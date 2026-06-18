@@ -205,6 +205,13 @@ const menuItems: MenuItem[] = [
   },
 ];
 
+const sectionLabels: Partial<Record<MenuItem['label'], string>> = {
+  'Cash & Bank': 'CORE',
+  Users: 'MANAGEMENT',
+  SMS: 'COMMUNICATION',
+  Reports: 'ANALYTICS',
+};
+
 export const Sidebar: React.FC<{ isOpen: boolean; onClose: () => void }> = ({
   isOpen,
   onClose,
@@ -265,98 +272,107 @@ export const Sidebar: React.FC<{ isOpen: boolean; onClose: () => void }> = ({
 
       {/* Sidebar */}
       <div
-        className={`fixed left-0 top-0 flex h-screen w-72 transform flex-col overflow-hidden bg-[#25282d] text-white shadow-xl transition-transform md:static md:inset-auto md:translate-x-0 ${
+        className={`fixed left-0 top-0 flex h-screen w-64 transform flex-col overflow-hidden border-r border-[#e6edf5] bg-white text-slate-700 shadow-[4px_0_18px_rgba(30,64,175,0.06)] transition-transform md:static md:inset-auto md:translate-x-0 ${
           isOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
         style={{ zIndex: 40 }}
       >
-        <div className="flex h-24 items-center justify-between border-b border-white/[0.08] px-7">
-          <Link to="/dashboard" onClick={onClose} className="flex items-center gap-3">
+        <div className="flex h-16 shrink-0 items-center justify-between border-b border-[#edf2f7] px-5">
+          <Link to="/dashboard" onClick={onClose} className="flex min-w-0 items-center gap-3">
             {user?.organizationLogoUrl ? (
-              <img src={user.organizationLogoUrl} alt="BillTop" className="h-12 w-12 object-contain" />
+              <img src={user.organizationLogoUrl} alt="BillTop" className="h-9 w-9 shrink-0 rounded-full object-contain" />
             ) : (
-              <div className="flex h-12 w-12 items-center justify-center text-3xl font-black italic tracking-tight text-[#ff2f85]">
-                B
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border-2 border-[#183260] bg-white">
+                <span className="text-[13px] font-black tracking-[-0.12em] text-[#183260]">
+                  B<span className="text-[#1684ed]">T</span>
+                </span>
               </div>
             )}
-            <span className="sr-only">BillTop</span>
+            <span className="truncate text-lg font-bold tracking-tight text-[#1684ed]">BillTop</span>
           </Link>
-          <button onClick={onClose} className="rounded-full p-2 text-white/80 hover:bg-white/10 md:hidden" aria-label="Close menu">
-            <X size={24} />
+          <button onClick={onClose} className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 md:hidden" aria-label="Close menu">
+            <X size={20} />
           </button>
-          <ChevronLeft className="hidden text-white/30 md:block" size={22} />
+          <ChevronLeft className="hidden text-[#1684ed] md:block" size={20} />
         </div>
 
-        <nav className="flex-1 space-y-1 overflow-y-auto px-5 py-5">
+        <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-4">
           {menuItems.map((item) => (
-            <div key={item.label}>
-              {item.href && !item.submenu ? (
-                <Link
-                  to={item.href}
-                  onClick={onClose}
-                  className={`flex min-h-12 items-center gap-4 rounded-xl px-4 py-3 transition-colors ${
-                    isMenuActive(item.href, item.submenu)
-                      ? 'bg-[#3a2b35] text-[#ff7ab6] shadow-[0_8px_22px_rgba(0,0,0,0.18)]'
-                      : 'text-white/90 hover:bg-white/[0.08] hover:text-white'
-                  }`}
-                >
-                  <span className="shrink-0">{item.icon}</span>
-                  <span className="text-base font-bold leading-snug">{item.label}</span>
-                </Link>
-              ) : (
-                <button
-                  onClick={() => toggleMenu(item.label)}
-                  className={`flex min-h-12 w-full items-center gap-4 rounded-xl px-4 py-3 transition-colors ${
-                    isMenuActive(item.href, item.submenu)
-                      ? 'bg-[#3a2b35] text-[#ff7ab6] shadow-[0_8px_22px_rgba(0,0,0,0.18)]'
-                      : 'text-white/90 hover:bg-white/[0.08] hover:text-white'
-                  }`}
-                >
-                  <span className="shrink-0">{item.icon}</span>
-                  <span className="flex-1 text-left text-base font-bold leading-snug">
-                    {item.label}
-                  </span>
-                  <ChevronDown
-                    size={16}
-                    className={`transform transition-transform ${
-                      expandedMenu === item.label ? 'rotate-180' : ''
+            <React.Fragment key={item.label}>
+              {sectionLabels[item.label] && (
+                <p className="mb-2 mt-5 px-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400 first:mt-0">
+                  {sectionLabels[item.label]}
+                </p>
+              )}
+              <div>
+                {item.href && !item.submenu ? (
+                  <Link
+                    to={item.href}
+                    onClick={onClose}
+                    className={`flex min-h-10 items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${
+                      isMenuActive(item.href, item.submenu)
+                        ? 'bg-[#eef7ff] font-semibold text-[#1684ed]'
+                        : 'font-medium text-slate-500 hover:bg-slate-50 hover:text-slate-800'
                     }`}
-                  />
-                </button>
-              )}
-
-              {/* Submenu */}
-              {item.submenu && expandedMenu === item.label && (
-                <div className="mt-1 space-y-1 pl-11">
-                  {item.submenu.map((subitem) => (
-                    <Link
-                      key={subitem.label}
-                      to={subitem.href || '#'}
-                      onClick={onClose}
-                      className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors ${
-                        location.pathname === subitem.href ||
-                        (!['/items', '/users', '/reports/purchase', '/reports/sale', '/reports/gst', '/reports/stock', '/reports/stock-transfer', '/reports/stock-adjustment', '/reports/expense'].includes(subitem.href || '') && location.pathname.startsWith(subitem.href || ''))
-                          ? 'bg-[#3a2b35] text-[#ff7ab6]'
-                          : 'text-white/75 hover:bg-white/[0.08] hover:text-white'
+                  >
+                    <span className="shrink-0 [&_svg]:h-[18px] [&_svg]:w-[18px]">{item.icon}</span>
+                    <span className="leading-snug">{item.label}</span>
+                  </Link>
+                ) : (
+                  <button
+                    onClick={() => toggleMenu(item.label)}
+                    className={`flex min-h-10 w-full items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${
+                      isMenuActive(item.href, item.submenu)
+                        ? 'bg-[#eef7ff] font-semibold text-[#1684ed]'
+                        : 'font-medium text-slate-500 hover:bg-slate-50 hover:text-slate-800'
+                    }`}
+                  >
+                    <span className="shrink-0 [&_svg]:h-[18px] [&_svg]:w-[18px]">{item.icon}</span>
+                    <span className="flex-1 text-left leading-snug">
+                      {item.label}
+                    </span>
+                    <ChevronDown
+                      size={14}
+                      className={`transform transition-transform ${
+                        expandedMenu === item.label ? 'rotate-180' : ''
                       }`}
-                    >
-                      <span className="shrink-0">{subitem.icon}</span>
-                      <span className="font-semibold">{subitem.label}</span>
-                    </Link>
-                  ))}
-                </div>
-              )}
-            </div>
+                    />
+                  </button>
+                )}
+
+                {/* Submenu */}
+                {item.submenu && expandedMenu === item.label && (
+                  <div className="mt-1 space-y-1 pl-8">
+                    {item.submenu.map((subitem) => (
+                      <Link
+                        key={subitem.label}
+                        to={subitem.href || '#'}
+                        onClick={onClose}
+                        className={`flex items-center gap-2.5 rounded-md px-3 py-2 text-[13px] transition-colors ${
+                          location.pathname === subitem.href ||
+                          (!['/items', '/users', '/reports/purchase', '/reports/sale', '/reports/gst', '/reports/stock', '/reports/stock-transfer', '/reports/stock-adjustment', '/reports/expense'].includes(subitem.href || '') && location.pathname.startsWith(subitem.href || ''))
+                            ? 'bg-[#eef7ff] font-semibold text-[#1684ed]'
+                            : 'font-medium text-slate-500 hover:bg-slate-50 hover:text-slate-800'
+                        }`}
+                      >
+                        <span className="shrink-0 [&_svg]:h-4 [&_svg]:w-4">{subitem.icon}</span>
+                        <span>{subitem.label}</span>
+                      </Link>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </React.Fragment>
           ))}
         </nav>
 
-        <div className="relative border-t border-white/[0.08] p-5">
+        <div className="relative border-t border-[#edf2f7] p-3">
           {showProfileMenu && (
-            <div className="absolute bottom-[92px] left-5 right-5 overflow-hidden rounded-2xl border border-white/[0.08] bg-[#1d2025] py-2 shadow-2xl">
+            <div className="absolute bottom-[76px] left-3 right-3 overflow-hidden rounded-xl border border-slate-200 bg-white py-1.5 shadow-xl">
               <button
                 type="button"
                 onClick={() => openProfilePanel('profile')}
-                className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm font-semibold text-white/90 hover:bg-white/[0.08] hover:text-white"
+                className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900"
               >
                 <User size={16} />
                 Profile
@@ -364,7 +380,7 @@ export const Sidebar: React.FC<{ isOpen: boolean; onClose: () => void }> = ({
               <button
                 type="button"
                 onClick={() => openProfilePanel('password')}
-                className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm font-semibold text-white/90 hover:bg-white/[0.08] hover:text-white"
+                className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900"
               >
                 <Lock size={16} />
                 Change Password
@@ -372,7 +388,7 @@ export const Sidebar: React.FC<{ isOpen: boolean; onClose: () => void }> = ({
               <button
                 type="button"
                 onClick={handleLogout}
-                className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm font-semibold text-red-300 hover:bg-red-500/10 hover:text-red-200"
+                className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm font-medium text-red-600 hover:bg-red-50"
               >
                 <LogOut size={16} />
                 Logout
@@ -382,16 +398,16 @@ export const Sidebar: React.FC<{ isOpen: boolean; onClose: () => void }> = ({
           <button
             type="button"
             onClick={() => setShowProfileMenu((current) => !current)}
-            className="flex w-full items-center gap-3 rounded-2xl bg-white/[0.08] px-4 py-3 text-left text-white shadow-[0_8px_24px_rgba(0,0,0,0.18)] hover:bg-white/[0.12]"
+            className="flex w-full items-center gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2 text-left text-slate-700 hover:bg-slate-50"
           >
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#ff2f85] text-sm font-bold text-white">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#1684ed] text-sm font-bold text-white">
               {user?.userName?.charAt(0).toUpperCase() || 'U'}
             </div>
             <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-bold">{user?.userName || 'User'}</p>
-              <p className="truncate text-xs text-white/70">{user?.role || user?.organizationName || 'BillTop'}</p>
+              <p className="truncate text-sm font-semibold text-slate-800">{user?.userName || 'User'}</p>
+              <p className="truncate text-xs text-slate-500">{user?.role || user?.organizationName || 'BillTop'}</p>
             </div>
-            <ChevronRight size={18} className={`text-white/70 transition-transform ${showProfileMenu ? '-rotate-90' : ''}`} />
+            <ChevronRight size={16} className={`text-slate-400 transition-transform ${showProfileMenu ? '-rotate-90' : ''}`} />
           </button>
         </div>
       </div>
