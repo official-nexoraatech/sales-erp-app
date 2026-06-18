@@ -1,0 +1,5 @@
+export const CONSTANTS = {
+  ITEMS_PER_PAGE: 10,
+  DEBOUNCE_DELAY: 300,
+  API_TIMEOUT: 30000,
+};
