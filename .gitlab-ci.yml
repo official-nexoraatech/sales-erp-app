@@ -13,7 +13,6 @@ build:
     - if: '$CI_COMMIT_BRANCH == "main"'
   script:
     - echo "Creating env files before build"
-
     - |
       cat > sale-erp-backend/.env <<EOF
       PORT=$PORT
@@ -32,34 +31,33 @@ build:
       AWS_S3_MAX_IMAGE_SIZE=$AWS_S3_MAX_IMAGE_SIZE
       AWS_S3_ALLOWED_CONTENT_TYPES=$AWS_S3_ALLOWED_CONTENT_TYPES
       APP_LOG_LEVEL=$APP_LOG_LEVEL
-      SECURITY_LOG_LEVEL=$SECURITY_LOG_LEVEL
-      SMS_PROVIDER_URL=$SMS_PROVIDER_URL
-      SMS_API_KEY=$SMS_API_KEY
-      SPRING_MAIL_HOST=$SPRING_MAIL_HOST
-      SPRING_MAIL_PORT=$SPRING_MAIL_PORT
-      SPRING_MAIL_USERNAME=$SPRING_MAIL_USERNAME
-      SPRING_MAIL_PASSWORD=$SPRING_MAIL_PASSWORD
-      SPRING_MAIL_SMTP_AUTH=$SPRING_MAIL_SMTP_AUTH
-      SPRING_MAIL_SMTP_STARTTLS_ENABLE=$SPRING_MAIL_SMTP_STARTTLS_ENABLE
       EOF
-
     - |
       cat > sale-erp-froentend/.env <<EOF
       VITE_API_BASE_URL=$VITE_API_BASE_URL
       EOF
-
-    - echo "Building Docker images"
-    - docker-compose build
 
 deploy:
   stage: deploy
+  image: alpine:latest
   rules:
     - if: '$CI_COMMIT_BRANCH == "main"'
+  before_script:
+    - apk add --no-cache openssh-client
+    - mkdir -p ~/.ssh
+    - echo "$EC2_SSH_KEY" | tr -d '\r' > ~/.ssh/id_rsa
+    - chmod 600 ~/.ssh/id_rsa
+    - ssh-keyscan -H $EC2_HOST >> ~/.ssh/known_hosts
   script:
-    - echo "Creating env files before deploy"
-
     - |
-      cat > sale-erp-backend/.env <<EOF
+      ssh $EC2_USER@$EC2_HOST "
+        cd ~/sales-erp-app &&
+        echo 'Pulling latest code' &&
+        git fetch origin &&
+        git reset --hard origin/main &&
+
+        echo 'Creating backend env file' &&
+        cat > sale-erp-backend/.env <<EOF
       PORT=$PORT
       SPRING_DATASOURCE_URL=$SPRING_DATASOURCE_URL
       SPRING_DATASOURCE_USERNAME=$SPRING_DATASOURCE_USERNAME
@@ -76,22 +74,15 @@ deploy:
       AWS_S3_MAX_IMAGE_SIZE=$AWS_S3_MAX_IMAGE_SIZE
       AWS_S3_ALLOWED_CONTENT_TYPES=$AWS_S3_ALLOWED_CONTENT_TYPES
       APP_LOG_LEVEL=$APP_LOG_LEVEL
-      SECURITY_LOG_LEVEL=$SECURITY_LOG_LEVEL
-      SMS_PROVIDER_URL=$SMS_PROVIDER_URL
-      SMS_API_KEY=$SMS_API_KEY
-      SPRING_MAIL_HOST=$SPRING_MAIL_HOST
-      SPRING_MAIL_PORT=$SPRING_MAIL_PORT
-      SPRING_MAIL_USERNAME=$SPRING_MAIL_USERNAME
-      SPRING_MAIL_PASSWORD=$SPRING_MAIL_PASSWORD
-      SPRING_MAIL_SMTP_AUTH=$SPRING_MAIL_SMTP_AUTH
-      SPRING_MAIL_SMTP_STARTTLS_ENABLE=$SPRING_MAIL_SMTP_STARTTLS_ENABLE
       EOF
 
-    - |
-      cat > sale-erp-froentend/.env <<EOF
+        echo 'Creating frontend env file' &&
+        cat > sale-erp-froentend/.env <<EOF
       VITE_API_BASE_URL=$VITE_API_BASE_URL
       EOF
 
-    - docker rm -f sale-erp-backend sale-erp-frontend 2>/dev/null || true
-    - docker-compose up -d --no-build --remove-orphans
-    - docker image prune -f
+        docker compose down || true &&
+        docker compose build --no-cache &&
+        docker compose up -d &&
+        docker image prune -f
+      "
