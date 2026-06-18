@@ -1,0 +1,36 @@
+# Workflow name shown inside GitHub Actions UI
+name: Mirror main to GitLab
+
+# Trigger configuration
+on:
+  # This workflow runs every time code is pushed
+  # to the "main" branch in GitHub
+  push:
+    branches:
+      - main
+
+jobs:
+  # Single job responsible for mirroring the repository
+  mirror:
+    # GitHub-hosted Ubuntu runner
+    runs-on: ubuntu-latest
+
+    steps:
+      # Step 1: Checkout the full repository
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          # fetch-depth: 0 ensures full git history is fetched
+          # This is IMPORTANT for proper mirroring and force pushes
+          fetch-depth: 0
+
+      # Step 2: Add GitLab as a remote and push
+      - name: Push to GitLab
+        run: |
+          # stored securely in GitHub Secrets as GITLAB_TOKEN
+          git remote add gitlab https://oauth2:${{ secrets.GITLAB_TOKEN }}@gitlab.com/nexoraa-tech-official/sales-erp-app.git
+
+          # Force push the main branch to GitLab
+          # --force ensures GitLab branch stays identical to GitHub
+          # WARNING: This overwrites history on GitLab if it differs
+          git push gitlab main --force
