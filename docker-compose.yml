@@ -1,0 +1,27 @@
+services:
+  backend:
+    build: ./sale-erp-backend
+    container_name: sale-erp-backend
+    ports:
+      - "8081:8081"
+    env_file:
+      - ./sale-erp-backend/.env
+    restart: always
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8081/v3/api-docs"]
+      interval: 30s
+      timeout: 5s
+      start_period: 40s
+      retries: 3
+
+  frontend:
+    build:
+      context: ./sale-erp-froentend
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL}
+    container_name: sale-erp-frontend
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend
+    restart: always
