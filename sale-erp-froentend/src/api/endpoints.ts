@@ -6,6 +6,8 @@ export type {
   AttendanceRequest,
   AttendanceStatus,
   Employee,
+  EmployeeAddress,
+  EmployeeAddressRequest,
   EmployeeRequest,
   EmployeeStatus,
   EmploymentType,
