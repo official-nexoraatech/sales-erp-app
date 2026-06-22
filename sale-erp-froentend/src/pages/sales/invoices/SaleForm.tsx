@@ -8,7 +8,6 @@ import { Button } from '../../../components/ui/Button';
 
 interface Line {
   itemId: number;
-  batchId: number;
   quantity: number;
   unitPrice: number;
   discountPercent: number;
@@ -58,7 +57,6 @@ export const SaleForm: React.FC<Props> = ({ initial, submitText, loading, onSubm
       : [...current, {
         itemId: item.id,
         itemName: item.itemName,
-        batchId: 0,
         quantity: 1,
         unitPrice: item.salePrice,
         discountPercent: 0,
@@ -76,8 +74,8 @@ export const SaleForm: React.FC<Props> = ({ initial, submitText, loading, onSubm
   }, 0), [lines]);
 
   const submit = () => {
-    if (!customerId || !warehouseId || !lines.length || lines.some((line) => !line.batchId || line.quantity <= 0)) {
-      alert('Select customer, warehouse, items and valid batch IDs.');
+    if (!customerId || !warehouseId || !lines.length || lines.some((line) => line.quantity <= 0)) {
+      alert('Select customer, warehouse, items and valid quantities.');
       return;
     }
 
@@ -88,9 +86,8 @@ export const SaleForm: React.FC<Props> = ({ initial, submitText, loading, onSubm
       stateId,
       salesPersonId,
       notes,
-      items: lines.map(({ itemId, batchId, quantity, unitPrice, discountPercent, taxPercent }) => ({
+      items: lines.map(({ itemId, quantity, unitPrice, discountPercent, taxPercent }) => ({
         itemId,
-        batchId,
         quantity,
         unitPrice,
         discountPercent,
@@ -115,10 +112,6 @@ export const SaleForm: React.FC<Props> = ({ initial, submitText, loading, onSubm
 
         <label className={labelClass}>Date
           <input type="date" className={`${inputClass} mt-1`} value={invoiceDate} onChange={(event) => setInvoiceDate(event.target.value)} />
-        </label>
-
-        <label className={labelClass}>Sale Code
-          <input className={`${inputClass} mt-1 bg-gray-50`} value="SL/ Auto" readOnly />
         </label>
 
         <CountryStateSelect stateId={stateId} onStateChange={setStateId} className={inputClass} />
@@ -152,7 +145,7 @@ export const SaleForm: React.FC<Props> = ({ initial, submitText, loading, onSubm
         <table className="w-full text-sm">
           <thead>
             <tr>
-              {['Action', 'Item', 'Batch ID', 'Qty', 'Price/Unit', 'Discount %', 'Tax %', 'Total'].map((heading) => (
+              {['Action', 'Item', 'Qty', 'Price/Unit', 'Discount %', 'Tax %', 'Total'].map((heading) => (
                 <th key={heading} className="border p-2 text-left">{heading}</th>
               ))}
             </tr>
@@ -166,7 +159,7 @@ export const SaleForm: React.FC<Props> = ({ initial, submitText, loading, onSubm
                   </button>
                 </td>
                 <td className="border p-2">{line.itemName}</td>
-                {(['batchId', 'quantity', 'unitPrice', 'discountPercent', 'taxPercent'] as const).map((field) => (
+                {(['quantity', 'unitPrice', 'discountPercent', 'taxPercent'] as const).map((field) => (
                   <td key={field} className="border p-2">
                     <input
                       type="number"
@@ -181,7 +174,7 @@ export const SaleForm: React.FC<Props> = ({ initial, submitText, loading, onSubm
               </tr>
             )) : (
               <tr>
-                <td colSpan={8} className="bg-gray-50 p-4 text-center italic">No items are added yet!!</td>
+                <td colSpan={7} className="bg-gray-50 p-4 text-center italic">No items are added yet!!</td>
               </tr>
             )}
           </tbody>

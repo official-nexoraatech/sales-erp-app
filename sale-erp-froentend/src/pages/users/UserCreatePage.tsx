@@ -1,14 +1,15 @@
 import React, { useRef, useState } from 'react';
-import { useMutation, useQuery } from '@tanstack/react-query';
-import { useLocation, useNavigate, useParams } from 'react-router-dom';
+import { useMutation } from '@tanstack/react-query';
+import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { UserRound } from 'lucide-react';
-import { organizationApi, rolesApi, usersApi } from '../../api/endpoints';
+import { usersApi } from '../../api/endpoints';
 import type { CreateUserRequest, UserListItem } from '../../api/endpoints';
 import { queryClient } from '../../app/queryClient';
 import { Button } from '../../components/ui/Button';
 import { useAuth } from '../../hooks/useAuth';
-import { useDebounce } from '../../hooks/useDebounce';
+import { OrganizationSelector } from './OrganizationSelector';
+import { RoleSelector } from './RoleSelector';
 
 const inputClass = 'h-10 w-full rounded border border-gray-300 bg-white px-3 text-sm text-gray-900 outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-gray-50';
 
@@ -17,17 +18,10 @@ interface Props { mode?: 'create' | 'edit' }
 export const UserCreatePage: React.FC<Props> = ({ mode = 'create' }) => {
   const navigate = useNavigate();
   const id = Number(useParams<{ id: string }>().id);
+  const [searchParams] = useSearchParams();
   const state = useLocation().state as UserListItem | undefined;
   const { user } = useAuth();
   const pictureRef = useRef<HTMLInputElement>(null);
-  const [organizationSearch, setOrganizationSearch] = useState('');
-  const debouncedOrganizationSearch = useDebounce(organizationSearch);
-  const roles = useQuery({ queryKey: ['roles', 'user-create'], queryFn: () => rolesApi.getAll('') });
-  const organizations = useQuery({
-    queryKey: ['organizations', 'user-create', debouncedOrganizationSearch],
-    queryFn: () => organizationApi.getAll(debouncedOrganizationSearch),
-    enabled: mode === 'create',
-  });
   const [form, setForm] = useState<CreateUserRequest>({
     firstName: state?.firstName || '',
     lastName: state?.lastName || '',
@@ -35,11 +29,10 @@ export const UserCreatePage: React.FC<Props> = ({ mode = 'create' }) => {
     email: state?.email || '',
     mobileNo: state?.mobileNo || state?.mobile || '',
     roleId: state?.roleId || 0,
-    organizationId: user?.organizationId || 0,
+    organizationId: Number(searchParams.get('organizationId')) || user?.organizationId || 0,
     password: '',
     status: state?.status === false || state?.status === 'INACTIVE' ? 'INACTIVE' : 'ACTIVE',
   });
-  const organizationRows = organizations.data?.data?.content || [];
 
   const mutation = useMutation({
     mutationFn: () => {
@@ -60,10 +53,6 @@ export const UserCreatePage: React.FC<Props> = ({ mode = 'create' }) => {
   const setText = (field: keyof CreateUserRequest, value: string) => {
     setForm((current) => ({ ...current, [field]: value }));
   };
-  const setNumber = (field: 'roleId' | 'organizationId', value: string) => {
-    setForm((current) => ({ ...current, [field]: Number(value) || 0 }));
-  };
-
   const submit = () => {
     if (!form.firstName.trim()) return toast.error('First name is required');
     if (!form.lastName.trim()) return toast.error('Last name is required');
@@ -101,43 +90,31 @@ export const UserCreatePage: React.FC<Props> = ({ mode = 'create' }) => {
               </div>
             </div>
           </div>
+          {mode === 'create' && (
+            <OrganizationSelector
+              value={form.organizationId}
+              onChange={(organizationId) => setForm((current) => ({
+                ...current,
+                organizationId,
+                roleId: organizationId === current.organizationId ? current.roleId : 0,
+              }))}
+              onCreate={() => navigate('/organizations/create?returnTo=/users/create')}
+            />
+          )}
           <label className="text-sm text-gray-600">First Name<input className={`${inputClass} mt-1`} value={form.firstName} onChange={(event) => setText('firstName', event.target.value)} /></label>
           <label className="text-sm text-gray-600">Last Name<input className={`${inputClass} mt-1`} value={form.lastName} onChange={(event) => setText('lastName', event.target.value)} /></label>
           <label className="text-sm text-gray-600">Username<input className={`${inputClass} mt-1`} value={form.userName} onChange={(event) => setText('userName', event.target.value)} /></label>
           <label className="text-sm text-gray-600">Email Address<input className={`${inputClass} mt-1`} type="email" value={form.email} onChange={(event) => setText('email', event.target.value)} /></label>
           <label className="text-sm text-gray-600">Mobile<input className={`${inputClass} mt-1`} value={form.mobileNo} onChange={(event) => setText('mobileNo', event.target.value)} /></label>
-          <label className="text-sm text-gray-600">
-            Role
-            <select className={`${inputClass} mt-1`} value={form.roleId} onChange={(event) => setNumber('roleId', event.target.value)}>
-              <option value={0}>Choose one thing</option>
-              {(roles.data?.data?.content || []).map((role) => (
-                <option key={role.id} value={role.id}>{role.name}</option>
-              ))}
-            </select>
-          </label>
+          <RoleSelector
+            organizationId={form.organizationId}
+            value={form.roleId}
+            onChange={(roleId) => setForm((current) => ({ ...current, roleId }))}
+            onCreate={() => navigate(
+              `/users/roles/create?organizationId=${form.organizationId}&returnTo=${encodeURIComponent(`/users/create?organizationId=${form.organizationId}`)}`
+            )}
+          />
           <label className="text-sm text-gray-600">Password<input className={`${inputClass} mt-1`} type="password" value={form.password} onChange={(event) => setText('password', event.target.value)} /></label>
-          {mode === 'create' && (
-            <div className="text-sm text-gray-600">
-              <label className="block">Organization</label>
-              <input
-                className={`${inputClass} mt-1`}
-                placeholder="Search organization"
-                value={organizationSearch}
-                onChange={(event) => setOrganizationSearch(event.target.value)}
-              />
-              <select
-                className={`${inputClass} mt-2`}
-                value={form.organizationId}
-                disabled={organizations.isLoading}
-                onChange={(event) => setNumber('organizationId', event.target.value)}
-              >
-                <option value={0}>{organizations.isLoading ? 'Loading organizations...' : 'Select organization'}</option>
-                {organizationRows.map((organization) => (
-                  <option key={organization.id} value={organization.id}>{organization.name}</option>
-                ))}
-              </select>
-            </div>
-          )}
           <label className="text-sm text-gray-600">
             Status
             <select className={`${inputClass} mt-1`} value={form.status} onChange={(event) => setForm((current) => ({ ...current, status: event.target.value as CreateUserRequest['status'] }))}>

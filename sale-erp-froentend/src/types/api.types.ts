@@ -228,6 +228,7 @@ export interface Role {
 export interface RoleRequest {
   name: string;
   status: 'ACTIVE' | 'INACTIVE';
+  organizationId?: number;
 }
 
 export interface PosBillingRequest {
@@ -283,7 +284,7 @@ export interface SaleRequest {
   stateId: number;
   salesPersonId: number;
   notes: string;
-  items: Array<{ itemId: number; batchId: number; quantity: number; unitPrice: number; discountPercent: number; taxPercent: number }>;
+  items: Array<{ itemId: number; quantity: number; unitPrice: number; discountPercent: number; taxPercent: number }>;
 }
 
 export interface SaleDetail {

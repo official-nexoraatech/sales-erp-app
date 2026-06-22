@@ -351,6 +351,8 @@ const normalizeRoleList = (response: ApiResponse<Role[] | PageResponse<Role>>) =
 export const rolesApi = {
   getAll: async (search = '') =>
     normalizeRoleList(await axiosClient.get<ApiResponse<Role[] | PageResponse<Role>>, ApiResponse<Role[] | PageResponse<Role>>>('/api/v1/roles', { params: { search } })),
+  getByOrganizationId: async (organizationId: number) =>
+    normalizeRoleList(await axiosClient.get<ApiResponse<Role[]>, ApiResponse<Role[]>>(`/api/v1/roles/organization/${organizationId}`)),
   getById: (id: number) =>
     axiosClient.get<ApiResponse<Role>, ApiResponse<Role>>(`/api/v1/roles/${id}`),
   create: (payload: RoleRequest) =>
