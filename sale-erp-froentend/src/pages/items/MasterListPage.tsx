@@ -13,6 +13,7 @@ import { useAuth } from '../../hooks/useAuth';
 import { useDebounce } from '../../hooks/useDebounce';
 import { usePagination } from '../../hooks/usePagination';
 import { formatDate } from '../../utils/formatDate';
+import { PERMISSIONS } from '../../auth/permissions';
 
 interface Props { type: 'category' | 'brand' }
 
@@ -22,7 +23,12 @@ export const MasterListPage: React.FC<Props> = ({ type }) => {
   const label = isCategory ? 'Category' : 'Brand';
   const exportColumns = isCategory ? ['Name', 'Description', 'Created by', 'Created at'] : ['Category', 'Name', 'Description', 'Created by', 'Created at'];
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, hasPermission } = useAuth();
+  const hasCategoryLookup = isCategory || hasPermission(PERMISSIONS.CATEGORY_VIEW);
+  const canCreate = hasPermission(isCategory ? PERMISSIONS.CATEGORY_CREATE : PERMISSIONS.BRAND_CREATE) && hasCategoryLookup;
+  const canUpdate = hasPermission(isCategory ? PERMISSIONS.CATEGORY_UPDATE : PERMISSIONS.BRAND_UPDATE) && hasCategoryLookup;
+  const canDelete = hasPermission(isCategory ? PERMISSIONS.CATEGORY_DELETE : PERMISSIONS.BRAND_DELETE);
+  const showActions = canUpdate || canDelete;
   const { page, setPage, handlePageChange } = usePagination();
   const [pageSize, setPageSize] = useState(10);
   const [search, setSearch] = useState('');
@@ -79,17 +85,17 @@ export const MasterListPage: React.FC<Props> = ({ type }) => {
       <div className="overflow-hidden rounded-lg bg-white shadow">
         <div className="flex items-center justify-between border-b px-5 py-4">
           <h1 className="text-xl font-semibold uppercase text-gray-900">{label} List</h1>
-          <Button onClick={() => navigate(`/items/${isCategory ? 'categories' : 'brands'}/create`)} className="min-w-[170px]">Create {label}</Button>
+          {canCreate && <Button onClick={() => navigate(`/items/${isCategory ? 'categories' : 'brands'}/create`)} className="min-w-[170px]">Create {label}</Button>}
         </div>
         <div className="flex flex-wrap items-center justify-between gap-3 p-5">
           <label className="flex items-center gap-2 text-sm text-gray-600">Show<select value={pageSize} onChange={(event) => { setPageSize(Number(event.target.value)); setPage(0); }} className="h-9 rounded border border-gray-300 px-2"><option>10</option><option>20</option><option>50</option><option>100</option></select>entries</label>
-          <div className="flex flex-wrap items-center"><button onClick={deleteSelected} className="h-10 rounded-l border border-red-300 px-3 text-sm text-red-500">Delete</button><button onClick={copy} className="h-10 border-y border-r px-3 text-sm">Copy</button><button onClick={() => download('xls')} className="h-10 border-y border-r px-3 text-sm">Excel</button><button onClick={() => download('csv')} className="h-10 border-y border-r px-3 text-sm">CSV</button><button onClick={printPdf} className="h-10 rounded-r border-y border-r px-3 text-sm">PDF</button></div>
+          <div className="flex flex-wrap items-center">{canDelete && <button onClick={deleteSelected} className="h-10 rounded-l border border-red-300 px-3 text-sm text-red-500">Delete</button>}<button onClick={copy} className={`h-10 border px-3 text-sm ${canDelete ? 'border-l-0' : 'rounded-l'}`}>Copy</button><button onClick={() => download('xls')} className="h-10 border-y border-r px-3 text-sm">Excel</button><button onClick={() => download('csv')} className="h-10 border-y border-r px-3 text-sm">CSV</button><button onClick={printPdf} className="h-10 rounded-r border-y border-r px-3 text-sm">PDF</button></div>
           <label className="flex items-center gap-2 text-sm text-gray-600">Search:<input value={search} onChange={(event) => { setSearch(event.target.value); setPage(0); }} className="h-9 rounded border border-gray-300 px-3" /></label>
         </div>
         <div className="overflow-x-auto px-3 pb-3">
           {records.isLoading ? <div className="p-10"><Loader /></div> : <table className="w-full text-sm">
-            <thead className="bg-gray-50"><tr><th className="border p-3"><input type="checkbox" checked={allSelected} onChange={() => setSelectedIds(allSelected ? [] : rows.map((row) => row.id))} /></th>{exportColumns.concat('Action').map((heading) => <th key={heading} className="border p-3 text-left">{heading}</th>)}</tr></thead>
-            <tbody>{rows.length ? rows.map((row: SimpleMaster) => <tr key={row.id} className="border-b even:bg-gray-50"><td className="border p-3"><input type="checkbox" checked={selectedIds.includes(row.id)} onChange={() => setSelectedIds((current) => current.includes(row.id) ? current.filter((id) => id !== row.id) : [...current, row.id])} /></td>{!isCategory && <td className="border p-3">{row.categoryName || ''}</td>}<td className="border p-3 font-semibold">{row.name}</td><td className="border p-3">{row.description || ''}</td><td className="border p-3">{row.createdBy || user?.userName || 'admin'}</td><td className="border p-3">{row.createdAt ? formatDate(row.createdAt) : ''}</td><td className="border p-3"><div className="flex gap-2"><button onClick={() => navigate(`/items/${isCategory ? 'categories' : 'brands'}/${row.id}/edit`, { state: row })} className="text-orange-600"><Edit size={16} /></button><button onClick={() => confirm(`Delete this ${label.toLowerCase()}?`) && remove.mutate(row.id)} className="text-red-600"><Trash2 size={16} /></button></div></td></tr>) : <tr><td colSpan={isCategory ? 6 : 7} className="bg-gray-50 p-5 text-center">No data available in table</td></tr>}</tbody>
+            <thead className="bg-gray-50"><tr>{canDelete && <th className="border p-3"><input type="checkbox" checked={allSelected} onChange={() => setSelectedIds(allSelected ? [] : rows.map((row) => row.id))} /></th>}{exportColumns.concat(showActions ? 'Action' : []).map((heading) => <th key={heading} className="border p-3 text-left">{heading}</th>)}</tr></thead>
+            <tbody>{rows.length ? rows.map((row: SimpleMaster) => <tr key={row.id} className="border-b even:bg-gray-50">{canDelete && <td className="border p-3"><input type="checkbox" checked={selectedIds.includes(row.id)} onChange={() => setSelectedIds((current) => current.includes(row.id) ? current.filter((id) => id !== row.id) : [...current, row.id])} /></td>}{!isCategory && <td className="border p-3">{row.categoryName || ''}</td>}<td className="border p-3 font-semibold">{row.name}</td><td className="border p-3">{row.description || ''}</td><td className="border p-3">{row.createdBy || user?.userName || 'admin'}</td><td className="border p-3">{row.createdAt ? formatDate(row.createdAt) : ''}</td>{showActions && <td className="border p-3"><div className="flex gap-2">{canUpdate && <button onClick={() => navigate(`/items/${isCategory ? 'categories' : 'brands'}/${row.id}/edit`, { state: row })} className="text-orange-600"><Edit size={16} /></button>}{canDelete && <button onClick={() => confirm(`Delete this ${label.toLowerCase()}?`) && remove.mutate(row.id)} className="text-red-600"><Trash2 size={16} /></button>}</div></td>}</tr>) : <tr><td colSpan={exportColumns.length + Number(canDelete) + Number(showActions)} className="bg-gray-50 p-5 text-center">No data available in table</td></tr>}</tbody>
           </table>}
         </div>
         <div className="flex flex-wrap items-center justify-between gap-3 border-t px-5 py-4 text-sm text-gray-600"><span>Showing {rows.length ? page * pageSize + 1 : 0} to {page * pageSize + rows.length} of {records.data?.data?.totalElements || 0} entries</span><Pagination page={page} totalPages={records.data?.data?.totalPages || 1} onPageChange={handlePageChange} /></div>

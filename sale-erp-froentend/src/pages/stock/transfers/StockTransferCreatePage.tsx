@@ -40,7 +40,7 @@ export const StockTransferCreatePage: React.FC = () => {
   };
   const submit = () => {
     if (!fromWarehouseId || !toWarehouseId || fromWarehouseId === toWarehouseId || !lines.length || lines.some((line) => line.quantity <= 0)) {
-      alert('Select different warehouses and at least one valid item.');
+      toast.error('Select different warehouses and at least one valid item.');
       return;
     }
     mutation.mutate({ fromWarehouseId, toWarehouseId, transferDate, notes, items: lines.map(({ itemId, quantity }) => ({ itemId, quantity })) });

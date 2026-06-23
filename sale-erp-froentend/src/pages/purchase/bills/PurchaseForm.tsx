@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { CirclePlus, Trash2 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
+import toast from 'react-hot-toast';
 import { carrierApi, itemApi, supplierApi, warehouseApi } from '../../../api/endpoints';
 import type { PurchaseRequest } from '../../../api/endpoints';
 import { CountryStateSelect } from '../../../components/form/CountryStateSelect';
@@ -87,7 +88,7 @@ export const PurchaseForm: React.FC<Props> = ({ initial, submitText, loading, on
 
   const submit = () => {
     if (!supplierId || !warehouseId || !lines.length || lines.some((line) => line.quantity <= 0)) {
-      alert('Select supplier, warehouse, and at least one valid item.');
+      toast.error('Select supplier, warehouse, and at least one valid item.');
       return;
     }
     onSubmit({

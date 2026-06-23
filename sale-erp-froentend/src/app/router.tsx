@@ -56,6 +56,8 @@ import { ExpenseListPage } from '../pages/expense/ExpenseListPage';
 import { ExpenseCreatePage } from '../pages/expense/ExpenseCreatePage';
 import { ExpenseEditPage } from '../pages/expense/ExpenseEditPage';
 import { ExpenseViewPage } from '../pages/expense/ExpenseViewPage';
+import { ExpenseMasterListPage } from '../pages/expense/ExpenseMasterListPage';
+import { ExpenseMasterFormPage } from '../pages/expense/ExpenseMasterFormPage';
 import { CashInHandPage } from '../pages/cash-bank/CashInHandPage';
 import { BankTransactionsPage } from '../pages/cash-bank/BankTransactionsPage';
 import { BankAccountsPage } from '../pages/cash-bank/BankAccountsPage';
@@ -72,6 +74,7 @@ import { UserListPage } from '../pages/users/UserListPage';
 import { UserCreatePage } from '../pages/users/UserCreatePage';
 import { RolesPage } from '../pages/users/RolesPage';
 import { RoleFormPage } from '../pages/users/RoleFormPage';
+import { UserPermissionsPage } from '../pages/users/UserPermissionsPage';
 import { StaffAttendancePage } from '../pages/staff/StaffAttendancePage';
 import { StaffEmployeeFormPage } from '../pages/staff/StaffEmployeeFormPage';
 import { StaffEmployeeViewPage } from '../pages/staff/StaffEmployeeViewPage';
@@ -88,6 +91,7 @@ import { ProfitLossReportPage } from '../pages/reports/ProfitLossReportPage';
 import { AppLayout } from '../components/layout/AppLayout';
 import { ProtectedRoute } from '../components/layout/ProtectedRoute';
 import { Navigate } from 'react-router-dom';
+import { PERMISSIONS } from '../auth/permissions';
 
 export const router = createBrowserRouter([
   {
@@ -199,19 +203,19 @@ export const router = createBrowserRouter([
   // Carriers
   {
     path: '/contacts/carriers',
-    element: <ProtectedRoute><AppLayout><CarrierListPage /></AppLayout></ProtectedRoute>,
+    element: <ProtectedRoute permissions={PERMISSIONS.CARRIER_VIEW}><AppLayout><CarrierListPage /></AppLayout></ProtectedRoute>,
   },
   {
     path: '/contacts/carriers/create',
-    element: <ProtectedRoute><AppLayout><CarrierCreatePage /></AppLayout></ProtectedRoute>,
+    element: <ProtectedRoute permissions={PERMISSIONS.CARRIER_CREATE}><AppLayout><CarrierCreatePage /></AppLayout></ProtectedRoute>,
   },
   {
     path: '/contacts/carriers/:id/edit',
-    element: <ProtectedRoute><AppLayout><CarrierEditPage /></AppLayout></ProtectedRoute>,
+    element: <ProtectedRoute permissions={[PERMISSIONS.CARRIER_UPDATE, PERMISSIONS.CARRIER_VIEW]} requireAll><AppLayout><CarrierEditPage /></AppLayout></ProtectedRoute>,
   },
   {
     path: '/contacts/carriers/:id',
-    element: <ProtectedRoute><AppLayout><CarrierViewPage /></AppLayout></ProtectedRoute>,
+    element: <ProtectedRoute permissions={PERMISSIONS.CARRIER_VIEW}><AppLayout><CarrierViewPage /></AppLayout></ProtectedRoute>,
   },
   {
     path: '/sales/pos',
@@ -240,20 +244,20 @@ export const router = createBrowserRouter([
   { path: '/purchase/returns', element: <ProtectedRoute><AppLayout><PurchaseReturnListPage /></AppLayout></ProtectedRoute> },
   { path: '/purchase/returns/create', element: <ProtectedRoute><AppLayout><PurchaseReturnCreatePage /></AppLayout></ProtectedRoute> },
   { path: '/purchase/returns/:id', element: <ProtectedRoute><AppLayout><PurchaseReturnViewPage /></AppLayout></ProtectedRoute> },
-  { path: '/items', element: <ProtectedRoute><AppLayout><ItemListPage /></AppLayout></ProtectedRoute> },
-  { path: '/items/create', element: <ProtectedRoute><AppLayout><ItemCreatePage /></AppLayout></ProtectedRoute> },
-  { path: '/items/:id/edit', element: <ProtectedRoute><AppLayout><ItemEditPage /></AppLayout></ProtectedRoute> },
-  { path: '/items/:id/stock', element: <ProtectedRoute><AppLayout><ItemStockPage /></AppLayout></ProtectedRoute> },
-  { path: '/items/:id', element: <ProtectedRoute><AppLayout><ItemViewPage /></AppLayout></ProtectedRoute> },
-  { path: '/items/categories', element: <ProtectedRoute><AppLayout><MasterListPage type="category" /></AppLayout></ProtectedRoute> },
-  { path: '/items/categories/create', element: <ProtectedRoute><AppLayout><MasterFormPage type="category" mode="create" /></AppLayout></ProtectedRoute> },
-  { path: '/items/categories/:id/edit', element: <ProtectedRoute><AppLayout><MasterFormPage type="category" mode="edit" /></AppLayout></ProtectedRoute> },
-  { path: '/items/brands', element: <ProtectedRoute><AppLayout><MasterListPage type="brand" /></AppLayout></ProtectedRoute> },
-  { path: '/items/brands/create', element: <ProtectedRoute><AppLayout><MasterFormPage type="brand" mode="create" /></AppLayout></ProtectedRoute> },
-  { path: '/items/brands/:id/edit', element: <ProtectedRoute><AppLayout><MasterFormPage type="brand" mode="edit" /></AppLayout></ProtectedRoute> },
-  { path: '/items/units', element: <ProtectedRoute><AppLayout><UnitListPage /></AppLayout></ProtectedRoute> },
-  { path: '/items/units/create', element: <ProtectedRoute><AppLayout><UnitFormPage mode="create" /></AppLayout></ProtectedRoute> },
-  { path: '/items/units/:id/edit', element: <ProtectedRoute><AppLayout><UnitFormPage mode="edit" /></AppLayout></ProtectedRoute> },
+  { path: '/items', element: <ProtectedRoute permissions={PERMISSIONS.ITEM_VIEW}><AppLayout><ItemListPage /></AppLayout></ProtectedRoute> },
+  { path: '/items/create', element: <ProtectedRoute permissions={[PERMISSIONS.ITEM_CREATE, PERMISSIONS.CATEGORY_VIEW, PERMISSIONS.BRAND_VIEW, PERMISSIONS.UNIT_VIEW]} requireAll><AppLayout><ItemCreatePage /></AppLayout></ProtectedRoute> },
+  { path: '/items/:id/edit', element: <ProtectedRoute permissions={[PERMISSIONS.ITEM_UPDATE, PERMISSIONS.ITEM_VIEW, PERMISSIONS.CATEGORY_VIEW, PERMISSIONS.BRAND_VIEW, PERMISSIONS.UNIT_VIEW]} requireAll><AppLayout><ItemEditPage /></AppLayout></ProtectedRoute> },
+  { path: '/items/:id/stock', element: <ProtectedRoute permissions={PERMISSIONS.ITEM_VIEW}><AppLayout><ItemStockPage /></AppLayout></ProtectedRoute> },
+  { path: '/items/:id', element: <ProtectedRoute permissions={PERMISSIONS.ITEM_VIEW}><AppLayout><ItemViewPage /></AppLayout></ProtectedRoute> },
+  { path: '/items/categories', element: <ProtectedRoute permissions={PERMISSIONS.CATEGORY_VIEW}><AppLayout><MasterListPage type="category" /></AppLayout></ProtectedRoute> },
+  { path: '/items/categories/create', element: <ProtectedRoute permissions={PERMISSIONS.CATEGORY_CREATE}><AppLayout><MasterFormPage type="category" mode="create" /></AppLayout></ProtectedRoute> },
+  { path: '/items/categories/:id/edit', element: <ProtectedRoute permissions={PERMISSIONS.CATEGORY_UPDATE}><AppLayout><MasterFormPage type="category" mode="edit" /></AppLayout></ProtectedRoute> },
+  { path: '/items/brands', element: <ProtectedRoute permissions={PERMISSIONS.BRAND_VIEW}><AppLayout><MasterListPage type="brand" /></AppLayout></ProtectedRoute> },
+  { path: '/items/brands/create', element: <ProtectedRoute permissions={[PERMISSIONS.BRAND_CREATE, PERMISSIONS.CATEGORY_VIEW]} requireAll><AppLayout><MasterFormPage type="brand" mode="create" /></AppLayout></ProtectedRoute> },
+  { path: '/items/brands/:id/edit', element: <ProtectedRoute permissions={[PERMISSIONS.BRAND_UPDATE, PERMISSIONS.CATEGORY_VIEW]} requireAll><AppLayout><MasterFormPage type="brand" mode="edit" /></AppLayout></ProtectedRoute> },
+  { path: '/items/units', element: <ProtectedRoute permissions={PERMISSIONS.UNIT_VIEW}><AppLayout><UnitListPage /></AppLayout></ProtectedRoute> },
+  { path: '/items/units/create', element: <ProtectedRoute permissions={PERMISSIONS.UNIT_CREATE}><AppLayout><UnitFormPage mode="create" /></AppLayout></ProtectedRoute> },
+  { path: '/items/units/:id/edit', element: <ProtectedRoute permissions={PERMISSIONS.UNIT_UPDATE}><AppLayout><UnitFormPage mode="edit" /></AppLayout></ProtectedRoute> },
   { path: '/stock/transfers', element: <ProtectedRoute><AppLayout><StockTransferListPage /></AppLayout></ProtectedRoute> },
   { path: '/stock/transfers/create', element: <ProtectedRoute><AppLayout><StockTransferCreatePage /></AppLayout></ProtectedRoute> },
   { path: '/stock/transfers/:id', element: <ProtectedRoute><AppLayout><StockTransferViewPage /></AppLayout></ProtectedRoute> },
@@ -262,6 +266,15 @@ export const router = createBrowserRouter([
   { path: '/stock/adjustments/:id', element: <ProtectedRoute><AppLayout><StockAdjustmentViewPage /></AppLayout></ProtectedRoute> },
   { path: '/expenses', element: <ProtectedRoute><AppLayout><ExpenseListPage /></AppLayout></ProtectedRoute> },
   { path: '/expenses/create', element: <ProtectedRoute><AppLayout><ExpenseCreatePage /></AppLayout></ProtectedRoute> },
+  { path: '/expenses/categories', element: <ProtectedRoute><AppLayout><ExpenseMasterListPage type="category" /></AppLayout></ProtectedRoute> },
+  { path: '/expenses/categories/create', element: <ProtectedRoute><AppLayout><ExpenseMasterFormPage type="category" mode="create" /></AppLayout></ProtectedRoute> },
+  { path: '/expenses/categories/:id/edit', element: <ProtectedRoute><AppLayout><ExpenseMasterFormPage type="category" mode="edit" /></AppLayout></ProtectedRoute> },
+  { path: '/expenses/subcategories', element: <ProtectedRoute><AppLayout><ExpenseMasterListPage type="subcategory" /></AppLayout></ProtectedRoute> },
+  { path: '/expenses/subcategories/create', element: <ProtectedRoute><AppLayout><ExpenseMasterFormPage type="subcategory" mode="create" /></AppLayout></ProtectedRoute> },
+  { path: '/expenses/subcategories/:id/edit', element: <ProtectedRoute><AppLayout><ExpenseMasterFormPage type="subcategory" mode="edit" /></AppLayout></ProtectedRoute> },
+  { path: '/expenses/payment-types', element: <ProtectedRoute><AppLayout><ExpenseMasterListPage type="paymentMethod" /></AppLayout></ProtectedRoute> },
+  { path: '/expenses/payment-types/create', element: <ProtectedRoute><AppLayout><ExpenseMasterFormPage type="paymentMethod" mode="create" /></AppLayout></ProtectedRoute> },
+  { path: '/expenses/payment-types/:id/edit', element: <ProtectedRoute><AppLayout><ExpenseMasterFormPage type="paymentMethod" mode="edit" /></AppLayout></ProtectedRoute> },
   { path: '/expenses/:id/edit', element: <ProtectedRoute><AppLayout><ExpenseEditPage /></AppLayout></ProtectedRoute> },
   { path: '/expenses/:id', element: <ProtectedRoute><AppLayout><ExpenseViewPage /></AppLayout></ProtectedRoute> },
   { path: '/cash-bank/cash-in-hand', element: <ProtectedRoute><AppLayout><CashInHandPage /></AppLayout></ProtectedRoute> },
@@ -273,19 +286,20 @@ export const router = createBrowserRouter([
   { path: '/warehouses', element: <ProtectedRoute><AppLayout><WarehouseListPage /></AppLayout></ProtectedRoute> },
   { path: '/warehouses/create', element: <ProtectedRoute><AppLayout><WarehouseFormPage mode="create" /></AppLayout></ProtectedRoute> },
   { path: '/warehouses/:id/edit', element: <ProtectedRoute><AppLayout><WarehouseFormPage mode="edit" /></AppLayout></ProtectedRoute> },
-  { path: '/organizations', element: <ProtectedRoute><AppLayout><OrganizationListPage /></AppLayout></ProtectedRoute> },
-  { path: '/organizations/create', element: <ProtectedRoute><AppLayout><OrganizationCreatePage /></AppLayout></ProtectedRoute> },
-  { path: '/organizations/:id/edit', element: <ProtectedRoute><AppLayout><OrganizationEditPage /></AppLayout></ProtectedRoute> },
+  { path: '/organizations', element: <ProtectedRoute permissions={PERMISSIONS.ORGANIZATION_VIEW}><AppLayout><OrganizationListPage /></AppLayout></ProtectedRoute> },
+  { path: '/organizations/create', element: <ProtectedRoute permissions={PERMISSIONS.ORGANIZATION_CREATE}><AppLayout><OrganizationCreatePage /></AppLayout></ProtectedRoute> },
+  { path: '/organizations/:id/edit', element: <ProtectedRoute permissions={[PERMISSIONS.ORGANIZATION_UPDATE, PERMISSIONS.ORGANIZATION_VIEW]} requireAll><AppLayout><OrganizationEditPage /></AppLayout></ProtectedRoute> },
   { path: '/utilities/import-items', element: <ProtectedRoute><AppLayout><ImportPage type="items" /></AppLayout></ProtectedRoute> },
   { path: '/utilities/import-contacts', element: <ProtectedRoute><AppLayout><ImportPage type="contacts" /></AppLayout></ProtectedRoute> },
   { path: '/utilities/generate-barcode', element: <ProtectedRoute><AppLayout><GenerateBarcodePage /></AppLayout></ProtectedRoute> },
-  { path: '/profile', element: <ProtectedRoute><AppLayout><UserProfilePage /></AppLayout></ProtectedRoute> },
-  { path: '/users', element: <ProtectedRoute><AppLayout><UserListPage /></AppLayout></ProtectedRoute> },
-  { path: '/users/create', element: <ProtectedRoute><AppLayout><UserCreatePage /></AppLayout></ProtectedRoute> },
-  { path: '/users/:id/edit', element: <ProtectedRoute><AppLayout><UserCreatePage mode="edit" /></AppLayout></ProtectedRoute> },
-  { path: '/users/roles', element: <ProtectedRoute><AppLayout><RolesPage /></AppLayout></ProtectedRoute> },
-  { path: '/users/roles/create', element: <ProtectedRoute><AppLayout><RoleFormPage mode="create" /></AppLayout></ProtectedRoute> },
-  { path: '/users/roles/:id/edit', element: <ProtectedRoute><AppLayout><RoleFormPage mode="edit" /></AppLayout></ProtectedRoute> },
+  { path: '/profile', element: <ProtectedRoute permissions={[PERMISSIONS.USER_PROFILE, PERMISSIONS.USER_CHANGE_PASSWORD]}><AppLayout><UserProfilePage /></AppLayout></ProtectedRoute> },
+  { path: '/users', element: <ProtectedRoute permissions={PERMISSIONS.USER_MANAGE}><AppLayout><UserListPage /></AppLayout></ProtectedRoute> },
+  { path: '/users/create', element: <ProtectedRoute permissions={[PERMISSIONS.USER_MANAGE, PERMISSIONS.ORGANIZATION_VIEW, PERMISSIONS.ROLE_MANAGE]} requireAll><AppLayout><UserCreatePage /></AppLayout></ProtectedRoute> },
+  { path: '/users/:id/edit', element: <ProtectedRoute permissions={[PERMISSIONS.USER_MANAGE, PERMISSIONS.ROLE_MANAGE]} requireAll><AppLayout><UserCreatePage mode="edit" /></AppLayout></ProtectedRoute> },
+  { path: '/users/roles', element: <ProtectedRoute permissions={PERMISSIONS.ROLE_MANAGE}><AppLayout><RolesPage /></AppLayout></ProtectedRoute> },
+  { path: '/users/roles/create', element: <ProtectedRoute permissions={PERMISSIONS.ROLE_MANAGE}><AppLayout><RoleFormPage mode="create" /></AppLayout></ProtectedRoute> },
+  { path: '/users/roles/:id/edit', element: <ProtectedRoute permissions={PERMISSIONS.ROLE_MANAGE}><AppLayout><RoleFormPage mode="edit" /></AppLayout></ProtectedRoute> },
+  { path: '/users/permissions', element: <ProtectedRoute permissions={PERMISSIONS.USER_MANAGE}><AppLayout><UserPermissionsPage /></AppLayout></ProtectedRoute> },
   { path: '/staff/employees', element: <ProtectedRoute><AppLayout><StaffEmployeesPage /></AppLayout></ProtectedRoute> },
   { path: '/staff/employees/create', element: <ProtectedRoute><AppLayout><StaffEmployeeFormPage /></AppLayout></ProtectedRoute> },
   { path: '/staff/employees/:id/edit', element: <ProtectedRoute><AppLayout><StaffEmployeeFormPage mode="edit" /></AppLayout></ProtectedRoute> },

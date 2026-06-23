@@ -8,15 +8,19 @@ import type { UpdateProfileRequest } from '../../api/endpoints';
 import { Button } from '../../components/ui/Button';
 import { Loader } from '../../components/ui/Loader';
 import { useAuth } from '../../hooks/useAuth';
+import { PERMISSIONS } from '../../auth/permissions';
 
 const inputClass = 'h-10 w-full rounded border border-gray-300 bg-white px-3 text-sm text-gray-900 outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-gray-50';
 
 export const UserProfilePage: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { logout } = useAuth();
+  const { logout, hasPermission } = useAuth();
+  const canViewProfile = hasPermission(PERMISSIONS.USER_PROFILE);
+  const canUpdateProfile = hasPermission(PERMISSIONS.USER_UPDATE_PROFILE);
+  const canChangePassword = hasPermission(PERMISSIONS.USER_CHANGE_PASSWORD);
   const pictureRef = useRef<HTMLInputElement>(null);
-  const [activePanel, setActivePanel] = useState<'profile' | 'password'>('profile');
+  const [activePanel, setActivePanel] = useState<'profile' | 'password'>(canViewProfile ? 'profile' : 'password');
   const [profileForm, setProfileForm] = useState<UpdateProfileRequest>({ firstName: '', lastName: '', userName: '', email: '', mobileNo: '' });
   const [profilePictureName, setProfilePictureName] = useState('');
   const [passwordForm, setPasswordForm] = useState({ currentPassword: '', newPassword: '', confirmPassword: '' });
@@ -25,13 +29,18 @@ export const UserProfilePage: React.FC = () => {
   const profile = useQuery({
     queryKey: ['user-profile'],
     queryFn: usersApi.getProfile,
-    enabled: activePanel === 'profile',
+    enabled: activePanel === 'profile' && canViewProfile,
   });
 
   useEffect(() => {
     const panel = (location.state as { panel?: 'profile' | 'password' } | null)?.panel;
-    if (panel) setActivePanel(panel);
-  }, [location.state]);
+    if (panel === 'profile' && canViewProfile) setActivePanel(panel);
+    if (panel === 'password' && canChangePassword) setActivePanel(panel);
+  }, [canChangePassword, canViewProfile, location.state]);
+  useEffect(() => {
+    if (activePanel === 'profile' && !canViewProfile && canChangePassword) setActivePanel('password');
+    if (activePanel === 'password' && !canChangePassword && canViewProfile) setActivePanel('profile');
+  }, [activePanel, canChangePassword, canViewProfile]);
   useEffect(() => {
     if (!profile.data?.data) return;
     const data = profile.data.data;
@@ -113,12 +122,12 @@ export const UserProfilePage: React.FC = () => {
                       </div>
                       <div className="min-w-0">
                         <div className="flex flex-wrap gap-2">
-                          <button type="button" onClick={() => pictureRef.current?.click()} className="inline-flex h-9 items-center gap-2 rounded border border-blue-500 bg-white px-3 text-sm font-semibold text-blue-600 hover:bg-blue-50">
+                          {canUpdateProfile && <button type="button" onClick={() => pictureRef.current?.click()} className="inline-flex h-9 items-center gap-2 rounded border border-blue-500 bg-white px-3 text-sm font-semibold text-blue-600 hover:bg-blue-50">
                             <Upload size={16} /> Browse
-                          </button>
-                          <button type="button" onClick={() => { setProfilePictureName(''); if (pictureRef.current) pictureRef.current.value = ''; }} className="inline-flex h-9 items-center gap-2 rounded border border-gray-300 bg-white px-3 text-sm text-gray-700 hover:bg-gray-50">
+                          </button>}
+                          {canUpdateProfile && <button type="button" onClick={() => { setProfilePictureName(''); if (pictureRef.current) pictureRef.current.value = ''; }} className="inline-flex h-9 items-center gap-2 rounded border border-gray-300 bg-white px-3 text-sm text-gray-700 hover:bg-gray-50">
                             <X size={16} /> Reset
-                          </button>
+                          </button>}
                         </div>
                         <p className="mt-1 truncate text-xs text-gray-500">{profilePictureName || 'Allowed JPG, GIF or PNG. Max size of 1MB'}</p>
                         <input ref={pictureRef} type="file" accept="image/png,image/jpeg,image/gif" className="hidden" onChange={(event) => setProfilePictureName(event.target.files?.[0]?.name || '')} />
@@ -126,17 +135,17 @@ export const UserProfilePage: React.FC = () => {
                     </div>
                   </div>
                   <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                    <label className="block text-sm text-gray-600">First Name<input className={`${inputClass} mt-1`} value={profileForm.firstName} onChange={(event) => setProfileField('firstName', event.target.value)} /></label>
-                    <label className="block text-sm text-gray-600">Last Name<input className={`${inputClass} mt-1`} value={profileForm.lastName} onChange={(event) => setProfileField('lastName', event.target.value)} /></label>
-                    <label className="block text-sm text-gray-600">Username<input className={`${inputClass} mt-1`} value={profileForm.userName} onChange={(event) => setProfileField('userName', event.target.value)} /></label>
-                    <label className="block text-sm text-gray-600">Email Address<input className={`${inputClass} mt-1`} type="email" value={profileForm.email} onChange={(event) => setProfileField('email', event.target.value)} /></label>
-                    <label className="block text-sm text-gray-600">Mobile<input className={`${inputClass} mt-1`} value={profileForm.mobileNo} onChange={(event) => setProfileField('mobileNo', event.target.value)} /></label>
+                    <label className="block text-sm text-gray-600">First Name<input disabled={!canUpdateProfile} className={`${inputClass} mt-1`} value={profileForm.firstName} onChange={(event) => setProfileField('firstName', event.target.value)} /></label>
+                    <label className="block text-sm text-gray-600">Last Name<input disabled={!canUpdateProfile} className={`${inputClass} mt-1`} value={profileForm.lastName} onChange={(event) => setProfileField('lastName', event.target.value)} /></label>
+                    <label className="block text-sm text-gray-600">Username<input disabled={!canUpdateProfile} className={`${inputClass} mt-1`} value={profileForm.userName} onChange={(event) => setProfileField('userName', event.target.value)} /></label>
+                    <label className="block text-sm text-gray-600">Email Address<input disabled={!canUpdateProfile} className={`${inputClass} mt-1`} type="email" value={profileForm.email} onChange={(event) => setProfileField('email', event.target.value)} /></label>
+                    <label className="block text-sm text-gray-600">Mobile<input disabled={!canUpdateProfile} className={`${inputClass} mt-1`} value={profileForm.mobileNo} onChange={(event) => setProfileField('mobileNo', event.target.value)} /></label>
                     <label className="block text-sm text-gray-600">Status<input className={`${inputClass} mt-1 bg-gray-50`} value={profile.data?.data?.status || ''} readOnly /></label>
                     <label className="block text-sm text-gray-600">Role Name<input className={`${inputClass} mt-1 bg-gray-50`} value={profile.data?.data?.roleName || ''} readOnly /></label>
                   </div>
                 </div>
                 <div className="flex gap-3 px-5 pb-5">
-                  <Button type="button" isLoading={updateProfile.isPending} onClick={submitProfile}>Submit</Button>
+                  {canUpdateProfile && <Button type="button" isLoading={updateProfile.isPending} onClick={submitProfile}>Submit</Button>}
                   <Button type="button" variant="secondary" onClick={() => navigate('/dashboard')}>Close</Button>
                 </div>
               </>

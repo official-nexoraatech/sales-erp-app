@@ -9,9 +9,7 @@ import lombok.*;
  * Role entity representing user roles.
  */
 @Entity
-@Table(name = "roles", uniqueConstraints = {
-        @UniqueConstraint(columnNames = "name")
-})
+@Table(name = "roles")
 @Getter
 @Setter
 @NoArgsConstructor

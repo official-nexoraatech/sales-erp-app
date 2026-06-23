@@ -9,7 +9,7 @@ public class ErrorMessage {
     }
 
     // Authentication Errors
-    public static final String INVALID_CREDENTIALS = "Invalid username or password";
+    public static final String INVALID_CREDENTIALS = "Username password not correct";
     public static final String UNAUTHORIZED = "Unauthorized access";
     public static final String TOKEN_INVALID = "Invalid or expired token";
     public static final String TOKEN_EXPIRED = "Token has expired";
@@ -38,6 +38,7 @@ public class ErrorMessage {
 
     // Brand Errors
     public static final String BRAND_NOT_FOUND = "Brand not found";
+    public static final String BRAND_NOT_FOUND_FOR_CATEGORY = "No brands found for this category";
     public static final String BRAND_ALREADY_EXISTS = "Brand already exists";
 
     // Unit Errors
@@ -62,9 +63,15 @@ public class ErrorMessage {
     public static final String WAREHOUSE_REQUIRED = "Warehouse is required";
     public static final String SHIPPING_CARRIER_NOT_FOUND = "Shipping carrier not found";
     public static final String PAYMENT_METHOD_NOT_FOUND = "Payment method not found";
+    public static final String PAYMENT_METHOD_ALREADY_EXISTS = "Payment method already exists";
     public static final String INSUFFICIENT_STOCK = "Insufficient stock";
 
     // Purchase/Sales Errors
+    public static final String EXPENSE_NOT_FOUND = "Expense not found";
+    public static final String EXPENSE_CATEGORY_NOT_FOUND = "Expense category not found";
+    public static final String EXPENSE_CATEGORY_ALREADY_EXISTS = "Expense category already exists";
+    public static final String EXPENSE_SUB_CATEGORY_NOT_FOUND = "Expense sub category not found";
+    public static final String EXPENSE_SUB_CATEGORY_ALREADY_EXISTS = "Expense sub category already exists";
     public static final String PURCHASE_NOT_FOUND = "Purchase not found";
     public static final String PURCHASE_RETURN_NOT_FOUND = "Purchase return not found";
     public static final String SALE_NOT_FOUND = "Sales invoice not found";

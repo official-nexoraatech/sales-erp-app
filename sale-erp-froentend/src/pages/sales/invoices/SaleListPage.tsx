@@ -49,7 +49,7 @@ export const SaleListPage: React.FC = () => {
   const invoice = async (id: number) => {
     try {
       const response = await salesApi.getInvoice(id);
-      alert(`Invoice: ${response.data.invoiceNo}\nCustomer: ${response.data.customerName}\nGrand Total: ${formatCurrency(response.data.grandTotal)}`);
+      toast.success(`Invoice ${response.data.invoiceNo} · ${response.data.customerName} · ${formatCurrency(response.data.grandTotal)}`);
     } catch (error: any) { toast.error(error?.message || 'Failed to load invoice'); }
   };
   const exportRows = () => rows.map((sale) => [sale.invoiceNo, sale.invoiceDate, sale.customerName, sale.grandTotal, sale.dueAmount, sale.dueAmount <= 0 ? 'PAID' : 'DUE']);

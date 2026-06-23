@@ -9,12 +9,14 @@ interface OrganizationSelectorProps {
   value: number;
   onChange: (organizationId: number) => void;
   onCreate: () => void;
+  canCreate?: boolean;
 }
 
 export const OrganizationSelector: React.FC<OrganizationSelectorProps> = ({
   value,
   onChange,
   onCreate,
+  canCreate = false,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [search, setSearch] = useState('');
@@ -59,7 +61,7 @@ export const OrganizationSelector: React.FC<OrganizationSelectorProps> = ({
             role="combobox"
             aria-expanded={isOpen}
             aria-autocomplete="list"
-            className={`h-14 w-full rounded-l-lg border border-r-0 bg-white px-5 pr-12 text-base text-gray-900 outline-none transition focus:z-10 ${
+            className={`h-14 w-full border bg-white px-5 pr-12 text-base text-gray-900 outline-none transition focus:z-10 ${canCreate ? 'rounded-l-lg border-r-0' : 'rounded-lg'} ${
               isOpen
                 ? 'border-blue-400 ring-2 ring-blue-100'
                 : 'border-gray-300 hover:border-gray-400 focus:border-blue-400 focus:ring-2 focus:ring-blue-100'
@@ -86,7 +88,7 @@ export const OrganizationSelector: React.FC<OrganizationSelectorProps> = ({
             />
           </button>
         </div>
-        <button
+        {canCreate && <button
           type="button"
           title="Create organization"
           aria-label="Create organization"
@@ -94,13 +96,13 @@ export const OrganizationSelector: React.FC<OrganizationSelectorProps> = ({
           className="flex h-14 w-12 shrink-0 items-center justify-center rounded-r border border-blue-400 bg-white text-blue-500 transition hover:bg-blue-50 hover:text-blue-600 focus:z-20 focus:outline-none focus:ring-2 focus:ring-blue-100"
         >
           <CirclePlus size={17} strokeWidth={2} />
-        </button>
+        </button>}
       </div>
 
       {isOpen && (
         <div
           role="listbox"
-          className="absolute z-30 mt-0 max-h-72 w-[calc(100%-3rem)] overflow-y-auto rounded-b-lg border border-t-0 border-blue-300 bg-white shadow-xl"
+          className={`absolute z-30 mt-0 max-h-72 overflow-y-auto rounded-b-lg border border-t-0 border-blue-300 bg-white shadow-xl ${canCreate ? 'w-[calc(100%-3rem)]' : 'w-full'}`}
         >
           {organizations.isLoading ? (
             <p className="px-5 py-4 text-sm text-gray-500">Loading organizations...</p>
@@ -138,9 +140,9 @@ export const OrganizationSelector: React.FC<OrganizationSelectorProps> = ({
           ) : (
             <div className="px-5 py-5 text-center">
               <p className="text-sm font-medium text-gray-700">No organizations found</p>
-              <button type="button" onClick={onCreate} className="mt-1 text-sm font-semibold text-blue-600 hover:underline">
+              {canCreate && <button type="button" onClick={onCreate} className="mt-1 text-sm font-semibold text-blue-600 hover:underline">
                 Create a new organization
-              </button>
+              </button>}
             </div>
           )}
         </div>

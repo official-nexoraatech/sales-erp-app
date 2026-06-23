@@ -3,6 +3,7 @@ import { useMutation } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { itemApi } from '../../api/endpoints';
+import { getValidationErrors, hasValidationErrors } from '../../utils/apiValidation';
 import { ItemForm } from './ItemForm';
 
 export const ItemCreatePage: React.FC = () => {
@@ -13,7 +14,9 @@ export const ItemCreatePage: React.FC = () => {
       toast.success('Item created successfully');
       navigate('/items');
     },
-    onError: (error: any) => toast.error(error?.message || 'Failed to create item'),
+    onError: (error: any) => {
+      if (!hasValidationErrors(error)) toast.error(error?.message || 'Failed to create item');
+    },
   });
-  return <div className="space-y-5"><div className="text-sm text-gray-500">Home &gt; Items &gt; Item List &gt; Create Item</div><ItemForm submitText="Submit" loading={mutation.isPending} onSubmit={(payload) => mutation.mutate(payload)} onCancel={() => navigate('/items')} /></div>;
+  return <div className="space-y-5"><div className="text-sm text-gray-500">Home &gt; Items &gt; Item List &gt; Create Item</div><ItemForm submitText="Submit" loading={mutation.isPending} validationErrors={getValidationErrors(mutation.error)} onFieldChange={mutation.reset} onSubmit={(payload) => mutation.mutate(payload)} onCancel={() => navigate('/items')} /></div>;
 };

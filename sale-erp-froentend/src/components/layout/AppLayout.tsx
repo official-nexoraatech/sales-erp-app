@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Sidebar } from './Sidebar';
+import { AppHeader } from './AppHeader';
 
 interface AppLayoutProps {
   children: React.ReactNode;
@@ -22,9 +23,13 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
         <span className="mt-1.5 block h-0.5 w-5 bg-current" />
       </button>
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        <AppHeader />
         <main className="flex-1 overflow-y-auto bg-[#f7f9fc]">
-          <div className="p-4 md:p-7">{children}</div>
+          <div className="min-h-full p-4 pb-8 md:p-5 md:pb-8">{children}</div>
         </main>
+        <footer className="flex h-8 shrink-0 items-center justify-center border-t border-indigo-100 bg-white px-4 text-[11px] text-slate-500">
+          Copyright © BillTop - {new Date().getFullYear()} (v2.4)
+        </footer>
       </div>
     </div>
   );

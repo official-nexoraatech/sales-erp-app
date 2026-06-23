@@ -39,8 +39,8 @@ export const MasterFormPage: React.FC<Props> = ({ type, mode }) => {
   });
 
   const submit = () => {
-    if (!name.trim()) return alert(`${label} name is required.`);
-    if (!isCategory && !categoryId) return alert('Category is required.');
+    if (!name.trim()) return toast.error(`${label} name is required.`);
+    if (!isCategory && !categoryId) return toast.error('Category is required.');
     mutation.mutate();
   };
 

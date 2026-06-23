@@ -154,7 +154,11 @@ class TransactionSupport {
     }
 
     PaymentMethod getActivePaymentMethod(Long id) {
-        return paymentMethodRepository.findByIdAndStatus(id, com.nexoraa.billtop.enums.Status.ACTIVE)
+        return paymentMethodRepository.findByIdAndOrganizationIdAndStatusAndIsDeletedFalse(
+                        id,
+                        currentOrganizationService.getOrganizationId(),
+                        com.nexoraa.billtop.enums.Status.ACTIVE
+                )
                 .orElseThrow(() -> new ResourceNotFoundException(
                         ErrorMessage.PAYMENT_METHOD_NOT_FOUND,
                         "PAYMENT_METHOD_NOT_FOUND"
@@ -164,9 +168,6 @@ class TransactionSupport {
     ItemBatch getBatchForItem(Long batchId, Long itemId) {
         ItemBatch batch = itemBatchRepository.findById(batchId)
                 .orElseThrow(() -> new ResourceNotFoundException("Item batch not found", "ITEM_BATCH_NOT_FOUND"));
-        if (batch.getItem() == null || !batch.getItem().getId().equals(itemId)) {
-            throw new BadRequestException("Batch does not belong to item", "INVALID_ITEM_BATCH");
-        }
         return batch;
     }
 
@@ -380,7 +381,6 @@ class TransactionSupport {
     record LineTotals(BigDecimal grossAmount, BigDecimal discountAmount, BigDecimal taxAmount, BigDecimal totalAmount) {
     }
 }
-
 
 
 

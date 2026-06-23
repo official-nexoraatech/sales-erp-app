@@ -18,6 +18,8 @@ import { carrierApi } from '../../../api/endpoints';
 import { Button } from '../../../components/ui/Button';
 import { Card } from '../../../components/ui/Card';
 import { Loader } from '../../../components/ui/Loader';
+import { useAuth } from '../../../hooks/useAuth';
+import { PERMISSIONS } from '../../../auth/permissions';
 
 const displayValue = (value?: React.ReactNode) => {
   if (value === undefined || value === null || value === '') {
@@ -67,6 +69,8 @@ const SectionTitle = ({
 
 export const CarrierViewPage: React.FC = () => {
   const navigate = useNavigate();
+  const { hasPermission } = useAuth();
+  const canUpdate = hasPermission(PERMISSIONS.CARRIER_UPDATE);
   const carrierId = Number(useParams<{ id: string }>().id);
   const { data, isLoading, isError } = useQuery({
     queryKey: ['carriers', carrierId],
@@ -111,9 +115,9 @@ export const CarrierViewPage: React.FC = () => {
           <Button variant="outline" onClick={() => navigate('/contacts/carriers')}>
             <ArrowLeft size={18} /> Back
           </Button>
-          <Button onClick={() => navigate(`/contacts/carriers/${carrierId}/edit`)}>
+          {canUpdate && <Button onClick={() => navigate(`/contacts/carriers/${carrierId}/edit`)}>
             <Edit size={18} /> Edit Carrier
-          </Button>
+          </Button>}
         </div>
       </div>
 

@@ -129,6 +129,16 @@ public class ResponseMessage {
     public static final String EXPENSE_DELETED = "Expense deleted successfully";
     public static final String EXPENSES_RETRIEVED = "Expenses retrieved successfully";
     public static final String EXPENSE_RETRIEVED = "Expense retrieved successfully";
+    public static final String EXPENSE_CATEGORY_CREATED = "Expense category created successfully";
+    public static final String EXPENSE_CATEGORY_UPDATED = "Expense category updated successfully";
+    public static final String EXPENSE_CATEGORY_DELETED = "Expense category deleted successfully";
+    public static final String EXPENSE_CATEGORY_RETRIEVED = "Expense category retrieved successfully";
+    public static final String EXPENSE_CATEGORIES_RETRIEVED = "Expense categories retrieved successfully";
+    public static final String EXPENSE_SUB_CATEGORY_CREATED = "Expense sub category created successfully";
+    public static final String EXPENSE_SUB_CATEGORY_UPDATED = "Expense sub category updated successfully";
+    public static final String EXPENSE_SUB_CATEGORY_DELETED = "Expense sub category deleted successfully";
+    public static final String EXPENSE_SUB_CATEGORY_RETRIEVED = "Expense sub category retrieved successfully";
+    public static final String EXPENSE_SUB_CATEGORIES_RETRIEVED = "Expense sub categories retrieved successfully";
 
     // Bank/Cash Messages
     public static final String BANK_ACCOUNT_CREATED = "Bank account created successfully";
@@ -136,6 +146,11 @@ public class ResponseMessage {
     public static final String BANK_TRANSACTIONS_RETRIEVED = "Bank transactions retrieved successfully";
     public static final String CASH_SUMMARY_RETRIEVED = "Cash summary retrieved successfully";
     public static final String CASH_TRANSACTIONS_RETRIEVED = "Cash transactions retrieved successfully";
+    public static final String PAYMENT_METHOD_CREATED = "Payment method created successfully";
+    public static final String PAYMENT_METHOD_UPDATED = "Payment method updated successfully";
+    public static final String PAYMENT_METHOD_DELETED = "Payment method deleted successfully";
+    public static final String PAYMENT_METHOD_RETRIEVED = "Payment method retrieved successfully";
+    public static final String PAYMENT_METHODS_RETRIEVED = "Payment methods retrieved successfully";
 
     // Dashboard/Report Messages
     public static final String DASHBOARD_SUMMARY_RETRIEVED = "Dashboard summary retrieved successfully";
@@ -160,6 +175,8 @@ public class ResponseMessage {
 
     // Permission Messages
     public static final String PERMISSIONS_RETRIEVED = "Permissions retrieved successfully";
+    public static final String USER_PERMISSIONS_RETRIEVED = "User permissions retrieved successfully";
+    public static final String USER_PERMISSIONS_ASSIGNED = "User permissions assigned successfully";
 
     // SMS Messages
     public static final String SMS_TEMPLATE_CREATED = "SMS template created successfully";

@@ -49,9 +49,6 @@ export const LoginPage: React.FC = () => {
         navigate('/dashboard');
       }
     },
-    onError: (error: any) => {
-      toast.error(error?.message || 'Login failed. Please try again.');
-    },
   });
 
   return (

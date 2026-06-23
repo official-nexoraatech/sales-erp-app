@@ -3,6 +3,8 @@ import { devtools, persist } from 'zustand/middleware';
 import type { AuthUser } from '../types/auth.types';
 import { isTokenExpired } from '../utils/authToken';
 
+const isSuperAdmin = (role?: string) => role?.trim().toLowerCase() === 'super admin';
+
 interface AuthStore {
   token: string | null;
   user: AuthUser | null;
@@ -12,6 +14,8 @@ interface AuthStore {
   logout: () => void;
   isSessionValid: () => boolean;
   hasPermission: (permission: string) => boolean;
+  hasAnyPermission: (permissions: string[]) => boolean;
+  hasAllPermissions: (permissions: string[]) => boolean;
 }
 
 const useAuthStore = create<AuthStore>()(
@@ -53,7 +57,22 @@ const useAuthStore = create<AuthStore>()(
         hasPermission: (permission: string) => {
           const { user, isSessionValid } = get();
           if (!isSessionValid()) return false;
+          if (isSuperAdmin(user?.role)) return true;
           return user?.permissions?.includes(permission) || false;
+        },
+
+        hasAnyPermission: (permissions: string[]) => {
+          const { user, isSessionValid } = get();
+          if (!isSessionValid()) return false;
+          if (isSuperAdmin(user?.role)) return true;
+          return permissions.some((permission) => user?.permissions?.includes(permission));
+        },
+
+        hasAllPermissions: (permissions: string[]) => {
+          const { user, isSessionValid } = get();
+          if (!isSessionValid()) return false;
+          if (isSuperAdmin(user?.role)) return true;
+          return permissions.every((permission) => user?.permissions?.includes(permission));
         },
       }),
       {

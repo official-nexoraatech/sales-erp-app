@@ -36,7 +36,7 @@ export const PaymentOutCreatePage: React.FC = () => {
 
   const submit = () => {
     if (!supplierId || !paymentMethodId || amount <= 0) {
-      alert('Select supplier, payment method, and valid amount.');
+      toast.error('Select supplier, payment method, and valid amount.');
       return;
     }
     mutation.mutate({ supplierId, paymentDate, paymentMethodId, referenceNo, amount, notes, purchaseIds });

@@ -1,6 +1,7 @@
 package com.nexoraa.billtop.service.impl;
 
 import com.nexoraa.billtop.dto.PageResponseDto;
+import com.nexoraa.billtop.constants.ErrorMessage;
 import com.nexoraa.billtop.dto.common.NameIdResponseDto;
 import com.nexoraa.billtop.dto.expense.ExpenseCreateResponseDto;
 import com.nexoraa.billtop.dto.expense.ExpenseRequestDto;
@@ -143,8 +144,15 @@ public class ExpenseServiceImpl implements ExpenseService {
     }
 
     private ExpenseCategory getExpenseCategory(Long id) {
-        return expenseCategoryRepository.findByIdAndStatus(id, com.nexoraa.billtop.enums.Status.ACTIVE)
-                .orElseThrow(() -> new ResourceNotFoundException("Expense category not found", "EXPENSE_CATEGORY_NOT_FOUND"));
+        return expenseCategoryRepository.findByIdAndOrganizationIdAndStatusAndIsDeletedFalse(
+                        id,
+                        currentOrganizationService.getOrganizationId(),
+                        com.nexoraa.billtop.enums.Status.ACTIVE
+                )
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        ErrorMessage.EXPENSE_CATEGORY_NOT_FOUND,
+                        "EXPENSE_CATEGORY_NOT_FOUND"
+                ));
     }
 
     private String nextExpenseNo() {

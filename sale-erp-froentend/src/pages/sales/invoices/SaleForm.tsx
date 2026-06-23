@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
-import { customerApi, itemApi, warehouseApi } from '../../../api/endpoints';
+import toast from 'react-hot-toast';
+import { customerApi, itemApi, usersApi, warehouseApi } from '../../../api/endpoints';
 import type { SaleRequest } from '../../../api/endpoints';
 import { CountryStateSelect } from '../../../components/form/CountryStateSelect';
 import { Button } from '../../../components/ui/Button';
@@ -40,7 +41,11 @@ export const SaleForm: React.FC<Props> = ({ initial, submitText, loading, onSubm
   const customers = useQuery({ queryKey: ['sale-form-customers'], queryFn: () => customerApi.getAll({ page: 0, size: 100, search: '' }) });
   const warehouses = useQuery({ queryKey: ['sale-form-warehouses'], queryFn: () => warehouseApi.getAll() });
   const items = useQuery({ queryKey: ['sale-form-items'], queryFn: () => itemApi.getAll({ page: 0, size: 100, search: '' }) });
+  const salesPersons = useQuery({ queryKey: ['sale-form-sales-persons'], queryFn: () => usersApi.getAll({ page: 0, size: 500, search: '' }) });
   const warehouseRows = warehouses.data?.data || [];
+  const salesPersonRows = (salesPersons.data?.data?.content || []).filter((entry) =>
+    entry.status !== false && entry.status !== 'INACTIVE'
+  );
 
   useEffect(() => {
     if (!warehouseId && warehouseRows.length) {
@@ -75,7 +80,7 @@ export const SaleForm: React.FC<Props> = ({ initial, submitText, loading, onSubm
 
   const submit = () => {
     if (!customerId || !warehouseId || !lines.length || lines.some((line) => line.quantity <= 0)) {
-      alert('Select customer, warehouse, items and valid quantities.');
+      toast.error('Select customer, warehouse, items and valid quantities.');
       return;
     }
 
@@ -116,8 +121,27 @@ export const SaleForm: React.FC<Props> = ({ initial, submitText, loading, onSubm
 
         <CountryStateSelect stateId={stateId} onStateChange={setStateId} className={inputClass} />
 
-        <label className={labelClass}>Sales Person ID
-          <input type="number" className={`${inputClass} mt-1`} placeholder="Sales Person ID" value={salesPersonId || ''} onChange={(event) => setSalesPersonId(Number(event.target.value))} />
+        <label className={labelClass}>Sales Person
+          <select
+            className={`${inputClass} mt-1`}
+            value={salesPersonId}
+            disabled={salesPersons.isLoading}
+            onChange={(event) => setSalesPersonId(Number(event.target.value))}
+          >
+            <option value={0}>
+              {salesPersons.isLoading ? 'Loading sales persons...' : 'Select sales person'}
+            </option>
+            {salesPersonRows.map((person) => {
+              const fullName = `${person.firstName || ''} ${person.lastName || ''}`.trim();
+              const userName = person.userName || person.username || '';
+              return (
+                <option key={person.id} value={person.id}>
+                  {fullName || userName || `User ${person.id}`}
+                  {fullName && userName ? ` (${userName})` : ''}
+                </option>
+              );
+            })}
+          </select>
         </label>
       </div>
 

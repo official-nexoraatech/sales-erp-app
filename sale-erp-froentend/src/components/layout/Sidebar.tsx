@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   X,
@@ -26,14 +26,17 @@ import {
   LogOut,
   Lock,
   User,
+  ShieldCheck,
 } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
+import { PERMISSIONS } from '../../auth/permissions';
 
 interface MenuItem {
   label: string;
   icon: React.ReactNode;
   href?: string;
   submenu?: MenuItem[];
+  permissions?: string[];
 }
 
 const menuItems: MenuItem[] = [
@@ -46,6 +49,7 @@ const menuItems: MenuItem[] = [
     label: 'Organization',
     icon: <Building2 size={20} />,
     href: '/organizations',
+    permissions: [PERMISSIONS.ORGANIZATION_VIEW],
   },
   {
     label: 'Contacts',
@@ -53,7 +57,7 @@ const menuItems: MenuItem[] = [
     submenu: [
       { label: 'Customers', href: '/contacts/customers', icon: <Users size={18} /> },
       { label: 'Suppliers', href: '/contacts/suppliers', icon: <Users size={18} /> },
-      { label: 'Carriers', href: '/contacts/carriers', icon: <Users size={18} /> },
+      { label: 'Carriers', href: '/contacts/carriers', icon: <Users size={18} />, permissions: [PERMISSIONS.CARRIER_VIEW] },
     ],
   },
   {
@@ -80,10 +84,10 @@ const menuItems: MenuItem[] = [
     label: 'Items',
     icon: <Package size={20} />,
     submenu: [
-      { label: 'Item List', href: '/items', icon: <Package size={18} /> },
-      { label: 'Category List', href: '/items/categories', icon: <Package size={18} /> },
-      { label: 'Brand List', href: '/items/brands', icon: <Package size={18} /> },
-      { label: 'Unit List', href: '/items/units', icon: <Package size={18} /> },
+      { label: 'Item List', href: '/items', icon: <Package size={18} />, permissions: [PERMISSIONS.ITEM_VIEW] },
+      { label: 'Category List', href: '/items/categories', icon: <Package size={18} />, permissions: [PERMISSIONS.CATEGORY_VIEW] },
+      { label: 'Brand List', href: '/items/brands', icon: <Package size={18} />, permissions: [PERMISSIONS.BRAND_VIEW] },
+      { label: 'Unit List', href: '/items/units', icon: <Package size={18} />, permissions: [PERMISSIONS.UNIT_VIEW] },
     ],
   },
   {
@@ -101,6 +105,7 @@ const menuItems: MenuItem[] = [
       { label: 'Expense List', href: '/expenses', icon: <CircleMinus size={18} /> },
       { label: 'Category List', href: '/expenses/categories', icon: <CircleMinus size={18} /> },
       { label: 'Subcategory List', href: '/expenses/subcategories', icon: <CircleMinus size={18} /> },
+      { label: 'Payment Type', href: '/expenses/payment-types', icon: <WalletCards size={18} /> },
     ],
   },
   {
@@ -130,8 +135,9 @@ const menuItems: MenuItem[] = [
     label: 'Users',
     icon: <Users size={20} />,
     submenu: [
-      { label: 'Users', href: '/users', icon: <Users size={18} /> },
-      { label: 'Roles', href: '/users/roles', icon: <Users size={18} /> },
+      { label: 'Users', href: '/users', icon: <Users size={18} />, permissions: [PERMISSIONS.USER_MANAGE] },
+      { label: 'Roles', href: '/users/roles', icon: <Users size={18} />, permissions: [PERMISSIONS.ROLE_MANAGE] },
+      { label: 'Permissions', href: '/users/permissions', icon: <ShieldCheck size={18} />, permissions: [PERMISSIONS.USER_MANAGE] },
     ],
   },
   {
@@ -220,17 +226,28 @@ export const Sidebar: React.FC<{ isOpen: boolean; onClose: () => void }> = ({
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
-  const { user, logout } = useAuth();
+  const { user, logout, hasPermission } = useAuth();
+  const visibleMenuItems = useMemo(() => menuItems
+    .map((item) => {
+      const submenu = item.submenu?.filter((subitem) =>
+        !subitem.permissions?.length || subitem.permissions.some(hasPermission)
+      );
+      return item.submenu ? { ...item, submenu } : item;
+    })
+    .filter((item) => {
+      if (item.permissions?.length && !item.permissions.some(hasPermission)) return false;
+      return !item.submenu || item.submenu.length > 0;
+    }), [hasPermission, user?.permissions]);
 
   useEffect(() => {
-    const activeParent = menuItems.find((item) =>
+    const activeParent = visibleMenuItems.find((item) =>
       item.submenu?.some((subitem) => location.pathname.startsWith(subitem.href || ''))
     );
     if (activeParent) {
       setExpandedMenu(activeParent.label);
     }
     setShowProfileMenu(false);
-  }, [location.pathname]);
+  }, [location.pathname, visibleMenuItems]);
 
   const toggleMenu = (label: string) => {
     setExpandedMenu(expandedMenu === label ? null : label);
@@ -297,7 +314,7 @@ export const Sidebar: React.FC<{ isOpen: boolean; onClose: () => void }> = ({
         </div>
 
         <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-4">
-          {menuItems.map((item) => (
+          {visibleMenuItems.map((item) => (
             <React.Fragment key={item.label}>
               {sectionLabels[item.label] && (
                 <p className="mb-2 mt-5 px-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400 first:mt-0">
@@ -369,22 +386,26 @@ export const Sidebar: React.FC<{ isOpen: boolean; onClose: () => void }> = ({
         <div className="relative border-t border-[#edf2f7] p-3">
           {showProfileMenu && (
             <div className="absolute bottom-[76px] left-3 right-3 overflow-hidden rounded-xl border border-slate-200 bg-white py-1.5 shadow-xl">
-              <button
-                type="button"
-                onClick={() => openProfilePanel('profile')}
-                className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900"
-              >
-                <User size={16} />
-                Profile
-              </button>
-              <button
-                type="button"
-                onClick={() => openProfilePanel('password')}
-                className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900"
-              >
-                <Lock size={16} />
-                Change Password
-              </button>
+              {hasPermission(PERMISSIONS.USER_PROFILE) && (
+                <button
+                  type="button"
+                  onClick={() => openProfilePanel('profile')}
+                  className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+                >
+                  <User size={16} />
+                  Profile
+                </button>
+              )}
+              {hasPermission(PERMISSIONS.USER_CHANGE_PASSWORD) && (
+                <button
+                  type="button"
+                  onClick={() => openProfilePanel('password')}
+                  className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+                >
+                  <Lock size={16} />
+                  Change Password
+                </button>
+              )}
               <button
                 type="button"
                 onClick={handleLogout}

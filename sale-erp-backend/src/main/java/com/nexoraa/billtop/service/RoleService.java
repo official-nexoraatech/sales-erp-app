@@ -11,6 +11,8 @@ public interface RoleService {
 
     List<RoleResponseDto> getRoles(String search);
 
+    List<RoleResponseDto> getRolesByOrganizationId(Long organizationId);
+
     RoleResponseDto getRoleById(Long id);
 
     void updateRole(Long id, RoleRequestDto request);

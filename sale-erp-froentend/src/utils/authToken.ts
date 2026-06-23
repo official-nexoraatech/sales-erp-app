@@ -30,6 +30,12 @@ export const authUserFromLoginResponse = (response: LoginResponse): AuthUser => 
     : Array.isArray(response.permissions)
       ? response.permissions
       : [];
+  const normalizedPermissions = [...new Set(
+    permissions
+      .filter((permission): permission is string => typeof permission === 'string')
+      .map((permission) => permission.trim())
+      .filter(Boolean)
+  )];
 
   return {
     accessToken: response.accessToken,
@@ -40,7 +46,7 @@ export const authUserFromLoginResponse = (response: LoginResponse): AuthUser => 
     organizationName: payload?.organizationName || response.organizationName || '',
     organizationLogoUrl: payload?.organizationLogoUrl ?? response.organizationLogoUrl ?? null,
     role: payload?.role || response.role || '',
-    permissions,
+    permissions: normalizedPermissions,
     issuedAt: payload?.iat ? payload.iat * 1000 : null,
     expiresAt: payload?.exp ? payload.exp * 1000 : null,
   };

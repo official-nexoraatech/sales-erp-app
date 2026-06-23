@@ -20,9 +20,6 @@ public class SalesItemRequestDto {
     @NotNull(message = ValidationMessage.ID_REQUIRED)
     private Long itemId;
 
-    @NotNull(message = ValidationMessage.ID_REQUIRED)
-    private Long batchId;
-
     @NotNull(message = ValidationMessage.QUANTITY_REQUIRED)
     @Positive(message = ValidationMessage.QUANTITY_INVALID)
     private BigDecimal quantity;

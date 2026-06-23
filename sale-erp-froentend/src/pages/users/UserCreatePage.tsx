@@ -10,6 +10,7 @@ import { Button } from '../../components/ui/Button';
 import { useAuth } from '../../hooks/useAuth';
 import { OrganizationSelector } from './OrganizationSelector';
 import { RoleSelector } from './RoleSelector';
+import { PERMISSIONS } from '../../auth/permissions';
 
 const inputClass = 'h-10 w-full rounded border border-gray-300 bg-white px-3 text-sm text-gray-900 outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-gray-50';
 
@@ -20,7 +21,7 @@ export const UserCreatePage: React.FC<Props> = ({ mode = 'create' }) => {
   const id = Number(useParams<{ id: string }>().id);
   const [searchParams] = useSearchParams();
   const state = useLocation().state as UserListItem | undefined;
-  const { user } = useAuth();
+  const { user, hasPermission } = useAuth();
   const pictureRef = useRef<HTMLInputElement>(null);
   const [form, setForm] = useState<CreateUserRequest>({
     firstName: state?.firstName || '',
@@ -99,6 +100,7 @@ export const UserCreatePage: React.FC<Props> = ({ mode = 'create' }) => {
                 roleId: organizationId === current.organizationId ? current.roleId : 0,
               }))}
               onCreate={() => navigate('/organizations/create?returnTo=/users/create')}
+              canCreate={hasPermission(PERMISSIONS.ORGANIZATION_CREATE)}
             />
           )}
           <label className="text-sm text-gray-600">First Name<input className={`${inputClass} mt-1`} value={form.firstName} onChange={(event) => setText('firstName', event.target.value)} /></label>
