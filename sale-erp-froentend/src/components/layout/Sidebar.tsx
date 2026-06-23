@@ -294,18 +294,9 @@ export const Sidebar: React.FC<{ isOpen: boolean; onClose: () => void }> = ({
         }`}
         style={{ zIndex: 40 }}
       >
-        <div className="flex h-16 shrink-0 items-center justify-between border-b border-[#edf2f7] px-5">
-          <Link to="/dashboard" onClick={onClose} className="flex min-w-0 items-center gap-3">
-            {user?.organizationLogoUrl ? (
-              <img src={user.organizationLogoUrl} alt="BillTop" className="h-9 w-9 shrink-0 rounded-full object-contain" />
-            ) : (
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border-2 border-[#183260] bg-white">
-                <span className="text-[13px] font-black tracking-[-0.12em] text-[#183260]">
-                  B<span className="text-[#1684ed]">T</span>
-                </span>
-              </div>
-            )}
-            <span className="truncate text-lg font-bold tracking-tight text-[#1684ed]">BillTop</span>
+        <div className="flex h-20 shrink-0 items-center justify-between gap-2 border-b border-[#edf2f7] px-4">
+          <Link to="/dashboard" onClick={onClose} className="flex min-w-0 flex-1 items-center">
+            <img src="/nexoraa-logo.png" alt="Nexoraa Technosolve" className="w-40 max-w-full object-contain" />
           </Link>
           <button onClick={onClose} className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 md:hidden" aria-label="Close menu">
             <X size={20} />
