@@ -3,7 +3,7 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { Edit, Eye, Trash2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { expenseApi } from '../../api/endpoints';
+import { expenseApi, expenseCategoryApi } from '../../api/endpoints';
 import type { ExpenseListItem } from '../../api/endpoints';
 import { queryClient } from '../../app/queryClient';
 import { Button } from '../../components/ui/Button';
@@ -24,11 +24,20 @@ export const ExpenseListPage: React.FC = () => {
   const { page, setPage, handlePageChange } = usePagination();
   const [pageSize, setPageSize] = useState(10);
   const [search, setSearch] = useState('');
-  const [category, setCategory] = useState('');
+  const [categoryId, setCategoryId] = useState(0);
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const debouncedSearch = useDebounce(search);
 
-  const expenses = useQuery({ queryKey: ['expenses', page, pageSize, debouncedSearch], queryFn: () => expenseApi.getAll({ page, size: pageSize, search: debouncedSearch }) });
+  const expenses = useQuery({
+    queryKey: ['expenses', page, pageSize, debouncedSearch],
+    queryFn: () => expenseApi.getAll({ page, size: pageSize, search: debouncedSearch }),
+    refetchOnMount: 'always',
+  });
+  const categories = useQuery({
+    queryKey: ['expense-categories', 'expense-list-filter'],
+    queryFn: () => expenseCategoryApi.getAll(''),
+    refetchOnMount: 'always',
+  });
   const remove = useMutation({
     mutationFn: expenseApi.delete,
     onSuccess: () => {
@@ -38,8 +47,11 @@ export const ExpenseListPage: React.FC = () => {
     onError: (error: any) => toast.error(error?.message || 'Failed to delete expense'),
   });
 
-  const categories = Array.from(new Set((expenses.data?.data?.content || []).map((expense) => expense.categoryName).filter(Boolean)));
-  const rows = (expenses.data?.data?.content || []).filter((expense) => !category || expense.categoryName === category);
+  const categoryOptions = (categories.data?.data?.content || [])
+    .filter((category) => category.status === 'ACTIVE' || category.id === categoryId);
+  const selectedCategory = categoryOptions.find((category) => category.id === categoryId);
+  const rows = (expenses.data?.data?.content || [])
+    .filter((expense) => !selectedCategory || expense.categoryName === selectedCategory.name);
   const allSelected = rows.length > 0 && rows.every((expense) => selectedIds.includes(expense.expenseId));
   const exportRows = () => rows.map((expense) => [expense.expenseDate, expenseNumber(expense), expense.categoryName || '', expense.subCategoryName || '', expense.amount, expense.paymentMethodName || expense.paymentType || '', expense.createdBy || user?.userName || 'admin', expense.createdAt || expense.expenseDate]);
   const copy = async () => { await navigator.clipboard.writeText([exportColumns, ...exportRows()].map((row) => row.join('\t')).join('\n')); toast.success('Expenses copied'); };
@@ -67,7 +79,29 @@ export const ExpenseListPage: React.FC = () => {
       <div className="overflow-hidden rounded-lg bg-white shadow">
         <div className="flex items-center justify-between border-b px-5 py-4"><h1 className="text-xl font-semibold uppercase text-gray-900">Expense List</h1><Button onClick={() => navigate('/expenses/create')} className="min-w-[165px]">Create Expense</Button></div>
         <div className="p-5">
-          <label className="block max-w-xs text-sm text-gray-600">Category<select className="mt-1 h-10 w-full rounded border border-gray-300 px-3" value={category} onChange={(event) => setCategory(event.target.value)}><option value="">Choose one thing</option>{categories.map((entry) => <option key={entry} value={entry}>{entry}</option>)}</select></label>
+          <label className="block max-w-xs text-sm text-gray-600">
+            Category
+            <select
+              className="mt-1 h-10 w-full rounded border border-gray-300 px-3 disabled:cursor-not-allowed disabled:bg-gray-50"
+              value={categoryId}
+              disabled={categories.isLoading || categories.isError}
+              onChange={(event) => {
+                setCategoryId(Number(event.target.value));
+                setSelectedIds([]);
+              }}
+            >
+              <option value={0}>
+                {categories.isLoading
+                  ? 'Loading expense categories...'
+                  : categories.isError
+                    ? 'Failed to load expense categories'
+                    : 'Choose one thing'}
+              </option>
+              {categoryOptions.map((category) => (
+                <option key={category.id} value={category.id}>{category.name}</option>
+              ))}
+            </select>
+          </label>
         </div>
         <div className="flex flex-wrap items-center justify-between gap-3 px-5 pb-4">
           <label className="flex items-center gap-2 text-sm text-gray-600">Show<select value={pageSize} onChange={(event) => { setPageSize(Number(event.target.value)); setPage(0); }} className="h-9 rounded border border-gray-300 px-2"><option>10</option><option>20</option><option>50</option><option>100</option></select>entries</label>

@@ -1,0 +1,2 @@
+ALTER TABLE roles
+    DROP CONSTRAINT IF EXISTS uk_roles_name;

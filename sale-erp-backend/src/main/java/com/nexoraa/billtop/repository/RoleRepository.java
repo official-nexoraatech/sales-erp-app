@@ -5,6 +5,7 @@ import com.nexoraa.billtop.entity.Role;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 
+import java.util.List;
 import java.util.Optional;
 
 public interface RoleRepository extends JpaRepository<Role, Long>, JpaSpecificationExecutor<Role> {
@@ -13,9 +14,10 @@ public interface RoleRepository extends JpaRepository<Role, Long>, JpaSpecificat
 
     Optional<Role> findByIdAndOrganizationIdAndStatusAndIsDeletedFalse(Long id, Long organizationId, Status status);
 
-    boolean existsByNameIgnoreCase(String name);
-
-    boolean existsByNameIgnoreCaseAndIdNot(String name, Long id);
+    List<Role> findAllByOrganizationIdAndStatusAndIsDeletedFalseOrderByNameAsc(
+            Long organizationId,
+            Status status
+    );
 
     boolean existsByNameIgnoreCaseAndOrganizationIdAndStatusAndIsDeletedFalse(
             String name,

@@ -20,5 +20,7 @@ public class RoleRequestDto {
     private String name;
 
     private Status status;
+
+    private Long organizationId;
 }
 

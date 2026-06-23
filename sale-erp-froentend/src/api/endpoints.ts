@@ -6,6 +6,8 @@ export type {
   AttendanceRequest,
   AttendanceStatus,
   Employee,
+  EmployeeAddress,
+  EmployeeAddressRequest,
   EmployeeRequest,
   EmployeeStatus,
   EmploymentType,
@@ -34,8 +36,12 @@ import type {
   Country,
   CreateUserRequest,
   ExpenseDetail,
+  ExpenseCategory,
+  ExpenseCategoryRequest,
   ExpenseListItem,
   ExpenseRequest,
+  ExpenseSubCategory,
+  ExpenseSubCategoryRequest,
   ItemListItem,
   ItemRequest,
   ItemStock,
@@ -45,6 +51,8 @@ import type {
   OrganizationRequest,
   PaymentDetail,
   PaymentListItem,
+  PaymentMethod,
+  PaymentMethodRequest,
   PaymentOutRequest,
   PosBillingRequest,
   PurchaseDetail,
@@ -77,6 +85,12 @@ import type {
   UserProfile,
   Warehouse,
   WarehouseRequest,
+  DashboardSummary,
+  StockReportItem,
+  TopSellingItem,
+  AssignedPermission,
+  AssignUserPermissionsRequest,
+  PermissionGroups,
 } from '../types/api.types';
 
 export type {
@@ -87,8 +101,13 @@ export type {
   Country,
   CreateUserRequest,
   ExpenseDetail,
+  ExpenseCategory,
+  ExpenseCategoryRequest,
   ExpenseListItem,
+  ExpenseMasterStatus,
   ExpenseRequest,
+  ExpenseSubCategory,
+  ExpenseSubCategoryRequest,
   ItemListItem,
   ItemRequest,
   ItemStock,
@@ -99,6 +118,8 @@ export type {
   OrganizationRequest,
   PaymentDetail,
   PaymentListItem,
+  PaymentMethod,
+  PaymentMethodRequest,
   PaymentOutRequest,
   PosBillingRequest,
   PurchaseDetail,
@@ -131,6 +152,9 @@ export type {
   UserProfile,
   Warehouse,
   WarehouseRequest,
+  AssignedPermission,
+  AssignUserPermissionsRequest,
+  PermissionGroups,
 } from '../types/api.types';
 
 const normalizeLocationResponse = <T,>(response: ApiResponse<T[]> | T[]): ApiResponse<T[]> => {
@@ -232,7 +256,7 @@ export const carrierApi = {
 
 export const dashboardApi = {
   getSummary: () =>
-    axiosClient.get<ApiResponse>('/api/v1/dashboard/summary'),
+    axiosClient.get<ApiResponse<DashboardSummary>, ApiResponse<DashboardSummary>>('/api/v1/dashboard/summary'),
 };
 
 export const itemApi = {
@@ -272,6 +296,8 @@ export const categoryApi = {
 
 export const brandApi = {
   getAll: async (params?: any) => normalizeMasterList(await axiosClient.get<ApiResponse<SimpleMaster[] | PageResponse<SimpleMaster>>, ApiResponse<SimpleMaster[] | PageResponse<SimpleMaster>>>('/api/v1/brands', { params })),
+  getByCategoryId: async (categoryId: number) =>
+    normalizeMasterList(await axiosClient.get<ApiResponse<SimpleMaster[] | PageResponse<SimpleMaster>>, ApiResponse<SimpleMaster[] | PageResponse<SimpleMaster>>>(`/api/v1/brands/category/${categoryId}`)),
   create: (payload: SimpleMasterRequest) => axiosClient.post<ApiResponse<void>, ApiResponse<void>>('/api/v1/brands', payload),
   update: (id: number, payload: SimpleMasterRequest) => axiosClient.put<ApiResponse<void>, ApiResponse<void>>(`/api/v1/brands/${id}`, payload),
   delete: (id: number) => axiosClient.delete<ApiResponse<void>, ApiResponse<void>>(`/api/v1/brands/${id}`),
@@ -333,6 +359,15 @@ export const usersApi = {
     axiosClient.put<ApiResponse<void>, ApiResponse<void>>('/api/v1/users/change-password', payload),
 };
 
+export const permissionsApi = {
+  getAll: () =>
+    axiosClient.get<ApiResponse<PermissionGroups>, ApiResponse<PermissionGroups>>('/api/v1/permissions'),
+  getCurrentUser: () =>
+    axiosClient.get<ApiResponse<AssignedPermission[]>, ApiResponse<AssignedPermission[]>>('/api/v1/permissions/users/me'),
+  assignToUser: (payload: AssignUserPermissionsRequest) =>
+    axiosClient.post<ApiResponse<void>, ApiResponse<void>>('/api/v1/permissions/users/assign', payload),
+};
+
 const normalizeUserList = (response: ApiResponse<UserListItem[] | PageResponse<UserListItem>> | UserListItem[]) => {
   if (Array.isArray(response)) return { success: true, message: '', data: { content: response, page: 0, size: response.length, totalElements: response.length, totalPages: 1, last: true } as PageResponse<UserListItem>, timestamp: new Date().toISOString() };
   const data: any = response.data;
@@ -349,6 +384,8 @@ const normalizeRoleList = (response: ApiResponse<Role[] | PageResponse<Role>>) =
 export const rolesApi = {
   getAll: async (search = '') =>
     normalizeRoleList(await axiosClient.get<ApiResponse<Role[] | PageResponse<Role>>, ApiResponse<Role[] | PageResponse<Role>>>('/api/v1/roles', { params: { search } })),
+  getByOrganizationId: async (organizationId: number) =>
+    normalizeRoleList(await axiosClient.get<ApiResponse<Role[]>, ApiResponse<Role[]>>(`/api/v1/roles/organization/${organizationId}`)),
   getById: (id: number) =>
     axiosClient.get<ApiResponse<Role>, ApiResponse<Role>>(`/api/v1/roles/${id}`),
   create: (payload: RoleRequest) =>
@@ -442,6 +479,65 @@ export const expenseApi = {
     axiosClient.delete<ApiResponse<void>, ApiResponse<void>>(`/api/v1/expenses/${id}`),
 };
 
+const normalizeExpenseMasterList = <T,>(response: ApiResponse<T[] | PageResponse<T>>) => {
+  const data = response.data;
+  if (Array.isArray(data)) {
+    return {
+      ...response,
+      data: {
+        content: data,
+        page: 0,
+        size: data.length,
+        totalElements: data.length,
+        totalPages: 1,
+        last: true,
+      } as PageResponse<T>,
+    };
+  }
+  return response as ApiResponse<PageResponse<T>>;
+};
+
+export const expenseCategoryApi = {
+  getAll: async (search = '') =>
+    normalizeExpenseMasterList(await axiosClient.get<ApiResponse<ExpenseCategory[] | PageResponse<ExpenseCategory>>, ApiResponse<ExpenseCategory[] | PageResponse<ExpenseCategory>>>('/api/v1/expense-categories', { params: { search } })),
+  getById: (id: number) =>
+    axiosClient.get<ApiResponse<ExpenseCategory>, ApiResponse<ExpenseCategory>>(`/api/v1/expense-categories/${id}`),
+  create: (payload: ExpenseCategoryRequest) =>
+    axiosClient.post<ApiResponse<void>, ApiResponse<void>>('/api/v1/expense-categories', payload),
+  update: (id: number, payload: ExpenseCategoryRequest) =>
+    axiosClient.put<ApiResponse<void>, ApiResponse<void>>(`/api/v1/expense-categories/${id}`, payload),
+  delete: (id: number) =>
+    axiosClient.delete<ApiResponse<void>, ApiResponse<void>>(`/api/v1/expense-categories/${id}`),
+};
+
+export const expenseSubCategoryApi = {
+  getAll: async (search = '') =>
+    normalizeExpenseMasterList(await axiosClient.get<ApiResponse<ExpenseSubCategory[] | PageResponse<ExpenseSubCategory>>, ApiResponse<ExpenseSubCategory[] | PageResponse<ExpenseSubCategory>>>('/api/v1/expense-sub-categories', { params: { search } })),
+  getByCategoryId: async (expenseCategoryId: number) =>
+    normalizeExpenseMasterList(await axiosClient.get<ApiResponse<ExpenseSubCategory[] | PageResponse<ExpenseSubCategory>>, ApiResponse<ExpenseSubCategory[] | PageResponse<ExpenseSubCategory>>>(`/api/v1/expense-sub-categories/category/${expenseCategoryId}`)),
+  getById: (id: number) =>
+    axiosClient.get<ApiResponse<ExpenseSubCategory>, ApiResponse<ExpenseSubCategory>>(`/api/v1/expense-sub-categories/${id}`),
+  create: (payload: ExpenseSubCategoryRequest) =>
+    axiosClient.post<ApiResponse<void>, ApiResponse<void>>('/api/v1/expense-sub-categories', payload),
+  update: (id: number, payload: ExpenseSubCategoryRequest) =>
+    axiosClient.put<ApiResponse<void>, ApiResponse<void>>(`/api/v1/expense-sub-categories/${id}`, payload),
+  delete: (id: number) =>
+    axiosClient.delete<ApiResponse<void>, ApiResponse<void>>(`/api/v1/expense-sub-categories/${id}`),
+};
+
+export const paymentMethodApi = {
+  getAll: async (search = '') =>
+    normalizeExpenseMasterList(await axiosClient.get<ApiResponse<PaymentMethod[] | PageResponse<PaymentMethod>>, ApiResponse<PaymentMethod[] | PageResponse<PaymentMethod>>>('/api/v1/payment-methods', { params: { search } })),
+  getById: (id: number) =>
+    axiosClient.get<ApiResponse<PaymentMethod>, ApiResponse<PaymentMethod>>(`/api/v1/payment-methods/${id}`),
+  create: (payload: PaymentMethodRequest) =>
+    axiosClient.post<ApiResponse<void>, ApiResponse<void>>('/api/v1/payment-methods', payload),
+  update: (id: number, payload: PaymentMethodRequest) =>
+    axiosClient.put<ApiResponse<void>, ApiResponse<void>>(`/api/v1/payment-methods/${id}`, payload),
+  delete: (id: number) =>
+    axiosClient.delete<ApiResponse<void>, ApiResponse<void>>(`/api/v1/payment-methods/${id}`),
+};
+
 const normalizeArray = <T,>(response: ApiResponse<T[] | PageResponse<T>>) => {
   const data: any = response.data;
   if (Array.isArray(data)) return { ...response, data: { content: data, page: 0, size: data.length, totalElements: data.length, totalPages: 1, last: true } as PageResponse<T> };
@@ -460,13 +556,13 @@ export const cashApi = {
 };
 
 export const reportsApi = {
-  topSellingItems: () => axiosClient.get<ApiResponse<any>, ApiResponse<any>>('/api/v1/reports/top-selling-items'),
+  topSellingItems: () => axiosClient.get<ApiResponse<TopSellingItem[]>, ApiResponse<TopSellingItem[]>>('/api/v1/reports/top-selling-items'),
   supplierLedger: (supplierId: number) => axiosClient.get<ApiResponse<any>, ApiResponse<any>>(`/api/v1/reports/supplier-ledger/${supplierId}`),
   stocks: () => axiosClient.get<ApiResponse<any>, ApiResponse<any>>('/api/v1/reports/stocks'),
   sales: (params?: any) => axiosClient.get<ApiResponse<any>, ApiResponse<any>>('/api/v1/reports/sales', { params }),
   purchases: (params?: any) => axiosClient.get<ApiResponse<any>, ApiResponse<any>>('/api/v1/reports/purchases', { params }),
   profitLoss: (params?: any) => axiosClient.get<ApiResponse<any>, ApiResponse<any>>('/api/v1/reports/profit-loss', { params }),
-  lowStock: () => axiosClient.get<ApiResponse<any>, ApiResponse<any>>('/api/v1/reports/low-stock'),
+  lowStock: () => axiosClient.get<ApiResponse<StockReportItem[]>, ApiResponse<StockReportItem[]>>('/api/v1/reports/low-stock'),
   inventoryValuation: () => axiosClient.get<ApiResponse<any>, ApiResponse<any>>('/api/v1/reports/inventory-valuation'),
   gst: (params?: any) => axiosClient.get<ApiResponse<any>, ApiResponse<any>>('/api/v1/reports/gst', { params }),
   dayBook: (params?: any) => axiosClient.get<ApiResponse<any>, ApiResponse<any>>('/api/v1/reports/day-book', { params }),

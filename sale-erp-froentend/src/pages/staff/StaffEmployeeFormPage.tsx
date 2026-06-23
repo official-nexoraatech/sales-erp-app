@@ -3,16 +3,29 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { FileText, Upload } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { staffApi } from '../../api/endpoints';
-import type { EmployeeRequest, EmploymentType } from '../../api/endpoints';
+import { locationApi, staffApi } from '../../api/endpoints';
+import type { Country, EmployeeAddressRequest, EmployeeRequest, EmploymentType, State } from '../../api/endpoints';
 import { queryClient } from '../../app/queryClient';
 import { Button } from '../../components/ui/Button';
 import { Loader } from '../../components/ui/Loader';
-import { employeeStatuses, employmentTypes, inputClass, labelClass, paymentModes, pretty, textareaClass } from './staffShared';
+import { employeeStatuses, employmentTypes, inputClass, labelClass, paymentModes, pretty } from './staffShared';
 
 const today = new Date().toISOString().slice(0, 10);
 
-const emptyEmployee: EmployeeRequest = {
+type EmployeeFormState = Omit<EmployeeRequest, 'address'> & {
+  address: EmployeeAddressRequest;
+};
+
+const emptyAddress = (): EmployeeAddressRequest => ({
+  addressLine1: '',
+  addressLine2: '',
+  city: '',
+  stateId: 0,
+  countryId: 0,
+  pincode: '',
+});
+
+const emptyEmployee: EmployeeFormState = {
   employeeCode: '',
   firstName: '',
   lastName: '',
@@ -20,7 +33,7 @@ const emptyEmployee: EmployeeRequest = {
   dob: today,
   mobile: '',
   email: '',
-  address: '',
+  address: emptyAddress(),
   department: '',
   designation: '',
   joiningDate: today,
@@ -38,6 +51,41 @@ const emptyEmployee: EmployeeRequest = {
   status: 'ACTIVE',
 };
 
+const optionName = (option: Country | State) => option.name
+  || ('stateName' in option ? option.stateName : undefined)
+  || ('countryName' in option ? option.countryName : undefined)
+  || `#${option.id}`;
+
+const hasAddressValue = (address: EmployeeAddressRequest) => Boolean(
+  address.addressLine1.trim()
+  || address.addressLine2?.trim()
+  || address.city.trim()
+  || address.pincode.trim()
+  || address.stateId
+  || address.countryId
+);
+
+const normalizeAddress = (address: EmployeeAddressRequest): EmployeeAddressRequest | undefined => {
+  if (!hasAddressValue(address)) return undefined;
+  return {
+    addressLine1: address.addressLine1.trim(),
+    addressLine2: address.addressLine2?.trim() || '',
+    city: address.city.trim(),
+    stateId: Number(address.stateId),
+    countryId: Number(address.countryId),
+    pincode: address.pincode.trim(),
+  };
+};
+
+const toEmployeeRequest = (form: EmployeeFormState): EmployeeRequest => {
+  const address = normalizeAddress(form.address);
+  const { address: _formAddress, ...payload } = form;
+  return {
+    ...payload,
+    ...(address ? { address } : {}),
+  };
+};
+
 interface Props {
   mode?: 'create' | 'edit';
 }
@@ -45,7 +93,8 @@ interface Props {
 export const StaffEmployeeFormPage: React.FC<Props> = ({ mode = 'create' }) => {
   const navigate = useNavigate();
   const id = Number(useParams<{ id: string }>().id);
-  const [form, setForm] = useState<EmployeeRequest>(emptyEmployee);
+  const [form, setForm] = useState<EmployeeFormState>(emptyEmployee);
+  const countryId = Number(form.address.countryId || 0);
 
   const employee = useQuery({
     queryKey: ['staff-employee', id],
@@ -54,17 +103,30 @@ export const StaffEmployeeFormPage: React.FC<Props> = ({ mode = 'create' }) => {
   });
   const departments = useQuery({ queryKey: ['staff-departments-options'], queryFn: staffApi.getDepartments });
   const designations = useQuery({ queryKey: ['staff-designations-options'], queryFn: staffApi.getDesignations });
+  const countries = useQuery({ queryKey: ['countries'], queryFn: locationApi.getCountries });
+  const states = useQuery({
+    queryKey: ['states', countryId],
+    queryFn: () => locationApi.getStates(countryId),
+    enabled: countryId > 0,
+  });
 
   useEffect(() => {
     const data = employee.data?.data;
     if (data) {
-      const { id: _id, ...payload } = data;
-      setForm(payload);
+      const { id: _id, address, ...payload } = data;
+      setForm({
+        ...payload,
+        address: typeof address === 'string'
+          ? { ...emptyAddress(), addressLine1: address }
+          : { ...emptyAddress(), ...(address || {}) },
+      });
     }
   }, [employee.data?.data]);
 
   const mutation = useMutation({
-    mutationFn: () => mode === 'edit' ? staffApi.updateEmployee(id, form) : staffApi.createEmployee(form),
+    mutationFn: (payload: EmployeeRequest) => mode === 'edit'
+      ? staffApi.updateEmployee(id, payload)
+      : staffApi.createEmployee(payload),
     onSuccess: () => {
       toast.success(`Employee ${mode === 'edit' ? 'updated' : 'created'} successfully`);
       queryClient.invalidateQueries({ queryKey: ['staff-employees'] });
@@ -73,8 +135,15 @@ export const StaffEmployeeFormPage: React.FC<Props> = ({ mode = 'create' }) => {
     onError: (error: any) => toast.error(error?.message || `Failed to ${mode} employee`),
   });
 
-  const set = (field: keyof EmployeeRequest, value: string | number) => {
+  const set = (field: keyof Omit<EmployeeFormState, 'address'>, value: string | number) => {
     setForm((current) => ({ ...current, [field]: value }));
+  };
+
+  const setAddress = <K extends keyof EmployeeAddressRequest>(field: K, value: EmployeeAddressRequest[K]) => {
+    setForm((current) => ({
+      ...current,
+      address: { ...current.address, [field]: value },
+    }));
   };
 
   const submit = () => {
@@ -85,7 +154,14 @@ export const StaffEmployeeFormPage: React.FC<Props> = ({ mode = 'create' }) => {
     if (!form.email.trim()) return toast.error('Email is required');
     if (!form.department.trim()) return toast.error('Department is required');
     if (!form.designation.trim()) return toast.error('Designation is required');
-    mutation.mutate();
+    if (hasAddressValue(form.address)) {
+      if (!form.address.addressLine1.trim()) return toast.error('Address line 1 is required');
+      if (!form.address.city.trim()) return toast.error('City is required');
+      if (!form.address.countryId) return toast.error('Country is required');
+      if (!form.address.stateId) return toast.error('State is required');
+      if (!/^[0-9]{5,10}$/.test(form.address.pincode.trim())) return toast.error('Pincode must contain 5 to 10 digits');
+    }
+    mutation.mutate(toEmployeeRequest(form));
   };
 
   if (employee.isLoading) return <Loader />;
@@ -107,7 +183,46 @@ export const StaffEmployeeFormPage: React.FC<Props> = ({ mode = 'create' }) => {
             <label className={labelClass}>Date of Birth<input type="date" className={`${inputClass} mt-1`} value={form.dob} onChange={(event) => set('dob', event.target.value)} /></label>
             <label className={labelClass}>Mobile<input className={`${inputClass} mt-1`} value={form.mobile} onChange={(event) => set('mobile', event.target.value)} /></label>
             <label className={labelClass}>Email<input type="email" className={`${inputClass} mt-1`} value={form.email} onChange={(event) => set('email', event.target.value)} /></label>
-            <label className={`${labelClass} md:col-span-3`}>Address<textarea className={textareaClass} value={form.address} onChange={(event) => set('address', event.target.value)} /></label>
+          </div>
+        </section>
+
+        <section className="border-b p-5">
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="text-lg font-semibold text-gray-900">Address</h2>
+            <span className="text-xs font-medium text-gray-500">Optional</span>
+          </div>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <label className={labelClass}>Address Line 1<input className={`${inputClass} mt-1`} placeholder="Enter address line 1" value={form.address.addressLine1} onChange={(event) => setAddress('addressLine1', event.target.value)} /></label>
+            <label className={labelClass}>Address Line 2<input className={`${inputClass} mt-1`} placeholder="Enter address line 2" value={form.address.addressLine2 || ''} onChange={(event) => setAddress('addressLine2', event.target.value)} /></label>
+            <label className={labelClass}>City<input className={`${inputClass} mt-1`} placeholder="Enter city" value={form.address.city} onChange={(event) => setAddress('city', event.target.value)} /></label>
+            <label className={labelClass}>Pincode<input className={`${inputClass} mt-1`} placeholder="Enter pincode" value={form.address.pincode} onChange={(event) => setAddress('pincode', event.target.value)} /></label>
+            <label className={labelClass}>
+              Country
+              <select
+                className={`${inputClass} mt-1`}
+                value={form.address.countryId}
+                disabled={countries.isLoading}
+                onChange={(event) => {
+                  setAddress('countryId', Number(event.target.value));
+                  setAddress('stateId', 0);
+                }}
+              >
+                <option value={0}>{countries.isLoading ? 'Loading countries...' : 'Select country'}</option>
+                {(countries.data?.data || []).map((country) => <option key={country.id} value={country.id}>{optionName(country)}</option>)}
+              </select>
+            </label>
+            <label className={labelClass}>
+              State
+              <select
+                className={`${inputClass} mt-1`}
+                value={form.address.stateId}
+                disabled={!countryId || states.isLoading}
+                onChange={(event) => setAddress('stateId', Number(event.target.value))}
+              >
+                <option value={0}>{!countryId ? 'Select country first' : states.isLoading ? 'Loading states...' : 'Select state'}</option>
+                {(states.data?.data || []).map((state) => <option key={state.id} value={state.id}>{optionName(state)}</option>)}
+              </select>
+            </label>
           </div>
         </section>
 

@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Edit } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { staffApi } from '../../api/endpoints';
+import type { EmployeeAddress } from '../../api/endpoints';
 import { Button } from '../../components/ui/Button';
 import { Loader } from '../../components/ui/Loader';
 import { formatDate } from '../../utils/formatDate';
@@ -15,6 +16,18 @@ const Field = ({ label, value }: { label: string; value: React.ReactNode }) => (
     <p className="font-semibold text-gray-900">{value || 'N/A'}</p>
   </div>
 );
+
+const formatAddress = (address: EmployeeAddress | string) => {
+  if (typeof address === 'string') return address;
+  return [
+    address.addressLine1,
+    address.addressLine2,
+    address.city,
+    address.stateName,
+    address.countryName,
+    address.pincode,
+  ].filter(Boolean).join(', ');
+};
 
 export const StaffEmployeeViewPage: React.FC = () => {
   const navigate = useNavigate();
@@ -48,7 +61,7 @@ export const StaffEmployeeViewPage: React.FC = () => {
             <Field label="Date of Birth" value={formatDate(data.dob)} />
             <Field label="Mobile" value={data.mobile} />
             <Field label="Email" value={data.email} />
-            <Field label="Address" value={data.address} />
+            <Field label="Address" value={data.address ? formatAddress(data.address) : ''} />
           </div>
         </section>
 

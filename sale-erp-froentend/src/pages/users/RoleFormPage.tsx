@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { rolesApi } from '../../api/endpoints';
 import type { RoleRequest } from '../../api/endpoints';
@@ -17,7 +17,13 @@ const inputClass = 'h-10 w-full rounded border border-gray-300 bg-white px-3 tex
 export const RoleFormPage: React.FC<Props> = ({ mode }) => {
   const navigate = useNavigate();
   const id = Number(useParams<{ id: string }>().id);
-  const [form, setForm] = useState<RoleRequest>({ name: '', status: 'ACTIVE' });
+  const [searchParams] = useSearchParams();
+  const organizationId = Number(searchParams.get('organizationId')) || undefined;
+  const requestedReturnTo = searchParams.get('returnTo');
+  const returnTo = requestedReturnTo?.startsWith('/') && !requestedReturnTo.startsWith('//')
+    ? requestedReturnTo
+    : '/users/roles';
+  const [form, setForm] = useState<RoleRequest>({ name: '', status: 'ACTIVE', organizationId });
 
   const role = useQuery({
     queryKey: ['roles', id],
@@ -37,7 +43,7 @@ export const RoleFormPage: React.FC<Props> = ({ mode }) => {
     onSuccess: () => {
       toast.success(`Role ${mode === 'edit' ? 'updated' : 'created'} successfully`);
       queryClient.invalidateQueries({ queryKey: ['roles'] });
-      navigate('/users/roles');
+      navigate(returnTo);
     },
     onError: (error: any) => toast.error(error?.message || `Failed to ${mode} role`),
   });
@@ -78,7 +84,7 @@ export const RoleFormPage: React.FC<Props> = ({ mode }) => {
 
             <div className="flex gap-3 border-t p-5">
               <Button type="button" isLoading={mutation.isPending} onClick={submit}>Submit</Button>
-              <Button type="button" variant="secondary" onClick={() => navigate('/users/roles')}>Close</Button>
+              <Button type="button" variant="secondary" onClick={() => navigate(returnTo)}>Close</Button>
             </div>
           </>
         )}

@@ -2,8 +2,10 @@ package com.nexoraa.billtop.security;
 
 import com.nexoraa.billtop.constants.ErrorMessage;
 import com.nexoraa.billtop.entity.RolePermissionMapping;
+import com.nexoraa.billtop.entity.UserPermissionMapping;
 import com.nexoraa.billtop.entity.User;
 import com.nexoraa.billtop.repository.RolePermissionMappingRepository;
+import com.nexoraa.billtop.repository.UserPermissionMappingRepository;
 import com.nexoraa.billtop.repository.UserRepository;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
@@ -18,13 +20,16 @@ public class CustomUserDetailsService implements UserDetailsService {
 
     private final UserRepository userRepository;
     private final RolePermissionMappingRepository rolePermissionMappingRepository;
+    private final UserPermissionMappingRepository userPermissionMappingRepository;
 
     public CustomUserDetailsService(
             UserRepository userRepository,
-            RolePermissionMappingRepository rolePermissionMappingRepository
+            RolePermissionMappingRepository rolePermissionMappingRepository,
+            UserPermissionMappingRepository userPermissionMappingRepository
     ) {
         this.userRepository = userRepository;
         this.rolePermissionMappingRepository = rolePermissionMappingRepository;
+        this.userPermissionMappingRepository = userPermissionMappingRepository;
     }
 
     @Override
@@ -33,12 +38,25 @@ public class CustomUserDetailsService implements UserDetailsService {
         User user = userRepository.findByUserName(username)
                 .orElseThrow(() -> new UsernameNotFoundException(ErrorMessage.USER_NOT_FOUND));
 
-        List<String> permissions = rolePermissionMappingRepository
+        List<String> rolePermissions = rolePermissionMappingRepository
                 .findActivePermissionsByRoleId(user.getRole().getId())
                 .stream()
                 .map(RolePermissionMapping::getPermission)
                 .filter(permission -> com.nexoraa.billtop.enums.Status.ACTIVE.equals(permission.getStatus()))
                 .map(permission -> permission.getName())
+                .distinct()
+                .sorted()
+                .toList();
+
+        List<String> userPermissions = userPermissionMappingRepository
+                .findActivePermissionsByUserId(user.getId())
+                .stream()
+                .map(UserPermissionMapping::getPermission)
+                .filter(permission -> com.nexoraa.billtop.enums.Status.ACTIVE.equals(permission.getStatus()))
+                .map(permission -> permission.getName())
+                .toList();
+
+        List<String> permissions = java.util.stream.Stream.concat(rolePermissions.stream(), userPermissions.stream())
                 .distinct()
                 .sorted()
                 .toList();

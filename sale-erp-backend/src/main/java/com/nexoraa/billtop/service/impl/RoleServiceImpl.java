@@ -8,6 +8,7 @@ import com.nexoraa.billtop.enums.Status;
 import com.nexoraa.billtop.exception.BadRequestException;
 import com.nexoraa.billtop.exception.ResourceNotFoundException;
 import com.nexoraa.billtop.mapper.RoleMapper;
+import com.nexoraa.billtop.repository.OrganizationRepository;
 import com.nexoraa.billtop.repository.RoleRepository;
 import com.nexoraa.billtop.security.CurrentOrganizationService;
 import com.nexoraa.billtop.service.RoleService;
@@ -25,21 +26,30 @@ public class RoleServiceImpl implements RoleService {
     private final RoleRepository roleRepository;
     private final RoleMapper roleMapper;
     private final CurrentOrganizationService currentOrganizationService;
+    private final OrganizationRepository organizationRepository;
 
     public RoleServiceImpl(
             RoleRepository roleRepository,
             RoleMapper roleMapper,
-            CurrentOrganizationService currentOrganizationService
+            CurrentOrganizationService currentOrganizationService,
+            OrganizationRepository organizationRepository
     ) {
         this.roleRepository = roleRepository;
         this.roleMapper = roleMapper;
         this.currentOrganizationService = currentOrganizationService;
+        this.organizationRepository = organizationRepository;
     }
 
     @Override
     @Transactional
     public void createRole(RoleRequestDto request) {
         Long organizationId = currentOrganizationService.getOrganizationId();
+        
+        var organization = organizationRepository.findByIdAndStatusAndIsDeletedFalse(organizationId, Status.ACTIVE)
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        ErrorMessage.ORGANIZATION_NOT_FOUND,
+                        "ORGANIZATION_NOT_FOUND"
+                ));
         if (roleRepository.existsByNameIgnoreCaseAndOrganizationIdAndStatusAndIsDeletedFalse(
                 request.getName(),
                 organizationId,
@@ -48,7 +58,7 @@ public class RoleServiceImpl implements RoleService {
             throw new BadRequestException(ErrorMessage.ROLE_ALREADY_EXISTS, "ROLE_ALREADY_EXISTS");
         }
         Role role = roleMapper.toEntity(request);
-        role.setOrganization(currentOrganizationService.getOrganizationReference());
+        role.setOrganization(organization);
         roleRepository.save(role);
     }
 
@@ -56,6 +66,24 @@ public class RoleServiceImpl implements RoleService {
     @Transactional(readOnly = true)
     public List<RoleResponseDto> getRoles(String search) {
         return roleRepository.findAll(roleSearchSpecification(search), Sort.by(Sort.Direction.ASC, "name"))
+                .stream()
+                .map(roleMapper::toResponse)
+                .toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<RoleResponseDto> getRolesByOrganizationId(Long organizationId) {
+        organizationRepository.findByIdAndStatusAndIsDeletedFalse(organizationId, Status.ACTIVE)
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        ErrorMessage.ORGANIZATION_NOT_FOUND,
+                        "ORGANIZATION_NOT_FOUND"
+                ));
+
+        return roleRepository.findAllByOrganizationIdAndStatusAndIsDeletedFalseOrderByNameAsc(
+                        organizationId,
+                        Status.ACTIVE
+                )
                 .stream()
                 .map(roleMapper::toResponse)
                 .toList();

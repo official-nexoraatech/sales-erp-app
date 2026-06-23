@@ -4,6 +4,21 @@ export type AttendanceStatus = 'PRESENT' | 'ABSENT' | 'HALF_DAY' | 'LATE' | 'LEA
 export type LeaveStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED';
 export type PayrollStatus = 'DRAFT' | 'GENERATED' | 'PAID';
 
+export interface EmployeeAddressRequest {
+  addressLine1: string;
+  addressLine2?: string;
+  city: string;
+  stateId: number;
+  countryId: number;
+  pincode: string;
+}
+
+export interface EmployeeAddress extends EmployeeAddressRequest {
+  id?: number;
+  stateName?: string;
+  countryName?: string;
+}
+
 export interface Employee {
   id: number;
   employeeCode: string;
@@ -13,7 +28,7 @@ export interface Employee {
   dob: string;
   mobile: string;
   email: string;
-  address: string;
+  address?: EmployeeAddress | string;
   department: string;
   designation: string;
   joiningDate: string;
@@ -31,7 +46,9 @@ export interface Employee {
   status: EmployeeStatus;
 }
 
-export type EmployeeRequest = Omit<Employee, 'id'>;
+export type EmployeeRequest = Omit<Employee, 'id' | 'address'> & {
+  address?: EmployeeAddressRequest;
+};
 
 export interface Attendance {
   id: number;

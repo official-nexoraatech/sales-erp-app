@@ -54,7 +54,7 @@ export const PurchaseReturnCreatePage: React.FC = () => {
   const grandTotal = roundOff ? Math.round(total) : total;
   const submit = () => {
     if (!purchaseId || !supplierId || !lines.length || lines.some((line) => line.quantity <= 0)) {
-      alert('Select purchase, supplier, and at least one valid item.');
+      toast.error('Select purchase, supplier, and at least one valid item.');
       return;
     }
     mutation.mutate({ purchaseId, supplierId, returnDate, reason, items: lines.map(({ itemId, batchId, quantity, rate }) => ({ itemId, batchId, quantity, rate })) });

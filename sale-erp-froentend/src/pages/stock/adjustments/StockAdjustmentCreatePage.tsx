@@ -34,7 +34,7 @@ export const StockAdjustmentCreatePage: React.FC = () => {
     setLines((current) => current.some((line) => line.itemId === item.id) ? current : [...current, { itemId: item.id, itemName: item.itemName, currentQty: item.availableQty, actualQty: item.availableQty, unitName: item.unitName || 'None' }]);
   };
   const submit = () => {
-    if (!warehouseId || !lines.length) return alert('Select warehouse and at least one item.');
+    if (!warehouseId || !lines.length) return toast.error('Select warehouse and at least one item.');
     mutation.mutate({ warehouseId, adjustmentDate, reason, items: lines.map(({ itemId, currentQty, actualQty }) => ({ itemId, currentQty, actualQty })) });
   };
 

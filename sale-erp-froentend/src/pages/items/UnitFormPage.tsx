@@ -32,8 +32,8 @@ export const UnitFormPage: React.FC<Props> = ({ mode }) => {
 
   const set = (field: keyof UnitRequest, value: string) => setForm((current) => ({ ...current, [field]: value }));
   const submit = () => {
-    if (!form.name.trim()) return alert('Unit name is required.');
-    if (!form.shortName.trim()) return alert('Short name is required.');
+    if (!form.name.trim()) return toast.error('Unit name is required.');
+    if (!form.shortName.trim()) return toast.error('Short name is required.');
     mutation.mutate();
   };
 

@@ -230,7 +230,7 @@ public class ItemServiceImpl implements ItemService {
 
         item.setBrand(getActiveBrand(request.getBrandId(), category.getId()));
         item.setBaseUnit(getActiveUnit(request.getBaseUnitId()));
-        item.setSecondaryUnit(getActiveUnit(request.getSecondaryUnitId()));
+
     }
 
     private ItemPrice buildPrice(Item item, ItemRequestDto request, ItemPrice price) {

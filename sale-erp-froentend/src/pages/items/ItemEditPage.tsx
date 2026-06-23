@@ -4,6 +4,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { itemApi } from '../../api/endpoints';
 import { Loader } from '../../components/ui/Loader';
+import { getValidationErrors, hasValidationErrors } from '../../utils/apiValidation';
 import { ItemForm } from './ItemForm';
 
 export const ItemEditPage: React.FC = () => {
@@ -16,8 +17,10 @@ export const ItemEditPage: React.FC = () => {
       toast.success('Item updated successfully');
       navigate('/items');
     },
-    onError: (error: any) => toast.error(error?.message || 'Failed to update item'),
+    onError: (error: any) => {
+      if (!hasValidationErrors(error)) toast.error(error?.message || 'Failed to update item');
+    },
   });
   if (item.isLoading) return <Loader />;
-  return <div className="space-y-5"><div className="text-sm text-gray-500">Home &gt; Items &gt; Item List &gt; Edit Item</div><ItemForm initial={item.data?.data} submitText="Update" loading={mutation.isPending} onSubmit={(payload) => mutation.mutate(payload)} onCancel={() => navigate('/items')} /></div>;
+  return <div className="space-y-5"><div className="text-sm text-gray-500">Home &gt; Items &gt; Item List &gt; Edit Item</div><ItemForm initial={item.data?.data} submitText="Update" loading={mutation.isPending} validationErrors={getValidationErrors(mutation.error)} onFieldChange={mutation.reset} onSubmit={(payload) => mutation.mutate(payload)} onCancel={() => navigate('/items')} /></div>;
 };

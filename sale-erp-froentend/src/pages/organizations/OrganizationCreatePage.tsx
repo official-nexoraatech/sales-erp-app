@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { organizationApi } from '../../api/endpoints';
 import type { OrganizationAddress, UpdateOrganizationRequest } from '../../api/endpoints';
@@ -16,6 +16,11 @@ const createEmptyForm = (): UpdateOrganizationRequest => ({
 
 export const OrganizationCreatePage: React.FC = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const requestedReturnTo = searchParams.get('returnTo');
+  const returnTo = requestedReturnTo?.startsWith('/') && !requestedReturnTo.startsWith('//')
+    ? requestedReturnTo
+    : '/organizations';
   const [form, setForm] = useState<UpdateOrganizationRequest>(createEmptyForm);
 
   const mutation = useMutation({
@@ -23,7 +28,7 @@ export const OrganizationCreatePage: React.FC = () => {
     onSuccess: async () => {
       toast.success('Organization created successfully');
       await queryClient.invalidateQueries({ queryKey: ['organizations'] });
-      navigate('/organizations');
+      navigate(returnTo);
     },
     onError: (error: any) => toast.error(error?.message || 'Failed to create organization'),
   });
@@ -52,7 +57,7 @@ export const OrganizationCreatePage: React.FC = () => {
         <OrganizationForm form={form} onChange={set} onAddressChange={setAddress} />
         <div className="flex gap-3 border-t p-5">
           <Button onClick={submit} isLoading={mutation.isPending}>Submit</Button>
-          <Button variant="secondary" onClick={() => navigate('/organizations')}>Close</Button>
+          <Button variant="secondary" onClick={() => navigate(returnTo)}>Close</Button>
         </div>
       </div>
     </div>

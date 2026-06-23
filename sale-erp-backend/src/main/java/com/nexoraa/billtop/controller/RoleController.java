@@ -45,6 +45,16 @@ public class RoleController {
         return ResponseEntity.ok(ApiResponseDto.success(ResponseMessage.ROLES_RETRIEVED, roleService.getRoles(search)));
     }
 
+    @GetMapping("/organization/{organizationId}")
+    public ResponseEntity<ApiResponseDto<List<RoleResponseDto>>> getRolesByOrganizationId(
+            @PathVariable @Positive Long organizationId
+    ) {
+        return ResponseEntity.ok(ApiResponseDto.success(
+                ResponseMessage.ROLES_RETRIEVED,
+                roleService.getRolesByOrganizationId(organizationId)
+        ));
+    }
+
     @GetMapping("/{id}")
     public ResponseEntity<ApiResponseDto<RoleResponseDto>> getRoleById(@PathVariable @Positive Long id) {
         return ResponseEntity.ok(ApiResponseDto.success(ResponseMessage.ROLE_RETRIEVED, roleService.getRoleById(id)));

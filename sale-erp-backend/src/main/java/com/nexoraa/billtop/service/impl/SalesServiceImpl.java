@@ -14,6 +14,7 @@ import com.nexoraa.billtop.entity.Item;
 import com.nexoraa.billtop.entity.ItemBatch;
 import com.nexoraa.billtop.entity.Sale;
 import com.nexoraa.billtop.entity.SalesItem;
+import com.nexoraa.billtop.entity.Stock;
 import com.nexoraa.billtop.entity.Warehouse;
 import com.nexoraa.billtop.exception.BadRequestException;
 import com.nexoraa.billtop.exception.ResourceNotFoundException;
@@ -144,7 +145,7 @@ public class SalesServiceImpl implements SalesService {
 
         for (SalesItemRequestDto itemRequest : request.getItems()) {
             Item item = support.getActiveItem(itemRequest.getItemId());
-            ItemBatch batch = support.getBatchForItem(itemRequest.getBatchId(), item.getId());
+            ItemBatch batch = getAvailableBatch(item, warehouse, itemRequest.getQuantity());
             TransactionSupport.LineTotals lineTotals = support.calculateLine(
                     itemRequest.getQuantity(),
                     itemRequest.getUnitPrice(),
@@ -175,6 +176,19 @@ public class SalesServiceImpl implements SalesService {
         sale.setStatus(TransactionSupport.STATUS_ACTIVE);
         sale.setNotes(request.getNotes());
         return new PreparedSale(sale, items);
+    }
+
+    private ItemBatch getAvailableBatch(Item item, Warehouse warehouse, BigDecimal requiredQuantity) {
+        return support.getStocksForItemAndWarehouse(item.getId(), warehouse.getId())
+                .stream()
+                .filter(stock -> stock.getBatch() != null)
+                .filter(stock -> support.defaultZero(stock.getAvailableQty()).compareTo(requiredQuantity) >= 0)
+                .map(Stock::getBatch)
+                .findFirst()
+                .orElseThrow(() -> new BadRequestException(
+                        ErrorMessage.INSUFFICIENT_STOCK,
+                        "INSUFFICIENT_STOCK"
+                ));
     }
 
     private void saveItemsAndDecreaseStock(Sale sale, List<PreparedSalesItem> items, String transactionType) {

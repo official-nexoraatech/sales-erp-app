@@ -30,6 +30,9 @@ public class Permission extends BaseEntity {
     @Column(length = 500)
     private String description;
 
+    @Column(length = 500)
+    private String endpoint;
+
     @Builder.Default
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)

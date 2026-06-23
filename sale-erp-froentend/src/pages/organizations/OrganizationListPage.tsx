@@ -20,9 +20,15 @@ import {
   getUploadedOrganizationLogoUrl,
   toUpdateOrganizationRequest,
 } from './organization.utils';
+import { useAuth } from '../../hooks/useAuth';
+import { PERMISSIONS } from '../../auth/permissions';
 
 export const OrganizationListPage: React.FC = () => {
   const navigate = useNavigate();
+  const { hasPermission } = useAuth();
+  const canCreate = hasPermission(PERMISSIONS.ORGANIZATION_CREATE);
+  const canUpdate = hasPermission(PERMISSIONS.ORGANIZATION_UPDATE);
+  const canDelete = hasPermission(PERMISSIONS.ORGANIZATION_DELETE);
   const { page, setPage, handlePageChange } = usePagination();
   const [search, setSearch] = useState('');
   const [deleteId, setDeleteId] = useState<number | null>(null);
@@ -99,33 +105,37 @@ export const OrganizationListPage: React.FC = () => {
         const id = getOrganizationId(record);
         return (
           <div className="flex gap-2">
-            <input
-              ref={(element) => {
-                logoInputRefs.current[id] = element;
-              }}
-              type="file"
-              accept="image/*"
-              className="hidden"
-              onChange={(event) => {
-                uploadLogo(record, event.target.files?.[0]);
-                event.currentTarget.value = '';
-              }}
-            />
-            <button
-              type="button"
-              aria-label="Upload organization logo"
-              disabled={logoMutation.isPending}
-              onClick={() => logoInputRefs.current[id]?.click()}
-              className="rounded p-1 text-blue-600 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <Upload size={18} />
-            </button>
-            <button type="button" aria-label="Edit organization" onClick={() => navigate(`/organizations/${id}/edit`, { state: record })} className="rounded p-1 text-orange-600 hover:bg-orange-50">
-              <Edit size={18} />
-            </button>
-            <button type="button" aria-label="Delete organization" onClick={() => setDeleteId(id)} className="rounded p-1 text-red-600 hover:bg-red-50">
+            {canUpdate && (
+              <>
+                <input
+                  ref={(element) => {
+                    logoInputRefs.current[id] = element;
+                  }}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(event) => {
+                    uploadLogo(record, event.target.files?.[0]);
+                    event.currentTarget.value = '';
+                  }}
+                />
+                <button
+                  type="button"
+                  aria-label="Upload organization logo"
+                  disabled={logoMutation.isPending}
+                  onClick={() => logoInputRefs.current[id]?.click()}
+                  className="rounded p-1 text-blue-600 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <Upload size={18} />
+                </button>
+                <button type="button" aria-label="Edit organization" onClick={() => navigate(`/organizations/${id}/edit`, { state: record })} className="rounded p-1 text-orange-600 hover:bg-orange-50">
+                  <Edit size={18} />
+                </button>
+              </>
+            )}
+            {canDelete && <button type="button" aria-label="Delete organization" onClick={() => setDeleteId(id)} className="rounded p-1 text-red-600 hover:bg-red-50">
               <Trash2 size={18} />
-            </button>
+            </button>}
           </div>
         );
       },
@@ -137,7 +147,7 @@ export const OrganizationListPage: React.FC = () => {
     <div className="space-y-6">
       <PageHeader
         title="Organization"
-        actions={<Button onClick={() => navigate('/organizations/create')} className="flex items-center gap-2"><Plus size={18} />New Organization</Button>}
+        actions={canCreate ? <Button onClick={() => navigate('/organizations/create')} className="flex items-center gap-2"><Plus size={18} />New Organization</Button> : undefined}
       />
 
       <DataTable

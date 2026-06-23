@@ -81,13 +81,20 @@ public class BrandServiceImpl implements BrandService {
         Long organizationId = currentOrganizationService.getOrganizationId();
         getActiveCategory(categoryId, organizationId);
 
-        return brandRepository.findAllByCategory_IdAndStatusAndIsDeletedFalseOrderByNameAsc(
+        List<BrandResponseDto> brands = brandRepository.findAllByCategory_IdAndStatusAndIsDeletedFalseOrderByNameAsc(
                         categoryId,
                         com.nexoraa.billtop.enums.Status.ACTIVE
                 )
                 .stream()
                 .map(brandMapper::toResponse)
                 .toList();
+        if (brands.isEmpty()) {
+            throw new ResourceNotFoundException(
+                    ErrorMessage.BRAND_NOT_FOUND_FOR_CATEGORY,
+                    "BRAND_NOT_FOUND_FOR_CATEGORY"
+            );
+        }
+        return brands;
     }
 
     @Override

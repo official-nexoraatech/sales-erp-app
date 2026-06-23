@@ -1,7 +1,18 @@
 import { useAuthStore } from '../store/authStore';
 
 export const useAuth = () => {
-  const { token, user, expiresAt, isAuthenticated, login, logout, isSessionValid, hasPermission } =
+  const {
+    token,
+    user,
+    expiresAt,
+    isAuthenticated,
+    login,
+    logout,
+    isSessionValid,
+    hasPermission,
+    hasAnyPermission,
+    hasAllPermissions,
+  } =
     useAuthStore();
 
   return {
@@ -13,5 +24,7 @@ export const useAuth = () => {
     logout,
     isSessionValid,
     hasPermission,
+    hasAnyPermission,
+    hasAllPermissions,
   };
 };

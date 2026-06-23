@@ -228,6 +228,7 @@ export interface Role {
 export interface RoleRequest {
   name: string;
   status: 'ACTIVE' | 'INACTIVE';
+  organizationId?: number;
 }
 
 export interface PosBillingRequest {
@@ -253,6 +254,45 @@ export interface SimpleMasterRequest {
   categoryId?: number;
 }
 
+export type ExpenseMasterStatus = 'ACTIVE' | 'INACTIVE';
+
+export interface ExpenseCategory {
+  id: number;
+  organizationId?: number;
+  name: string;
+  description?: string;
+  status: ExpenseMasterStatus;
+}
+
+export interface ExpenseCategoryRequest {
+  name: string;
+  description: string;
+  status: ExpenseMasterStatus;
+}
+
+export interface ExpenseSubCategory {
+  id: number;
+  expenseCategoryId: number;
+  expenseCategoryName?: string;
+  name: string;
+  description?: string;
+  status: ExpenseMasterStatus;
+}
+
+export interface ExpenseSubCategoryRequest extends ExpenseCategoryRequest {
+  expenseCategoryId: number;
+}
+
+export interface PaymentMethod {
+  id: number;
+  organizationId?: number;
+  name: string;
+  description?: string;
+  status: ExpenseMasterStatus;
+}
+
+export type PaymentMethodRequest = ExpenseCategoryRequest;
+
 export interface Unit {
   id: number;
   name: string;
@@ -274,6 +314,7 @@ export interface SaleListItem {
   grandTotal: number;
   paidAmount: number;
   dueAmount: number;
+  status?: string;
 }
 
 export interface SaleRequest {
@@ -283,7 +324,7 @@ export interface SaleRequest {
   stateId: number;
   salesPersonId: number;
   notes: string;
-  items: Array<{ itemId: number; batchId: number; quantity: number; unitPrice: number; discountPercent: number; taxPercent: number }>;
+  items: Array<{ itemId: number; quantity: number; unitPrice: number; discountPercent: number; taxPercent: number }>;
 }
 
 export interface SaleDetail {
@@ -553,4 +594,108 @@ export interface CashSummary {
   cashInHand?: number;
   totalCashIn?: number;
   totalCashOut?: number;
+}
+
+export interface DashboardTrendPoint {
+  period?: string;
+  label?: string;
+  month?: string;
+  sales?: number;
+  purchases?: number;
+  saleAmount?: number;
+  purchaseAmount?: number;
+}
+
+export interface DashboardTrendingItem {
+  itemId: number;
+  itemName: string;
+  quantity: number;
+  totalAmount: number;
+  percentage?: number;
+}
+
+export interface DashboardRecentInvoice {
+  saleId: number;
+  invoiceDate: string;
+  saleCode: string;
+  customerName: string;
+  grandTotal: number;
+  balance: number;
+  status: string;
+}
+
+export interface DashboardLowStockItem {
+  itemId: number;
+  itemName: string;
+  brand?: string;
+  category?: string;
+  minimumStock: number;
+  currentStock: number;
+  unit?: string;
+}
+
+export interface DashboardSummary {
+  todaySales?: number;
+  todayPurchase?: number;
+  todayExpense?: number;
+  todayCollection?: number;
+  cashInHand?: number;
+  bankBalance?: number;
+  stockValue?: number;
+  totalCustomers?: number;
+  totalSuppliers?: number;
+  lowStockItems?: number | DashboardLowStockItem[];
+  pendingSaleOrders?: number;
+  completedSaleOrders?: number;
+  paymentReceivables?: number;
+  paymentPayables?: number;
+  pendingPurchaseOrders?: number;
+  completedPurchaseOrders?: number;
+  totalExpense?: number;
+  saleVsPurchase?: DashboardTrendPoint[];
+  trendingItems?: DashboardTrendingItem[];
+  recentInvoices?: DashboardRecentInvoice[];
+  lowStockDetails?: DashboardLowStockItem[];
+  generatedAt?: string;
+}
+
+export interface StockReportItem {
+  itemId: number;
+  itemName: string;
+  warehouseId?: number;
+  warehouseName?: string;
+  batchId?: number;
+  batchNo?: string;
+  availableQty: number;
+  reorderLevel: number;
+  stockValue?: number;
+  brandName?: string;
+  categoryName?: string;
+  unitName?: string;
+}
+
+export interface TopSellingItem {
+  itemId: number;
+  itemName: string;
+  quantity: number;
+  totalAmount: number;
+}
+
+export interface PermissionSummary {
+  id: number;
+  name: string;
+  description: string;
+}
+
+export interface AssignedPermission extends PermissionSummary {
+  groupName: string;
+  endpoint?: string;
+  status?: string;
+}
+
+export type PermissionGroups = Record<string, PermissionSummary[]>;
+
+export interface AssignUserPermissionsRequest {
+  userId: number;
+  permissionIds: number[];
 }

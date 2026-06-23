@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { CirclePlus, Trash2, X } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
+import toast from 'react-hot-toast';
 import { customerApi, itemApi, warehouseApi } from '../../../api/endpoints';
 import type { SaleRequest } from '../../../api/endpoints';
 import { CountryStateSelect } from '../../../components/form/CountryStateSelect';
@@ -81,7 +82,7 @@ export const SaleOrderForm: React.FC<Props> = ({ initial, submitText, loading, o
 
   const submit = () => {
     if (!customerId || !warehouseId || !lines.length || lines.some((line) => line.quantity <= 0)) {
-      alert('Select customer, warehouse, and at least one valid item.');
+      toast.error('Select customer, warehouse, and at least one valid item.');
       return;
     }
     onSubmit({

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { Edit, MoreVertical, Trash2 } from 'lucide-react';
+import { Edit, MoreVertical, ShieldCheck, Trash2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { usersApi } from '../../api/endpoints';
@@ -11,11 +11,16 @@ import { Loader } from '../../components/ui/Loader';
 import { Pagination } from '../../components/ui/Pagination';
 import { useDebounce } from '../../hooks/useDebounce';
 import { formatDate } from '../../utils/formatDate';
+import { useAuth } from '../../hooks/useAuth';
+import { PERMISSIONS } from '../../auth/permissions';
 
 const columns = ['Username', 'First Name', 'Last Name', 'Email', 'Mobile', 'Role', 'Status', 'Created at', 'Action'];
 
 export const UserListPage: React.FC = () => {
   const navigate = useNavigate();
+  const { hasPermission } = useAuth();
+  const canCreate = hasPermission(PERMISSIONS.ORGANIZATION_VIEW) && hasPermission(PERMISSIONS.ROLE_MANAGE);
+  const canEdit = hasPermission(PERMISSIONS.ROLE_MANAGE);
   const [pageSize, setPageSize] = useState(10);
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(0);
@@ -54,7 +59,7 @@ export const UserListPage: React.FC = () => {
       <div className="overflow-hidden rounded-lg bg-white shadow">
         <div className="flex items-center justify-between border-b px-5 py-4">
           <h1 className="text-xl font-semibold uppercase text-gray-900">Users List</h1>
-          <Button onClick={() => navigate('/users/create')} className="min-w-[170px]">Create User</Button>
+          {canCreate && <Button onClick={() => navigate('/users/create')} className="min-w-[170px]">Create User</Button>}
         </div>
 
         <div className="flex flex-wrap items-center justify-between gap-3 p-5">
@@ -103,7 +108,7 @@ export const UserListPage: React.FC = () => {
                   <td className="border p-3">{row.roleName || ''}</td>
                   <td className="border p-3"><span className={`rounded-full px-3 py-1 text-xs font-semibold ${isActive ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>{isActive ? 'ACTIVE' : 'INACTIVE'}</span></td>
                   <td className="border p-3">{row.createdAt ? formatDate(row.createdAt) : ''}</td>
-                  <td className="border p-3"><div className="flex gap-2"><button type="button" onClick={() => navigate(`/users/${row.id}/edit`, { state: row })} className="text-orange-600"><Edit size={16} /></button><button type="button" onClick={() => confirm('Delete this user?') && remove.mutate(row.id)} className="text-red-600"><Trash2 size={16} /></button><MoreVertical size={16} /></div></td>
+                  <td className="border p-3"><div className="flex gap-2">{canEdit && <button type="button" title="Edit user" onClick={() => navigate(`/users/${row.id}/edit`, { state: row })} className="text-orange-600"><Edit size={16} /></button>}<button type="button" title="Assign permissions" onClick={() => navigate(`/users/permissions?userId=${row.id}`)} className="text-blue-600"><ShieldCheck size={16} /></button><button type="button" title="Delete user" onClick={() => confirm('Delete this user?') && remove.mutate(row.id)} className="text-red-600"><Trash2 size={16} /></button><MoreVertical size={16} /></div></td>
                 </tr>
                 );
               }) : (
