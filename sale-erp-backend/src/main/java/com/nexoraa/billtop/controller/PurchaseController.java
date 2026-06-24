@@ -3,6 +3,7 @@ package com.nexoraa.billtop.controller;
 import com.nexoraa.billtop.constants.ResponseMessage;
 import com.nexoraa.billtop.dto.ApiResponseDto;
 import com.nexoraa.billtop.dto.PageResponseDto;
+import com.nexoraa.billtop.dto.purchase.PurchaseCreateResponseDto;
 import com.nexoraa.billtop.dto.purchase.PurchaseDetailResponseDto;
 import com.nexoraa.billtop.dto.purchase.PurchaseListResponseDto;
 import com.nexoraa.billtop.dto.purchase.PurchaseRequestDto;
@@ -36,11 +37,13 @@ public class PurchaseController {
     }
 
     @PostMapping
-    public ResponseEntity<ApiResponseDto<Void>> createPurchase(
+    public ResponseEntity<ApiResponseDto<PurchaseCreateResponseDto>> createPurchase(
             @Valid @RequestBody PurchaseRequestDto request
     ) {
-        purchaseService.createPurchase(request);
-        return ResponseEntity.ok(ApiResponseDto.success(ResponseMessage.PURCHASE_CREATED));
+        return ResponseEntity.ok(ApiResponseDto.success(
+                ResponseMessage.PURCHASE_CREATED,
+                purchaseService.createPurchase(request)
+        ));
     }
 
     @GetMapping

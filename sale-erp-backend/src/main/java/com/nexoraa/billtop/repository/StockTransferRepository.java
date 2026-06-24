@@ -14,7 +14,7 @@ public interface StockTransferRepository extends JpaRepository<StockTransfer, Lo
             Long organizationId
     );
 
-    Page<StockTransfer> findByOrganizationId(Long organizationId, Pageable pageable);
+    Page<StockTransfer> findByOrganizationIdAndIsDeletedFalse(Long organizationId, Pageable pageable);
 
-    Optional<StockTransfer> findByIdAndOrganizationId(Long id, Long organizationId);
+    Optional<StockTransfer> findByIdAndOrganizationIdAndIsDeletedFalse(Long id, Long organizationId);
 }

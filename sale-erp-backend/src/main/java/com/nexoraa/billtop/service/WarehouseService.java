@@ -12,6 +12,8 @@ public interface WarehouseService {
 
     List<WarehouseResponseDto> getWarehouses(String search);
 
+    WarehouseResponseDto getWarehouseById(Long id);
+
     void updateWarehouse(Long id, WarehouseRequestDto request);
 
     void deleteWarehouse(Long id);

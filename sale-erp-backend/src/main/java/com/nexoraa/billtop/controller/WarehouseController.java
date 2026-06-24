@@ -50,6 +50,16 @@ public class WarehouseController {
         ));
     }
 
+    @GetMapping("/{id}")
+    public ResponseEntity<ApiResponseDto<WarehouseResponseDto>> getWarehouseById(
+            @PathVariable @Positive Long id
+    ) {
+        return ResponseEntity.ok(ApiResponseDto.success(
+                ResponseMessage.WAREHOUSE_RETRIEVED,
+                warehouseService.getWarehouseById(id)
+        ));
+    }
+
     @PutMapping("/{id}")
     public ResponseEntity<ApiResponseDto<Void>> updateWarehouse(
             @PathVariable @Positive Long id,

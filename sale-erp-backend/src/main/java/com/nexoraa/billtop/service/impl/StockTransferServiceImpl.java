@@ -35,6 +35,8 @@ public class StockTransferServiceImpl implements StockTransferService {
     private static final String PREFIX = "TRF-";
     private static final String TX_TRANSFER_OUT = "STOCK_TRANSFER_OUT";
     private static final String TX_TRANSFER_IN = "STOCK_TRANSFER_IN";
+    private static final String TX_TRANSFER_REVERSE_OUT = "STOCK_TRANSFER_REVERSE_OUT";
+    private static final String TX_TRANSFER_REVERSE_IN = "STOCK_TRANSFER_REVERSE_IN";
 
     private final StockTransferRepository stockTransferRepository;
     private final StockTransferItemRepository stockTransferItemRepository;
@@ -85,9 +87,46 @@ public class StockTransferServiceImpl implements StockTransferService {
     }
 
     @Override
+    @Transactional
+    public void updateTransfer(Long id, StockTransferRequestDto request) {
+        StockTransfer transfer = getTransfer(id);
+        reverseTransfer(transfer, TX_TRANSFER_REVERSE_IN, TX_TRANSFER_REVERSE_OUT);
+        stockTransferItemRepository.findByStockTransferIdAndIsDeletedFalse(transfer.getId())
+                .forEach(item -> {
+                    item.setIsDeleted(true);
+                    stockTransferItemRepository.save(item);
+                });
+        if (request.getFromWarehouseId().equals(request.getToWarehouseId())) {
+            throw new BadRequestException("Source and destination warehouses must be different", "INVALID_STOCK_TRANSFER");
+        }
+        transfer.setFromWarehouse(support.getActiveWarehouse(request.getFromWarehouseId()));
+        transfer.setToWarehouse(support.getActiveWarehouse(request.getToWarehouseId()));
+        transfer.setTransferDate(request.getTransferDate());
+        transfer.setNotes(request.getNotes());
+        StockTransfer savedTransfer = stockTransferRepository.save(transfer);
+        for (StockTransferItemRequestDto itemRequest : request.getItems()) {
+            transferItem(savedTransfer, support.getActiveItem(itemRequest.getItemId()), itemRequest.getQuantity());
+        }
+    }
+
+    @Override
+    @Transactional
+    public void deleteTransfer(Long id) {
+        StockTransfer transfer = getTransfer(id);
+        reverseTransfer(transfer, TX_TRANSFER_REVERSE_IN, TX_TRANSFER_REVERSE_OUT);
+        stockTransferItemRepository.findByStockTransferIdAndIsDeletedFalse(transfer.getId())
+                .forEach(item -> {
+                    item.setIsDeleted(true);
+                    stockTransferItemRepository.save(item);
+                });
+        transfer.setIsDeleted(true);
+        stockTransferRepository.save(transfer);
+    }
+
+    @Override
     @Transactional(readOnly = true)
     public PageResponseDto<StockTransferResponseDto> getTransfers(int page, int size) {
-        Page<StockTransfer> transfers = stockTransferRepository.findByOrganizationId(
+        Page<StockTransfer> transfers = stockTransferRepository.findByOrganizationIdAndIsDeletedFalse(
                 currentOrganizationService.getOrganizationId(),
                 PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "id"))
         );
@@ -97,8 +136,7 @@ public class StockTransferServiceImpl implements StockTransferService {
     @Override
     @Transactional(readOnly = true)
     public StockTransferResponseDto getTransferById(Long id) {
-        return toResponse(stockTransferRepository.findByIdAndOrganizationId(id, currentOrganizationService.getOrganizationId())
-                .orElseThrow(() -> new ResourceNotFoundException("Stock transfer not found", "STOCK_TRANSFER_NOT_FOUND")));
+        return toResponse(getTransfer(id));
     }
 
     private void transferItem(StockTransfer transfer, Item item, BigDecimal quantity) {
@@ -158,6 +196,37 @@ public class StockTransferServiceImpl implements StockTransferService {
         return support.nextNumber(PREFIX, currentNumber);
     }
 
+    private StockTransfer getTransfer(Long id) {
+        return stockTransferRepository.findByIdAndOrganizationIdAndIsDeletedFalse(
+                        id,
+                        currentOrganizationService.getOrganizationId()
+                )
+                .orElseThrow(() -> new ResourceNotFoundException("Stock transfer not found", "STOCK_TRANSFER_NOT_FOUND"));
+    }
+
+    private void reverseTransfer(StockTransfer transfer, String reverseInType, String reverseOutType) {
+        for (StockTransferItem item : stockTransferItemRepository.findByStockTransferIdAndIsDeletedFalse(transfer.getId())) {
+            support.increaseStock(
+                    item.getItem(),
+                    transfer.getFromWarehouse(),
+                    item.getBatch(),
+                    item.getQty(),
+                    reverseInType,
+                    transfer.getId(),
+                    "Reverse stock transfer " + transfer.getTransferNo()
+            );
+            support.decreaseStock(
+                    item.getItem(),
+                    transfer.getToWarehouse(),
+                    item.getBatch(),
+                    item.getQty(),
+                    reverseOutType,
+                    transfer.getId(),
+                    "Reverse stock transfer " + transfer.getTransferNo()
+            );
+        }
+    }
+
     private StockTransferResponseDto toResponse(StockTransfer transfer) {
         return StockTransferResponseDto.builder()
                 .transferId(transfer.getId())
@@ -166,7 +235,7 @@ public class StockTransferServiceImpl implements StockTransferService {
                 .toWarehouse(support.toNameId(transfer.getToWarehouse()))
                 .transferDate(transfer.getTransferDate())
                 .notes(transfer.getNotes())
-                .items(stockTransferItemRepository.findByStockTransferId(transfer.getId()).stream()
+                .items(stockTransferItemRepository.findByStockTransferIdAndIsDeletedFalse(transfer.getId()).stream()
                         .map(this::toItemResponse)
                         .toList())
                 .build();

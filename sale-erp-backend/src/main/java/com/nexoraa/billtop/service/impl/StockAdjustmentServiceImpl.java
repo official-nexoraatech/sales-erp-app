@@ -37,6 +37,8 @@ public class StockAdjustmentServiceImpl implements StockAdjustmentService {
     private static final String PREFIX = "ADJ-";
     private static final String TX_ADJUSTMENT_IN = "STOCK_ADJUSTMENT_IN";
     private static final String TX_ADJUSTMENT_OUT = "STOCK_ADJUSTMENT_OUT";
+    private static final String TX_ADJUSTMENT_REVERSE_IN = "STOCK_ADJUSTMENT_REVERSE_IN";
+    private static final String TX_ADJUSTMENT_REVERSE_OUT = "STOCK_ADJUSTMENT_REVERSE_OUT";
 
     private final StockAdjustmentRepository stockAdjustmentRepository;
     private final StockAdjustmentItemRepository stockAdjustmentItemRepository;
@@ -74,6 +76,75 @@ public class StockAdjustmentServiceImpl implements StockAdjustmentService {
                 .reason(request.getReason())
                 .build());
 
+        applyAdjustmentItems(adjustment, request, organization, warehouse);
+
+        return StockAdjustmentCreateResponseDto.builder()
+                .adjustmentId(adjustment.getId())
+                .adjustmentNo(adjustment.getAdjustmentNo())
+                .build();
+    }
+
+    @Override
+    @Transactional
+    public void updateAdjustment(Long id, StockAdjustmentRequestDto request) {
+        Organization organization = currentOrganizationService.getOrganizationReference();
+        StockAdjustment adjustment = getAdjustment(id);
+        reverseAdjustment(adjustment);
+        stockAdjustmentItemRepository.findByStockAdjustmentIdAndOrganizationIdAndIsDeletedFalse(
+                        adjustment.getId(),
+                        currentOrganizationService.getOrganizationId()
+                )
+                .forEach(item -> {
+                    item.setIsDeleted(true);
+                    stockAdjustmentItemRepository.save(item);
+                });
+        Warehouse warehouse = support.getActiveWarehouse(request.getWarehouseId());
+        adjustment.setWarehouse(warehouse);
+        adjustment.setAdjustmentDate(request.getAdjustmentDate());
+        adjustment.setReason(request.getReason());
+        StockAdjustment savedAdjustment = stockAdjustmentRepository.save(adjustment);
+        applyAdjustmentItems(savedAdjustment, request, organization, warehouse);
+    }
+
+    @Override
+    @Transactional
+    public void deleteAdjustment(Long id) {
+        StockAdjustment adjustment = getAdjustment(id);
+        reverseAdjustment(adjustment);
+        stockAdjustmentItemRepository.findByStockAdjustmentIdAndOrganizationIdAndIsDeletedFalse(
+                        adjustment.getId(),
+                        currentOrganizationService.getOrganizationId()
+                )
+                .forEach(item -> {
+                    item.setIsDeleted(true);
+                    stockAdjustmentItemRepository.save(item);
+                });
+        adjustment.setIsDeleted(true);
+        stockAdjustmentRepository.save(adjustment);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public PageResponseDto<StockAdjustmentResponseDto> getAdjustments(int page, int size) {
+        Page<StockAdjustment> adjustments = stockAdjustmentRepository.findByOrganizationIdAndIsDeletedFalse(
+                currentOrganizationService.getOrganizationId(),
+                PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "id"))
+        );
+        return PageResponseDto.from(adjustments.map(this::toResponse));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public StockAdjustmentResponseDto getAdjustmentById(Long id) {
+        return toResponse(getAdjustment(id));
+    }
+
+    private void applyAdjustmentItems(
+            StockAdjustment adjustment,
+            StockAdjustmentRequestDto request,
+            Organization organization,
+            Warehouse warehouse
+    ) {
         for (StockAdjustmentItemRequestDto itemRequest : request.getItems()) {
             Item item = support.getActiveItem(itemRequest.getItemId());
             BigDecimal currentQty = support.quantity(itemRequest.getCurrentQty());
@@ -105,28 +176,6 @@ public class StockAdjustmentServiceImpl implements StockAdjustmentService {
                 decreaseAcrossBatches(item, warehouse, differenceQty.abs(), adjustment);
             }
         }
-
-        return StockAdjustmentCreateResponseDto.builder()
-                .adjustmentId(adjustment.getId())
-                .adjustmentNo(adjustment.getAdjustmentNo())
-                .build();
-    }
-
-    @Override
-    @Transactional(readOnly = true)
-    public PageResponseDto<StockAdjustmentResponseDto> getAdjustments(int page, int size) {
-        Page<StockAdjustment> adjustments = stockAdjustmentRepository.findByOrganizationId(
-                currentOrganizationService.getOrganizationId(),
-                PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "id"))
-        );
-        return PageResponseDto.from(adjustments.map(this::toResponse));
-    }
-
-    @Override
-    @Transactional(readOnly = true)
-    public StockAdjustmentResponseDto getAdjustmentById(Long id) {
-        return toResponse(stockAdjustmentRepository.findByIdAndOrganizationId(id, currentOrganizationService.getOrganizationId())
-                .orElseThrow(() -> new ResourceNotFoundException("Stock adjustment not found", "STOCK_ADJUSTMENT_NOT_FOUND")));
     }
 
     private void decreaseAcrossBatches(Item item, Warehouse warehouse, BigDecimal quantity, StockAdjustment adjustment) {
@@ -183,6 +232,46 @@ public class StockAdjustmentServiceImpl implements StockAdjustmentService {
         return support.nextNumber(PREFIX, currentNumber);
     }
 
+    private StockAdjustment getAdjustment(Long id) {
+        return stockAdjustmentRepository.findByIdAndOrganizationIdAndIsDeletedFalse(
+                        id,
+                        currentOrganizationService.getOrganizationId()
+                )
+                .orElseThrow(() -> new ResourceNotFoundException("Stock adjustment not found", "STOCK_ADJUSTMENT_NOT_FOUND"));
+    }
+
+    private void reverseAdjustment(StockAdjustment adjustment) {
+        List<StockAdjustmentItem> items = stockAdjustmentItemRepository
+                .findByStockAdjustmentIdAndOrganizationIdAndIsDeletedFalse(
+                        adjustment.getId(),
+                        currentOrganizationService.getOrganizationId()
+                );
+        for (StockAdjustmentItem item : items) {
+            BigDecimal differenceQty = support.defaultZero(item.getDifferenceQty());
+            if (differenceQty.compareTo(TransactionSupport.ZERO) > 0) {
+                support.decreaseStock(
+                        item.getItem(),
+                        adjustment.getWarehouse(),
+                        item.getBatch(),
+                        differenceQty,
+                        TX_ADJUSTMENT_REVERSE_OUT,
+                        adjustment.getId(),
+                        "Reverse stock adjustment " + adjustment.getAdjustmentNo()
+                );
+            } else if (differenceQty.compareTo(TransactionSupport.ZERO) < 0) {
+                support.increaseStock(
+                        item.getItem(),
+                        adjustment.getWarehouse(),
+                        item.getBatch(),
+                        differenceQty.abs(),
+                        TX_ADJUSTMENT_REVERSE_IN,
+                        adjustment.getId(),
+                        "Reverse stock adjustment " + adjustment.getAdjustmentNo()
+                );
+            }
+        }
+    }
+
     private StockAdjustmentResponseDto toResponse(StockAdjustment adjustment) {
         return StockAdjustmentResponseDto.builder()
                 .adjustmentId(adjustment.getId())
@@ -190,7 +279,7 @@ public class StockAdjustmentServiceImpl implements StockAdjustmentService {
                 .warehouse(support.toNameId(adjustment.getWarehouse()))
                 .adjustmentDate(adjustment.getAdjustmentDate())
                 .reason(adjustment.getReason())
-                .items(stockAdjustmentItemRepository.findByStockAdjustmentIdAndOrganizationId(
+                .items(stockAdjustmentItemRepository.findByStockAdjustmentIdAndOrganizationIdAndIsDeletedFalse(
                                 adjustment.getId(),
                                 currentOrganizationService.getOrganizationId()
                         ).stream()

@@ -9,6 +9,10 @@ public interface StockAdjustmentService {
 
     StockAdjustmentCreateResponseDto createAdjustment(StockAdjustmentRequestDto request);
 
+    void updateAdjustment(Long id, StockAdjustmentRequestDto request);
+
+    void deleteAdjustment(Long id);
+
     PageResponseDto<StockAdjustmentResponseDto> getAdjustments(int page, int size);
 
     StockAdjustmentResponseDto getAdjustmentById(Long id);

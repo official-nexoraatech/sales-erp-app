@@ -11,9 +11,11 @@ import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.Positive;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -57,5 +59,20 @@ public class StockAdjustmentController {
                 ResponseMessage.STOCK_ADJUSTMENT_RETRIEVED,
                 stockAdjustmentService.getAdjustmentById(id)
         ));
+    }
+
+    @PutMapping("/{id}")
+    public ResponseEntity<ApiResponseDto<Void>> updateAdjustment(
+            @PathVariable @Positive Long id,
+            @Valid @RequestBody StockAdjustmentRequestDto request
+    ) {
+        stockAdjustmentService.updateAdjustment(id, request);
+        return ResponseEntity.ok(ApiResponseDto.success(ResponseMessage.STOCK_ADJUSTMENT_UPDATED));
+    }
+
+    @DeleteMapping("/{id}")
+    public ResponseEntity<ApiResponseDto<Void>> deleteAdjustment(@PathVariable @Positive Long id) {
+        stockAdjustmentService.deleteAdjustment(id);
+        return ResponseEntity.ok(ApiResponseDto.success(ResponseMessage.STOCK_ADJUSTMENT_DELETED));
     }
 }

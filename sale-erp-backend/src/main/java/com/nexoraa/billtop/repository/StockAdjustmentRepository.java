@@ -14,7 +14,7 @@ public interface StockAdjustmentRepository extends JpaRepository<StockAdjustment
             Long organizationId
     );
 
-    Page<StockAdjustment> findByOrganizationId(Long organizationId, Pageable pageable);
+    Page<StockAdjustment> findByOrganizationIdAndIsDeletedFalse(Long organizationId, Pageable pageable);
 
-    Optional<StockAdjustment> findByIdAndOrganizationId(Long id, Long organizationId);
+    Optional<StockAdjustment> findByIdAndOrganizationIdAndIsDeletedFalse(Long id, Long organizationId);
 }
