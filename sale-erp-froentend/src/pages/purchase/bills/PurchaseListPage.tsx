@@ -10,6 +10,7 @@ import { Button } from '../../../components/ui/Button';
 import { Loader } from '../../../components/ui/Loader';
 import { Pagination } from '../../../components/ui/Pagination';
 import { useAuth } from '../../../hooks/useAuth';
+import { useConfirmation } from '../../../hooks/useConfirmation';
 import { useDebounce } from '../../../hooks/useDebounce';
 import { usePagination } from '../../../hooks/usePagination';
 import { formatCurrency } from '../../../utils/formatCurrency';
@@ -25,6 +26,7 @@ export const PurchaseListPage: React.FC<Props> = ({ mode = 'bill' }) => {
   const isOrder = mode === 'order';
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { confirmAction, confirmationDialog } = useConfirmation();
   const { page, setPage, handlePageChange } = usePagination();
   const [pageSize, setPageSize] = useState(10);
   const [search, setSearch] = useState('');
@@ -96,7 +98,13 @@ export const PurchaseListPage: React.FC<Props> = ({ mode = 'bill' }) => {
       toast.error('Select at least one purchase');
       return;
     }
-    if (!confirm('Cancel selected purchases?')) return;
+    const confirmed = await confirmAction({
+      title: isOrder ? 'Cancel Purchase Orders' : 'Cancel Purchases',
+      message: isOrder ? 'Cancel selected purchase orders?' : 'Cancel selected purchases?',
+      confirmText: 'Cancel',
+      variant: 'danger',
+    });
+    if (!confirmed) return;
     for (const id of selectedIds) await cancel.mutateAsync(id);
     setSelectedIds([]);
   };
@@ -176,7 +184,21 @@ export const PurchaseListPage: React.FC<Props> = ({ mode = 'bill' }) => {
                     <td className="border p-3">
                       <div className="flex items-center gap-2">
                         <button onClick={() => navigate(isOrder ? `/purchase/orders/${purchase.purchaseId}/edit` : `/purchase/bills/${purchase.purchaseId}/edit`)} className="text-orange-600" title="Edit"><Edit size={17} /></button>
-                        <button onClick={() => confirm(isOrder ? 'Cancel this purchase order?' : 'Cancel this purchase?') && cancel.mutate(purchase.purchaseId)} className="text-red-600" title="Cancel"><Ban size={17} /></button>
+                        <button
+                          onClick={async () => {
+                            const confirmed = await confirmAction({
+                              title: isOrder ? 'Cancel Purchase Order' : 'Cancel Purchase',
+                              message: isOrder ? 'Cancel this purchase order?' : 'Cancel this purchase?',
+                              confirmText: 'Cancel',
+                              variant: 'danger',
+                            });
+                            if (confirmed) cancel.mutate(purchase.purchaseId);
+                          }}
+                          className="text-red-600"
+                          title="Cancel"
+                        >
+                          <Ban size={17} />
+                        </button>
                       </div>
                     </td>
                   </tr>
@@ -191,6 +213,7 @@ export const PurchaseListPage: React.FC<Props> = ({ mode = 'bill' }) => {
           <Pagination page={page} totalPages={purchases.data?.data?.totalPages || 1} onPageChange={handlePageChange} />
         </div>
       </div>
+      {confirmationDialog}
     </div>
   );
 };

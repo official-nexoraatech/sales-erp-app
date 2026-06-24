@@ -10,6 +10,7 @@ import { Button } from '../../components/ui/Button';
 import { Loader } from '../../components/ui/Loader';
 import { Pagination } from '../../components/ui/Pagination';
 import { useAuth } from '../../hooks/useAuth';
+import { useConfirmation } from '../../hooks/useConfirmation';
 import { useDebounce } from '../../hooks/useDebounce';
 import { usePagination } from '../../hooks/usePagination';
 import { formatCurrency } from '../../utils/formatCurrency';
@@ -20,6 +21,7 @@ const exportColumns = ['Name', 'Item Code', 'SKU', 'Brand', 'Category', 'Sale Pr
 export const ItemListPage: React.FC = () => {
   const navigate = useNavigate();
   const { user, hasPermission } = useAuth();
+  const { confirmAction, confirmationDialog } = useConfirmation();
   const canViewCategories = hasPermission(PERMISSIONS.CATEGORY_VIEW);
   const canViewBrands = hasPermission(PERMISSIONS.BRAND_VIEW);
   const canViewUnits = hasPermission(PERMISSIONS.UNIT_VIEW);
@@ -59,7 +61,7 @@ export const ItemListPage: React.FC = () => {
   });
 
   const rows = (items.data?.data?.content || [])
-    .filter((item) => !trackingType || item.trackingType === trackingType);
+    .filter((item) => !trackingType || (item.trackingType || 'Regular') === trackingType);
   const allSelected = rows.length > 0 && rows.every((item) => selectedIds.includes(item.id));
 
   const exportRows = () => rows.map((item) => [item.itemName, item.itemCode, item.sku, item.brandName || '', item.categoryName || '', item.salePrice, item.purchasePrice || 0, item.availableQty, item.trackingType || 'Regular', user?.userName || 'admin']);
@@ -86,7 +88,8 @@ export const ItemListPage: React.FC = () => {
   };
   const deleteSelected = async () => {
     if (!selectedIds.length) return toast.error('Select at least one item');
-    if (!confirm('Delete selected items?')) return;
+    const confirmed = await confirmAction({ title: 'Delete Items', message: 'Delete selected items?', confirmText: 'Delete', variant: 'danger' });
+    if (!confirmed) return;
     for (const id of selectedIds) await remove.mutateAsync(id);
     setSelectedIds([]);
   };
@@ -97,7 +100,7 @@ export const ItemListPage: React.FC = () => {
       <div className="overflow-hidden rounded-lg bg-white shadow">
         <div className="flex items-center justify-between border-b px-5 py-4">
           <h1 className="text-xl font-semibold uppercase text-gray-900">Item List</h1>
-          {canCreate && <div className="flex gap-2"><Button variant="outline" className="min-w-[120px]">Import</Button><Button onClick={() => navigate('/items/create')} className="min-w-[145px]">Create Item</Button></div>}
+          {canCreate && <div className="flex gap-2"><Button variant="outline" className="min-w-[120px]" onClick={() => navigate('/utilities/import-items')}>Import</Button><Button onClick={() => navigate('/items/create')} className="min-w-[145px]">Create Item</Button></div>}
         </div>
         <div className="grid grid-cols-1 gap-4 p-5 md:grid-cols-3">
           <label className="text-sm text-gray-600">Item Type<select className="mt-1 h-10 w-full rounded border border-gray-300 px-3" value={itemType} onChange={(event) => setItemType(event.target.value)}><option value="">Choose one thing</option><option>Product</option><option>Service</option></select></label>
@@ -115,11 +118,12 @@ export const ItemListPage: React.FC = () => {
         <div className="overflow-x-auto px-3 pb-3">
           {items.isLoading ? <div className="p-10"><Loader /></div> : <table className="w-full text-sm">
             <thead className="bg-gray-50"><tr>{canDelete && <th className="border p-3"><input type="checkbox" checked={allSelected} onChange={() => setSelectedIds(allSelected ? [] : rows.map((item) => item.id))} /></th>}{exportColumns.concat('Action').map((heading) => <th key={heading} className="border p-3 text-left">{heading}</th>)}</tr></thead>
-            <tbody>{rows.length ? rows.map((item: ItemListItem) => <tr key={item.id} className="border-b even:bg-gray-50">{canDelete && <td className="border p-3"><input type="checkbox" checked={selectedIds.includes(item.id)} onChange={() => setSelectedIds((current) => current.includes(item.id) ? current.filter((id) => id !== item.id) : [...current, item.id])} /></td>}<td className="border p-3 font-semibold">{item.itemName}</td><td className="border p-3">{item.itemCode}</td><td className="border p-3">{item.sku}</td><td className="border p-3">{item.brandName || ''}</td><td className="border p-3">{item.categoryName || 'General'}</td><td className="border p-3">{formatCurrency(item.salePrice)}</td><td className="border p-3">{formatCurrency(item.purchasePrice || 0)}</td><td className="border p-3">{item.availableQty} {item.unitName || 'None'}</td><td className="border p-3">{item.trackingType || 'Regular'}</td><td className="border p-3">{user?.userName || 'admin'}</td><td className="border p-3"><div className="flex gap-2"><button onClick={() => navigate(`/items/${item.id}`)} className="text-blue-600"><Eye size={16} /></button><button onClick={() => navigate(`/items/${item.id}/stock`)} className="text-green-600"><PackageSearch size={16} /></button>{canUpdate && <button onClick={() => navigate(`/items/${item.id}/edit`)} className="text-orange-600"><Edit size={16} /></button>}{canDelete && <button onClick={() => confirm('Delete this item?') && remove.mutate(item.id)} className="text-red-600"><Trash2 size={16} /></button>}</div></td></tr>) : <tr><td colSpan={canDelete ? 12 : 11} className="bg-gray-50 p-5 text-center">No data available in table</td></tr>}</tbody>
+            <tbody>{rows.length ? rows.map((item: ItemListItem) => <tr key={item.id} className="border-b even:bg-gray-50">{canDelete && <td className="border p-3"><input type="checkbox" checked={selectedIds.includes(item.id)} onChange={() => setSelectedIds((current) => current.includes(item.id) ? current.filter((id) => id !== item.id) : [...current, item.id])} /></td>}<td className="border p-3 font-semibold">{item.itemName}</td><td className="border p-3">{item.itemCode}</td><td className="border p-3">{item.sku}</td><td className="border p-3">{item.brandName || ''}</td><td className="border p-3">{item.categoryName || 'General'}</td><td className="border p-3">{formatCurrency(item.salePrice)}</td><td className="border p-3">{formatCurrency(item.purchasePrice || 0)}</td><td className="border p-3">{item.availableQty} {item.unitName || 'None'}</td><td className="border p-3">{item.trackingType || 'Regular'}</td><td className="border p-3">{user?.userName || 'admin'}</td><td className="border p-3"><div className="flex gap-2"><button onClick={() => navigate(`/items/${item.id}`)} className="text-blue-600"><Eye size={16} /></button><button onClick={() => navigate(`/items/${item.id}/stock`)} className="text-green-600"><PackageSearch size={16} /></button>{canUpdate && <button onClick={() => navigate(`/items/${item.id}/edit`)} className="text-orange-600"><Edit size={16} /></button>}{canDelete && <button onClick={async () => { if (await confirmAction({ title: 'Delete Item', message: 'Delete this item?', confirmText: 'Delete', variant: 'danger' })) remove.mutate(item.id); }} className="text-red-600"><Trash2 size={16} /></button>}</div></td></tr>) : <tr><td colSpan={canDelete ? 12 : 11} className="bg-gray-50 p-5 text-center">No data available in table</td></tr>}</tbody>
           </table>}
         </div>
         <div className="flex flex-wrap items-center justify-between gap-3 border-t px-5 py-4 text-sm text-gray-600"><span>Showing {rows.length ? page * pageSize + 1 : 0} to {page * pageSize + rows.length} of {items.data?.data?.totalElements || 0} entries</span><Pagination page={page} totalPages={items.data?.data?.totalPages || 1} onPageChange={handlePageChange} /></div>
       </div>
+      {confirmationDialog}
     </div>
   );
 };

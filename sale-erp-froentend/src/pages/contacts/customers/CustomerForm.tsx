@@ -100,8 +100,8 @@ export const CustomerForm = ({ register, control, setValue, errors }: CustomerFo
       <Input label="WhatsApp Number *" type="tel" placeholder="Enter WhatsApp number" error={errors.whatsappNo?.message} {...register('whatsappNo')} />
       <Input label="GST Number" placeholder="Enter GST number" error={errors.gstNumber?.message} {...register('gstNumber', { setValueAs: (value) => value.toUpperCase() })} />
       <Input label="PAN Number" placeholder="Enter PAN number" error={errors.panNumber?.message} {...register('panNumber', { setValueAs: (value) => value.toUpperCase() })} />
-      <Input label="Credit Limit" type="number" min="0" step="0.01" placeholder="0.00" error={errors.creditLimit?.message} {...register('creditLimit')} />
-      <Input label="Opening Balance" type="number" min="0" step="0.01" placeholder="0.00" error={errors.openingBalance?.message} {...register('openingBalance')} />
+      <Input label="Credit Limit" inputMode="decimal" placeholder="0.00" error={errors.creditLimit?.message} {...register('creditLimit')} />
+      <Input label="Opening Balance" inputMode="decimal" placeholder="0.00" error={errors.openingBalance?.message} {...register('openingBalance')} />
       <div>
         <label className={selectLabelClassName}>Opening Balance Type</label>
         <select className={selectClassName} {...register('openingBalanceType')}>

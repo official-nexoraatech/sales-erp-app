@@ -30,7 +30,7 @@ export const LoginPage: React.FC = () => {
   } = useForm<LoginFormData>({
     resolver: zodResolver(loginSchema),
     defaultValues: {
-      userName: 'deepakdagade',
+      userName: 'dipakdagade',
       password: 'Deepak@3536',
     },
   });
@@ -66,12 +66,14 @@ export const LoginPage: React.FC = () => {
       <section className="flex min-h-screen items-center justify-center px-6 py-10 sm:px-12 lg:px-16">
         <div className="w-full max-w-[500px]">
           <div className="mb-9 text-center">
-            <div className="mx-auto mb-5 flex h-20 w-20 items-center justify-center rounded-full border-[5px] border-[#183260] bg-white shadow-sm">
-              <span className="text-[29px] font-black tracking-[-0.14em] text-[#183260]">
-                B<span className="text-[#1684ed]">T</span>
-              </span>
+            <div className="mx-auto mb-5 flex h-24 items-center justify-center">
+              <img
+                src="/nexoraa-logo.png"
+                alt="Nexoraa logo"
+                className="h-full max-w-[220px] object-contain"
+              />
             </div>
-            <h1 className="text-3xl font-bold tracking-tight text-slate-800">BillTop</h1>
+            <h1 className="text-3xl font-bold tracking-tight text-slate-800">Texmitra</h1>
             <p className="mt-3 text-lg tracking-wide text-slate-600">
               Please log in to your account
             </p>

@@ -147,7 +147,7 @@ export const OrganizationListPage: React.FC = () => {
     <div className="space-y-6">
       <PageHeader
         title="Organization"
-        actions={canCreate ? <Button onClick={() => navigate('/organizations/create')} className="flex items-center gap-2"><Plus size={18} />New Organization</Button> : undefined}
+        actions={canCreate ? <Button onClick={() => navigate('/organizations/create')} className="flex w-full items-center justify-center gap-2 sm:w-auto"><Plus size={18} />New Organization</Button> : undefined}
       />
 
       <DataTable

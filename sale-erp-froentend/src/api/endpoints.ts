@@ -50,10 +50,12 @@ import type {
   OrganizationLogoUploadResponse,
   OrganizationRequest,
   PaymentDetail,
+  PaymentInRequest,
   PaymentListItem,
   PaymentMethod,
   PaymentMethodRequest,
   PaymentOutRequest,
+  PurchaseCreateResponse,
   PosBillingRequest,
   PurchaseDetail,
   PurchaseListItem,
@@ -117,10 +119,12 @@ export type {
   OrganizationLogoUploadResponse,
   OrganizationRequest,
   PaymentDetail,
+  PaymentInRequest,
   PaymentListItem,
   PaymentMethod,
   PaymentMethodRequest,
   PaymentOutRequest,
+  PurchaseCreateResponse,
   PosBillingRequest,
   PurchaseDetail,
   PurchaseListItem,
@@ -313,6 +317,8 @@ export const unitApi = {
 export const warehouseApi = {
   getAll: (search = '') =>
     axiosClient.get<ApiResponse<Warehouse[]>, ApiResponse<Warehouse[]>>('/api/v1/warehouses', { params: { search } }),
+  getById: (id: number) =>
+    axiosClient.get<ApiResponse<Warehouse>, ApiResponse<Warehouse>>(`/api/v1/warehouses/${id}`),
   create: (payload: WarehouseRequest) =>
     axiosClient.post<ApiResponse<void>, ApiResponse<void>>('/api/v1/warehouses', payload),
   update: (id: number, payload: WarehouseRequest) =>
@@ -415,6 +421,8 @@ export const paymentInApi = {
     axiosClient.get<ApiResponse<PageResponse<PaymentListItem>>, ApiResponse<PageResponse<PaymentListItem>>>('/api/v1/payment-in', { params }),
   getById: (id: number) =>
     axiosClient.get<ApiResponse<PaymentDetail>, ApiResponse<PaymentDetail>>(`/api/v1/payment-in/${id}`),
+  create: (payload: PaymentInRequest) =>
+    axiosClient.post<ApiResponse<void>, ApiResponse<void>>('/api/v1/payment-in', payload),
 };
 
 export const purchaseApi = {
@@ -423,7 +431,7 @@ export const purchaseApi = {
   getById: (id: number) =>
     axiosClient.get<ApiResponse<PurchaseDetail>, ApiResponse<PurchaseDetail>>(`/api/v1/purchases/${id}`),
   create: (payload: PurchaseRequest) =>
-    axiosClient.post<ApiResponse<void>, ApiResponse<void>>('/api/v1/purchases', payload),
+    axiosClient.post<ApiResponse<PurchaseCreateResponse>, ApiResponse<PurchaseCreateResponse>>('/api/v1/purchases', payload),
   update: (id: number, payload: PurchaseRequest) =>
     axiosClient.put<ApiResponse<void>, ApiResponse<void>>(`/api/v1/purchases/${id}`, payload),
   cancel: (id: number) =>
@@ -455,6 +463,10 @@ export const stockTransferApi = {
     axiosClient.get<ApiResponse<StockTransferDetail>, ApiResponse<StockTransferDetail>>(`/api/v1/stocks/transfers/${id}`),
   create: (payload: StockTransferRequest) =>
     axiosClient.post<ApiResponse<void>, ApiResponse<void>>('/api/v1/stocks/transfers', payload),
+  update: (id: number, payload: StockTransferRequest) =>
+    axiosClient.put<ApiResponse<void>, ApiResponse<void>>(`/api/v1/stocks/transfers/${id}`, payload),
+  delete: (id: number) =>
+    axiosClient.delete<ApiResponse<void>, ApiResponse<void>>(`/api/v1/stocks/transfers/${id}`),
 };
 
 export const stockAdjustmentApi = {
@@ -464,6 +476,10 @@ export const stockAdjustmentApi = {
     axiosClient.get<ApiResponse<StockAdjustmentDetail>, ApiResponse<StockAdjustmentDetail>>(`/api/v1/stocks/adjustments/${id}`),
   create: (payload: StockAdjustmentRequest) =>
     axiosClient.post<ApiResponse<void>, ApiResponse<void>>('/api/v1/stocks/adjustments', payload),
+  update: (id: number, payload: StockAdjustmentRequest) =>
+    axiosClient.put<ApiResponse<void>, ApiResponse<void>>(`/api/v1/stocks/adjustments/${id}`, payload),
+  delete: (id: number) =>
+    axiosClient.delete<ApiResponse<void>, ApiResponse<void>>(`/api/v1/stocks/adjustments/${id}`),
 };
 
 export const expenseApi = {

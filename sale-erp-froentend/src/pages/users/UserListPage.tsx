@@ -9,6 +9,7 @@ import { queryClient } from '../../app/queryClient';
 import { Button } from '../../components/ui/Button';
 import { Loader } from '../../components/ui/Loader';
 import { Pagination } from '../../components/ui/Pagination';
+import { useConfirmation } from '../../hooks/useConfirmation';
 import { useDebounce } from '../../hooks/useDebounce';
 import { formatDate } from '../../utils/formatDate';
 import { useAuth } from '../../hooks/useAuth';
@@ -19,6 +20,7 @@ const columns = ['Username', 'First Name', 'Last Name', 'Email', 'Mobile', 'Role
 export const UserListPage: React.FC = () => {
   const navigate = useNavigate();
   const { hasPermission } = useAuth();
+  const { confirmAction, confirmationDialog } = useConfirmation();
   const canCreate = hasPermission(PERMISSIONS.ORGANIZATION_VIEW) && hasPermission(PERMISSIONS.ROLE_MANAGE);
   const canEdit = hasPermission(PERMISSIONS.ROLE_MANAGE);
   const [pageSize, setPageSize] = useState(10);
@@ -48,7 +50,8 @@ export const UserListPage: React.FC = () => {
   };
   const deleteSelected = async () => {
     if (!selectedIds.length) return toast.error('Select at least one user');
-    if (!confirm('Delete selected users?')) return;
+    const confirmed = await confirmAction({ title: 'Delete Users', message: 'Delete selected users?', confirmText: 'Delete', variant: 'danger' });
+    if (!confirmed) return;
     for (const id of selectedIds) await remove.mutateAsync(id);
     setSelectedIds([]);
   };
@@ -108,7 +111,7 @@ export const UserListPage: React.FC = () => {
                   <td className="border p-3">{row.roleName || ''}</td>
                   <td className="border p-3"><span className={`rounded-full px-3 py-1 text-xs font-semibold ${isActive ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>{isActive ? 'ACTIVE' : 'INACTIVE'}</span></td>
                   <td className="border p-3">{row.createdAt ? formatDate(row.createdAt) : ''}</td>
-                  <td className="border p-3"><div className="flex gap-2">{canEdit && <button type="button" title="Edit user" onClick={() => navigate(`/users/${row.id}/edit`, { state: row })} className="text-orange-600"><Edit size={16} /></button>}<button type="button" title="Assign permissions" onClick={() => navigate(`/users/permissions?userId=${row.id}`)} className="text-blue-600"><ShieldCheck size={16} /></button><button type="button" title="Delete user" onClick={() => confirm('Delete this user?') && remove.mutate(row.id)} className="text-red-600"><Trash2 size={16} /></button><MoreVertical size={16} /></div></td>
+                  <td className="border p-3"><div className="flex gap-2">{canEdit && <button type="button" title="Edit user" onClick={() => navigate(`/users/${row.id}/edit`, { state: row })} className="text-orange-600"><Edit size={16} /></button>}<button type="button" title="Assign permissions" onClick={() => navigate(`/users/permissions?userId=${row.id}`)} className="text-blue-600"><ShieldCheck size={16} /></button><button type="button" title="Delete user" onClick={async () => { if (await confirmAction({ title: 'Delete User', message: 'Delete this user?', confirmText: 'Delete', variant: 'danger' })) remove.mutate(row.id); }} className="text-red-600"><Trash2 size={16} /></button><MoreVertical size={16} /></div></td>
                 </tr>
                 );
               }) : (
@@ -123,6 +126,7 @@ export const UserListPage: React.FC = () => {
           <Pagination page={page} totalPages={users.data?.data?.totalPages || 1} onPageChange={setPage} />
         </div>
       </div>
+      {confirmationDialog}
     </div>
   );
 };

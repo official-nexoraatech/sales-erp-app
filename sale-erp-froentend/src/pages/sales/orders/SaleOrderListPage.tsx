@@ -10,6 +10,7 @@ import { Button } from '../../../components/ui/Button';
 import { Loader } from '../../../components/ui/Loader';
 import { Pagination } from '../../../components/ui/Pagination';
 import { useAuth } from '../../../hooks/useAuth';
+import { useConfirmation } from '../../../hooks/useConfirmation';
 import { useDebounce } from '../../../hooks/useDebounce';
 import { usePagination } from '../../../hooks/usePagination';
 import { formatCurrency } from '../../../utils/formatCurrency';
@@ -20,6 +21,7 @@ const exportColumns = ['Order ID', 'Date', 'Due Date', 'Customer', 'Total', 'Bal
 export const SaleOrderListPage: React.FC = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { confirmAction, confirmationDialog } = useConfirmation();
   const { page, setPage, handlePageChange } = usePagination();
   const [pageSize, setPageSize] = useState(10);
   const [search, setSearch] = useState('');
@@ -103,7 +105,8 @@ export const SaleOrderListPage: React.FC = () => {
       toast.error('Select at least one sale order');
       return;
     }
-    if (!confirm('Cancel selected sale orders?')) return;
+    const confirmed = await confirmAction({ title: 'Cancel Sale Orders', message: 'Cancel selected sale orders?', confirmText: 'Cancel', variant: 'danger' });
+    if (!confirmed) return;
     for (const id of selectedIds) await cancel.mutateAsync(id);
     setSelectedIds([]);
   };
@@ -183,7 +186,7 @@ export const SaleOrderListPage: React.FC = () => {
                     <td className="border p-3">
                       <div className="flex items-center gap-2">
                         <button onClick={() => navigate(`/sales/orders/${sale.saleId}/edit`)} className="text-orange-600" title="Edit"><Edit size={17} /></button>
-                        <button onClick={() => confirm('Cancel this sale order?') && cancel.mutate(sale.saleId)} className="text-red-600" title="Cancel"><Ban size={17} /></button>
+                        <button onClick={async () => { if (await confirmAction({ title: 'Cancel Sale Order', message: 'Cancel this sale order?', confirmText: 'Cancel', variant: 'danger' })) cancel.mutate(sale.saleId); }} className="text-red-600" title="Cancel"><Ban size={17} /></button>
                       </div>
                     </td>
                   </tr>
@@ -198,6 +201,7 @@ export const SaleOrderListPage: React.FC = () => {
           <Pagination page={page} totalPages={sales.data?.data?.totalPages || 1} onPageChange={handlePageChange} />
         </div>
       </div>
+      {confirmationDialog}
     </div>
   );
 };

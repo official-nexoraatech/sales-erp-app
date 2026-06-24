@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { CirclePlus } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
@@ -6,6 +6,7 @@ import toast from 'react-hot-toast';
 import { brandApi, categoryApi, unitApi, warehouseApi } from '../../api/endpoints';
 import type { ItemListItem, ItemRequest } from '../../api/endpoints';
 import { Button } from '../../components/ui/Button';
+import { NumericInput } from '../../components/ui/NumericInput';
 
 type ItemFormInitial = Partial<ItemListItem> & Partial<Omit<ItemRequest, keyof ItemListItem>>;
 interface Props {
@@ -31,11 +32,14 @@ export const ItemForm: React.FC<Props> = ({
   onCancel,
 }) => {
   const navigate = useNavigate();
+  const imageInputRef = useRef<HTMLInputElement | null>(null);
   const [activeTab, setActiveTab] = useState<'pricing' | 'stock'>('pricing');
   const [itemType, setItemType] = useState('Product');
+  const [imagePreviewUrl, setImagePreviewUrl] = useState('');
+  const [imageName, setImageName] = useState('');
   const [form, setForm] = useState<ItemRequest>({
-    itemName: initial?.itemName || '', itemCode: initial?.itemCode || initial?.batchNo || '', sku: initial?.sku || '', barcode: initial?.barcode || '', hsnCode: initial?.hsnCode || '',
-    categoryId: numberValue(initial?.categoryId), subCategoryId: numberValue(initial?.subCategoryId), brandId: numberValue(initial?.brandId), baseUnitId: numberValue(initial?.baseUnitId), secondaryUnitId: numberValue(initial?.secondaryUnitId), conversionRate: numberValue(initial?.conversionRate) || 1,
+    itemName: initial?.itemName || '', itemCode: initial?.itemCode || initial?.batchNo || '', sku: initial?.sku || '', hsnCode: initial?.hsnCode || '',
+    categoryId: numberValue(initial?.categoryId), subCategoryId: numberValue(initial?.subCategoryId), brandId: numberValue(initial?.brandId), baseUnitId: numberValue(initial?.baseUnitId),
     purchasePrice: numberValue(initial?.purchasePrice), purchasePriceWithTax: numberValue(initial?.purchasePriceWithTax), taxPercentage: numberValue(initial?.taxPercentage), salePrice: numberValue(initial?.salePrice), wholesalePrice: numberValue(initial?.wholesalePrice), mrp: numberValue(initial?.mrp), msp: numberValue(initial?.msp), discountPercentage: numberValue(initial?.discountPercentage), profitMargin: numberValue(initial?.profitMargin),
     batchNo: initial?.batchNo || initial?.itemCode || '', manufacturingDate: initial?.manufacturingDate || today, expiryDate: initial?.expiryDate || today, openingQuantity: numberValue(initial?.openingQuantity), minimumStock: numberValue(initial?.minimumStock), warehouseId: numberValue(initial?.warehouseId), description: initial?.description || '',
   });
@@ -72,10 +76,13 @@ export const ItemForm: React.FC<Props> = ({
   useEffect(() => {
     const errorFields = Object.keys(validationErrors);
     const pricingFields = ['purchasePrice', 'purchasePriceWithTax', 'taxPercentage', 'profitMargin', 'mrp', 'wholesalePrice', 'discountPercentage', 'salePrice', 'msp'];
-    const stockFields = ['warehouseId', 'manufacturingDate', 'barcode', 'minimumStock', 'expiryDate'];
+    const stockFields = ['warehouseId', 'manufacturingDate', 'minimumStock', 'expiryDate'];
     if (errorFields.some((field) => pricingFields.includes(field))) setActiveTab('pricing');
     else if (errorFields.some((field) => stockFields.includes(field))) setActiveTab('stock');
   }, [validationErrors]);
+  useEffect(() => () => {
+    if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
+  }, [imagePreviewUrl]);
   useEffect(() => {
     if (!form.warehouseId && warehouseRows.length) {
       set('warehouseId', warehouseRows[0].id);
@@ -88,6 +95,25 @@ export const ItemForm: React.FC<Props> = ({
     if (!form.categoryId) return toast.error('Category is required.');
     if (!form.brandId) return toast.error('Brand is required.');
     onSubmit(form);
+  };
+  const chooseImage = (file?: File | null) => {
+    if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
+    if (!file) {
+      setImagePreviewUrl('');
+      setImageName('');
+      if (imageInputRef.current) imageInputRef.current.value = '';
+      return;
+    }
+    if (!file.type.startsWith('image/')) {
+      toast.error('Please choose an image file.');
+      return;
+    }
+    if (file.size > 1024 * 1024) {
+      toast.error('Image size must be 1MB or less.');
+      return;
+    }
+    setImagePreviewUrl(URL.createObjectURL(file));
+    setImageName(file.name);
   };
 
   return (
@@ -134,7 +160,7 @@ export const ItemForm: React.FC<Props> = ({
           {renderFieldError('brandId')}
         </label>
         <label className="text-sm text-gray-600">Opening Quantity
-          <input type="number" min={1} step={1} inputMode="numeric" className={`${controlClass('openingQuantity')} mt-1`} value={form.openingQuantity || ''} onChange={(event) => set('openingQuantity', Math.max(0, Math.trunc(Number(event.target.value))))} />
+          <NumericInput integer min={1} className={`${controlClass('openingQuantity')} mt-1`} value={form.openingQuantity || ''} onValueChange={(value) => set('openingQuantity', Math.trunc(value))} />
           {renderFieldError('openingQuantity')}
         </label>
         <label className="text-sm text-gray-600">Description
@@ -151,11 +177,14 @@ export const ItemForm: React.FC<Props> = ({
         <div className="text-sm text-gray-600">
           <span>Upload Image</span>
           <div className="mt-1 flex min-h-24 items-center gap-4 rounded border border-gray-200 bg-gray-50 p-3">
-            <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded border border-dashed border-gray-300 bg-white text-center text-[10px] text-gray-400">NO IMAGE<br />FOUND</div>
+            <div className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded border border-dashed border-gray-300 bg-white text-center text-[10px] text-gray-400">
+              {imagePreviewUrl ? <img src={imagePreviewUrl} alt={imageName} className="h-full w-full object-cover" /> : <>NO IMAGE<br />FOUND</>}
+            </div>
             <div>
-              <button type="button" className="rounded border border-blue-400 bg-white px-4 py-2 text-blue-600 hover:bg-blue-50">Browse</button>
-              <button type="button" className="ml-2 rounded border border-gray-300 bg-white px-4 py-2 text-gray-600 hover:bg-gray-100">Reset</button>
-              <p className="mt-2 text-xs leading-5 text-gray-500">Allowed JPG, GIF or PNG.<br />Max size of 1MB</p>
+              <input ref={imageInputRef} type="file" accept="image/png,image/jpeg,image/gif" className="hidden" onChange={(event) => chooseImage(event.target.files?.[0])} />
+              <button type="button" onClick={() => imageInputRef.current?.click()} className="rounded border border-blue-400 bg-white px-4 py-2 text-blue-600 hover:bg-blue-50">Browse</button>
+              <button type="button" onClick={() => chooseImage(null)} className="ml-2 rounded border border-gray-300 bg-white px-4 py-2 text-gray-600 hover:bg-gray-100">Reset</button>
+              <p className="mt-2 text-xs leading-5 text-gray-500">{imageName || 'Allowed JPG, GIF or PNG.'}<br />Max size of 1MB</p>
             </div>
           </div>
         </div>
@@ -163,19 +192,18 @@ export const ItemForm: React.FC<Props> = ({
       <div className="border-t px-5 py-4"><label className="inline-flex items-center gap-2 text-sm font-semibold"><input type="radio" defaultChecked />Regular</label></div>
       <div className="px-5 pt-3"><button onClick={() => setActiveTab('pricing')} className={`rounded-t border px-4 py-2 text-sm ${activeTab === 'pricing' ? 'border-green-500 text-green-600' : 'text-blue-600'}`}>$ Pricing</button><button onClick={() => setActiveTab('stock')} className={`rounded-t border px-4 py-2 text-sm ${activeTab === 'stock' ? 'border-green-500 text-green-600' : 'text-blue-600'}`}>▣ Stock</button></div>
       {activeTab === 'pricing' ? <div className="grid grid-cols-1 gap-4 border-t p-5 md:grid-cols-3">
-        <label className="text-sm text-gray-600">Purchase Price<div className="mt-1 flex"><input type="number" className={`${controlClass('purchasePrice')} rounded-r-none bg-green-50`} value={form.purchasePrice || ''} onChange={(event) => set('purchasePrice', Number(event.target.value))} /><select className="h-10 rounded-r border border-l-0 px-3"><option>With Tax</option></select></div>{renderFieldError('purchasePrice')}</label>
+        <label className="text-sm text-gray-600">Purchase Price<div className="mt-1 flex"><NumericInput min={0} className={`${controlClass('purchasePrice')} rounded-r-none bg-green-50`} value={form.purchasePrice || ''} onValueChange={(value) => set('purchasePrice', value)} /><select className="h-10 rounded-r border border-l-0 px-3"><option>With Tax</option></select></div>{renderFieldError('purchasePrice')}</label>
         <label className="text-sm text-gray-600">Tax<div className="mt-1 flex"><select className={`${controlClass('taxPercentage')} rounded-r-none`} value={form.taxPercentage} onChange={(event) => set('taxPercentage', Number(event.target.value))}><option value={0}>None</option><option value={5}>5%</option><option value={18}>18%</option></select><button type="button" className="flex h-10 w-10 items-center justify-center rounded-r border border-l-0 border-blue-400 text-blue-500"><CirclePlus size={17} /></button></div>{renderFieldError('taxPercentage')}</label>
-        <label className="text-sm text-gray-600">Sale Profit Margin (%)<input type="number" className={`${controlClass('profitMargin')} mt-1 bg-green-50`} value={form.profitMargin || ''} onChange={(event) => set('profitMargin', Number(event.target.value))} />{renderFieldError('profitMargin')}</label>
-        <label className="text-sm text-gray-600">MRP<div className="mt-1 flex"><input type="number" className={`${controlClass('mrp')} rounded-r-none`} value={form.mrp || ''} onChange={(event) => set('mrp', Number(event.target.value))} /><select className="h-10 rounded-r border border-l-0 px-3"><option>With Tax</option></select></div>{renderFieldError('mrp')}</label>
-        <label className="text-sm text-gray-600">Wholesale Price<div className="mt-1 flex"><input type="number" className={`${controlClass('wholesalePrice')} rounded-r-none`} value={form.wholesalePrice || ''} onChange={(event) => set('wholesalePrice', Number(event.target.value))} /><select className="h-10 rounded-r border border-l-0 px-3"><option>With Tax</option></select></div>{renderFieldError('wholesalePrice')}</label>
-        <label className="text-sm text-gray-600">Discount on MRP<div className="mt-1 flex"><input type="number" className={`${controlClass('discountPercentage')} rounded-r-none`} value={form.discountPercentage || ''} onChange={(event) => set('discountPercentage', Number(event.target.value))} /><select className="h-10 rounded-r border border-l-0 px-3"><option>Percentage</option></select></div>{renderFieldError('discountPercentage')}</label>
-        <label className="text-sm text-gray-600">Sale Price<div className="mt-1 flex"><input type="number" className={`${controlClass('salePrice')} rounded-r-none bg-green-50`} value={form.salePrice || ''} onChange={(event) => set('salePrice', Number(event.target.value))} /><select className="h-10 rounded-r border border-l-0 px-3"><option>With Tax</option></select></div>{renderFieldError('salePrice')}</label>
-        <label className="text-sm text-gray-600">MSP<input type="number" className={`${controlClass('msp')} mt-1`} value={form.msp || ''} onChange={(event) => set('msp', Number(event.target.value))} />{renderFieldError('msp')}</label>
+        <label className="text-sm text-gray-600">Sale Profit Margin (%)<NumericInput min={0} className={`${controlClass('profitMargin')} mt-1 bg-green-50`} value={form.profitMargin || ''} onValueChange={(value) => set('profitMargin', value)} />{renderFieldError('profitMargin')}</label>
+        <label className="text-sm text-gray-600">MRP<div className="mt-1 flex"><NumericInput min={0} className={`${controlClass('mrp')} rounded-r-none`} value={form.mrp || ''} onValueChange={(value) => set('mrp', value)} /><select className="h-10 rounded-r border border-l-0 px-3"><option>With Tax</option></select></div>{renderFieldError('mrp')}</label>
+        <label className="text-sm text-gray-600">Wholesale Price<div className="mt-1 flex"><NumericInput min={0} className={`${controlClass('wholesalePrice')} rounded-r-none`} value={form.wholesalePrice || ''} onValueChange={(value) => set('wholesalePrice', value)} /><select className="h-10 rounded-r border border-l-0 px-3"><option>With Tax</option></select></div>{renderFieldError('wholesalePrice')}</label>
+        <label className="text-sm text-gray-600">Discount on MRP<div className="mt-1 flex"><NumericInput min={0} className={`${controlClass('discountPercentage')} rounded-r-none`} value={form.discountPercentage || ''} onValueChange={(value) => set('discountPercentage', value)} /><select className="h-10 rounded-r border border-l-0 px-3"><option>Percentage</option></select></div>{renderFieldError('discountPercentage')}</label>
+        <label className="text-sm text-gray-600">Sale Price<div className="mt-1 flex"><NumericInput min={0} className={`${controlClass('salePrice')} rounded-r-none bg-green-50`} value={form.salePrice || ''} onValueChange={(value) => set('salePrice', value)} /><select className="h-10 rounded-r border border-l-0 px-3"><option>With Tax</option></select></div>{renderFieldError('salePrice')}</label>
+        <label className="text-sm text-gray-600">MSP<NumericInput min={0} className={`${controlClass('msp')} mt-1`} value={form.msp || ''} onValueChange={(value) => set('msp', value)} />{renderFieldError('msp')}</label>
       </div> : <div className="grid grid-cols-1 gap-4 border-t p-5 md:grid-cols-2">
         <label className="text-sm text-gray-600">Warehouse<select className={`${controlClass('warehouseId')} mt-1`} value={form.warehouseId} onChange={(event) => set('warehouseId', Number(event.target.value))}>{warehouseRows.map((warehouse) => <option key={warehouse.id} value={warehouse.id}>{warehouse.name}</option>)}</select>{renderFieldError('warehouseId')}</label>
         <label className="text-sm text-gray-600">As of Date<input type="date" className={`${controlClass('manufacturingDate')} mt-1`} value={form.manufacturingDate} onChange={(event) => set('manufacturingDate', event.target.value)} />{renderFieldError('manufacturingDate')}</label>
-        <label className="text-sm text-gray-600">Item Location<input className={`${controlClass('barcode')} mt-1`} value={form.barcode} onChange={(event) => set('barcode', event.target.value)} />{renderFieldError('barcode')}</label>
-        <label className="text-sm text-gray-600">Minimum Stock<input type="number" className={`${controlClass('minimumStock')} mt-1`} value={form.minimumStock || ''} onChange={(event) => set('minimumStock', Number(event.target.value))} />{renderFieldError('minimumStock')}</label>
+        <label className="text-sm text-gray-600">Minimum Stock<NumericInput min={0} className={`${controlClass('minimumStock')} mt-1`} value={form.minimumStock || ''} onValueChange={(value) => set('minimumStock', value)} />{renderFieldError('minimumStock')}</label>
         <label className="text-sm text-gray-600">Exp.Date<input type="date" className={`${controlClass('expiryDate')} mt-1`} value={form.expiryDate} onChange={(event) => set('expiryDate', event.target.value)} />{renderFieldError('expiryDate')}</label>
       </div>}
       <div className="flex gap-3 border-t p-5"><Button onClick={submit} isLoading={loading}>{submitText}</Button><Button variant="secondary" onClick={onCancel}>Close</Button></div>

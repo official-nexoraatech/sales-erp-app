@@ -7,6 +7,7 @@ import type { Payroll, PayrollRequest, PayrollStatus } from '../../api/endpoints
 import { queryClient } from '../../app/queryClient';
 import { Button } from '../../components/ui/Button';
 import { Loader } from '../../components/ui/Loader';
+import { NumericInput } from '../../components/ui/NumericInput';
 import { formatCurrency } from '../../utils/formatCurrency';
 import { inputClass, labelClass, payrollStatuses, pretty, statusClass } from './staffShared';
 
@@ -142,12 +143,12 @@ export const StaffPayrollPage: React.FC = () => {
               <label className={labelClass}>Employee<select className={`${inputClass} mt-1`} value={form.employeeId} onChange={(event) => selectEmployee(Number(event.target.value))}><option value={0}>Select employee</option>{(employees.data?.data?.content || []).map((employee) => <option key={employee.id} value={employee.id}>{employee.employeeCode} / {employee.firstName} {employee.lastName}</option>)}</select></label>
               <label className={labelClass}>Payroll Month<input type="month" className={`${inputClass} mt-1`} value={form.payrollMonth} onChange={(event) => set('payrollMonth', event.target.value)} /></label>
               <label className={labelClass}>Payment Date<input type="date" className={`${inputClass} mt-1`} value={form.paymentDate} onChange={(event) => set('paymentDate', event.target.value)} /></label>
-              <label className={labelClass}>Basic Salary<input type="number" className={`${inputClass} mt-1`} value={form.basicSalary || ''} onChange={(event) => set('basicSalary', Number(event.target.value))} /></label>
-              <label className={labelClass}>HRA<input type="number" className={`${inputClass} mt-1`} value={form.hra || ''} onChange={(event) => set('hra', Number(event.target.value))} /></label>
-              <label className={labelClass}>Allowance<input type="number" className={`${inputClass} mt-1`} value={form.allowance || ''} onChange={(event) => set('allowance', Number(event.target.value))} /></label>
-              <label className={labelClass}>Overtime Amount<input type="number" className={`${inputClass} mt-1`} value={form.overtimeAmount || ''} onChange={(event) => set('overtimeAmount', Number(event.target.value))} /></label>
-              <label className={labelClass}>Deductions<input type="number" className={`${inputClass} mt-1`} value={form.deductions || ''} onChange={(event) => set('deductions', Number(event.target.value))} /></label>
-              <label className={labelClass}>Tax<input type="number" className={`${inputClass} mt-1`} value={form.tax || ''} onChange={(event) => set('tax', Number(event.target.value))} /></label>
+              <label className={labelClass}>Basic Salary<NumericInput min={0} className={`${inputClass} mt-1`} value={form.basicSalary || ''} onValueChange={(value) => set('basicSalary', value)} /></label>
+              <label className={labelClass}>HRA<NumericInput min={0} className={`${inputClass} mt-1`} value={form.hra || ''} onValueChange={(value) => set('hra', value)} /></label>
+              <label className={labelClass}>Allowance<NumericInput min={0} className={`${inputClass} mt-1`} value={form.allowance || ''} onValueChange={(value) => set('allowance', value)} /></label>
+              <label className={labelClass}>Overtime Amount<NumericInput min={0} className={`${inputClass} mt-1`} value={form.overtimeAmount || ''} onValueChange={(value) => set('overtimeAmount', value)} /></label>
+              <label className={labelClass}>Deductions<NumericInput min={0} className={`${inputClass} mt-1`} value={form.deductions || ''} onValueChange={(value) => set('deductions', value)} /></label>
+              <label className={labelClass}>Tax<NumericInput min={0} className={`${inputClass} mt-1`} value={form.tax || ''} onValueChange={(value) => set('tax', value)} /></label>
               <label className={labelClass}>Status<select className={`${inputClass} mt-1`} value={form.status} onChange={(event) => set('status', event.target.value as PayrollStatus)}>{payrollStatuses.map((entry) => <option key={entry} value={entry}>{pretty(entry)}</option>)}</select></label>
               <div className="rounded border bg-gray-50 p-4 md:col-span-2"><p className="text-sm text-gray-500">Net Pay</p><p className="text-2xl font-bold">{formatCurrency(netPay)}</p></div>
             </div>

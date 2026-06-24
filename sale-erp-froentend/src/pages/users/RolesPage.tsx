@@ -9,11 +9,13 @@ import { queryClient } from '../../app/queryClient';
 import { Button } from '../../components/ui/Button';
 import { Loader } from '../../components/ui/Loader';
 import { Pagination } from '../../components/ui/Pagination';
+import { useConfirmation } from '../../hooks/useConfirmation';
 import { useDebounce } from '../../hooks/useDebounce';
 import { formatDate } from '../../utils/formatDate';
 
 export const RolesPage: React.FC = () => {
   const navigate = useNavigate();
+  const { confirmAction, confirmationDialog } = useConfirmation();
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(10);
   const [search, setSearch] = useState('');
@@ -45,13 +47,15 @@ export const RolesPage: React.FC = () => {
       toast.error('Select at least one role');
       return;
     }
-    if (!confirm('Delete selected roles?')) return;
+    const confirmed = await confirmAction({ title: 'Delete Roles', message: 'Delete selected roles?', confirmText: 'Delete', variant: 'danger' });
+    if (!confirmed) return;
     for (const id of selectedIds) await remove.mutateAsync(id);
     setSelectedIds([]);
   };
 
-  const deleteRole = (role: Role) => {
-    if (confirm(`Delete role "${role.name}"?`)) remove.mutate(role.id);
+  const deleteRole = async (role: Role) => {
+    const confirmed = await confirmAction({ title: 'Delete Role', message: `Delete role "${role.name}"?`, confirmText: 'Delete', variant: 'danger' });
+    if (confirmed) remove.mutate(role.id);
     setOpenActionId(null);
   };
 
@@ -137,6 +141,7 @@ export const RolesPage: React.FC = () => {
           <Pagination page={page} totalPages={totalPages} onPageChange={setPage} />
         </div>
       </div>
+      {confirmationDialog}
     </div>
   );
 };

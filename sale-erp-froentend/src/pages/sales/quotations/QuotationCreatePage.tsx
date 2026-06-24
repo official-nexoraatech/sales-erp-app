@@ -6,6 +6,7 @@ import toast from 'react-hot-toast';
 import { customerApi, itemApi, warehouseApi } from '../../../api/endpoints';
 import { CountryStateSelect } from '../../../components/form/CountryStateSelect';
 import { Button } from '../../../components/ui/Button';
+import { NumericInput } from '../../../components/ui/NumericInput';
 
 interface Line {
   itemId: number;
@@ -109,7 +110,7 @@ export const QuotationCreatePage: React.FC = () => {
               {lines.length ? lines.map((line, index) => {
                 const base = line.quantity * line.unitPrice;
                 const rowTotal = base - base * line.discountPercent / 100 + base * line.taxPercent / 100;
-                return <tr key={line.itemId}><td className="border p-2"><button onClick={() => setLines((current) => current.filter((_, i) => i !== index))} className="text-red-500"><Trash2 size={16} /></button></td><td className="border p-2">{line.itemName}</td><td className="border p-2">{line.unitPrice.toFixed(2)}</td><td className="border p-2"><input type="number" value={line.quantity} onChange={(event) => update(index, 'quantity', Number(event.target.value))} className="w-16 rounded border px-2 py-1" /></td><td className="border p-2">Nos</td><td className="border p-2">{line.unitPrice.toFixed(2)}</td><td className="border p-2">{base.toFixed(2)}</td><td className="border p-2"><input type="number" value={line.discountPercent} onChange={(event) => update(index, 'discountPercent', Number(event.target.value))} className="w-16 rounded border px-2 py-1" /></td><td className="border p-2"><input type="number" value={line.taxPercent} onChange={(event) => update(index, 'taxPercent', Number(event.target.value))} className="w-16 rounded border px-2 py-1" /></td><td className="border p-2 font-semibold">{rowTotal.toFixed(2)}</td></tr>;
+                return <tr key={line.itemId}><td className="border p-2"><button onClick={() => setLines((current) => current.filter((_, i) => i !== index))} className="text-red-500"><Trash2 size={16} /></button></td><td className="border p-2">{line.itemName}</td><td className="border p-2">{line.unitPrice.toFixed(2)}</td><td className="border p-2"><NumericInput min={0} value={line.quantity} onValueChange={(value) => update(index, 'quantity', value)} className="w-16 rounded border px-2 py-1" /></td><td className="border p-2">Nos</td><td className="border p-2">{line.unitPrice.toFixed(2)}</td><td className="border p-2">{base.toFixed(2)}</td><td className="border p-2"><NumericInput min={0} value={line.discountPercent} onValueChange={(value) => update(index, 'discountPercent', value)} className="w-16 rounded border px-2 py-1" /></td><td className="border p-2"><NumericInput min={0} value={line.taxPercent} onValueChange={(value) => update(index, 'taxPercent', value)} className="w-16 rounded border px-2 py-1" /></td><td className="border p-2 font-semibold">{rowTotal.toFixed(2)}</td></tr>;
               }) : <tr><td colSpan={10} className="bg-gray-50 p-4 text-center italic">No items are added yet!!</td></tr>}
               <tr><td colSpan={3} className="border p-2 text-right font-bold">Total</td><td className="border p-2 font-bold">{lines.reduce((sum, line) => sum + line.quantity, 0)}</td><td colSpan={5} className="border p-2" /><td className="border p-2 text-right font-bold">{total.toFixed(2)}</td></tr>
             </tbody>

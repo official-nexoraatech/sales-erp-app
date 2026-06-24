@@ -6,6 +6,7 @@ import { customerApi, itemApi, usersApi, warehouseApi } from '../../../api/endpo
 import type { SaleRequest } from '../../../api/endpoints';
 import { CountryStateSelect } from '../../../components/form/CountryStateSelect';
 import { Button } from '../../../components/ui/Button';
+import { NumericInput } from '../../../components/ui/NumericInput';
 
 interface Line {
   itemId: number;
@@ -110,7 +111,7 @@ export const SaleForm: React.FC<Props> = ({ initial, submitText, loading, onSubm
       <div className="grid grid-cols-1 gap-4 p-5 md:grid-cols-3">
         <label className={labelClass}>Customer
           <select className={`${inputClass} mt-1`} value={customerId} onChange={(event) => setCustomerId(Number(event.target.value))}>
-            <option value={0}>Walk in Customer (-)</option>
+            <option value={0}>Select Customer</option>
             {customers.data?.data?.content.map((customer) => <option key={customer.id} value={customer.id}>{customer.customerName}</option>)}
           </select>
         </label>
@@ -185,11 +186,10 @@ export const SaleForm: React.FC<Props> = ({ initial, submitText, loading, onSubm
                 <td className="border p-2">{line.itemName}</td>
                 {(['quantity', 'unitPrice', 'discountPercent', 'taxPercent'] as const).map((field) => (
                   <td key={field} className="border p-2">
-                    <input
-                      type="number"
-                      min="0"
+                    <NumericInput
+                      min={0}
                       value={line[field]}
-                      onChange={(event) => update(index, field, Number(event.target.value))}
+                      onValueChange={(value) => update(index, field, value)}
                       className={tableInputClass}
                     />
                   </td>

@@ -7,6 +7,7 @@ import type { StaffSetting, StaffSettingType } from '../../api/endpoints';
 import { queryClient } from '../../app/queryClient';
 import { Button } from '../../components/ui/Button';
 import { Loader } from '../../components/ui/Loader';
+import { useConfirmation } from '../../hooks/useConfirmation';
 import { employeeStatuses, inputClass, labelClass, pretty, statusClass, textareaClass } from './staffShared';
 
 const tabs: Array<{ key: StaffSettingType; label: string }> = [
@@ -21,6 +22,7 @@ const tabs: Array<{ key: StaffSettingType; label: string }> = [
 const emptySetting: Omit<StaffSetting, 'id'> = { name: '', description: '', status: 'ACTIVE' };
 
 export const StaffSettingsPage: React.FC = () => {
+  const { confirmAction, confirmationDialog } = useConfirmation();
   const [activeTab, setActiveTab] = useState<StaffSettingType>('departments');
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<StaffSetting | null>(null);
@@ -98,7 +100,7 @@ export const StaffSettingsPage: React.FC = () => {
                     <td className="border p-3 font-semibold">{row.name}</td>
                     <td className="border p-3">{row.description}</td>
                     <td className="border p-3"><span className={`rounded-full px-3 py-1 text-xs font-semibold ${statusClass(row.status)}`}>{pretty(row.status)}</span></td>
-                    <td className="border p-3"><div className="flex gap-2"><button type="button" onClick={() => openEdit(row)} className="text-orange-600"><Edit size={16} /></button><button type="button" onClick={() => confirm('Delete this setting?') && remove.mutate(row.id)} className="text-red-600"><Trash2 size={16} /></button></div></td>
+                    <td className="border p-3"><div className="flex gap-2"><button type="button" onClick={() => openEdit(row)} className="text-orange-600"><Edit size={16} /></button><button type="button" onClick={async () => { if (await confirmAction({ title: 'Delete Setting', message: 'Delete this setting?', confirmText: 'Delete', variant: 'danger' })) remove.mutate(row.id); }} className="text-red-600"><Trash2 size={16} /></button></div></td>
                   </tr>
                 )) : <tr><td colSpan={4} className="bg-gray-50 p-5 text-center">No settings found</td></tr>}
               </tbody>
@@ -123,6 +125,7 @@ export const StaffSettingsPage: React.FC = () => {
           </div>
         </div>
       )}
+      {confirmationDialog}
     </div>
   );
 };

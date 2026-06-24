@@ -1,12 +1,12 @@
 import React from 'react';
 import type { PurchaseRequest } from '../../../api/endpoints';
-import { PurchaseForm } from '../bills/PurchaseForm';
+import { PurchaseForm, type PurchaseSubmitPayload } from '../bills/PurchaseForm';
 
 interface Props {
   initial?: PurchaseRequest & { lines?: any[] };
   submitText: string;
   loading: boolean;
-  onSubmit: (payload: PurchaseRequest) => void;
+  onSubmit: (payload: PurchaseSubmitPayload) => void;
   onCancel: () => void;
 }
 
