@@ -56,7 +56,6 @@ const addressSchema = z.object({
 });
 
 export const customerSchema = z.object({
-  companyName: z.string().max(150).optional().or(z.literal('')),
   firstName: z.string().min(2, 'First name must have at least 2 characters').max(100),
   lastName: z.string().min(2, 'Last name must have at least 2 characters').max(100),
   email: z.string().email('Invalid email').max(150).optional().or(z.literal('')),
@@ -93,7 +92,6 @@ export const toCustomerRequest = (data: CustomerFormData): CreateCustomerRequest
   const shippingAddress = normalizeAddress(data.shippingAddress);
 
   return {
-    companyName: data.companyName || '',
     firstName: data.firstName,
     lastName: data.lastName,
     email: data.email || '',

@@ -25,7 +25,6 @@ export interface CustomerAddress extends CustomerAddressRequest {
 export interface CustomerDetail {
   id: number;
   customerCode: string;
-  companyName: string;
   firstName: string;
   lastName: string;
   email?: string;
@@ -44,7 +43,6 @@ export interface CustomerDetail {
 }
 
 export interface CreateCustomerRequest {
-  companyName: string;
   firstName: string;
   lastName: string;
   email: string;

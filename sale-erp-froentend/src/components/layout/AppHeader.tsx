@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ChevronDown,
   Grid2X2,
@@ -24,6 +24,7 @@ export const AppHeader: React.FC = () => {
   const navigate = useNavigate();
   const { user, logout, hasPermission } = useAuth();
   const [profileOpen, setProfileOpen] = useState(false);
+  const profileMenuRef = useRef<HTMLDivElement | null>(null);
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem('appearance') === 'dark');
   const [language, setLanguage] = useState<AppLanguage>(getStoredLanguage);
 
@@ -37,6 +38,31 @@ export const AppHeader: React.FC = () => {
   useEffect(() => {
     localStorage.setItem('language', language);
   }, [language]);
+
+  useEffect(() => {
+    if (!profileOpen) return;
+
+    const closeOnOutsideClick = (event: MouseEvent | TouchEvent) => {
+      const target = event.target;
+      if (target instanceof Node && !profileMenuRef.current?.contains(target)) {
+        setProfileOpen(false);
+      }
+    };
+
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setProfileOpen(false);
+    };
+
+    document.addEventListener('mousedown', closeOnOutsideClick);
+    document.addEventListener('touchstart', closeOnOutsideClick);
+    document.addEventListener('keydown', closeOnEscape);
+
+    return () => {
+      document.removeEventListener('mousedown', closeOnOutsideClick);
+      document.removeEventListener('touchstart', closeOnOutsideClick);
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [profileOpen]);
 
   const handleLogout = () => {
     logout();
@@ -110,12 +136,14 @@ export const AppHeader: React.FC = () => {
           {darkMode ? <Sun size={18} /> : <Moon size={18} />}
         </button>
 
-        <div className="relative ml-1 border-l border-slate-200 pl-3">
+        <div ref={profileMenuRef} className="relative ml-1 border-l border-slate-200 pl-3">
           <button
             type="button"
             onClick={() => setProfileOpen((current) => !current)}
             className="flex items-center gap-2 rounded-lg px-1.5 py-1 text-left transition hover:bg-slate-50"
             title="Profile menu"
+            aria-expanded={profileOpen}
+            aria-haspopup="menu"
           >
             <div className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-200 text-sm font-bold text-slate-500">
               {user?.userName?.charAt(0).toUpperCase() || 'U'}
@@ -128,7 +156,7 @@ export const AppHeader: React.FC = () => {
           </button>
 
           {profileOpen && (
-            <div className="absolute right-0 top-12 w-48 overflow-hidden rounded-xl border border-slate-200 bg-white py-1.5 shadow-xl">
+            <div className="absolute right-0 top-12 w-48 overflow-hidden rounded-xl border border-slate-200 bg-white py-1.5 shadow-xl" role="menu">
               {hasPermission(PERMISSIONS.USER_PROFILE) && (
                 <button
                   type="button"

@@ -143,8 +143,8 @@ export const CustomerViewPage: React.FC = () => {
   }
 
   const fullName = `${customer.firstName || ''} ${customer.lastName || ''}`.trim();
-  const displayName = customer.companyName || fullName || 'Customer';
-  const initials = (customer.companyName || fullName || customer.customerCode)
+  const displayName = fullName || 'Customer';
+  const initials = (fullName || customer.customerCode)
     .split(/\s+/)
     .slice(0, 2)
     .map((part) => part.charAt(0))
@@ -184,7 +184,6 @@ export const CustomerViewPage: React.FC = () => {
               <p className="mt-1 text-sm text-gray-500">
                 Customer code: <span className="font-semibold text-gray-700">{customer.customerCode}</span>
               </p>
-              {customer.companyName && fullName && <p className="mt-1 text-sm text-gray-600">Contact person: {fullName}</p>}
             </div>
           </div>
           <div className="rounded-lg border border-blue-100 bg-blue-50 px-5 py-3 sm:text-right">
@@ -204,7 +203,6 @@ export const CustomerViewPage: React.FC = () => {
           <div className="grid grid-cols-1 gap-x-6 gap-y-5 sm:grid-cols-2">
             <DetailField label="First Name" value={customer.firstName} />
             <DetailField label="Last Name" value={customer.lastName} />
-            <DetailField label="Company Name" value={customer.companyName} className="sm:col-span-2" />
             <DetailField
               label="Email Address"
               value={customer.email ? (

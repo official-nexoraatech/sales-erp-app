@@ -20,9 +20,6 @@ import java.math.BigDecimal;
 @Builder
 public class CustomerRequestDto {
 
-    @Size(max = 150, message = ValidationMessage.COMPANY_NAME_INVALID)
-    private String companyName;
-
     @NotBlank(message = ValidationMessage.FIRST_NAME_REQUIRED)
     @Size(min = 2, max = 100, message = ValidationMessage.FIRST_NAME_INVALID)
     private String firstName;

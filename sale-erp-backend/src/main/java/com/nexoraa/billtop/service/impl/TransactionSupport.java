@@ -308,9 +308,6 @@ class TransactionSupport {
         if (contact == null) {
             return null;
         }
-        if (StringUtils.hasText(contact.getCompanyName())) {
-            return contact.getCompanyName();
-        }
         String firstName = StringUtils.hasText(contact.getFirstName()) ? contact.getFirstName().trim() : "";
         String lastName = StringUtils.hasText(contact.getLastName()) ? contact.getLastName().trim() : "";
         String fullName = (firstName + " " + lastName).trim();

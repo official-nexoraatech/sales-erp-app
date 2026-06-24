@@ -104,8 +104,8 @@ export const SupplierViewPage: React.FC = () => {
   }
 
   const fullName = `${supplier.firstName || ''} ${supplier.lastName || ''}`.trim();
-  const displayName = supplier.companyName || fullName || 'Supplier';
-  const initials = (supplier.companyName || fullName || supplier.supplierCode)
+  const displayName = fullName || 'Supplier';
+  const initials = (fullName || supplier.supplierCode)
     .split(/\s+/)
     .slice(0, 2)
     .map((part) => part.charAt(0))
@@ -145,7 +145,6 @@ export const SupplierViewPage: React.FC = () => {
               <p className="mt-1 text-sm text-gray-500">
                 Supplier code: <span className="font-semibold text-gray-700">{supplier.supplierCode}</span>
               </p>
-              {supplier.companyName && fullName && <p className="mt-1 text-sm text-gray-600">Contact person: {fullName}</p>}
             </div>
           </div>
           <div className="rounded-lg border border-blue-100 bg-blue-50 px-5 py-3 sm:text-right">
@@ -165,7 +164,6 @@ export const SupplierViewPage: React.FC = () => {
           <div className="grid grid-cols-1 gap-x-6 gap-y-5 sm:grid-cols-2">
             <DetailField label="First Name" value={supplier.firstName} />
             <DetailField label="Last Name" value={supplier.lastName} />
-            <DetailField label="Company Name" value={supplier.companyName} className="sm:col-span-2" />
             <DetailField
               label="Email Address"
               value={supplier.email ? (

@@ -15,7 +15,6 @@ public class SupplierDetailResponseDto {
 
     private Long id;
     private String supplierCode;
-    private String companyName;
     private String firstName;
     private String lastName;
     private String mobile;

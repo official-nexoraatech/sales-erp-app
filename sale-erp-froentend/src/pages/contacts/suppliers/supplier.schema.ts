@@ -10,7 +10,6 @@ const optionalAmount = z.preprocess(
 );
 
 export const supplierSchema = z.object({
-  companyName: z.string().max(150, 'Company name cannot exceed 150 characters').optional().or(z.literal('')),
   firstName: z.string().min(2, 'First name must have at least 2 characters').max(100),
   lastName: z.string().min(2, 'Last name must have at least 2 characters').max(100),
   email: z.string().email('Invalid email').max(150).optional().or(z.literal('')),
@@ -39,10 +38,10 @@ export type SupplierFormData = z.infer<typeof supplierSchema>;
 export type SupplierFormInput = z.input<typeof supplierSchema>;
 
 export const toSupplierRequest = (data: SupplierFormData) => ({
-  companyName: data.companyName || '',
   firstName: data.firstName,
   lastName: data.lastName,
   mobile: data.mobile,
+  whatsappNo: data.whatsappNo || data.mobile,
   email: data.email || '',
   gstNumber: data.gstNumber || '',
   creditLimit: data.creditLimit ?? 0,

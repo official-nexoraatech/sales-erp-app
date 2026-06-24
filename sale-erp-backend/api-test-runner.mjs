@@ -272,7 +272,6 @@ async function main() {
     || await lookupId('/api/v1/bank-accounts', { predicate: (r) => r.accountNumber === bankAccount.accountNumber, idKeys: ['bankAccountId', 'id'] });
 
   const customer = {
-    companyName: `API Test Customer Co ${runId}`,
     firstName: 'Api',
     lastName: 'Customer',
     email: `apitest.customer.${runId}@example.com`,
@@ -291,13 +290,13 @@ async function main() {
   res = await run('POST', '/api/v1/customers', { body: customer });
   ids.customerId = extractId(res?.body, ['customerId', 'id'])
     || await lookupId('/api/v1/customers', { query: { page: 0, size: 20, search: runId }, predicate: (r) => r.mobile === customer.mobile });
-  await run('PUT', '/api/v1/customers/{id}', { actualPath: `/api/v1/customers/${ids.customerId}`, pathParams: { id: ids.customerId }, body: { ...customer, companyName: `${customer.companyName} Updated`, phone: '0200000001' } });
+  await run('PUT', '/api/v1/customers/{id}', { actualPath: `/api/v1/customers/${ids.customerId}`, pathParams: { id: ids.customerId }, body: { ...customer, phone: '0200000001' } });
 
-  const supplier = { companyName: `API Test Supplier Co ${runId}`, firstName: 'Api', lastName: 'Supplier', mobile: `8${digits}`, email: `apitest.supplier.${runId}@example.com`, gstNumber: '', creditLimit: 1000, openingBalance: 0 };
+  const supplier = { firstName: 'Api', lastName: 'Supplier', mobile: `8${digits}`, email: `apitest.supplier.${runId}@example.com`, gstNumber: '', creditLimit: 1000, openingBalance: 0 };
   res = await run('POST', '/api/v1/suppliers', { body: supplier });
   ids.supplierId = extractId(res?.body, ['supplierId', 'id'])
     || await lookupId('/api/v1/suppliers', { query: { page: 0, size: 20, search: runId }, predicate: (r) => r.mobile === supplier.mobile });
-  await run('PUT', '/api/v1/suppliers/{id}', { actualPath: `/api/v1/suppliers/${ids.supplierId}`, pathParams: { id: ids.supplierId }, body: { ...supplier, companyName: `${supplier.companyName} Updated` } });
+  await run('PUT', '/api/v1/suppliers/{id}', { actualPath: `/api/v1/suppliers/${ids.supplierId}`, pathParams: { id: ids.supplierId }, body: supplier });
 
   const item = {
     itemName: `API Test Item ${runId}`,

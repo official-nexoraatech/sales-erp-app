@@ -31,7 +31,6 @@ public final class ContactSpecification {
 
             String pattern = "%" + search.trim().toLowerCase() + "%";
             List<jakarta.persistence.criteria.Predicate> predicates = new ArrayList<>();
-            predicates.add(criteriaBuilder.like(criteriaBuilder.lower(root.get("companyName")), pattern));
             predicates.add(criteriaBuilder.like(criteriaBuilder.lower(root.get("firstName")), pattern));
             predicates.add(criteriaBuilder.like(criteriaBuilder.lower(root.get("lastName")), pattern));
             predicates.add(criteriaBuilder.like(criteriaBuilder.lower(root.get("email")), pattern));

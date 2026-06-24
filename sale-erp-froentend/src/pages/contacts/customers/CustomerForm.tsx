@@ -87,16 +87,26 @@ export const CustomerForm = ({ register, control, setValue, errors }: CustomerFo
     queryFn: locationApi.getCountries,
   });
   const countries = countriesQuery.data?.data || [];
+  const mobileField = register('mobile');
 
   return (
   <div className="space-y-6">
     <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-      <div className="md:col-span-2"><Input label="Company Name" placeholder="Enter company name" error={errors.companyName?.message} {...register('companyName')} /></div>
       <Input label="First Name *" placeholder="Enter first name" error={errors.firstName?.message} {...register('firstName')} />
       <Input label="Last Name *" placeholder="Enter last name" error={errors.lastName?.message} {...register('lastName')} />
       <Input label="Email" type="email" placeholder="Enter email address" error={errors.email?.message} {...register('email')} />
       <Input label="Phone" type="tel" placeholder="Enter phone number" error={errors.phone?.message} {...register('phone')} />
-      <Input label="Mobile *" type="tel" placeholder="Enter mobile number" error={errors.mobile?.message} {...register('mobile')} />
+      <Input
+        label="Mobile *"
+        type="tel"
+        placeholder="Enter mobile number"
+        error={errors.mobile?.message}
+        {...mobileField}
+        onChange={(event) => {
+          mobileField.onChange(event);
+          setValue('whatsappNo', event.target.value, { shouldDirty: true, shouldValidate: Boolean(errors.whatsappNo) });
+        }}
+      />
       <Input label="WhatsApp Number *" type="tel" placeholder="Enter WhatsApp number" error={errors.whatsappNo?.message} {...register('whatsappNo')} />
       <Input label="GST Number" placeholder="Enter GST number" error={errors.gstNumber?.message} {...register('gstNumber', { setValueAs: (value) => value.toUpperCase() })} />
       <Input label="PAN Number" placeholder="Enter PAN number" error={errors.panNumber?.message} {...register('panNumber', { setValueAs: (value) => value.toUpperCase() })} />
