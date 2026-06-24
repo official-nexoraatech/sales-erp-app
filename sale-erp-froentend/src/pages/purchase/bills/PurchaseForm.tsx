@@ -3,10 +3,11 @@ import { CirclePlus, Trash2 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { carrierApi, itemApi, supplierApi, warehouseApi } from '../../../api/endpoints';
+import { carrierApi, itemApi, paymentMethodApi, supplierApi, warehouseApi } from '../../../api/endpoints';
 import type { PurchaseRequest } from '../../../api/endpoints';
 import { CountryStateSelect } from '../../../components/form/CountryStateSelect';
 import { Button } from '../../../components/ui/Button';
+import { NumericInput } from '../../../components/ui/NumericInput';
 
 interface Line {
   itemId: number;
@@ -20,11 +21,17 @@ interface Line {
   taxPercent: number;
 }
 
+export type PurchaseSubmitPayload = PurchaseRequest & {
+  paymentAmount?: number;
+  paymentMethodId?: number;
+  paymentNote?: string;
+};
+
 interface Props {
   initial?: PurchaseRequest & { lines?: Line[] };
   submitText: string;
   loading: boolean;
-  onSubmit: (payload: PurchaseRequest) => void;
+  onSubmit: (payload: PurchaseSubmitPayload) => void;
   onCancel: () => void;
   mode?: 'bill' | 'order';
 }
@@ -44,8 +51,8 @@ export const PurchaseForm: React.FC<Props> = ({ initial, submitText, loading, on
   const [selectedItem, setSelectedItem] = useState(0);
   const [notes, setNotes] = useState(initial?.notes || '');
   const [roundOff, setRoundOff] = useState(false);
-  const [amount, setAmount] = useState('');
-  const [paymentType, setPaymentType] = useState('');
+  const [amount, setAmount] = useState(0);
+  const [paymentMethodId, setPaymentMethodId] = useState(0);
   const [paymentNote, setPaymentNote] = useState('');
   const [lines, setLines] = useState<Line[]>(initial?.lines || []);
 
@@ -53,7 +60,10 @@ export const PurchaseForm: React.FC<Props> = ({ initial, submitText, loading, on
   const warehouses = useQuery({ queryKey: ['purchase-form-warehouses'], queryFn: () => warehouseApi.getAll() });
   const carriers = useQuery({ queryKey: ['purchase-form-carriers'], queryFn: () => carrierApi.getAll({ page: 0, size: 100, search: '' }), retry: false });
   const items = useQuery({ queryKey: ['purchase-form-items'], queryFn: () => itemApi.getAll({ page: 0, size: 100, search: '' }) });
+  const paymentMethods = useQuery({ queryKey: ['purchase-form-payment-methods'], queryFn: () => paymentMethodApi.getAll('') });
   const warehouseRows = warehouses.data?.data || [];
+  const paymentMethodRows = (paymentMethods.data?.data?.content || [])
+    .filter((method) => method.status === 'ACTIVE' || method.id === paymentMethodId);
 
   useEffect(() => {
     if (!warehouseId && warehouseRows.length) {
@@ -74,7 +84,7 @@ export const PurchaseForm: React.FC<Props> = ({ initial, submitText, loading, on
       manufacturingDate: today,
       expiryDate: today,
       quantity: 1,
-      unitPrice: item.salePrice,
+      unitPrice: item.purchasePrice || item.salePrice,
       discountPercent: 0,
       taxPercent: 0,
     }]);
@@ -96,6 +106,10 @@ export const PurchaseForm: React.FC<Props> = ({ initial, submitText, loading, on
       toast.error('Select supplier, warehouse, and at least one valid item.');
       return;
     }
+    if (amount > 0 && !paymentMethodId) {
+      toast.error('Select payment type for the entered payment amount.');
+      return;
+    }
     onSubmit({
       supplierId,
       purchaseDate,
@@ -114,6 +128,9 @@ export const PurchaseForm: React.FC<Props> = ({ initial, submitText, loading, on
         discountPercent,
         taxPercent,
       })),
+      paymentAmount: amount,
+      paymentMethodId,
+      paymentNote,
     });
   };
 
@@ -128,7 +145,7 @@ export const PurchaseForm: React.FC<Props> = ({ initial, submitText, loading, on
               <option value={0}>Select Supplier</option>
               {suppliers.data?.data?.content.map((supplier) => <option key={supplier.id} value={supplier.id}>{supplier.supplierName}</option>)}
             </select>
-            <button type="button" className="flex h-10 w-9 items-center justify-center rounded-r border border-l-0 border-gray-300 text-blue-500"><CirclePlus size={16} /></button>
+            <button type="button" onClick={() => navigate('/contacts/suppliers/create')} className="flex h-10 w-9 items-center justify-center rounded-r border border-l-0 border-gray-300 text-blue-500" title="Create supplier" aria-label="Create supplier"><CirclePlus size={16} /></button>
           </div>
         </label>
         <label className="text-sm text-gray-600">Date
@@ -156,10 +173,10 @@ export const PurchaseForm: React.FC<Props> = ({ initial, submitText, loading, on
         <label className="text-sm text-gray-600">Enter Item Name
           <div className="mt-1 flex">
             <select className={`${inputClass} rounded-r-none`} value={selectedItem} onChange={(event) => setSelectedItem(Number(event.target.value))}>
-              <option value={0}>Scan Barcode/Search Item/Brand Name</option>
+              <option value={0}>Search Item/Brand Name</option>
               {items.data?.data?.content.map((item) => <option key={item.id} value={item.id}>{item.itemName}</option>)}
             </select>
-            <button type="button" onClick={() => navigate('/items/create')} className="flex h-10 w-11 items-center justify-center rounded-r border border-l-0 border-blue-400 text-blue-500" title="Create item"><CirclePlus size={18} /></button>
+            <button type="button" onClick={() => navigate('/items/create')} className="flex h-10 w-11 items-center justify-center rounded-r border border-l-0 border-blue-400 text-blue-500" title="Create item" aria-label="Create item"><CirclePlus size={18} /></button>
           </div>
         </label>
         <label className="text-sm text-gray-600">Purchased Items
@@ -176,15 +193,15 @@ export const PurchaseForm: React.FC<Props> = ({ initial, submitText, loading, on
               const rowTotal = base - base * line.discountPercent / 100 + base * line.taxPercent / 100;
               return (
                 <tr key={line.itemId}>
-                  <td className="border p-2"><button onClick={() => setLines((current) => current.filter((_, i) => i !== index))} className="text-red-500"><Trash2 size={16} /></button></td>
+                  <td className="border p-2"><button onClick={() => setLines((current) => current.filter((_, i) => i !== index))} className="text-red-500" title="Remove item"><Trash2 size={16} /></button></td>
                   <td className="border p-2">{line.itemName}</td>
                   <td className="border p-2">{line.unitPrice.toFixed(2)}</td>
-                  <td className="border p-2"><input type="number" value={line.quantity} onChange={(event) => updateNumber(index, 'quantity', Number(event.target.value))} className="w-16 rounded border px-2 py-1" /></td>
+                  <td className="border p-2"><NumericInput min={0} value={line.quantity} onValueChange={(value) => updateNumber(index, 'quantity', value)} className="w-16 rounded border px-2 py-1" /></td>
                   <td className="border p-2">Nos</td>
-                  <td className="border p-2"><input type="number" value={line.unitPrice} onChange={(event) => updateNumber(index, 'unitPrice', Number(event.target.value))} className="w-20 rounded border px-2 py-1" /></td>
+                  <td className="border p-2"><NumericInput min={0} value={line.unitPrice} onValueChange={(value) => updateNumber(index, 'unitPrice', value)} className="w-20 rounded border px-2 py-1" /></td>
                   <td className="border p-2">{base.toFixed(2)}</td>
-                  <td className="border p-2"><input type="number" value={line.discountPercent} onChange={(event) => updateNumber(index, 'discountPercent', Number(event.target.value))} className="w-16 rounded border px-2 py-1" /></td>
-                  <td className="border p-2"><input type="number" value={line.taxPercent} onChange={(event) => updateNumber(index, 'taxPercent', Number(event.target.value))} className="w-16 rounded border px-2 py-1" /></td>
+                  <td className="border p-2"><NumericInput min={0} value={line.discountPercent} onValueChange={(value) => updateNumber(index, 'discountPercent', value)} className="w-16 rounded border px-2 py-1" /></td>
+                  <td className="border p-2"><NumericInput min={0} value={line.taxPercent} onValueChange={(value) => updateNumber(index, 'taxPercent', value)} className="w-16 rounded border px-2 py-1" /></td>
                   <td className="border p-2 font-semibold">{rowTotal.toFixed(2)}</td>
                 </tr>
               );
@@ -206,11 +223,11 @@ export const PurchaseForm: React.FC<Props> = ({ initial, submitText, loading, on
 
       <h2 className="border-y px-5 py-4 text-lg font-semibold">Payment</h2>
       <div className="grid grid-cols-1 gap-5 p-5 md:grid-cols-2">
-        <label className="text-sm text-gray-600">#1 Amount<div className="mt-1 flex"><input className={`${inputClass} rounded-r-none text-right`} value={amount} onChange={(event) => setAmount(event.target.value)} /><span className="flex h-10 w-8 items-center justify-center rounded-r border border-l-0 border-gray-300">₹</span></div></label>
-        <label className="text-sm text-gray-600">Payment Type<div className="mt-1 flex"><select className={`${inputClass} rounded-r-none`} value={paymentType} onChange={(event) => setPaymentType(event.target.value)}><option value="">Choose one thing</option><option value="cash">Cash</option><option value="bank">Bank</option></select><button type="button" className="flex h-10 w-9 items-center justify-center rounded-r border border-l-0 border-gray-300 text-blue-500"><CirclePlus size={15} /></button></div></label>
+        <label className="text-sm text-gray-600">#1 Amount<div className="mt-1 flex"><NumericInput min={0} className={`${inputClass} rounded-r-none text-right`} value={amount || ''} onValueChange={setAmount} /><span className="flex h-10 w-10 items-center justify-center rounded-r border border-l-0 border-gray-300">Rs.</span></div></label>
+        <label className="text-sm text-gray-600">Payment Type<div className="mt-1 flex"><select className={`${inputClass} rounded-r-none`} value={paymentMethodId} disabled={paymentMethods.isLoading || paymentMethods.isError} onChange={(event) => setPaymentMethodId(Number(event.target.value))}><option value={0}>{paymentMethods.isLoading ? 'Loading payment types...' : paymentMethods.isError ? 'Failed to load payment types' : 'Choose one thing'}</option>{paymentMethodRows.map((method) => <option key={method.id} value={method.id}>{method.name}</option>)}</select><button type="button" title="Create payment type" aria-label="Create payment type" onClick={() => navigate('/expenses/payment-types/create')} className="flex h-10 w-9 items-center justify-center rounded-r border border-l-0 border-gray-300 text-blue-500"><CirclePlus size={15} /></button></div></label>
         <label className="text-sm text-gray-600">Payment Note<textarea className="mt-1 h-20 w-full rounded border border-gray-300 p-3" value={paymentNote} onChange={(event) => setPaymentNote(event.target.value)} /></label>
       </div>
-      <div className="px-5 pb-5"><button type="button" className="text-sm text-blue-600">+ Add Payment Type</button></div>
+      <div className="px-5 pb-5"><button type="button" onClick={() => navigate('/expenses/payment-types/create')} className="text-sm text-blue-600">+ Add Payment Type</button></div>
 
       <div className="flex gap-3 border-t p-5">
         <Button onClick={submit} isLoading={loading}>{submitText}</Button>

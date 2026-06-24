@@ -63,7 +63,6 @@ export interface ItemListItem {
   itemName: string;
   itemCode: string;
   sku: string;
-  barcode?: string;
   hsnCode?: string;
   categoryId?: number;
   categoryName?: string;
@@ -73,9 +72,6 @@ export interface ItemListItem {
   brandName?: string;
   baseUnitId?: number;
   baseUnitName?: string;
-  secondaryUnitId?: number;
-  secondaryUnitName?: string;
-  conversionRate?: number;
   purchasePrice?: number;
   purchasePriceWithTax?: number;
   taxPercentage?: number;
@@ -103,14 +99,11 @@ export interface ItemRequest {
   itemName: string;
   itemCode: string;
   sku: string;
-  barcode: string;
   hsnCode: string;
   categoryId: number;
   subCategoryId: number;
   brandId: number;
   baseUnitId: number;
-  secondaryUnitId: number;
-  conversionRate: number;
   purchasePrice: number;
   purchasePriceWithTax: number;
   taxPercentage: number;
@@ -382,6 +375,27 @@ export interface PaymentOutRequest {
   amount: number;
   notes: string;
   purchaseIds: number[];
+}
+
+export interface PaymentInRequest {
+  customerId: number;
+  paymentDate: string;
+  paymentMethodId: number;
+  referenceNo: string;
+  amount: number;
+  notes: string;
+  saleIds: number[];
+}
+
+export interface PurchaseCreateResponse {
+  purchaseId: number;
+  purchaseNo: string;
+  subTotal: number;
+  discountAmount: number;
+  taxAmount: number;
+  grandTotal: number;
+  paidAmount: number;
+  dueAmount: number;
 }
 
 export interface PurchaseListItem {

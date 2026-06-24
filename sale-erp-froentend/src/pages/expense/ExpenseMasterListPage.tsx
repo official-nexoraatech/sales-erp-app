@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { Edit, Trash2 } from 'lucide-react';
+import { Edit, Eye, Trash2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import {
@@ -15,6 +15,7 @@ import { queryClient } from '../../app/queryClient';
 import { Button } from '../../components/ui/Button';
 import { Loader } from '../../components/ui/Loader';
 import { Pagination } from '../../components/ui/Pagination';
+import { useConfirmation } from '../../hooks/useConfirmation';
 import { useDebounce } from '../../hooks/useDebounce';
 
 interface Props {
@@ -52,6 +53,7 @@ export const ExpenseMasterListPage: React.FC<Props> = ({ type }) => {
       ? 'expense-subcategories'
       : 'payment-methods';
   const navigate = useNavigate();
+  const { confirmAction, confirmationDialog } = useConfirmation();
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(10);
   const [search, setSearch] = useState('');
@@ -132,7 +134,8 @@ export const ExpenseMasterListPage: React.FC<Props> = ({ type }) => {
       toast.error(`Select at least one ${label.toLowerCase()}`);
       return;
     }
-    if (!confirm(`Delete selected ${label.toLowerCase()} records?`)) return;
+    const confirmed = await confirmAction({ title: `Delete ${label}s`, message: `Delete selected ${label.toLowerCase()} records?`, confirmText: 'Delete', variant: 'danger' });
+    if (!confirmed) return;
     for (const id of selectedIds) {
       await remove.mutateAsync(id);
     }
@@ -245,6 +248,13 @@ export const ExpenseMasterListPage: React.FC<Props> = ({ type }) => {
                     <td className="border p-3">
                       <div className="flex gap-2">
                         <button
+                          title={`View ${label}`}
+                          onClick={() => navigate(`${basePath}/${row.id}`)}
+                          className="text-blue-600"
+                        >
+                          <Eye size={16} />
+                        </button>
+                        <button
                           title={`Edit ${label}`}
                           onClick={() => navigate(`${basePath}/${row.id}/edit`)}
                           className="text-orange-600"
@@ -253,7 +263,10 @@ export const ExpenseMasterListPage: React.FC<Props> = ({ type }) => {
                         </button>
                         <button
                           title={`Delete ${label}`}
-                          onClick={() => confirm(`Delete this ${label.toLowerCase()}?`) && remove.mutate(row.id)}
+                          onClick={async () => {
+                            const confirmed = await confirmAction({ title: `Delete ${label}`, message: `Delete this ${label.toLowerCase()}?`, confirmText: 'Delete', variant: 'danger' });
+                            if (confirmed) remove.mutate(row.id);
+                          }}
                           className="text-red-600"
                         >
                           <Trash2 size={16} />
@@ -280,6 +293,7 @@ export const ExpenseMasterListPage: React.FC<Props> = ({ type }) => {
           <Pagination page={safePage} totalPages={totalPages} onPageChange={setPage} />
         </div>
       </div>
+      {confirmationDialog}
     </div>
   );
 };

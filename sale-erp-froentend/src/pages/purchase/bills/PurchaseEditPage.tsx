@@ -12,7 +12,10 @@ export const PurchaseEditPage: React.FC = () => {
   const id = Number(useParams<{ id: string }>().id);
   const purchase = useQuery({ queryKey: ['purchase', id], queryFn: () => purchaseApi.getById(id), enabled: id > 0 });
   const mutation = useMutation({
-    mutationFn: (payload: any) => purchaseApi.update(id, payload),
+    mutationFn: (payload: any) => {
+      const { paymentAmount, paymentMethodId, paymentNote, ...purchasePayload } = payload;
+      return purchaseApi.update(id, purchasePayload);
+    },
     onSuccess: () => {
       toast.success('Purchase updated successfully');
       queryClient.invalidateQueries({ queryKey: ['purchases'] });

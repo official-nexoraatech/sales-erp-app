@@ -10,6 +10,7 @@ import { Button } from '../../components/ui/Button';
 import { Loader } from '../../components/ui/Loader';
 import { Pagination } from '../../components/ui/Pagination';
 import { useAuth } from '../../hooks/useAuth';
+import { useConfirmation } from '../../hooks/useConfirmation';
 import { useDebounce } from '../../hooks/useDebounce';
 import { usePagination } from '../../hooks/usePagination';
 import { formatDate } from '../../utils/formatDate';
@@ -24,6 +25,7 @@ export const MasterListPage: React.FC<Props> = ({ type }) => {
   const exportColumns = isCategory ? ['Name', 'Description', 'Created by', 'Created at'] : ['Category', 'Name', 'Description', 'Created by', 'Created at'];
   const navigate = useNavigate();
   const { user, hasPermission } = useAuth();
+  const { confirmAction, confirmationDialog } = useConfirmation();
   const hasCategoryLookup = isCategory || hasPermission(PERMISSIONS.CATEGORY_VIEW);
   const canCreate = hasPermission(isCategory ? PERMISSIONS.CATEGORY_CREATE : PERMISSIONS.BRAND_CREATE) && hasCategoryLookup;
   const canUpdate = hasPermission(isCategory ? PERMISSIONS.CATEGORY_UPDATE : PERMISSIONS.BRAND_UPDATE) && hasCategoryLookup;
@@ -74,7 +76,8 @@ export const MasterListPage: React.FC<Props> = ({ type }) => {
   };
   const deleteSelected = async () => {
     if (!selectedIds.length) return toast.error(`Select at least one ${label.toLowerCase()}`);
-    if (!confirm(`Delete selected ${label.toLowerCase()} records?`)) return;
+    const confirmed = await confirmAction({ title: `Delete ${label}s`, message: `Delete selected ${label.toLowerCase()} records?`, confirmText: 'Delete', variant: 'danger' });
+    if (!confirmed) return;
     for (const id of selectedIds) await remove.mutateAsync(id);
     setSelectedIds([]);
   };
@@ -95,11 +98,12 @@ export const MasterListPage: React.FC<Props> = ({ type }) => {
         <div className="overflow-x-auto px-3 pb-3">
           {records.isLoading ? <div className="p-10"><Loader /></div> : <table className="w-full text-sm">
             <thead className="bg-gray-50"><tr>{canDelete && <th className="border p-3"><input type="checkbox" checked={allSelected} onChange={() => setSelectedIds(allSelected ? [] : rows.map((row) => row.id))} /></th>}{exportColumns.concat(showActions ? 'Action' : []).map((heading) => <th key={heading} className="border p-3 text-left">{heading}</th>)}</tr></thead>
-            <tbody>{rows.length ? rows.map((row: SimpleMaster) => <tr key={row.id} className="border-b even:bg-gray-50">{canDelete && <td className="border p-3"><input type="checkbox" checked={selectedIds.includes(row.id)} onChange={() => setSelectedIds((current) => current.includes(row.id) ? current.filter((id) => id !== row.id) : [...current, row.id])} /></td>}{!isCategory && <td className="border p-3">{row.categoryName || ''}</td>}<td className="border p-3 font-semibold">{row.name}</td><td className="border p-3">{row.description || ''}</td><td className="border p-3">{row.createdBy || user?.userName || 'admin'}</td><td className="border p-3">{row.createdAt ? formatDate(row.createdAt) : ''}</td>{showActions && <td className="border p-3"><div className="flex gap-2">{canUpdate && <button onClick={() => navigate(`/items/${isCategory ? 'categories' : 'brands'}/${row.id}/edit`, { state: row })} className="text-orange-600"><Edit size={16} /></button>}{canDelete && <button onClick={() => confirm(`Delete this ${label.toLowerCase()}?`) && remove.mutate(row.id)} className="text-red-600"><Trash2 size={16} /></button>}</div></td>}</tr>) : <tr><td colSpan={exportColumns.length + Number(canDelete) + Number(showActions)} className="bg-gray-50 p-5 text-center">No data available in table</td></tr>}</tbody>
+            <tbody>{rows.length ? rows.map((row: SimpleMaster) => <tr key={row.id} className="border-b even:bg-gray-50">{canDelete && <td className="border p-3"><input type="checkbox" checked={selectedIds.includes(row.id)} onChange={() => setSelectedIds((current) => current.includes(row.id) ? current.filter((id) => id !== row.id) : [...current, row.id])} /></td>}{!isCategory && <td className="border p-3">{row.categoryName || ''}</td>}<td className="border p-3 font-semibold">{row.name}</td><td className="border p-3">{row.description || ''}</td><td className="border p-3">{row.createdBy || user?.userName || 'admin'}</td><td className="border p-3">{row.createdAt ? formatDate(row.createdAt) : ''}</td>{showActions && <td className="border p-3"><div className="flex gap-2">{canUpdate && <button onClick={() => navigate(`/items/${isCategory ? 'categories' : 'brands'}/${row.id}/edit`, { state: row })} className="text-orange-600"><Edit size={16} /></button>}{canDelete && <button onClick={async () => { if (await confirmAction({ title: `Delete ${label}`, message: `Delete this ${label.toLowerCase()}?`, confirmText: 'Delete', variant: 'danger' })) remove.mutate(row.id); }} className="text-red-600"><Trash2 size={16} /></button>}</div></td>}</tr>) : <tr><td colSpan={exportColumns.length + Number(canDelete) + Number(showActions)} className="bg-gray-50 p-5 text-center">No data available in table</td></tr>}</tbody>
           </table>}
         </div>
         <div className="flex flex-wrap items-center justify-between gap-3 border-t px-5 py-4 text-sm text-gray-600"><span>Showing {rows.length ? page * pageSize + 1 : 0} to {page * pageSize + rows.length} of {records.data?.data?.totalElements || 0} entries</span><Pagination page={page} totalPages={records.data?.data?.totalPages || 1} onPageChange={handlePageChange} /></div>
       </div>
+      {confirmationDialog}
     </div>
   );
 };

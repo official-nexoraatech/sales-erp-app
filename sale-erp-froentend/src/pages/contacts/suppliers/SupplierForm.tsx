@@ -105,8 +105,8 @@ export const SupplierForm = ({ register, setValue, errors }: SupplierFormProps) 
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-4 pt-5 md:grid-cols-2">
-            <Input label="Credit Limit" type="number" min="0" step="0.01" placeholder="0.00" error={errors.creditLimit?.message} {...register('creditLimit')} />
-            <Input label="Opening Balance" type="number" min="0" step="0.01" placeholder="0.00" error={errors.openingBalance?.message} {...register('openingBalance')} />
+            <Input label="Credit Limit" inputMode="decimal" placeholder="0.00" error={errors.creditLimit?.message} {...register('creditLimit')} />
+            <Input label="Opening Balance" inputMode="decimal" placeholder="0.00" error={errors.openingBalance?.message} {...register('openingBalance')} />
           </div>
         )}
       </div>

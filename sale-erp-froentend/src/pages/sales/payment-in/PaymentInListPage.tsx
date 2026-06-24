@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { customerApi, paymentInApi } from '../../../api/endpoints';
 import type { PaymentListItem } from '../../../api/endpoints';
+import { Button } from '../../../components/ui/Button';
 import { Loader } from '../../../components/ui/Loader';
 import { Pagination } from '../../../components/ui/Pagination';
 import { useAuth } from '../../../hooks/useAuth';
@@ -74,7 +75,10 @@ export const PaymentInListPage: React.FC = () => {
     <div className="space-y-5">
       <div className="text-sm text-gray-500">Home › Sale › Payment In</div>
       <div className="overflow-hidden rounded-lg bg-white shadow">
-        <div className="border-b px-5 py-4"><h1 className="text-xl font-semibold uppercase text-gray-900">Payment In</h1></div>
+        <div className="flex items-center justify-between border-b px-5 py-4">
+          <h1 className="text-xl font-semibold uppercase text-gray-900">Payment In</h1>
+          <Button onClick={() => navigate('/sales/payment-in/create')} className="min-w-[150px]">Add Payment</Button>
+        </div>
 
         <div className="grid grid-cols-1 gap-x-4 gap-y-3 border-b p-5 md:grid-cols-2 xl:grid-cols-4">
           <label className="text-sm text-gray-600">Customers

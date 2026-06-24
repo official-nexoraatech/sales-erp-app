@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   ChevronDown,
   Grid2X2,
@@ -12,12 +12,31 @@ import {
 import { useNavigate } from 'react-router-dom';
 import { PERMISSIONS } from '../../auth/permissions';
 import { useAuth } from '../../hooks/useAuth';
+import { LANGUAGE_OPTIONS, usePageTranslation } from '../../hooks/usePageTranslation';
+import type { AppLanguage } from '../../hooks/usePageTranslation';
+
+const getStoredLanguage = (): AppLanguage => {
+  const language = localStorage.getItem('language');
+  return LANGUAGE_OPTIONS.some((option) => option.value === language) ? language as AppLanguage : 'en';
+};
 
 export const AppHeader: React.FC = () => {
   const navigate = useNavigate();
   const { user, logout, hasPermission } = useAuth();
   const [profileOpen, setProfileOpen] = useState(false);
-  const [darkIcon, setDarkIcon] = useState(false);
+  const [darkMode, setDarkMode] = useState(() => localStorage.getItem('appearance') === 'dark');
+  const [language, setLanguage] = useState<AppLanguage>(getStoredLanguage);
+
+  usePageTranslation(language);
+
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', darkMode);
+    localStorage.setItem('appearance', darkMode ? 'dark' : 'light');
+  }, [darkMode]);
+
+  useEffect(() => {
+    localStorage.setItem('language', language);
+  }, [language]);
 
   const handleLogout = () => {
     logout();
@@ -27,7 +46,7 @@ export const AppHeader: React.FC = () => {
   return (
     <header className="relative z-20 flex h-16 shrink-0 items-center justify-between border-b border-indigo-100 bg-white px-4 shadow-[0_3px_12px_rgba(79,70,229,0.08)] md:px-6">
       <div className="pl-10 text-sm font-semibold text-slate-700 md:pl-0">
-        <span className="hidden sm:inline">{user?.organizationName || 'BillTop'}</span>
+        <span className="hidden sm:inline">{user?.organizationName || 'Nexoraa'}</span>
       </div>
 
       <div className="flex items-center gap-2">
@@ -66,17 +85,29 @@ export const AppHeader: React.FC = () => {
           onClick={() => navigate('/dashboard')}
           className="rounded-lg p-2 text-slate-600 transition hover:bg-slate-100"
           aria-label="Open dashboard"
+          title="Dashboard"
         >
           <Grid2X2 size={18} />
         </button>
-        <span className="hidden text-xl sm:inline" aria-label="India">🇮🇳</span>
+        <select
+          value={language}
+          onChange={(event) => setLanguage(event.target.value as AppLanguage)}
+          className="hidden h-9 rounded-lg border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-600 outline-none hover:bg-slate-50 sm:block"
+          aria-label="Language"
+          title="Language"
+        >
+          {LANGUAGE_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>{option.label}</option>
+          ))}
+        </select>
         <button
           type="button"
-          onClick={() => setDarkIcon((current) => !current)}
+          onClick={() => setDarkMode((current) => !current)}
           className="rounded-lg p-2 text-slate-600 transition hover:bg-slate-100"
           aria-label="Toggle appearance"
+          title="Toggle appearance"
         >
-          {darkIcon ? <Sun size={18} /> : <Moon size={18} />}
+          {darkMode ? <Sun size={18} /> : <Moon size={18} />}
         </button>
 
         <div className="relative ml-1 border-l border-slate-200 pl-3">
@@ -84,6 +115,7 @@ export const AppHeader: React.FC = () => {
             type="button"
             onClick={() => setProfileOpen((current) => !current)}
             className="flex items-center gap-2 rounded-lg px-1.5 py-1 text-left transition hover:bg-slate-50"
+            title="Profile menu"
           >
             <div className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-200 text-sm font-bold text-slate-500">
               {user?.userName?.charAt(0).toUpperCase() || 'U'}
@@ -135,4 +167,3 @@ export const AppHeader: React.FC = () => {
     </header>
   );
 };
-

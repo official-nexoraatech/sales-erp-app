@@ -2,9 +2,10 @@ import React, { useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { paymentOutApi, purchaseApi, supplierApi } from '../../../api/endpoints';
+import { paymentMethodApi, paymentOutApi, purchaseApi, supplierApi } from '../../../api/endpoints';
 import type { PaymentOutRequest } from '../../../api/endpoints';
 import { Button } from '../../../components/ui/Button';
+import { NumericInput } from '../../../components/ui/NumericInput';
 import { formatCurrency } from '../../../utils/formatCurrency';
 
 const inputClass = 'h-10 w-full rounded border border-gray-300 bg-white px-3 text-sm text-gray-900 outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-gray-50';
@@ -21,6 +22,9 @@ export const PaymentOutCreatePage: React.FC = () => {
 
   const suppliers = useQuery({ queryKey: ['payment-out-create-suppliers'], queryFn: () => supplierApi.getAll({ page: 0, size: 100, search: '' }) });
   const purchases = useQuery({ queryKey: ['payment-out-create-purchases'], queryFn: () => purchaseApi.getAll({ page: 0, size: 100, search: '' }) });
+  const paymentMethods = useQuery({ queryKey: ['payment-out-create-payment-methods'], queryFn: () => paymentMethodApi.getAll('') });
+  const paymentMethodRows = (paymentMethods.data?.data?.content || [])
+    .filter((method) => method.status === 'ACTIVE' || method.id === paymentMethodId);
   const mutation = useMutation({
     mutationFn: (payload: PaymentOutRequest) => paymentOutApi.create(payload),
     onSuccess: () => {
@@ -58,18 +62,22 @@ export const PaymentOutCreatePage: React.FC = () => {
             <input type="date" className={`${inputClass} mt-1`} value={paymentDate} onChange={(event) => setPaymentDate(event.target.value)} />
           </label>
           <label className="text-sm text-gray-600">Payment Type
-            <select className={`${inputClass} mt-1`} value={paymentMethodId} onChange={(event) => setPaymentMethodId(Number(event.target.value))}>
-              <option value={0}>Choose one thing</option>
-              <option value={1}>Cash</option>
-              <option value={2}>Bank</option>
-              <option value={3}>UPI</option>
+            <select className={`${inputClass} mt-1`} value={paymentMethodId} disabled={paymentMethods.isLoading || paymentMethods.isError} onChange={(event) => setPaymentMethodId(Number(event.target.value))}>
+              <option value={0}>
+                {paymentMethods.isLoading
+                  ? 'Loading payment types...'
+                  : paymentMethods.isError
+                    ? 'Failed to load payment types'
+                    : 'Choose one thing'}
+              </option>
+              {paymentMethodRows.map((method) => <option key={method.id} value={method.id}>{method.name}</option>)}
             </select>
           </label>
           <label className="text-sm text-gray-600">Reference No.
             <input className={`${inputClass} mt-1`} value={referenceNo} onChange={(event) => setReferenceNo(event.target.value)} placeholder="(Optional)" />
           </label>
           <label className="text-sm text-gray-600">Amount
-            <div className="mt-1 flex"><input type="number" min="0" className={`${inputClass} rounded-r-none text-right`} value={amount || ''} onChange={(event) => setAmount(Number(event.target.value))} /><span className="flex h-10 w-8 items-center justify-center rounded-r border border-l-0 border-gray-300">₹</span></div>
+            <div className="mt-1 flex"><NumericInput min={0} className={`${inputClass} rounded-r-none text-right`} value={amount || ''} onValueChange={setAmount} /><span className="flex h-10 w-8 items-center justify-center rounded-r border border-l-0 border-gray-300">₹</span></div>
           </label>
         </div>
         <div className="border-y px-5 py-4"><h2 className="text-lg font-semibold">Purchase Bills</h2></div>

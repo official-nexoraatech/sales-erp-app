@@ -1,8 +1,12 @@
 import { z } from 'zod';
 
 const optionalAmount = z.preprocess(
-  (value) => (value === '' || value == null ? undefined : Number(value)),
-  z.number().min(0, 'Amount cannot be negative').optional()
+  (value) => (value === '' || value == null ? undefined : String(value).trim()),
+  z.string()
+    .regex(/^-?(?:\d+|\d*\.\d+)$/, 'Enter a valid number')
+    .transform(Number)
+    .pipe(z.number().min(0, 'Amount cannot be negative'))
+    .optional()
 );
 
 export const supplierSchema = z.object({

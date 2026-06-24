@@ -9,6 +9,7 @@ import { queryClient } from '../../app/queryClient';
 import { Button } from '../../components/ui/Button';
 import { Loader } from '../../components/ui/Loader';
 import { Pagination } from '../../components/ui/Pagination';
+import { useConfirmation } from '../../hooks/useConfirmation';
 import { useDebounce } from '../../hooks/useDebounce';
 import { formatDate } from '../../utils/formatDate';
 import { employeeStatuses, fullName, inputClass, pretty, statusClass } from './staffShared';
@@ -17,6 +18,7 @@ const columns = ['Employee Code', 'Name', 'Mobile', 'Email', 'Department', 'Desi
 
 export const StaffEmployeesPage: React.FC = () => {
   const navigate = useNavigate();
+  const { confirmAction, confirmationDialog } = useConfirmation();
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(10);
   const [search, setSearch] = useState('');
@@ -111,7 +113,7 @@ export const StaffEmployeesPage: React.FC = () => {
                       <div className="flex gap-2">
                         <button type="button" onClick={() => navigate(`/staff/employees/${employee.id}`)} className="text-blue-600"><Eye size={17} /></button>
                         <button type="button" onClick={() => navigate(`/staff/employees/${employee.id}/edit`)} className="text-orange-600"><Edit size={17} /></button>
-                        <button type="button" onClick={() => confirm('Delete this employee?') && remove.mutate(employee.id)} className="text-red-600"><Trash2 size={17} /></button>
+                        <button type="button" onClick={async () => { if (await confirmAction({ title: 'Delete Employee', message: 'Delete this employee?', confirmText: 'Delete', variant: 'danger' })) remove.mutate(employee.id); }} className="text-red-600"><Trash2 size={17} /></button>
                       </div>
                     </td>
                   </tr>
@@ -126,6 +128,7 @@ export const StaffEmployeesPage: React.FC = () => {
           <Pagination page={page} totalPages={employees.data?.data?.totalPages || 1} onPageChange={setPage} />
         </div>
       </div>
+      {confirmationDialog}
     </div>
   );
 };

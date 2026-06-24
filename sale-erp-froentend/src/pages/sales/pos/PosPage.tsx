@@ -3,8 +3,9 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { Box, CalendarDays, CirclePlus, CreditCard, LayoutDashboard, Minus, PackageSearch, Plus, Trash2, Users } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { customerApi, itemApi, posApi, warehouseApi } from '../../../api/endpoints';
+import { customerApi, itemApi, paymentMethodApi, posApi, warehouseApi } from '../../../api/endpoints';
 import type { ItemListItem } from '../../../api/endpoints';
+import { NumericInput } from '../../../components/ui/NumericInput';
 import { useDebounce } from '../../../hooks/useDebounce';
 
 interface CartLine extends ItemListItem { quantity: number }
@@ -27,6 +28,13 @@ const formatNumber = (value: number | null | undefined, digits = 2) => {
   const numberValue = Number(value);
   return Number.isFinite(numberValue) ? numberValue.toFixed(digits) : '-';
 };
+
+const escapeHtml = (value: unknown) => String(value ?? '')
+  .replaceAll('&', '&amp;')
+  .replaceAll('<', '&lt;')
+  .replaceAll('>', '&gt;')
+  .replaceAll('"', '&quot;')
+  .replaceAll("'", '&#039;');
 
 const formatNameWithId = (name?: string | null, id?: number | null) => {
   const label = formatValue(name);
@@ -59,13 +67,21 @@ export const PosPage: React.FC = () => {
 
   const customers = useQuery({ queryKey: ['pos-customers', debouncedCustomerSearch], queryFn: () => customerApi.getAll({ page: 0, size: 100, search: debouncedCustomerSearch }) });
   const warehouses = useQuery({ queryKey: ['pos-warehouses'], queryFn: () => warehouseApi.getAll() });
+  const paymentMethods = useQuery({ queryKey: ['pos-payment-methods'], queryFn: () => paymentMethodApi.getAll('') });
   const warehouseRows = warehouses.data?.data || [];
+  const paymentMethodRows = (paymentMethods.data?.data?.content || [])
+    .filter((method) => method.status === 'ACTIVE' || method.id === paymentMethodId);
 
   useEffect(() => {
     if (!warehouseId && warehouseRows.length) {
       setWarehouseId(warehouseRows[0].id);
     }
   }, [warehouseId, warehouseRows]);
+  useEffect(() => {
+    if (!paymentMethodId && paymentMethodRows.length) {
+      setPaymentMethodId(paymentMethodRows[0].id);
+    }
+  }, [paymentMethodId, paymentMethodRows]);
 
   const addItem = useCallback((item: ItemListItem) => setCart((current) => {
     const availableQty = Number(item.availableQty ?? 0);
@@ -97,7 +113,6 @@ export const PosPage: React.FC = () => {
       const response = await itemApi.getAll({ page: 0, size: 5, search: scannedValue });
       const results = response.data?.content || [];
       const exactMatch = results.find((item) =>
-        String(item.barcode || '') === scannedValue ||
         String(item.itemCode || '') === scannedValue ||
         String(item.sku || '') === scannedValue
       );
@@ -243,18 +258,36 @@ export const PosPage: React.FC = () => {
       window.setTimeout(() => scanAndAddItem(value, 'input-paste'), 0);
     }
   };
-  const save = () => {
+  const printReceipt = (cartSnapshot: CartLine[]) => {
+    const popup = window.open('', '_blank');
+    if (!popup) return;
+    const customer = customers.data?.data?.content.find((entry) => entry.id === customerId);
+    const method = paymentMethodRows.find((entry) => entry.id === paymentMethodId);
+    const rows = cartSnapshot.map((line) => {
+      const amount = Number(line.salePrice || 0) * line.quantity;
+      return `<tr><td>${escapeHtml(line.itemName)}</td><td>${line.quantity}</td><td>${formatNumber(line.salePrice)}</td><td>${formatNumber(amount)}</td></tr>`;
+    }).join('');
+    popup.document.write(`<html><head><title>POS Receipt</title></head><body><h2>Nexoraa POS Receipt</h2><p>Customer: ${escapeHtml(customer?.customerName || 'Walk in Customer')}</p><p>Payment: ${escapeHtml(method?.name || '')}</p><table border="1" cellspacing="0" cellpadding="6"><thead><tr><th>Item</th><th>Qty</th><th>Rate</th><th>Total</th></tr></thead><tbody>${rows}</tbody><tfoot><tr><td colspan="3"><strong>Grand Total</strong></td><td><strong>${formatNumber(grandTotal)}</strong></td></tr></tfoot></table><script>window.print()</script></body></html>`);
+    popup.document.close();
+  };
+  const submitBill = async (print = false) => {
     if (!customerId) return toast.error('Please select a customer');
     if (!warehouseId) return toast.error('Please select a warehouse');
-    if (!paymentMethodId) return toast.error('Please enter a payment method ID');
+    if (!paymentMethodId) return toast.error('Please select a payment method');
     if (!cart.length) return toast.error('Please add at least one item');
-    billing.mutate();
+    const cartSnapshot = [...cart];
+    try {
+      await billing.mutateAsync();
+      if (print) printReceipt(cartSnapshot);
+    } catch {
+      // The mutation onError handler already reports the API error.
+    }
   };
 
   return (
     <div className="min-h-screen bg-[#f5f6ff] text-slate-700">
       <header className="flex h-12 items-center justify-between border-b bg-white px-3 shadow-sm">
-        <button onClick={() => navigate('/dashboard')} className="text-xl font-semibold text-blue-600">BillTop</button>
+        <button onClick={() => navigate('/dashboard')} className="text-xl font-semibold text-blue-600">Nexoraa</button>
         <nav className="hidden items-center gap-5 text-xs text-slate-600 md:flex">
           <button onClick={() => navigate('/dashboard')} className="flex items-center gap-1 hover:text-blue-600"><LayoutDashboard size={13} />Dashboard</button>
           <button onClick={() => navigate('/contacts/customers')} className="flex items-center gap-1 hover:text-blue-600"><Users size={13} />Customer List</button>
@@ -291,8 +324,11 @@ export const PosPage: React.FC = () => {
               <input value="7" readOnly className={`${controlClass} rounded-l-none`} />
             </div>
           </div>
-          <label className={fieldLabelClass}>Payment Method ID
-            <input type="number" min="1" className={`${controlClass} mt-1`} value={paymentMethodId || ''} onChange={(event) => setPaymentMethodId(Number(event.target.value))} placeholder="Payment ID" />
+          <label className={fieldLabelClass}>Payment Method
+            <select className={`${controlClass} mt-1`} value={paymentMethodId} disabled={paymentMethods.isLoading || paymentMethods.isError} onChange={(event) => setPaymentMethodId(Number(event.target.value))}>
+              <option value={0}>{paymentMethods.isLoading ? 'Loading payment methods...' : paymentMethods.isError ? 'Failed to load payment methods' : 'Choose one thing'}</option>
+              {paymentMethodRows.map((method) => <option key={method.id} value={method.id}>{method.name}</option>)}
+            </select>
           </label>
           <div className={fieldLabelClass}>
             <span>Customer</span>
@@ -329,14 +365,11 @@ export const PosPage: React.FC = () => {
                       'ITEM',
                       'ITEM CODE',
                       'SKU',
-                      'BARCODE',
                       'HSN',
                       'CATEGORY',
                       'SUBCATEGORY',
                       'BRAND',
                       'BASE UNIT',
-                      'SECONDARY UNIT',
-                      'CONVERSION',
                       'WAREHOUSE',
                       'BATCH',
                       'MFG DATE',
@@ -377,14 +410,11 @@ export const PosPage: React.FC = () => {
                         <td className="border border-slate-200 p-2 font-semibold text-slate-800">{formatValue(line.itemName)}</td>
                         <td className="border border-slate-200 p-2">{formatValue(line.itemCode)}</td>
                         <td className="border border-slate-200 p-2">{formatValue(line.sku)}</td>
-                        <td className="border border-slate-200 p-2">{formatValue(line.barcode)}</td>
                         <td className="border border-slate-200 p-2">{formatValue(line.hsnCode)}</td>
                         <td className="border border-slate-200 p-2">{formatNameWithId(line.categoryName, line.categoryId)}</td>
                         <td className="border border-slate-200 p-2">{formatNameWithId(line.subCategoryName, line.subCategoryId)}</td>
                         <td className="border border-slate-200 p-2">{formatNameWithId(line.brandName, line.brandId)}</td>
                         <td className="border border-slate-200 p-2">{formatNameWithId(line.baseUnitName || line.unitName, line.baseUnitId)}</td>
-                        <td className="border border-slate-200 p-2">{formatNameWithId(line.secondaryUnitName, line.secondaryUnitId)}</td>
-                        <td className="border border-slate-200 p-2">{formatNumber(line.conversionRate)}</td>
                         <td className="border border-slate-200 p-2">{formatNameWithId(line.warehouseName, line.warehouseId)}</td>
                         <td className="border border-slate-200 p-2">{formatValue(line.batchNo)}</td>
                         <td className="border border-slate-200 p-2">{formatValue(line.manufacturingDate)}</td>
@@ -395,7 +425,7 @@ export const PosPage: React.FC = () => {
                         <td className="border border-slate-200 p-2">
                           <div className="flex items-center">
                             <button type="button" onClick={() => updateQuantity(line.id, line.quantity - 1)}><Minus size={13} /></button>
-                            <input value={line.quantity} onChange={(event) => updateQuantity(line.id, Number(event.target.value) || 1)} className="mx-1 h-7 w-12 border text-center" />
+                            <NumericInput min={1} max={line.availableQty} value={line.quantity} onValueChange={(value) => updateQuantity(line.id, value)} containerClassName="mx-1 w-12" className="h-7 w-12 border text-center" />
                             <button type="button" onClick={() => updateQuantity(line.id, line.quantity + 1)}><Plus size={13} /></button>
                           </div>
                         </td>
@@ -416,7 +446,7 @@ export const PosPage: React.FC = () => {
                       </tr>
                     );
                   }) : (
-                    <tr><td colSpan={35} className="bg-slate-50 py-4 text-center italic text-slate-600">No items are added yet!!</td></tr>
+                    <tr><td colSpan={32} className="bg-slate-50 py-4 text-center italic text-slate-600">No items are added yet!!</td></tr>
                   )}
                 </tbody>
               </table>
@@ -426,8 +456,11 @@ export const PosPage: React.FC = () => {
             <div className="ml-auto grid w-full max-w-[820px] grid-cols-1 gap-4 md:grid-cols-2">
               <div className="border bg-white">
                 <div className="grid grid-cols-1 gap-3 bg-[#f0f0f8] p-2 sm:grid-cols-[1fr_120px]">
-                  <label className="text-xs font-medium text-slate-600">Payment Method ID
-                    <input type="number" min="1" value={paymentMethodId || ''} onChange={(event) => setPaymentMethodId(Number(event.target.value))} className="mt-1 h-8 w-full rounded border px-2 text-xs" placeholder="Payment ID" />
+                  <label className="text-xs font-medium text-slate-600">Payment Method
+                    <select value={paymentMethodId} onChange={(event) => setPaymentMethodId(Number(event.target.value))} className="mt-1 h-8 w-full rounded border px-2 text-xs" disabled={paymentMethods.isLoading || paymentMethods.isError}>
+                      <option value={0}>Choose</option>
+                      {paymentMethodRows.map((method) => <option key={method.id} value={method.id}>{method.name}</option>)}
+                    </select>
                   </label>
                   <label className="text-xs font-medium text-slate-600">Amount
                     <input value={grandTotal.toFixed(2)} readOnly className="mt-1 h-8 w-full rounded border px-2 text-right" />
@@ -435,7 +468,7 @@ export const PosPage: React.FC = () => {
                 </div>
                 <p className="border-t px-3 py-2 text-right text-xs font-semibold">Balance <span className="ml-20">0</span></p>
                 <p className="border-t px-3 py-2 text-right text-xs font-semibold">Change Return <span className="ml-16 text-xl text-red-500">0</span></p>
-                <button className="px-2 py-1 text-xs text-blue-500">+ Add Payment Type</button>
+                <button type="button" onClick={() => navigate('/expenses/payment-types/create')} className="px-2 py-1 text-xs text-blue-500">+ Add Payment Type</button>
               </div>
               <div className="border bg-white"><label className="flex items-center gap-2 bg-[#f0f0f8] p-3 text-xs font-semibold"><input type="checkbox" checked={roundOff} onChange={(event) => setRoundOff(event.target.checked)} />Round Off</label><p className="flex justify-between border-t p-3 text-xs font-bold"><span>Grand Total</span><span>{grandTotal.toFixed(2)}</span></p></div>
             </div>
@@ -446,8 +479,8 @@ export const PosPage: React.FC = () => {
       <footer className="fixed inset-x-0 bottom-0 z-20 flex h-12 items-center justify-end gap-3 border-t bg-white px-4 shadow-[0_-2px_8px_rgba(0,0,0,0.06)]">
         <button onClick={() => navigate('/dashboard')} className="rounded bg-slate-100 px-5 py-2 text-sm">Close</button>
         <button onClick={() => setCart([])} className="rounded bg-slate-600 px-5 py-2 text-sm text-white">New</button>
-        <button onClick={save} disabled={billing.isPending} className="rounded bg-blue-500 px-5 py-2 text-sm text-white">Save &amp; Print</button>
-        <button onClick={save} disabled={billing.isPending} className="rounded bg-green-500 px-5 py-2 text-sm text-white">Save</button>
+        <button onClick={() => submitBill(true)} disabled={billing.isPending} className="rounded bg-blue-500 px-5 py-2 text-sm text-white">Save &amp; Print</button>
+        <button onClick={() => submitBill(false)} disabled={billing.isPending} className="rounded bg-green-500 px-5 py-2 text-sm text-white">Save</button>
       </footer>
     </div>
   );

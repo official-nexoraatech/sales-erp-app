@@ -284,7 +284,7 @@ export const customerApi = {
 ### Login
 1. Navigate to http://localhost:5173/login
 2. Use credentials:
-   - Username: deepakdagade
+   - Username: dipakdagade
    - Password: Deepak@3536
 3. Will redirect to dashboard
 

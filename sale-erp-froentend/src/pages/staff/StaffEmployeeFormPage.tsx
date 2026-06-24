@@ -8,6 +8,7 @@ import type { Country, EmployeeAddressRequest, EmployeeRequest, EmploymentType, 
 import { queryClient } from '../../app/queryClient';
 import { Button } from '../../components/ui/Button';
 import { Loader } from '../../components/ui/Loader';
+import { NumericInput } from '../../components/ui/NumericInput';
 import { employeeStatuses, employmentTypes, inputClass, labelClass, paymentModes, pretty } from './staffShared';
 
 const today = new Date().toISOString().slice(0, 10);
@@ -242,10 +243,10 @@ export const StaffEmployeeFormPage: React.FC<Props> = ({ mode = 'create' }) => {
         <section className="border-b p-5">
           <h2 className="mb-4 text-lg font-semibold text-gray-900">Salary Details</h2>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-            <label className={labelClass}>Basic Salary<input type="number" className={`${inputClass} mt-1`} value={form.basicSalary || ''} onChange={(event) => set('basicSalary', Number(event.target.value))} /></label>
-            <label className={labelClass}>HRA<input type="number" className={`${inputClass} mt-1`} value={form.hra || ''} onChange={(event) => set('hra', Number(event.target.value))} /></label>
-            <label className={labelClass}>Allowance<input type="number" className={`${inputClass} mt-1`} value={form.allowance || ''} onChange={(event) => set('allowance', Number(event.target.value))} /></label>
-            <label className={labelClass}>Deductions<input type="number" className={`${inputClass} mt-1`} value={form.deductions || ''} onChange={(event) => set('deductions', Number(event.target.value))} /></label>
+            <label className={labelClass}>Basic Salary<NumericInput min={0} className={`${inputClass} mt-1`} value={form.basicSalary || ''} onValueChange={(value) => set('basicSalary', value)} /></label>
+            <label className={labelClass}>HRA<NumericInput min={0} className={`${inputClass} mt-1`} value={form.hra || ''} onValueChange={(value) => set('hra', value)} /></label>
+            <label className={labelClass}>Allowance<NumericInput min={0} className={`${inputClass} mt-1`} value={form.allowance || ''} onValueChange={(value) => set('allowance', value)} /></label>
+            <label className={labelClass}>Deductions<NumericInput min={0} className={`${inputClass} mt-1`} value={form.deductions || ''} onValueChange={(value) => set('deductions', value)} /></label>
             <label className={labelClass}>Payment Mode<select className={`${inputClass} mt-1`} value={form.paymentMode} onChange={(event) => set('paymentMode', event.target.value)}>{paymentModes.map((entry) => <option key={entry}>{entry}</option>)}</select></label>
           </div>
         </section>

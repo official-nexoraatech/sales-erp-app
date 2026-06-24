@@ -10,6 +10,7 @@ import { Button } from '../../components/ui/Button';
 import { Loader } from '../../components/ui/Loader';
 import { Pagination } from '../../components/ui/Pagination';
 import { useAuth } from '../../hooks/useAuth';
+import { useConfirmation } from '../../hooks/useConfirmation';
 import { useDebounce } from '../../hooks/useDebounce';
 import { usePagination } from '../../hooks/usePagination';
 import { formatCurrency } from '../../utils/formatCurrency';
@@ -21,6 +22,7 @@ const expenseNumber = (expense: ExpenseListItem) => expense.expenseNo || expense
 export const ExpenseListPage: React.FC = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { confirmAction, confirmationDialog } = useConfirmation();
   const { page, setPage, handlePageChange } = usePagination();
   const [pageSize, setPageSize] = useState(10);
   const [search, setSearch] = useState('');
@@ -68,7 +70,8 @@ export const ExpenseListPage: React.FC = () => {
   };
   const deleteSelected = async () => {
     if (!selectedIds.length) return toast.error('Select at least one expense');
-    if (!confirm('Delete selected expenses?')) return;
+    const confirmed = await confirmAction({ title: 'Delete Expenses', message: 'Delete selected expenses?', confirmText: 'Delete', variant: 'danger' });
+    if (!confirmed) return;
     for (const id of selectedIds) await remove.mutateAsync(id);
     setSelectedIds([]);
   };
@@ -108,9 +111,10 @@ export const ExpenseListPage: React.FC = () => {
           <div className="flex flex-wrap items-center"><button onClick={deleteSelected} className="h-10 rounded-l border border-red-300 px-3 text-sm text-red-500">Delete</button><button onClick={copy} className="h-10 border-y border-r px-3 text-sm">Copy</button><button onClick={() => download('xls')} className="h-10 border-y border-r px-3 text-sm">Excel</button><button onClick={() => download('csv')} className="h-10 border-y border-r px-3 text-sm">CSV</button><button onClick={printPdf} className="h-10 rounded-r border-y border-r px-3 text-sm">PDF</button></div>
           <label className="flex items-center gap-2 text-sm text-gray-600">Search:<input value={search} onChange={(event) => { setSearch(event.target.value); setPage(0); }} className="h-9 rounded border border-gray-300 px-3" /></label>
         </div>
-        <div className="overflow-x-auto px-3 pb-3">{expenses.isLoading ? <div className="p-10"><Loader /></div> : <table className="w-full text-sm"><thead className="bg-gray-50"><tr><th className="border p-3"><input type="checkbox" checked={allSelected} onChange={() => setSelectedIds(allSelected ? [] : rows.map((expense) => expense.expenseId))} /></th>{exportColumns.concat('Action').map((heading) => <th key={heading} className="border p-3 text-left">{heading}</th>)}</tr></thead><tbody>{rows.length ? rows.map((expense: ExpenseListItem) => <tr key={expense.expenseId} className="border-b even:bg-gray-50"><td className="border p-3"><input type="checkbox" checked={selectedIds.includes(expense.expenseId)} onChange={() => setSelectedIds((current) => current.includes(expense.expenseId) ? current.filter((id) => id !== expense.expenseId) : [...current, expense.expenseId])} /></td><td className="border p-3">{formatDate(expense.expenseDate)}</td><td className="border p-3 font-semibold">{expenseNumber(expense)}</td><td className="border p-3">{expense.categoryName || 'N/A'}</td><td className="border p-3">{expense.subCategoryName || 'N/A'}</td><td className="border p-3 font-semibold">{formatCurrency(expense.amount)}</td><td className="border p-3">{expense.paymentMethodName || expense.paymentType || 'N/A'}</td><td className="border p-3">{expense.createdBy || user?.userName || 'admin'}</td><td className="border p-3">{formatDate(expense.createdAt || expense.expenseDate)}</td><td className="border p-3"><div className="flex gap-2"><button onClick={() => navigate(`/expenses/${expense.expenseId}`)} className="text-blue-600"><Eye size={16} /></button><button onClick={() => navigate(`/expenses/${expense.expenseId}/edit`)} className="text-orange-600"><Edit size={16} /></button><button onClick={() => confirm('Delete this expense?') && remove.mutate(expense.expenseId)} className="text-red-600"><Trash2 size={16} /></button></div></td></tr>) : <tr><td colSpan={10} className="bg-gray-50 p-5 text-center">No data available in table</td></tr>}</tbody></table>}</div>
+        <div className="overflow-x-auto px-3 pb-3">{expenses.isLoading ? <div className="p-10"><Loader /></div> : <table className="w-full text-sm"><thead className="bg-gray-50"><tr><th className="border p-3"><input type="checkbox" checked={allSelected} onChange={() => setSelectedIds(allSelected ? [] : rows.map((expense) => expense.expenseId))} /></th>{exportColumns.concat('Action').map((heading) => <th key={heading} className="border p-3 text-left">{heading}</th>)}</tr></thead><tbody>{rows.length ? rows.map((expense: ExpenseListItem) => <tr key={expense.expenseId} className="border-b even:bg-gray-50"><td className="border p-3"><input type="checkbox" checked={selectedIds.includes(expense.expenseId)} onChange={() => setSelectedIds((current) => current.includes(expense.expenseId) ? current.filter((id) => id !== expense.expenseId) : [...current, expense.expenseId])} /></td><td className="border p-3">{formatDate(expense.expenseDate)}</td><td className="border p-3 font-semibold">{expenseNumber(expense)}</td><td className="border p-3">{expense.categoryName || 'N/A'}</td><td className="border p-3">{expense.subCategoryName || 'N/A'}</td><td className="border p-3 font-semibold">{formatCurrency(expense.amount)}</td><td className="border p-3">{expense.paymentMethodName || expense.paymentType || 'N/A'}</td><td className="border p-3">{expense.createdBy || user?.userName || 'admin'}</td><td className="border p-3">{formatDate(expense.createdAt || expense.expenseDate)}</td><td className="border p-3"><div className="flex gap-2"><button onClick={() => navigate(`/expenses/${expense.expenseId}`)} className="text-blue-600"><Eye size={16} /></button><button onClick={() => navigate(`/expenses/${expense.expenseId}/edit`)} className="text-orange-600"><Edit size={16} /></button><button onClick={async () => { if (await confirmAction({ title: 'Delete Expense', message: 'Delete this expense?', confirmText: 'Delete', variant: 'danger' })) remove.mutate(expense.expenseId); }} className="text-red-600"><Trash2 size={16} /></button></div></td></tr>) : <tr><td colSpan={10} className="bg-gray-50 p-5 text-center">No data available in table</td></tr>}</tbody></table>}</div>
         <div className="flex flex-wrap items-center justify-between gap-3 border-t px-5 py-4 text-sm text-gray-600"><span>Showing {rows.length ? page * pageSize + 1 : 0} to {page * pageSize + rows.length} of {expenses.data?.data?.totalElements || 0} entries</span><Pagination page={page} totalPages={expenses.data?.data?.totalPages || 1} onPageChange={handlePageChange} /></div>
       </div>
+      {confirmationDialog}
     </div>
   );
 };

@@ -23,7 +23,7 @@ interface LabelOption {
 }
 
 const inputClass = 'h-10 w-full rounded border border-gray-300 bg-white px-3 text-sm text-gray-900 outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-gray-50';
-const tableHeadings = ['ITEM ID', 'ITEM', 'ITEM CODE', 'SKU', 'BARCODE', 'HSN', 'CATEGORY', 'BRAND', 'PURCHASE PRICE', 'SALE PRICE', 'MRP', 'QTY', 'UNIT', 'TRACKING', 'STATUS'];
+const tableHeadings = ['ITEM ID', 'ITEM', 'ITEM CODE', 'SKU', 'BARCODE VALUE', 'HSN', 'CATEGORY', 'BRAND', 'PURCHASE PRICE', 'SALE PRICE', 'MRP', 'QTY', 'UNIT', 'TRACKING', 'STATUS'];
 const labelOptions: LabelOption[] = [
   { value: '100x50', label: '100 x 50mm', widthMm: 100, heightMm: 50 },
   { value: '100x25', label: '100 x 25mm', widthMm: 100, heightMm: 25 },
@@ -297,7 +297,7 @@ export const GenerateBarcodePage: React.FC = () => {
                     <td className="border p-3 font-semibold">{selectedItem.itemName}</td>
                     <td className="border p-3">{selectedItem.itemCode || 'N/A'}</td>
                     <td className="border p-3">{selectedItem.sku || 'N/A'}</td>
-                    <td className="border p-3">{selectedItem.barcode || 'N/A'}</td>
+                    <td className="border p-3">{itemCodeValue(selectedItem)}</td>
                     <td className="border p-3">{selectedItem.hsnCode || 'N/A'}</td>
                     <td className="border p-3">{selectedItem.categoryName || 'N/A'}</td>
                     <td className="border p-3">{selectedItem.brandName || 'N/A'}</td>

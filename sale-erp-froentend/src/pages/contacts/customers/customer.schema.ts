@@ -2,8 +2,12 @@ import { z } from 'zod';
 import type { CreateCustomerRequest } from '../../../types/customer.types';
 
 const optionalAmount = z.preprocess(
-  (value) => (value === '' || value == null ? undefined : Number(value)),
-  z.number().min(0, 'Amount cannot be negative').optional()
+  (value) => (value === '' || value == null ? undefined : String(value).trim()),
+  z.string()
+    .regex(/^-?(?:\d+|\d*\.\d+)$/, 'Enter a valid number')
+    .transform(Number)
+    .pipe(z.number().min(0, 'Amount cannot be negative'))
+    .optional()
 );
 
 const optionalText = (max: number) => z.string().max(max).optional().or(z.literal(''));

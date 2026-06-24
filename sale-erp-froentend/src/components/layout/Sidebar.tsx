@@ -317,6 +317,7 @@ export const Sidebar: React.FC<{ isOpen: boolean; onClose: () => void }> = ({
                   <Link
                     to={item.href}
                     onClick={onClose}
+                    title={item.label}
                     className={`flex min-h-10 items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${
                       isMenuActive(item.href, item.submenu)
                         ? 'bg-[#eef7ff] font-semibold text-[#1684ed]'
@@ -329,6 +330,7 @@ export const Sidebar: React.FC<{ isOpen: boolean; onClose: () => void }> = ({
                 ) : (
                   <button
                     onClick={() => toggleMenu(item.label)}
+                    title={item.label}
                     className={`flex min-h-10 w-full items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${
                       isMenuActive(item.href, item.submenu)
                         ? 'bg-[#eef7ff] font-semibold text-[#1684ed]'
@@ -356,6 +358,7 @@ export const Sidebar: React.FC<{ isOpen: boolean; onClose: () => void }> = ({
                         key={subitem.label}
                         to={subitem.href || '#'}
                         onClick={onClose}
+                        title={subitem.label}
                         className={`flex items-center gap-2.5 rounded-md px-3 py-2 text-[13px] transition-colors ${
                           location.pathname === subitem.href ||
                           (!['/items', '/users', '/reports/purchase', '/reports/sale', '/reports/gst', '/reports/stock', '/reports/stock-transfer', '/reports/stock-adjustment', '/reports/expense'].includes(subitem.href || '') && location.pathname.startsWith(subitem.href || ''))
@@ -417,7 +420,7 @@ export const Sidebar: React.FC<{ isOpen: boolean; onClose: () => void }> = ({
             </div>
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-semibold text-slate-800">{user?.userName || 'User'}</p>
-              <p className="truncate text-xs text-slate-500">{user?.role || user?.organizationName || 'BillTop'}</p>
+              <p className="truncate text-xs text-slate-500">{user?.role || user?.organizationName || 'Nexoraa'}</p>
             </div>
             <ChevronRight size={16} className={`text-slate-400 transition-transform ${showProfileMenu ? '-rotate-90' : ''}`} />
           </button>

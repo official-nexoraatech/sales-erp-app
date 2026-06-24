@@ -1,11 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { CirclePlus, Trash2, X } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { customerApi, itemApi, warehouseApi } from '../../../api/endpoints';
 import type { SaleRequest } from '../../../api/endpoints';
 import { CountryStateSelect } from '../../../components/form/CountryStateSelect';
 import { Button } from '../../../components/ui/Button';
+import { NumericInput } from '../../../components/ui/NumericInput';
 
 interface Line {
   itemId: number;
@@ -28,6 +30,7 @@ interface Props {
 const inputClass = 'h-10 w-full rounded border border-gray-300 bg-white px-3 text-sm text-gray-900 outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-gray-50';
 
 export const SaleOrderForm: React.FC<Props> = ({ initial, submitText, loading, onSubmit, onCancel }) => {
+  const navigate = useNavigate();
   const [customerId, setCustomerId] = useState(initial?.customerId || 0);
   const [invoiceDate, setInvoiceDate] = useState(initial?.invoiceDate || new Date().toISOString().slice(0, 10));
   const [dueDate, setDueDate] = useState('');
@@ -157,11 +160,11 @@ export const SaleOrderForm: React.FC<Props> = ({ initial, submitText, loading, o
               {items.data?.data?.content.map((item) => <option key={item.id} value={item.id}>{item.itemName}</option>)}
             </select>
             <button type="button" onClick={addItem} className="flex h-10 w-11 items-center justify-center border border-l-0 border-blue-400 text-blue-500"><CirclePlus size={18} /></button>
-            <button type="button" onClick={() => setShowItemModal(true)} className="flex h-10 w-11 items-center justify-center rounded-r border border-l-0 border-blue-400 text-blue-500"><CirclePlus size={18} /></button>
+            <button type="button" onClick={() => navigate('/items/create')} className="flex h-10 w-11 items-center justify-center rounded-r border border-l-0 border-blue-400 text-blue-500" title="Create item" aria-label="Create item"><CirclePlus size={18} /></button>
           </div>
         </label>
         <label className="text-sm text-gray-600">Sold Items
-          <button type="button" className={`${inputClass} mt-1 bg-white`}>Load</button>
+          <button type="button" onClick={addItem} className={`${inputClass} mt-1 bg-white`}>Load</button>
         </label>
       </div>
 
@@ -179,12 +182,12 @@ export const SaleOrderForm: React.FC<Props> = ({ initial, submitText, loading, o
                   <td className="border p-2"><button onClick={() => setLines((current) => current.filter((_, i) => i !== index))} className="text-red-500"><Trash2 size={16} /></button></td>
                   <td className="border p-2">{line.itemName}</td>
                   <td className="border p-2">{line.unitPrice.toFixed(2)}</td>
-                  <td className="border p-2"><input type="number" value={line.quantity} onChange={(event) => update(index, 'quantity', Number(event.target.value))} className="w-16 rounded border px-2 py-1" /></td>
+                  <td className="border p-2"><NumericInput min={0} value={line.quantity} onValueChange={(value) => update(index, 'quantity', value)} className="w-16 rounded border px-2 py-1" /></td>
                   <td className="border p-2">Nos</td>
-                  <td className="border p-2"><input type="number" value={line.unitPrice} onChange={(event) => update(index, 'unitPrice', Number(event.target.value))} className="w-20 rounded border px-2 py-1" /></td>
+                  <td className="border p-2"><NumericInput min={0} value={line.unitPrice} onValueChange={(value) => update(index, 'unitPrice', value)} className="w-20 rounded border px-2 py-1" /></td>
                   <td className="border p-2">{base.toFixed(2)}</td>
-                  <td className="border p-2"><input type="number" value={line.discountPercent} onChange={(event) => update(index, 'discountPercent', Number(event.target.value))} className="w-16 rounded border px-2 py-1" /></td>
-                  <td className="border p-2"><input type="number" value={line.taxPercent} onChange={(event) => update(index, 'taxPercent', Number(event.target.value))} className="w-16 rounded border px-2 py-1" /></td>
+                  <td className="border p-2"><NumericInput min={0} value={line.discountPercent} onValueChange={(value) => update(index, 'discountPercent', value)} className="w-16 rounded border px-2 py-1" /></td>
+                  <td className="border p-2"><NumericInput min={0} value={line.taxPercent} onValueChange={(value) => update(index, 'taxPercent', value)} className="w-16 rounded border px-2 py-1" /></td>
                   <td className="border p-2 font-semibold">{rowTotal.toFixed(2)}</td>
                 </tr>
               );

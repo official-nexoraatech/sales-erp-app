@@ -10,6 +10,7 @@ import { Button } from '../../components/ui/Button';
 import { Loader } from '../../components/ui/Loader';
 import { Pagination } from '../../components/ui/Pagination';
 import { useAuth } from '../../hooks/useAuth';
+import { useConfirmation } from '../../hooks/useConfirmation';
 import { useDebounce } from '../../hooks/useDebounce';
 import { usePagination } from '../../hooks/usePagination';
 import { formatDate } from '../../utils/formatDate';
@@ -20,6 +21,7 @@ const exportColumns = ['Name', 'Short Name', 'Created by', 'Created at'];
 export const UnitListPage: React.FC = () => {
   const navigate = useNavigate();
   const { user, hasPermission } = useAuth();
+  const { confirmAction, confirmationDialog } = useConfirmation();
   const canCreate = hasPermission(PERMISSIONS.UNIT_CREATE);
   const canUpdate = hasPermission(PERMISSIONS.UNIT_UPDATE);
   const canDelete = hasPermission(PERMISSIONS.UNIT_DELETE);
@@ -66,7 +68,8 @@ export const UnitListPage: React.FC = () => {
   };
   const deleteSelected = async () => {
     if (!selectedIds.length) return toast.error('Select at least one unit');
-    if (!confirm('Delete selected units?')) return;
+    const confirmed = await confirmAction({ title: 'Delete Units', message: 'Delete selected units?', confirmText: 'Delete', variant: 'danger' });
+    if (!confirmed) return;
     for (const id of selectedIds) await remove.mutateAsync(id);
     setSelectedIds([]);
   };
@@ -87,11 +90,12 @@ export const UnitListPage: React.FC = () => {
         <div className="overflow-x-auto px-3 pb-3">
           {units.isLoading ? <div className="p-10"><Loader /></div> : <table className="w-full text-sm">
             <thead className="bg-gray-50"><tr>{canDelete && <th className="border p-3"><input type="checkbox" checked={allSelected} onChange={() => setSelectedIds(allSelected ? [] : rows.map((unit) => unit.id))} /></th>}{exportColumns.concat(showActions ? 'Action' : []).map((heading) => <th key={heading} className="border p-3 text-left">{heading}</th>)}</tr></thead>
-            <tbody>{rows.length ? rows.map((unit: Unit) => <tr key={unit.id} className="border-b even:bg-gray-50">{canDelete && <td className="border p-3"><input type="checkbox" checked={selectedIds.includes(unit.id)} onChange={() => setSelectedIds((current) => current.includes(unit.id) ? current.filter((id) => id !== unit.id) : [...current, unit.id])} /></td>}<td className="border p-3 font-semibold">{unit.name}</td><td className="border p-3">{unit.shortName}</td><td className="border p-3">{unit.createdBy || user?.userName || 'admin'}</td><td className="border p-3">{unit.createdAt ? formatDate(unit.createdAt) : ''}</td>{showActions && <td className="border p-3"><div className="flex gap-2">{canUpdate && <button onClick={() => navigate(`/items/units/${unit.id}/edit`, { state: unit })} className="text-orange-600"><Edit size={16} /></button>}{canDelete && <button onClick={() => confirm('Delete this unit?') && remove.mutate(unit.id)} className="text-red-600"><Trash2 size={16} /></button>}</div></td>}</tr>) : <tr><td colSpan={exportColumns.length + Number(canDelete) + Number(showActions)} className="bg-gray-50 p-5 text-center">No data available in table</td></tr>}</tbody>
+            <tbody>{rows.length ? rows.map((unit: Unit) => <tr key={unit.id} className="border-b even:bg-gray-50">{canDelete && <td className="border p-3"><input type="checkbox" checked={selectedIds.includes(unit.id)} onChange={() => setSelectedIds((current) => current.includes(unit.id) ? current.filter((id) => id !== unit.id) : [...current, unit.id])} /></td>}<td className="border p-3 font-semibold">{unit.name}</td><td className="border p-3">{unit.shortName}</td><td className="border p-3">{unit.createdBy || user?.userName || 'admin'}</td><td className="border p-3">{unit.createdAt ? formatDate(unit.createdAt) : ''}</td>{showActions && <td className="border p-3"><div className="flex gap-2">{canUpdate && <button onClick={() => navigate(`/items/units/${unit.id}/edit`, { state: unit })} className="text-orange-600"><Edit size={16} /></button>}{canDelete && <button onClick={async () => { if (await confirmAction({ title: 'Delete Unit', message: 'Delete this unit?', confirmText: 'Delete', variant: 'danger' })) remove.mutate(unit.id); }} className="text-red-600"><Trash2 size={16} /></button>}</div></td>}</tr>) : <tr><td colSpan={exportColumns.length + Number(canDelete) + Number(showActions)} className="bg-gray-50 p-5 text-center">No data available in table</td></tr>}</tbody>
           </table>}
         </div>
         <div className="flex flex-wrap items-center justify-between gap-3 border-t px-5 py-4 text-sm text-gray-600"><span>Showing {rows.length ? page * pageSize + 1 : 0} to {page * pageSize + rows.length} of {units.data?.data?.totalElements || 0} entries</span><Pagination page={page} totalPages={units.data?.data?.totalPages || 1} onPageChange={handlePageChange} /></div>
       </div>
+      {confirmationDialog}
     </div>
   );
 };
