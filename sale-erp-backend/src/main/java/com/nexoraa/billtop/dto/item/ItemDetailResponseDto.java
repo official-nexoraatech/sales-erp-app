@@ -19,7 +19,6 @@ public class ItemDetailResponseDto {
     private String itemName;
     private String itemCode;
     private String sku;
-    private String barcode;
     private String hsnCode;
     private Long categoryId;
     private String categoryName;
@@ -29,9 +28,6 @@ public class ItemDetailResponseDto {
     private String brandName;
     private Long baseUnitId;
     private String baseUnitName;
-    private Long secondaryUnitId;
-    private String secondaryUnitName;
-    private BigDecimal conversionRate;
     private BigDecimal purchasePrice;
     private BigDecimal purchasePriceWithTax;
     private BigDecimal taxPercentage;

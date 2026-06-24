@@ -5,6 +5,7 @@ import com.nexoraa.billtop.dto.category.CategoryRequestDto;
 import com.nexoraa.billtop.dto.category.CategoryResponseDto;
 import com.nexoraa.billtop.dto.common.IdResponseDto;
 import com.nexoraa.billtop.entity.Category;
+import com.nexoraa.billtop.entity.Organization;
 import com.nexoraa.billtop.exception.BadRequestException;
 import com.nexoraa.billtop.exception.ResourceNotFoundException;
 import com.nexoraa.billtop.mapper.CategoryMapper;
@@ -39,7 +40,8 @@ public class CategoryServiceImpl implements CategoryService {
     @Override
     @Transactional
     public IdResponseDto createCategory(CategoryRequestDto request) {
-        Long organizationId = currentOrganizationService.getOrganizationId();
+        Organization organization = currentOrganizationService.getOrganizationReference();
+        Long organizationId = organization.getId();
         if (categoryRepository.existsByNameIgnoreCaseAndOrganizationIdAndStatusAndIsDeletedFalse(
                 request.getName(),
                 organizationId,
@@ -48,7 +50,7 @@ public class CategoryServiceImpl implements CategoryService {
             throw new BadRequestException(ErrorMessage.CATEGORY_ALREADY_EXISTS, "CATEGORY_ALREADY_EXISTS");
         }
         Category category = categoryMapper.toEntity(request);
-        category.setOrganization(currentOrganizationService.getOrganizationReference());
+        category.setOrganization(organization);
         return IdResponseDto.builder().id(categoryRepository.save(category).getId()).build();
     }
 

@@ -15,8 +15,6 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
-import java.math.BigDecimal;
-
 @Entity
 @Table(name = "items")
 @Getter
@@ -39,9 +37,6 @@ public class Item extends BaseEntity {
     @Column(length = 80)
     private String sku;
 
-    @Column(length = 80)
-    private String barcode;
-
     @Column(name = "hsn_code", length = 30)
     private String hsnCode;
 
@@ -49,9 +44,6 @@ public class Item extends BaseEntity {
     @JoinColumn(name = "category_id")
     private Category category;
 
-//    @ManyToOne(fetch = FetchType.LAZY)
-//    @JoinColumn(name = "sub_category_id")
-//    private SubCategory subCategory;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "brand_id")
@@ -60,13 +52,6 @@ public class Item extends BaseEntity {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "base_unit_id")
     private Unit baseUnit;
-
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "secondary_unit_id")
-    private Unit secondaryUnit;
-
-    @Column(name = "conversion_rate", precision = 15, scale = 4)
-    private BigDecimal conversionRate;
 
     @Column(length = 500)
     private String description;

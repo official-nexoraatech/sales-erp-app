@@ -6,6 +6,7 @@ import com.nexoraa.billtop.dto.pos.PosBillingRequestDto;
 import com.nexoraa.billtop.dto.pos.PosBillingResponseDto;
 import com.nexoraa.billtop.entity.Contact;
 import com.nexoraa.billtop.entity.Item;
+import com.nexoraa.billtop.entity.Organization;
 import com.nexoraa.billtop.entity.Payment;
 import com.nexoraa.billtop.entity.PaymentMethod;
 import com.nexoraa.billtop.entity.Sale;
@@ -63,6 +64,7 @@ public class PosBillingServiceImpl implements PosBillingService {
     @Override
     @Transactional
     public PosBillingResponseDto createBill(PosBillingRequestDto request) {
+        Organization organization = currentOrganizationService.getOrganizationReference();
         Contact customer = support.getActiveCustomer(request.getCustomerId());
         Warehouse warehouse = support.getActiveWarehouse(request.getWarehouseId());
         PaymentMethod paymentMethod = support.getActivePaymentMethod(request.getPaymentMethodId());
@@ -79,7 +81,7 @@ public class PosBillingServiceImpl implements PosBillingService {
         grandTotal = support.money(grandTotal);
 
         Sale sale = Sale.builder()
-                .organization(currentOrganizationService.getOrganizationReference())
+                .organization(organization)
                 .invoiceNo(nextNumber(POS_PREFIX))
                 .invoiceDate(LocalDate.now())
                 .customer(customer)
@@ -97,11 +99,11 @@ public class PosBillingServiceImpl implements PosBillingService {
         Sale savedSale = saleRepository.save(sale);
 
         for (PreparedPosItem item : items) {
-            allocateStockAndCreateSaleItems(savedSale, warehouse, item);
+            allocateStockAndCreateSaleItems(savedSale, warehouse, item, organization);
         }
 
         Payment payment = paymentRepository.save(Payment.builder()
-                .organization(currentOrganizationService.getOrganizationReference())
+                .organization(organization)
                 .paymentNo(nextPaymentNo())
                 .paymentType(PAYMENT_TYPE)
                 .paymentMethod(paymentMethod)
@@ -112,7 +114,7 @@ public class PosBillingServiceImpl implements PosBillingService {
                 .notes("POS bill " + savedSale.getInvoiceNo())
                 .build());
         salesPaymentRepository.save(SalesPayment.builder()
-                .organization(currentOrganizationService.getOrganizationReference())
+                .organization(organization)
                 .sale(savedSale)
                 .payment(payment)
                 .amount(grandTotal)
@@ -125,7 +127,12 @@ public class PosBillingServiceImpl implements PosBillingService {
                 .build();
     }
 
-    private void allocateStockAndCreateSaleItems(Sale sale, Warehouse warehouse, PreparedPosItem item) {
+    private void allocateStockAndCreateSaleItems(
+            Sale sale,
+            Warehouse warehouse,
+            PreparedPosItem item,
+            Organization organization
+    ) {
         BigDecimal remainingQty = item.quantity();
         for (Stock stock : support.getStocksForItemAndWarehouse(item.item().getId(), warehouse.getId())) {
             if (remainingQty.compareTo(TransactionSupport.ZERO) <= 0) {
@@ -138,7 +145,7 @@ public class PosBillingServiceImpl implements PosBillingService {
             BigDecimal allocatedQty = availableQty.min(remainingQty);
             BigDecimal lineAmount = support.amount(allocatedQty, item.unitPrice());
             salesItemRepository.save(SalesItem.builder()
-                    .organization(currentOrganizationService.getOrganizationReference())
+                    .organization(organization)
                     .sale(sale)
                     .item(item.item())
                     .batch(stock.getBatch())

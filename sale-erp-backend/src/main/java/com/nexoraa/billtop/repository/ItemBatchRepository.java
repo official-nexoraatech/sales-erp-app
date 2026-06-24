@@ -7,7 +7,9 @@ import java.util.Optional;
 
 public interface ItemBatchRepository extends JpaRepository<ItemBatch, Long> {
 
-    Optional<ItemBatch> findTopByItemIdAndOrganizationIdOrderByIdDesc(Long itemId, Long organizationId);
+    Optional<ItemBatch> findTopByItemIdOrderByIdDesc(Long itemId);
 
-    Optional<ItemBatch> findByItemIdAndBatchNoAndOrganizationId(Long itemId, String batchNo, Long organizationId);
+    Optional<ItemBatch> findByIdAndItemId(Long id, Long itemId);
+
+    Optional<ItemBatch> findByItemIdAndBatchNo(Long itemId, String batchNo);
 }

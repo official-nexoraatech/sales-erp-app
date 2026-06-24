@@ -4,6 +4,7 @@ import com.nexoraa.billtop.constants.ErrorMessage;
 import com.nexoraa.billtop.dto.common.IdResponseDto;
 import com.nexoraa.billtop.dto.unit.UnitRequestDto;
 import com.nexoraa.billtop.dto.unit.UnitResponseDto;
+import com.nexoraa.billtop.entity.Organization;
 import com.nexoraa.billtop.entity.Unit;
 import com.nexoraa.billtop.enums.Status;
 import com.nexoraa.billtop.exception.BadRequestException;
@@ -40,7 +41,8 @@ public class UnitServiceImpl implements UnitService {
     @Override
     @Transactional
     public IdResponseDto createUnit(UnitRequestDto request) {
-        Long organizationId = currentOrganizationService.getOrganizationId();
+        Organization organization = currentOrganizationService.getOrganizationReference();
+        Long organizationId = organization.getId();
         if (unitRepository.existsByNameIgnoreCaseAndOrganizationIdAndStatusAndIsDeletedFalse(
                 request.getName(),
                 organizationId,
@@ -49,7 +51,7 @@ public class UnitServiceImpl implements UnitService {
             throw new BadRequestException(ErrorMessage.UNIT_ALREADY_EXISTS, "UNIT_ALREADY_EXISTS");
         }
         Unit unit = unitMapper.toEntity(request);
-        unit.setOrganization(currentOrganizationService.getOrganizationReference());
+        unit.setOrganization(organization);
         unit = unitRepository.save(unit);
         return IdResponseDto.builder().id(unit.getId()).build();
     }

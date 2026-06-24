@@ -11,6 +11,7 @@ import com.nexoraa.billtop.dto.sales.SalesReturnRequestDto;
 import com.nexoraa.billtop.entity.Contact;
 import com.nexoraa.billtop.entity.Item;
 import com.nexoraa.billtop.entity.ItemBatch;
+import com.nexoraa.billtop.entity.Organization;
 import com.nexoraa.billtop.entity.Sale;
 import com.nexoraa.billtop.entity.SalesReturn;
 import com.nexoraa.billtop.entity.SalesReturnItem;
@@ -60,6 +61,7 @@ public class SalesReturnServiceImpl implements SalesReturnService {
     @Override
     @Transactional
     public SalesReturnCreateResponseDto createSalesReturn(SalesReturnRequestDto request) {
+        Organization organization = currentOrganizationService.getOrganizationReference();
         Sale sale = getSale(request.getSaleId());
         if (support.isCancelled(sale.getStatus())) {
             throw new BadRequestException(ErrorMessage.SALE_ALREADY_CANCELLED, "SALE_ALREADY_CANCELLED");
@@ -81,7 +83,7 @@ public class SalesReturnServiceImpl implements SalesReturnService {
         }
 
         SalesReturn salesReturn = SalesReturn.builder()
-                .organization(currentOrganizationService.getOrganizationReference())
+                .organization(organization)
                 .returnNo(nextReturnNo())
                 .sale(sale)
                 .customer(customer)
@@ -95,7 +97,7 @@ public class SalesReturnServiceImpl implements SalesReturnService {
         SalesReturn savedReturn = salesReturnRepository.save(salesReturn);
         for (PreparedReturnItem item : items) {
             salesReturnItemRepository.save(SalesReturnItem.builder()
-                    .organization(currentOrganizationService.getOrganizationReference())
+                    .organization(organization)
                     .salesReturn(savedReturn)
                     .item(item.item())
                     .batch(item.batch())

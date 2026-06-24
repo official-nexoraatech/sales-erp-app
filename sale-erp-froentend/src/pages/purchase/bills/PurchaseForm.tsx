@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { CirclePlus, Trash2 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { carrierApi, itemApi, supplierApi, warehouseApi } from '../../../api/endpoints';
 import type { PurchaseRequest } from '../../../api/endpoints';
@@ -31,6 +32,7 @@ interface Props {
 const inputClass = 'h-10 w-full rounded border border-gray-300 bg-white px-3 text-sm text-gray-900 outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-gray-50';
 
 export const PurchaseForm: React.FC<Props> = ({ initial, submitText, loading, onSubmit, onCancel, mode = 'bill' }) => {
+  const navigate = useNavigate();
   const isOrder = mode === 'order';
   const today = new Date().toISOString().slice(0, 10);
   const [supplierId, setSupplierId] = useState(initial?.supplierId || 0);
@@ -61,7 +63,10 @@ export const PurchaseForm: React.FC<Props> = ({ initial, submitText, loading, on
 
   const addItem = () => {
     const item = items.data?.data?.content.find((entry) => entry.id === selectedItem);
-    if (!item) return;
+    if (!item) {
+      toast.error('Select an item to load.');
+      return;
+    }
     setLines((current) => current.some((line) => line.itemId === item.id) ? current : [...current, {
       itemId: item.id,
       itemName: item.itemName,
@@ -154,11 +159,11 @@ export const PurchaseForm: React.FC<Props> = ({ initial, submitText, loading, on
               <option value={0}>Scan Barcode/Search Item/Brand Name</option>
               {items.data?.data?.content.map((item) => <option key={item.id} value={item.id}>{item.itemName}</option>)}
             </select>
-            <button type="button" onClick={addItem} className="flex h-10 w-11 items-center justify-center rounded-r border border-l-0 border-blue-400 text-blue-500"><CirclePlus size={18} /></button>
+            <button type="button" onClick={() => navigate('/items/create')} className="flex h-10 w-11 items-center justify-center rounded-r border border-l-0 border-blue-400 text-blue-500" title="Create item"><CirclePlus size={18} /></button>
           </div>
         </label>
         <label className="text-sm text-gray-600">Purchased Items
-          <button type="button" className={`${inputClass} mt-1 bg-white`}>Load</button>
+          <button type="button" onClick={addItem} className={`${inputClass} mt-1 bg-white`}>Load</button>
         </label>
       </div>
 

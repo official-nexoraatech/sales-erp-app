@@ -9,6 +9,7 @@ import com.nexoraa.billtop.dto.stock.StockTransferRequestDto;
 import com.nexoraa.billtop.dto.stock.StockTransferResponseDto;
 import com.nexoraa.billtop.entity.Item;
 import com.nexoraa.billtop.entity.ItemBatch;
+import com.nexoraa.billtop.entity.Organization;
 import com.nexoraa.billtop.entity.Stock;
 import com.nexoraa.billtop.entity.StockTransfer;
 import com.nexoraa.billtop.entity.StockTransferItem;
@@ -58,13 +59,14 @@ public class StockTransferServiceImpl implements StockTransferService {
     @Override
     @Transactional
     public StockTransferCreateResponseDto transferStock(StockTransferRequestDto request) {
+        Organization organization = currentOrganizationService.getOrganizationReference();
         if (request.getFromWarehouseId().equals(request.getToWarehouseId())) {
             throw new BadRequestException("Source and destination warehouses must be different", "INVALID_STOCK_TRANSFER");
         }
         Warehouse fromWarehouse = support.getActiveWarehouse(request.getFromWarehouseId());
         Warehouse toWarehouse = support.getActiveWarehouse(request.getToWarehouseId());
         StockTransfer transfer = stockTransferRepository.save(StockTransfer.builder()
-                .organization(currentOrganizationService.getOrganizationReference())
+                .organization(organization)
                 .transferNo(nextTransferNo())
                 .fromWarehouse(fromWarehouse)
                 .toWarehouse(toWarehouse)
@@ -101,10 +103,9 @@ public class StockTransferServiceImpl implements StockTransferService {
 
     private void transferItem(StockTransfer transfer, Item item, BigDecimal quantity) {
         BigDecimal remainingQty = quantity;
-        for (Stock stock : stockRepository.findByItemIdAndWarehouseIdAndOrganizationIdOrderByIdAsc(
+        for (Stock stock : stockRepository.findByItemIdAndWarehouseIdOrderByIdAsc(
                 item.getId(),
-                transfer.getFromWarehouse().getId(),
-                currentOrganizationService.getOrganizationId()
+                transfer.getFromWarehouse().getId()
         )) {
             if (remainingQty.compareTo(TransactionSupport.ZERO) <= 0) {
                 break;
@@ -134,7 +135,6 @@ public class StockTransferServiceImpl implements StockTransferService {
                     "Stock transfer " + transfer.getTransferNo()
             );
             stockTransferItemRepository.save(StockTransferItem.builder()
-                    .organization(currentOrganizationService.getOrganizationReference())
                     .stockTransfer(transfer)
                     .item(item)
                     .batch(batch)
@@ -166,10 +166,7 @@ public class StockTransferServiceImpl implements StockTransferService {
                 .toWarehouse(support.toNameId(transfer.getToWarehouse()))
                 .transferDate(transfer.getTransferDate())
                 .notes(transfer.getNotes())
-                .items(stockTransferItemRepository.findByStockTransferIdAndOrganizationId(
-                                transfer.getId(),
-                                currentOrganizationService.getOrganizationId()
-                        ).stream()
+                .items(stockTransferItemRepository.findByStockTransferId(transfer.getId()).stream()
                         .map(this::toItemResponse)
                         .toList())
                 .build();

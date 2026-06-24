@@ -8,6 +8,7 @@ import com.nexoraa.billtop.dto.payment.PaymentListResponseDto;
 import com.nexoraa.billtop.dto.payment.PaymentOutCreateResponseDto;
 import com.nexoraa.billtop.dto.payment.PaymentOutRequestDto;
 import com.nexoraa.billtop.entity.Contact;
+import com.nexoraa.billtop.entity.Organization;
 import com.nexoraa.billtop.entity.Payment;
 import com.nexoraa.billtop.entity.PaymentMethod;
 import com.nexoraa.billtop.entity.Purchase;
@@ -59,10 +60,11 @@ public class PaymentOutServiceImpl implements PaymentOutService {
     @Override
     @Transactional
     public PaymentOutCreateResponseDto createPaymentOut(PaymentOutRequestDto request) {
+        Organization organization = currentOrganizationService.getOrganizationReference();
         Contact supplier = support.getActiveSupplier(request.getSupplierId());
         PaymentMethod paymentMethod = support.getActivePaymentMethod(request.getPaymentMethodId());
         Payment payment = paymentRepository.save(Payment.builder()
-                .organization(currentOrganizationService.getOrganizationReference())
+                .organization(organization)
                 .paymentNo(nextPaymentNo())
                 .paymentType(FinanceSupport.PAYMENT_OUT)
                 .paymentMethod(paymentMethod)
@@ -73,7 +75,7 @@ public class PaymentOutServiceImpl implements PaymentOutService {
                 .notes(request.getNotes())
                 .build());
 
-        allocateToPurchases(payment, supplier.getId(), request.getPurchaseIds());
+        allocateToPurchases(payment, supplier.getId(), request.getPurchaseIds(), organization);
         financeSupport.saveMoneyMovement(payment, FinanceSupport.PAYMENT_OUT);
 
         return PaymentOutCreateResponseDto.builder()
@@ -112,7 +114,12 @@ public class PaymentOutServiceImpl implements PaymentOutService {
         return toDetailResponse(payment);
     }
 
-    private void allocateToPurchases(Payment payment, Long supplierId, List<Long> purchaseIds) {
+    private void allocateToPurchases(
+            Payment payment,
+            Long supplierId,
+            List<Long> purchaseIds,
+            Organization organization
+    ) {
         BigDecimal remaining = support.defaultZero(payment.getAmount());
         if (purchaseIds == null || purchaseIds.isEmpty()) {
             return;
@@ -142,7 +149,7 @@ public class PaymentOutServiceImpl implements PaymentOutService {
             }
             purchaseRepository.save(purchase);
             purchasePaymentRepository.save(PurchasePayment.builder()
-                    .organization(currentOrganizationService.getOrganizationReference())
+                    .organization(organization)
                     .purchase(purchase)
                     .payment(payment)
                     .amount(support.money(allocated))

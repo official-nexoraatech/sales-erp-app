@@ -3,6 +3,7 @@ import { useMutation } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { purchaseApi } from '../../../api/endpoints';
+import { queryClient } from '../../../app/queryClient';
 import { PurchaseForm } from './PurchaseForm';
 
 export const PurchaseCreatePage: React.FC = () => {
@@ -11,6 +12,7 @@ export const PurchaseCreatePage: React.FC = () => {
     mutationFn: purchaseApi.create,
     onSuccess: () => {
       toast.success('Purchase created successfully');
+      queryClient.invalidateQueries({ queryKey: ['purchases'] });
       navigate('/purchase/bills');
     },
     onError: (error: any) => toast.error(error?.message || 'Failed to create purchase'),

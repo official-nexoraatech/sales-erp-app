@@ -9,6 +9,7 @@ import com.nexoraa.billtop.dto.supplier.SupplierDetailResponseDto;
 import com.nexoraa.billtop.dto.supplier.SupplierListResponseDto;
 import com.nexoraa.billtop.dto.supplier.SupplierRequestDto;
 import com.nexoraa.billtop.entity.Contact;
+import com.nexoraa.billtop.entity.Organization;
 import com.nexoraa.billtop.entity.Payment;
 import com.nexoraa.billtop.entity.Purchase;
 import com.nexoraa.billtop.entity.PurchaseReturn;
@@ -67,8 +68,9 @@ public class SupplierServiceImpl implements SupplierService {
     @Override
     @Transactional
     public SupplierCreateResponseDto createSupplier(SupplierRequestDto request) {
+        Organization organization = currentOrganizationService.getOrganizationReference();
         Contact supplier = supplierMapper.toEntity(request);
-        supplier.setOrganization(currentOrganizationService.getOrganizationReference());
+        supplier.setOrganization(organization);
         Contact savedSupplier = contactRepository.save(supplier);
 
         return SupplierCreateResponseDto.builder()

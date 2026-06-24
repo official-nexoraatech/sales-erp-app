@@ -5,6 +5,7 @@ import com.nexoraa.billtop.dto.staff.AttendanceRequestDto;
 import com.nexoraa.billtop.dto.staff.AttendanceResponseDto;
 import com.nexoraa.billtop.dto.staff.AttendanceSummaryResponseDto;
 import com.nexoraa.billtop.entity.Employee;
+import com.nexoraa.billtop.entity.Organization;
 import com.nexoraa.billtop.entity.StaffAttendance;
 import com.nexoraa.billtop.enums.StaffAttendanceStatus;
 import com.nexoraa.billtop.exception.BadRequestException;
@@ -68,7 +69,8 @@ public class StaffAttendanceServiceImpl implements StaffAttendanceService {
     @Override
     @Transactional
     public void markAttendance(AttendanceRequestDto request) {
-        Long organizationId = currentOrganizationService.getOrganizationId();
+        Organization organization = currentOrganizationService.getOrganizationReference();
+        Long organizationId = organization.getId();
         Employee employee = getEmployee(request.getEmployeeId());
         StaffAttendance attendance = attendanceRepository.findByOrganizationIdAndEmployeeIdAndAttendanceDateAndIsDeletedFalse(
                         organizationId,
@@ -77,7 +79,7 @@ public class StaffAttendanceServiceImpl implements StaffAttendanceService {
                 )
                 .orElseGet(StaffAttendance::new);
         if (attendance.getId() == null) {
-            attendance.setOrganization(currentOrganizationService.getOrganizationReference());
+            attendance.setOrganization(organization);
             attendance.setEmployee(employee);
             attendance.setAttendanceDate(request.getDate());
         }

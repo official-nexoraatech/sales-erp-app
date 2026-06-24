@@ -125,23 +125,20 @@ public class DashboardServiceImpl implements DashboardService {
     }
 
     private BigDecimal stockValue() {
-        return support.money(stockRepository.findByOrganizationId(currentOrganizationService.getOrganizationId()).stream()
+        return support.money(stockRepository.findByItem_Organization_Id(currentOrganizationService.getOrganizationId()).stream()
                 .map(stock -> support.defaultZero(stock.getAvailableQty()).multiply(itemPurchasePrice(stock.getItem().getId())))
                 .reduce(TransactionSupport.ZERO, BigDecimal::add));
     }
 
     private long lowStockCount() {
-        return stockRepository.findByOrganizationId(currentOrganizationService.getOrganizationId()).stream()
+        return stockRepository.findByItem_Organization_Id(currentOrganizationService.getOrganizationId()).stream()
                 .filter(stock -> support.defaultZero(stock.getAvailableQty())
                         .compareTo(support.defaultZero(stock.getReorderLevel())) <= 0)
                 .count();
     }
 
     private BigDecimal itemPurchasePrice(Long itemId) {
-        return itemPriceRepository.findTopByItemIdAndOrganizationIdOrderByIdDesc(
-                        itemId,
-                        currentOrganizationService.getOrganizationId()
-                )
+        return itemPriceRepository.findTopByItemIdOrderByIdDesc(itemId)
                 .map(price -> support.defaultZero(price.getPurchasePrice()))
                 .orElse(TransactionSupport.ZERO);
     }

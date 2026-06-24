@@ -166,20 +166,18 @@ class TransactionSupport {
     }
 
     ItemBatch getBatchForItem(Long batchId, Long itemId) {
-        ItemBatch batch = itemBatchRepository.findById(batchId)
+        ItemBatch batch = itemBatchRepository.findByIdAndItemId(batchId, itemId)
                 .orElseThrow(() -> new ResourceNotFoundException("Item batch not found", "ITEM_BATCH_NOT_FOUND"));
         return batch;
     }
 
     ItemBatch getOrCreateBatch(Item item, PurchaseItemRequestDto request) {
         validateBatchDates(request.getManufacturingDate(), request.getExpiryDate());
-        return itemBatchRepository.findByItemIdAndBatchNoAndOrganizationId(
+        return itemBatchRepository.findByItemIdAndBatchNo(
                         item.getId(),
-                        request.getBatchNo(),
-                        currentOrganizationService.getOrganizationId()
+                        request.getBatchNo()
                 )
                 .orElseGet(() -> itemBatchRepository.save(ItemBatch.builder()
-                        .organization(currentOrganizationService.getOrganizationReference())
                         .item(item)
                         .batchNo(request.getBatchNo())
                         .manufacturingDate(request.getManufacturingDate())
@@ -188,10 +186,7 @@ class TransactionSupport {
     }
 
     BigDecimal getSalePrice(Item item) {
-        ItemPrice price = itemPriceRepository.findTopByItemIdAndOrganizationIdOrderByIdDesc(
-                        item.getId(),
-                        currentOrganizationService.getOrganizationId()
-                )
+        ItemPrice price = itemPriceRepository.findTopByItemIdOrderByIdDesc(item.getId())
                 .orElseThrow(() -> new BadRequestException("Sale price is not configured", "SALE_PRICE_NOT_CONFIGURED"));
         BigDecimal salePrice = defaultZero(price.getSalePrice());
         if (salePrice.compareTo(ZERO) <= 0) {
@@ -201,10 +196,9 @@ class TransactionSupport {
     }
 
     List<Stock> getStocksForItemAndWarehouse(Long itemId, Long warehouseId) {
-        return stockRepository.findByItemIdAndWarehouseIdAndOrganizationIdOrderByIdAsc(
+        return stockRepository.findByItemIdAndWarehouseIdOrderByIdAsc(
                 itemId,
-                warehouseId,
-                currentOrganizationService.getOrganizationId()
+                warehouseId
         );
     }
 
@@ -217,13 +211,11 @@ class TransactionSupport {
             Long referenceId,
             String remarks
     ) {
-        Stock stock = stockRepository.findFirstByItemIdAndWarehouseIdAndBatchIdAndOrganizationId(
+        Stock stock = stockRepository.findFirstByItemIdAndWarehouseIdAndBatchId(
                 item.getId(),
                 warehouse.getId(),
-                batch.getId(),
-                currentOrganizationService.getOrganizationId()
+                batch.getId()
         ).orElseGet(() -> Stock.builder()
-                .organization(currentOrganizationService.getOrganizationReference())
                 .item(item)
                 .warehouse(warehouse)
                 .batch(batch)
@@ -249,11 +241,10 @@ class TransactionSupport {
             Long referenceId,
             String remarks
     ) {
-        Stock stock = stockRepository.findFirstByItemIdAndWarehouseIdAndBatchIdAndOrganizationId(
+        Stock stock = stockRepository.findFirstByItemIdAndWarehouseIdAndBatchId(
                 item.getId(),
                 warehouse.getId(),
-                batch.getId(),
-                currentOrganizationService.getOrganizationId()
+                batch.getId()
         ).orElseThrow(() -> new BadRequestException(ErrorMessage.INSUFFICIENT_STOCK, "INSUFFICIENT_STOCK"));
 
         BigDecimal availableQty = defaultZero(stock.getAvailableQty());
@@ -344,7 +335,7 @@ class TransactionSupport {
 
     void validateBatchDates(java.time.LocalDate manufacturingDate, java.time.LocalDate expiryDate) {
         if (manufacturingDate != null && expiryDate != null && expiryDate.isBefore(manufacturingDate)) {
-            throw new BadRequestException("Expiry date must be after manufacturing date", "INVALID_EXPIRY_DATE");
+            throw new BadRequestException(ErrorMessage.INVALID_EXPIRY_DATE, "INVALID_EXPIRY_DATE");
         }
     }
 
@@ -364,7 +355,7 @@ class TransactionSupport {
             String remarks
     ) {
         stockTransactionRepository.save(StockTransaction.builder()
-                .organization(currentOrganizationService.getOrganizationReference())
+                .organization(item.getOrganization())
                 .item(item)
                 .warehouse(warehouse)
                 .batch(batch)
@@ -381,6 +372,3 @@ class TransactionSupport {
     record LineTotals(BigDecimal grossAmount, BigDecimal discountAmount, BigDecimal taxAmount, BigDecimal totalAmount) {
     }
 }
-
-
-

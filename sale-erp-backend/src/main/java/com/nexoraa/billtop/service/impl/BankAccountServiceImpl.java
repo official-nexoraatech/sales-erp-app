@@ -6,6 +6,7 @@ import com.nexoraa.billtop.dto.bank.BankAccountResponseDto;
 import com.nexoraa.billtop.dto.bank.BankLedgerResponseDto;
 import com.nexoraa.billtop.dto.bank.BankTransactionResponseDto;
 import com.nexoraa.billtop.entity.BankAccount;
+import com.nexoraa.billtop.entity.Organization;
 import com.nexoraa.billtop.exception.ResourceNotFoundException;
 import com.nexoraa.billtop.repository.BankAccountRepository;
 import com.nexoraa.billtop.repository.BankTransactionRepository;
@@ -42,8 +43,9 @@ public class BankAccountServiceImpl implements BankAccountService {
     @Override
     @Transactional
     public BankAccountCreateResponseDto createBankAccount(BankAccountRequestDto request) {
+        Organization organization = currentOrganizationService.getOrganizationReference();
         BankAccount bankAccount = bankAccountRepository.save(BankAccount.builder()
-                .organization(currentOrganizationService.getOrganizationReference())
+                .organization(organization)
                 .bankName(request.getBankName())
                 .accountName(request.getAccountName())
                 .accountNumber(request.getAccountNumber())

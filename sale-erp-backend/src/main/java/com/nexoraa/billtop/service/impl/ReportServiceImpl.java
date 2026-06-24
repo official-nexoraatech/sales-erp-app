@@ -128,7 +128,7 @@ public class ReportServiceImpl implements ReportService {
     @Override
     @Transactional(readOnly = true)
     public List<StockReportResponseDto> getStockReport() {
-        return stockRepository.findByOrganizationId(currentOrganizationService.getOrganizationId()).stream()
+        return stockRepository.findByItem_Organization_Id(currentOrganizationService.getOrganizationId()).stream()
                 .map(this::toStockRecord)
                 .toList();
     }
@@ -355,10 +355,7 @@ public class ReportServiceImpl implements ReportService {
         if (itemId == null) {
             return TransactionSupport.ZERO;
         }
-        return itemPriceRepository.findTopByItemIdAndOrganizationIdOrderByIdDesc(
-                        itemId,
-                        currentOrganizationService.getOrganizationId()
-                )
+        return itemPriceRepository.findTopByItemIdOrderByIdDesc(itemId)
                 .map(price -> support.defaultZero(price.getPurchasePrice()))
                 .orElse(TransactionSupport.ZERO);
     }

@@ -3,6 +3,7 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { useNavigate, useParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { purchaseApi } from '../../../api/endpoints';
+import { queryClient } from '../../../app/queryClient';
 import { Loader } from '../../../components/ui/Loader';
 import { PurchaseForm } from './PurchaseForm';
 
@@ -14,6 +15,8 @@ export const PurchaseEditPage: React.FC = () => {
     mutationFn: (payload: any) => purchaseApi.update(id, payload),
     onSuccess: () => {
       toast.success('Purchase updated successfully');
+      queryClient.invalidateQueries({ queryKey: ['purchases'] });
+      queryClient.invalidateQueries({ queryKey: ['purchase', id] });
       navigate('/purchase/bills');
     },
     onError: (error: any) => toast.error(error?.message || 'Failed to update purchase'),

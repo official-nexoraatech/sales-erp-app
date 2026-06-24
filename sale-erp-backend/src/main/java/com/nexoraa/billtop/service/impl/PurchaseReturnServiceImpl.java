@@ -11,6 +11,7 @@ import com.nexoraa.billtop.dto.returning.ReturnListResponseDto;
 import com.nexoraa.billtop.entity.Contact;
 import com.nexoraa.billtop.entity.Item;
 import com.nexoraa.billtop.entity.ItemBatch;
+import com.nexoraa.billtop.entity.Organization;
 import com.nexoraa.billtop.entity.Purchase;
 import com.nexoraa.billtop.entity.PurchaseReturn;
 import com.nexoraa.billtop.entity.PurchaseReturnItem;
@@ -60,6 +61,7 @@ public class PurchaseReturnServiceImpl implements PurchaseReturnService {
     @Override
     @Transactional
     public PurchaseReturnCreateResponseDto createPurchaseReturn(PurchaseReturnRequestDto request) {
+        Organization organization = currentOrganizationService.getOrganizationReference();
         Purchase purchase = getPurchase(request.getPurchaseId());
         if (support.isCancelled(purchase.getStatus())) {
             throw new BadRequestException(ErrorMessage.PURCHASE_ALREADY_CANCELLED, "PURCHASE_ALREADY_CANCELLED");
@@ -81,7 +83,7 @@ public class PurchaseReturnServiceImpl implements PurchaseReturnService {
         }
 
         PurchaseReturn purchaseReturn = PurchaseReturn.builder()
-                .organization(currentOrganizationService.getOrganizationReference())
+                .organization(organization)
                 .returnNo(nextReturnNo())
                 .purchase(purchase)
                 .supplier(supplier)
@@ -95,7 +97,7 @@ public class PurchaseReturnServiceImpl implements PurchaseReturnService {
         PurchaseReturn savedReturn = purchaseReturnRepository.save(purchaseReturn);
         for (PreparedReturnItem item : items) {
             purchaseReturnItemRepository.save(PurchaseReturnItem.builder()
-                    .organization(currentOrganizationService.getOrganizationReference())
+                    .organization(organization)
                     .purchaseReturn(savedReturn)
                     .item(item.item())
                     .batch(item.batch())
