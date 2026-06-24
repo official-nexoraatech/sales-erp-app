@@ -37,7 +37,6 @@ public final class ItemSpecification {
             predicates.add(criteriaBuilder.like(criteriaBuilder.lower(root.get("itemName")), pattern));
             predicates.add(criteriaBuilder.like(criteriaBuilder.lower(root.get("itemCode")), pattern));
             predicates.add(criteriaBuilder.like(criteriaBuilder.lower(root.get("sku")), pattern));
-            predicates.add(criteriaBuilder.like(criteriaBuilder.lower(root.get("barcode")), pattern));
             predicates.add(criteriaBuilder.like(criteriaBuilder.lower(root.get("hsnCode")), pattern));
             predicates.add(criteriaBuilder.like(criteriaBuilder.lower(root.join("category", JoinType.LEFT).get("name")), pattern));
             predicates.add(criteriaBuilder.like(criteriaBuilder.lower(root.join("brand", JoinType.LEFT).get("name")), pattern));

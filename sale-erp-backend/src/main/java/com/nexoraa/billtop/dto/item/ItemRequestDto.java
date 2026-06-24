@@ -32,9 +32,6 @@ public class ItemRequestDto {
     @Size(max = 80, message = ValidationMessage.ITEM_CODE_REQUIRED)
     private String sku;
 
-    @Size(max = 80, message = ValidationMessage.ITEM_CODE_REQUIRED)
-    private String barcode;
-
     @Size(max = 30, message = ValidationMessage.ITEM_CODE_REQUIRED)
     private String hsnCode;
 
@@ -48,11 +45,6 @@ public class ItemRequestDto {
 
     @NotNull(message = ValidationMessage.ID_REQUIRED)
     private Long baseUnitId;
-
-    private Long secondaryUnitId;
-
-    @DecimalMin(value = "0.0", inclusive = false, message = ValidationMessage.QUANTITY_INVALID)
-    private BigDecimal conversionRate;
 
     @DecimalMin(value = "0.0", message = ValidationMessage.PRICE_INVALID)
     private BigDecimal purchasePrice;

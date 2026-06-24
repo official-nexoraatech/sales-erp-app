@@ -183,7 +183,7 @@ public class ItemExcelService {
             }
 
             importItemRows(itemSheet, formatter, organizationId, organization, unit, response, importedItemsByName);
-            importBatchRows(batchSheet, formatter, organizationId, organization, warehouse, response, importedItemsByName);
+            importBatchRows(batchSheet, formatter, organizationId, warehouse, response, importedItemsByName);
             response.setFailedRows(response.getErrors().size());
             return response;
         } catch (IOException ex) {
@@ -214,7 +214,7 @@ public class ItemExcelService {
                 continue;
             }
             if (!StringUtils.hasText(itemCode)) {
-                addError(response, ITEM_SHEET, rowIndex, itemName, "Item Code/Barcode is required");
+                addError(response, ITEM_SHEET, rowIndex, itemName, "Item Code is required");
                 continue;
             }
 
@@ -228,17 +228,15 @@ public class ItemExcelService {
 
             item.setItemName(limit(itemName, 150));
             item.setItemCode(limit(itemCode, 50));
-            item.setBarcode(limit(itemCode, 80));
             item.setSku(limit(text(row, ITEM_SKU, formatter), 80));
             item.setHsnCode(limit(text(row, ITEM_HSN, formatter), 30));
             item.setDescription(limit(text(row, ITEM_DESCRIPTION, formatter), 500));
             item.setCategory(category);
             item.setBrand(brand);
             item.setBaseUnit(unit);
-            item.setConversionRate(BigDecimal.ONE);
 
             Item savedItem = itemRepository.save(item);
-            saveItemPrice(savedItem, row, formatter, organizationId, organization);
+            saveItemPrice(savedItem, row, formatter);
             importedItemsByName.put(normalize(itemName), savedItem);
 
             if (created) {
@@ -253,7 +251,6 @@ public class ItemExcelService {
             Sheet sheet,
             DataFormatter formatter,
             Long organizationId,
-            Organization organization,
             Warehouse warehouse,
             ItemExcelImportResponseDto response,
             Map<String, Item> importedItemsByName
@@ -301,8 +298,8 @@ public class ItemExcelService {
             }
 
             Item batchItem = item;
-            ItemBatch batch = itemBatchRepository.findByItemIdAndBatchNoAndOrganizationId(batchItem.getId(), batchNo, organizationId)
-                    .orElseGet(() -> newBatch(organization, batchItem));
+            ItemBatch batch = itemBatchRepository.findByItemIdAndBatchNo(batchItem.getId(), batchNo)
+                    .orElseGet(() -> newBatch(batchItem));
             boolean createdBatch = batch.getId() == null;
             batch.setBatchNo(limit(batchNo, 80));
             batch.setManufacturingDate(manufacturingDate);
@@ -310,13 +307,12 @@ public class ItemExcelService {
             ItemBatch savedBatch = itemBatchRepository.save(batch);
 
             ItemBatch stockBatch = savedBatch;
-            Stock stock = stockRepository.findFirstByItemIdAndWarehouseIdAndBatchIdAndOrganizationId(
+            Stock stock = stockRepository.findFirstByItemIdAndWarehouseIdAndBatchId(
                             batchItem.getId(),
                             warehouse.getId(),
-                            stockBatch.getId(),
-                            organizationId
+                            stockBatch.getId()
                     )
-                    .orElseGet(() -> newStock(organization, batchItem, warehouse, stockBatch));
+                    .orElseGet(() -> newStock(batchItem, warehouse, stockBatch));
             stock.setAvailableQty(openingQty);
             stock.setReservedQty(stock.getReservedQty() == null ? ZERO : stock.getReservedQty());
             stock.setMinimumStock(stock.getMinimumStock() == null ? ZERO : stock.getMinimumStock());
@@ -332,10 +328,9 @@ public class ItemExcelService {
         }
     }
 
-    private void saveItemPrice(Item item, Row row, DataFormatter formatter, Long organizationId, Organization organization) {
-        ItemPrice price = itemPriceRepository.findTopByItemIdAndOrganizationIdOrderByIdDesc(item.getId(), organizationId)
+    private void saveItemPrice(Item item, Row row, DataFormatter formatter) {
+        ItemPrice price = itemPriceRepository.findTopByItemIdOrderByIdDesc(item.getId())
                 .orElseGet(ItemPrice::new);
-        price.setOrganization(organization);
         price.setItem(item);
         price.setPurchasePrice(number(row, ITEM_PURCHASE_PRICE, formatter, ZERO));
         price.setPurchasePriceWithTax(price.getPurchasePrice());
@@ -393,16 +388,14 @@ public class ItemExcelService {
         return item;
     }
 
-    private ItemBatch newBatch(Organization organization, Item item) {
+    private ItemBatch newBatch(Item item) {
         return ItemBatch.builder()
-                .organization(organization)
                 .item(item)
                 .build();
     }
 
-    private Stock newStock(Organization organization, Item item, Warehouse warehouse, ItemBatch batch) {
+    private Stock newStock(Item item, Warehouse warehouse, ItemBatch batch) {
         return Stock.builder()
-                .organization(organization)
                 .item(item)
                 .warehouse(warehouse)
                 .batch(batch)
@@ -565,7 +558,7 @@ public class ItemExcelService {
                 "Item Type*",
                 "HSN",
                 "SKU",
-                "Item Code/Barcode*",
+                "Item Code*",
                 "Category",
                 "Brand Name",
                 "MRP (Maximum Retail Price)",

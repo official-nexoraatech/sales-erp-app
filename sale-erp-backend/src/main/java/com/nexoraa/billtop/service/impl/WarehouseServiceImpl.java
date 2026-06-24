@@ -4,6 +4,7 @@ import com.nexoraa.billtop.constants.ErrorMessage;
 import com.nexoraa.billtop.dto.common.IdResponseDto;
 import com.nexoraa.billtop.dto.warehouse.WarehouseRequestDto;
 import com.nexoraa.billtop.dto.warehouse.WarehouseResponseDto;
+import com.nexoraa.billtop.entity.Organization;
 import com.nexoraa.billtop.entity.Warehouse;
 import com.nexoraa.billtop.exception.BadRequestException;
 import com.nexoraa.billtop.exception.ResourceNotFoundException;
@@ -39,7 +40,8 @@ public class WarehouseServiceImpl implements WarehouseService {
     @Override
     @Transactional
     public IdResponseDto createWarehouse(WarehouseRequestDto request) {
-        Long organizationId = currentOrganizationService.getOrganizationId();
+        Organization organization = currentOrganizationService.getOrganizationReference();
+        Long organizationId = organization.getId();
         if (warehouseRepository.existsByWarehouseCodeIgnoreCaseAndOrganizationIdAndStatus(
                 request.getWarehouseCode(),
                 organizationId,
@@ -47,7 +49,7 @@ public class WarehouseServiceImpl implements WarehouseService {
             throw new BadRequestException(ErrorMessage.WAREHOUSE_ALREADY_EXISTS, "WAREHOUSE_ALREADY_EXISTS");
         }
         Warehouse warehouse = warehouseMapper.toEntity(request);
-        warehouse.setOrganization(currentOrganizationService.getOrganizationReference());
+        warehouse.setOrganization(organization);
         return IdResponseDto.builder().id(warehouseRepository.save(warehouse).getId()).build();
     }
 

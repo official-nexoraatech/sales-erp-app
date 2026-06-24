@@ -8,6 +8,7 @@ import com.nexoraa.billtop.dto.payment.PaymentInCreateResponseDto;
 import com.nexoraa.billtop.dto.payment.PaymentInRequestDto;
 import com.nexoraa.billtop.dto.payment.PaymentListResponseDto;
 import com.nexoraa.billtop.entity.Contact;
+import com.nexoraa.billtop.entity.Organization;
 import com.nexoraa.billtop.entity.Payment;
 import com.nexoraa.billtop.entity.PaymentMethod;
 import com.nexoraa.billtop.entity.Sale;
@@ -60,10 +61,11 @@ public class PaymentInServiceImpl implements PaymentInService {
     @Override
     @Transactional
     public PaymentInCreateResponseDto createPaymentIn(PaymentInRequestDto request) {
+        Organization organization = currentOrganizationService.getOrganizationReference();
         Contact customer = support.getActiveCustomer(request.getCustomerId());
         PaymentMethod paymentMethod = support.getActivePaymentMethod(request.getPaymentMethodId());
         Payment payment = paymentRepository.save(Payment.builder()
-                .organization(currentOrganizationService.getOrganizationReference())
+                .organization(organization)
                 .paymentNo(nextPaymentNo())
                 .paymentType(FinanceSupport.PAYMENT_IN)
                 .paymentMethod(paymentMethod)
@@ -74,7 +76,7 @@ public class PaymentInServiceImpl implements PaymentInService {
                 .notes(request.getNotes())
                 .build());
 
-        allocateToSales(payment, customer.getId(), request.getSaleIds());
+        allocateToSales(payment, customer.getId(), request.getSaleIds(), organization);
         financeSupport.saveMoneyMovement(payment, FinanceSupport.PAYMENT_IN);
 
         return PaymentInCreateResponseDto.builder()
@@ -113,7 +115,7 @@ public class PaymentInServiceImpl implements PaymentInService {
         return toDetailResponse(payment);
     }
 
-    private void allocateToSales(Payment payment, Long customerId, List<Long> saleIds) {
+    private void allocateToSales(Payment payment, Long customerId, List<Long> saleIds, Organization organization) {
         BigDecimal remaining = support.defaultZero(payment.getAmount());
         if (saleIds == null || saleIds.isEmpty()) {
             return;
@@ -143,7 +145,7 @@ public class PaymentInServiceImpl implements PaymentInService {
             }
             saleRepository.save(sale);
             salesPaymentRepository.save(SalesPayment.builder()
-                    .organization(currentOrganizationService.getOrganizationReference())
+                    .organization(organization)
                     .sale(sale)
                     .payment(payment)
                     .amount(support.money(allocated))

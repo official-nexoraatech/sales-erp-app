@@ -6,6 +6,7 @@ import com.nexoraa.billtop.entity.BankTransaction;
 import com.nexoraa.billtop.entity.CashAccount;
 import com.nexoraa.billtop.entity.CashTransaction;
 import com.nexoraa.billtop.entity.Contact;
+import com.nexoraa.billtop.entity.Organization;
 import com.nexoraa.billtop.entity.Payment;
 import com.nexoraa.billtop.entity.PaymentMethod;
 import com.nexoraa.billtop.entity.Purchase;
@@ -78,10 +79,11 @@ class FinanceSupport {
 
     void saveMoneyMovement(Payment payment, String transactionType) {
         deleteMoneyMovement(payment);
+        Organization organization = payment.getOrganization();
         if (isCash(payment.getPaymentMethod())) {
             cashTransactionRepository.save(CashTransaction.builder()
-                    .organization(currentOrganizationService.getOrganizationReference())
-                    .cashAccount(getOrCreateCashAccount())
+                    .organization(organization)
+                    .cashAccount(getOrCreateCashAccount(organization))
                     .payment(payment)
                     .transactionType(transactionType)
                     .amount(support.money(payment.getAmount()))
@@ -92,8 +94,8 @@ class FinanceSupport {
         }
 
         bankTransactionRepository.save(BankTransaction.builder()
-                .organization(currentOrganizationService.getOrganizationReference())
-                .bankAccount(getDefaultBankAccount())
+                .organization(organization)
+                .bankAccount(getDefaultBankAccount(organization.getId()))
                 .payment(payment)
                 .transactionType(transactionType)
                 .amount(support.money(payment.getAmount()))
@@ -179,11 +181,13 @@ class FinanceSupport {
     }
 
     CashSummaryResponseDto cashSummary() {
-        CashAccount cashAccount = getOrCreateCashAccount();
+        Organization organization = currentOrganizationService.getOrganizationReference();
+        Long organizationId = organization.getId();
+        CashAccount cashAccount = getOrCreateCashAccount(organization);
         BigDecimal received = TransactionSupport.ZERO;
         BigDecimal paid = TransactionSupport.ZERO;
         for (CashTransaction transaction : cashTransactionRepository.findByOrganizationIdOrderByTransactionDateAscIdAsc(
-                currentOrganizationService.getOrganizationId()
+                organizationId
         )) {
             BigDecimal amount = support.defaultZero(transaction.getAmount());
             if (isPositive(transaction.getTransactionType())) {
@@ -238,17 +242,17 @@ class FinanceSupport {
         return name.contains("cash");
     }
 
-    private BankAccount getDefaultBankAccount() {
+    private BankAccount getDefaultBankAccount(Long organizationId) {
         return bankAccountRepository.findFirstByOrganizationIdAndStatusOrderByIdAsc(
-                        currentOrganizationService.getOrganizationId(),
+                        organizationId,
                 com.nexoraa.billtop.enums.Status.ACTIVE)
                 .orElseThrow(() -> new ResourceNotFoundException("Bank account not found", "BANK_ACCOUNT_NOT_FOUND"));
     }
 
-    private CashAccount getOrCreateCashAccount() {
-        return cashAccountRepository.findFirstByOrganizationIdAndStatusOrderByIdAsc(currentOrganizationService.getOrganizationId(), com.nexoraa.billtop.enums.Status.ACTIVE)
+    private CashAccount getOrCreateCashAccount(Organization organization) {
+        return cashAccountRepository.findFirstByOrganizationIdAndStatusOrderByIdAsc(organization.getId(), com.nexoraa.billtop.enums.Status.ACTIVE)
                 .orElseGet(() -> cashAccountRepository.save(CashAccount.builder()
-                        .organization(currentOrganizationService.getOrganizationReference())
+                        .organization(organization)
                         .accountName("Cash In Hand")
                         .openingBalance(TransactionSupport.ZERO)
                         .status(com.nexoraa.billtop.enums.Status.ACTIVE)

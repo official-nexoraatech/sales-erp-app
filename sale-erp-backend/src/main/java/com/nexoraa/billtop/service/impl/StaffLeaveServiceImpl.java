@@ -6,6 +6,7 @@ import com.nexoraa.billtop.dto.staff.LeaveRejectRequestDto;
 import com.nexoraa.billtop.dto.staff.LeaveRequestDto;
 import com.nexoraa.billtop.dto.staff.LeaveResponseDto;
 import com.nexoraa.billtop.entity.Employee;
+import com.nexoraa.billtop.entity.Organization;
 import com.nexoraa.billtop.entity.StaffLeaveRequest;
 import com.nexoraa.billtop.entity.StaffSetting;
 import com.nexoraa.billtop.enums.StaffLeaveStatus;
@@ -85,8 +86,9 @@ public class StaffLeaveServiceImpl implements StaffLeaveService {
             throw new BadRequestException(ErrorMessage.BAD_REQUEST, "INVALID_LEAVE_DATE_RANGE");
         }
         Employee employee = getEmployee(request.getEmployeeId());
+        Organization organization = currentOrganizationService.getOrganizationReference();
         StaffLeaveRequest leave = StaffLeaveRequest.builder()
-                .organization(currentOrganizationService.getOrganizationReference())
+                .organization(organization)
                 .employee(employee)
                 .leaveType(request.getLeaveType())
                 .fromDate(request.getFromDate())

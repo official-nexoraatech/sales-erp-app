@@ -4,6 +4,7 @@ import com.nexoraa.billtop.constants.ErrorMessage;
 import com.nexoraa.billtop.dto.staff.PayrollRequestDto;
 import com.nexoraa.billtop.dto.staff.PayrollResponseDto;
 import com.nexoraa.billtop.entity.Employee;
+import com.nexoraa.billtop.entity.Organization;
 import com.nexoraa.billtop.entity.StaffPayroll;
 import com.nexoraa.billtop.enums.StaffPayrollStatus;
 import com.nexoraa.billtop.exception.BadRequestException;
@@ -60,7 +61,8 @@ public class StaffPayrollServiceImpl implements StaffPayrollService {
     @Override
     @Transactional
     public void generatePayroll(PayrollRequestDto request) {
-        Long organizationId = currentOrganizationService.getOrganizationId();
+        Organization organization = currentOrganizationService.getOrganizationReference();
+        Long organizationId = organization.getId();
         Employee employee = getEmployee(request.getEmployeeId());
         StaffPayroll payroll = payrollRepository.findByOrganizationIdAndEmployeeIdAndPayrollMonthAndIsDeletedFalse(
                         organizationId,
@@ -69,7 +71,7 @@ public class StaffPayrollServiceImpl implements StaffPayrollService {
                 )
                 .orElseGet(StaffPayroll::new);
         if (payroll.getId() == null) {
-            payroll.setOrganization(currentOrganizationService.getOrganizationReference());
+            payroll.setOrganization(organization);
             payroll.setEmployee(employee);
             payroll.setPayrollMonth(request.getPayrollMonth());
         }

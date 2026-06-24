@@ -65,6 +65,7 @@ public class ErrorMessage {
     public static final String PAYMENT_METHOD_NOT_FOUND = "Payment method not found";
     public static final String PAYMENT_METHOD_ALREADY_EXISTS = "Payment method already exists";
     public static final String INSUFFICIENT_STOCK = "Insufficient stock";
+    public static final String INVALID_EXPIRY_DATE = "Expiry date must be after manufacturing date";
 
     // Purchase/Sales Errors
     public static final String EXPENSE_NOT_FOUND = "Expense not found";

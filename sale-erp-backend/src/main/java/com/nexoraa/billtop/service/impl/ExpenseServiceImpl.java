@@ -8,6 +8,7 @@ import com.nexoraa.billtop.dto.expense.ExpenseRequestDto;
 import com.nexoraa.billtop.dto.expense.ExpenseResponseDto;
 import com.nexoraa.billtop.entity.Expense;
 import com.nexoraa.billtop.entity.ExpenseCategory;
+import com.nexoraa.billtop.entity.Organization;
 import com.nexoraa.billtop.entity.Payment;
 import com.nexoraa.billtop.entity.PaymentMethod;
 import com.nexoraa.billtop.exception.ResourceNotFoundException;
@@ -56,8 +57,9 @@ public class ExpenseServiceImpl implements ExpenseService {
     @Override
     @Transactional
     public ExpenseCreateResponseDto createExpense(ExpenseRequestDto request) {
+        Organization organization = currentOrganizationService.getOrganizationReference();
         Expense expense = Expense.builder()
-                .organization(currentOrganizationService.getOrganizationReference())
+                .organization(organization)
                 .expenseNo(nextExpenseNo())
                 .expenseCategory(getExpenseCategory(request.getExpenseCategoryId()))
                 .expenseDate(request.getExpenseDate())
@@ -66,7 +68,7 @@ public class ExpenseServiceImpl implements ExpenseService {
                 .notes(request.getNotes())
                 .build();
         Expense savedExpense = expenseRepository.save(expense);
-        saveExpensePayment(savedExpense);
+        saveExpensePayment(savedExpense, organization);
         return ExpenseCreateResponseDto.builder()
                 .expenseId(savedExpense.getId())
                 .expenseNo(savedExpense.getExpenseNo())
@@ -99,7 +101,7 @@ public class ExpenseServiceImpl implements ExpenseService {
         expense.setPaymentMethod(support.getActivePaymentMethod(request.getPaymentMethodId()));
         expense.setNotes(request.getNotes());
         Expense savedExpense = expenseRepository.save(expense);
-        saveExpensePayment(savedExpense);
+        saveExpensePayment(savedExpense, savedExpense.getOrganization());
     }
 
     @Override
@@ -118,14 +120,14 @@ public class ExpenseServiceImpl implements ExpenseService {
         expenseRepository.delete(expense);
     }
 
-    private void saveExpensePayment(Expense expense) {
+    private void saveExpensePayment(Expense expense, Organization organization) {
         Payment payment = paymentRepository.findByReferenceNoAndPaymentTypeAndOrganizationId(
                         expense.getExpenseNo(),
                         FinanceSupport.EXPENSE,
                         currentOrganizationService.getOrganizationId()
                 )
                 .orElseGet(() -> Payment.builder()
-                        .organization(currentOrganizationService.getOrganizationReference())
+                        .organization(organization)
                         .paymentNo(nextExpensePaymentNo())
                         .paymentType(FinanceSupport.EXPENSE)
                         .referenceNo(expense.getExpenseNo())

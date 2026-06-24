@@ -7,6 +7,7 @@ import com.nexoraa.billtop.dto.staff.EmployeeDocumentResponseDto;
 import com.nexoraa.billtop.dto.staff.EmployeeRequestDto;
 import com.nexoraa.billtop.dto.staff.EmployeeResponseDto;
 import com.nexoraa.billtop.entity.Employee;
+import com.nexoraa.billtop.entity.Organization;
 import com.nexoraa.billtop.entity.StaffEmployeeDocument;
 import com.nexoraa.billtop.enums.Status;
 import com.nexoraa.billtop.exception.BadRequestException;
@@ -54,7 +55,8 @@ public class StaffEmployeeServiceImpl implements StaffEmployeeService {
     @Override
     @Transactional
     public void createEmployee(EmployeeRequestDto request) {
-        Long organizationId = currentOrganizationService.getOrganizationId();
+        Organization organization = currentOrganizationService.getOrganizationReference();
+        Long organizationId = organization.getId();
         if (employeeRepository.existsByEmployeeCodeIgnoreCaseAndOrganizationIdAndIsDeletedFalse(
                 request.getEmployeeCode(),
                 organizationId
@@ -63,7 +65,7 @@ public class StaffEmployeeServiceImpl implements StaffEmployeeService {
         }
 
         Employee employee = new Employee();
-        employee.setOrganization(currentOrganizationService.getOrganizationReference());
+        employee.setOrganization(organization);
         applyRequest(request, employee);
         employeeRepository.save(employee);
     }
@@ -127,14 +129,15 @@ public class StaffEmployeeServiceImpl implements StaffEmployeeService {
             throw new BadRequestException(ErrorMessage.BAD_REQUEST, "DOCUMENT_TYPE_REQUIRED");
         }
         Employee employee = getEmployee(employeeId);
-        Long organizationId = currentOrganizationService.getOrganizationId();
+        Organization organization = currentOrganizationService.getOrganizationReference();
+        Long organizationId = organization.getId();
         FileUploadResponseDto upload = fileStorageService.uploadFile(
                 file,
                 "organizations/" + organizationId + "/staff/employees/" + employeeId + "/documents"
         );
 
         StaffEmployeeDocument document = StaffEmployeeDocument.builder()
-                .organization(currentOrganizationService.getOrganizationReference())
+                .organization(organization)
                 .employee(employee)
                 .documentType(documentType)
                 .fileName(upload.getFileName())

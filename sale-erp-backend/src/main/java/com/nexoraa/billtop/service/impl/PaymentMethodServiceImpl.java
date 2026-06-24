@@ -4,6 +4,7 @@ import com.nexoraa.billtop.constants.ErrorMessage;
 import com.nexoraa.billtop.dto.common.IdResponseDto;
 import com.nexoraa.billtop.dto.payment.PaymentMethodRequestDto;
 import com.nexoraa.billtop.dto.payment.PaymentMethodResponseDto;
+import com.nexoraa.billtop.entity.Organization;
 import com.nexoraa.billtop.entity.PaymentMethod;
 import com.nexoraa.billtop.enums.Status;
 import com.nexoraa.billtop.exception.BadRequestException;
@@ -36,7 +37,8 @@ public class PaymentMethodServiceImpl implements PaymentMethodService {
     @Override
     @Transactional
     public IdResponseDto createPaymentMethod(PaymentMethodRequestDto request) {
-        Long organizationId = currentOrganizationService.getOrganizationId();
+        Organization organization = currentOrganizationService.getOrganizationReference();
+        Long organizationId = organization.getId();
         if (paymentMethodRepository.existsByNameIgnoreCaseAndOrganizationIdAndStatusAndIsDeletedFalse(
                 request.getName(),
                 organizationId,
@@ -49,7 +51,7 @@ public class PaymentMethodServiceImpl implements PaymentMethodService {
         }
 
         PaymentMethod paymentMethod = PaymentMethod.builder()
-                .organization(currentOrganizationService.getOrganizationReference())
+                .organization(organization)
                 .name(request.getName())
                 .description(request.getDescription())
                 .status(request.getStatus() == null ? Status.ACTIVE : request.getStatus())

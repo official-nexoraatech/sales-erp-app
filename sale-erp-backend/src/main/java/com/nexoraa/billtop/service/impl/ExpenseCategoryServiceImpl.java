@@ -5,6 +5,7 @@ import com.nexoraa.billtop.dto.common.IdResponseDto;
 import com.nexoraa.billtop.dto.expense.ExpenseCategoryRequestDto;
 import com.nexoraa.billtop.dto.expense.ExpenseCategoryResponseDto;
 import com.nexoraa.billtop.entity.ExpenseCategory;
+import com.nexoraa.billtop.entity.Organization;
 import com.nexoraa.billtop.enums.Status;
 import com.nexoraa.billtop.exception.BadRequestException;
 import com.nexoraa.billtop.exception.ResourceNotFoundException;
@@ -36,7 +37,8 @@ public class ExpenseCategoryServiceImpl implements ExpenseCategoryService {
     @Override
     @Transactional
     public IdResponseDto createExpenseCategory(ExpenseCategoryRequestDto request) {
-        Long organizationId = currentOrganizationService.getOrganizationId();
+        Organization organization = currentOrganizationService.getOrganizationReference();
+        Long organizationId = organization.getId();
         if (expenseCategoryRepository.existsByNameIgnoreCaseAndOrganizationIdAndStatusAndIsDeletedFalse(
                 request.getName(),
                 organizationId,
@@ -49,7 +51,7 @@ public class ExpenseCategoryServiceImpl implements ExpenseCategoryService {
         }
 
         ExpenseCategory category = ExpenseCategory.builder()
-                .organization(currentOrganizationService.getOrganizationReference())
+                .organization(organization)
                 .name(request.getName())
                 .description(request.getDescription())
                 .status(request.getStatus() == null ? Status.ACTIVE : request.getStatus())

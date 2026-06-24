@@ -4,6 +4,7 @@ import com.nexoraa.billtop.constants.ErrorMessage;
 import com.nexoraa.billtop.dto.PageResponseDto;
 import com.nexoraa.billtop.dto.carrier.CarrierRequestDto;
 import com.nexoraa.billtop.dto.carrier.CarrierResponseDto;
+import com.nexoraa.billtop.entity.Organization;
 import com.nexoraa.billtop.entity.ShippingCarrier;
 import com.nexoraa.billtop.enums.Status;
 import com.nexoraa.billtop.exception.BadRequestException;
@@ -39,7 +40,8 @@ public class CarrierServiceImpl implements CarrierService {
     @Override
     @Transactional
     public void createCarrier(CarrierRequestDto request) {
-        Long organizationId = currentOrganizationService.getOrganizationId();
+        Organization organization = currentOrganizationService.getOrganizationReference();
+        Long organizationId = organization.getId();
         if (shippingCarrierRepository.existsByNameIgnoreCaseAndOrganizationIdAndStatusAndIsDeletedFalse(
                 request.getName(),
                 organizationId,
@@ -48,7 +50,7 @@ public class CarrierServiceImpl implements CarrierService {
             throw new BadRequestException(ErrorMessage.CARRIER_ALREADY_EXISTS, "CARRIER_ALREADY_EXISTS");
         }
         ShippingCarrier carrier = carrierMapper.toEntity(request);
-        carrier.setOrganization(currentOrganizationService.getOrganizationReference());
+        carrier.setOrganization(organization);
         shippingCarrierRepository.save(carrier);
     }
 

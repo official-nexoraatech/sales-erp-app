@@ -17,7 +17,6 @@ public interface ItemMapper {
     @Mapping(target = "category", ignore = true)
     @Mapping(target = "brand", ignore = true)
     @Mapping(target = "baseUnit", ignore = true)
-    @Mapping(target = "secondaryUnit", ignore = true)
     @Mapping(target = "imageUrl", ignore = true)
     @Mapping(target = "status", constant = "ACTIVE")
     @Mapping(target = "createdAt", ignore = true)
@@ -29,7 +28,6 @@ public interface ItemMapper {
     @Mapping(target = "category", ignore = true)
     @Mapping(target = "brand", ignore = true)
     @Mapping(target = "baseUnit", ignore = true)
-    @Mapping(target = "secondaryUnit", ignore = true)
     @Mapping(target = "imageUrl", ignore = true)
     @Mapping(target = "status", ignore = true)
     @Mapping(target = "createdAt", ignore = true)
@@ -42,8 +40,6 @@ public interface ItemMapper {
     @Mapping(target = "brandName", source = "brand.name")
     @Mapping(target = "baseUnitId", source = "baseUnit.id")
     @Mapping(target = "baseUnitName", source = "baseUnit.name")
-    @Mapping(target = "secondaryUnitId", source = "secondaryUnit.id")
-    @Mapping(target = "secondaryUnitName", source = "secondaryUnit.name")
     @Mapping(target = "purchasePrice", ignore = true)
     @Mapping(target = "purchasePriceWithTax", ignore = true)
     @Mapping(target = "taxPercentage", ignore = true)
@@ -69,5 +65,4 @@ public interface ItemMapper {
     @Mapping(target = "availableQty", ignore = true)
     ItemListResponseDto toListResponse(Item item);
 }
-
 

@@ -7,5 +7,5 @@ import java.util.Optional;
 
 public interface ItemPriceRepository extends JpaRepository<ItemPrice, Long> {
 
-    Optional<ItemPrice> findTopByItemIdAndOrganizationIdOrderByIdDesc(Long itemId, Long organizationId);
+    Optional<ItemPrice> findTopByItemIdOrderByIdDesc(Long itemId);
 }

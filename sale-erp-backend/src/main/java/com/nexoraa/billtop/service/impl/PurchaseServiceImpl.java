@@ -11,6 +11,7 @@ import com.nexoraa.billtop.dto.purchase.PurchaseRequestDto;
 import com.nexoraa.billtop.entity.Contact;
 import com.nexoraa.billtop.entity.Item;
 import com.nexoraa.billtop.entity.ItemBatch;
+import com.nexoraa.billtop.entity.Organization;
 import com.nexoraa.billtop.entity.Purchase;
 import com.nexoraa.billtop.entity.PurchaseItem;
 import com.nexoraa.billtop.entity.Warehouse;
@@ -61,10 +62,11 @@ public class PurchaseServiceImpl implements PurchaseService {
     @Override
     @Transactional
     public PurchaseCreateResponseDto createPurchase(PurchaseRequestDto request) {
+        Organization organization = currentOrganizationService.getOrganizationReference();
         String purchaseNo = nextPurchaseNo();
-        PreparedPurchase preparedPurchase = preparePurchase(new Purchase(), request, purchaseNo);
+        PreparedPurchase preparedPurchase = preparePurchase(new Purchase(), request, purchaseNo, organization);
         Purchase savedPurchase = purchaseRepository.save(preparedPurchase.purchase());
-        saveItemsAndIncreaseStock(savedPurchase, preparedPurchase.items(), TX_PURCHASE);
+        saveItemsAndIncreaseStock(savedPurchase, preparedPurchase.items(), TX_PURCHASE, organization);
         return toCreateResponse(savedPurchase);
     }
 
@@ -98,15 +100,16 @@ public class PurchaseServiceImpl implements PurchaseService {
     @Override
     @Transactional
     public void updatePurchase(Long id, PurchaseRequestDto request) {
+        Organization organization = currentOrganizationService.getOrganizationReference();
         Purchase purchase = getPurchase(id);
         ensureNotCancelled(purchase);
 
         reversePurchaseStock(purchase, TX_PURCHASE_REVERSE);
         purchaseItemRepository.deleteByPurchaseIdAndOrganizationId(id, currentOrganizationService.getOrganizationId());
 
-        PreparedPurchase preparedPurchase = preparePurchase(purchase, request, purchase.getPurchaseNo());
+        PreparedPurchase preparedPurchase = preparePurchase(purchase, request, purchase.getPurchaseNo(), organization);
         Purchase savedPurchase = purchaseRepository.save(preparedPurchase.purchase());
-        saveItemsAndIncreaseStock(savedPurchase, preparedPurchase.items(), TX_PURCHASE);
+        saveItemsAndIncreaseStock(savedPurchase, preparedPurchase.items(), TX_PURCHASE, organization);
     }
 
     @Override
@@ -119,11 +122,16 @@ public class PurchaseServiceImpl implements PurchaseService {
         purchaseRepository.save(purchase);
     }
 
-    private PreparedPurchase preparePurchase(Purchase purchase, PurchaseRequestDto request, String purchaseNo) {
+    private PreparedPurchase preparePurchase(
+            Purchase purchase,
+            PurchaseRequestDto request,
+            String purchaseNo,
+            Organization organization
+    ) {
         Contact supplier = support.getActiveSupplier(request.getSupplierId());
         Warehouse warehouse = support.getActiveWarehouse(request.getWarehouseId());
         List<PreparedPurchaseItem> items = new ArrayList<>();
-        purchase.setOrganization(currentOrganizationService.getOrganizationReference());
+        purchase.setOrganization(organization);
 
         BigDecimal subTotal = TransactionSupport.ZERO;
         BigDecimal discountAmount = TransactionSupport.ZERO;
@@ -166,10 +174,15 @@ public class PurchaseServiceImpl implements PurchaseService {
         return new PreparedPurchase(purchase, items);
     }
 
-    private void saveItemsAndIncreaseStock(Purchase purchase, List<PreparedPurchaseItem> items, String transactionType) {
+    private void saveItemsAndIncreaseStock(
+            Purchase purchase,
+            List<PreparedPurchaseItem> items,
+            String transactionType,
+            Organization organization
+    ) {
         for (PreparedPurchaseItem preparedItem : items) {
             PurchaseItem purchaseItem = PurchaseItem.builder()
-                    .organization(currentOrganizationService.getOrganizationReference())
+                    .organization(organization)
                     .purchase(purchase)
                     .item(preparedItem.item())
                     .batch(preparedItem.batch())

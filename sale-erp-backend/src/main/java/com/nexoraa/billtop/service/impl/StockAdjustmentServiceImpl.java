@@ -9,6 +9,7 @@ import com.nexoraa.billtop.dto.stock.StockAdjustmentRequestDto;
 import com.nexoraa.billtop.dto.stock.StockAdjustmentResponseDto;
 import com.nexoraa.billtop.entity.Item;
 import com.nexoraa.billtop.entity.ItemBatch;
+import com.nexoraa.billtop.entity.Organization;
 import com.nexoraa.billtop.entity.Stock;
 import com.nexoraa.billtop.entity.StockAdjustment;
 import com.nexoraa.billtop.entity.StockAdjustmentItem;
@@ -63,9 +64,10 @@ public class StockAdjustmentServiceImpl implements StockAdjustmentService {
     @Override
     @Transactional
     public StockAdjustmentCreateResponseDto createAdjustment(StockAdjustmentRequestDto request) {
+        Organization organization = currentOrganizationService.getOrganizationReference();
         Warehouse warehouse = support.getActiveWarehouse(request.getWarehouseId());
         StockAdjustment adjustment = stockAdjustmentRepository.save(StockAdjustment.builder()
-                .organization(currentOrganizationService.getOrganizationReference())
+                .organization(organization)
                 .adjustmentNo(nextAdjustmentNo())
                 .warehouse(warehouse)
                 .adjustmentDate(request.getAdjustmentDate())
@@ -80,7 +82,7 @@ public class StockAdjustmentServiceImpl implements StockAdjustmentService {
             ItemBatch batch = resolveBatch(item, warehouse);
 
             stockAdjustmentItemRepository.save(StockAdjustmentItem.builder()
-                    .organization(currentOrganizationService.getOrganizationReference())
+                    .organization(organization)
                     .stockAdjustment(adjustment)
                     .item(item)
                     .batch(batch)
@@ -129,10 +131,9 @@ public class StockAdjustmentServiceImpl implements StockAdjustmentService {
 
     private void decreaseAcrossBatches(Item item, Warehouse warehouse, BigDecimal quantity, StockAdjustment adjustment) {
         BigDecimal remainingQty = quantity;
-        for (Stock stock : stockRepository.findByItemIdAndWarehouseIdAndOrganizationIdOrderByIdAsc(
+        for (Stock stock : stockRepository.findByItemIdAndWarehouseIdOrderByIdAsc(
                 item.getId(),
-                warehouse.getId(),
-                currentOrganizationService.getOrganizationId()
+                warehouse.getId()
         )) {
             if (remainingQty.compareTo(TransactionSupport.ZERO) <= 0) {
                 break;
@@ -159,19 +160,14 @@ public class StockAdjustmentServiceImpl implements StockAdjustmentService {
     }
 
     private ItemBatch resolveBatch(Item item, Warehouse warehouse) {
-        return stockRepository.findByItemIdAndWarehouseIdAndOrganizationIdOrderByIdAsc(
+        return stockRepository.findByItemIdAndWarehouseIdOrderByIdAsc(
                         item.getId(),
-                        warehouse.getId(),
-                        currentOrganizationService.getOrganizationId()
+                        warehouse.getId()
                 ).stream()
                 .map(Stock::getBatch)
                 .findFirst()
-                .orElseGet(() -> itemBatchRepository.findTopByItemIdAndOrganizationIdOrderByIdDesc(
-                                item.getId(),
-                                currentOrganizationService.getOrganizationId()
-                        )
+                .orElseGet(() -> itemBatchRepository.findTopByItemIdOrderByIdDesc(item.getId())
                         .orElseGet(() -> itemBatchRepository.save(ItemBatch.builder()
-                                .organization(currentOrganizationService.getOrganizationReference())
                                 .item(item)
                                 .batchNo("ADJ-" + item.getId())
                                 .build())));

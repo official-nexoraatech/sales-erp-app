@@ -13,6 +13,7 @@ import com.nexoraa.billtop.dto.ledger.LedgerTransactionResponseDto;
 import com.nexoraa.billtop.entity.Contact;
 import com.nexoraa.billtop.entity.Address;
 import com.nexoraa.billtop.entity.Country;
+import com.nexoraa.billtop.entity.Organization;
 import com.nexoraa.billtop.entity.Payment;
 import com.nexoraa.billtop.entity.Sale;
 import com.nexoraa.billtop.entity.SalesReturn;
@@ -86,12 +87,13 @@ public class CustomerServiceImpl implements CustomerService {
     @Override
     @Transactional
     public CustomerCreateResponseDto createCustomer(CustomerRequestDto request) {
+        Organization organization = currentOrganizationService.getOrganizationReference();
         Contact contact = customerMapper.toEntity(request);
-        contact.setOrganization(currentOrganizationService.getOrganizationReference());
+        contact.setOrganization(organization);
         Contact savedContact = contactRepository.save(contact);
 
-        saveAddress(savedContact, request.getBillingAddress(), BILLING);
-        saveAddress(savedContact, request.getShippingAddress(), SHIPPING);
+        saveAddress(savedContact, request.getBillingAddress(), BILLING, organization);
+        saveAddress(savedContact, request.getShippingAddress(), SHIPPING, organization);
 
         return CustomerCreateResponseDto.builder()
                 .id(savedContact.getId())
@@ -103,11 +105,12 @@ public class CustomerServiceImpl implements CustomerService {
     @Transactional
     public void updateCustomer(Long id, CustomerRequestDto request) {
         Contact contact = getActiveCustomer(id);
+        Organization organization = contact.getOrganization();
         customerMapper.updateEntity(request, contact);
         contactRepository.save(contact);
 
-        saveAddress(contact, request.getBillingAddress(), BILLING);
-        saveAddress(contact, request.getShippingAddress(), SHIPPING);
+        saveAddress(contact, request.getBillingAddress(), BILLING, organization);
+        saveAddress(contact, request.getShippingAddress(), SHIPPING, organization);
     }
 
     @Override
@@ -209,7 +212,12 @@ public class CustomerServiceImpl implements CustomerService {
                 .orElseThrow(() -> new ResourceNotFoundException(ErrorMessage.CUSTOMER_NOT_FOUND, "CUSTOMER_NOT_FOUND"));
     }
 
-    private void saveAddress(Contact contact, CustomerAddressRequestDto request, String addressType) {
+    private void saveAddress(
+            Contact contact,
+            CustomerAddressRequestDto request,
+            String addressType,
+            Organization organization
+    ) {
         if (request == null) {
             return;
         }
@@ -223,7 +231,7 @@ public class CustomerServiceImpl implements CustomerService {
         boolean isNewAddress = address.getId() == null;
 
         customerMapper.updateAddressEntity(request, address);
-        address.setOrganization(currentOrganizationService.getOrganizationReference());
+        address.setOrganization(organization);
         address.setContact(contact);
         address.setAddressType(addressType);
         address.setState(getActiveState(request.getStateId()));

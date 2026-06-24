@@ -12,6 +12,7 @@ import com.nexoraa.billtop.dto.sales.SalesRequestDto;
 import com.nexoraa.billtop.entity.Contact;
 import com.nexoraa.billtop.entity.Item;
 import com.nexoraa.billtop.entity.ItemBatch;
+import com.nexoraa.billtop.entity.Organization;
 import com.nexoraa.billtop.entity.Sale;
 import com.nexoraa.billtop.entity.SalesItem;
 import com.nexoraa.billtop.entity.Stock;
@@ -63,10 +64,11 @@ public class SalesServiceImpl implements SalesService {
     @Override
     @Transactional
     public SalesCreateResponseDto createSale(SalesRequestDto request) {
+        Organization organization = currentOrganizationService.getOrganizationReference();
         String invoiceNo = nextInvoiceNo(INVOICE_PREFIX);
-        PreparedSale preparedSale = prepareSale(new Sale(), request, invoiceNo);
+        PreparedSale preparedSale = prepareSale(new Sale(), request, invoiceNo, organization);
         Sale savedSale = saleRepository.save(preparedSale.sale());
-        saveItemsAndDecreaseStock(savedSale, preparedSale.items(), TX_SALE);
+        saveItemsAndDecreaseStock(savedSale, preparedSale.items(), TX_SALE, organization);
         return toCreateResponse(savedSale);
     }
 
@@ -100,15 +102,16 @@ public class SalesServiceImpl implements SalesService {
     @Override
     @Transactional
     public void updateSale(Long id, SalesRequestDto request) {
+        Organization organization = currentOrganizationService.getOrganizationReference();
         Sale sale = getSale(id);
         ensureNotCancelled(sale);
 
         reverseSaleStock(sale, TX_SALE_REVERSE);
         salesItemRepository.deleteBySaleIdAndOrganizationId(id, currentOrganizationService.getOrganizationId());
 
-        PreparedSale preparedSale = prepareSale(sale, request, sale.getInvoiceNo());
+        PreparedSale preparedSale = prepareSale(sale, request, sale.getInvoiceNo(), organization);
         Sale savedSale = saleRepository.save(preparedSale.sale());
-        saveItemsAndDecreaseStock(savedSale, preparedSale.items(), TX_SALE);
+        saveItemsAndDecreaseStock(savedSale, preparedSale.items(), TX_SALE, organization);
     }
 
     @Override
@@ -132,11 +135,16 @@ public class SalesServiceImpl implements SalesService {
                 .build();
     }
 
-    private PreparedSale prepareSale(Sale sale, SalesRequestDto request, String invoiceNo) {
+    private PreparedSale prepareSale(
+            Sale sale,
+            SalesRequestDto request,
+            String invoiceNo,
+            Organization organization
+    ) {
         Contact customer = support.getActiveCustomer(request.getCustomerId());
         Warehouse warehouse = support.getActiveWarehouse(request.getWarehouseId());
         List<PreparedSalesItem> items = new ArrayList<>();
-        sale.setOrganization(currentOrganizationService.getOrganizationReference());
+        sale.setOrganization(organization);
 
         BigDecimal subTotal = TransactionSupport.ZERO;
         BigDecimal discountAmount = TransactionSupport.ZERO;
@@ -191,10 +199,15 @@ public class SalesServiceImpl implements SalesService {
                 ));
     }
 
-    private void saveItemsAndDecreaseStock(Sale sale, List<PreparedSalesItem> items, String transactionType) {
+    private void saveItemsAndDecreaseStock(
+            Sale sale,
+            List<PreparedSalesItem> items,
+            String transactionType,
+            Organization organization
+    ) {
         for (PreparedSalesItem preparedItem : items) {
             SalesItem salesItem = SalesItem.builder()
-                    .organization(currentOrganizationService.getOrganizationReference())
+                    .organization(organization)
                     .sale(sale)
                     .item(preparedItem.item())
                     .batch(preparedItem.batch())

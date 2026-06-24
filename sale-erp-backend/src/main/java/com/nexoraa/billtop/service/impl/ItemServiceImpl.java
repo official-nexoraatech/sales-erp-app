@@ -12,6 +12,7 @@ import com.nexoraa.billtop.entity.Category;
 import com.nexoraa.billtop.entity.Item;
 import com.nexoraa.billtop.entity.ItemBatch;
 import com.nexoraa.billtop.entity.ItemPrice;
+import com.nexoraa.billtop.entity.Organization;
 import com.nexoraa.billtop.entity.Stock;
 import com.nexoraa.billtop.entity.SubCategory;
 import com.nexoraa.billtop.entity.Unit;
@@ -89,7 +90,8 @@ public class ItemServiceImpl implements ItemService {
     @Transactional
     public ItemCreateResponseDto createItem(ItemRequestDto request) {
         validateItemDates(request);
-        Long organizationId = currentOrganizationService.getOrganizationId();
+        Organization organization = currentOrganizationService.getOrganizationReference();
+        Long organizationId = organization.getId();
         if (itemRepository.existsByItemCodeIgnoreCaseAndOrganizationIdAndStatus(
                 request.getItemCode(),
                 organizationId,
@@ -99,7 +101,7 @@ public class ItemServiceImpl implements ItemService {
 
         Warehouse warehouse = getActiveWarehouse(request.getWarehouseId());
         Item item = itemMapper.toEntity(request);
-        item.setOrganization(currentOrganizationService.getOrganizationReference());
+        item.setOrganization(organization);
         applyRelationships(item, request);
         Item savedItem = itemRepository.save(item);
 
@@ -118,12 +120,11 @@ public class ItemServiceImpl implements ItemService {
     public ItemDetailResponseDto getItemById(Long id) {
         Item item = getActiveItem(id);
         ItemDetailResponseDto response = itemMapper.toDetailResponse(item);
-        Long organizationId = currentOrganizationService.getOrganizationId();
-        itemPriceRepository.findTopByItemIdAndOrganizationIdOrderByIdDesc(id, organizationId)
+        itemPriceRepository.findTopByItemIdOrderByIdDesc(id)
                 .ifPresent(price -> applyPrice(response, price));
-        itemBatchRepository.findTopByItemIdAndOrganizationIdOrderByIdDesc(id, organizationId)
+        itemBatchRepository.findTopByItemIdOrderByIdDesc(id)
                 .ifPresent(batch -> applyBatch(response, batch));
-        stockRepository.findByItemIdAndOrganizationId(id, organizationId).stream()
+        stockRepository.findByItemId(id).stream()
                 .findFirst()
                 .ifPresent(stock -> applyStock(response, stock));
         return response;
@@ -143,7 +144,7 @@ public class ItemServiceImpl implements ItemService {
 
         Page<ItemListResponseDto> response = items.map(item -> {
             ItemListResponseDto itemResponse = itemMapper.toListResponse(item);
-            itemPriceRepository.findTopByItemIdAndOrganizationIdOrderByIdDesc(item.getId(), organizationId)
+            itemPriceRepository.findTopByItemIdOrderByIdDesc(item.getId())
                     .ifPresent(price -> itemResponse.setSalePrice(price.getSalePrice()));
             itemResponse.setAvailableQty(totalAvailableQty(item.getId()));
             return itemResponse;
@@ -170,19 +171,18 @@ public class ItemServiceImpl implements ItemService {
         applyRelationships(item, request);
         Item savedItem = itemRepository.save(item);
 
-        ItemPrice price = itemPriceRepository.findTopByItemIdAndOrganizationIdOrderByIdDesc(id, organizationId)
+        ItemPrice price = itemPriceRepository.findTopByItemIdOrderByIdDesc(id)
                 .orElse(null);
         itemPriceRepository.save(buildPrice(savedItem, request, price));
 
-        ItemBatch batch = itemBatchRepository.findTopByItemIdAndOrganizationIdOrderByIdDesc(id, organizationId)
+        ItemBatch batch = itemBatchRepository.findTopByItemIdOrderByIdDesc(id)
                 .orElse(null);
         ItemBatch savedBatch = itemBatchRepository.save(buildBatch(savedItem, request, batch));
 
-        Stock stock = stockRepository.findFirstByItemIdAndWarehouseIdAndBatchIdAndOrganizationId(
+        Stock stock = stockRepository.findFirstByItemIdAndWarehouseIdAndBatchId(
                         id,
                         warehouse.getId(),
-                        savedBatch.getId(),
-                        organizationId
+                        savedBatch.getId()
                 )
                 .orElse(null);
         stockRepository.save(buildStock(savedItem, warehouse, savedBatch, request, stock));
@@ -200,7 +200,7 @@ public class ItemServiceImpl implements ItemService {
     @Transactional(readOnly = true)
     public ItemStockResponseDto getItemStock(Long id) {
         Item item = getActiveItem(id);
-        List<Stock> stocks = stockRepository.findByItemIdAndOrganizationId(id, currentOrganizationService.getOrganizationId());
+        List<Stock> stocks = stockRepository.findByItemId(id);
         BigDecimal availableQty = stocks.stream()
                 .map(Stock::getAvailableQty)
                 .map(this::defaultZero)
@@ -235,7 +235,6 @@ public class ItemServiceImpl implements ItemService {
 
     private ItemPrice buildPrice(Item item, ItemRequestDto request, ItemPrice price) {
         ItemPrice target = price == null ? new ItemPrice() : price;
-        target.setOrganization(currentOrganizationService.getOrganizationReference());
         target.setItem(item);
         target.setPurchasePrice(request.getPurchasePrice());
         target.setPurchasePriceWithTax(request.getPurchasePriceWithTax());
@@ -254,7 +253,6 @@ public class ItemServiceImpl implements ItemService {
 
     private ItemBatch buildBatch(Item item, ItemRequestDto request, ItemBatch batch) {
         ItemBatch target = batch == null ? new ItemBatch() : batch;
-        target.setOrganization(currentOrganizationService.getOrganizationReference());
         target.setItem(item);
         target.setBatchNo(request.getBatchNo());
         target.setManufacturingDate(request.getManufacturingDate());
@@ -264,7 +262,6 @@ public class ItemServiceImpl implements ItemService {
 
     private Stock buildStock(Item item, Warehouse warehouse, ItemBatch batch, ItemRequestDto request, Stock stock) {
         Stock target = stock == null ? new Stock() : stock;
-        target.setOrganization(currentOrganizationService.getOrganizationReference());
         target.setItem(item);
         target.setWarehouse(warehouse);
         target.setBatch(batch);
@@ -317,7 +314,6 @@ public class ItemServiceImpl implements ItemService {
                 .orElseThrow(() -> new ResourceNotFoundException(ErrorMessage.CATEGORY_NOT_FOUND, "CATEGORY_NOT_FOUND"));
     }
 
-
     private Brand getActiveBrand(Long id, Long categoryId) {
         return brandRepository.findByIdAndCategory_IdAndStatusAndIsDeletedFalse(
                         id,
@@ -344,12 +340,12 @@ public class ItemServiceImpl implements ItemService {
         if (request.getManufacturingDate() != null
                 && request.getExpiryDate() != null
                 && request.getExpiryDate().isBefore(request.getManufacturingDate())) {
-            throw new BadRequestException("Expiry date must be after manufacturing date", "INVALID_EXPIRY_DATE");
+            throw new BadRequestException(ErrorMessage.INVALID_EXPIRY_DATE, "INVALID_EXPIRY_DATE");
         }
     }
 
     private BigDecimal totalAvailableQty(Long itemId) {
-        return stockRepository.findByItemIdAndOrganizationId(itemId, currentOrganizationService.getOrganizationId())
+        return stockRepository.findByItemId(itemId)
                 .stream()
                 .map(Stock::getAvailableQty)
                 .map(this::defaultZero)
@@ -360,6 +356,3 @@ public class ItemServiceImpl implements ItemService {
         return value == null ? ZERO : value;
     }
 }
-
-
-

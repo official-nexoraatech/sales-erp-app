@@ -3,6 +3,7 @@ package com.nexoraa.billtop.service.impl;
 import com.nexoraa.billtop.constants.ErrorMessage;
 import com.nexoraa.billtop.dto.staff.StaffSettingRequestDto;
 import com.nexoraa.billtop.dto.staff.StaffSettingResponseDto;
+import com.nexoraa.billtop.entity.Organization;
 import com.nexoraa.billtop.entity.StaffSetting;
 import com.nexoraa.billtop.enums.Status;
 import com.nexoraa.billtop.exception.BadRequestException;
@@ -57,7 +58,8 @@ public class StaffSettingServiceImpl implements StaffSettingService {
     @Transactional
     public void createSetting(String type, StaffSettingRequestDto request) {
         String validatedType = validateType(type);
-        Long organizationId = currentOrganizationService.getOrganizationId();
+        Organization organization = currentOrganizationService.getOrganizationReference();
+        Long organizationId = organization.getId();
         if (settingRepository.existsByTypeAndNameIgnoreCaseAndOrganizationIdAndIsDeletedFalse(
                 validatedType,
                 request.getName(),
@@ -67,7 +69,7 @@ public class StaffSettingServiceImpl implements StaffSettingService {
         }
 
         StaffSetting setting = StaffSetting.builder()
-                .organization(currentOrganizationService.getOrganizationReference())
+                .organization(organization)
                 .type(validatedType)
                 .name(request.getName())
                 .description(request.getDescription())

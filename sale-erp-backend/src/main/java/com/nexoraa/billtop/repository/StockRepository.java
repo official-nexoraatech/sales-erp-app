@@ -8,20 +8,18 @@ import java.util.Optional;
 
 public interface StockRepository extends JpaRepository<Stock, Long> {
 
-    List<Stock> findByItemIdAndOrganizationId(Long itemId, Long organizationId);
+    List<Stock> findByItemId(Long itemId);
 
-    List<Stock> findByOrganizationId(Long organizationId);
+    List<Stock> findByItem_Organization_Id(Long organizationId);
 
-    List<Stock> findByItemIdAndWarehouseIdAndOrganizationIdOrderByIdAsc(
+    List<Stock> findByItemIdAndWarehouseIdOrderByIdAsc(
             Long itemId,
-            Long warehouseId,
-            Long organizationId
+            Long warehouseId
     );
 
-    Optional<Stock> findFirstByItemIdAndWarehouseIdAndBatchIdAndOrganizationId(
+    Optional<Stock> findFirstByItemIdAndWarehouseIdAndBatchId(
             Long itemId,
             Long warehouseId,
-            Long batchId,
-            Long organizationId
+            Long batchId
     );
 }

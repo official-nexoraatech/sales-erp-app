@@ -23,10 +23,6 @@ import java.math.BigDecimal;
 @Builder
 public class StockTransferItem extends BaseEntity {
 
-    @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "organization_id", nullable = false)
-    private Organization organization;
-
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "stock_transfer_id")
     private StockTransfer stockTransfer;
