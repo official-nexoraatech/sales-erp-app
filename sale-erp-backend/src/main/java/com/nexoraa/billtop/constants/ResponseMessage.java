@@ -75,6 +75,7 @@ public class ResponseMessage {
     public static final String WAREHOUSE_CREATED = "Warehouse created successfully";
     public static final String WAREHOUSE_UPDATED = "Warehouse updated successfully";
     public static final String WAREHOUSE_DELETED = "Warehouse deleted successfully";
+    public static final String WAREHOUSE_RETRIEVED = "Warehouse retrieved successfully";
     public static final String WAREHOUSES_RETRIEVED = "Warehouses retrieved successfully";
 
     // Location Messages
@@ -117,9 +118,13 @@ public class ResponseMessage {
 
     // Stock Movement Messages
     public static final String STOCK_ADJUSTMENT_COMPLETED = "Stock adjustment completed";
+    public static final String STOCK_ADJUSTMENT_UPDATED = "Stock adjustment updated successfully";
+    public static final String STOCK_ADJUSTMENT_DELETED = "Stock adjustment deleted successfully";
     public static final String STOCK_ADJUSTMENTS_RETRIEVED = "Stock adjustments retrieved successfully";
     public static final String STOCK_ADJUSTMENT_RETRIEVED = "Stock adjustment retrieved successfully";
     public static final String STOCK_TRANSFERRED = "Stock transferred successfully";
+    public static final String STOCK_TRANSFER_UPDATED = "Stock transfer updated successfully";
+    public static final String STOCK_TRANSFER_DELETED = "Stock transfer deleted successfully";
     public static final String STOCK_TRANSFERS_RETRIEVED = "Stock transfers retrieved successfully";
     public static final String STOCK_TRANSFER_RETRIEVED = "Stock transfer retrieved successfully";
 

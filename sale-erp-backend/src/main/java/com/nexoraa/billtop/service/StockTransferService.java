@@ -9,6 +9,10 @@ public interface StockTransferService {
 
     StockTransferCreateResponseDto transferStock(StockTransferRequestDto request);
 
+    void updateTransfer(Long id, StockTransferRequestDto request);
+
+    void deleteTransfer(Long id);
+
     PageResponseDto<StockTransferResponseDto> getTransfers(int page, int size);
 
     StockTransferResponseDto getTransferById(Long id);

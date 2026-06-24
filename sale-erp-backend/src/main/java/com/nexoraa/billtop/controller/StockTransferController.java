@@ -12,8 +12,10 @@ import jakarta.validation.constraints.Positive;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -55,5 +57,20 @@ public class StockTransferController {
                 ResponseMessage.STOCK_TRANSFER_RETRIEVED,
                 stockTransferService.getTransferById(id)
         ));
+    }
+
+    @PutMapping("/{id}")
+    public ResponseEntity<ApiResponseDto<Void>> updateTransfer(
+            @PathVariable @Positive Long id,
+            @Valid @RequestBody StockTransferRequestDto request
+    ) {
+        stockTransferService.updateTransfer(id, request);
+        return ResponseEntity.ok(ApiResponseDto.success(ResponseMessage.STOCK_TRANSFER_UPDATED));
+    }
+
+    @DeleteMapping("/{id}")
+    public ResponseEntity<ApiResponseDto<Void>> deleteTransfer(@PathVariable @Positive Long id) {
+        stockTransferService.deleteTransfer(id);
+        return ResponseEntity.ok(ApiResponseDto.success(ResponseMessage.STOCK_TRANSFER_DELETED));
     }
 }

@@ -66,6 +66,12 @@ public class WarehouseServiceImpl implements WarehouseService {
     }
 
     @Override
+    @Transactional(readOnly = true)
+    public WarehouseResponseDto getWarehouseById(Long id) {
+        return warehouseMapper.toResponse(getActiveWarehouse(id));
+    }
+
+    @Override
     @Transactional
     public void updateWarehouse(Long id, WarehouseRequestDto request) {
         Warehouse warehouse = getActiveWarehouse(id);

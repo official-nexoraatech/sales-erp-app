@@ -63,7 +63,7 @@ public class DashboardServiceImpl implements DashboardService {
     }
 
     @Override
-    @Transactional(readOnly = true)
+    @Transactional
     public DashboardSummaryResponseDto getSummary() {
         LocalDate today = LocalDate.now();
         BigDecimal todaySales = saleRepository.findAll(todaySalesSpec(today)).stream()

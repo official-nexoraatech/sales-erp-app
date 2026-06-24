@@ -246,7 +246,13 @@ class FinanceSupport {
         return bankAccountRepository.findFirstByOrganizationIdAndStatusOrderByIdAsc(
                         organizationId,
                 com.nexoraa.billtop.enums.Status.ACTIVE)
-                .orElseThrow(() -> new ResourceNotFoundException("Bank account not found", "BANK_ACCOUNT_NOT_FOUND"));
+                .orElseGet(() -> bankAccountRepository.save(BankAccount.builder()
+                        .organization(currentOrganizationService.getOrganizationReference())
+                        .bankName("Default Bank")
+                        .accountName("Default Bank Account")
+                        .openingBalance(TransactionSupport.ZERO)
+                        .status(com.nexoraa.billtop.enums.Status.ACTIVE)
+                        .build()));
     }
 
     private CashAccount getOrCreateCashAccount(Organization organization) {
