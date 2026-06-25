@@ -153,6 +153,10 @@ const clearTranslationMarkers = () => {
   document.body.style.top = '';
 };
 
+const reloadToRestorePageLanguage = () => {
+  window.setTimeout(() => window.location.reload(), 50);
+};
+
 const resetToPageLanguage = async (shouldRepaint: boolean) => {
   const hasTranslation = hasActiveTranslation();
 
@@ -169,6 +173,7 @@ const resetToPageLanguage = async (shouldRepaint: boolean) => {
 
   if (shouldRepaint && hasTranslation) {
     window.dispatchEvent(new Event(TRANSLATION_RESET_EVENT));
+    reloadToRestorePageLanguage();
   }
 };
 

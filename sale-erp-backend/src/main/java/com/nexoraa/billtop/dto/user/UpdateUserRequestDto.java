@@ -40,7 +40,6 @@ public class UpdateUserRequestDto {
     @NotNull(message = ValidationMessage.ID_REQUIRED)
     private Long roleId;
 
-    @Size(min = 6, message = ValidationMessage.PASSWORD_INVALID)
     private String password;
 
     private Status status;

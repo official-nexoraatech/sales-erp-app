@@ -2,19 +2,31 @@ import React from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useNavigate, useParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { purchaseApi } from '../../../api/endpoints';
+import { paymentOutApi, purchaseApi } from '../../../api/endpoints';
 import { queryClient } from '../../../app/queryClient';
 import { Loader } from '../../../components/ui/Loader';
-import { PurchaseForm } from './PurchaseForm';
+import { PurchaseForm, type PurchaseSubmitPayload } from './PurchaseForm';
 
 export const PurchaseEditPage: React.FC = () => {
   const navigate = useNavigate();
   const id = Number(useParams<{ id: string }>().id);
   const purchase = useQuery({ queryKey: ['purchase', id], queryFn: () => purchaseApi.getById(id), enabled: id > 0 });
   const mutation = useMutation({
-    mutationFn: (payload: any) => {
-      const { paymentAmount, paymentMethodId, paymentNote, ...purchasePayload } = payload;
-      return purchaseApi.update(id, purchasePayload);
+    mutationFn: async (payload: PurchaseSubmitPayload) => {
+      const { payments = [], ...purchasePayload } = payload;
+      const response = await purchaseApi.update(id, purchasePayload);
+      for (const payment of payments) {
+        await paymentOutApi.create({
+          supplierId: purchasePayload.supplierId,
+          paymentDate: purchasePayload.purchaseDate,
+          paymentMethodId: payment.paymentMethodId,
+          referenceNo: purchasePayload.referenceNo,
+          amount: payment.amount,
+          notes: payment.paymentNote,
+          purchaseIds: [id],
+        });
+      }
+      return response;
     },
     onSuccess: () => {
       toast.success('Purchase updated successfully');

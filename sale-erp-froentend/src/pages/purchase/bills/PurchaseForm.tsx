@@ -21,10 +21,18 @@ interface Line {
   taxPercent: number;
 }
 
+export interface PurchasePaymentLine {
+  amount: number;
+  paymentMethodId: number;
+  paymentNote: string;
+}
+
+interface PaymentLine extends PurchasePaymentLine {
+  id: number;
+}
+
 export type PurchaseSubmitPayload = PurchaseRequest & {
-  paymentAmount?: number;
-  paymentMethodId?: number;
-  paymentNote?: string;
+  payments?: PurchasePaymentLine[];
 };
 
 interface Props {
@@ -51,9 +59,8 @@ export const PurchaseForm: React.FC<Props> = ({ initial, submitText, loading, on
   const [selectedItem, setSelectedItem] = useState(0);
   const [notes, setNotes] = useState(initial?.notes || '');
   const [roundOff, setRoundOff] = useState(false);
-  const [amount, setAmount] = useState(0);
-  const [paymentMethodId, setPaymentMethodId] = useState(0);
-  const [paymentNote, setPaymentNote] = useState('');
+  const [payments, setPayments] = useState<PaymentLine[]>([{ id: 1, amount: 0, paymentMethodId: 0, paymentNote: '' }]);
+  const [nextPaymentId, setNextPaymentId] = useState(2);
   const [lines, setLines] = useState<Line[]>(initial?.lines || []);
 
   const suppliers = useQuery({ queryKey: ['purchase-form-suppliers'], queryFn: () => supplierApi.getAll({ page: 0, size: 100, search: '' }) });
@@ -62,8 +69,9 @@ export const PurchaseForm: React.FC<Props> = ({ initial, submitText, loading, on
   const items = useQuery({ queryKey: ['purchase-form-items'], queryFn: () => itemApi.getAll({ page: 0, size: 100, search: '' }) });
   const paymentMethods = useQuery({ queryKey: ['purchase-form-payment-methods'], queryFn: () => paymentMethodApi.getAll('') });
   const warehouseRows = warehouses.data?.data || [];
+  const selectedPaymentMethodIds = new Set(payments.map((payment) => payment.paymentMethodId).filter(Boolean));
   const paymentMethodRows = (paymentMethods.data?.data?.content || [])
-    .filter((method) => method.status === 'ACTIVE' || method.id === paymentMethodId);
+    .filter((method) => method.status === 'ACTIVE' || selectedPaymentMethodIds.has(method.id));
 
   useEffect(() => {
     if (!warehouseId && warehouseRows.length) {
@@ -106,8 +114,28 @@ export const PurchaseForm: React.FC<Props> = ({ initial, submitText, loading, on
       toast.error('Select supplier, warehouse, and at least one valid item.');
       return;
     }
-    if (amount > 0 && !paymentMethodId) {
-      toast.error('Select payment type for the entered payment amount.');
+    const paymentLines: PurchasePaymentLine[] = [];
+    for (let index = 0; index < payments.length; index += 1) {
+      const payment = payments[index];
+      const hasPaymentValue = payment.amount > 0 || payment.paymentMethodId || payment.paymentNote.trim();
+      if (!hasPaymentValue) continue;
+      if (payment.amount <= 0) {
+        toast.error(`Enter amount for payment #${index + 1}.`);
+        return;
+      }
+      if (!payment.paymentMethodId) {
+        toast.error(`Select payment type for payment #${index + 1}.`);
+        return;
+      }
+      paymentLines.push({
+        amount: payment.amount,
+        paymentMethodId: payment.paymentMethodId,
+        paymentNote: payment.paymentNote,
+      });
+    }
+    const totalPayments = paymentLines.reduce((sum, payment) => sum + payment.amount, 0);
+    if (totalPayments > grandTotal) {
+      toast.error('Payment amount cannot exceed grand total.');
       return;
     }
     onSubmit({
@@ -128,10 +156,18 @@ export const PurchaseForm: React.FC<Props> = ({ initial, submitText, loading, on
         discountPercent,
         taxPercent,
       })),
-      paymentAmount: amount,
-      paymentMethodId,
-      paymentNote,
+      payments: paymentLines,
     });
+  };
+  const addPaymentLine = () => {
+    setPayments((current) => [...current, { id: nextPaymentId, amount: 0, paymentMethodId: 0, paymentNote: '' }]);
+    setNextPaymentId((current) => current + 1);
+  };
+  const updatePaymentLine = <Field extends keyof PurchasePaymentLine>(id: number, field: Field, value: PurchasePaymentLine[Field]) => {
+    setPayments((current) => current.map((payment) => payment.id === id ? { ...payment, [field]: value } : payment));
+  };
+  const removePaymentLine = (id: number) => {
+    setPayments((current) => current.length > 1 ? current.filter((payment) => payment.id !== id) : current);
   };
 
   return (
@@ -222,12 +258,23 @@ export const PurchaseForm: React.FC<Props> = ({ initial, submitText, loading, on
       </div>
 
       <h2 className="border-y px-5 py-4 text-lg font-semibold">Payment</h2>
-      <div className="grid grid-cols-1 gap-5 p-5 md:grid-cols-2">
-        <label className="text-sm text-gray-600">#1 Amount<div className="mt-1 flex"><NumericInput min={0} className={`${inputClass} rounded-r-none text-right`} value={amount || ''} onValueChange={setAmount} /><span className="flex h-10 w-10 items-center justify-center rounded-r border border-l-0 border-gray-300">Rs.</span></div></label>
-        <label className="text-sm text-gray-600">Payment Type<div className="mt-1 flex"><select className={`${inputClass} rounded-r-none`} value={paymentMethodId} disabled={paymentMethods.isLoading || paymentMethods.isError} onChange={(event) => setPaymentMethodId(Number(event.target.value))}><option value={0}>{paymentMethods.isLoading ? 'Loading payment types...' : paymentMethods.isError ? 'Failed to load payment types' : 'Choose one thing'}</option>{paymentMethodRows.map((method) => <option key={method.id} value={method.id}>{method.name}</option>)}</select><button type="button" title="Create payment type" aria-label="Create payment type" onClick={() => navigate('/expenses/payment-types/create')} className="flex h-10 w-9 items-center justify-center rounded-r border border-l-0 border-gray-300 text-blue-500"><CirclePlus size={15} /></button></div></label>
-        <label className="text-sm text-gray-600">Payment Note<textarea className="mt-1 h-20 w-full rounded border border-gray-300 p-3" value={paymentNote} onChange={(event) => setPaymentNote(event.target.value)} /></label>
+      <div className="space-y-5 p-5">
+        {payments.map((payment, index) => (
+          <div key={payment.id} className="grid grid-cols-1 gap-5 md:grid-cols-2">
+            <label className="text-sm text-gray-600">#{index + 1} Amount<div className="mt-1 flex"><NumericInput min={0} className={`${inputClass} rounded-r-none text-right`} value={payment.amount || ''} onValueChange={(value) => updatePaymentLine(payment.id, 'amount', value)} /><span className="flex h-10 w-10 items-center justify-center rounded-r border border-l-0 border-gray-300">Rs.</span></div></label>
+            <label className="text-sm text-gray-600">Payment Type<div className="mt-1 flex"><select className={`${inputClass} rounded-r-none`} value={payment.paymentMethodId} disabled={paymentMethods.isLoading || paymentMethods.isError} onChange={(event) => updatePaymentLine(payment.id, 'paymentMethodId', Number(event.target.value))}><option value={0}>{paymentMethods.isLoading ? 'Loading payment types...' : paymentMethods.isError ? 'Failed to load payment types' : 'Choose one thing'}</option>{paymentMethodRows.map((method) => <option key={method.id} value={method.id}>{method.name}</option>)}</select><button type="button" title="Add payment type" aria-label="Add payment type" onClick={addPaymentLine} className="flex h-10 w-9 items-center justify-center rounded-r border border-l-0 border-gray-300 text-blue-500"><CirclePlus size={15} /></button></div></label>
+            <label className="text-sm text-gray-600">Payment Note<textarea className="mt-1 h-20 w-full rounded border border-gray-300 p-3" value={payment.paymentNote} onChange={(event) => updatePaymentLine(payment.id, 'paymentNote', event.target.value)} /></label>
+            {payments.length > 1 && (
+              <div className="flex items-end">
+                <button type="button" onClick={() => removePaymentLine(payment.id)} className="inline-flex h-10 items-center gap-2 rounded border border-red-200 px-3 text-sm text-red-600 hover:bg-red-50">
+                  <Trash2 size={15} /> Remove
+                </button>
+              </div>
+            )}
+          </div>
+        ))}
       </div>
-      <div className="px-5 pb-5"><button type="button" onClick={() => navigate('/expenses/payment-types/create')} className="text-sm text-blue-600">+ Add Payment Type</button></div>
+      <div className="px-5 pb-5"><button type="button" onClick={addPaymentLine} className="text-sm text-blue-600">+ Add Payment Type</button></div>
 
       <div className="flex gap-3 border-t p-5">
         <Button onClick={submit} isLoading={loading}>{submitText}</Button>

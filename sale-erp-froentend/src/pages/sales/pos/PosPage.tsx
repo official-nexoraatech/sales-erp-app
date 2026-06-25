@@ -291,9 +291,9 @@ export const PosPage: React.FC = () => {
         <nav className="hidden items-center gap-5 text-xs text-slate-600 md:flex">
           <button onClick={() => navigate('/dashboard')} className="flex items-center gap-1 hover:text-blue-600"><LayoutDashboard size={13} />Dashboard</button>
           <button onClick={() => navigate('/contacts/customers')} className="flex items-center gap-1 hover:text-blue-600"><Users size={13} />Customer List</button>
-          <button className="flex items-center gap-1"><CreditCard size={13} />Invoices</button>
-          <button className="flex items-center gap-1"><Box size={13} />Item List</button>
-          <button className="flex items-center gap-1"><CreditCard size={13} />Payment In</button>
+          <button onClick={() => navigate('/sales/invoices')} className="flex items-center gap-1 hover:text-blue-600"><CreditCard size={13} />Invoices</button>
+          <button onClick={() => navigate('/items')} className="flex items-center gap-1 hover:text-blue-600"><Box size={13} />Item List</button>
+          <button onClick={() => navigate('/sales/payment-in')} className="flex items-center gap-1 hover:text-blue-600"><CreditCard size={13} />Payment In</button>
         </nav>
       </header>
 

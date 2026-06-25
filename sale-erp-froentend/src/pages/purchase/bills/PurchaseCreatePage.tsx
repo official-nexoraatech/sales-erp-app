@@ -10,16 +10,17 @@ export const PurchaseCreatePage: React.FC = () => {
   const navigate = useNavigate();
   const mutation = useMutation({
     mutationFn: async (payload: PurchaseSubmitPayload) => {
-      const { paymentAmount = 0, paymentMethodId = 0, paymentNote = '', ...purchasePayload } = payload;
+      const { payments = [], ...purchasePayload } = payload;
       const response = await purchaseApi.create(purchasePayload);
-      if (paymentAmount > 0 && paymentMethodId && response.data?.purchaseId) {
+      for (const payment of payments) {
+        if (!response.data?.purchaseId) break;
         await paymentOutApi.create({
           supplierId: purchasePayload.supplierId,
           paymentDate: purchasePayload.purchaseDate,
-          paymentMethodId,
+          paymentMethodId: payment.paymentMethodId,
           referenceNo: purchasePayload.referenceNo,
-          amount: paymentAmount,
-          notes: paymentNote,
+          amount: payment.amount,
+          notes: payment.paymentNote,
           purchaseIds: [response.data.purchaseId],
         });
       }

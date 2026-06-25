@@ -23,6 +23,8 @@ export const QuotationCreatePage: React.FC = () => {
   const navigate = useNavigate();
   const [customerId, setCustomerId] = useState(0);
   const [quotationDate, setQuotationDate] = useState(new Date().toISOString().slice(0, 10));
+  const [quotationPrefix, setQuotationPrefix] = useState('QT/');
+  const [quotationNumber, setQuotationNumber] = useState('1');
   const [status, setStatus] = useState('PENDING');
   const [stateId, setStateId] = useState(0);
   const [warehouseId, setWarehouseId] = useState(0);
@@ -44,7 +46,10 @@ export const QuotationCreatePage: React.FC = () => {
 
   const addItem = () => {
     const item = items.data?.data?.content.find((entry) => entry.id === selectedItem);
-    if (!item) return;
+    if (!item) {
+      toast.error('Select an item to load.');
+      return;
+    }
     setLines((current) => current.some((line) => line.itemId === item.id) ? current : [...current, { itemId: item.id, itemName: item.itemName, quantity: 1, unitPrice: item.salePrice, discountPercent: 0, taxPercent: 0 }]);
   };
   const update = (index: number, field: keyof Line, value: number) => setLines((current) => current.map((line, i) => i === index ? { ...line, [field]: value } : line));
@@ -73,7 +78,7 @@ export const QuotationCreatePage: React.FC = () => {
             <input type="date" className={`${inputClass} mt-1`} value={quotationDate} onChange={(event) => setQuotationDate(event.target.value)} />
           </label>
           <label className="text-sm text-gray-600">Quotation ID
-            <div className="mt-1 flex"><input className={`${inputClass} rounded-r-none`} value="QT/" readOnly /><span className="flex h-10 items-center border-y px-3">#</span><input className={`${inputClass} rounded-l-none`} value="1" readOnly /></div>
+            <div className="mt-1 flex"><input className={`${inputClass} rounded-r-none`} value={quotationPrefix} onChange={(event) => setQuotationPrefix(event.target.value)} /><span className="flex h-10 items-center border-y px-3">#</span><input className={`${inputClass} rounded-l-none`} value={quotationNumber} onChange={(event) => setQuotationNumber(event.target.value)} /></div>
           </label>
           <label className="text-sm text-gray-600">Quotation Status
             <select className={`${inputClass} mt-1`} value={status} onChange={(event) => setStatus(event.target.value)}>
@@ -99,7 +104,7 @@ export const QuotationCreatePage: React.FC = () => {
             </div>
           </label>
           <label className="text-sm text-gray-600">Sold Items
-            <button type="button" className={`${inputClass} mt-1 bg-white`}>Load</button>
+            <button type="button" onClick={addItem} className={`${inputClass} mt-1 bg-white`}>Load</button>
           </label>
         </div>
 

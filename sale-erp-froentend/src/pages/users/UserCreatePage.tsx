@@ -31,7 +31,6 @@ export const UserCreatePage: React.FC<Props> = ({ mode = 'create' }) => {
     mobileNo: state?.mobileNo || state?.mobile || '',
     roleId: state?.roleId || 0,
     organizationId: Number(searchParams.get('organizationId')) || user?.organizationId || 0,
-    password: '',
     status: state?.status === false || state?.status === 'INACTIVE' ? 'INACTIVE' : 'ACTIVE',
   });
 
@@ -61,7 +60,6 @@ export const UserCreatePage: React.FC<Props> = ({ mode = 'create' }) => {
     if (!form.email.trim()) return toast.error('Email is required');
     if (!form.roleId) return toast.error('Role is required');
     if (mode === 'create' && !form.organizationId) return toast.error('Organization is required');
-    if (mode === 'create' && !form.password.trim()) return toast.error('Password is required');
     mutation.mutate();
   };
 
@@ -116,7 +114,6 @@ export const UserCreatePage: React.FC<Props> = ({ mode = 'create' }) => {
               `/users/roles/create?organizationId=${form.organizationId}&returnTo=${encodeURIComponent(`/users/create?organizationId=${form.organizationId}`)}`
             )}
           />
-          <label className="text-sm text-gray-600">Password<input className={`${inputClass} mt-1`} type="password" value={form.password} onChange={(event) => setText('password', event.target.value)} /></label>
           <label className="text-sm text-gray-600">
             Status
             <select className={`${inputClass} mt-1`} value={form.status} onChange={(event) => setForm((current) => ({ ...current, status: event.target.value as CreateUserRequest['status'] }))}>
