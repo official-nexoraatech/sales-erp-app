@@ -9,10 +9,10 @@ export interface SupplierListItem {
 export interface SupplierDetail {
   id: number;
   supplierCode: string;
-  companyName: string;
   firstName: string;
   lastName: string;
   mobile?: string;
+  whatsappNo?: string;
   email?: string;
   gstNumber?: string;
   creditLimit: number;
@@ -21,10 +21,10 @@ export interface SupplierDetail {
 }
 
 export interface CreateSupplierRequest {
-  companyName?: string;
   firstName: string;
   lastName: string;
   mobile: string;
+  whatsappNo?: string;
   email?: string;
   gstNumber?: string;
   creditLimit?: number;

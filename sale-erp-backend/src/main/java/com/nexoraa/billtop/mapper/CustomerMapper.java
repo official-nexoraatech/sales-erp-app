@@ -74,7 +74,7 @@ public interface CustomerMapper {
         String firstName = contact.getFirstName() == null ? "" : contact.getFirstName().trim();
         String lastName = contact.getLastName() == null ? "" : contact.getLastName().trim();
         String fullName = (firstName + " " + lastName).trim();
-        return fullName.isBlank() ? contact.getCompanyName() : fullName;
+        return fullName.isBlank() ? toCustomerCode(contact.getId()) : fullName;
     }
 }
 

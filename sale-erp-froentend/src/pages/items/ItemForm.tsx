@@ -1,12 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { CirclePlus } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { brandApi, categoryApi, unitApi, warehouseApi } from '../../api/endpoints';
 import type { ItemListItem, ItemRequest } from '../../api/endpoints';
 import { Button } from '../../components/ui/Button';
 import { NumericInput } from '../../components/ui/NumericInput';
+import { WarehouseSelector } from './WarehouseSelector';
 
 type ItemFormInitial = Partial<ItemListItem> & Partial<Omit<ItemRequest, keyof ItemListItem>>;
 interface Props {
@@ -32,6 +33,7 @@ export const ItemForm: React.FC<Props> = ({
   onCancel,
 }) => {
   const navigate = useNavigate();
+  const location = useLocation();
   const imageInputRef = useRef<HTMLInputElement | null>(null);
   const [activeTab, setActiveTab] = useState<'pricing' | 'stock'>('pricing');
   const [itemType, setItemType] = useState('Product');
@@ -114,6 +116,10 @@ export const ItemForm: React.FC<Props> = ({
     }
     setImagePreviewUrl(URL.createObjectURL(file));
     setImageName(file.name);
+  };
+  const createWarehouse = () => {
+    const returnTo = `${location.pathname}${location.search}`;
+    navigate(`/warehouses/create?returnTo=${encodeURIComponent(returnTo)}`);
   };
 
   return (
@@ -201,7 +207,17 @@ export const ItemForm: React.FC<Props> = ({
         <label className="text-sm text-gray-600">Sale Price<div className="mt-1 flex"><NumericInput min={0} className={`${controlClass('salePrice')} rounded-r-none bg-green-50`} value={form.salePrice || ''} onValueChange={(value) => set('salePrice', value)} /><select className="h-10 rounded-r border border-l-0 px-3"><option>With Tax</option></select></div>{renderFieldError('salePrice')}</label>
         <label className="text-sm text-gray-600">MSP<NumericInput min={0} className={`${controlClass('msp')} mt-1`} value={form.msp || ''} onValueChange={(value) => set('msp', value)} />{renderFieldError('msp')}</label>
       </div> : <div className="grid grid-cols-1 gap-4 border-t p-5 md:grid-cols-2">
-        <label className="text-sm text-gray-600">Warehouse<select className={`${controlClass('warehouseId')} mt-1`} value={form.warehouseId} onChange={(event) => set('warehouseId', Number(event.target.value))}>{warehouseRows.map((warehouse) => <option key={warehouse.id} value={warehouse.id}>{warehouse.name}</option>)}</select>{renderFieldError('warehouseId')}</label>
+        <div>
+          <WarehouseSelector
+            value={form.warehouseId}
+            rows={warehouseRows}
+            isLoading={warehouses.isLoading}
+            hasError={Boolean(fieldError('warehouseId'))}
+            onChange={(warehouseId) => set('warehouseId', warehouseId)}
+            onCreate={createWarehouse}
+          />
+          {renderFieldError('warehouseId')}
+        </div>
         <label className="text-sm text-gray-600">As of Date<input type="date" className={`${controlClass('manufacturingDate')} mt-1`} value={form.manufacturingDate} onChange={(event) => set('manufacturingDate', event.target.value)} />{renderFieldError('manufacturingDate')}</label>
         <label className="text-sm text-gray-600">Minimum Stock<NumericInput min={0} className={`${controlClass('minimumStock')} mt-1`} value={form.minimumStock || ''} onValueChange={(value) => set('minimumStock', value)} />{renderFieldError('minimumStock')}</label>
         <label className="text-sm text-gray-600">Exp.Date<input type="date" className={`${controlClass('expiryDate')} mt-1`} value={form.expiryDate} onChange={(event) => set('expiryDate', event.target.value)} />{renderFieldError('expiryDate')}</label>

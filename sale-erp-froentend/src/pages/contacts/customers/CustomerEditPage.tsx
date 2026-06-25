@@ -36,7 +36,6 @@ export const CustomerEditPage: React.FC = () => {
       pincode: address?.pincode || '',
     });
     reset({
-      companyName: customer.companyName || '',
       firstName: customer.firstName || '',
       lastName: customer.lastName || '',
       email: customer.email || '',

@@ -33,9 +33,6 @@ public class Contact extends BaseEntity {
     @Column(name = "contact_type", length = 50)
     private String contactType;
 
-    @Column(name = "company_name", length = 150)
-    private String companyName;
-
     @Column(name = "first_name", length = 100)
     private String firstName;
 

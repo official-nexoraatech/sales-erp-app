@@ -35,7 +35,6 @@ public final class SaleSpecification {
             String pattern = "%" + search.trim().toLowerCase() + "%";
             List<Predicate> predicates = new ArrayList<>();
             predicates.add(criteriaBuilder.like(criteriaBuilder.lower(root.get("invoiceNo")), pattern));
-            predicates.add(criteriaBuilder.like(criteriaBuilder.lower(root.join("customer", JoinType.LEFT).get("companyName")), pattern));
             predicates.add(criteriaBuilder.like(criteriaBuilder.lower(root.join("customer", JoinType.LEFT).get("firstName")), pattern));
             predicates.add(criteriaBuilder.like(criteriaBuilder.lower(root.join("customer", JoinType.LEFT).get("lastName")), pattern));
             return criteriaBuilder.or(predicates.toArray(Predicate[]::new));

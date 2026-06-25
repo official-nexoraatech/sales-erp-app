@@ -1341,7 +1341,6 @@ Request Body JSON:
 
 ```json
 {
-  "companyName": "API Test Customer Co 20260603113236057",
   "firstName": "Api",
   "lastName": "Customer",
   "email": "apitest.customer.20260603113236057@example.com",
@@ -1380,7 +1379,7 @@ curl -X POST 'http://localhost:8081/api/v1/customers' \
   -H 'Accept: application/json' \
   -H 'Content-Type: application/json' \
   -H 'Authorization: Bearer <JWT_TOKEN>' \
-  -d '{"companyName":"API Test Customer Co 20260603113236057","firstName":"Api","lastName":"Customer","email":"apitest.customer.20260603113236057@example.com","phone":"0200000000","mobile":"9113236057","whatsappNo":"9113236057","gstNumber":"","panNumber":"","creditLimit":1000,"openingBalance":0,"openingBalanceType":"RECEIVABLE","isWholesale":false,"billingAddress":{"addressLine1":"API Test Address Line 1","addressLine2":"API Test Address Line 2","city":"Pune","stateId":1,"countryId":1,"pincode":"411001"},"shippingAddress":{"addressLine1":"API Test Address Line 1","addressLine2":"API Test Address Line 2","city":"Pune","stateId":1,"countryId":1,"pincode":"411001"}}'
+  -d '{"firstName":"Api","lastName":"Customer","email":"apitest.customer.20260603113236057@example.com","phone":"0200000000","mobile":"9113236057","whatsappNo":"9113236057","gstNumber":"","panNumber":"","creditLimit":1000,"openingBalance":0,"openingBalanceType":"RECEIVABLE","isWholesale":false,"billingAddress":{"addressLine1":"API Test Address Line 1","addressLine2":"API Test Address Line 2","city":"Pune","stateId":1,"countryId":1,"pincode":"411001"},"shippingAddress":{"addressLine1":"API Test Address Line 1","addressLine2":"API Test Address Line 2","city":"Pune","stateId":1,"countryId":1,"pincode":"411001"}}'
 ```
 
 Success Response JSON:
@@ -1551,7 +1550,6 @@ Success Response JSON:
   "data": {
     "id": 5,
     "customerCode": "CUS000005",
-    "companyName": "API Test Customer Co 20260603113236057 Updated",
     "firstName": "Api",
     "lastName": "Customer",
     "email": "apitest.customer.20260603113236057@example.com",
@@ -1654,7 +1652,6 @@ Request Body JSON:
 
 ```json
 {
-  "companyName": "API Test Customer Co 20260603113236057 Updated",
   "firstName": "Api",
   "lastName": "Customer",
   "email": "apitest.customer.20260603113236057@example.com",
@@ -1693,7 +1690,7 @@ curl -X PUT 'http://localhost:8081/api/v1/customers/5' \
   -H 'Accept: application/json' \
   -H 'Content-Type: application/json' \
   -H 'Authorization: Bearer <JWT_TOKEN>' \
-  -d '{"companyName":"API Test Customer Co 20260603113236057 Updated","firstName":"Api","lastName":"Customer","email":"apitest.customer.20260603113236057@example.com","phone":"0200000001","mobile":"9113236057","whatsappNo":"9113236057","gstNumber":"","panNumber":"","creditLimit":1000,"openingBalance":0,"openingBalanceType":"RECEIVABLE","isWholesale":false,"billingAddress":{"addressLine1":"API Test Address Line 1","addressLine2":"API Test Address Line 2","city":"Pune","stateId":1,"countryId":1,"pincode":"411001"},"shippingAddress":{"addressLine1":"API Test Address Line 1","addressLine2":"API Test Address Line 2","city":"Pune","stateId":1,"countryId":1,"pincode":"411001"}}'
+  -d '{"firstName":"Api","lastName":"Customer","email":"apitest.customer.20260603113236057@example.com","phone":"0200000001","mobile":"9113236057","whatsappNo":"9113236057","gstNumber":"","panNumber":"","creditLimit":1000,"openingBalance":0,"openingBalanceType":"RECEIVABLE","isWholesale":false,"billingAddress":{"addressLine1":"API Test Address Line 1","addressLine2":"API Test Address Line 2","city":"Pune","stateId":1,"countryId":1,"pincode":"411001"},"shippingAddress":{"addressLine1":"API Test Address Line 1","addressLine2":"API Test Address Line 2","city":"Pune","stateId":1,"countryId":1,"pincode":"411001"}}'
 ```
 
 Success Response JSON:
@@ -7491,7 +7488,6 @@ Request Body JSON:
 
 ```json
 {
-  "companyName": "API Test Supplier Co 20260603113236057",
   "firstName": "Api",
   "lastName": "Supplier",
   "mobile": "8113236057",
@@ -7509,7 +7505,7 @@ curl -X POST 'http://localhost:8081/api/v1/suppliers' \
   -H 'Accept: application/json' \
   -H 'Content-Type: application/json' \
   -H 'Authorization: Bearer <JWT_TOKEN>' \
-  -d '{"companyName":"API Test Supplier Co 20260603113236057","firstName":"Api","lastName":"Supplier","mobile":"8113236057","email":"apitest.supplier.20260603113236057@example.com","gstNumber":"","creditLimit":1000,"openingBalance":0}'
+  -d '{"firstName":"Api","lastName":"Supplier","mobile":"8113236057","email":"apitest.supplier.20260603113236057@example.com","gstNumber":"","creditLimit":1000,"openingBalance":0}'
 ```
 
 Success Response JSON:
@@ -7680,7 +7676,6 @@ Success Response JSON:
   "data": {
     "id": 6,
     "supplierCode": "SUP000006",
-    "companyName": "API Test Supplier Co 20260603113236057 Updated",
     "firstName": "Api",
     "lastName": "Supplier",
     "mobile": "8113236057",
@@ -7754,7 +7749,6 @@ Request Body JSON:
 
 ```json
 {
-  "companyName": "API Test Supplier Co 20260603113236057 Updated",
   "firstName": "Api",
   "lastName": "Supplier",
   "mobile": "8113236057",
@@ -7772,7 +7766,7 @@ curl -X PUT 'http://localhost:8081/api/v1/suppliers/6' \
   -H 'Accept: application/json' \
   -H 'Content-Type: application/json' \
   -H 'Authorization: Bearer <JWT_TOKEN>' \
-  -d '{"companyName":"API Test Supplier Co 20260603113236057 Updated","firstName":"Api","lastName":"Supplier","mobile":"8113236057","email":"apitest.supplier.20260603113236057@example.com","gstNumber":"","creditLimit":1000,"openingBalance":0}'
+  -d '{"firstName":"Api","lastName":"Supplier","mobile":"8113236057","email":"apitest.supplier.20260603113236057@example.com","gstNumber":"","creditLimit":1000,"openingBalance":0}'
 ```
 
 Success Response JSON:

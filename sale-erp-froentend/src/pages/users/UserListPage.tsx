@@ -21,8 +21,10 @@ export const UserListPage: React.FC = () => {
   const navigate = useNavigate();
   const { hasPermission } = useAuth();
   const { confirmAction, confirmationDialog } = useConfirmation();
-  const canCreate = hasPermission(PERMISSIONS.ORGANIZATION_VIEW) && hasPermission(PERMISSIONS.ROLE_MANAGE);
-  const canEdit = hasPermission(PERMISSIONS.ROLE_MANAGE);
+  const canCreate = hasPermission(PERMISSIONS.USER_CREATE);
+  const canEdit = hasPermission(PERMISSIONS.USER_UPDATE);
+  const canDelete = hasPermission(PERMISSIONS.USER_DELETE);
+  const canAssignPermissions = hasPermission(PERMISSIONS.USER_UPDATE);
   const [pageSize, setPageSize] = useState(10);
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(0);
@@ -77,8 +79,8 @@ export const UserListPage: React.FC = () => {
             entries
           </label>
           <div className="flex flex-wrap items-center">
-            <button type="button" onClick={deleteSelected} className="h-10 rounded-l border border-red-300 bg-red-500 px-3 text-sm text-white">Delete</button>
-            <button type="button" onClick={copy} className="h-10 border-y border-r px-3 text-sm">Copy</button>
+            {canDelete && <button type="button" onClick={deleteSelected} className="h-10 rounded-l border border-red-300 bg-red-500 px-3 text-sm text-white">Delete</button>}
+            <button type="button" onClick={copy} className={`h-10 border px-3 text-sm ${canDelete ? 'border-l-0' : 'rounded-l'}`}>Copy</button>
             <button type="button" onClick={copy} className="h-10 border-y border-r px-3 text-sm">Excel</button>
             <button type="button" onClick={copy} className="h-10 border-y border-r px-3 text-sm">CSV</button>
             <button type="button" onClick={copy} className="h-10 rounded-r border-y border-r px-3 text-sm">PDF</button>
@@ -93,7 +95,7 @@ export const UserListPage: React.FC = () => {
           {users.isLoading ? <div className="p-10"><Loader /></div> : <table className="w-full min-w-[1040px] text-sm">
             <thead className="bg-gray-50">
               <tr>
-                <th className="border p-3"><input type="checkbox" checked={allSelected} onChange={() => setSelectedIds(allSelected ? [] : rows.map((row) => row.id))} /></th>
+                {canDelete && <th className="border p-3"><input type="checkbox" checked={allSelected} onChange={() => setSelectedIds(allSelected ? [] : rows.map((row) => row.id))} /></th>}
                 {columns.map((heading) => <th key={heading} className="border p-3 text-left">{heading}</th>)}
               </tr>
             </thead>
@@ -102,7 +104,7 @@ export const UserListPage: React.FC = () => {
                   const isActive = row.status === true || row.status === 'ACTIVE';
                 return (
                 <tr key={row.id} className="border-b even:bg-gray-50">
-                  <td className="border p-3"><input type="checkbox" checked={selectedIds.includes(row.id)} onChange={() => setSelectedIds((current) => current.includes(row.id) ? current.filter((id) => id !== row.id) : [...current, row.id])} /></td>
+                  {canDelete && <td className="border p-3"><input type="checkbox" checked={selectedIds.includes(row.id)} onChange={() => setSelectedIds((current) => current.includes(row.id) ? current.filter((id) => id !== row.id) : [...current, row.id])} /></td>}
                   <td className="border p-3">{row.userName || row.username || ''}</td>
                   <td className="border p-3">{row.firstName || ''}</td>
                   <td className="border p-3">{row.lastName || ''}</td>
@@ -111,11 +113,11 @@ export const UserListPage: React.FC = () => {
                   <td className="border p-3">{row.roleName || ''}</td>
                   <td className="border p-3"><span className={`rounded-full px-3 py-1 text-xs font-semibold ${isActive ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>{isActive ? 'ACTIVE' : 'INACTIVE'}</span></td>
                   <td className="border p-3">{row.createdAt ? formatDate(row.createdAt) : ''}</td>
-                  <td className="border p-3"><div className="flex gap-2">{canEdit && <button type="button" title="Edit user" onClick={() => navigate(`/users/${row.id}/edit`, { state: row })} className="text-orange-600"><Edit size={16} /></button>}<button type="button" title="Assign permissions" onClick={() => navigate(`/users/permissions?userId=${row.id}`)} className="text-blue-600"><ShieldCheck size={16} /></button><button type="button" title="Delete user" onClick={async () => { if (await confirmAction({ title: 'Delete User', message: 'Delete this user?', confirmText: 'Delete', variant: 'danger' })) remove.mutate(row.id); }} className="text-red-600"><Trash2 size={16} /></button><MoreVertical size={16} /></div></td>
+                  <td className="border p-3"><div className="flex gap-2">{canEdit && <button type="button" title="Edit user" onClick={() => navigate(`/users/${row.id}/edit`, { state: row })} className="text-orange-600"><Edit size={16} /></button>}{canAssignPermissions && <button type="button" title="Assign permissions" onClick={() => navigate(`/users/permissions?userId=${row.id}`)} className="text-blue-600"><ShieldCheck size={16} /></button>}{canDelete && <button type="button" title="Delete user" onClick={async () => { if (await confirmAction({ title: 'Delete User', message: 'Delete this user?', confirmText: 'Delete', variant: 'danger' })) remove.mutate(row.id); }} className="text-red-600"><Trash2 size={16} /></button>}<MoreVertical size={16} /></div></td>
                 </tr>
                 );
               }) : (
-                <tr><td colSpan={10} className="bg-gray-50 p-5 text-center">No data available in table</td></tr>
+                <tr><td colSpan={columns.length + Number(canDelete)} className="bg-gray-50 p-5 text-center">No data available in table</td></tr>
               )}
             </tbody>
           </table>}

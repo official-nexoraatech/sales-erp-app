@@ -28,13 +28,12 @@ export const SupplierEditPage: React.FC = () => {
     if (data?.data) {
       const supplier = data.data;
       reset({
-        companyName: supplier.companyName || '',
         firstName: supplier.firstName || '',
         lastName: supplier.lastName || '',
         email: supplier.email || '',
         phone: '',
         mobile: supplier.mobile || '',
-        whatsappNo: '',
+        whatsappNo: supplier.whatsappNo || supplier.mobile || '',
         gstNumber: supplier.gstNumber || '',
         creditLimit: supplier.creditLimit,
         openingBalance: supplier.openingBalance,

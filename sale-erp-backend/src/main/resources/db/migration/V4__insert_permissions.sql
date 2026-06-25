@@ -6,9 +6,6 @@
 -- Disable foreign key checks (if needed)
 -- SET FOREIGN_KEY_CHECKS = 0;
 
-ALTER TABLE permissions
-    ADD COLUMN IF NOT EXISTS endpoint VARCHAR(500);
-
 -- ===================== ITEM MANAGEMENT =====================
 INSERT INTO permissions (name, group_name, description, endpoint, status, is_deleted, created_at, updated_at) VALUES
 ('ITEM_CREATE', 'Item', 'Create a new item in the inventory', 'POST /api/v1/items', 'ACTIVE', FALSE, NOW(), NOW()),

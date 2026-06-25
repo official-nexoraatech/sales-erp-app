@@ -15,7 +15,6 @@ public class CustomerDetailResponseDto {
 
     private Long id;
     private String customerCode;
-    private String companyName;
     private String firstName;
     private String lastName;
     private String email;

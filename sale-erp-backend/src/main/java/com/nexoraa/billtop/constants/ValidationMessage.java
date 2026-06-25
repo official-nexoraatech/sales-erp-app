@@ -32,7 +32,6 @@ public class ValidationMessage {
     public static final String MOBILE_INVALID = "Mobile number must be valid";
 
     // Contact Validation
-    public static final String COMPANY_NAME_INVALID = "Company name must be 150 characters or less";
     public static final String GST_NUMBER_INVALID = "GST number must be valid";
     public static final String PAN_NUMBER_INVALID = "PAN number must be valid";
     public static final String OPENING_BALANCE_TYPE_INVALID = "Opening balance type must be valid";

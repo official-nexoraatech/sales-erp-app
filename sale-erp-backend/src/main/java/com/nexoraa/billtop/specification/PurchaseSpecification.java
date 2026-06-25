@@ -36,7 +36,6 @@ public final class PurchaseSpecification {
             List<Predicate> predicates = new ArrayList<>();
             predicates.add(criteriaBuilder.like(criteriaBuilder.lower(root.get("purchaseNo")), pattern));
             predicates.add(criteriaBuilder.like(criteriaBuilder.lower(root.get("referenceNo")), pattern));
-            predicates.add(criteriaBuilder.like(criteriaBuilder.lower(root.join("supplier", JoinType.LEFT).get("companyName")), pattern));
             predicates.add(criteriaBuilder.like(criteriaBuilder.lower(root.join("supplier", JoinType.LEFT).get("firstName")), pattern));
             predicates.add(criteriaBuilder.like(criteriaBuilder.lower(root.join("supplier", JoinType.LEFT).get("lastName")), pattern));
             return criteriaBuilder.or(predicates.toArray(Predicate[]::new));
