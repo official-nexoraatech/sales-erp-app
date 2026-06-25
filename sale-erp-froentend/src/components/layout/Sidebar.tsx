@@ -135,9 +135,9 @@ const menuItems: MenuItem[] = [
     label: 'Users',
     icon: <Users size={20} />,
     submenu: [
-      { label: 'Users', href: '/users', icon: <Users size={18} />, permissions: [PERMISSIONS.USER_MANAGE] },
-      { label: 'Roles', href: '/users/roles', icon: <Users size={18} />, permissions: [PERMISSIONS.ROLE_MANAGE] },
-      { label: 'Permissions', href: '/users/permissions', icon: <ShieldCheck size={18} />, permissions: [PERMISSIONS.USER_MANAGE] },
+      { label: 'Users', href: '/users', icon: <Users size={18} />, permissions: [PERMISSIONS.USER_VIEW] },
+      { label: 'Roles', href: '/users/roles', icon: <Users size={18} />, permissions: [PERMISSIONS.ROLE_VIEW] },
+      { label: 'Permissions', href: '/users/permissions', icon: <ShieldCheck size={18} />, permissions: [PERMISSIONS.USER_UPDATE] },
     ],
   },
   {
@@ -380,7 +380,7 @@ export const Sidebar: React.FC<{ isOpen: boolean; onClose: () => void }> = ({
         <div className="relative border-t border-[#edf2f7] p-3">
           {showProfileMenu && (
             <div className="absolute bottom-[76px] left-3 right-3 overflow-hidden rounded-xl border border-slate-200 bg-white py-1.5 shadow-xl">
-              {hasPermission(PERMISSIONS.USER_PROFILE) && (
+              {hasPermission(PERMISSIONS.USER_PROFILE_VIEW) && (
                 <button
                   type="button"
                   onClick={() => openProfilePanel('profile')}

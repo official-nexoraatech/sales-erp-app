@@ -157,7 +157,7 @@ export const AppHeader: React.FC = () => {
 
           {profileOpen && (
             <div className="absolute right-0 top-12 w-48 overflow-hidden rounded-xl border border-slate-200 bg-white py-1.5 shadow-xl" role="menu">
-              {hasPermission(PERMISSIONS.USER_PROFILE) && (
+              {hasPermission(PERMISSIONS.USER_PROFILE_VIEW) && (
                 <button
                   type="button"
                   onClick={() => {

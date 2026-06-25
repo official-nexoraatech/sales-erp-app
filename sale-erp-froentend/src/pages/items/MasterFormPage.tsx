@@ -4,6 +4,7 @@ import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { brandApi, categoryApi } from '../../api/endpoints';
 import type { SimpleMaster } from '../../api/endpoints';
+import { queryClient } from '../../app/queryClient';
 import { Button } from '../../components/ui/Button';
 
 interface Props { type: 'category' | 'brand'; mode: 'create' | 'edit' }
@@ -31,8 +32,9 @@ export const MasterFormPage: React.FC<Props> = ({ type, mode }) => {
       const payload = isCategory ? { name, description } : { name, description, categoryId };
       return mode === 'edit' ? api.update(id, payload) : api.create(payload);
     },
-    onSuccess: () => {
+    onSuccess: async () => {
       toast.success(`${label} ${mode === 'edit' ? 'updated' : 'created'} successfully`);
+      await queryClient.invalidateQueries({ queryKey: [type] });
       navigate(backPath);
     },
     onError: (error: any) => toast.error(error?.message || `Failed to ${mode} ${label.toLowerCase()}`),

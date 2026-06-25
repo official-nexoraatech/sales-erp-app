@@ -16,8 +16,8 @@ export const UserProfilePage: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { logout, hasPermission } = useAuth();
-  const canViewProfile = hasPermission(PERMISSIONS.USER_PROFILE);
-  const canUpdateProfile = hasPermission(PERMISSIONS.USER_UPDATE_PROFILE);
+  const canViewProfile = hasPermission(PERMISSIONS.USER_PROFILE_VIEW);
+  const canUpdateProfile = hasPermission(PERMISSIONS.USER_PROFILE_UPDATE);
   const canChangePassword = hasPermission(PERMISSIONS.USER_CHANGE_PASSWORD);
   const pictureRef = useRef<HTMLInputElement>(null);
   const [activePanel, setActivePanel] = useState<'profile' | 'password'>(canViewProfile ? 'profile' : 'password');
