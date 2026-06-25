@@ -3,7 +3,7 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { Edit, Eye, PackageSearch, Trash2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { brandApi, categoryApi, itemApi } from '../../api/endpoints';
+import { brandApi, categoryApi, itemApi, warehouseApi } from '../../api/endpoints';
 import type { ItemListItem } from '../../api/endpoints';
 import { queryClient } from '../../app/queryClient';
 import { Button } from '../../components/ui/Button';
@@ -36,14 +36,14 @@ export const ItemListPage: React.FC = () => {
   const [brandId, setBrandId] = useState(0);
   const [categoryId, setCategoryId] = useState(0);
   const [selectedUser, setSelectedUser] = useState(user?.userName || '');
-  const [warehouseStock, setWarehouseStock] = useState('All');
+  const [warehouseId, setWarehouseId] = useState(0);
   const [trackingType, setTrackingType] = useState('');
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const debouncedSearch = useDebounce(search);
 
   const items = useQuery({
-    queryKey: ['items', page, pageSize, debouncedSearch, categoryId, brandId],
-    queryFn: () => itemApi.getAll({ page, size: pageSize, search: debouncedSearch, categoryId: categoryId || undefined, brandId: brandId || undefined }),
+    queryKey: ['items', page, pageSize, debouncedSearch, categoryId, brandId, warehouseId],
+    queryFn: () => itemApi.getAll({ page, size: pageSize, search: debouncedSearch, categoryId: categoryId || undefined, brandId: brandId || undefined, warehouseId: warehouseId || undefined }),
   });
   const categories = useQuery({ queryKey: ['item-list-categories'], queryFn: () => categoryApi.getAll({ page: 0, size: 100, search: '' }), enabled: canViewCategories });
   const brands = useQuery({
@@ -51,6 +51,7 @@ export const ItemListPage: React.FC = () => {
     queryFn: () => brandApi.getByCategoryId(categoryId),
     enabled: canViewBrands && categoryId > 0,
   });
+  const warehouses = useQuery({ queryKey: ['item-list-warehouses'], queryFn: () => warehouseApi.getAll() });
   const remove = useMutation({
     mutationFn: itemApi.delete,
     onSuccess: () => {
@@ -61,6 +62,7 @@ export const ItemListPage: React.FC = () => {
   });
 
   const rows = (items.data?.data?.content || [])
+    .filter((item) => !warehouseId || item.warehouseId === warehouseId)
     .filter((item) => !trackingType || (item.trackingType || 'Regular') === trackingType);
   const allSelected = rows.length > 0 && rows.every((item) => selectedIds.includes(item.id));
 
@@ -107,7 +109,7 @@ export const ItemListPage: React.FC = () => {
           {canViewCategories && <label className="text-sm text-gray-600">Category<select className="mt-1 h-10 w-full rounded border border-gray-300 px-3" value={categoryId} disabled={categories.isLoading} onChange={(event) => { setCategoryId(Number(event.target.value)); setBrandId(0); setPage(0); }}><option value={0}>{categories.isLoading ? 'Loading categories...' : 'Choose one thing'}</option>{(categories.data?.data?.content || []).map((entry) => <option key={entry.id} value={entry.id}>{entry.name}</option>)}</select></label>}
           {canViewBrands && <label className="text-sm text-gray-600">Brand<select className="mt-1 h-10 w-full rounded border border-gray-300 px-3" value={brandId} disabled={!categoryId || brands.isLoading} onChange={(event) => { setBrandId(Number(event.target.value)); setPage(0); }}><option value={0}>{!categoryId ? 'Select category first' : brands.isLoading ? 'Loading brands...' : 'Choose one thing'}</option>{(brands.data?.data?.content || []).map((entry) => <option key={entry.id} value={entry.id}>{entry.name}</option>)}</select></label>}
           <label className="text-sm text-gray-600">User<select className="mt-1 h-10 w-full rounded border border-gray-300 px-3" value={selectedUser} onChange={(event) => setSelectedUser(event.target.value)}><option value="">Choose one thing</option>{user?.userName && <option value={user.userName}>{user.userName}</option>}</select></label>
-          <label className="text-sm text-gray-600">Warehouse Stock<select className="mt-1 h-10 w-full rounded border border-gray-300 px-3" value={warehouseStock} onChange={(event) => setWarehouseStock(event.target.value)}><option>All</option><option>In Stock</option><option>Low Stock</option></select></label>
+          <label className="text-sm text-gray-600">Warehouse Stock<select className="mt-1 h-10 w-full rounded border border-gray-300 px-3" value={warehouseId} disabled={warehouses.isLoading} onChange={(event) => { setWarehouseId(Number(event.target.value)); setPage(0); }}><option value={0}>{warehouses.isLoading ? 'Loading warehouses...' : 'All warehouses'}</option>{(warehouses.data?.data || []).map((warehouse) => <option key={warehouse.id} value={warehouse.id}>{warehouse.name}</option>)}</select></label>
           <label className="text-sm text-gray-600">Tracking Type<select className="mt-1 h-10 w-full rounded border border-gray-300 px-3" value={trackingType} onChange={(event) => setTrackingType(event.target.value)}><option value="">Choose one thing</option><option>Regular</option><option>Batch</option></select></label>
         </div>
         <div className="flex flex-wrap items-center justify-between gap-3 px-5 pb-4">

@@ -16,11 +16,14 @@ export const MasterFormPage: React.FC<Props> = ({ type, mode }) => {
   const label = isCategory ? 'Category' : 'Brand';
   const navigate = useNavigate();
   const id = Number(useParams<{ id: string }>().id);
-  const state = useLocation().state as SimpleMaster | undefined;
+  const location = useLocation();
+  const state = location.state as SimpleMaster | undefined;
+  const returnTo = new URLSearchParams(location.search).get('returnTo');
+  const safeReturnTo = returnTo?.startsWith('/') && !returnTo.startsWith('//') ? returnTo : '';
   const [name, setName] = useState(mode === 'edit' ? state?.name || '' : '');
   const [description, setDescription] = useState(mode === 'edit' ? state?.description || '' : '');
   const [categoryId, setCategoryId] = useState(mode === 'edit' ? state?.categoryId || 0 : 0);
-  const backPath = `/items/${isCategory ? 'categories' : 'brands'}`;
+  const backPath = safeReturnTo || `/items/${isCategory ? 'categories' : 'brands'}`;
   const categories = useQuery({
     queryKey: ['category', 'brand-form'],
     queryFn: () => categoryApi.getAll({ page: 0, size: 100, search: '' }),
@@ -35,6 +38,14 @@ export const MasterFormPage: React.FC<Props> = ({ type, mode }) => {
     onSuccess: async () => {
       toast.success(`${label} ${mode === 'edit' ? 'updated' : 'created'} successfully`);
       await queryClient.invalidateQueries({ queryKey: [type] });
+      if (isCategory) {
+        await queryClient.invalidateQueries({ queryKey: ['item-form-categories'] });
+        await queryClient.invalidateQueries({ queryKey: ['item-list-categories'] });
+        await queryClient.invalidateQueries({ queryKey: ['category', 'brand-form'] });
+      } else {
+        await queryClient.invalidateQueries({ queryKey: ['item-form-brands'] });
+        await queryClient.invalidateQueries({ queryKey: ['item-list-brands'] });
+      }
       navigate(backPath);
     },
     onError: (error: any) => toast.error(error?.message || `Failed to ${mode} ${label.toLowerCase()}`),

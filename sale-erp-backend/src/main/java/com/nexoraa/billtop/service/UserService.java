@@ -35,6 +35,8 @@ import java.util.Locale;
 @Service
 public class UserService {
 
+    private static final String DEFAULT_PASSWORD_SUFFIX = "@123";
+
     private final UserRepository userRepository;
     private final RoleRepository roleRepository;
     private final OrganizationRepository organizationRepository;
@@ -89,7 +91,7 @@ public class UserService {
                 .status(request.getStatus() == null ? Status.ACTIVE : request.getStatus())
                 .role(role)
                 .organization(organization)
-                .password(passwordEncoder.encode(request.getPassword()))
+                .password(passwordEncoder.encode(defaultPassword(request.getFirstName())))
                 .build();
 
         return userMapper.toResponseDto(userRepository.save(user));
@@ -222,6 +224,10 @@ public class UserService {
     private Role getActiveRole(Long roleId, Long organizationId) {
         return roleRepository.findByIdAndOrganizationIdAndStatusAndIsDeletedFalse(roleId, organizationId, Status.ACTIVE)
                 .orElseThrow(() -> new BadRequestException(ErrorMessage.ROLE_NOT_FOUND, "ROLE_NOT_FOUND"));
+    }
+
+    private String defaultPassword(String firstName) {
+        return firstName.trim() + DEFAULT_PASSWORD_SUFFIX;
     }
 
     private BillTopUserDetails getCurrentUserDetails() {

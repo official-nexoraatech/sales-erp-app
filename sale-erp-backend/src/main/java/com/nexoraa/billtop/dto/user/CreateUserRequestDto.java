@@ -43,8 +43,6 @@ public class CreateUserRequestDto {
     @NotNull(message = ValidationMessage.ID_REQUIRED)
     private Long organizationId;
 
-    @NotBlank(message = ValidationMessage.PASSWORD_REQUIRED)
-    @Size(min = 6, message = ValidationMessage.PASSWORD_INVALID)
     private String password;
 
     private Status status;

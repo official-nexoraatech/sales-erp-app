@@ -163,7 +163,7 @@ export interface CreateUserRequest {
   mobileNo: string;
   roleId: number;
   organizationId: number;
-  password: string;
+  password?: string;
   status: 'ACTIVE' | 'INACTIVE';
 }
 

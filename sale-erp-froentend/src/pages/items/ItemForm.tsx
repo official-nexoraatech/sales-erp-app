@@ -121,6 +121,14 @@ export const ItemForm: React.FC<Props> = ({
     const returnTo = `${location.pathname}${location.search}`;
     navigate(`/warehouses/create?returnTo=${encodeURIComponent(returnTo)}`);
   };
+  const createCategory = () => {
+    const returnTo = `${location.pathname}${location.search}`;
+    navigate(`/items/categories/create?returnTo=${encodeURIComponent(returnTo)}`);
+  };
+  const createBrand = () => {
+    const returnTo = `${location.pathname}${location.search}`;
+    navigate(`/items/brands/create?returnTo=${encodeURIComponent(returnTo)}`);
+  };
 
   return (
     <div className="overflow-hidden rounded-lg bg-white shadow">
@@ -139,10 +147,7 @@ export const ItemForm: React.FC<Props> = ({
           {renderFieldError('sku')}
         </label>
         <label className="text-sm text-gray-600">Batch No
-          <div className="mt-1 flex">
-            <input className={`${controlClass('batchNo', inputClass, ['itemCode'])} rounded-r-none`} value={form.batchNo} onChange={(event) => setBatchNo(event.target.value)} />
-            <button type="button" onClick={() => setBatchNo(String(Date.now()).slice(-10))} className="h-10 rounded-r border border-l-0 px-4 text-gray-600">Auto</button>
-          </div>
+          <input className={`${controlClass('batchNo', inputClass, ['itemCode'])} mt-1`} value={form.batchNo} onChange={(event) => setBatchNo(event.target.value)} />
           {renderFieldError('batchNo', ['itemCode'])}
         </label>
         <label className="text-sm text-gray-600">Category
@@ -151,7 +156,7 @@ export const ItemForm: React.FC<Props> = ({
               <option value={0}>{categories.isLoading ? 'Loading categories...' : 'Select category'}</option>
               {(categories.data?.data?.content || []).map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
             </select>
-            <button type="button" title="Create category" aria-label="Create category" onClick={() => navigate('/items/categories/create')} className="flex h-10 w-10 items-center justify-center rounded-r border border-l-0 border-blue-400 text-blue-500 hover:bg-blue-50"><CirclePlus size={17} /></button>
+            <button type="button" title="Create category" aria-label="Create category" onClick={createCategory} className="flex h-10 w-10 items-center justify-center rounded-r border border-l-0 border-blue-400 text-blue-500 hover:bg-blue-50"><CirclePlus size={17} /></button>
           </div>
           {renderFieldError('categoryId')}
         </label>
@@ -161,7 +166,7 @@ export const ItemForm: React.FC<Props> = ({
               <option value={0}>{!form.categoryId ? 'Select category first' : brands.isLoading ? 'Loading brands...' : 'Select brand'}</option>
               {(brands.data?.data?.content || []).map((brand) => <option key={brand.id} value={brand.id}>{brand.name}</option>)}
             </select>
-            <button type="button" title="Create brand" aria-label="Create brand" onClick={() => navigate('/items/brands/create')} className="flex h-10 w-10 items-center justify-center rounded-r border border-l-0 border-blue-400 text-blue-500 hover:bg-blue-50"><CirclePlus size={17} /></button>
+            <button type="button" title="Create brand" aria-label="Create brand" onClick={createBrand} className="flex h-10 w-10 items-center justify-center rounded-r border border-l-0 border-blue-400 text-blue-500 hover:bg-blue-50"><CirclePlus size={17} /></button>
           </div>
           {renderFieldError('brandId')}
         </label>
