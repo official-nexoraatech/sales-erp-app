@@ -30,8 +30,8 @@ export const LoginPage: React.FC = () => {
   } = useForm<LoginFormData>({
     resolver: zodResolver(loginSchema),
     defaultValues: {
-      userName: 'dipakdagade',
-      password: 'Deepak@3536',
+      userName: '',
+      password: '',
     },
   });
 
@@ -153,11 +153,6 @@ export const LoginPage: React.FC = () => {
           </form>
 
           <div className="mt-7 text-center text-sm text-slate-500">
-            <p>
-              Demo: <span className="font-medium text-slate-700">deepakdagade</span>
-              <span className="mx-2 text-slate-300">|</span>
-              <span className="font-medium text-slate-700">Deepak@3536</span>
-            </p>
             <div className="mt-6 flex items-center justify-center gap-5 text-base font-medium text-blue-600">
               <button type="button" className="hover:underline">🇺🇸 English</button>
               <button type="button" className="hover:underline">🇮🇳 Hindi</button>
