@@ -7,6 +7,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import toast from 'react-hot-toast';
 import { authApi } from '../../api/endpoints';
+import { getDefaultAuthorizedPath } from '../../auth/featurePermissions';
 import { useAuth } from '../../hooks/useAuth';
 import { authUserFromLoginResponse, isTokenExpired } from '../../utils/authToken';
 
@@ -46,7 +47,7 @@ export const LoginPage: React.FC = () => {
         }
         login(authUser);
         toast.success('Login successful');
-        navigate('/dashboard');
+        navigate(getDefaultAuthorizedPath(authUser.permissions, authUser.role));
       }
     },
   });

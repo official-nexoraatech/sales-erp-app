@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { customerApi } from '../../../api/endpoints';
+import { PERMISSIONS } from '../../../auth/permissions';
 import { Button } from '../../../components/ui/Button';
 import { Pagination } from '../../../components/ui/Pagination';
 import { useAuth } from '../../../hooks/useAuth';
@@ -13,8 +14,10 @@ const columns = ['Quotation ID', 'Date', 'Customer', 'Total', 'Status', 'Created
 
 export const QuotationListPage: React.FC = () => {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, hasPermission } = useAuth();
   const { page, handlePageChange } = usePagination();
+  const canCreate = hasPermission(PERMISSIONS.SALES_CREATE);
+  const canDelete = hasPermission(PERMISSIONS.SALES_DELETE);
   const [pageSize, setPageSize] = useState(10);
   const [customerId, setCustomerId] = useState(0);
   const [selectedUser, setSelectedUser] = useState(user?.userName || '');
@@ -36,9 +39,11 @@ export const QuotationListPage: React.FC = () => {
       <div className="overflow-hidden rounded-lg bg-white shadow">
         <div className="flex items-center justify-between border-b px-5 py-4">
           <h1 className="text-xl font-semibold uppercase text-gray-900">Quotation List</h1>
-          <Button onClick={() => navigate('/sales/quotations/create')} className="flex min-w-44 items-center justify-center gap-2">
-            <Plus size={18} />Create Quotation
-          </Button>
+          {canCreate && (
+            <Button onClick={() => navigate('/sales/quotations/create')} className="flex min-w-44 items-center justify-center gap-2">
+              <Plus size={18} />Create Quotation
+            </Button>
+          )}
         </div>
 
         <div className="grid grid-cols-1 gap-x-4 gap-y-3 border-b p-5 md:grid-cols-2 xl:grid-cols-4">
@@ -69,8 +74,10 @@ export const QuotationListPage: React.FC = () => {
             </select> entries
           </label>
           <div className="flex flex-wrap items-center gap-0">
-            <button onClick={exportEmpty} className="rounded-l border border-red-300 px-3 py-2 text-sm text-red-500">Delete</button>
-            <button onClick={exportEmpty} className="border-y border-r px-3 py-2 text-sm">Copy</button>
+            {canDelete && (
+              <button onClick={exportEmpty} className="rounded-l border border-red-300 px-3 py-2 text-sm text-red-500">Delete</button>
+            )}
+            <button onClick={exportEmpty} className={`${canDelete ? 'border-y border-r' : 'rounded-l border'} px-3 py-2 text-sm`}>Copy</button>
             <button onClick={exportEmpty} className="border-y border-r px-3 py-2 text-sm">Excel</button>
             <button onClick={exportEmpty} className="border-y border-r px-3 py-2 text-sm">CSV</button>
             <button onClick={exportEmpty} className="rounded-r border-y border-r px-3 py-2 text-sm">PDF</button>
@@ -79,15 +86,15 @@ export const QuotationListPage: React.FC = () => {
         </div>
 
         <div className="overflow-x-auto px-3 pb-3">
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="p-3"><input type="checkbox" disabled /></th>
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50">
+                <tr>
+                {canDelete && <th className="p-3"><input type="checkbox" disabled /></th>}
                 {columns.map((heading) => <th key={heading} className="border-b p-3 text-left">{heading}</th>)}
               </tr>
             </thead>
             <tbody>
-              <tr><td colSpan={columns.length + 1} className="bg-gray-50 p-5 text-center text-sm text-gray-700">No data available in table</td></tr>
+              <tr><td colSpan={columns.length + (canDelete ? 1 : 0)} className="bg-gray-50 p-5 text-center text-sm text-gray-700">No data available in table</td></tr>
             </tbody>
           </table>
         </div>

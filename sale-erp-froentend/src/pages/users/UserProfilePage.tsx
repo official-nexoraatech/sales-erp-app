@@ -5,17 +5,19 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { usersApi } from '../../api/endpoints';
 import type { UpdateProfileRequest } from '../../api/endpoints';
+import { getDefaultAuthorizedPath } from '../../auth/featurePermissions';
+import { PERMISSIONS } from '../../auth/permissions';
 import { Button } from '../../components/ui/Button';
 import { Loader } from '../../components/ui/Loader';
 import { useAuth } from '../../hooks/useAuth';
-import { PERMISSIONS } from '../../auth/permissions';
 
 const inputClass = 'h-10 w-full rounded border border-gray-300 bg-white px-3 text-sm text-gray-900 outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-gray-50';
 
 export const UserProfilePage: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { logout, hasPermission } = useAuth();
+  const { user, logout, hasPermission } = useAuth();
+  const closePath = getDefaultAuthorizedPath(user?.permissions, user?.role);
   const canViewProfile = hasPermission(PERMISSIONS.USER_PROFILE_VIEW);
   const canUpdateProfile = hasPermission(PERMISSIONS.USER_PROFILE_UPDATE);
   const canChangePassword = hasPermission(PERMISSIONS.USER_CHANGE_PASSWORD);
@@ -146,7 +148,7 @@ export const UserProfilePage: React.FC = () => {
                 </div>
                 <div className="flex gap-3 px-5 pb-5">
                   {canUpdateProfile && <Button type="button" isLoading={updateProfile.isPending} onClick={submitProfile}>Submit</Button>}
-                  <Button type="button" variant="secondary" onClick={() => navigate('/dashboard')}>Close</Button>
+                  <Button type="button" variant="secondary" onClick={() => navigate(closePath)}>Close</Button>
                 </div>
               </>
             )}
@@ -160,7 +162,7 @@ export const UserProfilePage: React.FC = () => {
             </div>
             <div className="flex gap-3 px-5 pb-5">
               <Button type="button" isLoading={changePassword.isPending} onClick={submitPassword}>Submit</Button>
-              <Button type="button" variant="secondary" onClick={() => navigate('/dashboard')}>Close</Button>
+              <Button type="button" variant="secondary" onClick={() => navigate(closePath)}>Close</Button>
             </div>
           </>
         )}

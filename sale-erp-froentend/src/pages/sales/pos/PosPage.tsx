@@ -5,7 +5,10 @@ import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { customerApi, itemApi, paymentMethodApi, posApi, warehouseApi } from '../../../api/endpoints';
 import type { ItemListItem } from '../../../api/endpoints';
+import { getDefaultAuthorizedPath } from '../../../auth/featurePermissions';
+import { PERMISSIONS } from '../../../auth/permissions';
 import { NumericInput } from '../../../components/ui/NumericInput';
+import { useAuth } from '../../../hooks/useAuth';
 import { useDebounce } from '../../../hooks/useDebounce';
 
 interface CartLine extends ItemListItem { quantity: number }
@@ -50,6 +53,15 @@ const isItemActive = (item: ItemListItem) => getItemStatusLabel(item.status) ===
 
 export const PosPage: React.FC = () => {
   const navigate = useNavigate();
+  const { user, hasPermission } = useAuth();
+  const defaultPath = getDefaultAuthorizedPath(user?.permissions, user?.role);
+  const canViewDashboard = hasPermission(PERMISSIONS.DASHBOARD_VIEW);
+  const canViewCustomers = hasPermission(PERMISSIONS.CUSTOMER_VIEW);
+  const canCreateCustomer = hasPermission(PERMISSIONS.CUSTOMER_CREATE);
+  const canViewSales = hasPermission(PERMISSIONS.SALES_VIEW);
+  const canViewItems = hasPermission(PERMISSIONS.ITEM_VIEW);
+  const canViewPaymentIn = hasPermission(PERMISSIONS.PAYMENT_IN_VIEW);
+  const canCreateExpenseMaster = hasPermission(PERMISSIONS.EXPENSE_CREATE);
   const [customerId, setCustomerId] = useState(0);
   const [warehouseId, setWarehouseId] = useState(0);
   const [paymentMethodId, setPaymentMethodId] = useState(0);
@@ -287,13 +299,13 @@ export const PosPage: React.FC = () => {
   return (
     <div className="min-h-screen bg-[#f5f6ff] text-slate-700">
       <header className="flex h-12 items-center justify-between border-b bg-white px-3 shadow-sm">
-        <button onClick={() => navigate('/dashboard')} className="text-xl font-semibold text-blue-600">Nexoraa</button>
+        <button onClick={() => navigate(defaultPath)} className="text-xl font-semibold text-blue-600">Nexoraa</button>
         <nav className="hidden items-center gap-5 text-xs text-slate-600 md:flex">
-          <button onClick={() => navigate('/dashboard')} className="flex items-center gap-1 hover:text-blue-600"><LayoutDashboard size={13} />Dashboard</button>
-          <button onClick={() => navigate('/contacts/customers')} className="flex items-center gap-1 hover:text-blue-600"><Users size={13} />Customer List</button>
-          <button onClick={() => navigate('/sales/invoices')} className="flex items-center gap-1 hover:text-blue-600"><CreditCard size={13} />Invoices</button>
-          <button onClick={() => navigate('/items')} className="flex items-center gap-1 hover:text-blue-600"><Box size={13} />Item List</button>
-          <button onClick={() => navigate('/sales/payment-in')} className="flex items-center gap-1 hover:text-blue-600"><CreditCard size={13} />Payment In</button>
+          {canViewDashboard && <button onClick={() => navigate('/dashboard')} className="flex items-center gap-1 hover:text-blue-600"><LayoutDashboard size={13} />Dashboard</button>}
+          {canViewCustomers && <button onClick={() => navigate('/contacts/customers')} className="flex items-center gap-1 hover:text-blue-600"><Users size={13} />Customer List</button>}
+          {canViewSales && <button onClick={() => navigate('/sales/invoices')} className="flex items-center gap-1 hover:text-blue-600"><CreditCard size={13} />Invoices</button>}
+          {canViewItems && <button onClick={() => navigate('/items')} className="flex items-center gap-1 hover:text-blue-600"><Box size={13} />Item List</button>}
+          {canViewPaymentIn && <button onClick={() => navigate('/sales/payment-in')} className="flex items-center gap-1 hover:text-blue-600"><CreditCard size={13} />Payment In</button>}
         </nav>
       </header>
 
@@ -334,13 +346,13 @@ export const PosPage: React.FC = () => {
             <span>Customer</span>
             <input className={`${controlClass} mt-1`} value={customerSearch} onChange={(event) => setCustomerSearch(event.target.value)} placeholder="Search customer" />
             <div className="mt-2 flex">
-              <select className={`${controlClass} rounded-r-none`} value={customerId} onChange={(event) => setCustomerId(Number(event.target.value))}>
+              <select className={canCreateCustomer ? `${controlClass} rounded-r-none` : controlClass} value={customerId} onChange={(event) => setCustomerId(Number(event.target.value))}>
                 <option value={0}>{customers.isLoading ? 'Loading customers...' : 'Walk in Customer (-)'}</option>
                 {customers.data?.data?.content.map((customer) => <option key={customer.id} value={customer.id}>{customer.customerName} - {customer.mobile}</option>)}
               </select>
-              <button type="button" onClick={() => navigate(`/contacts/customers/create?returnTo=${encodeURIComponent('/sales/pos')}`)} className="flex h-10 w-11 items-center justify-center rounded-r border border-l-0 border-blue-400 bg-white text-blue-600" title="Create customer">
+              {canCreateCustomer && <button type="button" onClick={() => navigate(`/contacts/customers/create?returnTo=${encodeURIComponent('/sales/pos')}`)} className="flex h-10 w-11 items-center justify-center rounded-r border border-l-0 border-blue-400 bg-white text-blue-600" title="Create customer">
                 <Plus size={17} />
-              </button>
+              </button>}
             </div>
           </div>
           <div className={`${fieldLabelClass} xl:col-span-2`}>
@@ -468,7 +480,7 @@ export const PosPage: React.FC = () => {
                 </div>
                 <p className="border-t px-3 py-2 text-right text-xs font-semibold">Balance <span className="ml-20">0</span></p>
                 <p className="border-t px-3 py-2 text-right text-xs font-semibold">Change Return <span className="ml-16 text-xl text-red-500">0</span></p>
-                <button type="button" onClick={() => navigate('/expenses/payment-types/create')} className="px-2 py-1 text-xs text-blue-500">+ Add Payment Type</button>
+                {canCreateExpenseMaster && <button type="button" onClick={() => navigate('/expenses/payment-types/create')} className="px-2 py-1 text-xs text-blue-500">+ Add Payment Type</button>}
               </div>
               <div className="border bg-white"><label className="flex items-center gap-2 bg-[#f0f0f8] p-3 text-xs font-semibold"><input type="checkbox" checked={roundOff} onChange={(event) => setRoundOff(event.target.checked)} />Round Off</label><p className="flex justify-between border-t p-3 text-xs font-bold"><span>Grand Total</span><span>{grandTotal.toFixed(2)}</span></p></div>
             </div>
@@ -477,7 +489,7 @@ export const PosPage: React.FC = () => {
       </main>
 
       <footer className="fixed inset-x-0 bottom-0 z-20 flex h-12 items-center justify-end gap-3 border-t bg-white px-4 shadow-[0_-2px_8px_rgba(0,0,0,0.06)]">
-        <button onClick={() => navigate('/dashboard')} className="rounded bg-slate-100 px-5 py-2 text-sm">Close</button>
+        <button onClick={() => navigate(defaultPath)} className="rounded bg-slate-100 px-5 py-2 text-sm">Close</button>
         <button onClick={() => setCart([])} className="rounded bg-slate-600 px-5 py-2 text-sm text-white">New</button>
         <button onClick={() => submitBill(true)} disabled={billing.isPending} className="rounded bg-blue-500 px-5 py-2 text-sm text-white">Save &amp; Print</button>
         <button onClick={() => submitBill(false)} disabled={billing.isPending} className="rounded bg-green-500 px-5 py-2 text-sm text-white">Save</button>

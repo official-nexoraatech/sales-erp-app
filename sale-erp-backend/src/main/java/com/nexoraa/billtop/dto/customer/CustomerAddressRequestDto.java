@@ -30,9 +30,6 @@ public class CustomerAddressRequestDto {
     @NotNull(message = ValidationMessage.ID_REQUIRED)
     private Long stateId;
 
-    @NotNull(message = ValidationMessage.ID_REQUIRED)
-    private Long countryId;
-
     @Pattern(regexp = "^[0-9]{5,10}$", message = ValidationMessage.PINCODE_INVALID)
     private String pincode;
 }

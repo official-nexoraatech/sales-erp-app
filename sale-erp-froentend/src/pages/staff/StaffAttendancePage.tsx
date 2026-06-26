@@ -5,8 +5,10 @@ import toast from 'react-hot-toast';
 import { staffApi } from '../../api/endpoints';
 import type { AttendanceRequest, AttendanceStatus } from '../../api/endpoints';
 import { queryClient } from '../../app/queryClient';
+import { PERMISSIONS } from '../../auth/permissions';
 import { Button } from '../../components/ui/Button';
 import { Loader } from '../../components/ui/Loader';
+import { useAuth } from '../../hooks/useAuth';
 import { attendanceStatuses, inputClass, labelClass, pretty, statusClass, textareaClass } from './staffShared';
 
 const today = new Date().toISOString().slice(0, 10);
@@ -21,6 +23,9 @@ const emptyAttendance: AttendanceRequest = {
 };
 
 export const StaffAttendancePage: React.FC = () => {
+  const { hasPermission } = useAuth();
+  const canCreate = hasPermission(PERMISSIONS.STAFF_ATTENDANCE_CREATE);
+  const canUpdate = hasPermission(PERMISSIONS.STAFF_ATTENDANCE_UPDATE);
   const [filters, setFilters] = useState({ date: today, department: '', employee: '', status: '' });
   const [modalOpen, setModalOpen] = useState(false);
   const [form, setForm] = useState<AttendanceRequest>(emptyAttendance);
@@ -67,8 +72,8 @@ export const StaffAttendancePage: React.FC = () => {
         <div className="flex flex-wrap items-center justify-between gap-3 border-b px-5 py-4">
           <h1 className="text-xl font-semibold text-gray-900">Attendance</h1>
           <div className="flex flex-wrap gap-2">
-            <Button type="button" onClick={() => setModalOpen(true)}><CalendarCheck size={16} /> Mark Attendance</Button>
-            <Button type="button" variant="secondary"><ClipboardList size={16} /> Bulk Mark</Button>
+            {canCreate && <Button type="button" onClick={() => setModalOpen(true)}><CalendarCheck size={16} /> Mark Attendance</Button>}
+            {canCreate && <Button type="button" variant="secondary"><ClipboardList size={16} /> Bulk Mark</Button>}
             <Button type="button" variant="outline">Export</Button>
           </div>
         </div>
@@ -105,7 +110,7 @@ export const StaffAttendancePage: React.FC = () => {
                     <td className="border p-3">{row.checkOut || '-'}</td>
                     <td className="border p-3">{row.totalHours.toFixed(2)}</td>
                     <td className="border p-3"><span className={`rounded-full px-3 py-1 text-xs font-semibold ${statusClass(row.status)}`}>{pretty(row.status)}</span></td>
-                    <td className="border p-3"><button type="button" onClick={() => { setForm({ employeeId: row.employeeId, date: row.date, checkIn: row.checkIn, checkOut: row.checkOut, status: row.status, note: row.note }); setModalOpen(true); }} className="text-orange-600"><Edit size={16} /></button></td>
+                    <td className="border p-3">{canUpdate && <button type="button" onClick={() => { setForm({ employeeId: row.employeeId, date: row.date, checkIn: row.checkIn, checkOut: row.checkOut, status: row.status, note: row.note }); setModalOpen(true); }} className="text-orange-600"><Edit size={16} /></button>}</td>
                   </tr>
                 )) : <tr><td colSpan={8} className="bg-gray-50 p-5 text-center">No attendance records found</td></tr>}
               </tbody>

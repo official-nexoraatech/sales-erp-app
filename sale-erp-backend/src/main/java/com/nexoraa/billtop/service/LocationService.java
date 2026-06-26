@@ -9,5 +9,5 @@ public interface LocationService {
 
     List<CountryResponseDto> getCountries();
 
-    List<StateResponseDto> getStatesByCountryId(Long countryId);
+    List<StateResponseDto> getStates();
 }

@@ -12,9 +12,11 @@ import {
   type PaymentMethod,
 } from '../../api/endpoints';
 import { queryClient } from '../../app/queryClient';
+import { PERMISSIONS } from '../../auth/permissions';
 import { Button } from '../../components/ui/Button';
 import { Loader } from '../../components/ui/Loader';
 import { Pagination } from '../../components/ui/Pagination';
+import { useAuth } from '../../hooks/useAuth';
 import { useConfirmation } from '../../hooks/useConfirmation';
 import { useDebounce } from '../../hooks/useDebounce';
 
@@ -53,7 +55,12 @@ export const ExpenseMasterListPage: React.FC<Props> = ({ type }) => {
       ? 'expense-subcategories'
       : 'payment-methods';
   const navigate = useNavigate();
+  const { hasPermission } = useAuth();
   const { confirmAction, confirmationDialog } = useConfirmation();
+  const canCreate = hasPermission(PERMISSIONS.EXPENSE_CREATE);
+  const canUpdate = hasPermission(PERMISSIONS.EXPENSE_UPDATE);
+  const canDelete = hasPermission(PERMISSIONS.EXPENSE_DELETE);
+  const showActions = true;
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(10);
   const [search, setSearch] = useState('');
@@ -148,9 +155,11 @@ export const ExpenseMasterListPage: React.FC<Props> = ({ type }) => {
       <div className="overflow-hidden rounded-lg bg-white shadow">
         <div className="flex items-center justify-between border-b px-5 py-4">
           <h1 className="text-xl font-semibold uppercase text-gray-900">{label} List</h1>
-          <Button onClick={() => navigate(`${basePath}/create`)} className="min-w-[210px]">
-            Create {label}
-          </Button>
+          {canCreate && (
+            <Button onClick={() => navigate(`${basePath}/create`)} className="min-w-[210px]">
+              Create {label}
+            </Button>
+          )}
         </div>
 
         <div className="flex flex-wrap items-center justify-between gap-3 p-5">
@@ -173,8 +182,8 @@ export const ExpenseMasterListPage: React.FC<Props> = ({ type }) => {
           </label>
 
           <div className="flex flex-wrap items-center">
-            <button onClick={deleteSelected} className="h-10 rounded-l border border-red-300 px-3 text-sm text-red-500">Delete</button>
-            <button onClick={copy} className="h-10 border-y border-r px-3 text-sm">Copy</button>
+            {canDelete && <button onClick={deleteSelected} className="h-10 rounded-l border border-red-300 px-3 text-sm text-red-500">Delete</button>}
+            <button onClick={copy} className={`h-10 border px-3 text-sm ${canDelete ? 'border-l-0' : 'rounded-l'}`}>Copy</button>
             <button onClick={() => download('xls')} className="h-10 border-y border-r px-3 text-sm">Excel</button>
             <button onClick={() => download('csv')} className="h-10 border-y border-r px-3 text-sm">CSV</button>
             <button onClick={printPdf} className="h-10 rounded-r border-y border-r px-3 text-sm">PDF</button>
@@ -200,7 +209,7 @@ export const ExpenseMasterListPage: React.FC<Props> = ({ type }) => {
             <table className="w-full text-sm">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="border p-3">
+                  {canDelete && <th className="border p-3">
                     <input
                       type="checkbox"
                       checked={allSelected}
@@ -210,8 +219,8 @@ export const ExpenseMasterListPage: React.FC<Props> = ({ type }) => {
                           : Array.from(new Set([...selectedIds, ...rows.map((row) => row.id)])),
                       )}
                     />
-                  </th>
-                  {exportColumns.concat('Action').map((heading) => (
+                  </th>}
+                  {exportColumns.concat(showActions ? 'Action' : []).map((heading) => (
                     <th key={heading} className="border p-3 text-left">{heading}</th>
                   ))}
                 </tr>
@@ -219,7 +228,7 @@ export const ExpenseMasterListPage: React.FC<Props> = ({ type }) => {
               <tbody>
                 {rows.length ? rows.map((row) => (
                   <tr key={row.id} className="border-b even:bg-gray-50">
-                    <td className="border p-3">
+                    {canDelete && <td className="border p-3">
                       <input
                         type="checkbox"
                         checked={selectedIds.includes(row.id)}
@@ -227,7 +236,7 @@ export const ExpenseMasterListPage: React.FC<Props> = ({ type }) => {
                           ? current.filter((id) => id !== row.id)
                           : [...current, row.id])}
                       />
-                    </td>
+                    </td>}
                     {subCategoryMode && (
                       <td className="border p-3">
                         {isSubCategory(row) ? row.expenseCategoryName || 'N/A' : 'N/A'}
@@ -245,7 +254,7 @@ export const ExpenseMasterListPage: React.FC<Props> = ({ type }) => {
                         {row.status}
                       </span>
                     </td>
-                    <td className="border p-3">
+                    {showActions && <td className="border p-3">
                       <div className="flex gap-2">
                         <button
                           title={`View ${label}`}
@@ -254,14 +263,14 @@ export const ExpenseMasterListPage: React.FC<Props> = ({ type }) => {
                         >
                           <Eye size={16} />
                         </button>
-                        <button
+                        {canUpdate && <button
                           title={`Edit ${label}`}
                           onClick={() => navigate(`${basePath}/${row.id}/edit`)}
                           className="text-orange-600"
                         >
                           <Edit size={16} />
-                        </button>
-                        <button
+                        </button>}
+                        {canDelete && <button
                           title={`Delete ${label}`}
                           onClick={async () => {
                             const confirmed = await confirmAction({ title: `Delete ${label}`, message: `Delete this ${label.toLowerCase()}?`, confirmText: 'Delete', variant: 'danger' });
@@ -270,13 +279,13 @@ export const ExpenseMasterListPage: React.FC<Props> = ({ type }) => {
                           className="text-red-600"
                         >
                           <Trash2 size={16} />
-                        </button>
+                        </button>}
                       </div>
-                    </td>
+                    </td>}
                   </tr>
                 )) : (
                   <tr>
-                    <td colSpan={exportColumns.length + 2} className="bg-gray-50 p-5 text-center">
+                    <td colSpan={exportColumns.length + Number(canDelete) + Number(showActions)} className="bg-gray-50 p-5 text-center">
                       No data available in table
                     </td>
                   </tr>

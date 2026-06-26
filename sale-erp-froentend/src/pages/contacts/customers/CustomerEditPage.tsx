@@ -32,7 +32,6 @@ export const CustomerEditPage: React.FC = () => {
       addressLine2: address?.addressLine2 || '',
       city: address?.city || '',
       stateId: address?.stateId || 0,
-      countryId: address?.countryId || 0,
       pincode: address?.pincode || '',
     });
     reset({

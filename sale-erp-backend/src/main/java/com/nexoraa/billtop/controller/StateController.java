@@ -4,12 +4,10 @@ import com.nexoraa.billtop.constants.ResponseMessage;
 import com.nexoraa.billtop.dto.ApiResponseDto;
 import com.nexoraa.billtop.dto.location.StateResponseDto;
 import com.nexoraa.billtop.service.LocationService;
-import jakarta.validation.constraints.Positive;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
@@ -26,12 +24,10 @@ public class StateController {
     }
 
     @GetMapping
-    public ResponseEntity<ApiResponseDto<List<StateResponseDto>>> getStatesByCountryId(
-            @RequestParam @Positive Long countryId
-    ) {
+    public ResponseEntity<ApiResponseDto<List<StateResponseDto>>> getStates() {
         return ResponseEntity.ok(ApiResponseDto.success(
                 ResponseMessage.STATES_RETRIEVED,
-                locationService.getStatesByCountryId(countryId)
+                locationService.getStates()
         ));
     }
 }

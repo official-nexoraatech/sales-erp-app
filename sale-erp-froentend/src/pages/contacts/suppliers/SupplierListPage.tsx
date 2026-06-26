@@ -13,9 +13,15 @@ import { PageHeader } from '../../../components/ui/PageHeader';
 import { useDebounce } from '../../../hooks/useDebounce';
 import { usePagination } from '../../../hooks/usePagination';
 import { formatCurrency } from '../../../utils/formatCurrency';
+import { useAuth } from '../../../hooks/useAuth';
+import { PERMISSIONS } from '../../../auth/permissions';
 
 export const SupplierListPage: React.FC = () => {
   const navigate = useNavigate();
+  const { hasPermission } = useAuth();
+  const canCreate = hasPermission(PERMISSIONS.SUPPLIER_CREATE);
+  const canUpdate = hasPermission(PERMISSIONS.SUPPLIER_UPDATE);
+  const canDelete = hasPermission(PERMISSIONS.SUPPLIER_DELETE);
   const [searchTerm, setSearchTerm] = useState('');
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const { page, handlePageChange } = usePagination();
@@ -47,8 +53,8 @@ export const SupplierListPage: React.FC = () => {
       render: (value: number) => (
         <div className="flex gap-2">
           <button aria-label="View supplier" onClick={() => navigate(`/contacts/suppliers/${value}`)} className="rounded p-1 text-blue-600 hover:bg-blue-50"><Eye size={18} /></button>
-          <button aria-label="Edit supplier" onClick={() => navigate(`/contacts/suppliers/${value}/edit`)} className="rounded p-1 text-orange-600 hover:bg-orange-50"><Edit size={18} /></button>
-          <button aria-label="Delete supplier" onClick={() => setDeleteId(value)} className="rounded p-1 text-red-600 hover:bg-red-50"><Trash2 size={18} /></button>
+          {canUpdate && <button aria-label="Edit supplier" onClick={() => navigate(`/contacts/suppliers/${value}/edit`)} className="rounded p-1 text-orange-600 hover:bg-orange-50"><Edit size={18} /></button>}
+          {canDelete && <button aria-label="Delete supplier" onClick={() => setDeleteId(value)} className="rounded p-1 text-red-600 hover:bg-red-50"><Trash2 size={18} /></button>}
         </div>
       ),
     },
@@ -59,7 +65,7 @@ export const SupplierListPage: React.FC = () => {
       <PageHeader
         title="Suppliers"
         description="Manage your suppliers and their information"
-        actions={<Button onClick={() => navigate('/contacts/suppliers/create')} className="flex items-center gap-2"><Plus size={18} />New Supplier</Button>}
+        actions={canCreate ? <Button onClick={() => navigate('/contacts/suppliers/create')} className="flex items-center gap-2"><Plus size={18} />New Supplier</Button> : undefined}
       />
       <DataTable
         columns={columns}

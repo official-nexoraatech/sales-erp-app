@@ -1,9 +1,7 @@
-import { useQuery } from '@tanstack/react-query';
 import type { Control, FieldErrors, UseFormRegister, UseFormSetValue } from 'react-hook-form';
-import { useWatch } from 'react-hook-form';
-import { locationApi } from '../../../api/endpoints';
-import type { Country, State } from '../../../api/endpoints';
 import { Input } from '../../../components/ui/Input';
+import { stateOptionName, useStates } from '../../../hooks/useStates';
+import type { State } from '../../../api/endpoints';
 import type { CustomerFormInput } from './customer.schema';
 
 interface CustomerFormProps {
@@ -18,27 +16,18 @@ const selectLabelClassName = 'mb-1 block text-sm text-gray-600';
 const sectionClassName = 'border-t border-gray-200 pt-5';
 const sectionHeaderClassName = 'mb-4 flex items-center justify-between';
 
-const optionName = (option: Country | State) => option.name || ('stateName' in option ? option.stateName : undefined) || ('countryName' in option ? option.countryName : undefined) || `#${option.id}`;
-
 type AddressKey = 'billingAddress' | 'shippingAddress';
 
 interface AddressFieldsProps extends CustomerFormProps {
   addressKey: AddressKey;
-  countries: Country[];
-  countriesLoading: boolean;
+  states: State[];
+  statesLoading: boolean;
+  statesError: boolean;
 }
 
-const AddressFields = ({ addressKey, register, control, setValue, errors, countries, countriesLoading }: AddressFieldsProps) => {
+const AddressFields = ({ addressKey, register, errors, states, statesLoading, statesError }: AddressFieldsProps) => {
   const title = addressKey === 'billingAddress' ? 'Billing Address' : 'Shipping Address';
   const addressErrors = errors[addressKey];
-  const countryId = Number(useWatch({ control, name: `${addressKey}.countryId` }) || 0);
-  const statesQuery = useQuery({
-    queryKey: ['states', countryId],
-    queryFn: () => locationApi.getStates(countryId),
-    enabled: countryId > 0,
-  });
-  const states = statesQuery.data?.data || [];
-  const countryField = register(`${addressKey}.countryId`, { setValueAs: Number });
   const stateField = register(`${addressKey}.stateId`, { setValueAs: Number });
 
   return (
@@ -53,26 +42,10 @@ const AddressFields = ({ addressKey, register, control, setValue, errors, countr
         <Input label="City" placeholder="Enter city" error={addressErrors?.city?.message} {...register(`${addressKey}.city`)} />
         <Input label="Pincode" placeholder="Enter pincode" error={addressErrors?.pincode?.message} {...register(`${addressKey}.pincode`)} />
         <div>
-          <label className={selectLabelClassName}>Country</label>
-          <select
-            className={selectClassName}
-            disabled={countriesLoading}
-            {...countryField}
-            onChange={(event) => {
-              countryField.onChange(event);
-              setValue(`${addressKey}.stateId`, 0, { shouldDirty: true, shouldValidate: true });
-            }}
-          >
-            <option value={0}>{countriesLoading ? 'Loading countries...' : 'Select country'}</option>
-            {countries.map((country) => <option key={country.id} value={country.id}>{optionName(country)}</option>)}
-          </select>
-          {addressErrors?.countryId?.message && <p className="mt-1 text-sm text-red-600">{addressErrors.countryId.message}</p>}
-        </div>
-        <div>
           <label className={selectLabelClassName}>State</label>
-          <select className={selectClassName} disabled={!countryId || statesQuery.isLoading} {...stateField}>
-            <option value={0}>{!countryId ? 'Select country first' : statesQuery.isLoading ? 'Loading states...' : 'Select state'}</option>
-            {states.map((state) => <option key={state.id} value={state.id}>{optionName(state)}</option>)}
+          <select className={selectClassName} disabled={statesLoading || statesError} {...stateField}>
+            <option value={0}>{statesLoading ? 'Loading states...' : statesError ? 'Failed to load states' : 'Select state'}</option>
+            {states.map((state) => <option key={state.id} value={state.id}>{stateOptionName(state)}</option>)}
           </select>
           {addressErrors?.stateId?.message && <p className="mt-1 text-sm text-red-600">{addressErrors.stateId.message}</p>}
         </div>
@@ -82,11 +55,7 @@ const AddressFields = ({ addressKey, register, control, setValue, errors, countr
 };
 
 export const CustomerForm = ({ register, control, setValue, errors }: CustomerFormProps) => {
-  const countriesQuery = useQuery({
-    queryKey: ['countries'],
-    queryFn: locationApi.getCountries,
-  });
-  const countries = countriesQuery.data?.data || [];
+  const { states, isLoading: statesLoading, isError: statesError } = useStates();
   const mobileField = register('mobile');
 
   return (
@@ -130,8 +99,9 @@ export const CustomerForm = ({ register, control, setValue, errors }: CustomerFo
           control={control}
           setValue={setValue}
           errors={errors}
-          countries={countries}
-          countriesLoading={countriesQuery.isLoading}
+          states={states}
+          statesLoading={statesLoading}
+          statesError={statesError}
         />
       );
     })}

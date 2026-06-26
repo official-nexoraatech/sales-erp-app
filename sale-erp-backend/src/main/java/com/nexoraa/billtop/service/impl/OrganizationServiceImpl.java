@@ -6,7 +6,6 @@ import com.nexoraa.billtop.dto.organization.OrganizationAddressRequestDto;
 import com.nexoraa.billtop.dto.organization.OrganizationRequestDto;
 import com.nexoraa.billtop.dto.organization.OrganizationResponseDto;
 import com.nexoraa.billtop.entity.Address;
-import com.nexoraa.billtop.entity.Country;
 import com.nexoraa.billtop.entity.Organization;
 import com.nexoraa.billtop.entity.State;
 import com.nexoraa.billtop.enums.Status;
@@ -14,7 +13,6 @@ import com.nexoraa.billtop.exception.BadRequestException;
 import com.nexoraa.billtop.exception.ResourceNotFoundException;
 import com.nexoraa.billtop.mapper.OrganizationMapper;
 import com.nexoraa.billtop.repository.AddressRepository;
-import com.nexoraa.billtop.repository.CountryRepository;
 import com.nexoraa.billtop.repository.OrganizationRepository;
 import com.nexoraa.billtop.repository.StateRepository;
 import com.nexoraa.billtop.service.FileStorageService;
@@ -41,7 +39,6 @@ public class OrganizationServiceImpl implements OrganizationService {
     private final OrganizationRepository organizationRepository;
     private final AddressRepository addressRepository;
     private final StateRepository stateRepository;
-    private final CountryRepository countryRepository;
     private final OrganizationMapper organizationMapper;
     private final FileStorageService fileStorageService;
 
@@ -49,14 +46,12 @@ public class OrganizationServiceImpl implements OrganizationService {
             OrganizationRepository organizationRepository,
             AddressRepository addressRepository,
             StateRepository stateRepository,
-            CountryRepository countryRepository,
             OrganizationMapper organizationMapper,
             FileStorageService fileStorageService
     ) {
         this.organizationRepository = organizationRepository;
         this.addressRepository = addressRepository;
         this.stateRepository = stateRepository;
-        this.countryRepository = countryRepository;
         this.organizationMapper = organizationMapper;
         this.fileStorageService = fileStorageService;
     }
@@ -149,7 +144,6 @@ public class OrganizationServiceImpl implements OrganizationService {
         address.setAddressLine2(request.getAddressLine2());
         address.setCity(request.getCity());
         address.setState(getActiveState(request.getStateId()));
-        address.setCountry(getActiveCountry(request.getCountryId()));
         address.setPincode(request.getPincode());
 
         Address savedAddress = addressRepository.save(address);
@@ -162,11 +156,6 @@ public class OrganizationServiceImpl implements OrganizationService {
     private State getActiveState(Long id) {
         return stateRepository.findByIdAndStatus(id, Status.ACTIVE)
                 .orElseThrow(() -> new ResourceNotFoundException(ErrorMessage.STATE_NOT_FOUND, "STATE_NOT_FOUND"));
-    }
-
-    private Country getActiveCountry(Long id) {
-        return countryRepository.findByIdAndStatus(id, Status.ACTIVE)
-                .orElseThrow(() -> new ResourceNotFoundException(ErrorMessage.COUNTRY_NOT_FOUND, "COUNTRY_NOT_FOUND"));
     }
 
     private Specification<Organization> search(String search) {

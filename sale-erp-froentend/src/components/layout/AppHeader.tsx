@@ -95,7 +95,7 @@ export const AppHeader: React.FC = () => {
               <Plus size={14} /> Sale
             </button>
           )}
-          {hasPermission(PERMISSIONS.SALES_CREATE) && (
+          {hasPermission(PERMISSIONS.POS_BILLING_CREATE) && (
             <button
               type="button"
               onClick={() => navigate('/sales/pos')}
@@ -106,15 +106,17 @@ export const AppHeader: React.FC = () => {
           )}
         </div>
 
-        <button
-          type="button"
-          onClick={() => navigate('/dashboard')}
-          className="rounded-lg p-2 text-slate-600 transition hover:bg-slate-100"
-          aria-label="Open dashboard"
-          title="Dashboard"
-        >
-          <Grid2X2 size={18} />
-        </button>
+        {hasPermission(PERMISSIONS.DASHBOARD_VIEW) && (
+          <button
+            type="button"
+            onClick={() => navigate('/dashboard')}
+            className="rounded-lg p-2 text-slate-600 transition hover:bg-slate-100"
+            aria-label="Open dashboard"
+            title="Dashboard"
+          >
+            <Grid2X2 size={18} />
+          </button>
+        )}
         <select
           value={language}
           onChange={(event) => setLanguage(event.target.value as AppLanguage)}

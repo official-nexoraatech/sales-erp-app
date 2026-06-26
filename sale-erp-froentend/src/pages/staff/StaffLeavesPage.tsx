@@ -5,14 +5,20 @@ import toast from 'react-hot-toast';
 import { staffApi } from '../../api/endpoints';
 import type { LeaveRequestItem, LeaveRequestPayload, LeaveStatus } from '../../api/endpoints';
 import { queryClient } from '../../app/queryClient';
+import { PERMISSIONS } from '../../auth/permissions';
 import { Button } from '../../components/ui/Button';
 import { Loader } from '../../components/ui/Loader';
+import { useAuth } from '../../hooks/useAuth';
 import { inputClass, labelClass, leaveStatuses, pretty, statusClass, textareaClass } from './staffShared';
 
 const today = new Date().toISOString().slice(0, 10);
 const emptyLeave: LeaveRequestPayload = { employeeId: 0, leaveType: '', fromDate: today, toDate: today, reason: '' };
 
 export const StaffLeavesPage: React.FC = () => {
+  const { hasPermission } = useAuth();
+  const canCreate = hasPermission(PERMISSIONS.STAFF_LEAVE_CREATE);
+  const canApprove = hasPermission(PERMISSIONS.STAFF_LEAVE_APPROVE);
+  const canReject = hasPermission(PERMISSIONS.STAFF_LEAVE_REJECT);
   const [filters, setFilters] = useState({ employee: '', leaveType: '', status: '', fromDate: '', toDate: '' });
   const [modalOpen, setModalOpen] = useState(false);
   const [viewLeave, setViewLeave] = useState<LeaveRequestItem | null>(null);
@@ -57,7 +63,7 @@ export const StaffLeavesPage: React.FC = () => {
       <div className="overflow-hidden rounded-lg bg-white shadow">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b px-5 py-4">
           <h1 className="text-xl font-semibold text-gray-900">Leave Management</h1>
-          <Button type="button" onClick={() => setModalOpen(true)}>Create Leave Request</Button>
+          {canCreate && <Button type="button" onClick={() => setModalOpen(true)}>Create Leave Request</Button>}
         </div>
 
         <div className="grid grid-cols-1 gap-4 p-5 md:grid-cols-5">
@@ -87,8 +93,8 @@ export const StaffLeavesPage: React.FC = () => {
                     <td className="border p-3">
                       <div className="flex gap-2">
                         <button type="button" onClick={() => setViewLeave(leave)} className="text-blue-600"><Eye size={16} /></button>
-                        <button type="button" onClick={() => updateStatus.mutate({ id: leave.id, status: 'APPROVED' })} className="text-green-600"><Check size={16} /></button>
-                        <button type="button" onClick={() => updateStatus.mutate({ id: leave.id, status: 'REJECTED' })} className="text-red-600"><X size={16} /></button>
+                        {canApprove && <button type="button" onClick={() => updateStatus.mutate({ id: leave.id, status: 'APPROVED' })} className="text-green-600"><Check size={16} /></button>}
+                        {canReject && <button type="button" onClick={() => updateStatus.mutate({ id: leave.id, status: 'REJECTED' })} className="text-red-600"><X size={16} /></button>}
                       </div>
                     </td>
                   </tr>

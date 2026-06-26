@@ -15,12 +15,16 @@ import { useDebounce } from '../../../hooks/useDebounce';
 import { usePagination } from '../../../hooks/usePagination';
 import { formatCurrency } from '../../../utils/formatCurrency';
 import { formatDate } from '../../../utils/formatDate';
+import { PERMISSIONS } from '../../../auth/permissions';
 
 const exportColumns = ['Order ID', 'Date', 'Due Date', 'Customer', 'Total', 'Balance', 'Status'];
 
 export const SaleOrderListPage: React.FC = () => {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, hasPermission } = useAuth();
+  const canCreate = hasPermission(PERMISSIONS.SALES_CREATE);
+  const canUpdate = hasPermission(PERMISSIONS.SALES_UPDATE);
+  const canDelete = hasPermission(PERMISSIONS.SALES_DELETE);
   const { confirmAction, confirmationDialog } = useConfirmation();
   const { page, setPage, handlePageChange } = usePagination();
   const [pageSize, setPageSize] = useState(10);
@@ -118,7 +122,7 @@ export const SaleOrderListPage: React.FC = () => {
       <div className="overflow-hidden rounded-lg bg-white shadow">
         <div className="flex items-center justify-between border-b px-5 py-4">
           <h1 className="text-xl font-semibold uppercase text-gray-900">Sale Order List</h1>
-          <Button onClick={() => navigate('/sales/orders/create')} className="min-w-[175px]">Create Sale Order</Button>
+          {canCreate && <Button onClick={() => navigate('/sales/orders/create')} className="min-w-[175px]">Create Sale Order</Button>}
         </div>
 
         <div className="grid grid-cols-1 gap-x-4 gap-y-3 p-5 md:grid-cols-2 xl:grid-cols-4">
@@ -150,8 +154,8 @@ export const SaleOrderListPage: React.FC = () => {
             entries
           </label>
           <div className="flex flex-wrap items-center">
-            <button onClick={cancelSelected} className="h-10 rounded-l border border-red-300 px-3 text-sm text-red-500">Delete</button>
-            <button onClick={copy} className="h-10 border-y border-r px-3 text-sm">Copy</button>
+            {canDelete && <button onClick={cancelSelected} className="h-10 rounded-l border border-red-300 px-3 text-sm text-red-500">Delete</button>}
+            <button onClick={copy} className={`h-10 border px-3 text-sm ${canDelete ? 'border-l-0' : 'rounded-l'}`}>Copy</button>
             <button onClick={() => download('xls')} className="h-10 border-y border-r px-3 text-sm">Excel</button>
             <button onClick={() => download('csv')} className="h-10 border-y border-r px-3 text-sm">CSV</button>
             <button onClick={printPdf} className="h-10 rounded-r border-y border-r px-3 text-sm">PDF</button>
@@ -166,14 +170,14 @@ export const SaleOrderListPage: React.FC = () => {
             <table className="w-full text-sm">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="border p-3"><input type="checkbox" checked={allSelected} onChange={() => setSelectedIds(allSelected ? [] : rows.map((sale) => sale.saleId))} /></th>
+                  {canDelete && <th className="border p-3"><input type="checkbox" checked={allSelected} onChange={() => setSelectedIds(allSelected ? [] : rows.map((sale) => sale.saleId))} /></th>}
                   {['Order ID', 'Date', 'Due Date', 'Customer', 'Total', 'Balance', 'Status', 'Created by', 'Created at', 'Action'].map((heading) => <th key={heading} className="border p-3 text-left">{heading}</th>)}
                 </tr>
               </thead>
               <tbody>
                 {rows.length ? rows.map((sale: SaleListItem) => (
                   <tr key={sale.saleId} className="border-b even:bg-gray-50">
-                    <td className="border p-3"><input type="checkbox" checked={selectedIds.includes(sale.saleId)} onChange={() => setSelectedIds((current) => current.includes(sale.saleId) ? current.filter((id) => id !== sale.saleId) : [...current, sale.saleId])} /></td>
+                    {canDelete && <td className="border p-3"><input type="checkbox" checked={selectedIds.includes(sale.saleId)} onChange={() => setSelectedIds((current) => current.includes(sale.saleId) ? current.filter((id) => id !== sale.saleId) : [...current, sale.saleId])} /></td>}
                     <td className="border p-3 font-semibold">{sale.invoiceNo}</td>
                     <td className="border p-3">{formatDate(sale.invoiceDate)}</td>
                     <td className="border p-3">{formatDate(sale.invoiceDate)}</td>
@@ -185,8 +189,8 @@ export const SaleOrderListPage: React.FC = () => {
                     <td className="border p-3">{formatDate(sale.invoiceDate)}</td>
                     <td className="border p-3">
                       <div className="flex items-center gap-2">
-                        <button onClick={() => navigate(`/sales/orders/${sale.saleId}/edit`)} className="text-orange-600" title="Edit"><Edit size={17} /></button>
-                        <button onClick={async () => { if (await confirmAction({ title: 'Cancel Sale Order', message: 'Cancel this sale order?', confirmText: 'Cancel', variant: 'danger' })) cancel.mutate(sale.saleId); }} className="text-red-600" title="Cancel"><Ban size={17} /></button>
+                        {canUpdate && <button onClick={() => navigate(`/sales/orders/${sale.saleId}/edit`)} className="text-orange-600" title="Edit"><Edit size={17} /></button>}
+                        {canDelete && <button onClick={async () => { if (await confirmAction({ title: 'Cancel Sale Order', message: 'Cancel this sale order?', confirmText: 'Cancel', variant: 'danger' })) cancel.mutate(sale.saleId); }} className="text-red-600" title="Cancel"><Ban size={17} /></button>}
                       </div>
                     </td>
                   </tr>

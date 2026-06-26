@@ -13,6 +13,8 @@ public interface StateRepository extends JpaRepository<State, Long> {
 
     Optional<State> findFirstByStateNameIgnoreCaseAndStatus(String stateName, Status status);
 
+    List<State> findAllByStatusAndIsDeletedFalseOrderByStateNameAsc(Status status);
+
     List<State> findAllByCountry_IdAndStatusAndIsDeletedFalseOrderByStateNameAsc(Long countryId, Status status);
 }
 

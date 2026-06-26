@@ -1,11 +1,9 @@
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
 import { CircleDollarSign, MapPin } from 'lucide-react';
 import type { FieldErrors, UseFormRegister, UseFormSetValue } from 'react-hook-form';
-import { locationApi } from '../../../api/endpoints';
-import type { Country, State } from '../../../api/endpoints';
 import { Input } from '../../../components/ui/Input';
 import { Textarea } from '../../../components/ui/Textarea';
+import { stateOptionName, useStates } from '../../../hooks/useStates';
 import type { SupplierFormInput } from './supplier.schema';
 
 interface SupplierFormProps {
@@ -16,17 +14,9 @@ interface SupplierFormProps {
 
 const selectClassName = 'h-10 w-full rounded border border-gray-300 bg-white px-3 text-sm text-gray-900 outline-none transition-colors focus:border-blue-300 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-gray-50';
 
-const optionName = (option: Country | State) => option.name || ('stateName' in option ? option.stateName : undefined) || ('countryName' in option ? option.countryName : undefined) || `#${option.id}`;
-
 export const SupplierForm = ({ register, setValue, errors }: SupplierFormProps) => {
   const [activeTab, setActiveTab] = useState<'address' | 'credit'>('address');
-  const [countryId, setCountryId] = useState(0);
-  const countries = useQuery({ queryKey: ['countries'], queryFn: locationApi.getCountries });
-  const states = useQuery({
-    queryKey: ['states', countryId],
-    queryFn: () => locationApi.getStates(countryId),
-    enabled: countryId > 0,
-  });
+  const { states, isLoading: statesLoading, isError: statesError } = useStates();
   const mobileField = register('mobile');
 
   return (
@@ -50,25 +40,10 @@ export const SupplierForm = ({ register, setValue, errors }: SupplierFormProps) 
         <Input label="WhatsApp Number" type="tel" placeholder="Enter WhatsApp number" error={errors.whatsappNo?.message} {...register('whatsappNo')} />
         <Input label="Tax Number" placeholder="Enter GST number" error={errors.gstNumber?.message} {...register('gstNumber', { setValueAs: (value) => value.toUpperCase() })} />
         <div>
-          <label className="mb-1 block text-sm text-gray-600">Country</label>
-          <select
-            className={selectClassName}
-            value={countryId}
-            disabled={countries.isLoading}
-            onChange={(event) => {
-              setCountryId(Number(event.target.value));
-              setValue('state', '', { shouldDirty: true, shouldValidate: true });
-            }}
-          >
-            <option value={0}>{countries.isLoading ? 'Loading countries...' : 'Select country'}</option>
-            {(countries.data?.data || []).map((country) => <option key={country.id} value={country.id}>{optionName(country)}</option>)}
-          </select>
-        </div>
-        <div>
           <label className="mb-1 block text-sm text-gray-600">State Name</label>
-          <select className={selectClassName} disabled={!countryId || states.isLoading} {...register('state')}>
-            <option value="">{!countryId ? 'Select country first' : states.isLoading ? 'Loading states...' : 'Select state'}</option>
-            {(states.data?.data || []).map((state) => <option key={state.id} value={optionName(state)}>{optionName(state)}</option>)}
+          <select className={selectClassName} disabled={statesLoading || statesError} {...register('state')}>
+            <option value="">{statesLoading ? 'Loading states...' : statesError ? 'Failed to load states' : 'Select state'}</option>
+            {states.map((state) => <option key={state.id} value={stateOptionName(state)}>{stateOptionName(state)}</option>)}
           </select>
         </div>
         <div>

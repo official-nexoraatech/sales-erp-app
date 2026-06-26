@@ -9,14 +9,12 @@ export interface EmployeeAddressRequest {
   addressLine2?: string;
   city: string;
   stateId: number;
-  countryId: number;
   pincode: string;
 }
 
 export interface EmployeeAddress extends EmployeeAddressRequest {
   id?: number;
   stateName?: string;
-  countryName?: string;
 }
 
 export interface Employee {

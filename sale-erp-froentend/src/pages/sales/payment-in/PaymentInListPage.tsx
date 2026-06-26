@@ -12,12 +12,14 @@ import { useAuth } from '../../../hooks/useAuth';
 import { usePagination } from '../../../hooks/usePagination';
 import { formatCurrency } from '../../../utils/formatCurrency';
 import { formatDate } from '../../../utils/formatDate';
+import { PERMISSIONS } from '../../../auth/permissions';
 
 const exportColumns = ['Date', 'Reference No.', 'Invoice No.', 'Customer', 'Paid', 'Created by', 'Created at'];
 
 export const PaymentInListPage: React.FC = () => {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, hasPermission } = useAuth();
+  const canCreate = hasPermission(PERMISSIONS.PAYMENT_IN_CREATE);
   const { page, setPage, handlePageChange } = usePagination();
   const [pageSize, setPageSize] = useState(10);
   const [customerId, setCustomerId] = useState(0);
@@ -25,7 +27,6 @@ export const PaymentInListPage: React.FC = () => {
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
   const [search, setSearch] = useState('');
-  const [selectedIds, setSelectedIds] = useState<number[]>([]);
 
   const customers = useQuery({ queryKey: ['payment-in-customers'], queryFn: () => customerApi.getAll({ page: 0, size: 100, search: '' }) });
   const payments = useQuery({
@@ -38,7 +39,6 @@ export const PaymentInListPage: React.FC = () => {
     .filter((payment) => !search || JSON.stringify(payment).toLowerCase().includes(search.toLowerCase()))
     .filter((payment) => !fromDate || payment.paymentDate >= fromDate)
     .filter((payment) => !toDate || payment.paymentDate <= toDate);
-  const allSelected = rows.length > 0 && rows.every((payment) => selectedIds.includes(payment.paymentId));
 
   const exportRows = () => rows.map((payment) => [
     payment.paymentDate,
@@ -77,7 +77,7 @@ export const PaymentInListPage: React.FC = () => {
       <div className="overflow-hidden rounded-lg bg-white shadow">
         <div className="flex items-center justify-between border-b px-5 py-4">
           <h1 className="text-xl font-semibold uppercase text-gray-900">Payment In</h1>
-          <Button onClick={() => navigate('/sales/payment-in/create')} className="min-w-[150px]">Add Payment</Button>
+          {canCreate && <Button onClick={() => navigate('/sales/payment-in/create')} className="min-w-[150px]">Add Payment</Button>}
         </div>
 
         <div className="grid grid-cols-1 gap-x-4 gap-y-3 border-b p-5 md:grid-cols-2 xl:grid-cols-4">
@@ -108,8 +108,7 @@ export const PaymentInListPage: React.FC = () => {
             </select> entries
           </label>
           <div className="flex flex-wrap items-center gap-0">
-            <button onClick={() => toast('Delete API is not available for Payment In')} className="rounded-l border border-red-300 px-3 py-2 text-sm text-red-500">Delete</button>
-            <button onClick={copy} className="border-y border-r px-3 py-2 text-sm">Copy</button>
+            <button onClick={copy} className="rounded-l border px-3 py-2 text-sm">Copy</button>
             <button onClick={() => download('xls')} className="border-y border-r px-3 py-2 text-sm">Excel</button>
             <button onClick={() => download('csv')} className="border-y border-r px-3 py-2 text-sm">CSV</button>
             <button onClick={printPdf} className="rounded-r border-y border-r px-3 py-2 text-sm">PDF</button>
@@ -119,12 +118,11 @@ export const PaymentInListPage: React.FC = () => {
 
         <div className="overflow-x-auto px-3 pb-3">
           {payments.isLoading ? <div className="p-10"><Loader /></div> : <table className="w-full text-sm">
-            <thead className="bg-gray-50"><tr><th className="p-3"><input type="checkbox" checked={allSelected} onChange={() => setSelectedIds(allSelected ? [] : rows.map((payment) => payment.paymentId))} /></th>{exportColumns.concat('Action').map((heading) => <th key={heading} className="border-b p-3 text-left">{heading}</th>)}</tr></thead>
+            <thead className="bg-gray-50"><tr>{exportColumns.concat('Action').map((heading) => <th key={heading} className="border-b p-3 text-left">{heading}</th>)}</tr></thead>
             <tbody>
               {rows.length ? rows.map((payment: PaymentListItem) => <tr key={payment.paymentId} className="border-b even:bg-gray-50">
-                <td className="p-3"><input type="checkbox" checked={selectedIds.includes(payment.paymentId)} onChange={() => setSelectedIds((current) => current.includes(payment.paymentId) ? current.filter((id) => id !== payment.paymentId) : [...current, payment.paymentId])} /></td>
                 <td className="p-3">{formatDate(payment.paymentDate)}</td><td className="p-3">{payment.paymentNo || 'N/A'}</td><td className="p-3">{payment.paymentNo || 'N/A'}</td><td className="p-3">{payment.customerName || payment.partyName || 'N/A'}</td><td className="p-3 font-semibold">{formatCurrency(payment.amount)}</td><td className="p-3">{user?.userName || 'N/A'}</td><td className="p-3">{formatDate(payment.paymentDate)}</td><td className="p-3"><button onClick={() => navigate(`/sales/payment-in/${payment.paymentId}`)} className="text-blue-600"><Eye size={17} /></button></td>
-              </tr>) : <tr><td colSpan={9} className="bg-gray-50 p-5 text-center text-gray-700">No data available in table</td></tr>}
+              </tr>) : <tr><td colSpan={8} className="bg-gray-50 p-5 text-center text-gray-700">No data available in table</td></tr>}
             </tbody>
           </table>}
         </div>

@@ -18,7 +18,5 @@ public class CustomerAddressResponseDto {
     private String city;
     private Long stateId;
     private String stateName;
-    private Long countryId;
-    private String countryName;
     private String pincode;
 }

@@ -6,16 +6,23 @@ import toast from 'react-hot-toast';
 import { rolesApi } from '../../api/endpoints';
 import type { Role } from '../../api/endpoints';
 import { queryClient } from '../../app/queryClient';
+import { PERMISSIONS } from '../../auth/permissions';
 import { Button } from '../../components/ui/Button';
 import { Loader } from '../../components/ui/Loader';
 import { Pagination } from '../../components/ui/Pagination';
+import { useAuth } from '../../hooks/useAuth';
 import { useConfirmation } from '../../hooks/useConfirmation';
 import { useDebounce } from '../../hooks/useDebounce';
 import { formatDate } from '../../utils/formatDate';
 
 export const RolesPage: React.FC = () => {
   const navigate = useNavigate();
+  const { hasPermission } = useAuth();
   const { confirmAction, confirmationDialog } = useConfirmation();
+  const canCreate = hasPermission(PERMISSIONS.ROLE_CREATE);
+  const canUpdate = hasPermission(PERMISSIONS.ROLE_UPDATE);
+  const canDelete = hasPermission(PERMISSIONS.ROLE_DELETE);
+  const showActions = canUpdate || canDelete;
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(10);
   const [search, setSearch] = useState('');
@@ -65,7 +72,9 @@ export const RolesPage: React.FC = () => {
       <div className="overflow-hidden rounded-lg bg-white shadow">
         <div className="flex items-center justify-between border-b px-5 py-4">
           <h1 className="text-xl font-semibold uppercase text-gray-900">Roles List</h1>
-          <Button onClick={() => navigate('/users/roles/create')} className="min-w-[170px]">Create Role</Button>
+          {canCreate && (
+            <Button onClick={() => navigate('/users/roles/create')} className="min-w-[170px]">Create Role</Button>
+          )}
         </div>
 
         <div className="flex flex-wrap items-center justify-between gap-3 p-5">
@@ -80,7 +89,9 @@ export const RolesPage: React.FC = () => {
             entries
           </label>
           <div className="flex flex-wrap items-center">
-            <button type="button" onClick={deleteSelected} className="h-10 rounded-l border border-red-300 px-3 text-sm text-red-500">Delete</button>
+            {canDelete && (
+              <button type="button" onClick={deleteSelected} className="h-10 rounded-l border border-red-300 px-3 text-sm text-red-500">Delete</button>
+            )}
           </div>
           <label className="flex items-center gap-2 text-sm text-gray-600">
             Search:
@@ -95,11 +106,11 @@ export const RolesPage: React.FC = () => {
             <table className="w-full min-w-[780px] text-sm">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="border p-3"><input type="checkbox" checked={allSelected} onChange={() => setSelectedIds(allSelected ? [] : rows.map((role) => role.id))} /></th>
+                  {canDelete && <th className="border p-3"><input type="checkbox" checked={allSelected} onChange={() => setSelectedIds(allSelected ? [] : rows.map((role) => role.id))} /></th>}
                   <th className="border p-3 text-left">Role Name</th>
                   <th className="border p-3 text-center">Status</th>
                   <th className="border p-3 text-left">Created at</th>
-                  <th className="border p-3 text-left">Action</th>
+                  {showActions && <th className="border p-3 text-left">Action</th>}
                 </tr>
               </thead>
               <tbody>
@@ -107,7 +118,7 @@ export const RolesPage: React.FC = () => {
                   const isActive = role.status === true || role.status === 'ACTIVE';
                   return (
                   <tr key={role.id} className="border-b even:bg-gray-50">
-                    <td className="border p-3"><input type="checkbox" checked={selectedIds.includes(role.id)} onChange={() => setSelectedIds((current) => current.includes(role.id) ? current.filter((id) => id !== role.id) : [...current, role.id])} /></td>
+                    {canDelete && <td className="border p-3"><input type="checkbox" checked={selectedIds.includes(role.id)} onChange={() => setSelectedIds((current) => current.includes(role.id) ? current.filter((id) => id !== role.id) : [...current, role.id])} /></td>}
                     <td className="border p-3 font-medium">{role.name}</td>
                     <td className="border p-3 text-center">
                       <span className={`rounded-full px-3 py-1 text-xs font-semibold ${isActive ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
@@ -115,21 +126,21 @@ export const RolesPage: React.FC = () => {
                       </span>
                     </td>
                     <td className="border p-3">{role.createdAt ? formatDate(role.createdAt) : ''}</td>
-                    <td className="relative border p-3">
+                    {showActions && <td className="relative border p-3">
                       <button type="button" className="rounded p-1 hover:bg-gray-100" onClick={() => setOpenActionId(openActionId === role.id ? null : role.id)}>
                         <MoreVertical size={18} />
                       </button>
                       {openActionId === role.id && (
                         <div className="absolute right-8 top-8 z-10 w-28 rounded border bg-white py-1 shadow">
-                          <button type="button" onClick={() => navigate(`/users/roles/${role.id}/edit`)} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-gray-50"><Edit size={14} /> Edit</button>
-                          <button type="button" onClick={() => deleteRole(role)} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-red-600 hover:bg-gray-50"><Trash2 size={14} /> Delete</button>
+                          {canUpdate && <button type="button" onClick={() => navigate(`/users/roles/${role.id}/edit`)} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-gray-50"><Edit size={14} /> Edit</button>}
+                          {canDelete && <button type="button" onClick={() => deleteRole(role)} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-red-600 hover:bg-gray-50"><Trash2 size={14} /> Delete</button>}
                         </div>
                       )}
-                    </td>
+                    </td>}
                   </tr>
                   );
                 }) : (
-                  <tr><td colSpan={5} className="bg-gray-50 p-5 text-center">No data available in table</td></tr>
+                  <tr><td colSpan={3 + Number(canDelete) + Number(showActions)} className="bg-gray-50 p-5 text-center">No data available in table</td></tr>
                 )}
               </tbody>
             </table>

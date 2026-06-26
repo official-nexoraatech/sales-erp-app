@@ -288,7 +288,6 @@ public class ContactExcelService {
         address.setAddressLine1(limit(addressText, 250));
         address.setAddressLine2(null);
         address.setState(state);
-        address.setCountry(state == null ? null : state.getCountry());
         if (created) {
         }
         addressRepository.save(address);
@@ -307,7 +306,7 @@ public class ContactExcelService {
         }
         Optional<State> state = stateRepository.findFirstByStateNameIgnoreCaseAndStatus(stateName, com.nexoraa.billtop.enums.Status.ACTIVE);
         if (state.isEmpty()) {
-            addWarning(response, rowIndex, contactName, "State Name '" + stateName + "' was not found, so address state/country were not linked.");
+            addWarning(response, rowIndex, contactName, "State Name '" + stateName + "' was not found, so address state was not linked.");
         }
         return state.orElse(null);
     }
