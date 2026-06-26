@@ -14,6 +14,7 @@ import { useConfirmation } from '../../hooks/useConfirmation';
 import { usePagination } from '../../hooks/usePagination';
 import { formatCurrency } from '../../utils/formatCurrency';
 import { formatDate } from '../../utils/formatDate';
+import { PERMISSIONS } from '../../auth/permissions';
 
 const exportColumns = ['Warehouse', 'Items', 'Available Stock', 'Worth Cost', 'Worth Sale', 'Worth Profit', 'Created by', 'Created at'];
 const getNumber = (warehouse: Warehouse, keys: string[], fallback = 0) => {
@@ -27,7 +28,10 @@ const getNumber = (warehouse: Warehouse, keys: string[], fallback = 0) => {
 
 export const WarehouseListPage: React.FC = () => {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, hasPermission } = useAuth();
+  const canCreate = hasPermission(PERMISSIONS.WAREHOUSE_CREATE);
+  const canUpdate = hasPermission(PERMISSIONS.WAREHOUSE_UPDATE);
+  const canDelete = hasPermission(PERMISSIONS.WAREHOUSE_DELETE);
   const { confirmAction, confirmationDialog } = useConfirmation();
   const { page, setPage, handlePageChange } = usePagination();
   const [pageSize, setPageSize] = useState(10);
@@ -87,17 +91,17 @@ export const WarehouseListPage: React.FC = () => {
       <div className="overflow-hidden rounded-lg bg-white shadow">
         <div className="flex items-center justify-between border-b px-5 py-4">
           <h1 className="text-xl font-semibold uppercase text-gray-900">Warehouse List</h1>
-          <Button onClick={() => navigate('/warehouses/create')} className="min-w-[180px]">Create Warehouse</Button>
+          {canCreate && <Button onClick={() => navigate('/warehouses/create')} className="min-w-[180px]">Create Warehouse</Button>}
         </div>
         <div className="flex flex-wrap items-center justify-between gap-3 p-5">
           <label className="flex items-center gap-2 text-sm text-gray-600">Show<select value={pageSize} onChange={(event) => { setPageSize(Number(event.target.value)); setPage(0); }} className="h-9 rounded border border-gray-300 px-2"><option>10</option><option>20</option><option>50</option><option>100</option></select>entries</label>
-          <div className="flex"><button onClick={deleteSelected} className="h-10 rounded-l border border-red-300 px-3 text-sm text-red-500">Delete</button><button onClick={copy} className="h-10 border-y border-r px-3 text-sm">Copy</button><button onClick={() => download('xls')} className="h-10 border-y border-r px-3 text-sm">Excel</button><button onClick={() => download('csv')} className="h-10 border-y border-r px-3 text-sm">CSV</button><button onClick={printPdf} className="h-10 rounded-r border-y border-r px-3 text-sm">PDF</button></div>
+          <div className="flex">{canDelete && <button onClick={deleteSelected} className="h-10 rounded-l border border-red-300 px-3 text-sm text-red-500">Delete</button>}<button onClick={copy} className={`h-10 border px-3 text-sm ${canDelete ? 'border-l-0' : 'rounded-l'}`}>Copy</button><button onClick={() => download('xls')} className="h-10 border-y border-r px-3 text-sm">Excel</button><button onClick={() => download('csv')} className="h-10 border-y border-r px-3 text-sm">CSV</button><button onClick={printPdf} className="h-10 rounded-r border-y border-r px-3 text-sm">PDF</button></div>
           <label className="flex items-center gap-2 text-sm text-gray-600">Search:<input value={search} onChange={(event) => setSearch(event.target.value)} className="h-9 rounded border border-gray-300 px-3" /></label>
         </div>
         <div className="overflow-x-auto px-3 pb-3">
           {warehouses.isLoading ? <div className="p-10"><Loader /></div> : (
             <table className="w-full min-w-[980px] text-sm">
-              <thead className="bg-gray-50"><tr><th className="border p-3"><input type="checkbox" checked={allSelected} onChange={() => setSelectedIds(allSelected ? [] : rows.map((warehouse) => warehouse.id))} /></th>{exportColumns.concat('Action').map((heading) => <th key={heading} className="border p-3 text-left">{heading}</th>)}</tr></thead>
+              <thead className="bg-gray-50"><tr>{canDelete && <th className="border p-3"><input type="checkbox" checked={allSelected} onChange={() => setSelectedIds(allSelected ? [] : rows.map((warehouse) => warehouse.id))} /></th>}{exportColumns.concat('Action').map((heading) => <th key={heading} className="border p-3 text-left">{heading}</th>)}</tr></thead>
               <tbody>
                 {rows.length ? rows.map((warehouse) => {
                   const cost = getNumber(warehouse, ['worthCost', 'costWorth', 'stockValueCost']);
@@ -105,7 +109,7 @@ export const WarehouseListPage: React.FC = () => {
                   const profit = getNumber(warehouse, ['worthProfit', 'profitWorth'], sale - cost);
                   return (
                     <tr key={warehouse.id} className="border-b even:bg-gray-50">
-                      <td className="border p-3"><input type="checkbox" checked={selectedIds.includes(warehouse.id)} onChange={() => setSelectedIds((current) => current.includes(warehouse.id) ? current.filter((id) => id !== warehouse.id) : [...current, warehouse.id])} /></td>
+                      {canDelete && <td className="border p-3"><input type="checkbox" checked={selectedIds.includes(warehouse.id)} onChange={() => setSelectedIds((current) => current.includes(warehouse.id) ? current.filter((id) => id !== warehouse.id) : [...current, warehouse.id])} /></td>}
                       <td className="border p-3 font-semibold">{warehouse.name}</td>
                       <td className="border p-3">{getNumber(warehouse, ['totalItems', 'itemCount'])}</td>
                       <td className="border p-3">{getNumber(warehouse, ['availableStock', 'availableQty', 'quantity']).toFixed(2)}</td>
@@ -114,7 +118,7 @@ export const WarehouseListPage: React.FC = () => {
                       <td className="border p-3">{formatCurrency(profit)}</td>
                       <td className="border p-3">{warehouse.createdBy || user?.userName || 'admin'}</td>
                       <td className="border p-3">{warehouse.createdAt ? formatDate(warehouse.createdAt) : ''}</td>
-                      <td className="border p-3"><div className="flex gap-2"><button title="View warehouse" onClick={() => navigate(`/warehouses/${warehouse.id}`)} className="text-blue-600"><Eye size={16} /></button><button title="Edit warehouse" onClick={() => navigate(`/warehouses/${warehouse.id}/edit`, { state: warehouse })} className="text-orange-600"><Edit size={16} /></button><button title="Delete warehouse" onClick={async () => { if (await confirmAction({ title: 'Delete Warehouse', message: 'Delete this warehouse?', confirmText: 'Delete', variant: 'danger' })) remove.mutate(warehouse.id); }} className="text-red-600"><Trash2 size={16} /></button></div></td>
+                      <td className="border p-3"><div className="flex gap-2"><button title="View warehouse" onClick={() => navigate(`/warehouses/${warehouse.id}`)} className="text-blue-600"><Eye size={16} /></button>{canUpdate && <button title="Edit warehouse" onClick={() => navigate(`/warehouses/${warehouse.id}/edit`, { state: warehouse })} className="text-orange-600"><Edit size={16} /></button>}{canDelete && <button title="Delete warehouse" onClick={async () => { if (await confirmAction({ title: 'Delete Warehouse', message: 'Delete this warehouse?', confirmText: 'Delete', variant: 'danger' })) remove.mutate(warehouse.id); }} className="text-red-600"><Trash2 size={16} /></button>}</div></td>
                     </tr>
                   );
                 }) : <tr><td colSpan={10} className="bg-gray-50 p-5 text-center">No data available in table</td></tr>}

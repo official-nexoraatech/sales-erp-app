@@ -1,5 +1,6 @@
 import React from 'react';
-import { Navigate } from 'react-router-dom';
+import { Navigate, useLocation } from 'react-router-dom';
+import { getDefaultAuthorizedPath } from '../../auth/featurePermissions';
 import { useAuth } from '../../hooks/useAuth';
 
 interface ProtectedRouteProps {
@@ -15,6 +16,7 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
 }) => {
   const {
     token,
+    user,
     expiresAt,
     isAuthenticated,
     isSessionValid,
@@ -22,6 +24,7 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
     hasAnyPermission,
     hasAllPermissions,
   } = useAuth();
+  const location = useLocation();
   const sessionValid = isSessionValid();
   const requiredPermissions = permissions
     ? Array.isArray(permissions) ? permissions : [permissions]
@@ -52,7 +55,19 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
       ? hasAllPermissions(requiredPermissions)
       : hasAnyPermission(requiredPermissions))
   ) {
-    return <Navigate to="/dashboard" replace />;
+    const fallbackPath = getDefaultAuthorizedPath(user?.permissions, user?.role);
+
+    if (fallbackPath !== location.pathname) {
+      return <Navigate to={fallbackPath} replace />;
+    }
+
+    return (
+      <div className="min-h-screen bg-[#f7f9fc] p-6">
+        <div className="rounded border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+          Your account does not have permission to access this page.
+        </div>
+      </div>
+    );
   }
 
   return <>{children}</>;

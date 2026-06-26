@@ -11,7 +11,6 @@ export interface CustomerAddressRequest {
   addressLine2?: string;
   city: string;
   stateId: number;
-  countryId: number;
   pincode: string;
 }
 
@@ -19,7 +18,6 @@ export interface CustomerAddress extends CustomerAddressRequest {
   id: number;
   addressType: 'BILLING' | 'SHIPPING';
   stateName: string;
-  countryName: string;
 }
 
 export interface CustomerDetail {

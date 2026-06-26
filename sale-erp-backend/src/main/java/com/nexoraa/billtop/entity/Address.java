@@ -46,10 +46,6 @@ public class Address extends BaseEntity {
     @JoinColumn(name = "state_id")
     private State state;
 
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "country_id")
-    private Country country;
-
     @Column(length = 20)
     private String pincode;
 }

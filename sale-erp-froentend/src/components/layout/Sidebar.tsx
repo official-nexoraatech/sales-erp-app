@@ -29,6 +29,16 @@ import {
   ShieldCheck,
 } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
+import {
+  ANY_REPORT_RULE,
+  CONTACT_IMPORT_RULE,
+  FEATURE_PERMISSIONS,
+  ITEM_IMPORT_RULE,
+  type AccessRule,
+  canAccessRule,
+  getDefaultAuthorizedPath,
+  rule,
+} from '../../auth/featurePermissions';
 import { PERMISSIONS } from '../../auth/permissions';
 
 interface MenuItem {
@@ -36,7 +46,7 @@ interface MenuItem {
   icon: React.ReactNode;
   href?: string;
   submenu?: MenuItem[];
-  permissions?: string[];
+  access?: AccessRule;
 }
 
 const menuItems: MenuItem[] = [
@@ -44,169 +54,173 @@ const menuItems: MenuItem[] = [
     label: 'Dashboard',
     icon: <LayoutDashboard size={20} />,
     href: '/dashboard',
+    access: rule(FEATURE_PERMISSIONS.dashboard.view),
   },
   {
     label: 'Organization',
     icon: <Building2 size={20} />,
     href: '/organizations',
-    permissions: [PERMISSIONS.ORGANIZATION_VIEW],
+    access: rule(FEATURE_PERMISSIONS.organization.view),
   },
   {
     label: 'Contacts',
     icon: <Users size={20} />,
     submenu: [
-      { label: 'Customers', href: '/contacts/customers', icon: <Users size={18} /> },
-      { label: 'Suppliers', href: '/contacts/suppliers', icon: <Users size={18} /> },
-      { label: 'Carriers', href: '/contacts/carriers', icon: <Users size={18} />, permissions: [PERMISSIONS.CARRIER_VIEW] },
+      { label: 'Customers', href: '/contacts/customers', icon: <Users size={18} />, access: rule(FEATURE_PERMISSIONS.customer.view) },
+      { label: 'Suppliers', href: '/contacts/suppliers', icon: <Users size={18} />, access: rule(FEATURE_PERMISSIONS.supplier.view) },
+      { label: 'Carriers', href: '/contacts/carriers', icon: <Users size={18} />, access: rule(FEATURE_PERMISSIONS.carrier.view) },
     ],
   },
   {
     label: 'Sales',
     icon: <ShoppingCart size={20} />,
     submenu: [
-      { label: 'POS', href: '/sales/pos', icon: <ShoppingCart size={18} /> },
-      { label: 'Invoices', href: '/sales/invoices', icon: <ShoppingCart size={18} /> },
-      { label: 'Quotations', href: '/sales/quotations', icon: <ShoppingCart size={18} /> },
-      { label: 'Payment In', href: '/sales/payment-in', icon: <ShoppingCart size={18} /> },
-      { label: 'Sale Orders', href: '/sales/orders', icon: <ShoppingCart size={18} /> },
+      { label: 'POS', href: '/sales/pos', icon: <ShoppingCart size={18} />, access: rule(FEATURE_PERMISSIONS.pos.create) },
+      { label: 'Invoices', href: '/sales/invoices', icon: <ShoppingCart size={18} />, access: rule(FEATURE_PERMISSIONS.sales.view) },
+      { label: 'Quotations', href: '/sales/quotations', icon: <ShoppingCart size={18} />, access: rule(FEATURE_PERMISSIONS.sales.view) },
+      { label: 'Payment In', href: '/sales/payment-in', icon: <ShoppingCart size={18} />, access: rule(FEATURE_PERMISSIONS.paymentIn.view) },
+      { label: 'Sale Orders', href: '/sales/orders', icon: <ShoppingCart size={18} />, access: rule(FEATURE_PERMISSIONS.sales.view) },
     ],
   },
   {
     label: 'Purchase',
     icon: <ShoppingBag size={20} />,
     submenu: [
-      { label: 'Bills', href: '/purchase/bills', icon: <ShoppingBag size={18} /> },
-      { label: 'Orders', href: '/purchase/orders', icon: <ShoppingBag size={18} /> },
-      { label: 'Payment Out', href: '/purchase/payment-out', icon: <ShoppingBag size={18} /> },
+      { label: 'Bills', href: '/purchase/bills', icon: <ShoppingBag size={18} />, access: rule(FEATURE_PERMISSIONS.purchase.view) },
+      { label: 'Orders', href: '/purchase/orders', icon: <ShoppingBag size={18} />, access: rule(FEATURE_PERMISSIONS.purchase.view) },
+      { label: 'Payment Out', href: '/purchase/payment-out', icon: <ShoppingBag size={18} />, access: rule(FEATURE_PERMISSIONS.paymentOut.view) },
     ],
   },
   {
     label: 'Items',
     icon: <Package size={20} />,
     submenu: [
-      { label: 'Item List', href: '/items', icon: <Package size={18} />, permissions: [PERMISSIONS.ITEM_VIEW] },
-      { label: 'Category List', href: '/items/categories', icon: <Package size={18} />, permissions: [PERMISSIONS.CATEGORY_VIEW] },
-      { label: 'Brand List', href: '/items/brands', icon: <Package size={18} />, permissions: [PERMISSIONS.BRAND_VIEW] },
-      { label: 'Unit List', href: '/items/units', icon: <Package size={18} />, permissions: [PERMISSIONS.UNIT_VIEW] },
+      { label: 'Item List', href: '/items', icon: <Package size={18} />, access: rule(FEATURE_PERMISSIONS.item.view) },
+      { label: 'Category List', href: '/items/categories', icon: <Package size={18} />, access: rule(FEATURE_PERMISSIONS.category.view) },
+      { label: 'Brand List', href: '/items/brands', icon: <Package size={18} />, access: rule(FEATURE_PERMISSIONS.brand.view) },
+      { label: 'Unit List', href: '/items/units', icon: <Package size={18} />, access: rule(FEATURE_PERMISSIONS.unit.view) },
     ],
   },
   {
     label: 'Stock',
     icon: <Warehouse size={20} />,
     submenu: [
-      { label: 'Transfer', href: '/stock/transfers', icon: <Warehouse size={18} /> },
-      { label: 'Adjustment', href: '/stock/adjustments', icon: <Warehouse size={18} /> },
+      { label: 'Transfer', href: '/stock/transfers', icon: <Warehouse size={18} />, access: rule(FEATURE_PERMISSIONS.stockTransfer.view) },
+      { label: 'Adjustment', href: '/stock/adjustments', icon: <Warehouse size={18} />, access: rule(FEATURE_PERMISSIONS.stockAdjustment.view) },
     ],
   },
   {
     label: 'Expense',
     icon: <CircleMinus size={20} />,
     submenu: [
-      { label: 'Expense List', href: '/expenses', icon: <CircleMinus size={18} /> },
-      { label: 'Category List', href: '/expenses/categories', icon: <CircleMinus size={18} /> },
-      { label: 'Subcategory List', href: '/expenses/subcategories', icon: <CircleMinus size={18} /> },
-      { label: 'Payment Type', href: '/expenses/payment-types', icon: <WalletCards size={18} /> },
+      { label: 'Expense List', href: '/expenses', icon: <CircleMinus size={18} />, access: rule(FEATURE_PERMISSIONS.expense.view) },
+      { label: 'Category List', href: '/expenses/categories', icon: <CircleMinus size={18} />, access: rule(FEATURE_PERMISSIONS.expense.view) },
+      { label: 'Subcategory List', href: '/expenses/subcategories', icon: <CircleMinus size={18} />, access: rule(FEATURE_PERMISSIONS.expense.view) },
+      { label: 'Payment Type', href: '/expenses/payment-types', icon: <WalletCards size={18} />, access: rule(FEATURE_PERMISSIONS.expense.view) },
     ],
   },
   {
     label: 'Warehouses',
     icon: <Building2 size={20} />,
     href: '/warehouses',
+    access: rule(FEATURE_PERMISSIONS.warehouse.view),
   },
   {
     label: 'Cash & Bank',
     icon: <DollarSign size={20} />,
     submenu: [
-      { label: 'Cash In Hand', href: '/cash-bank/cash-in-hand', icon: <DollarSign size={18} /> },
-      { label: 'Cheques', href: '/cash-bank/cheques', icon: <DollarSign size={18} /> },
-      { label: 'Bank', href: '/cash-bank/bank', icon: <DollarSign size={18} /> },
+      { label: 'Cash In Hand', href: '/cash-bank/cash-in-hand', icon: <DollarSign size={18} />, access: rule(FEATURE_PERMISSIONS.cash.view) },
+      { label: 'Cheques', href: '/cash-bank/cheques', icon: <DollarSign size={18} />, access: rule(FEATURE_PERMISSIONS.cash.view) },
+      { label: 'Bank', href: '/cash-bank/bank', icon: <DollarSign size={18} />, access: rule(FEATURE_PERMISSIONS.bankAccount.view) },
+      { label: 'Bank Accounts', href: '/cash-bank/bank-accounts', icon: <DollarSign size={18} />, access: rule(FEATURE_PERMISSIONS.bankAccount.view) },
     ],
   },
   {
     label: 'Utilities',
     icon: <Wrench size={20} />,
     submenu: [
-      { label: 'Import Items', href: '/utilities/import-items', icon: <Wrench size={18} /> },
-      { label: 'Import Contacts', href: '/utilities/import-contacts', icon: <Wrench size={18} /> },
-      { label: 'Generate Barcode', href: '/utilities/generate-barcode', icon: <Wrench size={18} /> },
+      { label: 'Import Items', href: '/utilities/import-items', icon: <Wrench size={18} />, access: ITEM_IMPORT_RULE },
+      { label: 'Import Contacts', href: '/utilities/import-contacts', icon: <Wrench size={18} />, access: CONTACT_IMPORT_RULE },
+      { label: 'Generate Barcode', href: '/utilities/generate-barcode', icon: <Wrench size={18} />, access: rule(FEATURE_PERMISSIONS.item.view) },
     ],
   },
   {
     label: 'Users',
     icon: <Users size={20} />,
     submenu: [
-      { label: 'Users', href: '/users', icon: <Users size={18} />, permissions: [PERMISSIONS.USER_VIEW] },
-      { label: 'Roles', href: '/users/roles', icon: <Users size={18} />, permissions: [PERMISSIONS.ROLE_VIEW] },
-      { label: 'Permissions', href: '/users/permissions', icon: <ShieldCheck size={18} />, permissions: [PERMISSIONS.USER_UPDATE] },
+      { label: 'Users', href: '/users', icon: <Users size={18} />, access: rule(FEATURE_PERMISSIONS.user.view) },
+      { label: 'Roles', href: '/users/roles', icon: <Users size={18} />, access: rule(FEATURE_PERMISSIONS.role.view) },
+      { label: 'Permissions', href: '/users/permissions', icon: <ShieldCheck size={18} />, access: rule([FEATURE_PERMISSIONS.user.view, FEATURE_PERMISSIONS.user.update], 'all') },
     ],
   },
   {
     label: 'Staff Management',
     icon: <UserCog size={20} />,
     submenu: [
-      { label: 'Employees', href: '/staff/employees', icon: <UserCog size={18} /> },
-      { label: 'Attendance', href: '/staff/attendance', icon: <CalendarCheck size={18} /> },
-      { label: 'Leaves', href: '/staff/leaves', icon: <ClipboardList size={18} /> },
-      { label: 'Payroll', href: '/staff/payroll', icon: <WalletCards size={18} /> },
-      { label: 'Settings', href: '/staff/settings', icon: <Settings size={18} /> },
+      { label: 'Employees', href: '/staff/employees', icon: <UserCog size={18} />, access: rule(FEATURE_PERMISSIONS.staffEmployee.view) },
+      { label: 'Attendance', href: '/staff/attendance', icon: <CalendarCheck size={18} />, access: rule(FEATURE_PERMISSIONS.staffAttendance.view) },
+      { label: 'Leaves', href: '/staff/leaves', icon: <ClipboardList size={18} />, access: rule(FEATURE_PERMISSIONS.staffLeave.view) },
+      { label: 'Payroll', href: '/staff/payroll', icon: <WalletCards size={18} />, access: rule(FEATURE_PERMISSIONS.staffPayroll.view) },
+      { label: 'Settings', href: '/staff/settings', icon: <Settings size={18} />, access: rule(FEATURE_PERMISSIONS.staffSetting.view) },
     ],
   },
   {
     label: 'SMS',
     icon: <MessageSquare size={20} />,
     submenu: [
-      { label: 'Create SMS', href: '/sms/create', icon: <MessageSquare size={18} /> },
-      { label: 'Templates', href: '/sms/templates', icon: <MessageSquare size={18} /> },
+      { label: 'Create SMS', href: '/sms/create', icon: <MessageSquare size={18} />, access: rule(FEATURE_PERMISSIONS.sms.send) },
+      { label: 'Templates', href: '/sms/templates', icon: <MessageSquare size={18} />, access: rule(FEATURE_PERMISSIONS.sms.templateView) },
     ],
   },
   {
     label: 'Email',
     icon: <Mail size={20} />,
     submenu: [
-      { label: 'Create Email', href: '/email/create', icon: <Mail size={18} /> },
-      { label: 'Templates', href: '/email/templates', icon: <Mail size={18} /> },
+      { label: 'Create Email', href: '/email/create', icon: <Mail size={18} />, access: rule(FEATURE_PERMISSIONS.email.send) },
+      { label: 'Templates', href: '/email/templates', icon: <Mail size={18} />, access: rule(FEATURE_PERMISSIONS.email.templateView) },
     ],
   },
   {
     label: 'Reports',
     icon: <BarChart3 size={20} />,
+    access: ANY_REPORT_RULE,
     submenu: [
-      { label: 'Profit and Loss', href: '/reports/profit-and-loss', icon: <BarChart3 size={18} /> },
-      { label: 'Batch Wise', href: '/reports/item-transaction/batch', icon: <BarChart3 size={18} /> },
-      { label: 'Serial/IMEI', href: '/reports/item-transaction/serial', icon: <BarChart3 size={18} /> },
-      { label: 'General', href: '/reports/item-transaction/general', icon: <BarChart3 size={18} /> },
-      { label: 'Purchase', href: '/reports/purchase', icon: <BarChart3 size={18} /> },
-      { label: 'Item Purchase', href: '/reports/purchase/item', icon: <BarChart3 size={18} /> },
-      { label: 'Purchase Payment', href: '/reports/purchase/payment', icon: <BarChart3 size={18} /> },
-      { label: 'Sale', href: '/reports/sale', icon: <BarChart3 size={18} /> },
-      { label: 'Item Sale', href: '/reports/sale/item', icon: <BarChart3 size={18} /> },
-      { label: 'Sale Payment', href: '/reports/sale/payment', icon: <BarChart3 size={18} /> },
-      { label: 'Customer Due', href: '/reports/due/customer', icon: <BarChart3 size={18} /> },
-      { label: 'Supplier Due', href: '/reports/due/supplier', icon: <BarChart3 size={18} /> },
-      { label: 'Expense', href: '/reports/expense', icon: <BarChart3 size={18} /> },
-      { label: 'Expense Item', href: '/reports/expense/item', icon: <BarChart3 size={18} /> },
-      { label: 'Expense Payment', href: '/reports/expense/payment', icon: <BarChart3 size={18} /> },
-      { label: 'Cash flow', href: '/reports/transactions/cash-flow', icon: <BarChart3 size={18} /> },
-      { label: 'Bank Statement', href: '/reports/transactions/bank-statement', icon: <BarChart3 size={18} /> },
-      { label: 'Supplier Ledger', href: '/reports/ledger/supplier', icon: <BarChart3 size={18} /> },
-      { label: 'Customer Ledger', href: '/reports/ledger/customer', icon: <BarChart3 size={18} /> },
-      { label: 'GST', href: '/reports/gst', icon: <BarChart3 size={18} /> },
-      { label: 'GSTR-1', href: '/reports/gst/gstr-1', icon: <BarChart3 size={18} /> },
-      { label: 'GSTR-2', href: '/reports/gst/gstr-2', icon: <BarChart3 size={18} /> },
-      { label: 'Stock Transfer', href: '/reports/stock-transfer', icon: <BarChart3 size={18} /> },
-      { label: 'Item Stock Transfer', href: '/reports/stock-transfer/item', icon: <BarChart3 size={18} /> },
-      { label: 'Stock Adjustment', href: '/reports/stock-adjustment', icon: <BarChart3 size={18} /> },
-      { label: 'Item Stock Adjustment', href: '/reports/stock-adjustment/item', icon: <BarChart3 size={18} /> },
-      { label: 'Stock Report', href: '/reports/stock', icon: <BarChart3 size={18} /> },
-      { label: 'Stock Batch Wise', href: '/reports/stock-report/batch', icon: <BarChart3 size={18} /> },
-      { label: 'Stock Serial/IMEI', href: '/reports/stock-report/serial', icon: <BarChart3 size={18} /> },
-      { label: 'Stock General', href: '/reports/stock-report/general', icon: <BarChart3 size={18} /> },
-      { label: 'Low Stock', href: '/reports/low-stock', icon: <BarChart3 size={18} /> },
-      { label: 'Inventory Valuation', href: '/reports/inventory-valuation', icon: <BarChart3 size={18} /> },
-      { label: 'Top Selling Items', href: '/reports/top-selling-items', icon: <BarChart3 size={18} /> },
-      { label: 'Day Book', href: '/reports/day-book', icon: <BarChart3 size={18} /> },
-      { label: 'Expired Item Report', href: '/reports/expired-items', icon: <BarChart3 size={18} /> },
-      { label: 'Reorder Item Report', href: '/reports/reorder-items', icon: <BarChart3 size={18} /> },
+      { label: 'Profit and Loss', href: '/reports/profit-and-loss', icon: <BarChart3 size={18} />, access: rule(FEATURE_PERMISSIONS.report.profitLoss) },
+      { label: 'Batch Wise', href: '/reports/item-transaction/batch', icon: <BarChart3 size={18} />, access: rule(FEATURE_PERMISSIONS.report.stock) },
+      { label: 'Serial/IMEI', href: '/reports/item-transaction/serial', icon: <BarChart3 size={18} />, access: rule(FEATURE_PERMISSIONS.report.stock) },
+      { label: 'General', href: '/reports/item-transaction/general', icon: <BarChart3 size={18} />, access: rule(FEATURE_PERMISSIONS.report.stock) },
+      { label: 'Purchase', href: '/reports/purchase', icon: <BarChart3 size={18} />, access: rule(FEATURE_PERMISSIONS.report.purchase) },
+      { label: 'Item Purchase', href: '/reports/purchase/item', icon: <BarChart3 size={18} />, access: rule(FEATURE_PERMISSIONS.report.purchase) },
+      { label: 'Purchase Payment', href: '/reports/purchase/payment', icon: <BarChart3 size={18} />, access: rule(FEATURE_PERMISSIONS.report.purchase) },
+      { label: 'Sale', href: '/reports/sale', icon: <BarChart3 size={18} />, access: rule(FEATURE_PERMISSIONS.report.sales) },
+      { label: 'Item Sale', href: '/reports/sale/item', icon: <BarChart3 size={18} />, access: rule(FEATURE_PERMISSIONS.report.sales) },
+      { label: 'Sale Payment', href: '/reports/sale/payment', icon: <BarChart3 size={18} />, access: rule(FEATURE_PERMISSIONS.report.sales) },
+      { label: 'Customer Due', href: '/reports/due/customer', icon: <BarChart3 size={18} />, access: rule(FEATURE_PERMISSIONS.report.customerLedger) },
+      { label: 'Supplier Due', href: '/reports/due/supplier', icon: <BarChart3 size={18} />, access: rule(FEATURE_PERMISSIONS.report.supplierLedger) },
+      { label: 'Expense', href: '/reports/expense', icon: <BarChart3 size={18} />, access: rule(FEATURE_PERMISSIONS.expense.view) },
+      { label: 'Expense Item', href: '/reports/expense/item', icon: <BarChart3 size={18} />, access: rule(FEATURE_PERMISSIONS.expense.view) },
+      { label: 'Expense Payment', href: '/reports/expense/payment', icon: <BarChart3 size={18} />, access: rule(FEATURE_PERMISSIONS.expense.view) },
+      { label: 'Cash flow', href: '/reports/transactions/cash-flow', icon: <BarChart3 size={18} />, access: rule(FEATURE_PERMISSIONS.cash.view) },
+      { label: 'Bank Statement', href: '/reports/transactions/bank-statement', icon: <BarChart3 size={18} />, access: rule(FEATURE_PERMISSIONS.bankAccount.view) },
+      { label: 'Supplier Ledger', href: '/reports/ledger/supplier', icon: <BarChart3 size={18} />, access: rule(FEATURE_PERMISSIONS.report.supplierLedger) },
+      { label: 'Customer Ledger', href: '/reports/ledger/customer', icon: <BarChart3 size={18} />, access: rule(FEATURE_PERMISSIONS.report.customerLedger) },
+      { label: 'GST', href: '/reports/gst', icon: <BarChart3 size={18} />, access: rule(FEATURE_PERMISSIONS.report.gst) },
+      { label: 'GSTR-1', href: '/reports/gst/gstr-1', icon: <BarChart3 size={18} />, access: rule(FEATURE_PERMISSIONS.report.gst) },
+      { label: 'GSTR-2', href: '/reports/gst/gstr-2', icon: <BarChart3 size={18} />, access: rule(FEATURE_PERMISSIONS.report.gst) },
+      { label: 'Stock Transfer', href: '/reports/stock-transfer', icon: <BarChart3 size={18} />, access: rule(FEATURE_PERMISSIONS.stockTransfer.view) },
+      { label: 'Item Stock Transfer', href: '/reports/stock-transfer/item', icon: <BarChart3 size={18} />, access: rule(FEATURE_PERMISSIONS.stockTransfer.view) },
+      { label: 'Stock Adjustment', href: '/reports/stock-adjustment', icon: <BarChart3 size={18} />, access: rule(FEATURE_PERMISSIONS.stockAdjustment.view) },
+      { label: 'Item Stock Adjustment', href: '/reports/stock-adjustment/item', icon: <BarChart3 size={18} />, access: rule(FEATURE_PERMISSIONS.stockAdjustment.view) },
+      { label: 'Stock Report', href: '/reports/stock', icon: <BarChart3 size={18} />, access: rule(FEATURE_PERMISSIONS.report.stock) },
+      { label: 'Stock Batch Wise', href: '/reports/stock-report/batch', icon: <BarChart3 size={18} />, access: rule(FEATURE_PERMISSIONS.report.stock) },
+      { label: 'Stock Serial/IMEI', href: '/reports/stock-report/serial', icon: <BarChart3 size={18} />, access: rule(FEATURE_PERMISSIONS.report.stock) },
+      { label: 'Stock General', href: '/reports/stock-report/general', icon: <BarChart3 size={18} />, access: rule(FEATURE_PERMISSIONS.report.stock) },
+      { label: 'Low Stock', href: '/reports/low-stock', icon: <BarChart3 size={18} />, access: rule(FEATURE_PERMISSIONS.report.lowStock) },
+      { label: 'Inventory Valuation', href: '/reports/inventory-valuation', icon: <BarChart3 size={18} />, access: rule(FEATURE_PERMISSIONS.report.inventoryValuation) },
+      { label: 'Top Selling Items', href: '/reports/top-selling-items', icon: <BarChart3 size={18} />, access: rule(FEATURE_PERMISSIONS.report.topSellingItems) },
+      { label: 'Day Book', href: '/reports/day-book', icon: <BarChart3 size={18} />, access: rule(FEATURE_PERMISSIONS.report.dayBook) },
+      { label: 'Expired Item Report', href: '/reports/expired-items', icon: <BarChart3 size={18} />, access: rule(FEATURE_PERMISSIONS.report.stock) },
+      { label: 'Reorder Item Report', href: '/reports/reorder-items', icon: <BarChart3 size={18} />, access: rule(FEATURE_PERMISSIONS.report.lowStock) },
     ],
   },
 ];
@@ -226,18 +240,19 @@ export const Sidebar: React.FC<{ isOpen: boolean; onClose: () => void }> = ({
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
-  const { user, logout, hasPermission } = useAuth();
+  const { user, logout, hasPermission, hasAnyPermission, hasAllPermissions } = useAuth();
+  const defaultPath = getDefaultAuthorizedPath(user?.permissions, user?.role);
   const visibleMenuItems = useMemo(() => menuItems
     .map((item) => {
       const submenu = item.submenu?.filter((subitem) =>
-        !subitem.permissions?.length || subitem.permissions.some(hasPermission)
+        canAccessRule(subitem.access, hasAnyPermission, hasAllPermissions)
       );
       return item.submenu ? { ...item, submenu } : item;
     })
     .filter((item) => {
-      if (item.permissions?.length && !item.permissions.some(hasPermission)) return false;
+      if (!canAccessRule(item.access, hasAnyPermission, hasAllPermissions)) return false;
       return !item.submenu || item.submenu.length > 0;
-    }), [hasPermission, user?.permissions]);
+    }), [hasAllPermissions, hasAnyPermission, user?.permissions]);
 
   useEffect(() => {
     const activeParent = visibleMenuItems.find((item) =>
@@ -295,7 +310,7 @@ export const Sidebar: React.FC<{ isOpen: boolean; onClose: () => void }> = ({
         style={{ zIndex: 40 }}
       >
         <div className="flex h-20 shrink-0 items-center justify-between gap-2 border-b border-[#edf2f7] px-4">
-          <Link to="/dashboard" onClick={onClose} className="flex min-w-0 flex-1 items-center">
+          <Link to={defaultPath} onClick={onClose} className="flex min-w-0 flex-1 items-center">
             <img src="/nexoraa-logo.png" alt="Nexoraa Technosolve" className="w-40 max-w-full object-contain" />
           </Link>
           <button onClick={onClose} className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 md:hidden" aria-label="Close menu">

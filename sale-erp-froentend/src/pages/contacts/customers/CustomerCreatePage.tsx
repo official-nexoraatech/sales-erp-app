@@ -23,8 +23,8 @@ export const CustomerCreatePage: React.FC = () => {
     defaultValues: {
       openingBalanceType: '',
       isWholesale: false,
-      billingAddress: { stateId: 0, countryId: 0 },
-      shippingAddress: { stateId: 0, countryId: 0 },
+      billingAddress: { stateId: 0 },
+      shippingAddress: { stateId: 0 },
     },
   });
 

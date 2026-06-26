@@ -15,12 +15,17 @@ import { useDebounce } from '../../../hooks/useDebounce';
 import { usePagination } from '../../../hooks/usePagination';
 import { formatCurrency } from '../../../utils/formatCurrency';
 import { formatDate } from '../../../utils/formatDate';
+import { PERMISSIONS } from '../../../auth/permissions';
 
 const exportColumns = ['Sale Code', 'Date', 'Customer', 'Total', 'Balance', 'Status'];
 
 export const SaleListPage: React.FC = () => {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, hasPermission } = useAuth();
+  const canCreate = hasPermission(PERMISSIONS.SALES_CREATE);
+  const canUpdate = hasPermission(PERMISSIONS.SALES_UPDATE);
+  const canDelete = hasPermission(PERMISSIONS.SALES_DELETE);
+  const canPrint = hasPermission(PERMISSIONS.SALES_INVOICE_PRINT);
   const { confirmAction, confirmationDialog } = useConfirmation();
   const { page, setPage, handlePageChange } = usePagination();
   const [pageSize, setPageSize] = useState(10);
@@ -81,7 +86,7 @@ export const SaleListPage: React.FC = () => {
       <div className="overflow-hidden rounded-lg bg-white shadow">
         <div className="flex items-center justify-between border-b px-5 py-4">
           <h1 className="text-xl font-semibold uppercase text-gray-900">Sale List</h1>
-          <Button onClick={() => navigate('/sales/invoices/create')} className="flex items-center gap-2"><Plus size={18} />Create Sale</Button>
+          {canCreate && <Button onClick={() => navigate('/sales/invoices/create')} className="flex items-center gap-2"><Plus size={18} />Create Sale</Button>}
         </div>
 
         <div className="grid grid-cols-1 gap-x-4 gap-y-3 border-b p-5 md:grid-cols-2">
@@ -104,8 +109,8 @@ export const SaleListPage: React.FC = () => {
             <select value={pageSize} onChange={(event) => { setPageSize(Number(event.target.value)); setPage(0); }} className="rounded border px-2 py-2"><option>10</option><option>20</option><option>50</option><option>100</option></select> entries
           </label>
           <div className="flex flex-wrap items-center gap-0">
-            <button onClick={cancelSelected} className="rounded-l border border-red-300 px-3 py-2 text-sm text-red-500">Delete</button>
-            <button onClick={copy} className="border-y border-r px-3 py-2 text-sm">Copy</button>
+            {canDelete && <button onClick={cancelSelected} className="rounded-l border border-red-300 px-3 py-2 text-sm text-red-500">Delete</button>}
+            <button onClick={copy} className={`border px-3 py-2 text-sm ${canDelete ? 'border-l-0' : 'rounded-l'}`}>Copy</button>
             <button onClick={() => download('xls')} className="border-y border-r px-3 py-2 text-sm">Excel</button>
             <button onClick={() => download('csv')} className="border-y border-r px-3 py-2 text-sm">CSV</button>
             <button onClick={printPdf} className="rounded-r border-y border-r px-3 py-2 text-sm">PDF</button>
@@ -115,8 +120,8 @@ export const SaleListPage: React.FC = () => {
 
         <div className="overflow-x-auto px-3 pb-3">
           {sales.isLoading ? <div className="p-10"><Loader /></div> : <table className="w-full text-sm">
-            <thead className="bg-gray-50"><tr><th className="p-3"><input type="checkbox" checked={allSelected} onChange={() => setSelectedIds(allSelected ? [] : rows.map((sale) => sale.saleId))} /></th>{['Sale Code','Date','Customer','Total','Balance','Status','Created by','Created at','Action'].map((heading) => <th key={heading} className="border-b p-3 text-left">{heading}</th>)}</tr></thead>
-            <tbody>{rows.map((sale: SaleListItem) => <tr key={sale.saleId} className="border-b even:bg-gray-50"><td className="p-3"><input type="checkbox" checked={selectedIds.includes(sale.saleId)} onChange={() => setSelectedIds((current) => current.includes(sale.saleId) ? current.filter((id) => id !== sale.saleId) : [...current, sale.saleId])} /></td><td className="p-3 font-semibold">{sale.invoiceNo}</td><td className="p-3">{formatDate(sale.invoiceDate)}</td><td className="p-3">{sale.customerName}</td><td className="p-3 font-semibold text-green-600">{formatCurrency(sale.grandTotal)}</td><td className="p-3">{formatCurrency(sale.dueAmount)}</td><td className="p-3"><span className={`rounded-full px-3 py-1 text-xs font-semibold ${sale.dueAmount <= 0 ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>{sale.dueAmount <= 0 ? 'PAID' : 'DUE'}</span></td><td className="p-3">{user?.userName || 'N/A'}</td><td className="p-3">{formatDate(sale.invoiceDate)}</td><td className="p-3"><div className="flex gap-1"><button onClick={() => navigate(`/sales/invoices/${sale.saleId}`)} className="text-blue-600"><Eye size={17} /></button><button onClick={() => navigate(`/sales/invoices/${sale.saleId}/edit`)} className="text-orange-600"><Edit size={17} /></button><button onClick={() => invoice(sale.saleId)} className="text-indigo-600"><FileText size={17} /></button><button onClick={async () => { if (await confirmAction({ title: 'Cancel Sale', message: 'Cancel this sale?', confirmText: 'Cancel', variant: 'danger' })) cancel.mutate(sale.saleId); }} className="text-red-600"><Ban size={17} /></button></div></td></tr>)}</tbody>
+            <thead className="bg-gray-50"><tr>{canDelete && <th className="p-3"><input type="checkbox" checked={allSelected} onChange={() => setSelectedIds(allSelected ? [] : rows.map((sale) => sale.saleId))} /></th>}{['Sale Code','Date','Customer','Total','Balance','Status','Created by','Created at','Action'].map((heading) => <th key={heading} className="border-b p-3 text-left">{heading}</th>)}</tr></thead>
+            <tbody>{rows.map((sale: SaleListItem) => <tr key={sale.saleId} className="border-b even:bg-gray-50">{canDelete && <td className="p-3"><input type="checkbox" checked={selectedIds.includes(sale.saleId)} onChange={() => setSelectedIds((current) => current.includes(sale.saleId) ? current.filter((id) => id !== sale.saleId) : [...current, sale.saleId])} /></td>}<td className="p-3 font-semibold">{sale.invoiceNo}</td><td className="p-3">{formatDate(sale.invoiceDate)}</td><td className="p-3">{sale.customerName}</td><td className="p-3 font-semibold text-green-600">{formatCurrency(sale.grandTotal)}</td><td className="p-3">{formatCurrency(sale.dueAmount)}</td><td className="p-3"><span className={`rounded-full px-3 py-1 text-xs font-semibold ${sale.dueAmount <= 0 ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>{sale.dueAmount <= 0 ? 'PAID' : 'DUE'}</span></td><td className="p-3">{user?.userName || 'N/A'}</td><td className="p-3">{formatDate(sale.invoiceDate)}</td><td className="p-3"><div className="flex gap-1"><button onClick={() => navigate(`/sales/invoices/${sale.saleId}`)} className="text-blue-600"><Eye size={17} /></button>{canUpdate && <button onClick={() => navigate(`/sales/invoices/${sale.saleId}/edit`)} className="text-orange-600"><Edit size={17} /></button>}{canPrint && <button onClick={() => invoice(sale.saleId)} className="text-indigo-600"><FileText size={17} /></button>}{canDelete && <button onClick={async () => { if (await confirmAction({ title: 'Cancel Sale', message: 'Cancel this sale?', confirmText: 'Cancel', variant: 'danger' })) cancel.mutate(sale.saleId); }} className="text-red-600"><Ban size={17} /></button>}</div></td></tr>)}</tbody>
           </table>}
         </div>
 

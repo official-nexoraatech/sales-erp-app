@@ -9,7 +9,6 @@ export const emptyOrganizationAddress: OrganizationAddress = {
   addressLine2: '',
   city: '',
   stateId: 0,
-  countryId: 0,
   pincode: '',
 };
 
@@ -30,10 +29,8 @@ export const normalizeOrganizationAddress = (address: Organization['address']): 
     addressLine2: address.addressLine2 || '',
     city: address.city || '',
     stateId: Number(address.stateId || 0),
-    countryId: Number(address.countryId || 0),
     pincode: address.pincode || '',
     stateName: address.stateName,
-    countryName: address.countryName,
   };
 };
 
@@ -46,7 +43,6 @@ export const formatOrganizationAddress = (address: Organization['address']) => {
     address.addressLine2,
     address.city,
     address.stateName,
-    address.countryName,
     address.pincode,
   ].filter(Boolean).join(', ') || 'N/A';
 };
@@ -56,7 +52,6 @@ export const toOrganizationAddressRequest = (address: OrganizationAddress): Orga
   addressLine2: address.addressLine2 || '',
   city: address.city || '',
   stateId: Number(address.stateId || 0),
-  countryId: Number(address.countryId || 0),
   pincode: address.pincode || '',
 });
 

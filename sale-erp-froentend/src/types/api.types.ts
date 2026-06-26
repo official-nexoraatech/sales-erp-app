@@ -22,10 +22,8 @@ export interface OrganizationAddress {
   addressLine2: string;
   city: string;
   stateId: number;
-  countryId: number;
   pincode: string;
   stateName?: string;
-  countryName?: string;
 }
 
 export interface Organization {

@@ -6,9 +6,11 @@ import toast from 'react-hot-toast';
 import { staffApi } from '../../api/endpoints';
 import type { Employee } from '../../api/endpoints';
 import { queryClient } from '../../app/queryClient';
+import { PERMISSIONS } from '../../auth/permissions';
 import { Button } from '../../components/ui/Button';
 import { Loader } from '../../components/ui/Loader';
 import { Pagination } from '../../components/ui/Pagination';
+import { useAuth } from '../../hooks/useAuth';
 import { useConfirmation } from '../../hooks/useConfirmation';
 import { useDebounce } from '../../hooks/useDebounce';
 import { formatDate } from '../../utils/formatDate';
@@ -18,7 +20,11 @@ const columns = ['Employee Code', 'Name', 'Mobile', 'Email', 'Department', 'Desi
 
 export const StaffEmployeesPage: React.FC = () => {
   const navigate = useNavigate();
+  const { hasPermission } = useAuth();
   const { confirmAction, confirmationDialog } = useConfirmation();
+  const canCreate = hasPermission(PERMISSIONS.STAFF_EMPLOYEE_CREATE);
+  const canUpdate = hasPermission(PERMISSIONS.STAFF_EMPLOYEE_UPDATE);
+  const canDelete = hasPermission(PERMISSIONS.STAFF_EMPLOYEE_DELETE);
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(10);
   const [search, setSearch] = useState('');
@@ -56,7 +62,7 @@ export const StaffEmployeesPage: React.FC = () => {
       <div className="overflow-hidden rounded-lg bg-white shadow">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b px-5 py-4">
           <h1 className="text-xl font-semibold text-gray-900">Employees</h1>
-          <Button onClick={() => navigate('/staff/employees/create')} className="min-w-[150px]">Create Employee</Button>
+          {canCreate && <Button onClick={() => navigate('/staff/employees/create')} className="min-w-[150px]">Create Employee</Button>}
         </div>
 
         <div className="grid grid-cols-1 gap-4 p-5 md:grid-cols-4">
@@ -112,8 +118,8 @@ export const StaffEmployeesPage: React.FC = () => {
                     <td className="border p-3">
                       <div className="flex gap-2">
                         <button type="button" onClick={() => navigate(`/staff/employees/${employee.id}`)} className="text-blue-600"><Eye size={17} /></button>
-                        <button type="button" onClick={() => navigate(`/staff/employees/${employee.id}/edit`)} className="text-orange-600"><Edit size={17} /></button>
-                        <button type="button" onClick={async () => { if (await confirmAction({ title: 'Delete Employee', message: 'Delete this employee?', confirmText: 'Delete', variant: 'danger' })) remove.mutate(employee.id); }} className="text-red-600"><Trash2 size={17} /></button>
+                        {canUpdate && <button type="button" onClick={() => navigate(`/staff/employees/${employee.id}/edit`)} className="text-orange-600"><Edit size={17} /></button>}
+                        {canDelete && <button type="button" onClick={async () => { if (await confirmAction({ title: 'Delete Employee', message: 'Delete this employee?', confirmText: 'Delete', variant: 'danger' })) remove.mutate(employee.id); }} className="text-red-600"><Trash2 size={17} /></button>}
                       </div>
                     </td>
                   </tr>

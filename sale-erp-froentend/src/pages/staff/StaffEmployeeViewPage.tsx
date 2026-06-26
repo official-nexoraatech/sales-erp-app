@@ -24,7 +24,6 @@ const formatAddress = (address: EmployeeAddress | string) => {
     address.addressLine2,
     address.city,
     address.stateName,
-    address.countryName,
     address.pincode,
   ].filter(Boolean).join(', ');
 };

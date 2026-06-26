@@ -15,6 +15,7 @@ import { useDebounce } from '../../../hooks/useDebounce';
 import { usePagination } from '../../../hooks/usePagination';
 import { formatCurrency } from '../../../utils/formatCurrency';
 import { formatDate } from '../../../utils/formatDate';
+import { PERMISSIONS } from '../../../auth/permissions';
 
 const exportColumns = ['Purchase Code', 'Date', 'Days', 'Supplier', 'Total', 'Balance', 'Status'];
 const daysSince = (date: string) => Math.max(0, Math.ceil((Date.now() - new Date(date).getTime()) / 86400000));
@@ -25,7 +26,10 @@ interface Props { mode?: 'bill' | 'order' }
 export const PurchaseListPage: React.FC<Props> = ({ mode = 'bill' }) => {
   const isOrder = mode === 'order';
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, hasPermission } = useAuth();
+  const canCreate = hasPermission(PERMISSIONS.PURCHASE_CREATE);
+  const canUpdate = hasPermission(PERMISSIONS.PURCHASE_UPDATE);
+  const canDelete = hasPermission(PERMISSIONS.PURCHASE_DELETE);
   const { confirmAction, confirmationDialog } = useConfirmation();
   const { page, setPage, handlePageChange } = usePagination();
   const [pageSize, setPageSize] = useState(10);
@@ -116,7 +120,7 @@ export const PurchaseListPage: React.FC<Props> = ({ mode = 'bill' }) => {
       <div className="overflow-hidden rounded-lg bg-white shadow">
         <div className="flex items-center justify-between border-b px-5 py-4">
           <h1 className="text-xl font-semibold uppercase text-gray-900">{isOrder ? 'Purchase Order List' : 'Purchase List'}</h1>
-          <Button onClick={() => navigate(isOrder ? '/purchase/orders/create' : '/purchase/bills/create')} className="min-w-[190px]">{isOrder ? 'Create Purchase Order' : 'Create Purchase'}</Button>
+          {canCreate && <Button onClick={() => navigate(isOrder ? '/purchase/orders/create' : '/purchase/bills/create')} className="min-w-[190px]">{isOrder ? 'Create Purchase Order' : 'Create Purchase'}</Button>}
         </div>
 
         <div className="grid grid-cols-1 gap-x-4 gap-y-3 p-5 md:grid-cols-2 xl:grid-cols-4">
@@ -148,8 +152,8 @@ export const PurchaseListPage: React.FC<Props> = ({ mode = 'bill' }) => {
             entries
           </label>
           <div className="flex flex-wrap items-center">
-            <button onClick={cancelSelected} className="h-10 rounded-l border border-red-300 px-3 text-sm text-red-500">Delete</button>
-            <button onClick={copy} className="h-10 border-y border-r px-3 text-sm">Copy</button>
+            {canDelete && <button onClick={cancelSelected} className="h-10 rounded-l border border-red-300 px-3 text-sm text-red-500">Delete</button>}
+            <button onClick={copy} className={`h-10 border px-3 text-sm ${canDelete ? 'border-l-0' : 'rounded-l'}`}>Copy</button>
             <button onClick={() => download('xls')} className="h-10 border-y border-r px-3 text-sm">Excel</button>
             <button onClick={() => download('csv')} className="h-10 border-y border-r px-3 text-sm">CSV</button>
             <button onClick={printPdf} className="h-10 rounded-r border-y border-r px-3 text-sm">PDF</button>
@@ -164,14 +168,14 @@ export const PurchaseListPage: React.FC<Props> = ({ mode = 'bill' }) => {
             <table className="w-full text-sm">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="border p-3"><input type="checkbox" checked={allSelected} onChange={() => setSelectedIds(allSelected ? [] : rows.map((purchase) => purchase.purchaseId))} /></th>
+                  {canDelete && <th className="border p-3"><input type="checkbox" checked={allSelected} onChange={() => setSelectedIds(allSelected ? [] : rows.map((purchase) => purchase.purchaseId))} /></th>}
                   {(isOrder ? ['Order ID', 'Date', 'Due Date', 'Supplier', 'Total', 'Balance', 'Status', 'Created by', 'Created at', 'Action'] : ['Purchase Code', 'Date', 'Days', 'Supplier', 'Total', 'Balance', 'Status', 'Created by', 'Created at', 'Action']).map((heading) => <th key={heading} className="border p-3 text-left">{heading}</th>)}
                 </tr>
               </thead>
               <tbody>
                 {rows.length ? rows.map((purchase: PurchaseListItem) => (
                   <tr key={purchase.purchaseId} className="border-b even:bg-gray-50">
-                    <td className="border p-3"><input type="checkbox" checked={selectedIds.includes(purchase.purchaseId)} onChange={() => setSelectedIds((current) => current.includes(purchase.purchaseId) ? current.filter((id) => id !== purchase.purchaseId) : [...current, purchase.purchaseId])} /></td>
+                    {canDelete && <td className="border p-3"><input type="checkbox" checked={selectedIds.includes(purchase.purchaseId)} onChange={() => setSelectedIds((current) => current.includes(purchase.purchaseId) ? current.filter((id) => id !== purchase.purchaseId) : [...current, purchase.purchaseId])} /></td>}
                     <td className="border p-3 font-semibold">{isOrder ? purchaseCode(purchase).replace('PB/', 'PO/') : purchaseCode(purchase)}</td>
                     <td className="border p-3">{formatDate(purchase.purchaseDate)}</td>
                     <td className="border p-3">{isOrder ? formatDate(purchase.purchaseDate) : daysSince(purchase.purchaseDate)}</td>
@@ -183,8 +187,8 @@ export const PurchaseListPage: React.FC<Props> = ({ mode = 'bill' }) => {
                     <td className="border p-3">{formatDate(purchase.purchaseDate)}</td>
                     <td className="border p-3">
                       <div className="flex items-center gap-2">
-                        <button onClick={() => navigate(isOrder ? `/purchase/orders/${purchase.purchaseId}/edit` : `/purchase/bills/${purchase.purchaseId}/edit`)} className="text-orange-600" title="Edit"><Edit size={17} /></button>
-                        <button
+                        {canUpdate && <button onClick={() => navigate(isOrder ? `/purchase/orders/${purchase.purchaseId}/edit` : `/purchase/bills/${purchase.purchaseId}/edit`)} className="text-orange-600" title="Edit"><Edit size={17} /></button>}
+                        {canDelete && <button
                           onClick={async () => {
                             const confirmed = await confirmAction({
                               title: isOrder ? 'Cancel Purchase Order' : 'Cancel Purchase',
@@ -198,7 +202,7 @@ export const PurchaseListPage: React.FC<Props> = ({ mode = 'bill' }) => {
                           title="Cancel"
                         >
                           <Ban size={17} />
-                        </button>
+                        </button>}
                       </div>
                     </td>
                   </tr>

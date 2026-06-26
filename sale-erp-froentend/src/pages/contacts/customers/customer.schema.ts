@@ -17,15 +17,13 @@ const hasAddressValue = (address: {
   addressLine2?: string;
   city?: string;
   stateId?: number;
-  countryId?: number;
   pincode?: string;
 }) => Boolean(
   address.addressLine1?.trim() ||
   address.addressLine2?.trim() ||
   address.city?.trim() ||
   address.pincode?.trim() ||
-  address.stateId ||
-  address.countryId
+  address.stateId
 );
 
 const addressSchema = z.object({
@@ -33,7 +31,6 @@ const addressSchema = z.object({
   addressLine2: optionalText(250),
   city: optionalText(100),
   stateId: z.preprocess((value) => Number(value || 0), z.number().int()),
-  countryId: z.preprocess((value) => Number(value || 0), z.number().int()),
   pincode: z.string().optional().or(z.literal('')),
 }).superRefine((address, context) => {
   if (!hasAddressValue(address)) return;
@@ -43,9 +40,6 @@ const addressSchema = z.object({
   }
   if (!address.city?.trim()) {
     context.addIssue({ code: 'custom', path: ['city'], message: 'City is required' });
-  }
-  if (!address.countryId) {
-    context.addIssue({ code: 'custom', path: ['countryId'], message: 'Please select a valid option' });
   }
   if (!address.stateId) {
     context.addIssue({ code: 'custom', path: ['stateId'], message: 'Please select a valid option' });
@@ -82,7 +76,6 @@ const normalizeAddress = (address: CustomerFormData['billingAddress']) => {
     addressLine2: address.addressLine2?.trim() || '',
     city: address.city?.trim() || '',
     stateId: address.stateId,
-    countryId: address.countryId,
     pincode: address.pincode?.trim() || '',
   };
 };

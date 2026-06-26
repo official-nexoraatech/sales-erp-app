@@ -14,10 +14,12 @@ import {
 } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { customerApi } from '../../../api/endpoints';
+import { PERMISSIONS } from '../../../auth/permissions';
 import type { CustomerAddress } from '../../../types/customer.types';
 import { Button } from '../../../components/ui/Button';
 import { Card } from '../../../components/ui/Card';
 import { Loader } from '../../../components/ui/Loader';
+import { useAuth } from '../../../hooks/useAuth';
 import { formatCurrency } from '../../../utils/formatCurrency';
 
 const displayValue = (value?: React.ReactNode) => {
@@ -87,7 +89,6 @@ const AddressCard = ({
         <DetailField label="City" value={address.city} />
         <DetailField label="State" value={address.stateName} />
         <DetailField label="Pincode" value={address.pincode} />
-        <DetailField label="Country" value={address.countryName} />
       </div>
     ) : (
       <div className="flex min-h-36 flex-col items-center justify-center rounded-lg border border-dashed border-gray-200 bg-gray-50 px-4 text-center">
@@ -117,6 +118,8 @@ const FinancialSummary = ({
 
 export const CustomerViewPage: React.FC = () => {
   const navigate = useNavigate();
+  const { hasPermission } = useAuth();
+  const canUpdate = hasPermission(PERMISSIONS.CUSTOMER_UPDATE);
   const customerId = Number(useParams<{ id: string }>().id);
   const { data, isLoading, isError } = useQuery({
     queryKey: ['customers', customerId],
@@ -162,9 +165,9 @@ export const CustomerViewPage: React.FC = () => {
           <Button variant="outline" onClick={() => navigate('/contacts/customers')}>
             <ArrowLeft size={18} /> Back
           </Button>
-          <Button onClick={() => navigate(`/contacts/customers/${customerId}/edit`)}>
+          {canUpdate && <Button onClick={() => navigate(`/contacts/customers/${customerId}/edit`)}>
             <Edit size={18} /> Edit Customer
-          </Button>
+          </Button>}
         </div>
       </div>
 

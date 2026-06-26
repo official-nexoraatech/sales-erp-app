@@ -2,8 +2,10 @@ import React, { useMemo, useState } from 'react';
 import { MoreVertical } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
+import { PERMISSIONS } from '../../auth/permissions';
 import { Button } from '../../components/ui/Button';
 import { Pagination } from '../../components/ui/Pagination';
+import { useAuth } from '../../hooks/useAuth';
 
 interface TemplateRow {
   id: number;
@@ -36,6 +38,7 @@ const columns = ['Name', 'Content', 'Created at'];
 
 export const MessageTemplateListPage: React.FC<Props> = ({ type }) => {
   const navigate = useNavigate();
+  const { hasPermission } = useAuth();
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(10);
   const [search, setSearch] = useState('');
@@ -49,6 +52,10 @@ export const MessageTemplateListPage: React.FC<Props> = ({ type }) => {
   const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
   const title = type === 'sms' ? 'SMS Templates' : 'Email Templates';
   const basePath = type === 'sms' ? '/sms/templates' : '/email/templates';
+  const canCreate = hasPermission(type === 'sms' ? PERMISSIONS.SMS_TEMPLATE_CREATE : PERMISSIONS.EMAIL_TEMPLATE_CREATE);
+  const canUpdate = hasPermission(type === 'sms' ? PERMISSIONS.SMS_TEMPLATE_UPDATE : PERMISSIONS.EMAIL_TEMPLATE_UPDATE);
+  const canDelete = hasPermission(type === 'sms' ? PERMISSIONS.SMS_TEMPLATE_DELETE : PERMISSIONS.EMAIL_TEMPLATE_DELETE);
+  const showActions = canUpdate || canDelete;
   const placeholder = () => toast(`${title} API is required for this action.`);
 
   const exportRows = () => rows.map((row) => [row.name, row.content, row.createdAt]);
@@ -80,7 +87,9 @@ export const MessageTemplateListPage: React.FC<Props> = ({ type }) => {
       <div className="overflow-hidden rounded-lg bg-white shadow">
         <div className="flex items-center justify-between border-b px-5 py-4">
           <h1 className="text-xl font-semibold uppercase text-gray-900">{title}</h1>
-          <Button onClick={() => navigate(`${basePath}/create`)} className="min-w-[190px]">Create Template</Button>
+          {canCreate && (
+            <Button onClick={() => navigate(`${basePath}/create`)} className="min-w-[190px]">Create Template</Button>
+          )}
         </div>
 
         <div className="flex flex-wrap items-center justify-between gap-3 p-5">
@@ -95,8 +104,10 @@ export const MessageTemplateListPage: React.FC<Props> = ({ type }) => {
             entries
           </label>
           <div className="flex flex-wrap items-center">
-            <button type="button" onClick={placeholder} className="h-10 rounded-l border border-red-300 px-3 text-sm text-red-500">Delete</button>
-            <button type="button" onClick={copy} className="h-10 border-y border-r px-3 text-sm">Copy</button>
+            {canDelete && (
+              <button type="button" onClick={placeholder} className="h-10 rounded-l border border-red-300 px-3 text-sm text-red-500">Delete</button>
+            )}
+            <button type="button" onClick={copy} className={`h-10 border px-3 text-sm ${canDelete ? 'border-l-0' : 'rounded-l'}`}>Copy</button>
             <button type="button" onClick={() => download('xls')} className="h-10 border-y border-r px-3 text-sm">Excel</button>
             <button type="button" onClick={() => download('csv')} className="h-10 border-y border-r px-3 text-sm">CSV</button>
             <button type="button" onClick={printPdf} className="h-10 rounded-r border-y border-r px-3 text-sm">PDF</button>
@@ -114,7 +125,7 @@ export const MessageTemplateListPage: React.FC<Props> = ({ type }) => {
                 <th className="border p-3 text-left">Name</th>
                 <th className="border p-3 text-left">Content</th>
                 <th className="border p-3 text-left">Created at</th>
-                <th className="border p-3 text-left">Action</th>
+                {showActions && <th className="border p-3 text-left">Action</th>}
               </tr>
             </thead>
             <tbody>
@@ -123,10 +134,10 @@ export const MessageTemplateListPage: React.FC<Props> = ({ type }) => {
                   <td className="border p-3 font-medium">{row.name}</td>
                   <td className="border p-3">{row.content.length > 58 ? `${row.content.slice(0, 58)}...` : row.content}</td>
                   <td className="border p-3">{row.createdAt}</td>
-                  <td className="border p-3"><button type="button" onClick={placeholder} className="rounded p-1 hover:bg-gray-100"><MoreVertical size={18} /></button></td>
+                  {showActions && <td className="border p-3"><button type="button" onClick={placeholder} className="rounded p-1 hover:bg-gray-100"><MoreVertical size={18} /></button></td>}
                 </tr>
               ))}
-              {!visibleRows.length && <tr><td colSpan={4} className="bg-gray-50 p-5 text-center">No data available in table</td></tr>}
+              {!visibleRows.length && <tr><td colSpan={3 + Number(showActions)} className="bg-gray-50 p-5 text-center">No data available in table</td></tr>}
             </tbody>
           </table>
         </div>

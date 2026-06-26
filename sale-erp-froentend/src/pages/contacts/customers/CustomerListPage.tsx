@@ -13,9 +13,15 @@ import { CONSTANTS } from '../../../app/constants';
 import { customerApi } from '../../../api/endpoints';
 import { queryClient } from '../../../app/queryClient';
 import { formatCurrency } from '../../../utils/formatCurrency';
+import { useAuth } from '../../../hooks/useAuth';
+import { PERMISSIONS } from '../../../auth/permissions';
 
 export const CustomerListPage: React.FC = () => {
   const navigate = useNavigate();
+  const { hasPermission } = useAuth();
+  const canCreate = hasPermission(PERMISSIONS.CUSTOMER_CREATE);
+  const canUpdate = hasPermission(PERMISSIONS.CUSTOMER_UPDATE);
+  const canDelete = hasPermission(PERMISSIONS.CUSTOMER_DELETE);
   const [searchTerm, setSearchTerm] = useState('');
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const { page, handlePageChange } = usePagination();
@@ -59,20 +65,24 @@ export const CustomerListPage: React.FC = () => {
           >
             <Eye size={18} />
           </button>
-          <button
-            onClick={() =>
-              navigate(`/contacts/customers/${value}/edit`)
-            }
-            className="p-1 text-orange-600 hover:bg-orange-50 rounded"
-          >
-            <Edit size={18} />
-          </button>
-          <button
-            onClick={() => setDeleteId(value)}
-            className="p-1 text-red-600 hover:bg-red-50 rounded"
-          >
-            <Trash2 size={18} />
-          </button>
+          {canUpdate && (
+            <button
+              onClick={() =>
+                navigate(`/contacts/customers/${value}/edit`)
+              }
+              className="p-1 text-orange-600 hover:bg-orange-50 rounded"
+            >
+              <Edit size={18} />
+            </button>
+          )}
+          {canDelete && (
+            <button
+              onClick={() => setDeleteId(value)}
+              className="p-1 text-red-600 hover:bg-red-50 rounded"
+            >
+              <Trash2 size={18} />
+            </button>
+          )}
         </div>
       ),
     },
@@ -86,7 +96,7 @@ export const CustomerListPage: React.FC = () => {
       <PageHeader
         title="Customers"
         description="Manage your customers and their information"
-        actions={
+        actions={canCreate ? (
           <Button
             onClick={() => navigate('/contacts/customers/create')}
             className="flex items-center gap-2"
@@ -94,7 +104,7 @@ export const CustomerListPage: React.FC = () => {
             <Plus size={18} />
             New Customer
           </Button>
-        }
+        ) : undefined}
       />
 
       <DataTable

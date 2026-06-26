@@ -181,8 +181,8 @@ export const authApi = {
 export const locationApi = {
   getCountries: async () =>
     normalizeLocationResponse(await axiosClient.get<ApiResponse<Country[]> | Country[], ApiResponse<Country[]> | Country[]>('/api/v1/countries')),
-  getStates: async (countryId: number) =>
-    normalizeLocationResponse(await axiosClient.get<ApiResponse<State[]> | State[], ApiResponse<State[]> | State[]>('/api/v1/states', { params: { countryId } })),
+  getStates: async () =>
+    normalizeLocationResponse(await axiosClient.get<ApiResponse<State[]> | State[], ApiResponse<State[]> | State[]>('/api/v1/states')),
 };
 
 const normalizeOrganizationList = (response: ApiResponse<Organization[] | PageResponse<Organization>> | Organization[]) => {

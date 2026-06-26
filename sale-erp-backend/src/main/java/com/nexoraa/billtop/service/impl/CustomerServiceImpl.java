@@ -12,7 +12,6 @@ import com.nexoraa.billtop.dto.ledger.LedgerResponseDto;
 import com.nexoraa.billtop.dto.ledger.LedgerTransactionResponseDto;
 import com.nexoraa.billtop.entity.Contact;
 import com.nexoraa.billtop.entity.Address;
-import com.nexoraa.billtop.entity.Country;
 import com.nexoraa.billtop.entity.Organization;
 import com.nexoraa.billtop.entity.Payment;
 import com.nexoraa.billtop.entity.Sale;
@@ -22,7 +21,6 @@ import com.nexoraa.billtop.exception.ResourceNotFoundException;
 import com.nexoraa.billtop.mapper.CustomerMapper;
 import com.nexoraa.billtop.repository.AddressRepository;
 import com.nexoraa.billtop.repository.ContactRepository;
-import com.nexoraa.billtop.repository.CountryRepository;
 import com.nexoraa.billtop.repository.PaymentRepository;
 import com.nexoraa.billtop.repository.SaleRepository;
 import com.nexoraa.billtop.repository.SalesReturnRepository;
@@ -55,7 +53,6 @@ public class CustomerServiceImpl implements CustomerService {
     private final ContactRepository contactRepository;
     private final AddressRepository addressRepository;
     private final StateRepository stateRepository;
-    private final CountryRepository countryRepository;
     private final SaleRepository saleRepository;
     private final SalesReturnRepository salesReturnRepository;
     private final PaymentRepository paymentRepository;
@@ -66,7 +63,6 @@ public class CustomerServiceImpl implements CustomerService {
             ContactRepository contactRepository,
             AddressRepository addressRepository,
             StateRepository stateRepository,
-            CountryRepository countryRepository,
             SaleRepository saleRepository,
             SalesReturnRepository salesReturnRepository,
             PaymentRepository paymentRepository,
@@ -76,7 +72,6 @@ public class CustomerServiceImpl implements CustomerService {
         this.contactRepository = contactRepository;
         this.addressRepository = addressRepository;
         this.stateRepository = stateRepository;
-        this.countryRepository = countryRepository;
         this.saleRepository = saleRepository;
         this.salesReturnRepository = salesReturnRepository;
         this.paymentRepository = paymentRepository;
@@ -235,7 +230,6 @@ public class CustomerServiceImpl implements CustomerService {
         address.setContact(contact);
         address.setAddressType(addressType);
         address.setState(getActiveState(request.getStateId()));
-        address.setCountry(getActiveCountry(request.getCountryId()));
         if (isNewAddress) {
         }
         addressRepository.save(address);
@@ -254,11 +248,6 @@ public class CustomerServiceImpl implements CustomerService {
     private State getActiveState(Long id) {
         return stateRepository.findByIdAndStatus(id, com.nexoraa.billtop.enums.Status.ACTIVE)
                 .orElseThrow(() -> new ResourceNotFoundException(ErrorMessage.STATE_NOT_FOUND, "STATE_NOT_FOUND"));
-    }
-
-    private Country getActiveCountry(Long id) {
-        return countryRepository.findByIdAndStatus(id, com.nexoraa.billtop.enums.Status.ACTIVE)
-                .orElseThrow(() -> new ResourceNotFoundException(ErrorMessage.COUNTRY_NOT_FOUND, "COUNTRY_NOT_FOUND"));
     }
 
     private BigDecimal defaultZero(BigDecimal value) {

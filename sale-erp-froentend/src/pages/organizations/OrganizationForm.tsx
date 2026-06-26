@@ -1,8 +1,7 @@
 import React from 'react';
-import { useQuery } from '@tanstack/react-query';
 import { Upload } from 'lucide-react';
-import { locationApi } from '../../api/endpoints';
-import type { Country, OrganizationAddress, UpdateOrganizationRequest, State } from '../../api/endpoints';
+import type { OrganizationAddress, UpdateOrganizationRequest } from '../../api/endpoints';
+import { stateOptionName, useStates } from '../../hooks/useStates';
 
 interface OrganizationFormProps {
   form: UpdateOrganizationRequest;
@@ -15,7 +14,6 @@ interface OrganizationFormProps {
 
 const inputClass = 'h-10 w-full rounded border border-gray-300 bg-white px-3 text-sm text-gray-900 outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-gray-50';
 const textareaClass = 'h-24 w-full rounded border border-gray-300 p-3 text-sm outline-none focus:ring-2 focus:ring-blue-100';
-const optionName = (option: Country | State) => option.name || ('stateName' in option ? option.stateName : undefined) || ('countryName' in option ? option.countryName : undefined) || `#${option.id}`;
 
 export const OrganizationForm: React.FC<OrganizationFormProps> = ({
   form,
@@ -25,13 +23,7 @@ export const OrganizationForm: React.FC<OrganizationFormProps> = ({
   onLogoFileChange,
   showLogoUpload = false,
 }) => {
-  const countryId = Number(form.address.countryId || 0);
-  const countries = useQuery({ queryKey: ['countries'], queryFn: locationApi.getCountries });
-  const states = useQuery({
-    queryKey: ['states', countryId],
-    queryFn: () => locationApi.getStates(countryId),
-    enabled: countryId > 0,
-  });
+  const { states, isLoading: statesLoading, isError: statesError } = useStates();
 
   return (
     <div className="grid grid-cols-1 gap-4 p-5 md:grid-cols-2">
@@ -81,30 +73,15 @@ export const OrganizationForm: React.FC<OrganizationFormProps> = ({
         <input className={`${inputClass} mt-1`} value={form.address.pincode} onChange={(event) => onAddressChange('pincode', event.target.value)} />
       </label>
       <label className="text-sm text-gray-600">
-        Country
-        <select
-          className={`${inputClass} mt-1`}
-          value={form.address.countryId}
-          disabled={countries.isLoading}
-          onChange={(event) => {
-            onAddressChange('countryId', Number(event.target.value));
-            onAddressChange('stateId', 0);
-          }}
-        >
-          <option value={0}>{countries.isLoading ? 'Loading countries...' : 'Select country'}</option>
-          {(countries.data?.data || []).map((country) => <option key={country.id} value={country.id}>{optionName(country)}</option>)}
-        </select>
-      </label>
-      <label className="text-sm text-gray-600">
         State
         <select
           className={`${inputClass} mt-1`}
           value={form.address.stateId}
-          disabled={!countryId || states.isLoading}
+          disabled={statesLoading || statesError}
           onChange={(event) => onAddressChange('stateId', Number(event.target.value))}
         >
-          <option value={0}>{!countryId ? 'Select country first' : states.isLoading ? 'Loading states...' : 'Select state'}</option>
-          {(states.data?.data || []).map((state) => <option key={state.id} value={state.id}>{optionName(state)}</option>)}
+          <option value={0}>{statesLoading ? 'Loading states...' : statesError ? 'Failed to load states' : 'Select state'}</option>
+          {states.map((state) => <option key={state.id} value={state.id}>{stateOptionName(state)}</option>)}
         </select>
       </label>
       <label className="text-sm text-gray-600 md:col-span-2">

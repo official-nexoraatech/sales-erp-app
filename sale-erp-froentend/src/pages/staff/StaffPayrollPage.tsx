@@ -5,9 +5,11 @@ import toast from 'react-hot-toast';
 import { staffApi } from '../../api/endpoints';
 import type { Payroll, PayrollRequest, PayrollStatus } from '../../api/endpoints';
 import { queryClient } from '../../app/queryClient';
+import { PERMISSIONS } from '../../auth/permissions';
 import { Button } from '../../components/ui/Button';
 import { Loader } from '../../components/ui/Loader';
 import { NumericInput } from '../../components/ui/NumericInput';
+import { useAuth } from '../../hooks/useAuth';
 import { formatCurrency } from '../../utils/formatCurrency';
 import { inputClass, labelClass, payrollStatuses, pretty, statusClass } from './staffShared';
 
@@ -30,6 +32,9 @@ const emptyPayroll: PayrollRequest = {
 };
 
 export const StaffPayrollPage: React.FC = () => {
+  const { hasPermission } = useAuth();
+  const canCreate = hasPermission(PERMISSIONS.STAFF_PAYROLL_CREATE);
+  const canUpdate = hasPermission(PERMISSIONS.STAFF_PAYROLL_UPDATE);
   const [filters, setFilters] = useState({ month: currentMonth, year: currentYear });
   const [modalOpen, setModalOpen] = useState(false);
   const [payslip, setPayslip] = useState<Payroll | null>(null);
@@ -92,7 +97,7 @@ export const StaffPayrollPage: React.FC = () => {
       <div className="overflow-hidden rounded-lg bg-white shadow">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b px-5 py-4">
           <h1 className="text-xl font-semibold text-gray-900">Payroll</h1>
-          <Button type="button" onClick={() => setModalOpen(true)}><WalletCards size={16} /> Generate Payroll</Button>
+          {canCreate && <Button type="button" onClick={() => setModalOpen(true)}><WalletCards size={16} /> Generate Payroll</Button>}
         </div>
 
         <div className="grid grid-cols-2 gap-3 p-5 lg:grid-cols-5">
@@ -126,7 +131,7 @@ export const StaffPayrollPage: React.FC = () => {
                     <td className="border p-3">{formatCurrency(row.grossPay)}</td>
                     <td className="border p-3 font-semibold">{formatCurrency(row.netPay)}</td>
                     <td className="border p-3"><span className={`rounded-full px-3 py-1 text-xs font-semibold ${statusClass(row.status)}`}>{pretty(row.status)}</span></td>
-                    <td className="border p-3"><div className="flex gap-2"><button type="button" onClick={() => setPayslip(row)} className="text-blue-600"><Eye size={16} /></button><button type="button" onClick={() => markPaid.mutate(row.id)} className="text-green-600"><IndianRupee size={16} /></button></div></td>
+                    <td className="border p-3"><div className="flex gap-2"><button type="button" onClick={() => setPayslip(row)} className="text-blue-600"><Eye size={16} /></button>{canUpdate && <button type="button" onClick={() => markPaid.mutate(row.id)} className="text-green-600"><IndianRupee size={16} /></button>}</div></td>
                   </tr>
                 )) : <tr><td colSpan={9} className="bg-gray-50 p-5 text-center">No payroll records found</td></tr>}
               </tbody>

@@ -47,7 +47,6 @@ public interface CustomerMapper {
     @Mapping(target = "contact", ignore = true)
     @Mapping(target = "addressType", ignore = true)
     @Mapping(target = "state", ignore = true)
-    @Mapping(target = "country", ignore = true)
     @Mapping(target = "createdAt", ignore = true)
     Address toAddressEntity(CustomerAddressRequestDto request);
 
@@ -56,14 +55,11 @@ public interface CustomerMapper {
     @Mapping(target = "contact", ignore = true)
     @Mapping(target = "addressType", ignore = true)
     @Mapping(target = "state", ignore = true)
-    @Mapping(target = "country", ignore = true)
     @Mapping(target = "createdAt", ignore = true)
     void updateAddressEntity(CustomerAddressRequestDto request, @MappingTarget Address address);
 
     @Mapping(target = "stateId", source = "state.id")
     @Mapping(target = "stateName", source = "state.stateName")
-    @Mapping(target = "countryId", source = "country.id")
-    @Mapping(target = "countryName", source = "country.name")
     CustomerAddressResponseDto toAddressResponse(Address address);
 
     default String toCustomerCode(Long id) {

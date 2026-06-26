@@ -5,8 +5,10 @@ import toast from 'react-hot-toast';
 import { staffApi } from '../../api/endpoints';
 import type { StaffSetting, StaffSettingType } from '../../api/endpoints';
 import { queryClient } from '../../app/queryClient';
+import { PERMISSIONS } from '../../auth/permissions';
 import { Button } from '../../components/ui/Button';
 import { Loader } from '../../components/ui/Loader';
+import { useAuth } from '../../hooks/useAuth';
 import { useConfirmation } from '../../hooks/useConfirmation';
 import { employeeStatuses, inputClass, labelClass, pretty, statusClass, textareaClass } from './staffShared';
 
@@ -22,7 +24,12 @@ const tabs: Array<{ key: StaffSettingType; label: string }> = [
 const emptySetting: Omit<StaffSetting, 'id'> = { name: '', description: '', status: 'ACTIVE' };
 
 export const StaffSettingsPage: React.FC = () => {
+  const { hasPermission } = useAuth();
   const { confirmAction, confirmationDialog } = useConfirmation();
+  const canCreate = hasPermission(PERMISSIONS.STAFF_SETTING_CREATE);
+  const canUpdate = hasPermission(PERMISSIONS.STAFF_SETTING_UPDATE);
+  const canDelete = hasPermission(PERMISSIONS.STAFF_SETTING_DELETE);
+  const showActions = canUpdate || canDelete;
   const [activeTab, setActiveTab] = useState<StaffSettingType>('departments');
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<StaffSetting | null>(null);
@@ -74,7 +81,7 @@ export const StaffSettingsPage: React.FC = () => {
       <div className="overflow-hidden rounded-lg bg-white shadow">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b px-5 py-4">
           <h1 className="text-xl font-semibold text-gray-900">Staff Settings</h1>
-          <Button type="button" onClick={openCreate}><Plus size={16} /> Add</Button>
+          {canCreate && <Button type="button" onClick={openCreate}><Plus size={16} /> Add</Button>}
         </div>
 
         <div className="flex flex-wrap gap-2 border-b px-5 pt-4">
@@ -93,16 +100,16 @@ export const StaffSettingsPage: React.FC = () => {
         <div className="overflow-x-auto p-3">
           {settings.isLoading ? <div className="p-10"><Loader /></div> : (
             <table className="w-full text-sm">
-              <thead className="bg-gray-50"><tr>{['Name', 'Description', 'Status', 'Action'].map((heading) => <th key={heading} className="border p-3 text-left">{heading}</th>)}</tr></thead>
+              <thead className="bg-gray-50"><tr>{['Name', 'Description', 'Status'].concat(showActions ? 'Action' : []).map((heading) => <th key={heading} className="border p-3 text-left">{heading}</th>)}</tr></thead>
               <tbody>
                 {(settings.data?.data || []).length ? settings.data?.data.map((row) => (
                   <tr key={row.id} className="border-b even:bg-gray-50">
                     <td className="border p-3 font-semibold">{row.name}</td>
                     <td className="border p-3">{row.description}</td>
                     <td className="border p-3"><span className={`rounded-full px-3 py-1 text-xs font-semibold ${statusClass(row.status)}`}>{pretty(row.status)}</span></td>
-                    <td className="border p-3"><div className="flex gap-2"><button type="button" onClick={() => openEdit(row)} className="text-orange-600"><Edit size={16} /></button><button type="button" onClick={async () => { if (await confirmAction({ title: 'Delete Setting', message: 'Delete this setting?', confirmText: 'Delete', variant: 'danger' })) remove.mutate(row.id); }} className="text-red-600"><Trash2 size={16} /></button></div></td>
+                    {showActions && <td className="border p-3"><div className="flex gap-2">{canUpdate && <button type="button" onClick={() => openEdit(row)} className="text-orange-600"><Edit size={16} /></button>}{canDelete && <button type="button" onClick={async () => { if (await confirmAction({ title: 'Delete Setting', message: 'Delete this setting?', confirmText: 'Delete', variant: 'danger' })) remove.mutate(row.id); }} className="text-red-600"><Trash2 size={16} /></button>}</div></td>}
                   </tr>
-                )) : <tr><td colSpan={4} className="bg-gray-50 p-5 text-center">No settings found</td></tr>}
+                )) : <tr><td colSpan={3 + Number(showActions)} className="bg-gray-50 p-5 text-center">No settings found</td></tr>}
               </tbody>
             </table>
           )}

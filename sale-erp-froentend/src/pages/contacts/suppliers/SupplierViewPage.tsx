@@ -12,9 +12,11 @@ import {
 } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { supplierApi } from '../../../api/endpoints';
+import { PERMISSIONS } from '../../../auth/permissions';
 import { Button } from '../../../components/ui/Button';
 import { Card } from '../../../components/ui/Card';
 import { Loader } from '../../../components/ui/Loader';
+import { useAuth } from '../../../hooks/useAuth';
 import { formatCurrency } from '../../../utils/formatCurrency';
 
 const displayValue = (value?: React.ReactNode) => {
@@ -78,6 +80,8 @@ const FinancialSummary = ({
 
 export const SupplierViewPage: React.FC = () => {
   const navigate = useNavigate();
+  const { hasPermission } = useAuth();
+  const canUpdate = hasPermission(PERMISSIONS.SUPPLIER_UPDATE);
   const supplierId = Number(useParams<{ id: string }>().id);
   const { data, isLoading, isError } = useQuery({
     queryKey: ['suppliers', supplierId],
@@ -123,9 +127,9 @@ export const SupplierViewPage: React.FC = () => {
           <Button variant="outline" onClick={() => navigate('/contacts/suppliers')}>
             <ArrowLeft size={18} /> Back
           </Button>
-          <Button onClick={() => navigate(`/contacts/suppliers/${supplierId}/edit`)}>
+          {canUpdate && <Button onClick={() => navigate(`/contacts/suppliers/${supplierId}/edit`)}>
             <Edit size={18} /> Edit Supplier
-          </Button>
+          </Button>}
         </div>
       </div>
 

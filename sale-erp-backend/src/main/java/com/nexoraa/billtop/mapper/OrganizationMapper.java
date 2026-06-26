@@ -31,8 +31,6 @@ public interface OrganizationMapper {
 
     @Mapping(target = "stateId", source = "state.id")
     @Mapping(target = "stateName", source = "state.stateName")
-    @Mapping(target = "countryId", source = "country.id")
-    @Mapping(target = "countryName", source = "country.name")
     OrganizationAddressResponseDto toAddressResponse(Address address);
 }
 

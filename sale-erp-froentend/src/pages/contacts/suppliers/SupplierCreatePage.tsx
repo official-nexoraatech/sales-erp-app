@@ -6,14 +6,18 @@ import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { supplierApi } from '../../../api/endpoints';
 import { queryClient } from '../../../app/queryClient';
+import { getDefaultAuthorizedPath } from '../../../auth/featurePermissions';
 import { Button } from '../../../components/ui/Button';
 import { Card } from '../../../components/ui/Card';
+import { useAuth } from '../../../hooks/useAuth';
 import { SupplierForm } from './SupplierForm';
 import { supplierSchema, toSupplierRequest } from './supplier.schema';
 import type { SupplierFormData, SupplierFormInput } from './supplier.schema';
 
 export const SupplierCreatePage: React.FC = () => {
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const defaultPath = getDefaultAuthorizedPath(user?.permissions, user?.role);
   const { register, setValue, handleSubmit, formState: { errors } } = useForm<SupplierFormInput, unknown, SupplierFormData>({
     resolver: zodResolver(supplierSchema),
     defaultValues: { status: 'ACTIVE', isDefaultSupplier: false },
@@ -31,7 +35,7 @@ export const SupplierCreatePage: React.FC = () => {
   return (
     <div className="space-y-5">
       <div className="flex items-center gap-2 text-sm text-gray-500">
-        <button onClick={() => navigate('/dashboard')} className="text-blue-600 hover:underline">Home</button>
+        <button onClick={() => navigate(defaultPath)} className="text-blue-600 hover:underline">Home</button>
         <span>›</span><span>Contacts</span><span>›</span>
         <button onClick={() => navigate('/contacts/suppliers')} className="hover:underline">Supplier List</button>
         <span>›</span><span className="text-gray-700">Create Supplier</span>
