@@ -1,0 +1,8 @@
+<svg width="520" height="128" viewBox="0 0 520 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="128" height="128" rx="28" fill="#0f766e"/>
+  <path d="M38 36h52c8.837 0 16 7.163 16 16v10H78v30H50V62H22V52c0-8.837 7.163-16 16-16Z" fill="#ffffff"/>
+  <path d="M38 52h52" stroke="#99f6e4" stroke-width="8" stroke-linecap="round"/>
+  <path d="M50 76h28" stroke="#99f6e4" stroke-width="8" stroke-linecap="round"/>
+  <text x="152" y="77" fill="#0f172a" font-family="Inter, Arial, sans-serif" font-size="54" font-weight="800">Texmintra</text>
+  <text x="156" y="103" fill="#0f766e" font-family="Inter, Arial, sans-serif" font-size="20" font-weight="600">Retail ERP for textile trade</text>
+</svg>

@@ -45,6 +45,7 @@ interface Props {
 }
 
 const inputClass = 'h-10 w-full rounded border border-gray-300 bg-white px-3 text-sm text-gray-900 outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-gray-50';
+const loadButtonClass = 'mt-1 flex h-10 w-full items-center justify-center rounded border border-gray-300 bg-white px-3 text-sm font-medium text-blue-600 outline-none transition-colors hover:border-blue-400 hover:bg-blue-50 focus:border-blue-300 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-gray-50';
 
 export const PurchaseForm: React.FC<Props> = ({ initial, submitText, loading, onSubmit, onCancel, mode = 'bill' }) => {
   const navigate = useNavigate();
@@ -216,7 +217,7 @@ export const PurchaseForm: React.FC<Props> = ({ initial, submitText, loading, on
           </div>
         </label>
         <label className="text-sm text-gray-600">Purchased Items
-          <button type="button" onClick={addItem} className={`${inputClass} mt-1 bg-white`}>Load</button>
+          <button type="button" onClick={addItem} className={loadButtonClass}>Load</button>
         </label>
       </div>
 

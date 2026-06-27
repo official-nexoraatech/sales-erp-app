@@ -311,7 +311,7 @@ export const Sidebar: React.FC<{ isOpen: boolean; onClose: () => void }> = ({
       >
         <div className="flex h-20 shrink-0 items-center justify-between gap-2 border-b border-[#edf2f7] px-4">
           <Link to={defaultPath} onClick={onClose} className="flex min-w-0 flex-1 items-center">
-            <img src="/nexoraa-logo.png" alt="Nexoraa Technosolve" className="w-40 max-w-full object-contain" />
+            <img src="/texmintra-logo.svg" alt="Texmintra" className="w-44 max-w-full object-contain" />
           </Link>
           <button onClick={onClose} className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 md:hidden" aria-label="Close menu">
             <X size={20} />
@@ -435,7 +435,7 @@ export const Sidebar: React.FC<{ isOpen: boolean; onClose: () => void }> = ({
             </div>
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-semibold text-slate-800">{user?.userName || 'User'}</p>
-              <p className="truncate text-xs text-slate-500">{user?.role || user?.organizationName || 'Nexoraa'}</p>
+              <p className="truncate text-xs text-slate-500">{user?.role || user?.organizationName || 'Texmintra'}</p>
             </div>
             <ChevronRight size={16} className={`text-slate-400 transition-transform ${showProfileMenu ? '-rotate-90' : ''}`} />
           </button>

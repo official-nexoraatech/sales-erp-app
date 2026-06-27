@@ -53,14 +53,18 @@ export const LoginPage: React.FC = () => {
   });
 
   return (
-    <main className="min-h-screen bg-white lg:grid lg:grid-cols-[58%_42%]">
-      <section className="relative hidden min-h-screen items-center justify-center overflow-hidden bg-[#f5f6ff] p-12 lg:flex">
-        <div className="absolute left-12 top-12 h-20 w-20 rounded-full bg-blue-100/60" />
-        <div className="absolute bottom-12 right-16 h-32 w-32 rounded-full bg-indigo-100/50" />
+    <main className="min-h-screen bg-[#f8fafc] lg:grid lg:grid-cols-[58%_42%]">
+      <section className="relative hidden min-h-screen items-center justify-center overflow-hidden bg-gradient-to-br from-teal-50 via-white to-sky-50 p-12 lg:flex">
+        <div className="absolute left-12 top-12 rounded-full border border-teal-200 bg-white/80 px-5 py-2 text-sm font-semibold text-teal-700 shadow-sm">
+          Textile inventory, billing and stock control
+        </div>
+        <div className="absolute bottom-12 right-16 rounded-full bg-teal-600 px-5 py-2 text-sm font-semibold text-white shadow-lg">
+          Built for retail and wholesale teams
+        </div>
         <img
-          src="/login-security-illustration.png"
-          alt="Professional securely signing in from a workspace"
-          className="relative z-10 max-h-[82vh] w-full max-w-[820px] object-contain drop-shadow-[0_24px_55px_rgba(60,85,155,0.12)]"
+          src="/texmintra-login-visual.svg"
+          alt="Texmintra textile inventory illustration"
+          className="relative z-10 max-h-[82vh] w-full max-w-[860px] object-contain drop-shadow-[0_24px_55px_rgba(15,118,110,0.14)]"
         />
       </section>
 
@@ -69,14 +73,14 @@ export const LoginPage: React.FC = () => {
           <div className="mb-9 text-center">
             <div className="mx-auto mb-5 flex h-24 items-center justify-center">
               <img
-                src="/nexoraa-logo.png"
-                alt="Nexoraa logo"
-                className="h-full max-w-[220px] object-contain"
+                src="/texmintra-logo.svg"
+                alt="Texmintra logo"
+                className="h-full max-w-[260px] object-contain"
               />
             </div>
-            <h1 className="text-3xl font-bold tracking-tight text-slate-800">Texmitra</h1>
+            <h1 className="text-3xl font-bold tracking-tight text-slate-800">Texmintra</h1>
             <p className="mt-3 text-lg tracking-wide text-slate-600">
-              Please log in to your account
+              Sign in to manage billing, stock and customer orders
             </p>
           </div>
 
@@ -89,7 +93,7 @@ export const LoginPage: React.FC = () => {
                 id="userName"
                 autoComplete="username"
                 placeholder="Enter your username"
-                className={`h-14 w-full rounded-lg border bg-[#eef4ff] px-4 text-lg text-slate-900 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100 ${
+                className={`h-14 w-full rounded-lg border bg-teal-50/70 px-4 text-lg text-slate-900 outline-none transition focus:border-teal-400 focus:ring-4 focus:ring-teal-100 ${
                   errors.userName ? 'border-red-400' : 'border-slate-200'
                 }`}
                 {...register('userName')}
@@ -101,7 +105,7 @@ export const LoginPage: React.FC = () => {
               <label htmlFor="password" className="mb-2 block text-base font-medium tracking-wide text-slate-700">
                 Password
               </label>
-              <div className={`flex h-14 overflow-hidden rounded-lg border bg-[#eef4ff] transition focus-within:border-blue-400 focus-within:ring-4 focus-within:ring-blue-100 ${
+              <div className={`flex h-14 overflow-hidden rounded-lg border bg-teal-50/70 transition focus-within:border-teal-400 focus-within:ring-4 focus-within:ring-teal-100 ${
                 errors.password ? 'border-red-400' : 'border-slate-200'
               }`}>
                 <input
@@ -132,13 +136,13 @@ export const LoginPage: React.FC = () => {
                   onChange={(event) => setRememberMe(event.target.checked)}
                   className="peer sr-only"
                 />
-                <span className="relative h-6 w-11 rounded-full bg-slate-200 transition peer-checked:bg-blue-500 after:absolute after:left-1 after:top-1 after:h-4 after:w-4 after:rounded-full after:bg-white after:shadow after:transition peer-checked:after:translate-x-5" />
+                <span className="relative h-6 w-11 rounded-full bg-slate-200 transition peer-checked:bg-teal-500 after:absolute after:left-1 after:top-1 after:h-4 after:w-4 after:rounded-full after:bg-white after:shadow after:transition peer-checked:after:translate-x-5" />
                 Remember Me
               </label>
               <button
                 type="button"
                 onClick={() => toast('Please contact your administrator to reset your password.')}
-                className="font-medium text-blue-600 transition hover:text-blue-700 hover:underline"
+                className="font-medium text-teal-700 transition hover:text-teal-800 hover:underline"
               >
                 Forgot Password?
               </button>
@@ -147,17 +151,17 @@ export const LoginPage: React.FC = () => {
             <button
               type="submit"
               disabled={loginMutation.isPending}
-              className="flex h-14 w-full items-center justify-center rounded-lg bg-[#138dec] text-lg font-semibold text-white shadow-[0_10px_24px_rgba(19,141,236,0.22)] transition hover:bg-[#087ed9] focus:outline-none focus:ring-4 focus:ring-blue-200 disabled:cursor-not-allowed disabled:opacity-70"
+              className="flex h-14 w-full items-center justify-center rounded-lg bg-teal-600 text-lg font-semibold text-white shadow-[0_10px_24px_rgba(15,118,110,0.24)] transition hover:bg-teal-700 focus:outline-none focus:ring-4 focus:ring-teal-200 disabled:cursor-not-allowed disabled:opacity-70"
             >
               {loginMutation.isPending ? 'Signing in...' : 'Sign in'}
             </button>
           </form>
 
           <div className="mt-7 text-center text-sm text-slate-500">
-            <div className="mt-6 flex items-center justify-center gap-5 text-base font-medium text-blue-600">
-              <button type="button" className="hover:underline">🇺🇸 English</button>
-              <button type="button" className="hover:underline">🇮🇳 Hindi</button>
-              <button type="button" className="hover:underline">🇮🇳 Marathi</button>
+            <div className="mt-6 flex items-center justify-center gap-5 text-base font-medium text-teal-700">
+              <button type="button" className="hover:underline">English</button>
+              <button type="button" className="hover:underline">Hindi</button>
+              <button type="button" className="hover:underline">Marathi</button>
             </div>
             <p className="mt-6 tracking-wide text-slate-600">Version: 2.4</p>
           </div>

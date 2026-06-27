@@ -131,7 +131,7 @@ const ViewAllButton: React.FC<{ onClick: () => void }> = ({ onClick }) => (
 
 export const DashboardPage: React.FC = () => {
   const navigate = useNavigate();
-  const { hasPermission } = useAuth();
+  const { user, hasPermission } = useAuth();
   const months = useMemo(lastSixMonths, []);
   const fromDate = `${months[0].key}-01`;
   const toDate = new Date().toISOString().slice(0, 10);
@@ -287,6 +287,17 @@ export const DashboardPage: React.FC = () => {
 
   return (
     <div className="space-y-5">
+      <div className="flex flex-col justify-between gap-4 rounded-lg border border-teal-100 bg-white px-5 py-4 shadow-[0_2px_10px_rgba(15,118,110,0.08)] md:flex-row md:items-center">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-teal-700">Texmintra Dashboard</p>
+          <h1 className="mt-1 text-2xl font-bold text-slate-900">{user?.organizationName || 'Retail Operations'}</h1>
+          <p className="mt-1 text-sm text-slate-500">Billing, stock, purchase and payment activity in one place.</p>
+        </div>
+        <div className="rounded-md border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-600">
+          {new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+        </div>
+      </div>
+
       {hasAnyError && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800">
           Some dashboard sections could not be loaded. Available information is still shown below.

@@ -7,11 +7,9 @@ import { permissionsApi, usersApi } from '../../api/endpoints';
 import { queryClient } from '../../app/queryClient';
 import { Button } from '../../components/ui/Button';
 import { Loader } from '../../components/ui/Loader';
-import { useAuth } from '../../hooks/useAuth';
 
 export const UserPermissionsPage: React.FC = () => {
   const [searchParams] = useSearchParams();
-  const { user: loggedInUser } = useAuth();
   const [selectedUserId, setSelectedUserId] = useState(Number(searchParams.get('userId')) || 0);
   const [selectedPermissionIds, setSelectedPermissionIds] = useState<number[]>([]);
   const [search, setSearch] = useState('');
@@ -24,10 +22,10 @@ export const UserPermissionsPage: React.FC = () => {
     queryKey: ['permissions', 'grouped'],
     queryFn: permissionsApi.getAll,
   });
-  const currentUserPermissions = useQuery({
-    queryKey: ['permissions', 'current-user'],
-    queryFn: permissionsApi.getCurrentUser,
-    enabled: selectedUserId > 0 && selectedUserId === loggedInUser?.userId,
+  const selectedUserPermissions = useQuery({
+    queryKey: ['permissions', 'user', selectedUserId],
+    queryFn: () => permissionsApi.getForUser(selectedUserId),
+    enabled: selectedUserId > 0,
   });
 
   const userRows = users.data?.data?.content || [];
@@ -35,14 +33,14 @@ export const UserPermissionsPage: React.FC = () => {
   const permissionGroups = permissions.data?.data || {};
 
   useEffect(() => {
-    if (selectedUserId !== loggedInUser?.userId) {
+    if (!selectedUserId) {
       setSelectedPermissionIds([]);
       return;
     }
-    if (currentUserPermissions.data?.data) {
-      setSelectedPermissionIds(currentUserPermissions.data.data.map((permission) => permission.id));
+    if (selectedUserPermissions.data?.data) {
+      setSelectedPermissionIds(selectedUserPermissions.data.data.map((permission) => permission.id));
     }
-  }, [currentUserPermissions.data?.data, loggedInUser?.userId, selectedUserId]);
+  }, [selectedUserPermissions.data?.data, selectedUserId]);
 
   const filteredGroups = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase();
@@ -69,9 +67,8 @@ export const UserPermissionsPage: React.FC = () => {
     mutationFn: permissionsApi.assignToUser,
     onSuccess: async () => {
       toast.success('Permissions assigned successfully. The user must sign in again to receive a new token.');
-      if (selectedUserId === loggedInUser?.userId) {
-        await queryClient.invalidateQueries({ queryKey: ['permissions', 'current-user'] });
-      }
+      await queryClient.invalidateQueries({ queryKey: ['permissions', 'user', selectedUserId] });
+      await queryClient.invalidateQueries({ queryKey: ['permissions', 'current-user'] });
     },
     onError: (error: any) => toast.error(error?.message || 'Failed to assign permissions'),
   });
@@ -115,7 +112,7 @@ export const UserPermissionsPage: React.FC = () => {
     <div className="space-y-5">
       <div className="text-sm text-gray-500">Home &gt; Users &gt; Permissions</div>
 
-      <div className="overflow-hidden rounded-xl bg-white shadow">
+      <div className="flex max-h-[calc(100vh-7rem)] min-h-[620px] flex-col overflow-hidden rounded-xl bg-white shadow">
         <div className="flex flex-col gap-3 border-b px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h1 className="text-xl font-semibold text-gray-900">User Permissions</h1>
@@ -163,12 +160,6 @@ export const UserPermissionsPage: React.FC = () => {
           </label>
         </div>
 
-        {selectedUserId > 0 && selectedUserId !== loggedInUser?.userId && (
-          <div className="mx-5 mt-5 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-            The backend does not currently provide this user’s assigned-permission list. Checked permissions will be added; existing permissions will remain unchanged.
-          </div>
-        )}
-
         <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4">
           <label className="inline-flex cursor-pointer items-center gap-3 text-sm font-semibold text-gray-700">
             <input
@@ -188,8 +179,8 @@ export const UserPermissionsPage: React.FC = () => {
           )}
         </div>
 
-        <div className="px-5 pb-5">
-          {permissions.isLoading ? (
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-5">
+          {permissions.isLoading || selectedUserPermissions.isFetching ? (
             <div className="p-12"><Loader /></div>
           ) : permissions.isError ? (
             <div className="rounded-lg border border-red-200 bg-red-50 p-5 text-sm text-red-700">
@@ -258,7 +249,11 @@ export const UserPermissionsPage: React.FC = () => {
           )}
         </div>
 
-        <div className="sticky bottom-0 flex justify-end border-t bg-white/95 px-5 py-4 backdrop-blur">
+        <div className="shrink-0 border-t bg-white/95 px-5 py-4 backdrop-blur">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <span className="text-sm font-semibold text-slate-600">
+              {selectedPermissionIds.length} permissions selected
+            </span>
           <Button
             type="button"
             onClick={submit}
@@ -268,9 +263,9 @@ export const UserPermissionsPage: React.FC = () => {
           >
             Assign Permissions
           </Button>
+          </div>
         </div>
       </div>
     </div>
   );
 };
-

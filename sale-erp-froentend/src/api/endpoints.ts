@@ -57,6 +57,10 @@ import type {
   PaymentOutRequest,
   PurchaseCreateResponse,
   PosBillingRequest,
+  QuotationCreateResponse,
+  QuotationDetail,
+  QuotationListItem,
+  QuotationRequest,
   PurchaseDetail,
   PurchaseListItem,
   PurchaseRequest,
@@ -66,6 +70,7 @@ import type {
   Role,
   RoleRequest,
   SaleDetail,
+  SalesCreateResponse,
   SaleInvoice,
   SaleListItem,
   SaleRequest,
@@ -126,6 +131,10 @@ export type {
   PaymentOutRequest,
   PurchaseCreateResponse,
   PosBillingRequest,
+  QuotationCreateResponse,
+  QuotationDetail,
+  QuotationListItem,
+  QuotationRequest,
   PurchaseDetail,
   PurchaseListItem,
   PurchaseRequest,
@@ -135,6 +144,7 @@ export type {
   Role,
   RoleRequest,
   SaleDetail,
+  SalesCreateResponse,
   SaleInvoice,
   SaleListItem,
   SaleRequest,
@@ -370,6 +380,8 @@ export const permissionsApi = {
     axiosClient.get<ApiResponse<PermissionGroups>, ApiResponse<PermissionGroups>>('/api/v1/permissions'),
   getCurrentUser: () =>
     axiosClient.get<ApiResponse<AssignedPermission[]>, ApiResponse<AssignedPermission[]>>('/api/v1/permissions/users/me'),
+  getForUser: (userId: number) =>
+    axiosClient.get<ApiResponse<AssignedPermission[]>, ApiResponse<AssignedPermission[]>>(`/api/v1/permissions/users/${userId}`),
   assignToUser: (payload: AssignUserPermissionsRequest) =>
     axiosClient.post<ApiResponse<void>, ApiResponse<void>>('/api/v1/permissions/users/assign', payload),
 };
@@ -414,6 +426,21 @@ export const salesApi = {
   update: (id: number, payload: SaleRequest) => axiosClient.put<ApiResponse<void>, ApiResponse<void>>(`/api/v1/sales/${id}`, payload),
   cancel: (id: number) => axiosClient.put<ApiResponse<void>, ApiResponse<void>>(`/api/v1/sales/${id}/cancel`),
   getInvoice: (id: number) => axiosClient.get<ApiResponse<SaleInvoice>, ApiResponse<SaleInvoice>>(`/api/v1/sales/${id}/invoice`),
+};
+
+export const quotationApi = {
+  getAll: (params?: any) =>
+    axiosClient.get<ApiResponse<PageResponse<QuotationListItem>>, ApiResponse<PageResponse<QuotationListItem>>>('/api/v1/quotations', { params }),
+  getById: (id: number) =>
+    axiosClient.get<ApiResponse<QuotationDetail>, ApiResponse<QuotationDetail>>(`/api/v1/quotations/${id}`),
+  create: (payload: QuotationRequest) =>
+    axiosClient.post<ApiResponse<QuotationCreateResponse>, ApiResponse<QuotationCreateResponse>>('/api/v1/quotations', payload),
+  update: (id: number, payload: QuotationRequest) =>
+    axiosClient.put<ApiResponse<void>, ApiResponse<void>>(`/api/v1/quotations/${id}`, payload),
+  delete: (id: number) =>
+    axiosClient.delete<ApiResponse<void>, ApiResponse<void>>(`/api/v1/quotations/${id}`),
+  convertToInvoice: (id: number, invoiceDate = new Date().toISOString().slice(0, 10)) =>
+    axiosClient.post<ApiResponse<SalesCreateResponse>, ApiResponse<SalesCreateResponse>>(`/api/v1/quotations/${id}/convert-to-invoice`, { invoiceDate }),
 };
 
 export const paymentInApi = {

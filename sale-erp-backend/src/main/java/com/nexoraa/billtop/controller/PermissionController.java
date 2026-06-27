@@ -8,6 +8,7 @@ import com.nexoraa.billtop.dto.permission.PermissionResponseDto;
 import com.nexoraa.billtop.dto.permission.PermissionSummaryResponseDto;
 import com.nexoraa.billtop.service.PermissionManagementService;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Positive;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -47,6 +48,16 @@ public class PermissionController {
         return ResponseEntity.ok(ApiResponseDto.success(
                 ResponseMessage.USER_PERMISSIONS_RETRIEVED,
                 permissionManagementService.getCurrentUserPermissions()
+        ));
+    }
+
+    @GetMapping("/users/{userId}")
+    public ResponseEntity<ApiResponseDto<List<PermissionResponseDto>>> getUserPermissions(
+            @PathVariable @Positive Long userId
+    ) {
+        return ResponseEntity.ok(ApiResponseDto.success(
+                ResponseMessage.USER_PERMISSIONS_RETRIEVED,
+                permissionManagementService.getUserPermissions(userId)
         ));
     }
 

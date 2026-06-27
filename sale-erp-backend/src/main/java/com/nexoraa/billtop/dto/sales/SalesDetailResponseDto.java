@@ -24,6 +24,7 @@ public class SalesDetailResponseDto {
     private BigDecimal subTotal;
     private BigDecimal discountAmount;
     private BigDecimal taxAmount;
+    private BigDecimal roundOff;
     private BigDecimal grandTotal;
     private BigDecimal paidAmount;
     private BigDecimal dueAmount;

@@ -3,6 +3,7 @@ import { useMutation } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { itemApi } from '../../api/endpoints';
+import { queryClient } from '../../app/queryClient';
 import { getValidationErrors, hasValidationErrors } from '../../utils/apiValidation';
 import { ItemForm } from './ItemForm';
 
@@ -10,8 +11,9 @@ export const ItemCreatePage: React.FC = () => {
   const navigate = useNavigate();
   const mutation = useMutation({
     mutationFn: itemApi.create,
-    onSuccess: () => {
+    onSuccess: async () => {
       toast.success('Item created successfully');
+      await queryClient.invalidateQueries({ queryKey: ['items'] });
       navigate('/items');
     },
     onError: (error: any) => {

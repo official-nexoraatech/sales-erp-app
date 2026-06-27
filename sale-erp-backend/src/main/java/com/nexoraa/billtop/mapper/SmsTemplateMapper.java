@@ -12,10 +12,12 @@ import org.mapstruct.MappingTarget;
 public interface SmsTemplateMapper {
 
     @Mapping(target = "id", ignore = true)
+    @Mapping(target = "organization", ignore = true)
     @Mapping(target = "status", expression = "java(request.getStatus() == null ? com.nexoraa.billtop.enums.Status.ACTIVE : request.getStatus())")
     SmsTemplate toEntity(SmsTemplateRequestDto request);
 
     @Mapping(target = "id", ignore = true)
+    @Mapping(target = "organization", ignore = true)
     @Mapping(target = "status", expression = "java(request.getStatus() == null ? template.getStatus() : request.getStatus())")
     void updateEntity(SmsTemplateRequestDto request, @MappingTarget SmsTemplate template);
 

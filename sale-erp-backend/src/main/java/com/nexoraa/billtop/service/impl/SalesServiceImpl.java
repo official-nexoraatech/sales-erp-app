@@ -168,19 +168,21 @@ public class SalesServiceImpl implements SalesService {
         }
 
         BigDecimal paidAmount = support.money(support.defaultZero(sale.getPaidAmount()));
+        BigDecimal roundOff = support.money(request.getRoundOff());
+        BigDecimal finalGrandTotal = support.money(grandTotal.add(roundOff));
         sale.setInvoiceNo(invoiceNo);
         sale.setInvoiceDate(request.getInvoiceDate());
         sale.setCustomer(customer);
         sale.setWarehouse(warehouse);
-        sale.setState(support.getActiveState(request.getStateId()));
-        sale.setSalesPerson(support.getActiveUser(request.getSalesPersonId()));
+        sale.setState(support.getActiveState(optionalId(request.getStateId())));
+        sale.setSalesPerson(support.getActiveUser(optionalId(request.getSalesPersonId())));
         sale.setSubTotal(support.money(subTotal));
         sale.setDiscountAmount(support.money(discountAmount));
         sale.setTaxAmount(support.money(taxAmount));
-        sale.setRoundOff(TransactionSupport.ZERO);
-        sale.setGrandTotal(support.money(grandTotal));
+        sale.setRoundOff(roundOff);
+        sale.setGrandTotal(finalGrandTotal);
         sale.setPaidAmount(paidAmount);
-        sale.setDueAmount(support.money(grandTotal.subtract(paidAmount)));
+        sale.setDueAmount(support.money(finalGrandTotal.subtract(paidAmount)));
         sale.setStatus(TransactionSupport.STATUS_ACTIVE);
         sale.setNotes(request.getNotes());
         return new PreparedSale(sale, items);
@@ -270,6 +272,10 @@ public class SalesServiceImpl implements SalesService {
         }
     }
 
+    private Long optionalId(Long id) {
+        return id == null || id <= 0 ? null : id;
+    }
+
     private SalesCreateResponseDto toCreateResponse(Sale sale) {
         return SalesCreateResponseDto.builder()
                 .saleId(sale.getId())
@@ -277,6 +283,7 @@ public class SalesServiceImpl implements SalesService {
                 .subTotal(sale.getSubTotal())
                 .discountAmount(sale.getDiscountAmount())
                 .taxAmount(sale.getTaxAmount())
+                .roundOff(sale.getRoundOff())
                 .grandTotal(sale.getGrandTotal())
                 .paidAmount(sale.getPaidAmount())
                 .dueAmount(sale.getDueAmount())

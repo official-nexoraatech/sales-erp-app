@@ -79,11 +79,14 @@ public class ItemController {
     public ResponseEntity<ApiResponseDto<PageResponseDto<ItemListResponseDto>>> getItems(
             @RequestParam(defaultValue = "0") @Min(0) int page,
             @RequestParam(defaultValue = "20") @Positive int size,
-            @RequestParam(required = false) String search
+            @RequestParam(required = false) String search,
+            @RequestParam(required = false) Long categoryId,
+            @RequestParam(required = false) Long brandId,
+            @RequestParam(required = false) Long warehouseId
     ) {
         return ResponseEntity.ok(ApiResponseDto.success(
                 ResponseMessage.ITEMS_RETRIEVED,
-                itemService.getItems(page, size, search)
+                itemService.getItems(page, size, search, categoryId, brandId, warehouseId)
         ));
     }
 

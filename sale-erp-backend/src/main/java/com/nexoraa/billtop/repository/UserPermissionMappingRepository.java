@@ -3,6 +3,7 @@ package com.nexoraa.billtop.repository;
 import com.nexoraa.billtop.entity.UserPermissionMapping;
 import com.nexoraa.billtop.entity.UserPermissionMappingId;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -33,4 +34,11 @@ public interface UserPermissionMappingRepository extends JpaRepository<UserPermi
             @Param("userId") Long userId,
             @Param("permissionIds") Collection<Long> permissionIds
     );
+
+    @Modifying
+    @Query("""
+            delete from UserPermissionMapping mapping
+            where mapping.user.id = :userId
+            """)
+    void deleteByUserId(@Param("userId") Long userId);
 }

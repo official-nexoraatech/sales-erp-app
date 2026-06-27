@@ -10,6 +10,7 @@ import com.nexoraa.billtop.exception.BadRequestException;
 import com.nexoraa.billtop.exception.ResourceNotFoundException;
 import com.nexoraa.billtop.mapper.SmsTemplateMapper;
 import com.nexoraa.billtop.repository.SmsTemplateRepository;
+import com.nexoraa.billtop.security.CurrentOrganizationService;
 import com.nexoraa.billtop.service.SmsService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -34,17 +35,20 @@ public class SmsServiceImpl implements SmsService {
 
     private final SmsTemplateRepository smsTemplateRepository;
     private final SmsTemplateMapper smsTemplateMapper;
+    private final CurrentOrganizationService currentOrganizationService;
     private final String smsProviderUrl;
     private final String smsApiKey;
 
     public SmsServiceImpl(
             SmsTemplateRepository smsTemplateRepository,
             SmsTemplateMapper smsTemplateMapper,
+            CurrentOrganizationService currentOrganizationService,
             @Value("${app.sms.provider-url:}") String smsProviderUrl,
             @Value("${app.sms.api-key:}") String smsApiKey
     ) {
         this.smsTemplateRepository = smsTemplateRepository;
         this.smsTemplateMapper = smsTemplateMapper;
+        this.currentOrganizationService = currentOrganizationService;
         this.smsProviderUrl = smsProviderUrl;
         this.smsApiKey = smsApiKey;
     }
@@ -52,10 +56,13 @@ public class SmsServiceImpl implements SmsService {
     @Override
     @Transactional
     public void createTemplate(SmsTemplateRequestDto request) {
-        if (smsTemplateRepository.existsByNameIgnoreCaseAndStatus(request.getName(), com.nexoraa.billtop.enums.Status.ACTIVE)) {
+        Long organizationId = currentOrganizationService.getOrganizationId();
+        if (smsTemplateRepository.existsByNameIgnoreCaseAndOrganizationIdAndStatus(request.getName(), organizationId, com.nexoraa.billtop.enums.Status.ACTIVE)) {
             throw new BadRequestException(ErrorMessage.SMS_TEMPLATE_ALREADY_EXISTS, "SMS_TEMPLATE_ALREADY_EXISTS");
         }
-        smsTemplateRepository.save(smsTemplateMapper.toEntity(request));
+        SmsTemplate template = smsTemplateMapper.toEntity(request);
+        template.setOrganization(currentOrganizationService.getOrganizationReference());
+        smsTemplateRepository.save(template);
     }
 
     @Override
@@ -76,7 +83,12 @@ public class SmsServiceImpl implements SmsService {
     @Transactional
     public void updateTemplate(Long id, SmsTemplateRequestDto request) {
         SmsTemplate template = getActiveTemplate(id);
-        if (smsTemplateRepository.existsByNameIgnoreCaseAndIdNotAndStatus(request.getName(), id, com.nexoraa.billtop.enums.Status.ACTIVE)) {
+        if (smsTemplateRepository.existsByNameIgnoreCaseAndIdNotAndOrganizationIdAndStatus(
+                request.getName(),
+                id,
+                currentOrganizationService.getOrganizationId(),
+                com.nexoraa.billtop.enums.Status.ACTIVE
+        )) {
             throw new BadRequestException(ErrorMessage.SMS_TEMPLATE_ALREADY_EXISTS, "SMS_TEMPLATE_ALREADY_EXISTS");
         }
         smsTemplateMapper.updateEntity(request, template);
@@ -128,7 +140,11 @@ public class SmsServiceImpl implements SmsService {
     }
 
     private SmsTemplate getActiveTemplate(Long id) {
-        return smsTemplateRepository.findByIdAndStatus(id, com.nexoraa.billtop.enums.Status.ACTIVE)
+        return smsTemplateRepository.findByIdAndOrganizationIdAndStatus(
+                        id,
+                        currentOrganizationService.getOrganizationId(),
+                        com.nexoraa.billtop.enums.Status.ACTIVE
+                )
                 .orElseThrow(() -> new ResourceNotFoundException(
                         ErrorMessage.SMS_TEMPLATE_NOT_FOUND,
                         "SMS_TEMPLATE_NOT_FOUND"
@@ -136,8 +152,11 @@ public class SmsServiceImpl implements SmsService {
     }
 
     private Specification<SmsTemplate> activeTemplateSpecification(String search) {
-        Specification<SmsTemplate> specification = (root, query, criteriaBuilder) ->
-                criteriaBuilder.equal(root.get("status"), com.nexoraa.billtop.enums.Status.ACTIVE);
+        Long organizationId = currentOrganizationService.getOrganizationId();
+        Specification<SmsTemplate> specification = (root, query, criteriaBuilder) -> criteriaBuilder.and(
+                criteriaBuilder.equal(root.get("organization").get("id"), organizationId),
+                criteriaBuilder.equal(root.get("status"), com.nexoraa.billtop.enums.Status.ACTIVE)
+        );
 
         if (!StringUtils.hasText(search)) {
             return specification;

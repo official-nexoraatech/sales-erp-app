@@ -10,6 +10,7 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
 
@@ -31,6 +32,8 @@ public class SalesRequestDto {
     private Long stateId;
 
     private Long salesPersonId;
+
+    private BigDecimal roundOff;
 
     @Size(max = 500, message = ValidationMessage.DESCRIPTION_INVALID)
     private String notes;

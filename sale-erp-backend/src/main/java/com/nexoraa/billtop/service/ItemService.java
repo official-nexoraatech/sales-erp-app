@@ -13,7 +13,14 @@ public interface ItemService {
 
     ItemDetailResponseDto getItemById(Long id);
 
-    PageResponseDto<ItemListResponseDto> getItems(int page, int size, String search);
+    PageResponseDto<ItemListResponseDto> getItems(
+            int page,
+            int size,
+            String search,
+            Long categoryId,
+            Long brandId,
+            Long warehouseId
+    );
 
     void updateItem(Long id, ItemRequestDto request);
 

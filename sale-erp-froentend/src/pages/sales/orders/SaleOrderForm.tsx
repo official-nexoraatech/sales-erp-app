@@ -28,6 +28,7 @@ interface Props {
 }
 
 const inputClass = 'h-10 w-full rounded border border-gray-300 bg-white px-3 text-sm text-gray-900 outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-gray-50';
+const loadButtonClass = 'mt-1 flex h-10 w-full items-center justify-center rounded border border-gray-300 bg-white px-3 text-sm font-medium text-blue-600 outline-none transition-colors hover:border-blue-400 hover:bg-blue-50 focus:border-blue-300 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-gray-50';
 
 export const SaleOrderForm: React.FC<Props> = ({ initial, submitText, loading, onSubmit, onCancel }) => {
   const navigate = useNavigate();
@@ -60,7 +61,10 @@ export const SaleOrderForm: React.FC<Props> = ({ initial, submitText, loading, o
 
   const addItem = () => {
     const item = items.data?.data?.content.find((entry) => entry.id === selectedItem);
-    if (!item) return;
+    if (!item) {
+      toast.error('Select an item to load.');
+      return;
+    }
     setLines((current) => current.some((line) => line.itemId === item.id) ? current : [...current, {
       itemId: item.id,
       itemName: item.itemName,
@@ -159,12 +163,11 @@ export const SaleOrderForm: React.FC<Props> = ({ initial, submitText, loading, o
               <option value={0}>Scan Barcode/Search Item/Brand Name</option>
               {items.data?.data?.content.map((item) => <option key={item.id} value={item.id}>{item.itemName}</option>)}
             </select>
-            <button type="button" onClick={addItem} className="flex h-10 w-11 items-center justify-center border border-l-0 border-blue-400 text-blue-500"><CirclePlus size={18} /></button>
             <button type="button" onClick={() => navigate('/items/create')} className="flex h-10 w-11 items-center justify-center rounded-r border border-l-0 border-blue-400 text-blue-500" title="Create item" aria-label="Create item"><CirclePlus size={18} /></button>
           </div>
         </label>
         <label className="text-sm text-gray-600">Sold Items
-          <button type="button" onClick={addItem} className={`${inputClass} mt-1 bg-white`}>Load</button>
+          <button type="button" onClick={addItem} className={loadButtonClass}>Load</button>
         </label>
       </div>
 

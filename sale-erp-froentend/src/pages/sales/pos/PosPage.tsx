@@ -279,7 +279,7 @@ export const PosPage: React.FC = () => {
       const amount = Number(line.salePrice || 0) * line.quantity;
       return `<tr><td>${escapeHtml(line.itemName)}</td><td>${line.quantity}</td><td>${formatNumber(line.salePrice)}</td><td>${formatNumber(amount)}</td></tr>`;
     }).join('');
-    popup.document.write(`<html><head><title>POS Receipt</title></head><body><h2>Nexoraa POS Receipt</h2><p>Customer: ${escapeHtml(customer?.customerName || 'Walk in Customer')}</p><p>Payment: ${escapeHtml(method?.name || '')}</p><table border="1" cellspacing="0" cellpadding="6"><thead><tr><th>Item</th><th>Qty</th><th>Rate</th><th>Total</th></tr></thead><tbody>${rows}</tbody><tfoot><tr><td colspan="3"><strong>Grand Total</strong></td><td><strong>${formatNumber(grandTotal)}</strong></td></tr></tfoot></table><script>window.print()</script></body></html>`);
+    popup.document.write(`<html><head><title>POS Receipt</title></head><body><h2>Texmintra POS Receipt</h2><p>Customer: ${escapeHtml(customer?.customerName || 'Walk in Customer')}</p><p>Payment: ${escapeHtml(method?.name || '')}</p><table border="1" cellspacing="0" cellpadding="6"><thead><tr><th>Item</th><th>Qty</th><th>Rate</th><th>Total</th></tr></thead><tbody>${rows}</tbody><tfoot><tr><td colspan="3"><strong>Grand Total</strong></td><td><strong>${formatNumber(grandTotal)}</strong></td></tr></tfoot></table><script>window.print()</script></body></html>`);
     popup.document.close();
   };
   const submitBill = async (print = false) => {
@@ -299,7 +299,7 @@ export const PosPage: React.FC = () => {
   return (
     <div className="min-h-screen bg-[#f5f6ff] text-slate-700">
       <header className="flex h-12 items-center justify-between border-b bg-white px-3 shadow-sm">
-        <button onClick={() => navigate(defaultPath)} className="text-xl font-semibold text-blue-600">Nexoraa</button>
+        <button onClick={() => navigate(defaultPath)} className="text-xl font-semibold text-blue-600">Texmintra</button>
         <nav className="hidden items-center gap-5 text-xs text-slate-600 md:flex">
           {canViewDashboard && <button onClick={() => navigate('/dashboard')} className="flex items-center gap-1 hover:text-blue-600"><LayoutDashboard size={13} />Dashboard</button>}
           {canViewCustomers && <button onClick={() => navigate('/contacts/customers')} className="flex items-center gap-1 hover:text-blue-600"><Users size={13} />Customer List</button>}

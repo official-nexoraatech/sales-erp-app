@@ -1,6 +1,9 @@
 package com.nexoraa.billtop.specification;
 
 import com.nexoraa.billtop.entity.Item;
+import com.nexoraa.billtop.entity.Stock;
+import jakarta.persistence.criteria.Root;
+import jakarta.persistence.criteria.Subquery;
 import jakarta.persistence.criteria.JoinType;
 import jakarta.persistence.criteria.Predicate;
 import org.springframework.data.jpa.domain.Specification;
@@ -20,6 +23,38 @@ public final class ItemSpecification {
 
     public static Specification<Item> organization(Long organizationId) {
         return (root, query, criteriaBuilder) -> criteriaBuilder.equal(root.get("organization").get("id"), organizationId);
+    }
+
+    public static Specification<Item> category(Long categoryId) {
+        return (root, query, criteriaBuilder) -> {
+            if (categoryId == null || categoryId <= 0) {
+                return criteriaBuilder.conjunction();
+            }
+            return criteriaBuilder.equal(root.get("category").get("id"), categoryId);
+        };
+    }
+
+    public static Specification<Item> brand(Long brandId) {
+        return (root, query, criteriaBuilder) -> {
+            if (brandId == null || brandId <= 0) {
+                return criteriaBuilder.conjunction();
+            }
+            return criteriaBuilder.equal(root.get("brand").get("id"), brandId);
+        };
+    }
+
+    public static Specification<Item> warehouse(Long warehouseId) {
+        return (root, query, criteriaBuilder) -> {
+            if (warehouseId == null || warehouseId <= 0 || query == null) {
+                return criteriaBuilder.conjunction();
+            }
+
+            Subquery<Long> subquery = query.subquery(Long.class);
+            Root<Stock> stock = subquery.from(Stock.class);
+            subquery.select(stock.get("item").get("id"))
+                    .where(criteriaBuilder.equal(stock.get("warehouse").get("id"), warehouseId));
+            return root.get("id").in(subquery);
+        };
     }
 
     public static Specification<Item> search(String search) {

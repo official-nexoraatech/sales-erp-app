@@ -82,6 +82,7 @@ export interface ItemListItem {
   batchNo?: string;
   manufacturingDate?: string;
   expiryDate?: string;
+  openingQuantity?: number;
   availableQty: number;
   reservedQty?: number;
   minimumStock?: number;
@@ -314,6 +315,7 @@ export interface SaleRequest {
   warehouseId: number;
   stateId: number;
   salesPersonId: number;
+  roundOff?: number;
   notes: string;
   items: Array<{ itemId: number; quantity: number; unitPrice: number; discountPercent: number; taxPercent: number }>;
 }
@@ -327,6 +329,7 @@ export interface SaleDetail {
   subTotal: number;
   discountAmount: number;
   taxAmount: number;
+  roundOff?: number;
   grandTotal: number;
   paidAmount: number;
   dueAmount: number;
@@ -339,6 +342,75 @@ export interface SaleInvoice {
   invoiceNo: string;
   customerName: string;
   grandTotal: number;
+}
+
+export interface SalesCreateResponse {
+  saleId: number;
+  invoiceNo: string;
+  subTotal: number;
+  discountAmount: number;
+  taxAmount: number;
+  roundOff?: number;
+  grandTotal: number;
+  paidAmount: number;
+  dueAmount: number;
+}
+
+export interface QuotationCreateResponse {
+  quotationId: number;
+  quotationNo: string;
+  subTotal: number;
+  discountAmount: number;
+  taxAmount: number;
+  roundOff: number;
+  grandTotal: number;
+  status: string;
+}
+
+export interface QuotationListItem {
+  quotationId: number;
+  quotationNo: string;
+  quotationDate: string;
+  validUntil?: string;
+  customerName: string;
+  grandTotal: number;
+  status: string;
+  convertedSaleId?: number;
+  convertedInvoiceNo?: string;
+}
+
+export interface QuotationRequest {
+  customerId: number;
+  quotationDate: string;
+  validUntil?: string;
+  warehouseId: number;
+  stateId: number;
+  salesPersonId: number;
+  roundOff: number;
+  status: string;
+  notes: string;
+  items: Array<{ itemId: number; quantity: number; unitPrice: number; discountPercent: number; taxPercent: number }>;
+}
+
+export interface QuotationDetail {
+  quotationId: number;
+  quotationNo: string;
+  quotationDate: string;
+  validUntil?: string;
+  customer: { id: number; name: string };
+  warehouse: { id: number; name: string };
+  stateId?: number;
+  salesPersonId?: number;
+  subTotal: number;
+  discountAmount: number;
+  taxAmount: number;
+  roundOff: number;
+  grandTotal: number;
+  status: string;
+  notes?: string;
+  convertedSaleId?: number;
+  convertedInvoiceNo?: string;
+  items: Array<{ itemId: number; itemName: string; qty: number; unitPrice: number; discountPercent: number; discountAmount: number; taxPercent: number; taxAmount: number; totalAmount: number }>;
 }
 
 export interface PaymentListItem {

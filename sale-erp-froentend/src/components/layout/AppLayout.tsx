@@ -37,7 +37,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
           <div className="min-h-full p-4 pb-8 md:p-5 md:pb-8">{children}</div>
         </main>
         <footer className="flex h-8 shrink-0 items-center justify-center border-t border-indigo-100 bg-white px-4 text-[11px] text-slate-500">
-          Copyright © Nexoraa - {new Date().getFullYear()} (v2.4)
+          Copyright &copy; Texmintra - {new Date().getFullYear()} (v2.4)
         </footer>
       </div>
     </div>
