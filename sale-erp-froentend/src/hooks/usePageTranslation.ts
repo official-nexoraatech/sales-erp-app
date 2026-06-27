@@ -9,7 +9,7 @@ export const LANGUAGE_OPTIONS: Array<{ value: AppLanguage; label: string }> = [
   { value: 'mr', label: 'Marathi' },
 ];
 
-export const TRANSLATION_RESET_EVENT = 'billtop:translation-reset';
+export const TRANSLATION_RESET_EVENT = 'texmintra:translation-reset';
 
 interface GoogleTranslateOptions {
   pageLanguage: string;

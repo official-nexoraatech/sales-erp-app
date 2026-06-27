@@ -9,10 +9,10 @@ import java.util.Optional;
 
 public interface SmsTemplateRepository extends JpaRepository<SmsTemplate, Long>, JpaSpecificationExecutor<SmsTemplate> {
 
-    boolean existsByNameIgnoreCaseAndStatus(String name, Status status);
+    boolean existsByNameIgnoreCaseAndOrganizationIdAndStatus(String name, Long organizationId, Status status);
 
-    boolean existsByNameIgnoreCaseAndIdNotAndStatus(String name, Long id, Status status);
+    boolean existsByNameIgnoreCaseAndIdNotAndOrganizationIdAndStatus(String name, Long id, Long organizationId, Status status);
 
-    Optional<SmsTemplate> findByIdAndStatus(Long id, Status status);
+    Optional<SmsTemplate> findByIdAndOrganizationIdAndStatus(Long id, Long organizationId, Status status);
 }
 

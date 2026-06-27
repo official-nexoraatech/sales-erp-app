@@ -9,10 +9,10 @@ import java.util.Optional;
 
 public interface EmailTemplateRepository extends JpaRepository<EmailTemplate, Long>, JpaSpecificationExecutor<EmailTemplate> {
 
-    boolean existsByNameIgnoreCaseAndStatus(String name, Status status);
+    boolean existsByNameIgnoreCaseAndOrganizationIdAndStatus(String name, Long organizationId, Status status);
 
-    boolean existsByNameIgnoreCaseAndIdNotAndStatus(String name, Long id, Status status);
+    boolean existsByNameIgnoreCaseAndIdNotAndOrganizationIdAndStatus(String name, Long id, Long organizationId, Status status);
 
-    Optional<EmailTemplate> findByIdAndStatus(Long id, Status status);
+    Optional<EmailTemplate> findByIdAndOrganizationIdAndStatus(Long id, Long organizationId, Status status);
 }
 

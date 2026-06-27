@@ -101,6 +101,12 @@ public class ResponseMessage {
     public static final String SALES_INVOICE_RETRIEVED = "Sales invoice retrieved successfully";
     public static final String SALES_INVOICES_RETRIEVED = "Sales invoices retrieved successfully";
     public static final String SALES_INVOICE_PRINT_RETRIEVED = "Sales invoice retrieved successfully";
+    public static final String QUOTATION_CREATED = "Quotation created successfully";
+    public static final String QUOTATION_UPDATED = "Quotation updated successfully";
+    public static final String QUOTATION_DELETED = "Quotation deleted successfully";
+    public static final String QUOTATION_RETRIEVED = "Quotation retrieved successfully";
+    public static final String QUOTATIONS_RETRIEVED = "Quotations retrieved successfully";
+    public static final String QUOTATION_CONVERTED = "Quotation converted to invoice successfully";
 
     // Sales Return Messages
     public static final String SALES_RETURN_CREATED = "Sales return created successfully";

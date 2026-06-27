@@ -3,6 +3,7 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { useNavigate, useParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { itemApi } from '../../api/endpoints';
+import { queryClient } from '../../app/queryClient';
 import { Loader } from '../../components/ui/Loader';
 import { getValidationErrors, hasValidationErrors } from '../../utils/apiValidation';
 import { ItemForm } from './ItemForm';
@@ -13,8 +14,12 @@ export const ItemEditPage: React.FC = () => {
   const item = useQuery({ queryKey: ['item', id], queryFn: () => itemApi.getById(id), enabled: id > 0 });
   const mutation = useMutation({
     mutationFn: (payload: any) => itemApi.update(id, payload),
-    onSuccess: () => {
+    onSuccess: async () => {
       toast.success('Item updated successfully');
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['items'] }),
+        queryClient.invalidateQueries({ queryKey: ['item', id] }),
+      ]);
       navigate('/items');
     },
     onError: (error: any) => {

@@ -72,7 +72,7 @@ export const AppHeader: React.FC = () => {
   return (
     <header className="relative z-20 flex h-16 shrink-0 items-center justify-between border-b border-indigo-100 bg-white px-4 shadow-[0_3px_12px_rgba(79,70,229,0.08)] md:px-6">
       <div className="pl-10 text-sm font-semibold text-slate-700 md:pl-0">
-        <span className="hidden sm:inline">{user?.organizationName || 'Nexoraa'}</span>
+        <span className="hidden sm:inline">{user?.organizationName || 'Texmintra'}</span>
       </div>
 
       <div className="flex items-center gap-2">

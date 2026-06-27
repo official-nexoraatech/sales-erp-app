@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { Edit, Eye, PackageSearch, Trash2 } from 'lucide-react';
+import { Edit, Eye, PackageSearch, RefreshCw, Trash2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { brandApi, categoryApi, itemApi, warehouseApi } from '../../api/endpoints';
@@ -14,9 +14,56 @@ import { useConfirmation } from '../../hooks/useConfirmation';
 import { useDebounce } from '../../hooks/useDebounce';
 import { usePagination } from '../../hooks/usePagination';
 import { formatCurrency } from '../../utils/formatCurrency';
+import { formatDate } from '../../utils/formatDate';
 import { PERMISSIONS } from '../../auth/permissions';
 
-const exportColumns = ['Name', 'Item Code', 'SKU', 'Brand', 'Category', 'Sale Price', 'Purchase Price', 'Quantity', 'Tracking Type', 'Created by'];
+type TableColumn = {
+  heading: string;
+  render: (item: ItemListItem) => React.ReactNode;
+  exportValue: (item: ItemListItem) => string | number;
+};
+
+const text = (value: unknown, fallback = '') => {
+  if (value === null || value === undefined || value === '') return fallback;
+  return String(value);
+};
+const number = (value: unknown) => Number(value || 0);
+const date = (value?: string) => (value ? formatDate(value) : '');
+const statusText = (status: ItemListItem['status']) => (
+  status === true || status === 'ACTIVE' ? 'Active' : status === false || status === 'INACTIVE' ? 'Inactive' : text(status)
+);
+
+const itemColumns: TableColumn[] = [
+  { heading: 'Name', render: (item) => <span className="font-semibold">{item.itemName}</span>, exportValue: (item) => item.itemName },
+  { heading: 'Item Code', render: (item) => text(item.itemCode), exportValue: (item) => text(item.itemCode) },
+  { heading: 'HSN', render: (item) => text(item.hsnCode), exportValue: (item) => text(item.hsnCode) },
+  { heading: 'SKU', render: (item) => text(item.sku), exportValue: (item) => text(item.sku) },
+  { heading: 'Category', render: (item) => text(item.categoryName, 'General'), exportValue: (item) => text(item.categoryName, 'General') },
+  { heading: 'Brand', render: (item) => text(item.brandName), exportValue: (item) => text(item.brandName) },
+  { heading: 'Base Unit', render: (item) => text(item.unitName || item.baseUnitName), exportValue: (item) => text(item.unitName || item.baseUnitName) },
+  { heading: 'Purchase Price', render: (item) => formatCurrency(number(item.purchasePrice)), exportValue: (item) => number(item.purchasePrice) },
+  { heading: 'Purchase With Tax', render: (item) => formatCurrency(number(item.purchasePriceWithTax)), exportValue: (item) => number(item.purchasePriceWithTax) },
+  { heading: 'Tax %', render: (item) => number(item.taxPercentage), exportValue: (item) => number(item.taxPercentage) },
+  { heading: 'Sale Price', render: (item) => formatCurrency(number(item.salePrice)), exportValue: (item) => number(item.salePrice) },
+  { heading: 'Wholesale Price', render: (item) => formatCurrency(number(item.wholesalePrice)), exportValue: (item) => number(item.wholesalePrice) },
+  { heading: 'MRP', render: (item) => formatCurrency(number(item.mrp)), exportValue: (item) => number(item.mrp) },
+  { heading: 'MSP', render: (item) => formatCurrency(number(item.msp)), exportValue: (item) => number(item.msp) },
+  { heading: 'Discount %', render: (item) => number(item.discountPercentage), exportValue: (item) => number(item.discountPercentage) },
+  { heading: 'Profit %', render: (item) => number(item.profitMargin), exportValue: (item) => number(item.profitMargin) },
+  { heading: 'Batch No', render: (item) => text(item.batchNo), exportValue: (item) => text(item.batchNo) },
+  { heading: 'Mfg Date', render: (item) => date(item.manufacturingDate), exportValue: (item) => date(item.manufacturingDate) },
+  { heading: 'Exp Date', render: (item) => date(item.expiryDate), exportValue: (item) => date(item.expiryDate) },
+  { heading: 'Opening Qty', render: (item) => number(item.openingQuantity), exportValue: (item) => number(item.openingQuantity) },
+  { heading: 'Available Qty', render: (item) => number(item.availableQty), exportValue: (item) => number(item.availableQty) },
+  { heading: 'Reserved Qty', render: (item) => number(item.reservedQty), exportValue: (item) => number(item.reservedQty) },
+  { heading: 'Minimum Stock', render: (item) => number(item.minimumStock), exportValue: (item) => number(item.minimumStock) },
+  { heading: 'Warehouse', render: (item) => text(item.warehouseName), exportValue: (item) => text(item.warehouseName) },
+  { heading: 'Description', render: (item) => <span className="line-clamp-2">{text(item.description)}</span>, exportValue: (item) => text(item.description) },
+  { heading: 'Tracking Type', render: (item) => text(item.trackingType, 'Regular'), exportValue: (item) => text(item.trackingType, 'Regular') },
+  { heading: 'Status', render: (item) => statusText(item.status), exportValue: (item) => statusText(item.status) },
+];
+
+const exportColumns = [...itemColumns.map((column) => column.heading), 'Created by'];
 
 export const ItemListPage: React.FC = () => {
   const navigate = useNavigate();
@@ -45,7 +92,14 @@ export const ItemListPage: React.FC = () => {
 
   const items = useQuery({
     queryKey: ['items', page, pageSize, debouncedSearch, categoryId, brandId, warehouseId],
-    queryFn: () => itemApi.getAll({ page, size: pageSize, search: debouncedSearch, categoryId: categoryId || undefined, brandId: brandId || undefined, warehouseId: warehouseId || undefined }),
+    queryFn: () => itemApi.getAll({
+      page,
+      size: pageSize,
+      search: debouncedSearch,
+      categoryId: categoryId || undefined,
+      brandId: brandId || undefined,
+      warehouseId: warehouseId || undefined,
+    }),
   });
   const categories = useQuery({ queryKey: ['item-list-categories'], queryFn: () => categoryApi.getAll({ page: 0, size: 100, search: '' }), enabled: canViewCategories });
   const brands = useQuery({
@@ -67,8 +121,8 @@ export const ItemListPage: React.FC = () => {
     .filter((item) => !warehouseId || item.warehouseId === warehouseId)
     .filter((item) => !trackingType || (item.trackingType || 'Regular') === trackingType);
   const allSelected = rows.length > 0 && rows.every((item) => selectedIds.includes(item.id));
+  const exportRows = () => rows.map((item) => [...itemColumns.map((column) => column.exportValue(item)), user?.userName || 'admin']);
 
-  const exportRows = () => rows.map((item) => [item.itemName, item.itemCode, item.sku, item.brandName || '', item.categoryName || '', item.salePrice, item.purchasePrice || 0, item.availableQty, item.trackingType || 'Regular', user?.userName || 'admin']);
   const copy = async () => {
     await navigator.clipboard.writeText([exportColumns, ...exportRows()].map((row) => row.join('\t')).join('\n'));
     toast.success('Items copied');
@@ -116,14 +170,32 @@ export const ItemListPage: React.FC = () => {
         </div>
         <div className="flex flex-wrap items-center justify-between gap-3 px-5 pb-4">
           <label className="flex items-center gap-2 text-sm text-gray-600">Show<select value={pageSize} onChange={(event) => { setPageSize(Number(event.target.value)); setPage(0); }} className="h-9 rounded border border-gray-300 px-2"><option>10</option><option>20</option><option>50</option><option>100</option></select>entries</label>
-          <div className="flex flex-wrap items-center">{canDelete && <button onClick={deleteSelected} className="h-10 rounded-l border border-red-300 px-3 text-sm text-red-500">Delete</button>}<button onClick={copy} className={`h-10 border px-3 text-sm ${canDelete ? 'border-l-0' : 'rounded-l'}`}>Copy</button><button onClick={() => download('xls')} className="h-10 border-y border-r px-3 text-sm">Excel</button><button onClick={() => download('csv')} className="h-10 border-y border-r px-3 text-sm">CSV</button><button onClick={printPdf} className="h-10 border-y border-r px-3 text-sm">PDF</button><button onClick={() => queryClient.invalidateQueries({ queryKey: ['items'] })} className="h-10 rounded-r border-y border-r px-3 text-sm">↻</button></div>
+          <div className="flex flex-wrap items-center">{canDelete && <button onClick={deleteSelected} className="h-10 rounded-l border border-red-300 px-3 text-sm text-red-500">Delete</button>}<button onClick={copy} className={`h-10 border px-3 text-sm ${canDelete ? 'border-l-0' : 'rounded-l'}`}>Copy</button><button onClick={() => download('xls')} className="h-10 border-y border-r px-3 text-sm">Excel</button><button onClick={() => download('csv')} className="h-10 border-y border-r px-3 text-sm">CSV</button><button onClick={printPdf} className="h-10 border-y border-r px-3 text-sm">PDF</button><button type="button" title="Refresh items" onClick={() => queryClient.invalidateQueries({ queryKey: ['items'] })} className="flex h-10 w-10 items-center justify-center rounded-r border-y border-r text-gray-600"><RefreshCw size={16} /></button></div>
           <label className="flex items-center gap-2 text-sm text-gray-600">Search:<input value={search} onChange={(event) => { setSearch(event.target.value); setPage(0); }} className="h-9 rounded border border-gray-300 px-3" /></label>
         </div>
         <div className="overflow-x-auto px-3 pb-3">
-          {items.isLoading ? <div className="p-10"><Loader /></div> : <table className="w-full text-sm">
-            <thead className="bg-gray-50"><tr>{canDelete && <th className="border p-3"><input type="checkbox" checked={allSelected} onChange={() => setSelectedIds(allSelected ? [] : rows.map((item) => item.id))} /></th>}{exportColumns.concat('Action').map((heading) => <th key={heading} className="border p-3 text-left">{heading}</th>)}</tr></thead>
-            <tbody>{rows.length ? rows.map((item: ItemListItem) => <tr key={item.id} className="border-b even:bg-gray-50">{canDelete && <td className="border p-3"><input type="checkbox" checked={selectedIds.includes(item.id)} onChange={() => setSelectedIds((current) => current.includes(item.id) ? current.filter((id) => id !== item.id) : [...current, item.id])} /></td>}<td className="border p-3 font-semibold">{item.itemName}</td><td className="border p-3">{item.itemCode}</td><td className="border p-3">{item.sku}</td><td className="border p-3">{item.brandName || ''}</td><td className="border p-3">{item.categoryName || 'General'}</td><td className="border p-3">{formatCurrency(item.salePrice)}</td><td className="border p-3">{formatCurrency(item.purchasePrice || 0)}</td><td className="border p-3">{item.availableQty} {item.unitName || 'None'}</td><td className="border p-3">{item.trackingType || 'Regular'}</td><td className="border p-3">{user?.userName || 'admin'}</td><td className="border p-3"><div className="flex gap-2"><button onClick={() => navigate(`/items/${item.id}`)} className="text-blue-600"><Eye size={16} /></button>{canViewStock && <button onClick={() => navigate(`/items/${item.id}/stock`)} className="text-green-600"><PackageSearch size={16} /></button>}{canUpdate && <button onClick={() => navigate(`/items/${item.id}/edit`)} className="text-orange-600"><Edit size={16} /></button>}{canDelete && <button onClick={async () => { if (await confirmAction({ title: 'Delete Item', message: 'Delete this item?', confirmText: 'Delete', variant: 'danger' })) remove.mutate(item.id); }} className="text-red-600"><Trash2 size={16} /></button>}</div></td></tr>) : <tr><td colSpan={canDelete ? 12 : 11} className="bg-gray-50 p-5 text-center">No data available in table</td></tr>}</tbody>
-          </table>}
+          {items.isLoading ? <div className="p-10"><Loader /></div> : (
+            <table className="w-full min-w-[2600px] text-sm">
+              <thead className="bg-gray-50"><tr>{canDelete && <th className="border p-3"><input type="checkbox" checked={allSelected} onChange={() => setSelectedIds(allSelected ? [] : rows.map((item) => item.id))} /></th>}{itemColumns.map((column) => <th key={column.heading} className="border p-3 text-left">{column.heading}</th>)}<th className="border p-3 text-left">Created by</th><th className="border p-3 text-left">Action</th></tr></thead>
+              <tbody>
+                {rows.length ? rows.map((item) => (
+                  <tr key={item.id} className="border-b even:bg-gray-50">
+                    {canDelete && <td className="border p-3"><input type="checkbox" checked={selectedIds.includes(item.id)} onChange={() => setSelectedIds((current) => current.includes(item.id) ? current.filter((id) => id !== item.id) : [...current, item.id])} /></td>}
+                    {itemColumns.map((column) => <td key={column.heading} className="border p-3 align-top">{column.render(item)}</td>)}
+                    <td className="border p-3">{user?.userName || 'admin'}</td>
+                    <td className="border p-3">
+                      <div className="flex gap-2">
+                        <button title="View item" onClick={() => navigate(`/items/${item.id}`)} className="text-blue-600"><Eye size={16} /></button>
+                        {canViewStock && <button title="View stock" onClick={() => navigate(`/items/${item.id}/stock`)} className="text-green-600"><PackageSearch size={16} /></button>}
+                        {canUpdate && <button title="Edit item" onClick={() => navigate(`/items/${item.id}/edit`)} className="text-orange-600"><Edit size={16} /></button>}
+                        {canDelete && <button title="Delete item" onClick={async () => { if (await confirmAction({ title: 'Delete Item', message: 'Delete this item?', confirmText: 'Delete', variant: 'danger' })) remove.mutate(item.id); }} className="text-red-600"><Trash2 size={16} /></button>}
+                      </div>
+                    </td>
+                  </tr>
+                )) : <tr><td colSpan={itemColumns.length + (canDelete ? 3 : 2)} className="bg-gray-50 p-5 text-center">No data available in table</td></tr>}
+              </tbody>
+            </table>
+          )}
         </div>
         <div className="flex flex-wrap items-center justify-between gap-3 border-t px-5 py-4 text-sm text-gray-600"><span>Showing {rows.length ? page * pageSize + 1 : 0} to {page * pageSize + rows.length} of {items.data?.data?.totalElements || 0} entries</span><Pagination page={page} totalPages={items.data?.data?.totalPages || 1} onPageChange={handlePageChange} /></div>
       </div>

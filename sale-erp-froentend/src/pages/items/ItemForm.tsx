@@ -22,6 +22,32 @@ interface Props {
 const inputClass = 'h-10 w-full rounded border border-gray-300 bg-white px-3 text-sm text-gray-900 outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-gray-50';
 const today = new Date().toISOString().slice(0, 10);
 const numberValue = (value: unknown) => Number(value || 0);
+const buildFormState = (initial?: ItemFormInitial): ItemRequest => ({
+  itemName: initial?.itemName || '',
+  itemCode: initial?.itemCode || initial?.batchNo || '',
+  sku: initial?.sku || '',
+  hsnCode: initial?.hsnCode || '',
+  categoryId: numberValue(initial?.categoryId),
+  subCategoryId: numberValue(initial?.subCategoryId),
+  brandId: numberValue(initial?.brandId),
+  baseUnitId: numberValue(initial?.baseUnitId),
+  purchasePrice: numberValue(initial?.purchasePrice),
+  purchasePriceWithTax: numberValue(initial?.purchasePriceWithTax),
+  taxPercentage: numberValue(initial?.taxPercentage),
+  salePrice: numberValue(initial?.salePrice),
+  wholesalePrice: numberValue(initial?.wholesalePrice),
+  mrp: numberValue(initial?.mrp),
+  msp: numberValue(initial?.msp),
+  discountPercentage: numberValue(initial?.discountPercentage),
+  profitMargin: numberValue(initial?.profitMargin),
+  batchNo: initial?.batchNo || initial?.itemCode || '',
+  manufacturingDate: initial?.manufacturingDate || today,
+  expiryDate: initial?.expiryDate || today,
+  openingQuantity: numberValue(initial?.openingQuantity ?? initial?.availableQty),
+  minimumStock: numberValue(initial?.minimumStock),
+  warehouseId: numberValue(initial?.warehouseId),
+  description: initial?.description || '',
+});
 
 export const ItemForm: React.FC<Props> = ({
   initial,
@@ -39,12 +65,7 @@ export const ItemForm: React.FC<Props> = ({
   const [itemType, setItemType] = useState('Product');
   const [imagePreviewUrl, setImagePreviewUrl] = useState('');
   const [imageName, setImageName] = useState('');
-  const [form, setForm] = useState<ItemRequest>({
-    itemName: initial?.itemName || '', itemCode: initial?.itemCode || initial?.batchNo || '', sku: initial?.sku || '', hsnCode: initial?.hsnCode || '',
-    categoryId: numberValue(initial?.categoryId), subCategoryId: numberValue(initial?.subCategoryId), brandId: numberValue(initial?.brandId), baseUnitId: numberValue(initial?.baseUnitId),
-    purchasePrice: numberValue(initial?.purchasePrice), purchasePriceWithTax: numberValue(initial?.purchasePriceWithTax), taxPercentage: numberValue(initial?.taxPercentage), salePrice: numberValue(initial?.salePrice), wholesalePrice: numberValue(initial?.wholesalePrice), mrp: numberValue(initial?.mrp), msp: numberValue(initial?.msp), discountPercentage: numberValue(initial?.discountPercentage), profitMargin: numberValue(initial?.profitMargin),
-    batchNo: initial?.batchNo || initial?.itemCode || '', manufacturingDate: initial?.manufacturingDate || today, expiryDate: initial?.expiryDate || today, openingQuantity: numberValue(initial?.openingQuantity), minimumStock: numberValue(initial?.minimumStock), warehouseId: numberValue(initial?.warehouseId), description: initial?.description || '',
-  });
+  const [form, setForm] = useState<ItemRequest>(() => buildFormState(initial));
   const categories = useQuery({ queryKey: ['item-form-categories'], queryFn: () => categoryApi.getAll({ page: 0, size: 100, search: '' }) });
   const brands = useQuery({
     queryKey: ['item-form-brands', form.categoryId],
@@ -76,9 +97,12 @@ export const ItemForm: React.FC<Props> = ({
   };
   const unitRows = units.data?.data?.content || [];
   useEffect(() => {
+    setForm(buildFormState(initial));
+  }, [initial?.id]);
+  useEffect(() => {
     const errorFields = Object.keys(validationErrors);
     const pricingFields = ['purchasePrice', 'purchasePriceWithTax', 'taxPercentage', 'profitMargin', 'mrp', 'wholesalePrice', 'discountPercentage', 'salePrice', 'msp'];
-    const stockFields = ['warehouseId', 'manufacturingDate', 'minimumStock', 'expiryDate'];
+    const stockFields = ['warehouseId', 'manufacturingDate', 'openingQuantity', 'minimumStock', 'expiryDate'];
     if (errorFields.some((field) => pricingFields.includes(field))) setActiveTab('pricing');
     else if (errorFields.some((field) => stockFields.includes(field))) setActiveTab('stock');
   }, [validationErrors]);

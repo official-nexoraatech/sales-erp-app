@@ -79,9 +79,15 @@ public class PermissionManagementService {
     @Transactional(readOnly = true)
     public List<PermissionResponseDto> getCurrentUserPermissions() {
         BillTopUserDetails userDetails = getCurrentUserDetails();
+        return getUserPermissions(userDetails.userId());
+    }
+
+    @Transactional(readOnly = true)
+    public List<PermissionResponseDto> getUserPermissions(Long userId) {
+        Long organizationId = currentOrganizationService.getOrganizationId();
         User user = userRepository.findByIdAndOrganizationIdAndStatusAndIsDeletedFalse(
-                        userDetails.userId(),
-                        userDetails.organizationId(),
+                        userId,
+                        organizationId,
                         Status.ACTIVE
                 )
                 .orElseThrow(() -> new ResourceNotFoundException(ErrorMessage.USER_NOT_FOUND, "USER_NOT_FOUND"));
@@ -129,16 +135,8 @@ public class PermissionManagementService {
             throw new BadRequestException(ErrorMessage.PERMISSION_NOT_FOUND, "PERMISSION_NOT_FOUND");
         }
 
-        Set<Long> existingPermissionIds = userPermissionMappingRepository.findByUserIdAndPermissionIds(
-                        user.getId(),
-                        requestedPermissionIds
-                )
-                .stream()
-                .map(mapping -> mapping.getPermission().getId())
-                .collect(java.util.stream.Collectors.toSet());
-
+        userPermissionMappingRepository.deleteByUserId(user.getId());
         List<UserPermissionMapping> mappingsToSave = permissions.stream()
-                .filter(permission -> !existingPermissionIds.contains(permission.getId()))
                 .map(permission -> UserPermissionMapping.builder()
                         .id(new UserPermissionMappingId(user.getId(), permission.getId()))
                         .user(user)

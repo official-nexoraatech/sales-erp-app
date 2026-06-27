@@ -6,6 +6,9 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
+
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
@@ -18,5 +21,12 @@ public class WarehouseResponseDto {
     private String description;
     private String address;
     private Status status;
+    private Long totalItems;
+    private BigDecimal availableStock;
+    private BigDecimal worthCost;
+    private BigDecimal worthSale;
+    private BigDecimal worthProfit;
+    private String createdBy;
+    private LocalDateTime createdAt;
 }
 

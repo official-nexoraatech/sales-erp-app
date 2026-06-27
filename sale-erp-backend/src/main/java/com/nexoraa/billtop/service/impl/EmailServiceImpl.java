@@ -9,6 +9,7 @@ import com.nexoraa.billtop.exception.BadRequestException;
 import com.nexoraa.billtop.exception.ResourceNotFoundException;
 import com.nexoraa.billtop.mapper.EmailTemplateMapper;
 import com.nexoraa.billtop.repository.EmailTemplateRepository;
+import com.nexoraa.billtop.security.CurrentOrganizationService;
 import com.nexoraa.billtop.service.EmailService;
 import jakarta.mail.MessagingException;
 import jakarta.mail.internet.AddressException;
@@ -34,17 +35,20 @@ public class EmailServiceImpl implements EmailService {
 
     private final EmailTemplateRepository emailTemplateRepository;
     private final EmailTemplateMapper emailTemplateMapper;
+    private final CurrentOrganizationService currentOrganizationService;
     private final JavaMailSender mailSender;
     private final String fromAddress;
 
     public EmailServiceImpl(
             EmailTemplateRepository emailTemplateRepository,
             EmailTemplateMapper emailTemplateMapper,
+            CurrentOrganizationService currentOrganizationService,
             JavaMailSender mailSender,
             @Value("${spring.mail.username:no-reply@billtop.com}") String fromAddress
     ) {
         this.emailTemplateRepository = emailTemplateRepository;
         this.emailTemplateMapper = emailTemplateMapper;
+        this.currentOrganizationService = currentOrganizationService;
         this.mailSender = mailSender;
         this.fromAddress = fromAddress;
     }
@@ -52,10 +56,13 @@ public class EmailServiceImpl implements EmailService {
     @Override
     @Transactional
     public void createTemplate(EmailTemplateRequestDto request) {
-        if (emailTemplateRepository.existsByNameIgnoreCaseAndStatus(request.getName(), com.nexoraa.billtop.enums.Status.ACTIVE)) {
+        Long organizationId = currentOrganizationService.getOrganizationId();
+        if (emailTemplateRepository.existsByNameIgnoreCaseAndOrganizationIdAndStatus(request.getName(), organizationId, com.nexoraa.billtop.enums.Status.ACTIVE)) {
             throw new BadRequestException(ErrorMessage.EMAIL_TEMPLATE_ALREADY_EXISTS, "EMAIL_TEMPLATE_ALREADY_EXISTS");
         }
-        emailTemplateRepository.save(emailTemplateMapper.toEntity(request));
+        EmailTemplate template = emailTemplateMapper.toEntity(request);
+        template.setOrganization(currentOrganizationService.getOrganizationReference());
+        emailTemplateRepository.save(template);
     }
 
     @Override
@@ -76,7 +83,12 @@ public class EmailServiceImpl implements EmailService {
     @Transactional
     public void updateTemplate(Long id, EmailTemplateRequestDto request) {
         EmailTemplate template = getActiveTemplate(id);
-        if (emailTemplateRepository.existsByNameIgnoreCaseAndIdNotAndStatus(request.getName(), id, com.nexoraa.billtop.enums.Status.ACTIVE)) {
+        if (emailTemplateRepository.existsByNameIgnoreCaseAndIdNotAndOrganizationIdAndStatus(
+                request.getName(),
+                id,
+                currentOrganizationService.getOrganizationId(),
+                com.nexoraa.billtop.enums.Status.ACTIVE
+        )) {
             throw new BadRequestException(ErrorMessage.EMAIL_TEMPLATE_ALREADY_EXISTS, "EMAIL_TEMPLATE_ALREADY_EXISTS");
         }
         emailTemplateMapper.updateEntity(request, template);
@@ -121,7 +133,11 @@ public class EmailServiceImpl implements EmailService {
     }
 
     private EmailTemplate getActiveTemplate(Long id) {
-        return emailTemplateRepository.findByIdAndStatus(id, com.nexoraa.billtop.enums.Status.ACTIVE)
+        return emailTemplateRepository.findByIdAndOrganizationIdAndStatus(
+                        id,
+                        currentOrganizationService.getOrganizationId(),
+                        com.nexoraa.billtop.enums.Status.ACTIVE
+                )
                 .orElseThrow(() -> new ResourceNotFoundException(
                         ErrorMessage.EMAIL_TEMPLATE_NOT_FOUND,
                         "EMAIL_TEMPLATE_NOT_FOUND"
@@ -129,8 +145,11 @@ public class EmailServiceImpl implements EmailService {
     }
 
     private Specification<EmailTemplate> activeTemplateSpecification(String search) {
-        Specification<EmailTemplate> specification = (root, query, criteriaBuilder) ->
-                criteriaBuilder.equal(root.get("status"), com.nexoraa.billtop.enums.Status.ACTIVE);
+        Long organizationId = currentOrganizationService.getOrganizationId();
+        Specification<EmailTemplate> specification = (root, query, criteriaBuilder) -> criteriaBuilder.and(
+                criteriaBuilder.equal(root.get("organization").get("id"), organizationId),
+                criteriaBuilder.equal(root.get("status"), com.nexoraa.billtop.enums.Status.ACTIVE)
+        );
 
         if (!StringUtils.hasText(search)) {
             return specification;

@@ -132,10 +132,20 @@ public class ItemServiceImpl implements ItemService {
 
     @Override
     @Transactional(readOnly = true)
-    public PageResponseDto<ItemListResponseDto> getItems(int page, int size, String search) {
+    public PageResponseDto<ItemListResponseDto> getItems(
+            int page,
+            int size,
+            String search,
+            Long categoryId,
+            Long brandId,
+            Long warehouseId
+    ) {
         Long organizationId = currentOrganizationService.getOrganizationId();
         Specification<Item> specification = ItemSpecification.active()
                 .and(ItemSpecification.organization(organizationId))
+                .and(ItemSpecification.category(categoryId))
+                .and(ItemSpecification.brand(brandId))
+                .and(ItemSpecification.warehouse(warehouseId))
                 .and(ItemSpecification.search(search));
         Page<Item> items = itemRepository.findAll(
                 specification,
@@ -145,8 +155,10 @@ public class ItemServiceImpl implements ItemService {
         Page<ItemListResponseDto> response = items.map(item -> {
             ItemListResponseDto itemResponse = itemMapper.toListResponse(item);
             itemPriceRepository.findTopByItemIdOrderByIdDesc(item.getId())
-                    .ifPresent(price -> itemResponse.setSalePrice(price.getSalePrice()));
-            itemResponse.setAvailableQty(totalAvailableQty(item.getId()));
+                    .ifPresent(price -> applyListPrice(itemResponse, price));
+            itemBatchRepository.findTopByItemIdOrderByIdDesc(item.getId())
+                    .ifPresent(batch -> applyListBatch(itemResponse, batch));
+            applyListStock(itemResponse, item.getId(), warehouseId);
             return itemResponse;
         });
         return PageResponseDto.from(response);
@@ -291,6 +303,7 @@ public class ItemServiceImpl implements ItemService {
     }
 
     private void applyStock(ItemDetailResponseDto response, Stock stock) {
+        response.setOpeningQuantity(stock.getAvailableQty());
         response.setAvailableQty(stock.getAvailableQty());
         response.setReservedQty(stock.getReservedQty());
         response.setMinimumStock(stock.getMinimumStock());
@@ -344,12 +357,47 @@ public class ItemServiceImpl implements ItemService {
         }
     }
 
-    private BigDecimal totalAvailableQty(Long itemId) {
-        return stockRepository.findByItemId(itemId)
-                .stream()
+    private void applyListStock(ItemListResponseDto response, Long itemId, Long warehouseId) {
+        List<Stock> stocks = warehouseId == null || warehouseId <= 0
+                ? stockRepository.findByItemId(itemId)
+                : stockRepository.findByItemIdAndWarehouseIdOrderByIdAsc(itemId, warehouseId);
+        BigDecimal availableQty = stocks.stream()
                 .map(Stock::getAvailableQty)
                 .map(this::defaultZero)
                 .reduce(ZERO, BigDecimal::add);
+        BigDecimal reservedQty = stocks.stream()
+                .map(Stock::getReservedQty)
+                .map(this::defaultZero)
+                .reduce(ZERO, BigDecimal::add);
+        response.setOpeningQuantity(availableQty);
+        response.setAvailableQty(availableQty);
+        response.setReservedQty(reservedQty);
+        stocks.stream()
+                .filter(stock -> stock.getWarehouse() != null)
+                .findFirst()
+                .ifPresent(stock -> {
+                    response.setMinimumStock(stock.getMinimumStock());
+                    response.setWarehouseId(stock.getWarehouse().getId());
+                    response.setWarehouseName(stock.getWarehouse().getName());
+                });
+    }
+
+    private void applyListPrice(ItemListResponseDto response, ItemPrice price) {
+        response.setPurchasePrice(price.getPurchasePrice());
+        response.setPurchasePriceWithTax(price.getPurchasePriceWithTax());
+        response.setTaxPercentage(price.getTaxPercentage());
+        response.setSalePrice(price.getSalePrice());
+        response.setWholesalePrice(price.getWholesalePrice());
+        response.setMrp(price.getMrp());
+        response.setMsp(price.getMsp());
+        response.setDiscountPercentage(price.getDiscountPercentage());
+        response.setProfitMargin(price.getProfitMargin());
+    }
+
+    private void applyListBatch(ItemListResponseDto response, ItemBatch batch) {
+        response.setBatchNo(batch.getBatchNo());
+        response.setManufacturingDate(batch.getManufacturingDate());
+        response.setExpiryDate(batch.getExpiryDate());
     }
 
     private BigDecimal defaultZero(BigDecimal value) {

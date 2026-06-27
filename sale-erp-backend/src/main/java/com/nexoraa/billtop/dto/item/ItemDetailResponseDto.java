@@ -40,6 +40,7 @@ public class ItemDetailResponseDto {
     private String batchNo;
     private LocalDate manufacturingDate;
     private LocalDate expiryDate;
+    private BigDecimal openingQuantity;
     private BigDecimal availableQty;
     private BigDecimal reservedQty;
     private BigDecimal minimumStock;
