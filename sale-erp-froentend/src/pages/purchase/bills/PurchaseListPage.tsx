@@ -6,6 +6,7 @@ import toast from 'react-hot-toast';
 import { purchaseApi, supplierApi } from '../../../api/endpoints';
 import type { PurchaseListItem } from '../../../api/endpoints';
 import { queryClient } from '../../../app/queryClient';
+import { TableExportButtons } from '../../../components/common/TableExportButtons';
 import { Button } from '../../../components/ui/Button';
 import { Loader } from '../../../components/ui/Loader';
 import { Pagination } from '../../../components/ui/Pagination';
@@ -151,13 +152,13 @@ export const PurchaseListPage: React.FC<Props> = ({ mode = 'bill' }) => {
             </select>
             entries
           </label>
-          <div className="flex flex-wrap items-center">
-            {canDelete && <button onClick={cancelSelected} className="h-10 rounded-l border border-red-300 px-3 text-sm text-red-500">Delete</button>}
-            <button onClick={copy} className={`h-10 border px-3 text-sm ${canDelete ? 'border-l-0' : 'rounded-l'}`}>Copy</button>
-            <button onClick={() => download('xls')} className="h-10 border-y border-r px-3 text-sm">Excel</button>
-            <button onClick={() => download('csv')} className="h-10 border-y border-r px-3 text-sm">CSV</button>
-            <button onClick={printPdf} className="h-10 rounded-r border-y border-r px-3 text-sm">PDF</button>
-          </div>
+          <TableExportButtons
+            leadingButton={canDelete && <button onClick={cancelSelected} className="h-10 rounded-l border border-red-300 px-3 text-sm text-red-500 transition-all active:scale-95 active:bg-red-50">Delete</button>}
+            onCopy={copy}
+            onDownloadExcel={() => download('xls')}
+            onDownloadCsv={() => download('csv')}
+            onPrint={printPdf}
+          />
           <label className="flex items-center gap-2 text-sm text-gray-600">Search:
             <input value={search} onChange={(event) => { setSearch(event.target.value); setPage(0); }} className="h-9 rounded border border-gray-300 px-3" />
           </label>

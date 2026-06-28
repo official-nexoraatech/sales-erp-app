@@ -1,6 +1,6 @@
 # Staff Management API Requirements
 
-Use this document to generate Java Spring Boot + PostgreSQL backend APIs for the BillTop Staff Management module.
+Use this document to generate Java Spring Boot + PostgreSQL backend APIs for the texmintra Staff Management module.
 
 ## Backend Stack
 
@@ -14,7 +14,7 @@ Use this document to generate Java Spring Boot + PostgreSQL backend APIs for the
 
 ## Standard Response Format
 
-All APIs should return the existing BillTop response shape:
+All APIs should return the existing texmintra response shape:
 
 ```json
 {
@@ -551,7 +551,7 @@ Fields:
 ## Backend Codex Prompt
 
 ```text
-Build Java Spring Boot + PostgreSQL APIs for the BillTop Staff Management module using this API document.
+Build Java Spring Boot + PostgreSQL APIs for the texmintra Staff Management module using this API document.
 
 Create entities, DTOs, repositories, services, controllers, validation, enum types, and PostgreSQL migrations for:
 - Employees

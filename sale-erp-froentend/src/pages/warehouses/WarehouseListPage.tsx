@@ -15,6 +15,7 @@ import { usePagination } from '../../hooks/usePagination';
 import { formatCurrency } from '../../utils/formatCurrency';
 import { formatDate } from '../../utils/formatDate';
 import { PERMISSIONS } from '../../auth/permissions';
+import { TableExportButtons } from '../../components/common/TableExportButtons';
 
 const exportColumns = ['Warehouse', 'Items', 'Available Stock', 'Worth Cost', 'Worth Sale', 'Worth Profit', 'Created by', 'Created at'];
 const getNumber = (warehouse: Warehouse, keys: string[], fallback = 0) => {
@@ -95,7 +96,13 @@ export const WarehouseListPage: React.FC = () => {
         </div>
         <div className="flex flex-wrap items-center justify-between gap-3 p-5">
           <label className="flex items-center gap-2 text-sm text-gray-600">Show<select value={pageSize} onChange={(event) => { setPageSize(Number(event.target.value)); setPage(0); }} className="h-9 rounded border border-gray-300 px-2"><option>10</option><option>20</option><option>50</option><option>100</option></select>entries</label>
-          <div className="flex">{canDelete && <button onClick={deleteSelected} className="h-10 rounded-l border border-red-300 px-3 text-sm text-red-500">Delete</button>}<button onClick={copy} className={`h-10 border px-3 text-sm ${canDelete ? 'border-l-0' : 'rounded-l'}`}>Copy</button><button onClick={() => download('xls')} className="h-10 border-y border-r px-3 text-sm">Excel</button><button onClick={() => download('csv')} className="h-10 border-y border-r px-3 text-sm">CSV</button><button onClick={printPdf} className="h-10 rounded-r border-y border-r px-3 text-sm">PDF</button></div>
+          <TableExportButtons
+            onCopy={copy}
+            onDownloadExcel={() => download('xls')}
+            onDownloadCsv={() => download('csv')}
+            onPrint={printPdf}
+            leadingButton={canDelete && <button onClick={deleteSelected} className="h-10 rounded-l border border-red-300 px-3 text-sm text-red-500 transition-all active:scale-95 active:bg-red-50">Delete</button>}
+          />
           <label className="flex items-center gap-2 text-sm text-gray-600">Search:<input value={search} onChange={(event) => setSearch(event.target.value)} className="h-9 rounded border border-gray-300 px-3" /></label>
         </div>
         <div className="overflow-x-auto px-3 pb-3">

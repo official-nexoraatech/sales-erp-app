@@ -45,6 +45,9 @@ import type {
   ItemListItem,
   ItemRequest,
   ItemStock,
+  EmailSendRequest,
+  MessageTemplate,
+  MessageTemplateRequest,
   MoneyTransaction,
   Organization,
   OrganizationLogoUploadResponse,
@@ -76,6 +79,7 @@ import type {
   SaleRequest,
   SimpleMaster,
   SimpleMasterRequest,
+  SmsSendRequest,
   State,
   StockAdjustmentDetail,
   StockAdjustmentListItem,
@@ -118,6 +122,9 @@ export type {
   ItemListItem,
   ItemRequest,
   ItemStock,
+  EmailSendRequest,
+  MessageTemplate,
+  MessageTemplateRequest,
   MoneyTransaction,
   Organization,
   OrganizationAddress,
@@ -150,6 +157,7 @@ export type {
   SaleRequest,
   SimpleMaster,
   SimpleMasterRequest,
+  SmsSendRequest,
   State,
   StockAdjustmentDetail,
   StockAdjustmentListItem,
@@ -357,6 +365,44 @@ export const excelImportApi = {
       headers: { 'Content-Type': 'multipart/form-data' },
     });
   },
+};
+
+type MessageTemplateType = 'sms' | 'email';
+
+const messageTemplateBasePath = (type: MessageTemplateType) => `/api/v1/${type}`;
+
+export const messageTemplateApi = {
+  getAll: (type: MessageTemplateType, params?: any) =>
+    axiosClient.get<ApiResponse<PageResponse<MessageTemplate>>, ApiResponse<PageResponse<MessageTemplate>>>(`${messageTemplateBasePath(type)}/templates`, { params }),
+  getById: (type: MessageTemplateType, id: number) =>
+    axiosClient.get<ApiResponse<MessageTemplate>, ApiResponse<MessageTemplate>>(`${messageTemplateBasePath(type)}/templates/${id}`),
+  create: (type: MessageTemplateType, payload: MessageTemplateRequest) =>
+    axiosClient.post<ApiResponse<void>, ApiResponse<void>>(`${messageTemplateBasePath(type)}/templates`, payload),
+  update: (type: MessageTemplateType, id: number, payload: MessageTemplateRequest) =>
+    axiosClient.put<ApiResponse<void>, ApiResponse<void>>(`${messageTemplateBasePath(type)}/templates/${id}`, payload),
+  delete: (type: MessageTemplateType, id: number) =>
+    axiosClient.delete<ApiResponse<void>, ApiResponse<void>>(`${messageTemplateBasePath(type)}/templates/${id}`),
+};
+
+export const emailApi = {
+  send: ({ emailIds, subject, message, file }: EmailSendRequest) => {
+    const formData = new FormData();
+    formData.append('emailIds', emailIds);
+    formData.append('subject', subject);
+    formData.append('message', message);
+    if (file) {
+      formData.append('file', file);
+    }
+
+    return axiosClient.post<ApiResponse<void>, ApiResponse<void>>('/api/v1/email/send', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
+};
+
+export const smsApi = {
+  send: (payload: SmsSendRequest) =>
+    axiosClient.post<ApiResponse<void>, ApiResponse<void>>('/api/v1/sms/send', payload),
 };
 
 export const usersApi = {

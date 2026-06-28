@@ -15,6 +15,7 @@ import { useConfirmation } from '../../hooks/useConfirmation';
 import { useDebounce } from '../../hooks/useDebounce';
 import { formatDate } from '../../utils/formatDate';
 import { employeeStatuses, fullName, inputClass, pretty, statusClass } from './staffShared';
+import { TableExportButtons } from '../../components/common/TableExportButtons';
 
 const columns = ['Employee Code', 'Name', 'Mobile', 'Email', 'Department', 'Designation', 'Joining Date', 'Status', 'Action'];
 
@@ -48,10 +49,29 @@ export const StaffEmployeesPage: React.FC = () => {
     onError: (error: any) => toast.error(error?.message || 'Failed to delete employee'),
   });
 
+  const exportColumns = columns.slice(0, -1);
+  const getExportRows = () => rows.map((row) => [row.employeeCode, fullName(row.firstName, row.lastName), row.mobile, row.email, row.department, row.designation, row.joiningDate, row.status]);
+
   const copy = async () => {
-    const exportRows = rows.map((row) => [row.employeeCode, fullName(row.firstName, row.lastName), row.mobile, row.email, row.department, row.designation, row.joiningDate, row.status]);
-    await navigator.clipboard.writeText([columns.slice(0, -1), ...exportRows].map((entry) => entry.join('\t')).join('\n'));
+    await navigator.clipboard.writeText([exportColumns, ...getExportRows()].map((entry) => entry.join('\t')).join('\n'));
     toast.success('Employees copied');
+  };
+  const download = (extension: 'csv' | 'xls') => {
+    const separator = extension === 'csv' ? ',' : '\t';
+    const content = [exportColumns, ...getExportRows()].map((row) => row.map((value) => `"${String(value).replaceAll('"', '""')}"`).join(separator)).join('\n');
+    const blob = new Blob([content], { type: extension === 'csv' ? 'text/csv' : 'application/vnd.ms-excel' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `employees.${extension}`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+  const printPdf = () => {
+    const popup = window.open('', '_blank');
+    if (!popup) return;
+    popup.document.write(`<html><head><title>Employee List</title></head><body><h2>Employee List</h2><table border="1" cellspacing="0" cellpadding="6"><thead><tr>${exportColumns.map((column) => `<th>${column}</th>`).join('')}</tr></thead><tbody>${getExportRows().map((row) => `<tr>${row.map((value) => `<td>${value}</td>`).join('')}</tr>`).join('')}</tbody></table><script>window.print()</script></body></html>`);
+    popup.document.close();
   };
 
   const resetPage = () => setPage(0);
@@ -92,10 +112,7 @@ export const StaffEmployeesPage: React.FC = () => {
         </div>
 
         <div className="flex flex-wrap items-center justify-end gap-2 px-5 pb-4">
-          <button type="button" onClick={copy} className="h-10 rounded border px-4 text-sm">Copy</button>
-          <button type="button" onClick={copy} className="h-10 rounded border px-4 text-sm">Excel</button>
-          <button type="button" onClick={copy} className="h-10 rounded border px-4 text-sm">CSV</button>
-          <button type="button" onClick={copy} className="h-10 rounded border px-4 text-sm">PDF</button>
+          <TableExportButtons onCopy={copy} onDownloadExcel={() => download('xls')} onDownloadCsv={() => download('csv')} onPrint={printPdf} />
         </div>
 
         <div className="overflow-x-auto px-3 pb-3">

@@ -22,16 +22,21 @@ import org.springframework.data.jpa.domain.Specification;
 import org.springframework.mail.MailException;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.mail.javamail.MimeMessageHelper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.List;
 
 @Service
 public class EmailServiceImpl implements EmailService {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(EmailServiceImpl.class);
 
     private final EmailTemplateRepository emailTemplateRepository;
     private final EmailTemplateMapper emailTemplateMapper;
@@ -44,7 +49,7 @@ public class EmailServiceImpl implements EmailService {
             EmailTemplateMapper emailTemplateMapper,
             CurrentOrganizationService currentOrganizationService,
             JavaMailSender mailSender,
-            @Value("${spring.mail.username:no-reply@billtop.com}") String fromAddress
+            @Value("${app.mail.from:${spring.mail.username:no-reply@billtop.com}}") String fromAddress
     ) {
         this.emailTemplateRepository = emailTemplateRepository;
         this.emailTemplateMapper = emailTemplateMapper;
@@ -113,22 +118,24 @@ public class EmailServiceImpl implements EmailService {
         try {
             MimeMessage mimeMessage = mailSender.createMimeMessage();
             boolean hasAttachment = file != null && !file.isEmpty();
-            MimeMessageHelper helper = new MimeMessageHelper(mimeMessage, hasAttachment);
-            helper.setFrom(fromAddress);
+            MimeMessageHelper helper = new MimeMessageHelper(
+                    mimeMessage,
+                    hasAttachment,
+                    StandardCharsets.UTF_8.name()
+            );
+            helper.setFrom(toInternetAddress(fromAddress, ErrorMessage.EMAIL_SEND_FAILED, "EMAIL_SEND_FAILED"));
             helper.setTo(recipients.toArray(String[]::new));
             helper.setSubject(subject.trim());
             helper.setText(message, false);
 
             if (hasAttachment) {
-                String fileName = StringUtils.hasText(file.getOriginalFilename())
-                        ? file.getOriginalFilename()
-                        : "attachment";
-                helper.addAttachment(fileName, file);
+                helper.addAttachment(resolveAttachmentName(file), file);
             }
 
             mailSender.send(mimeMessage);
         } catch (MessagingException | MailException ex) {
-            throw new BadRequestException(ErrorMessage.EMAIL_SEND_FAILED, "EMAIL_SEND_FAILED");
+            LOGGER.warn("Email send failed for {} recipient(s)", recipients.size(), ex);
+            throw new BadRequestException(ErrorMessage.EMAIL_SEND_FAILED, "EMAIL_SEND_FAILED", ex);
         }
     }
 
@@ -186,12 +193,27 @@ public class EmailServiceImpl implements EmailService {
     }
 
     private void validateEmail(String email) {
+        toInternetAddress(email, ErrorMessage.INVALID_EMAIL_IDS, "INVALID_EMAIL_IDS");
+    }
+
+    private InternetAddress toInternetAddress(String email, String errorMessage, String errorCode) {
         try {
             InternetAddress internetAddress = new InternetAddress(email);
             internetAddress.validate();
+            return internetAddress;
         } catch (AddressException ex) {
-            throw new BadRequestException(ErrorMessage.INVALID_EMAIL_IDS, "INVALID_EMAIL_IDS");
+            throw new BadRequestException(errorMessage, errorCode, ex);
         }
+    }
+
+    private String resolveAttachmentName(MultipartFile file) {
+        String originalFilename = file.getOriginalFilename();
+        if (!StringUtils.hasText(originalFilename)) {
+            return "attachment";
+        }
+
+        String fileName = StringUtils.getFilename(originalFilename);
+        return StringUtils.hasText(fileName) ? fileName : "attachment";
     }
 }
 

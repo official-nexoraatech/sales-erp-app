@@ -16,6 +16,7 @@ import { usePagination } from '../../../hooks/usePagination';
 import { formatCurrency } from '../../../utils/formatCurrency';
 import { formatDate } from '../../../utils/formatDate';
 import { PERMISSIONS } from '../../../auth/permissions';
+import { TableExportButtons } from '../../../components/common/TableExportButtons';
 
 const exportColumns = ['Sale Code', 'Date', 'Customer', 'Total', 'Balance', 'Status'];
 
@@ -109,13 +110,13 @@ export const SaleListPage: React.FC = () => {
           <label className="flex items-center gap-2 text-sm">Show
             <select value={pageSize} onChange={(event) => { setPageSize(Number(event.target.value)); setPage(0); }} className="rounded border px-2 py-2"><option>10</option><option>20</option><option>50</option><option>100</option></select> entries
           </label>
-          <div className="flex flex-wrap items-center gap-0">
-            {canDelete && <button onClick={cancelSelected} className="rounded-l border border-red-300 px-3 py-2 text-sm text-red-500">Delete</button>}
-            <button onClick={copy} className={`border px-3 py-2 text-sm ${canDelete ? 'border-l-0' : 'rounded-l'}`}>Copy</button>
-            <button onClick={() => download('xls')} className="border-y border-r px-3 py-2 text-sm">Excel</button>
-            <button onClick={() => download('csv')} className="border-y border-r px-3 py-2 text-sm">CSV</button>
-            <button onClick={printPdf} className="rounded-r border-y border-r px-3 py-2 text-sm">PDF</button>
-          </div>
+          <TableExportButtons
+            onCopy={copy}
+            onDownloadExcel={() => download('xls')}
+            onDownloadCsv={() => download('csv')}
+            onPrint={printPdf}
+            leadingButton={canDelete && <button onClick={cancelSelected} className="h-10 rounded-l border border-red-300 px-3 text-sm text-red-500 transition-all active:scale-95 active:bg-red-50">Delete</button>}
+          />
           <label className="flex items-center gap-2 text-sm">Search:<input value={search} onChange={(event) => { setSearch(event.target.value); setPage(0); }} className="rounded border px-3 py-2" /></label>
         </div>
 
