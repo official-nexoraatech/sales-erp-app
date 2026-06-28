@@ -62,8 +62,8 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
     }
 
     return (
-      <div className="min-h-screen bg-[#f7f9fc] p-6">
-        <div className="rounded border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+      <div className="min-h-screen bg-slate-50 dark:bg-slate-900 p-6">
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800 dark:border-amber-800/50 dark:bg-amber-900/20 dark:text-amber-300">
           Your account does not have permission to access this page.
         </div>
       </div>
