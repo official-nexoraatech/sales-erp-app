@@ -13,6 +13,8 @@ import {
   TrendingDown,
   TrendingUp,
   Users,
+  Wallet,
+  BarChart2,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -23,6 +25,8 @@ import {
   CartesianGrid,
   Cell,
   Legend,
+  Line,
+  LineChart,
   Pie,
   PieChart,
   ResponsiveContainer,
@@ -96,8 +100,7 @@ interface MetricCardProps {
 
 const MetricCard: React.FC<MetricCardProps> = ({ title, value, color, icon, currency = false, subLabel }) => (
   <div
-    className="flex min-h-[88px] items-center justify-between rounded-xl border-l-[3px] bg-white px-4 py-3 shadow-[0_2px_10px_rgba(79,70,229,0.10)] dark:bg-[#111827]"
-    style={{ borderLeftColor: color }}
+    className="flex min-h-[88px] items-center justify-between rounded-xl bg-white px-4 py-3 shadow-[0_2px_10px_rgba(79,70,229,0.10)] dark:bg-[#111827]"
   >
     <div>
       <p className="max-w-[130px] text-[11px] leading-5 text-slate-500 dark:text-slate-400">{title}</p>
@@ -204,6 +207,21 @@ export const DashboardPage: React.FC = () => {
     };
   }, [expenses, purchases, sales, summary]);
 
+  /* ── Extended financial metrics ── */
+  const financialMetrics = useMemo(() => {
+    const totalRevenue   = sales.reduce((t, s) => t + numberValue(s.grandTotal), 0);
+    const totalCost      = purchases.reduce((t, p) => t + numberValue(p.grandTotal), 0);
+    const totalExpenses  = expenses.reduce((t, e) => t + numberValue(e.amount), 0);
+    const netProfit      = totalRevenue - totalCost - totalExpenses;
+    const paidSalesAmt   = sales.filter((s) => isCompleted(s.status, s.dueAmount)).reduce((t, s) => t + numberValue(s.grandTotal), 0);
+    const unpaidSalesAmt = sales.filter((s) => !isCompleted(s.status, s.dueAmount)).reduce((t, s) => t + numberValue(s.dueAmount), 0);
+    const paidSalesCount   = sales.filter((s) => isCompleted(s.status, s.dueAmount)).length;
+    const unpaidSalesCount = sales.filter((s) => !isCompleted(s.status, s.dueAmount)).length;
+    const paidPurchAmt   = purchases.filter((p) => isCompleted(p.status, p.dueAmount)).reduce((t, p) => t + numberValue(p.grandTotal), 0);
+    const unpaidPurchAmt = purchases.filter((p) => !isCompleted(p.status, p.dueAmount)).reduce((t, p) => t + numberValue(p.dueAmount), 0);
+    return { totalRevenue, totalCost, totalExpenses, netProfit, paidSalesAmt, unpaidSalesAmt, paidSalesCount, unpaidSalesCount, paidPurchAmt, unpaidPurchAmt };
+  }, [sales, purchases, expenses]);
+
   /* ── Today stats ── */
   const todayStats = useMemo(() => {
     const todayStr = new Date().toISOString().slice(0, 10);
@@ -239,6 +257,27 @@ export const DashboardPage: React.FC = () => {
     });
     return [...grouped.values()];
   }, [months, expenses]);
+
+  /* ── Net Profit trend ── */
+  const profitTrendData = useMemo(() => {
+    const grouped = new Map(months.map((m) => [m.key, { month: m.label, revenue: 0, cost: 0, expense: 0 }]));
+    sales.forEach((s) => { const e = grouped.get(monthKey(s.invoiceDate)); if (e) e.revenue += numberValue(s.grandTotal); });
+    purchases.forEach((p) => { const e = grouped.get(monthKey(p.purchaseDate)); if (e) e.cost += numberValue(p.grandTotal); });
+    expenses.forEach((ex) => { const e = grouped.get(monthKey(ex.expenseDate || '')); if (e) e.expense += numberValue(ex.amount); });
+    return [...grouped.values()].map((m) => ({ ...m, profit: m.revenue - m.cost - m.expense }));
+  }, [months, sales, purchases, expenses]);
+
+  /* ── Sales payment status for pie ── */
+  const salesPaymentStatus = useMemo(() => [
+    { name: 'Collected', value: financialMetrics.paidSalesAmt, count: financialMetrics.paidSalesCount, color: '#22c55e' },
+    { name: 'Outstanding', value: financialMetrics.unpaidSalesAmt, count: financialMetrics.unpaidSalesCount, color: '#ff3d5a' },
+  ], [financialMetrics]);
+
+  /* ── Purchase payment status for pie ── */
+  const purchasePaymentStatus = useMemo(() => [
+    { name: 'Paid', value: financialMetrics.paidPurchAmt, color: '#22c55e' },
+    { name: 'Unpaid', value: financialMetrics.unpaidPurchAmt, color: '#ff9f0a' },
+  ], [financialMetrics]);
 
   /* ── Trending items ── */
   const trendingItems = useMemo<DashboardTrendingItem[]>(() => {
@@ -333,6 +372,24 @@ export const DashboardPage: React.FC = () => {
         </div>
       </div>
 
+      {/* ── Financial Performance Cards ── */}
+      <div>
+        <p className="mb-2 text-[11px] font-semibold uppercase tracking-widest text-slate-400">Financial Performance (Last 6 Months)</p>
+        <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+          <MetricCard title="Total Revenue" value={financialMetrics.totalRevenue} color="#1684ed" icon={<Wallet size={20} />} currency />
+          <MetricCard title="Total Purchase Cost" value={financialMetrics.totalCost} color="#f5b800" icon={<ShoppingBag size={20} />} currency />
+          <MetricCard title="Total Expenses" value={financialMetrics.totalExpenses} color="#ef4444" icon={<TrendingDown size={20} />} currency />
+          <MetricCard
+            title="Net Profit"
+            value={financialMetrics.netProfit}
+            color={financialMetrics.netProfit >= 0 ? '#22c55e' : '#ef4444'}
+            icon={<BarChart2 size={20} />}
+            currency
+            subLabel={financialMetrics.netProfit >= 0 ? 'Profitable' : 'Loss'}
+          />
+        </div>
+      </div>
+
       {/* ── Charts Row ── */}
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-3">
         <Panel title="Sale vs. Purchase — Last 6 Months" className="xl:col-span-2">
@@ -370,6 +427,65 @@ export const DashboardPage: React.FC = () => {
             </ResponsiveContainer>
           </div>
         </Panel>
+      </div>
+
+      {/* ── Net Profit Trend + Payment Status Charts ── */}
+      <div className="grid grid-cols-1 gap-5 xl:grid-cols-3">
+        <Panel title="Net Profit Trend — Last 6 Months" className="xl:col-span-2">
+          <div className="h-[260px] p-4">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={profitTrendData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                <CartesianGrid stroke="#e5e7eb" vertical={false} />
+                <XAxis dataKey="month" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} />
+                <YAxis tick={{ fontSize: 11, fill: '#64748b' }} width={52} axisLine={false} tickLine={false} />
+                <Tooltip formatter={(value) => formatCurrency(numberValue(value))} />
+                <Legend wrapperStyle={{ fontSize: 11 }} />
+                <Line name="Revenue" type="monotone" dataKey="revenue" stroke="#1684ed" strokeWidth={2} dot={{ r: 3, fill: '#1684ed' }} />
+                <Line name="Purchase Cost" type="monotone" dataKey="cost" stroke="#f5b800" strokeWidth={2} dot={{ r: 3, fill: '#f5b800' }} />
+                <Line name="Expenses" type="monotone" dataKey="expense" stroke="#ef4444" strokeWidth={2} dot={{ r: 3, fill: '#ef4444' }} />
+                <Line name="Net Profit" type="monotone" dataKey="profit" stroke="#22c55e" strokeWidth={2.5} strokeDasharray="5 3" dot={{ r: 3, fill: '#22c55e' }} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </Panel>
+
+        <div className="flex flex-col gap-5">
+          <Panel title="Sales Collection Status">
+            <div className="h-[115px] p-3">
+              {salesPaymentStatus.some((s) => s.value > 0) ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie data={salesPaymentStatus} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={30} outerRadius={48} paddingAngle={2}>
+                      {salesPaymentStatus.map((entry) => <Cell key={entry.name} fill={entry.color} />)}
+                    </Pie>
+                    <Tooltip formatter={(value) => formatCurrency(numberValue(value))} />
+                    <Legend wrapperStyle={{ fontSize: 10 }} />
+                  </PieChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="flex h-full items-center justify-center text-xs text-slate-400">No sales data</div>
+              )}
+            </div>
+          </Panel>
+
+          <Panel title="Purchase Payment Status">
+            <div className="h-[115px] p-3">
+              {purchasePaymentStatus.some((s) => s.value > 0) ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie data={purchasePaymentStatus} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={30} outerRadius={48} paddingAngle={2}>
+                      {purchasePaymentStatus.map((entry) => <Cell key={entry.name} fill={entry.color} />)}
+                    </Pie>
+                    <Tooltip formatter={(value) => formatCurrency(numberValue(value))} />
+                    <Legend wrapperStyle={{ fontSize: 10 }} />
+                  </PieChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="flex h-full items-center justify-center text-xs text-slate-400">No purchase data</div>
+              )}
+            </div>
+          </Panel>
+        </div>
       </div>
 
       {/* ── Trending Items (horizontal bar) + Total Expense ── */}

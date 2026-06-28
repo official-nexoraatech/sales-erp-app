@@ -70,6 +70,7 @@ import { WarehouseViewPage } from '../pages/warehouses/WarehouseViewPage';
 import { OrganizationListPage } from '../pages/organizations/OrganizationListPage';
 import { OrganizationCreatePage } from '../pages/organizations/OrganizationCreatePage';
 import { OrganizationEditPage } from '../pages/organizations/OrganizationEditPage';
+import { OrganizationViewPage } from '../pages/organizations/OrganizationViewPage';
 import { ImportPage } from '../pages/utilities/ImportPage';
 import { GenerateBarcodePage } from '../pages/utilities/GenerateBarcodePage';
 import { UserProfilePage } from '../pages/users/UserProfilePage';
@@ -309,6 +310,7 @@ export const router = createBrowserRouter([
   { path: '/organizations', element: <ProtectedRoute permissions={PERMISSIONS.ORGANIZATION_VIEW}><AppLayout><OrganizationListPage /></AppLayout></ProtectedRoute> },
   { path: '/organizations/create', element: <ProtectedRoute permissions={PERMISSIONS.ORGANIZATION_CREATE}><AppLayout><OrganizationCreatePage /></AppLayout></ProtectedRoute> },
   { path: '/organizations/:id/edit', element: <ProtectedRoute permissions={[PERMISSIONS.ORGANIZATION_UPDATE, PERMISSIONS.ORGANIZATION_VIEW]} requireAll><AppLayout><OrganizationEditPage /></AppLayout></ProtectedRoute> },
+  { path: '/organizations/:id', element: <ProtectedRoute permissions={PERMISSIONS.ORGANIZATION_VIEW}><AppLayout><OrganizationViewPage /></AppLayout></ProtectedRoute> },
   { path: '/utilities/import-items', element: <ProtectedRoute permissions={[PERMISSIONS.ITEM_IMPORT, PERMISSIONS.ITEM_TEMPLATE_DOWNLOAD]}><AppLayout><ImportPage type="items" /></AppLayout></ProtectedRoute> },
   { path: '/utilities/import-contacts', element: <ProtectedRoute permissions={[PERMISSIONS.CONTACT_IMPORT, PERMISSIONS.CONTACT_TEMPLATE_DOWNLOAD]}><AppLayout><ImportPage type="contacts" /></AppLayout></ProtectedRoute> },
   { path: '/utilities/generate-barcode', element: <ProtectedRoute permissions={PERMISSIONS.ITEM_VIEW}><AppLayout><GenerateBarcodePage /></AppLayout></ProtectedRoute> },

@@ -117,7 +117,7 @@ export const PaymentInListPage: React.FC = () => {
             <thead className="bg-gray-50"><tr>{exportColumns.concat('Action').map((heading) => <th key={heading} className="border-b p-3 text-left">{heading}</th>)}</tr></thead>
             <tbody>
               {rows.length ? rows.map((payment: PaymentListItem) => <tr key={payment.paymentId} className="border-b even:bg-gray-50">
-                <td className="p-3">{formatDate(payment.paymentDate)}</td><td className="p-3">{payment.paymentNo || 'N/A'}</td><td className="p-3">{payment.paymentNo || 'N/A'}</td><td className="p-3">{payment.customerName || payment.partyName || 'N/A'}</td><td className="p-3 font-semibold">{formatCurrency(payment.amount)}</td><td className="p-3">{user?.userName || 'N/A'}</td><td className="p-3">{formatDate(payment.paymentDate)}</td><td className="p-3"><button onClick={() => navigate(`/sales/payment-in/${payment.paymentId}`)} className="text-blue-600"><Eye size={17} /></button></td>
+                <td className="p-3">{formatDate(payment.paymentDate)}</td><td className="p-3">{payment.paymentNo || 'N/A'}</td><td className="p-3">{payment.paymentNo || 'N/A'}</td><td className="p-3">{payment.customerName || payment.partyName || 'N/A'}</td><td className="p-3 font-semibold">{formatCurrency(payment.amount)}</td><td className="p-3">{user?.userName || 'N/A'}</td><td className="p-3">{formatDate(payment.paymentDate)}</td><td className="p-3"><button title="View payment" onClick={() => navigate(`/sales/payment-in/${payment.paymentId}`)} className="text-blue-600"><Eye size={17} /></button></td>
               </tr>) : <tr><td colSpan={8} className="bg-gray-50 p-5 text-center text-gray-700">No data available in table</td></tr>}
             </tbody>
           </table>}

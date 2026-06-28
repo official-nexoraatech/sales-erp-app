@@ -52,9 +52,9 @@ export const SupplierListPage: React.FC = () => {
       header: 'Actions',
       render: (value: number) => (
         <div className="flex gap-2">
-          <button aria-label="View supplier" onClick={() => navigate(`/contacts/suppliers/${value}`)} className="rounded p-1 text-blue-600 hover:bg-blue-50"><Eye size={18} /></button>
-          {canUpdate && <button aria-label="Edit supplier" onClick={() => navigate(`/contacts/suppliers/${value}/edit`)} className="rounded p-1 text-orange-600 hover:bg-orange-50"><Edit size={18} /></button>}
-          {canDelete && <button aria-label="Delete supplier" onClick={() => setDeleteId(value)} className="rounded p-1 text-red-600 hover:bg-red-50"><Trash2 size={18} /></button>}
+          <button title="View supplier" aria-label="View supplier" onClick={() => navigate(`/contacts/suppliers/${value}`)} className="rounded p-1 text-blue-600 hover:bg-blue-50"><Eye size={18} /></button>
+          {canUpdate && <button title="Edit supplier" aria-label="Edit supplier" onClick={() => navigate(`/contacts/suppliers/${value}/edit`)} className="rounded p-1 text-orange-600 hover:bg-orange-50"><Edit size={18} /></button>}
+          {canDelete && <button title="Delete supplier" aria-label="Delete supplier" onClick={() => setDeleteId(value)} className="rounded p-1 text-red-600 hover:bg-red-50"><Trash2 size={18} /></button>}
         </div>
       ),
     },

@@ -60,6 +60,7 @@ export const CustomerListPage: React.FC = () => {
       render: (value: number) => (
         <div className="flex gap-2">
           <button
+            title="View customer"
             onClick={() => navigate(`/contacts/customers/${value}`)}
             className="p-1 text-blue-600 hover:bg-blue-50 rounded"
           >
@@ -67,6 +68,7 @@ export const CustomerListPage: React.FC = () => {
           </button>
           {canUpdate && (
             <button
+              title="Edit customer"
               onClick={() =>
                 navigate(`/contacts/customers/${value}/edit`)
               }
@@ -77,6 +79,7 @@ export const CustomerListPage: React.FC = () => {
           )}
           {canDelete && (
             <button
+              title="Delete customer"
               onClick={() => setDeleteId(value)}
               className="p-1 text-red-600 hover:bg-red-50 rounded"
             >
