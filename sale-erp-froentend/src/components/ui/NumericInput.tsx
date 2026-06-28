@@ -15,9 +15,8 @@ type NumericInputProps = Omit<
   containerClassName?: string;
 };
 
-const toDisplayValue = (value: number | string) => (
-  value === null || value === undefined ? '' : String(value)
-);
+const toDisplayValue = (value: number | string) =>
+  value === null || value === undefined ? '' : String(value);
 
 const parseNumericText = (
   value: string,
@@ -38,7 +37,10 @@ const parseNumericText = (
     return { message: 'Enter a valid number', value: null };
   }
   if (min !== undefined && numericValue < min) {
-    return { message: min === 0 ? 'Value cannot be negative' : `Value must be at least ${min}`, value: null };
+    return {
+      message: min === 0 ? 'Value cannot be negative' : `Value must be at least ${min}`,
+      value: null,
+    };
   }
   if (max !== undefined && numericValue > max) {
     return { message: `Value must be ${max} or less`, value: null };
@@ -59,7 +61,7 @@ export const NumericInput = React.forwardRef<HTMLInputElement, NumericInputProps
       error,
       helperText,
       containerClassName,
-      className,
+      className = '',
       id,
       ...props
     },
@@ -84,9 +86,21 @@ export const NumericInput = React.forwardRef<HTMLInputElement, NumericInputProps
           type="text"
           inputMode={integer ? 'numeric' : 'decimal'}
           value={displayValue}
-          aria-invalid={Boolean(message)}
+          aria-invalid={Boolean(message) || undefined}
           aria-describedby={message || helperText ? `${inputId}-message` : undefined}
-          className={`${className || ''} ${message ? 'border-red-400 focus:border-red-400 focus:ring-red-100' : ''}`}
+          className={[
+            'h-10 w-full rounded-md border bg-white px-3 text-sm text-slate-900 outline-none',
+            'transition-colors placeholder:text-slate-400 focus:ring-2',
+            'disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400',
+            'dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-500',
+            'dark:disabled:bg-slate-800 dark:disabled:text-slate-500',
+            message
+              ? 'border-red-400 focus:border-red-500 focus:ring-red-100 dark:border-red-500 dark:focus:ring-red-900/30'
+              : 'border-slate-300 focus:border-blue-400 focus:ring-blue-100 dark:border-slate-600 dark:focus:border-blue-400 dark:focus:ring-blue-900/30',
+            className,
+          ]
+            .filter(Boolean)
+            .join(' ')}
           onChange={(event) => {
             const nextValue = event.target.value;
             setDisplayValue(nextValue);
@@ -103,8 +117,16 @@ export const NumericInput = React.forwardRef<HTMLInputElement, NumericInputProps
           }}
           {...props}
         />
-        {message && <p id={`${inputId}-message`} className="mt-1 text-xs font-medium text-red-600">{message}</p>}
-        {helperText && !message && <p id={`${inputId}-message`} className="mt-1 text-xs text-gray-500">{helperText}</p>}
+        {message && (
+          <p id={`${inputId}-message`} role="alert" className="mt-1.5 text-xs font-medium text-red-600 dark:text-red-400">
+            {message}
+          </p>
+        )}
+        {helperText && !message && (
+          <p id={`${inputId}-message`} className="mt-1.5 text-xs text-slate-500 dark:text-slate-400">
+            {helperText}
+          </p>
+        )}
       </div>
     );
   },

@@ -29,7 +29,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
   };
 
   return (
-    <div className="flex h-screen bg-[#f7f9fc] dark:bg-[#0f172a]">
+    <div className="flex h-screen bg-slate-100 dark:bg-slate-900">
       <Sidebar
         key={`sidebar-${translationResetKey}`}
         isOpen={sidebarOpen}
@@ -37,24 +37,35 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
         collapsed={sidebarCollapsed}
         onToggleCollapsed={handleToggleCollapsed}
       />
-      {/* Mobile hamburger */}
+
+      {/* Mobile hamburger — matches sidebar chrome color */}
       <button
         type="button"
         onClick={() => setSidebarOpen(true)}
-        className="fixed left-3 top-3 z-30 rounded-lg border border-[#dbe7f3] bg-white p-2 text-[#1684ed] shadow-md md:hidden"
+        className="fixed left-3 top-3 z-30 rounded-lg border border-slate-200 bg-white p-2 text-blue-600 shadow-md transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-blue-400 dark:hover:bg-slate-700 md:hidden"
         aria-label="Open menu"
       >
         <span className="block h-0.5 w-5 bg-current" />
         <span className="mt-1.5 block h-0.5 w-5 bg-current" />
         <span className="mt-1.5 block h-0.5 w-5 bg-current" />
       </button>
+
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <AppHeader />
-        <main key={`content-${translationResetKey}`} className="flex-1 overflow-y-auto bg-[#f7f9fc] dark:bg-[#0f172a]">
-          <div className="min-h-full p-4 pb-8 md:p-5 md:pb-8">{children}</div>
+
+        {/* Main content — slate-900 is slightly deeper than the sidebar/header chrome (slate-800) */}
+        <main
+          key={`content-${translationResetKey}`}
+          className="flex-1 overflow-y-auto bg-slate-50 dark:bg-slate-900"
+        >
+          <div className="min-h-full p-4 pb-8 md:p-5 md:pb-10">
+            {children}
+          </div>
         </main>
-        <footer className="flex h-8 shrink-0 items-center justify-center border-t border-indigo-100 bg-white px-4 text-[11px] text-slate-500 dark:border-slate-700 dark:bg-[#111827] dark:text-slate-400">
-          Copyright &copy; Texmintra - {new Date().getFullYear()} (v2.4)
+
+        {/* Footer — same slate-800 as sidebar and header for unified chrome */}
+        <footer className="flex h-8 shrink-0 items-center justify-center border-t border-slate-200 bg-white px-4 text-[11px] text-slate-400 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-500">
+          Copyright &copy; Texmintra &mdash; {new Date().getFullYear()} (v2.4)
         </footer>
       </div>
     </div>
