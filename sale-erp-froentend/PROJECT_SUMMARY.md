@@ -1,4 +1,4 @@
-# BillTop Frontend Application - Complete Build Summary
+# Texmintra Frontend Application - Complete Build Summary
 
 ## Project Overview
 A complete React-based billing and inventory management system frontend built with modern technologies.
@@ -20,7 +20,7 @@ A complete React-based billing and inventory management system frontend built wi
 ## Project Structure Created
 
 ```
-billtop-frontend/
+texmintra-frontend/
 ├── src/
 │   ├── app/
 │   │   ├── router.tsx           # React Router configuration
@@ -201,7 +201,7 @@ VITE_API_BASE_URL=http://localhost:8081
 
 ### Installation
 ```bash
-cd billtop-frontend
+cd texmintra-frontend
 npm install
 ```
 

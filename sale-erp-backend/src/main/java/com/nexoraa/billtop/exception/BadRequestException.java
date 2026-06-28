@@ -12,5 +12,9 @@ public class BadRequestException extends ApplicationException {
     public BadRequestException(String message, String errorCode) {
         super(message, errorCode);
     }
+
+    public BadRequestException(String message, String errorCode, Throwable cause) {
+        super(message, errorCode, cause);
+    }
 }
 

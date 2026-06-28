@@ -1,4 +1,4 @@
-# BillTop Dashboard and Application API Audit
+# texmintra Dashboard and Application API Audit
 
 Audit date: June 22, 2026
 

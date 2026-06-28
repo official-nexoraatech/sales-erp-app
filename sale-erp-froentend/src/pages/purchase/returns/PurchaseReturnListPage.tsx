@@ -13,6 +13,7 @@ import { useAuth } from '../../../hooks/useAuth';
 import { usePagination } from '../../../hooks/usePagination';
 import { formatCurrency } from '../../../utils/formatCurrency';
 import { formatDate } from '../../../utils/formatDate';
+import { TableExportButtons } from '../../../components/common/TableExportButtons';
 
 const exportColumns = ['Return ID', 'Date', 'Supplier', 'Total', 'Balance', 'Created by', 'Created at'];
 const returnCode = (entry: PurchaseReturnListItem) => entry.returnNo || `PR/${entry.returnId}`;
@@ -87,7 +88,7 @@ export const PurchaseReturnListPage: React.FC = () => {
         </div>
         <div className="flex flex-wrap items-center justify-between gap-3 px-5 pb-4">
           <label className="flex items-center gap-2 text-sm text-gray-600">Show<select value={pageSize} onChange={(event) => { setPageSize(Number(event.target.value)); setPage(0); }} className="h-9 rounded border border-gray-300 px-2"><option>10</option><option>20</option><option>50</option><option>100</option></select>entries</label>
-          <div className="flex flex-wrap items-center"><button onClick={copy} className="h-10 rounded-l border border-r px-3 text-sm">Copy</button><button onClick={() => download('xls')} className="h-10 border-y border-r px-3 text-sm">Excel</button><button onClick={() => download('csv')} className="h-10 border-y border-r px-3 text-sm">CSV</button><button onClick={printPdf} className="h-10 rounded-r border-y border-r px-3 text-sm">PDF</button></div>
+          <TableExportButtons onCopy={copy} onDownloadExcel={() => download('xls')} onDownloadCsv={() => download('csv')} onPrint={printPdf} />
           <label className="flex items-center gap-2 text-sm text-gray-600">Search:<input value={search} onChange={(event) => setSearch(event.target.value)} className="h-9 rounded border border-gray-300 px-3" /></label>
         </div>
         <div className="overflow-x-auto px-3 pb-3">

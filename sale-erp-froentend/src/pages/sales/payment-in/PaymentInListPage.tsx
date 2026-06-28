@@ -13,6 +13,7 @@ import { usePagination } from '../../../hooks/usePagination';
 import { formatCurrency } from '../../../utils/formatCurrency';
 import { formatDate } from '../../../utils/formatDate';
 import { PERMISSIONS } from '../../../auth/permissions';
+import { TableExportButtons } from '../../../components/common/TableExportButtons';
 
 const exportColumns = ['Date', 'Reference No.', 'Invoice No.', 'Customer', 'Paid', 'Created by', 'Created at'];
 
@@ -107,12 +108,7 @@ export const PaymentInListPage: React.FC = () => {
               <option>10</option><option>20</option><option>50</option><option>100</option>
             </select> entries
           </label>
-          <div className="flex flex-wrap items-center gap-0">
-            <button onClick={copy} className="rounded-l border px-3 py-2 text-sm">Copy</button>
-            <button onClick={() => download('xls')} className="border-y border-r px-3 py-2 text-sm">Excel</button>
-            <button onClick={() => download('csv')} className="border-y border-r px-3 py-2 text-sm">CSV</button>
-            <button onClick={printPdf} className="rounded-r border-y border-r px-3 py-2 text-sm">PDF</button>
-          </div>
+          <TableExportButtons onCopy={copy} onDownloadExcel={() => download('xls')} onDownloadCsv={() => download('csv')} onPrint={printPdf} />
           <label className="flex items-center gap-2 text-sm">Search:<input value={search} onChange={(event) => setSearch(event.target.value)} className="rounded border px-3 py-2" /></label>
         </div>
 

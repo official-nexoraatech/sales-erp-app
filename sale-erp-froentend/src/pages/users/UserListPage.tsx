@@ -14,6 +14,7 @@ import { useDebounce } from '../../hooks/useDebounce';
 import { formatDate } from '../../utils/formatDate';
 import { useAuth } from '../../hooks/useAuth';
 import { PERMISSIONS } from '../../auth/permissions';
+import { TableExportButtons } from '../../components/common/TableExportButtons';
 
 const columns = ['Username', 'First Name', 'Last Name', 'Email', 'Mobile', 'Role', 'Status', 'Created at', 'Action'];
 
@@ -45,10 +46,29 @@ export const UserListPage: React.FC = () => {
     onError: (error: any) => toast.error(error?.message || 'Failed to delete user'),
   });
 
+  const exportColumns = columns.slice(0, -1);
+  const getExportRows = () => rows.map((row) => [row.userName || row.username || '', row.firstName || '', row.lastName || '', row.email || '', row.mobileNo || row.mobile || '', row.roleName || '', row.status ?? '', row.createdAt || '']);
+
   const copy = async () => {
-    const exportRows = rows.map((row) => [row.userName || row.username || '', row.firstName || '', row.lastName || '', row.email || '', row.mobileNo || row.mobile || '', row.roleName || '', row.status ?? '', row.createdAt || '']);
-    await navigator.clipboard.writeText([columns.slice(0, -1), ...exportRows].map((entry) => entry.join('\t')).join('\n'));
+    await navigator.clipboard.writeText([exportColumns, ...getExportRows()].map((entry) => entry.join('\t')).join('\n'));
     toast.success('Users copied');
+  };
+  const download = (extension: 'csv' | 'xls') => {
+    const separator = extension === 'csv' ? ',' : '\t';
+    const content = [exportColumns, ...getExportRows()].map((row) => row.map((value) => `"${String(value).replaceAll('"', '""')}"`).join(separator)).join('\n');
+    const blob = new Blob([content], { type: extension === 'csv' ? 'text/csv' : 'application/vnd.ms-excel' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `users.${extension}`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+  const printPdf = () => {
+    const popup = window.open('', '_blank');
+    if (!popup) return;
+    popup.document.write(`<html><head><title>User List</title></head><body><h2>User List</h2><table border="1" cellspacing="0" cellpadding="6"><thead><tr>${exportColumns.map((column) => `<th>${column}</th>`).join('')}</tr></thead><tbody>${getExportRows().map((row) => `<tr>${row.map((value) => `<td>${value}</td>`).join('')}</tr>`).join('')}</tbody></table><script>window.print()</script></body></html>`);
+    popup.document.close();
   };
   const deleteSelected = async () => {
     if (!selectedIds.length) return toast.error('Select at least one user');
@@ -78,13 +98,13 @@ export const UserListPage: React.FC = () => {
             </select>
             entries
           </label>
-          <div className="flex flex-wrap items-center">
-            {canDelete && <button type="button" onClick={deleteSelected} className="h-10 rounded-l border border-red-300 bg-red-500 px-3 text-sm text-white">Delete</button>}
-            <button type="button" onClick={copy} className={`h-10 border px-3 text-sm ${canDelete ? 'border-l-0' : 'rounded-l'}`}>Copy</button>
-            <button type="button" onClick={copy} className="h-10 border-y border-r px-3 text-sm">Excel</button>
-            <button type="button" onClick={copy} className="h-10 border-y border-r px-3 text-sm">CSV</button>
-            <button type="button" onClick={copy} className="h-10 rounded-r border-y border-r px-3 text-sm">PDF</button>
-          </div>
+          <TableExportButtons
+            onCopy={copy}
+            onDownloadExcel={() => download('xls')}
+            onDownloadCsv={() => download('csv')}
+            onPrint={printPdf}
+            leadingButton={canDelete && <button type="button" onClick={deleteSelected} className="h-10 rounded-l border border-red-300 bg-red-500 px-3 text-sm text-white transition-all active:scale-95 active:bg-red-50">Delete</button>}
+          />
           <label className="flex items-center gap-2 text-sm text-gray-600">
             Search:
             <input value={search} onChange={(event) => { setSearch(event.target.value); setPage(0); }} className="h-9 rounded border border-gray-300 px-3" />

@@ -246,6 +246,37 @@ export interface SimpleMasterRequest {
   categoryId?: number;
 }
 
+export type MessageTemplateStatus = 'ACTIVE' | 'INACTIVE';
+
+export interface MessageTemplate {
+  id: number;
+  name: string;
+  subject?: string;
+  content: string;
+  status?: MessageTemplateStatus;
+  createdAt?: string;
+  createdBy?: string;
+}
+
+export interface MessageTemplateRequest {
+  name: string;
+  subject?: string;
+  content: string;
+  status: MessageTemplateStatus;
+}
+
+export interface EmailSendRequest {
+  emailIds: string;
+  subject: string;
+  message: string;
+  file?: File | null;
+}
+
+export interface SmsSendRequest {
+  mobileNumbers: string[];
+  message: string;
+}
+
 export type ExpenseMasterStatus = 'ACTIVE' | 'INACTIVE';
 
 export interface ExpenseCategory {

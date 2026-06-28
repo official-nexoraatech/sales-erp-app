@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { Edit, Eye, PackageSearch, RefreshCw, Trash2 } from 'lucide-react';
+import { Edit, Eye, PackageSearch, Trash2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { brandApi, categoryApi, itemApi, warehouseApi } from '../../api/endpoints';
 import type { ItemListItem } from '../../api/endpoints';
 import { queryClient } from '../../app/queryClient';
+import { TableExportButtons } from '../../components/common/TableExportButtons';
 import { Button } from '../../components/ui/Button';
 import { Loader } from '../../components/ui/Loader';
 import { Pagination } from '../../components/ui/Pagination';
@@ -170,7 +171,14 @@ export const ItemListPage: React.FC = () => {
         </div>
         <div className="flex flex-wrap items-center justify-between gap-3 px-5 pb-4">
           <label className="flex items-center gap-2 text-sm text-gray-600">Show<select value={pageSize} onChange={(event) => { setPageSize(Number(event.target.value)); setPage(0); }} className="h-9 rounded border border-gray-300 px-2"><option>10</option><option>20</option><option>50</option><option>100</option></select>entries</label>
-          <div className="flex flex-wrap items-center">{canDelete && <button onClick={deleteSelected} className="h-10 rounded-l border border-red-300 px-3 text-sm text-red-500">Delete</button>}<button onClick={copy} className={`h-10 border px-3 text-sm ${canDelete ? 'border-l-0' : 'rounded-l'}`}>Copy</button><button onClick={() => download('xls')} className="h-10 border-y border-r px-3 text-sm">Excel</button><button onClick={() => download('csv')} className="h-10 border-y border-r px-3 text-sm">CSV</button><button onClick={printPdf} className="h-10 border-y border-r px-3 text-sm">PDF</button><button type="button" title="Refresh items" onClick={() => queryClient.invalidateQueries({ queryKey: ['items'] })} className="flex h-10 w-10 items-center justify-center rounded-r border-y border-r text-gray-600"><RefreshCw size={16} /></button></div>
+          <TableExportButtons
+            leadingButton={canDelete && <button onClick={deleteSelected} className="h-10 rounded-l border border-red-300 px-3 text-sm text-red-500 transition-all active:scale-95 active:bg-red-50">Delete</button>}
+            onCopy={copy}
+            onDownloadExcel={() => download('xls')}
+            onDownloadCsv={() => download('csv')}
+            onPrint={printPdf}
+            onRefresh={() => queryClient.invalidateQueries({ queryKey: ['items'] })}
+          />
           <label className="flex items-center gap-2 text-sm text-gray-600">Search:<input value={search} onChange={(event) => { setSearch(event.target.value); setPage(0); }} className="h-9 rounded border border-gray-300 px-3" /></label>
         </div>
         <div className="overflow-x-auto px-3 pb-3">
