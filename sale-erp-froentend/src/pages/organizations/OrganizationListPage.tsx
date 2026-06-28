@@ -1,6 +1,6 @@
 import React, { useRef, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { Edit, Plus, Trash2, Upload } from 'lucide-react';
+import { Edit, Eye, Plus, Trash2, Upload } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { organizationApi } from '../../api/endpoints';
@@ -105,6 +105,15 @@ export const OrganizationListPage: React.FC = () => {
         const id = getOrganizationId(record);
         return (
           <div className="flex gap-2">
+            <button
+              type="button"
+              title="View organization"
+              aria-label="View organization"
+              onClick={() => navigate(`/organizations/${id}`)}
+              className="rounded p-1 text-blue-600 hover:bg-blue-50"
+            >
+              <Eye size={18} />
+            </button>
             {canUpdate && (
               <>
                 <input
@@ -121,19 +130,20 @@ export const OrganizationListPage: React.FC = () => {
                 />
                 <button
                   type="button"
+                  title="Upload logo"
                   aria-label="Upload organization logo"
                   disabled={logoMutation.isPending}
                   onClick={() => logoInputRefs.current[id]?.click()}
-                  className="rounded p-1 text-blue-600 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="rounded p-1 text-violet-600 hover:bg-violet-50 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <Upload size={18} />
                 </button>
-                <button type="button" aria-label="Edit organization" onClick={() => navigate(`/organizations/${id}/edit`, { state: record })} className="rounded p-1 text-orange-600 hover:bg-orange-50">
+                <button type="button" title="Edit organization" aria-label="Edit organization" onClick={() => navigate(`/organizations/${id}/edit`, { state: record })} className="rounded p-1 text-orange-600 hover:bg-orange-50">
                   <Edit size={18} />
                 </button>
               </>
             )}
-            {canDelete && <button type="button" aria-label="Delete organization" onClick={() => setDeleteId(id)} className="rounded p-1 text-red-600 hover:bg-red-50">
+            {canDelete && <button type="button" title="Delete organization" aria-label="Delete organization" onClick={() => setDeleteId(id)} className="rounded p-1 text-red-600 hover:bg-red-50">
               <Trash2 size={18} />
             </button>}
           </div>
