@@ -6,6 +6,7 @@ import com.nexoraa.billtop.dto.item.ItemDetailResponseDto;
 import com.nexoraa.billtop.dto.item.ItemListResponseDto;
 import com.nexoraa.billtop.dto.item.ItemRequestDto;
 import com.nexoraa.billtop.dto.item.ItemStockResponseDto;
+import com.nexoraa.billtop.enums.ItemStatus;
 
 public interface ItemService {
 
@@ -19,7 +20,8 @@ public interface ItemService {
             String search,
             Long categoryId,
             Long brandId,
-            Long warehouseId
+            Long warehouseId,
+            ItemStatus status
     );
 
     void updateItem(Long id, ItemRequestDto request);

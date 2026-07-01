@@ -62,7 +62,6 @@ export const ItemForm: React.FC<Props> = ({
   const location = useLocation();
   const imageInputRef = useRef<HTMLInputElement | null>(null);
   const [activeTab, setActiveTab] = useState<'pricing' | 'stock'>('pricing');
-  const [itemType, setItemType] = useState('Product');
   const [imagePreviewUrl, setImagePreviewUrl] = useState('');
   const [imageName, setImageName] = useState('');
   const [form, setForm] = useState<ItemRequest>(() => buildFormState(initial));
@@ -156,7 +155,7 @@ export const ItemForm: React.FC<Props> = ({
 
   return (
     <div className="overflow-hidden rounded-lg bg-white shadow">
-      <div className="flex items-center justify-between border-b px-5 py-4"><h1 className="text-xl font-semibold text-gray-900">Item Details</h1><div className="overflow-hidden rounded border border-blue-500"><button onClick={() => setItemType('Product')} className={`px-4 py-2 text-sm ${itemType === 'Product' ? 'bg-blue-600 text-white' : 'text-blue-600'}`}>Product</button><button onClick={() => setItemType('Service')} className={`px-4 py-2 text-sm ${itemType === 'Service' ? 'bg-blue-600 text-white' : 'text-blue-600'}`}>Service</button></div></div>
+      <div className="flex items-center justify-between border-b px-5 py-4"><h1 className="text-xl font-semibold text-gray-900">Item Details</h1></div>
       <div className="grid grid-cols-1 gap-4 p-5 md:grid-cols-3">
         <label className="text-sm text-gray-600">Name
           <input className={`${controlClass('itemName')} mt-1`} value={form.itemName} onChange={(event) => set('itemName', event.target.value)} />

@@ -2,6 +2,7 @@ package com.nexoraa.billtop.specification;
 
 import com.nexoraa.billtop.entity.Item;
 import com.nexoraa.billtop.entity.Stock;
+import com.nexoraa.billtop.enums.ItemStatus;
 import jakarta.persistence.criteria.Root;
 import jakarta.persistence.criteria.Subquery;
 import jakarta.persistence.criteria.JoinType;
@@ -17,8 +18,8 @@ public final class ItemSpecification {
     private ItemSpecification() {
     }
 
-    public static Specification<Item> active() {
-        return (root, query, criteriaBuilder) -> criteriaBuilder.equal(root.get("status"), com.nexoraa.billtop.enums.Status.ACTIVE);
+    public static Specification<Item> notDeleted() {
+        return (root, query, criteriaBuilder) -> criteriaBuilder.isFalse(root.get("isDeleted"));
     }
 
     public static Specification<Item> organization(Long organizationId) {
@@ -57,6 +58,15 @@ public final class ItemSpecification {
         };
     }
 
+    public static Specification<Item> status(ItemStatus status) {
+        return (root, query, criteriaBuilder) -> {
+            if (status == null) {
+                return criteriaBuilder.conjunction();
+            }
+            return criteriaBuilder.equal(root.get("status"), status);
+        };
+    }
+
     public static Specification<Item> search(String search) {
         return (root, query, criteriaBuilder) -> {
             if (!StringUtils.hasText(search)) {
@@ -73,6 +83,7 @@ public final class ItemSpecification {
             predicates.add(criteriaBuilder.like(criteriaBuilder.lower(root.get("itemCode")), pattern));
             predicates.add(criteriaBuilder.like(criteriaBuilder.lower(root.get("sku")), pattern));
             predicates.add(criteriaBuilder.like(criteriaBuilder.lower(root.get("hsnCode")), pattern));
+            predicates.add(criteriaBuilder.like(criteriaBuilder.lower(root.get("status").as(String.class)), pattern));
             predicates.add(criteriaBuilder.like(criteriaBuilder.lower(root.join("category", JoinType.LEFT).get("name")), pattern));
             predicates.add(criteriaBuilder.like(criteriaBuilder.lower(root.join("brand", JoinType.LEFT).get("name")), pattern));
             return criteriaBuilder.or(predicates.toArray(Predicate[]::new));

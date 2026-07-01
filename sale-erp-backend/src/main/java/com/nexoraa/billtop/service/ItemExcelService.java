@@ -11,6 +11,7 @@ import com.nexoraa.billtop.entity.Organization;
 import com.nexoraa.billtop.entity.Stock;
 import com.nexoraa.billtop.entity.Unit;
 import com.nexoraa.billtop.entity.Warehouse;
+import com.nexoraa.billtop.enums.ItemStatus;
 import com.nexoraa.billtop.exception.BadRequestException;
 import com.nexoraa.billtop.exception.ResourceNotFoundException;
 import com.nexoraa.billtop.repository.BrandRepository;
@@ -107,6 +108,7 @@ public class ItemExcelService {
     private final ItemPriceRepository itemPriceRepository;
     private final ItemBatchRepository itemBatchRepository;
     private final StockRepository stockRepository;
+    private final ItemStockStatusService itemStockStatusService;
     private final CurrentOrganizationService currentOrganizationService;
 
     public ItemExcelService(
@@ -118,6 +120,7 @@ public class ItemExcelService {
             ItemPriceRepository itemPriceRepository,
             ItemBatchRepository itemBatchRepository,
             StockRepository stockRepository,
+            ItemStockStatusService itemStockStatusService,
             CurrentOrganizationService currentOrganizationService
     ) {
         this.itemRepository = itemRepository;
@@ -128,6 +131,7 @@ public class ItemExcelService {
         this.itemPriceRepository = itemPriceRepository;
         this.itemBatchRepository = itemBatchRepository;
         this.stockRepository = stockRepository;
+        this.itemStockStatusService = itemStockStatusService;
         this.currentOrganizationService = currentOrganizationService;
     }
 
@@ -222,7 +226,7 @@ public class ItemExcelService {
 
             Category category = findOrCreateCategory(text(row, ITEM_CATEGORY, formatter), organizationId, organization);
             Brand brand = findOrCreateBrand(text(row, ITEM_BRAND, formatter), organizationId, category);
-            Item item = itemRepository.findByItemCodeIgnoreCaseAndOrganizationIdAndStatus(itemCode, organizationId, com.nexoraa.billtop.enums.Status.ACTIVE)
+            Item item = itemRepository.findByItemCodeIgnoreCaseAndOrganizationIdAndIsDeletedFalse(itemCode, organizationId)
                     .orElseGet(() -> newItem(organization));
             boolean created = item.getId() == null;
 
@@ -270,7 +274,7 @@ public class ItemExcelService {
 
             Item item = importedItemsByName.get(normalize(itemName));
             if (item == null) {
-                item = itemRepository.findFirstByItemNameIgnoreCaseAndOrganizationIdAndStatus(itemName, organizationId, com.nexoraa.billtop.enums.Status.ACTIVE).orElse(null);
+                item = itemRepository.findFirstByItemNameIgnoreCaseAndOrganizationIdAndIsDeletedFalse(itemName, organizationId).orElse(null);
             }
             if (item == null) {
                 addError(response, BATCH_SHEET, rowIndex, itemName, "Item not found. Add this item to the Item Details sheet first.");
@@ -318,6 +322,7 @@ public class ItemExcelService {
             stock.setMinimumStock(stock.getMinimumStock() == null ? ZERO : stock.getMinimumStock());
             stock.setReorderLevel(stock.getReorderLevel() == null ? ZERO : stock.getReorderLevel());
             stockRepository.save(stock);
+            itemStockStatusService.refreshStatus(batchItem);
 
             if (createdBatch) {
                 response.setCreatedBatches(response.getCreatedBatches() + 1);
@@ -384,7 +389,7 @@ public class ItemExcelService {
     private Item newItem(Organization organization) {
         Item item = new Item();
         item.setOrganization(organization);
-        item.setStatus(com.nexoraa.billtop.enums.Status.ACTIVE);
+        item.setStatus(ItemStatus.OUT_OF_STOCK);
         return item;
     }
 

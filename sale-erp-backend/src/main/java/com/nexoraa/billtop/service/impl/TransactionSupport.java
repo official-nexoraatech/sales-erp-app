@@ -28,6 +28,7 @@ import com.nexoraa.billtop.repository.StockTransactionRepository;
 import com.nexoraa.billtop.repository.UserRepository;
 import com.nexoraa.billtop.repository.WarehouseRepository;
 import com.nexoraa.billtop.security.CurrentOrganizationService;
+import com.nexoraa.billtop.service.ItemStockStatusService;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
@@ -60,6 +61,7 @@ class TransactionSupport {
     private final StockRepository stockRepository;
     private final StockTransactionRepository stockTransactionRepository;
     private final PaymentMethodRepository paymentMethodRepository;
+    private final ItemStockStatusService itemStockStatusService;
     private final CurrentOrganizationService currentOrganizationService;
 
     TransactionSupport(
@@ -74,6 +76,7 @@ class TransactionSupport {
             StockRepository stockRepository,
             StockTransactionRepository stockTransactionRepository,
             PaymentMethodRepository paymentMethodRepository,
+            ItemStockStatusService itemStockStatusService,
             CurrentOrganizationService currentOrganizationService
     ) {
         this.contactRepository = contactRepository;
@@ -87,6 +90,7 @@ class TransactionSupport {
         this.stockRepository = stockRepository;
         this.stockTransactionRepository = stockTransactionRepository;
         this.paymentMethodRepository = paymentMethodRepository;
+        this.itemStockStatusService = itemStockStatusService;
         this.currentOrganizationService = currentOrganizationService;
     }
 
@@ -149,7 +153,7 @@ class TransactionSupport {
     }
 
     Item getActiveItem(Long id) {
-        return itemRepository.findByIdAndOrganizationIdAndStatus(id, currentOrganizationService.getOrganizationId(), com.nexoraa.billtop.enums.Status.ACTIVE)
+        return itemRepository.findByIdAndOrganizationIdAndIsDeletedFalse(id, currentOrganizationService.getOrganizationId())
                 .orElseThrow(() -> new ResourceNotFoundException(ErrorMessage.ITEM_NOT_FOUND, "ITEM_NOT_FOUND"));
     }
 
@@ -228,6 +232,7 @@ class TransactionSupport {
         stock.setAvailableQty(quantity(defaultZero(stock.getAvailableQty()).add(quantity)));
         stock.setReservedQty(quantity(defaultZero(stock.getReservedQty())));
         Stock savedStock = stockRepository.save(stock);
+        itemStockStatusService.refreshStatus(item);
         createStockTransaction(item, warehouse, batch, transactionType, referenceId, quantity, ZERO, savedStock.getAvailableQty(), remarks);
         return savedStock;
     }
@@ -255,6 +260,7 @@ class TransactionSupport {
         stock.setAvailableQty(quantity(availableQty.subtract(quantity)));
         stock.setReservedQty(quantity(defaultZero(stock.getReservedQty())));
         Stock savedStock = stockRepository.save(stock);
+        itemStockStatusService.refreshStatus(item);
         createStockTransaction(item, warehouse, batch, transactionType, referenceId, ZERO, quantity, savedStock.getAvailableQty(), remarks);
         return savedStock;
     }

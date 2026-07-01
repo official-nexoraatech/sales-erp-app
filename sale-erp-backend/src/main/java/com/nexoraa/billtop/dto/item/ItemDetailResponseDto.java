@@ -1,6 +1,6 @@
 package com.nexoraa.billtop.dto.item;
 
-import com.nexoraa.billtop.enums.Status;
+import com.nexoraa.billtop.enums.ItemStatus;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -47,6 +47,5 @@ public class ItemDetailResponseDto {
     private Long warehouseId;
     private String warehouseName;
     private String description;
-    private Status status;
+    private ItemStatus status;
 }
-

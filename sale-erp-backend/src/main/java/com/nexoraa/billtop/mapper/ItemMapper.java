@@ -18,7 +18,7 @@ public interface ItemMapper {
     @Mapping(target = "brand", ignore = true)
     @Mapping(target = "baseUnit", ignore = true)
     @Mapping(target = "imageUrl", ignore = true)
-    @Mapping(target = "status", constant = "ACTIVE")
+    @Mapping(target = "status", constant = "OUT_OF_STOCK")
     @Mapping(target = "createdAt", ignore = true)
     @Mapping(target = "updatedAt", ignore = true)
     Item toEntity(ItemRequestDto request);
