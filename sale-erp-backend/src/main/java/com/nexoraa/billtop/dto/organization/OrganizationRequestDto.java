@@ -4,6 +4,7 @@ import com.nexoraa.billtop.enums.Status;
 import com.nexoraa.billtop.constants.ValidationMessage;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -25,6 +26,12 @@ public class OrganizationRequestDto {
 
     @Size(max = 500, message = ValidationMessage.URL_INVALID)
     private String logoUrl;
+
+    @Size(max = 20, message = ValidationMessage.MOBILE_INVALID)
+    private String phone;
+
+    @Pattern(regexp = "^$|^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$", message = ValidationMessage.GST_NUMBER_INVALID)
+    private String gstNumber;
 
     @Valid
     private OrganizationAddressRequestDto address;

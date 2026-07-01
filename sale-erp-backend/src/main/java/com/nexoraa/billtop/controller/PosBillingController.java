@@ -3,6 +3,7 @@ package com.nexoraa.billtop.controller;
 import com.nexoraa.billtop.constants.ResponseMessage;
 import com.nexoraa.billtop.dto.ApiResponseDto;
 import com.nexoraa.billtop.dto.pos.PosBillingRequestDto;
+import com.nexoraa.billtop.dto.pos.PosBillingResponseDto;
 import com.nexoraa.billtop.service.PosBillingService;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
@@ -24,10 +25,10 @@ public class PosBillingController {
     }
 
     @PostMapping
-    public ResponseEntity<ApiResponseDto<Void>> createBill(
+    public ResponseEntity<ApiResponseDto<PosBillingResponseDto>> createBill(
             @Valid @RequestBody PosBillingRequestDto request
     ) {
-        posBillingService.createBill(request);
-        return ResponseEntity.ok(ApiResponseDto.success(ResponseMessage.POS_BILL_GENERATED));
+        PosBillingResponseDto response = posBillingService.createBill(request);
+        return ResponseEntity.ok(ApiResponseDto.success(ResponseMessage.POS_BILL_GENERATED, response));
     }
 }

@@ -141,6 +141,8 @@ export const OrganizationViewPage: React.FC = () => {
           <div className="grid grid-cols-1 gap-x-6 gap-y-5 sm:grid-cols-2">
             <DetailField label="Organization Name" value={organization.name} className="sm:col-span-2" />
             <DetailField label="Description" value={organization.description} className="sm:col-span-2" />
+            <DetailField label="Phone" value={organization.phone} />
+            <DetailField label="GSTIN" value={organization.gstNumber} />
             <DetailField
               label="Status"
               value={

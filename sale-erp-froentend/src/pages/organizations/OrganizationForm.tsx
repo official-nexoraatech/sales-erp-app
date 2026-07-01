@@ -38,6 +38,14 @@ export const OrganizationForm: React.FC<OrganizationFormProps> = ({
           <option value="INACTIVE">INACTIVE</option>
         </select>
       </label>
+      <label className="text-sm text-gray-600">
+        Phone
+        <input className={`${inputClass} mt-1`} value={form.phone || ''} onChange={(event) => onChange('phone', event.target.value)} />
+      </label>
+      <label className="text-sm text-gray-600">
+        GSTIN
+        <input className={`${inputClass} mt-1`} value={form.gstNumber || ''} onChange={(event) => onChange('gstNumber', event.target.value.toUpperCase())} />
+      </label>
       {showLogoUpload && (
         <div className="text-sm text-gray-600 md:col-span-2">
           <span>Logo Attachment</span>

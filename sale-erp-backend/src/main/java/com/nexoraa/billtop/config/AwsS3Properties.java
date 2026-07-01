@@ -24,6 +24,12 @@ public class AwsS3Properties {
     @NotBlank
     private String publicUrl;
 
+    private String accessKeyId;
+
+    private String secretAccessKey;
+
+    private String sessionToken;
+
     private DataSize maxImageSize = DataSize.ofMegabytes(5);
 
     private List<String> allowedContentTypes = List.of(

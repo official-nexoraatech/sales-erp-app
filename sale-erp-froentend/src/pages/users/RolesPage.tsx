@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { Edit, MoreVertical, Trash2 } from 'lucide-react';
+import { Edit, MoreVertical, ShieldCheck, Trash2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { rolesApi } from '../../api/endpoints';
@@ -27,7 +27,6 @@ export const RolesPage: React.FC = () => {
   const [pageSize, setPageSize] = useState(10);
   const [search, setSearch] = useState('');
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
-  const [openActionId, setOpenActionId] = useState<number | null>(null);
   const debouncedSearch = useDebounce(search);
 
   const roles = useQuery({
@@ -63,7 +62,6 @@ export const RolesPage: React.FC = () => {
   const deleteRole = async (role: Role) => {
     const confirmed = await confirmAction({ title: 'Delete Role', message: `Delete role "${role.name}"?`, confirmText: 'Delete', variant: 'danger' });
     if (confirmed) remove.mutate(role.id);
-    setOpenActionId(null);
   };
 
   return (
@@ -126,16 +124,25 @@ export const RolesPage: React.FC = () => {
                       </span>
                     </td>
                     <td className="border p-3">{role.createdAt ? formatDate(role.createdAt) : ''}</td>
-                    {showActions && <td className="relative border p-3">
-                      <button type="button" className="rounded p-1 hover:bg-gray-100" onClick={() => setOpenActionId(openActionId === role.id ? null : role.id)}>
-                        <MoreVertical size={18} />
-                      </button>
-                      {openActionId === role.id && (
-                        <div className="absolute right-8 top-8 z-10 w-28 rounded border bg-white py-1 shadow">
-                          {canUpdate && <button type="button" onClick={() => navigate(`/users/roles/${role.id}/edit`)} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-gray-50"><Edit size={14} /> Edit</button>}
-                          {canDelete && <button type="button" onClick={() => deleteRole(role)} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-red-600 hover:bg-gray-50"><Trash2 size={14} /> Delete</button>}
-                        </div>
-                      )}
+                    {showActions && <td className="border p-3">
+                      <div className="flex items-center gap-3">
+                        {canUpdate && (
+                          <button type="button" title="Edit role" aria-label="Edit role" onClick={() => navigate(`/users/roles/${role.id}/edit`)} className="text-orange-600 transition hover:text-orange-700">
+                            <Edit size={19} strokeWidth={2.2} />
+                          </button>
+                        )}
+                        {canUpdate && (
+                          <button type="button" title="Role settings" aria-label="Role settings" onClick={() => navigate(`/users/roles/${role.id}/edit`)} className="text-blue-600 transition hover:text-blue-700">
+                            <ShieldCheck size={20} strokeWidth={2.2} />
+                          </button>
+                        )}
+                        {canDelete && (
+                          <button type="button" title="Delete role" aria-label="Delete role" onClick={() => deleteRole(role)} className="text-red-600 transition hover:text-red-700">
+                            <Trash2 size={19} strokeWidth={2.2} />
+                          </button>
+                        )}
+                        <MoreVertical size={20} strokeWidth={2.4} className="text-slate-900" aria-hidden="true" />
+                      </div>
                     </td>}
                   </tr>
                   );
