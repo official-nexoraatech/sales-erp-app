@@ -56,6 +56,18 @@ export type OrganizationLogoUploadResponse = string | {
   path?: string | null;
 } | null;
 
+export type ItemStatus = 'IN_STOCK' | 'LOW_STOCK' | 'OUT_OF_STOCK';
+
+export interface ItemListQuery {
+  page?: number;
+  size?: number;
+  search?: string;
+  categoryId?: number;
+  brandId?: number;
+  warehouseId?: number;
+  status?: ItemStatus;
+}
+
 export interface ItemListItem {
   id: number;
   itemName: string;
@@ -88,7 +100,7 @@ export interface ItemListItem {
   minimumStock?: number;
   warehouseId?: number;
   warehouseName?: string;
-  status: boolean | string;
+  status: ItemStatus;
   trackingType?: string;
   unitName?: string;
   description?: string;

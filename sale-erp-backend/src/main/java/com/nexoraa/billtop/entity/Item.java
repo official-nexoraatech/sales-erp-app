@@ -1,6 +1,6 @@
 package com.nexoraa.billtop.entity;
 
-import com.nexoraa.billtop.enums.Status;
+import com.nexoraa.billtop.enums.ItemStatus;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -62,7 +62,7 @@ public class Item extends BaseEntity {
     @Builder.Default
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
-    private Status status = Status.ACTIVE;
+    private ItemStatus status = ItemStatus.OUT_OF_STOCK;
 }
 
 

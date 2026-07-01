@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { brandApi, categoryApi, itemApi, warehouseApi } from '../../api/endpoints';
 import type { ItemListItem } from '../../api/endpoints';
+import type { ItemStatus } from '../../types/api.types';
 import { queryClient } from '../../app/queryClient';
 import { TableExportButtons } from '../../components/common/TableExportButtons';
 import { Button } from '../../components/ui/Button';
@@ -30,9 +31,13 @@ const text = (value: unknown, fallback = '') => {
 };
 const number = (value: unknown) => Number(value || 0);
 const date = (value?: string) => (value ? formatDate(value) : '');
-const statusText = (status: ItemListItem['status']) => (
-  status === true || status === 'ACTIVE' ? 'Active' : status === false || status === 'INACTIVE' ? 'Inactive' : text(status)
-);
+const itemStatusOptions: Array<{ value: ItemStatus; label: string }> = [
+  { value: 'IN_STOCK', label: 'In Stock' },
+  { value: 'LOW_STOCK', label: 'Low Stock' },
+  { value: 'OUT_OF_STOCK', label: 'Out of Stock' },
+];
+const itemStatusLabel = (status: ItemListItem['status'] | '') =>
+  itemStatusOptions.find((option) => option.value === status)?.label || text(status);
 
 const itemColumns: TableColumn[] = [
   { heading: 'Name', render: (item) => <span className="font-semibold">{item.itemName}</span>, exportValue: (item) => item.itemName },
@@ -60,8 +65,7 @@ const itemColumns: TableColumn[] = [
   { heading: 'Minimum Stock', render: (item) => number(item.minimumStock), exportValue: (item) => number(item.minimumStock) },
   { heading: 'Warehouse', render: (item) => text(item.warehouseName), exportValue: (item) => text(item.warehouseName) },
   { heading: 'Description', render: (item) => <span className="line-clamp-2">{text(item.description)}</span>, exportValue: (item) => text(item.description) },
-  { heading: 'Tracking Type', render: (item) => text(item.trackingType, 'Regular'), exportValue: (item) => text(item.trackingType, 'Regular') },
-  { heading: 'Status', render: (item) => statusText(item.status), exportValue: (item) => statusText(item.status) },
+  { heading: 'Status', render: (item) => itemStatusLabel(item.status), exportValue: (item) => itemStatusLabel(item.status) },
 ];
 
 const exportColumns = [...itemColumns.map((column) => column.heading), 'Created by'];
@@ -82,17 +86,16 @@ export const ItemListPage: React.FC = () => {
   const { page, setPage, handlePageChange } = usePagination();
   const [pageSize, setPageSize] = useState(10);
   const [search, setSearch] = useState('');
-  const [itemType, setItemType] = useState('');
   const [brandId, setBrandId] = useState(0);
   const [categoryId, setCategoryId] = useState(0);
   const [selectedUser, setSelectedUser] = useState(user?.userName || '');
   const [warehouseId, setWarehouseId] = useState(0);
-  const [trackingType, setTrackingType] = useState('');
+  const [itemStatus, setItemStatus] = useState<ItemStatus | ''>('');
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const debouncedSearch = useDebounce(search);
 
   const items = useQuery({
-    queryKey: ['items', page, pageSize, debouncedSearch, categoryId, brandId, warehouseId],
+    queryKey: ['items', page, pageSize, debouncedSearch, categoryId, brandId, warehouseId, itemStatus],
     queryFn: () => itemApi.getAll({
       page,
       size: pageSize,
@@ -100,6 +103,7 @@ export const ItemListPage: React.FC = () => {
       categoryId: categoryId || undefined,
       brandId: brandId || undefined,
       warehouseId: warehouseId || undefined,
+      status: itemStatus || undefined,
     }),
   });
   const categories = useQuery({ queryKey: ['item-list-categories'], queryFn: () => categoryApi.getAll({ page: 0, size: 100, search: '' }), enabled: canViewCategories });
@@ -119,8 +123,7 @@ export const ItemListPage: React.FC = () => {
   });
 
   const rows = (items.data?.data?.content || [])
-    .filter((item) => !warehouseId || item.warehouseId === warehouseId)
-    .filter((item) => !trackingType || (item.trackingType || 'Regular') === trackingType);
+    .filter((item) => !warehouseId || item.warehouseId === warehouseId);
   const allSelected = rows.length > 0 && rows.every((item) => selectedIds.includes(item.id));
   const exportRows = () => rows.map((item) => [...itemColumns.map((column) => column.exportValue(item)), user?.userName || 'admin']);
 
@@ -162,12 +165,11 @@ export const ItemListPage: React.FC = () => {
           {(canCreate || canImport) && <div className="flex gap-2">{canImport && <Button variant="outline" className="min-w-[120px]" onClick={() => navigate('/utilities/import-items')}>Import</Button>}{canCreate && <Button onClick={() => navigate('/items/create')} className="min-w-[145px]">Create Item</Button>}</div>}
         </div>
         <div className="grid grid-cols-1 gap-4 p-5 md:grid-cols-3">
-          <label className="text-sm text-gray-600">Item Type<select className="mt-1 h-10 w-full rounded border border-gray-300 px-3" value={itemType} onChange={(event) => setItemType(event.target.value)}><option value="">Choose one thing</option><option>Product</option><option>Service</option></select></label>
           {canViewCategories && <label className="text-sm text-gray-600">Category<select className="mt-1 h-10 w-full rounded border border-gray-300 px-3" value={categoryId} disabled={categories.isLoading} onChange={(event) => { setCategoryId(Number(event.target.value)); setBrandId(0); setPage(0); }}><option value={0}>{categories.isLoading ? 'Loading categories...' : 'Choose one thing'}</option>{(categories.data?.data?.content || []).map((entry) => <option key={entry.id} value={entry.id}>{entry.name}</option>)}</select></label>}
           {canViewBrands && <label className="text-sm text-gray-600">Brand<select className="mt-1 h-10 w-full rounded border border-gray-300 px-3" value={brandId} disabled={!categoryId || brands.isLoading} onChange={(event) => { setBrandId(Number(event.target.value)); setPage(0); }}><option value={0}>{!categoryId ? 'Select category first' : brands.isLoading ? 'Loading brands...' : 'Choose one thing'}</option>{(brands.data?.data?.content || []).map((entry) => <option key={entry.id} value={entry.id}>{entry.name}</option>)}</select></label>}
           <label className="text-sm text-gray-600">User<select className="mt-1 h-10 w-full rounded border border-gray-300 px-3" value={selectedUser} onChange={(event) => setSelectedUser(event.target.value)}><option value="">Choose one thing</option>{user?.userName && <option value={user.userName}>{user.userName}</option>}</select></label>
           <label className="text-sm text-gray-600">Warehouse Stock<select className="mt-1 h-10 w-full rounded border border-gray-300 px-3" value={warehouseId} disabled={warehouses.isLoading} onChange={(event) => { setWarehouseId(Number(event.target.value)); setPage(0); }}><option value={0}>{warehouses.isLoading ? 'Loading warehouses...' : 'All warehouses'}</option>{(warehouses.data?.data || []).map((warehouse) => <option key={warehouse.id} value={warehouse.id}>{warehouse.name}</option>)}</select></label>
-          <label className="text-sm text-gray-600">Tracking Type<select className="mt-1 h-10 w-full rounded border border-gray-300 px-3" value={trackingType} onChange={(event) => setTrackingType(event.target.value)}><option value="">Choose one thing</option><option>Regular</option><option>Batch</option></select></label>
+          <label className="text-sm text-gray-600">Item Status<select className="mt-1 h-10 w-full rounded border border-gray-300 px-3" value={itemStatus} onChange={(event) => { setItemStatus(event.target.value as ItemStatus | ''); setPage(0); }}><option value="">All statuses</option>{itemStatusOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
         </div>
         <div className="flex flex-wrap items-center justify-between gap-3 px-5 pb-4">
           <label className="flex items-center gap-2 text-sm text-gray-600">Show<select value={pageSize} onChange={(event) => { setPageSize(Number(event.target.value)); setPage(0); }} className="h-9 rounded border border-gray-300 px-2"><option>10</option><option>20</option><option>50</option><option>100</option></select>entries</label>

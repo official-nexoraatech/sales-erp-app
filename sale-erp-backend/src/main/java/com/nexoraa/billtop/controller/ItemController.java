@@ -8,6 +8,7 @@ import com.nexoraa.billtop.dto.item.ItemListResponseDto;
 import com.nexoraa.billtop.dto.item.ItemRequestDto;
 import com.nexoraa.billtop.dto.item.ItemStockResponseDto;
 import com.nexoraa.billtop.dto.item.excel.ItemExcelImportResponseDto;
+import com.nexoraa.billtop.enums.ItemStatus;
 import com.nexoraa.billtop.service.ItemExcelService;
 import com.nexoraa.billtop.service.ItemService;
 import jakarta.validation.Valid;
@@ -82,11 +83,12 @@ public class ItemController {
             @RequestParam(required = false) String search,
             @RequestParam(required = false) Long categoryId,
             @RequestParam(required = false) Long brandId,
-            @RequestParam(required = false) Long warehouseId
+            @RequestParam(required = false) Long warehouseId,
+            @RequestParam(required = false) ItemStatus status
     ) {
         return ResponseEntity.ok(ApiResponseDto.success(
                 ResponseMessage.ITEMS_RETRIEVED,
-                itemService.getItems(page, size, search, categoryId, brandId, warehouseId)
+                itemService.getItems(page, size, search, categoryId, brandId, warehouseId, status)
         ));
     }
 

@@ -42,6 +42,7 @@ import type {
   ExpenseRequest,
   ExpenseSubCategory,
   ExpenseSubCategoryRequest,
+  ItemListQuery,
   ItemListItem,
   ItemRequest,
   ItemStock,
@@ -120,6 +121,7 @@ export type {
   ExpenseSubCategory,
   ExpenseSubCategoryRequest,
   ItemListItem,
+  ItemListQuery,
   ItemRequest,
   ItemStock,
   EmailSendRequest,
@@ -282,7 +284,7 @@ export const dashboardApi = {
 };
 
 export const itemApi = {
-  getAll: (params?: any) =>
+  getAll: (params?: ItemListQuery) =>
     axiosClient.get<ApiResponse<PageResponse<ItemListItem>>, ApiResponse<PageResponse<ItemListItem>>>('/api/v1/items', { params }),
   getById: (id: number) =>
     axiosClient.get<ApiResponse<ItemListItem>, ApiResponse<ItemListItem>>(`/api/v1/items/${id}`),

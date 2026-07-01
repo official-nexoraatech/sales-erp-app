@@ -17,6 +17,7 @@ import com.nexoraa.billtop.entity.Stock;
 import com.nexoraa.billtop.entity.SubCategory;
 import com.nexoraa.billtop.entity.Unit;
 import com.nexoraa.billtop.entity.Warehouse;
+import com.nexoraa.billtop.enums.ItemStatus;
 import com.nexoraa.billtop.exception.BadRequestException;
 import com.nexoraa.billtop.exception.ResourceNotFoundException;
 import com.nexoraa.billtop.mapper.ItemMapper;
@@ -30,6 +31,7 @@ import com.nexoraa.billtop.repository.SubCategoryRepository;
 import com.nexoraa.billtop.repository.UnitRepository;
 import com.nexoraa.billtop.repository.WarehouseRepository;
 import com.nexoraa.billtop.security.CurrentOrganizationService;
+import com.nexoraa.billtop.service.ItemStockStatusService;
 import com.nexoraa.billtop.service.ItemService;
 import com.nexoraa.billtop.specification.ItemSpecification;
 import org.springframework.data.domain.Page;
@@ -58,6 +60,7 @@ public class ItemServiceImpl implements ItemService {
     private final ItemBatchRepository itemBatchRepository;
     private final StockRepository stockRepository;
     private final ItemMapper itemMapper;
+    private final ItemStockStatusService itemStockStatusService;
     private final CurrentOrganizationService currentOrganizationService;
 
     public ItemServiceImpl(
@@ -71,6 +74,7 @@ public class ItemServiceImpl implements ItemService {
             ItemBatchRepository itemBatchRepository,
             StockRepository stockRepository,
             ItemMapper itemMapper,
+            ItemStockStatusService itemStockStatusService,
             CurrentOrganizationService currentOrganizationService
     ) {
         this.itemRepository = itemRepository;
@@ -83,6 +87,7 @@ public class ItemServiceImpl implements ItemService {
         this.itemBatchRepository = itemBatchRepository;
         this.stockRepository = stockRepository;
         this.itemMapper = itemMapper;
+        this.itemStockStatusService = itemStockStatusService;
         this.currentOrganizationService = currentOrganizationService;
     }
 
@@ -92,10 +97,9 @@ public class ItemServiceImpl implements ItemService {
         validateItemDates(request);
         Organization organization = currentOrganizationService.getOrganizationReference();
         Long organizationId = organization.getId();
-        if (itemRepository.existsByItemCodeIgnoreCaseAndOrganizationIdAndStatus(
+        if (itemRepository.existsByItemCodeIgnoreCaseAndOrganizationIdAndIsDeletedFalse(
                 request.getItemCode(),
-                organizationId,
-        com.nexoraa.billtop.enums.Status.ACTIVE)) {
+                organizationId)) {
             throw new BadRequestException(ErrorMessage.ITEM_ALREADY_EXISTS, "ITEM_ALREADY_EXISTS");
         }
 
@@ -108,6 +112,7 @@ public class ItemServiceImpl implements ItemService {
         itemPriceRepository.save(buildPrice(savedItem, request, null));
         ItemBatch batch = itemBatchRepository.save(buildBatch(savedItem, request, null));
         stockRepository.save(buildStock(savedItem, warehouse, batch, request, null));
+        itemStockStatusService.refreshStatus(savedItem);
 
         return ItemCreateResponseDto.builder()
                 .id(savedItem.getId())
@@ -138,14 +143,16 @@ public class ItemServiceImpl implements ItemService {
             String search,
             Long categoryId,
             Long brandId,
-            Long warehouseId
+            Long warehouseId,
+            ItemStatus status
     ) {
         Long organizationId = currentOrganizationService.getOrganizationId();
-        Specification<Item> specification = ItemSpecification.active()
+        Specification<Item> specification = ItemSpecification.notDeleted()
                 .and(ItemSpecification.organization(organizationId))
                 .and(ItemSpecification.category(categoryId))
                 .and(ItemSpecification.brand(brandId))
                 .and(ItemSpecification.warehouse(warehouseId))
+                .and(ItemSpecification.status(status))
                 .and(ItemSpecification.search(search));
         Page<Item> items = itemRepository.findAll(
                 specification,
@@ -170,11 +177,10 @@ public class ItemServiceImpl implements ItemService {
         validateItemDates(request);
         Item item = getActiveItem(id);
         Long organizationId = currentOrganizationService.getOrganizationId();
-        if (itemRepository.existsByItemCodeIgnoreCaseAndIdNotAndOrganizationIdAndStatus(
+        if (itemRepository.existsByItemCodeIgnoreCaseAndIdNotAndOrganizationIdAndIsDeletedFalse(
                 request.getItemCode(),
                 id,
-                organizationId,
-        com.nexoraa.billtop.enums.Status.ACTIVE)) {
+                organizationId)) {
             throw new BadRequestException(ErrorMessage.ITEM_ALREADY_EXISTS, "ITEM_ALREADY_EXISTS");
         }
 
@@ -198,13 +204,14 @@ public class ItemServiceImpl implements ItemService {
                 )
                 .orElse(null);
         stockRepository.save(buildStock(savedItem, warehouse, savedBatch, request, stock));
+        itemStockStatusService.refreshStatus(savedItem);
     }
 
     @Override
     @Transactional
     public void deleteItem(Long id) {
         Item item = getActiveItem(id);
-        item.setStatus(com.nexoraa.billtop.enums.Status.INACTIVE);
+        item.setIsDeleted(true);
         itemRepository.save(item);
     }
 
@@ -314,7 +321,7 @@ public class ItemServiceImpl implements ItemService {
     }
 
     private Item getActiveItem(Long id) {
-        return itemRepository.findByIdAndOrganizationIdAndStatus(id, currentOrganizationService.getOrganizationId(), com.nexoraa.billtop.enums.Status.ACTIVE)
+        return itemRepository.findByIdAndOrganizationIdAndIsDeletedFalse(id, currentOrganizationService.getOrganizationId())
                 .orElseThrow(() -> new ResourceNotFoundException(ErrorMessage.ITEM_NOT_FOUND, "ITEM_NOT_FOUND"));
     }
 
