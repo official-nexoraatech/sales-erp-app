@@ -61,6 +61,7 @@ import type {
   PaymentOutRequest,
   PurchaseCreateResponse,
   PosBillingRequest,
+  PosBillingResponse,
   QuotationCreateResponse,
   QuotationDetail,
   QuotationListItem,
@@ -140,6 +141,7 @@ export type {
   PaymentOutRequest,
   PurchaseCreateResponse,
   PosBillingRequest,
+  PosBillingResponse,
   QuotationCreateResponse,
   QuotationDetail,
   QuotationListItem,
@@ -224,6 +226,8 @@ const normalizeOrganizationList = (response: ApiResponse<Organization[] | PageRe
 export const organizationApi = {
   getAll: async (search = '') =>
     normalizeOrganizationList(await axiosClient.get<ApiResponse<Organization[] | PageResponse<Organization>> | Organization[], ApiResponse<Organization[] | PageResponse<Organization>> | Organization[]>('/api/v1/organizations', { params: { search } })),
+  getById: (id: number) =>
+    axiosClient.get<ApiResponse<Organization>, ApiResponse<Organization>>(`/api/v1/organizations/${id}`),
   create: (payload: OrganizationRequest) =>
     axiosClient.post<ApiResponse<void>, ApiResponse<void>>('/api/v1/organizations', payload),
   update: (id: number, payload: UpdateOrganizationRequest) =>
@@ -464,7 +468,7 @@ export const rolesApi = {
 
 export const posApi = {
   createBill: (payload: PosBillingRequest) =>
-    axiosClient.post<ApiResponse<void>, ApiResponse<void>>('/api/v1/pos/billing', payload),
+    axiosClient.post<ApiResponse<PosBillingResponse>, ApiResponse<PosBillingResponse>>('/api/v1/pos/billing', payload),
 };
 
 export const salesApi = {

@@ -26,6 +26,7 @@ export const WarehouseFormPage: React.FC<Props> = ({ mode }) => {
       toast.success(`Warehouse ${mode === 'edit' ? 'updated' : 'created'} successfully`);
       await queryClient.invalidateQueries({ queryKey: ['warehouses'] });
       await queryClient.invalidateQueries({ queryKey: ['item-form-warehouses'] });
+      await queryClient.invalidateQueries({ queryKey: ['pos-warehouses'] });
       navigate(backPath);
     },
     onError: (error: any) => toast.error(error?.message || `Failed to ${mode} warehouse`),

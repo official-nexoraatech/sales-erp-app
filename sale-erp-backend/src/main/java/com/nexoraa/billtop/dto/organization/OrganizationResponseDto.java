@@ -18,6 +18,8 @@ public class OrganizationResponseDto {
     private String name;
     private String description;
     private String logoUrl;
+    private String phone;
+    private String gstNumber;
     private OrganizationAddressResponseDto address;
     private Status status;
     private LocalDateTime createdAt;

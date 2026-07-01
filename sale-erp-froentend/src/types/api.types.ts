@@ -31,6 +31,8 @@ export interface Organization {
   name: string;
   description?: string;
   logoUrl?: string | null;
+  phone?: string;
+  gstNumber?: string;
   address?: OrganizationAddress | string | null;
   status: OrganizationStatus | string | boolean;
   createdAt?: string;
@@ -40,6 +42,8 @@ export interface Organization {
 export interface OrganizationRequest {
   name: string;
   description: string;
+  phone?: string;
+  gstNumber?: string;
   address: OrganizationAddress;
   status: OrganizationStatus;
 }
@@ -239,7 +243,13 @@ export interface PosBillingRequest {
   customerId: number;
   warehouseId: number;
   paymentMethodId: number;
-  items: Array<{ itemId: number; quantity: number }>;
+  items: Array<{ itemId: number; quantity: number; discountPercent?: number; taxPercent?: number }>;
+}
+
+export interface PosBillingResponse {
+  invoiceNo: string;
+  grandTotal: number;
+  paymentStatus: string;
 }
 
 export interface SimpleMaster {

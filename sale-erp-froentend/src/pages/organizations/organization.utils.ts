@@ -16,6 +16,8 @@ export const emptyOrganizationForm: UpdateOrganizationRequest = {
   name: '',
   description: '',
   logoUrl: '',
+  phone: '',
+  gstNumber: '',
   address: emptyOrganizationAddress,
   status: 'ACTIVE',
 };
@@ -64,6 +66,8 @@ export const toUpdateOrganizationRequest = (organization: Organization, logoUrl:
   name: organization.name || '',
   description: organization.description || '',
   logoUrl,
+  phone: organization.phone || '',
+  gstNumber: organization.gstNumber || '',
   address: toOrganizationAddressRequest(normalizeOrganizationAddress(organization.address)),
   status: getOrganizationStatus(organization.status),
 });

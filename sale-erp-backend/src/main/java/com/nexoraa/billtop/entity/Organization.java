@@ -37,6 +37,12 @@ public class Organization extends BaseEntity {
     @Column(name = "logo_url", length = 500)
     private String logoUrl;
 
+    @Column(length = 20)
+    private String phone;
+
+    @Column(name = "gst_number", length = 20)
+    private String gstNumber;
+
     @OneToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "address_id", unique = true)
     private Address address;

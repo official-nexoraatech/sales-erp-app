@@ -110,28 +110,28 @@ export const UserPermissionsPage: React.FC = () => {
 
   return (
     <div className="space-y-5">
-      <div className="text-sm text-gray-500">Home &gt; Users &gt; Permissions</div>
+      <div className="text-sm text-gray-500 dark:text-slate-400">Home &gt; Users &gt; Permissions</div>
 
-      <div className="flex max-h-[calc(100vh-7rem)] min-h-[620px] flex-col overflow-hidden rounded-xl bg-white shadow">
-        <div className="flex flex-col gap-3 border-b px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex max-h-[calc(100vh-7rem)] min-h-[620px] flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow dark:border-slate-700 dark:bg-slate-800 dark:shadow-slate-950/40">
+        <div className="flex flex-col gap-3 border-b border-slate-200 px-5 py-4 dark:border-slate-700 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h1 className="text-xl font-semibold text-gray-900">User Permissions</h1>
-            <p className="mt-1 text-sm text-gray-500">Select a user and assign permissions group wise.</p>
+            <h1 className="text-xl font-semibold text-gray-900 dark:text-slate-100">User Permissions</h1>
+            <p className="mt-1 text-sm text-gray-500 dark:text-slate-400">Select a user and assign permissions group wise.</p>
           </div>
-          <div className="flex items-center gap-2 rounded-full bg-blue-50 px-3 py-1.5 text-sm font-semibold text-blue-700">
+          <div className="flex items-center gap-2 rounded-full bg-blue-50 px-3 py-1.5 text-sm font-semibold text-blue-700 dark:bg-blue-950/50 dark:text-blue-300 dark:ring-1 dark:ring-blue-800/60">
             <ShieldCheck size={17} />
             {selectedPermissionIds.length} selected
           </div>
         </div>
 
-        <div className="grid grid-cols-1 gap-4 border-b bg-slate-50/70 p-5 lg:grid-cols-[minmax(0,1fr)_minmax(280px,420px)]">
-          <label className="text-sm font-medium text-gray-700">
+        <div className="grid grid-cols-1 gap-4 border-b border-slate-200 bg-slate-50/70 p-5 dark:border-slate-700 dark:bg-slate-900/70 lg:grid-cols-[minmax(0,1fr)_minmax(280px,420px)]">
+          <label className="text-sm font-medium text-gray-700 dark:text-slate-300">
             Select User
             <select
               value={selectedUserId}
               disabled={users.isLoading}
               onChange={(event) => setSelectedUserId(Number(event.target.value))}
-              className="mt-1.5 h-11 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+              className="mt-1.5 h-11 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm text-slate-900 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100 dark:focus:border-blue-400 dark:focus:ring-blue-900/40"
             >
               <option value={0}>{users.isLoading ? 'Loading users...' : 'Choose a user'}</option>
               {userRows.map((entry) => (
@@ -139,40 +139,40 @@ export const UserPermissionsPage: React.FC = () => {
                   {entry.firstName || entry.lastName
                     ? `${entry.firstName || ''} ${entry.lastName || ''}`.trim()
                     : entry.userName || entry.username || `User ${entry.id}`}
-                  {' — '}
+                  {' - '}
                   {entry.userName || entry.username || entry.email || entry.id}
                 </option>
               ))}
             </select>
           </label>
 
-          <label className="text-sm font-medium text-gray-700">
+          <label className="text-sm font-medium text-gray-700 dark:text-slate-300">
             Search Permission
             <span className="relative mt-1.5 block">
-              <Search className="absolute left-3 top-3 text-gray-400" size={17} />
+              <Search className="absolute left-3 top-3 text-gray-400 dark:text-slate-500" size={17} />
               <input
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
                 placeholder="Search group or description"
-                className="h-11 w-full rounded-lg border border-gray-300 bg-white pl-10 pr-3 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                className="h-11 w-full rounded-lg border border-gray-300 bg-white pl-10 pr-3 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-blue-400 focus:ring-2 focus:ring-blue-100 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-blue-400 dark:focus:ring-blue-900/40"
               />
             </span>
           </label>
         </div>
 
         <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4">
-          <label className="inline-flex cursor-pointer items-center gap-3 text-sm font-semibold text-gray-700">
+          <label className="inline-flex cursor-pointer items-center gap-3 text-sm font-semibold text-gray-700 dark:text-slate-200">
             <input
               type="checkbox"
               checked={allSelected}
               onChange={toggleAll}
               disabled={!allPermissionIds.length}
-              className="h-4 w-4 rounded border-gray-300 text-blue-600"
+              className="h-4 w-4 rounded border-gray-300 text-blue-600 accent-blue-600 dark:border-slate-500"
             />
             Select all permissions
           </label>
           {selectedUser && (
-            <div className="flex items-center gap-2 text-sm text-gray-500">
+            <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-slate-400">
               <UserRound size={17} />
               <span>{selectedUser.userName || selectedUser.username || selectedUser.email}</span>
             </div>
@@ -183,7 +183,7 @@ export const UserPermissionsPage: React.FC = () => {
           {permissions.isLoading || selectedUserPermissions.isFetching ? (
             <div className="p-12"><Loader /></div>
           ) : permissions.isError ? (
-            <div className="rounded-lg border border-red-200 bg-red-50 p-5 text-sm text-red-700">
+            <div className="rounded-lg border border-red-200 bg-red-50 p-5 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300">
               Unable to load permissions.
             </div>
           ) : filteredGroups.length ? (
@@ -194,36 +194,36 @@ export const UserPermissionsPage: React.FC = () => {
                 const groupSelected = groupIds.length > 0 && selectedCount === groupIds.length;
 
                 return (
-                  <section key={groupName} className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-                    <div className="flex items-center justify-between gap-3 border-b bg-slate-50 px-4 py-3">
+                  <section key={groupName} className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800">
+                    <div className="flex items-center justify-between gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-700 dark:bg-slate-900/80">
                       <label className="flex cursor-pointer items-center gap-3">
                         <input
                           type="checkbox"
                           checked={groupSelected}
                           onChange={() => toggleGroup(groupIds)}
-                          className="h-4 w-4 rounded border-gray-300 text-blue-600"
+                          className="h-4 w-4 rounded border-gray-300 text-blue-600 accent-blue-600 dark:border-slate-500"
                         />
-                        <span className="font-semibold text-slate-800">{groupName}</span>
+                        <span className="font-semibold text-slate-800 dark:text-slate-100">{groupName}</span>
                       </label>
-                      <span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-slate-500 shadow-sm">
+                      <span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-slate-500 shadow-sm dark:bg-slate-800 dark:text-slate-300 dark:ring-1 dark:ring-slate-700">
                         {selectedCount}/{groupIds.length}
                       </span>
                     </div>
 
-                    <div className="divide-y divide-slate-100">
+                    <div className="divide-y divide-slate-100 dark:divide-slate-700/70">
                       {groupPermissions.map((permission) => {
                         const checked = selectedPermissionIds.includes(permission.id);
                         return (
                           <label
                             key={permission.id}
                             className={`flex cursor-pointer items-start gap-3 px-4 py-3 transition ${
-                              checked ? 'bg-blue-50/60' : 'hover:bg-slate-50'
+                              checked ? 'bg-blue-50/60 dark:bg-blue-950/30' : 'hover:bg-slate-50 dark:hover:bg-slate-700/50'
                             }`}
                           >
                             <span className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded border ${
                               checked
                                 ? 'border-blue-600 bg-blue-600 text-white'
-                                : 'border-slate-300 bg-white text-transparent'
+                                : 'border-slate-300 bg-white text-transparent dark:border-slate-600 dark:bg-slate-900'
                             }`}>
                               <Check size={14} />
                             </span>
@@ -233,7 +233,7 @@ export const UserPermissionsPage: React.FC = () => {
                               onChange={() => togglePermission(permission.id)}
                               className="sr-only"
                             />
-                            <span className="text-sm leading-6 text-slate-700">{permission.description}</span>
+                            <span className="text-sm leading-6 text-slate-700 dark:text-slate-300">{permission.description}</span>
                           </label>
                         );
                       })}
@@ -243,26 +243,26 @@ export const UserPermissionsPage: React.FC = () => {
               })}
             </div>
           ) : (
-            <div className="rounded-lg border border-dashed border-slate-300 p-10 text-center text-sm text-slate-500">
+            <div className="rounded-lg border border-dashed border-slate-300 p-10 text-center text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">
               No permissions match your search.
             </div>
           )}
         </div>
 
-        <div className="shrink-0 border-t bg-white/95 px-5 py-4 backdrop-blur">
+        <div className="shrink-0 border-t border-slate-200 bg-white/95 px-5 py-4 backdrop-blur dark:border-slate-700 dark:bg-slate-900/95">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <span className="text-sm font-semibold text-slate-600">
+            <span className="text-sm font-semibold text-slate-600 dark:text-slate-300">
               {selectedPermissionIds.length} permissions selected
             </span>
-          <Button
-            type="button"
-            onClick={submit}
-            isLoading={assignment.isPending}
-            disabled={!selectedUserId || !selectedPermissionIds.length}
-            className="min-w-[180px]"
-          >
-            Assign Permissions
-          </Button>
+            <Button
+              type="button"
+              onClick={submit}
+              isLoading={assignment.isPending}
+              disabled={!selectedUserId || !selectedPermissionIds.length}
+              className="min-w-[180px]"
+            >
+              Assign Permissions
+            </Button>
           </div>
         </div>
       </div>

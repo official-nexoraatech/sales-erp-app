@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import {
   expenseCategoryApi,
@@ -30,7 +30,7 @@ export const ExpenseMasterFormPage: React.FC<Props> = ({ type, mode }) => {
     : subCategoryMode
       ? 'Expense Subcategory'
       : 'Payment Type';
-  const backPath = categoryMode
+  const defaultBackPath = categoryMode
     ? '/expenses/categories'
     : subCategoryMode
       ? '/expenses/subcategories'
@@ -47,6 +47,11 @@ export const ExpenseMasterFormPage: React.FC<Props> = ({ type, mode }) => {
       : 'payment-method';
   const id = Number(useParams<{ id: string }>().id);
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const requestedReturnTo = searchParams.get('returnTo');
+  const backPath = requestedReturnTo?.startsWith('/') && !requestedReturnTo.startsWith('//')
+    ? requestedReturnTo
+    : defaultBackPath;
   const [expenseCategoryId, setExpenseCategoryId] = useState(0);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
@@ -98,6 +103,7 @@ export const ExpenseMasterFormPage: React.FC<Props> = ({ type, mode }) => {
     onSuccess: () => {
       queryClient.removeQueries({ queryKey: [listQueryKey] });
       queryClient.removeQueries({ queryKey: [recordQueryKey, id] });
+      queryClient.invalidateQueries({ queryKey: ['pos-payment-methods'] });
       toast.success(`${label} ${mode === 'edit' ? 'updated' : 'created'} successfully`);
       navigate(backPath);
     },
