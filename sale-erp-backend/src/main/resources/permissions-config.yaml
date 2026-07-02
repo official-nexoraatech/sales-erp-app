@@ -165,8 +165,8 @@ permissions:
         description: "Update an existing purchase order"
         endpoint: "PUT /api/v1/purchases/{id}"
       - name: "PURCHASE_DELETE"
-        description: "Cancel a purchase order"
-        endpoint: "PUT /api/v1/purchases/{id}/cancel"
+        description: "Cancel or delete a purchase order"
+        endpoint: "PUT /api/v1/purchases/{id}/cancel, DELETE /api/v1/purchases/{id}"
 
   # ===================== PURCHASE RETURN MANAGEMENT =====================
   purchase_return:
@@ -193,8 +193,8 @@ permissions:
         description: "Update an existing sales invoice"
         endpoint: "PUT /api/v1/sales/{id}"
       - name: "SALES_DELETE"
-        description: "Cancel a sales invoice"
-        endpoint: "PUT /api/v1/sales/{id}/cancel"
+        description: "Cancel or delete a sales invoice"
+        endpoint: "PUT /api/v1/sales/{id}/cancel, DELETE /api/v1/sales/{id}"
       - name: "SALES_INVOICE_PRINT"
         description: "Print and retrieve sales invoice"
         endpoint: "GET /api/v1/sales/{id}/invoice"
@@ -220,12 +220,24 @@ permissions:
       - name: "PAYMENT_IN_VIEW"
         description: "View incoming payments list and retrieve details"
         endpoint: "GET /api/v1/payment-in, GET /api/v1/payment-in/{id}"
+      - name: "PAYMENT_IN_UPDATE"
+        description: "Update an existing incoming payment"
+        endpoint: "PUT /api/v1/payment-in/{id}"
+      - name: "PAYMENT_IN_DELETE"
+        description: "Delete an incoming payment"
+        endpoint: "DELETE /api/v1/payment-in/{id}"
       - name: "PAYMENT_OUT_CREATE"
         description: "Record outgoing payment to suppliers"
         endpoint: "POST /api/v1/payment-out"
       - name: "PAYMENT_OUT_VIEW"
         description: "View outgoing payments list and retrieve details"
         endpoint: "GET /api/v1/payment-out, GET /api/v1/payment-out/{id}"
+      - name: "PAYMENT_OUT_UPDATE"
+        description: "Update an existing outgoing payment"
+        endpoint: "PUT /api/v1/payment-out/{id}"
+      - name: "PAYMENT_OUT_DELETE"
+        description: "Delete an outgoing payment"
+        endpoint: "DELETE /api/v1/payment-out/{id}"
 
   # ===================== BANK ACCOUNT MANAGEMENT =====================
   bank_account:

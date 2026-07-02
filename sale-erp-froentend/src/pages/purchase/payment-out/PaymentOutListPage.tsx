@@ -1,17 +1,20 @@
 import React, { useState } from 'react';
-import { Eye } from 'lucide-react';
-import { useQuery } from '@tanstack/react-query';
+import { Edit, Eye, Trash2 } from 'lucide-react';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { paymentOutApi, supplierApi } from '../../../api/endpoints';
 import type { PaymentListItem } from '../../../api/endpoints';
+import { queryClient } from '../../../app/queryClient';
 import { Button } from '../../../components/ui/Button';
 import { Loader } from '../../../components/ui/Loader';
 import { Pagination } from '../../../components/ui/Pagination';
 import { useAuth } from '../../../hooks/useAuth';
+import { useConfirmation } from '../../../hooks/useConfirmation';
 import { usePagination } from '../../../hooks/usePagination';
 import { formatCurrency } from '../../../utils/formatCurrency';
 import { formatDate } from '../../../utils/formatDate';
+import { downloadCsv, downloadExcel, printTable } from '../../../utils/tableExport';
 import { PERMISSIONS } from '../../../auth/permissions';
 import { TableExportButtons } from '../../../components/common/TableExportButtons';
 
@@ -21,6 +24,9 @@ export const PaymentOutListPage: React.FC = () => {
   const navigate = useNavigate();
   const { user, hasPermission } = useAuth();
   const canCreate = hasPermission(PERMISSIONS.PAYMENT_OUT_CREATE);
+  const canUpdate = hasPermission(PERMISSIONS.PAYMENT_OUT_UPDATE);
+  const canDelete = hasPermission(PERMISSIONS.PAYMENT_OUT_DELETE);
+  const { confirmAction, confirmationDialog } = useConfirmation();
   const { page, setPage, handlePageChange } = usePagination();
   const [pageSize, setPageSize] = useState(10);
   const [agent, setAgent] = useState('');
@@ -53,22 +59,23 @@ export const PaymentOutListPage: React.FC = () => {
     toast.success('Payment out records copied');
   };
   const download = (extension: 'csv' | 'xls') => {
-    const separator = extension === 'csv' ? ',' : '\t';
-    const content = [exportColumns, ...exportRows()].map((row) => row.map((value) => `"${String(value).replaceAll('"', '""')}"`).join(separator)).join('\n');
-    const blob = new Blob([content], { type: extension === 'csv' ? 'text/csv' : 'application/vnd.ms-excel' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `payment-out.${extension}`;
-    link.click();
-    URL.revokeObjectURL(url);
+    if (extension === 'csv') downloadCsv(exportColumns, exportRows(), 'payment-out');
+    else downloadExcel(exportColumns, exportRows(), 'payment-out', 'Payment Out');
   };
   const printPdf = () => {
-    const popup = window.open('', '_blank');
-    if (!popup) return;
-    popup.document.write(`<html><head><title>Payment Out</title></head><body><h2>Payment Out</h2><table border="1" cellspacing="0" cellpadding="6"><thead><tr>${exportColumns.map((column) => `<th>${column}</th>`).join('')}</tr></thead><tbody>${exportRows().map((row) => `<tr>${row.map((value) => `<td>${value}</td>`).join('')}</tr>`).join('')}</tbody></table><script>window.print()</script></body></html>`);
-    popup.document.close();
+    if (!printTable(exportColumns, exportRows(), 'Payment Out')) {
+      toast.error('Please allow popups to print');
+    }
   };
+
+  const deletePayment = useMutation({
+    mutationFn: paymentOutApi.delete,
+    onSuccess: () => {
+      toast.success('Payment deleted');
+      queryClient.invalidateQueries({ queryKey: ['payment-out'] });
+    },
+    onError: (error: any) => toast.error(error?.message || 'Failed to delete payment'),
+  });
 
   return (
     <div className="space-y-5">
@@ -93,11 +100,18 @@ export const PaymentOutListPage: React.FC = () => {
         <div className="overflow-x-auto px-3 pb-3">
           {payments.isLoading ? <div className="p-10"><Loader /></div> : <table className="w-full text-sm">
             <thead className="bg-gray-50"><tr>{exportColumns.concat('Action').map((heading) => <th key={heading} className="border p-3 text-left">{heading}</th>)}</tr></thead>
-            <tbody>{rows.length ? rows.map((payment: PaymentListItem) => <tr key={payment.paymentId} className="border-b even:bg-gray-50"><td className="border p-3">{formatDate(payment.paymentDate)}</td><td className="border p-3">{payment.paymentNo || 'N/A'}</td><td className="border p-3">{payment.paymentNo || 'N/A'}</td><td className="border p-3">{payment.supplierName || payment.partyName || 'N/A'}</td><td className="border p-3 font-semibold">{formatCurrency(payment.amount)}</td><td className="border p-3">{user?.userName || 'admin'}</td><td className="border p-3">{formatDate(payment.paymentDate)}</td><td className="border p-3"><button title="View payment" onClick={() => navigate(`/purchase/payment-out/${payment.paymentId}`)} className="text-blue-600"><Eye size={17} /></button></td></tr>) : <tr><td colSpan={8} className="bg-gray-50 p-5 text-center">No data available in table</td></tr>}</tbody>
+            <tbody>{rows.length ? rows.map((payment: PaymentListItem) => <tr key={payment.paymentId} className="border-b even:bg-gray-50"><td className="border p-3">{formatDate(payment.paymentDate)}</td><td className="border p-3">{payment.paymentNo || 'N/A'}</td><td className="border p-3">{payment.paymentNo || 'N/A'}</td><td className="border p-3">{payment.supplierName || payment.partyName || 'N/A'}</td><td className="border p-3 font-semibold">{formatCurrency(payment.amount)}</td><td className="border p-3">{user?.userName || 'admin'}</td><td className="border p-3">{formatDate(payment.paymentDate)}</td><td className="border p-3">
+              <div className="flex items-center gap-2">
+                <button title="View payment" onClick={() => navigate(`/purchase/payment-out/${payment.paymentId}`)} className="text-blue-600"><Eye size={17} /></button>
+                {canUpdate && <button title="Edit payment" onClick={() => navigate(`/purchase/payment-out/${payment.paymentId}/edit`)} className="text-orange-600"><Edit size={17} /></button>}
+                {canDelete && <button title="Delete payment" onClick={async () => { if (await confirmAction({ title: 'Delete Payment', message: 'Delete this payment? This cannot be undone.', confirmText: 'Delete', variant: 'danger' })) deletePayment.mutate(payment.paymentId); }} className="text-red-600"><Trash2 size={17} /></button>}
+              </div>
+            </td></tr>) : <tr><td colSpan={8} className="bg-gray-50 p-5 text-center">No data available in table</td></tr>}</tbody>
           </table>}
         </div>
         <div className="flex flex-wrap items-center justify-between gap-3 border-t px-5 py-4 text-sm text-gray-600"><span>Showing {rows.length ? page * pageSize + 1 : 0} to {page * pageSize + rows.length} of {payments.data?.data?.totalElements || 0} entries</span><Pagination page={page} totalPages={payments.data?.data?.totalPages || 1} onPageChange={handlePageChange} /></div>
       </div>
+      {confirmationDialog}
     </div>
   );
 };

@@ -18,4 +18,6 @@ public interface PurchaseRepository extends JpaRepository<Purchase, Long>, JpaSp
     Optional<Purchase> findTopByPurchaseNoStartingWithAndOrganizationIdOrderByIdDesc(String prefix, Long organizationId);
 
     Optional<Purchase> findByIdAndOrganizationId(Long id, Long organizationId);
+
+    Optional<Purchase> findByIdAndOrganizationIdAndIsDeletedFalse(Long id, Long organizationId);
 }

@@ -89,7 +89,7 @@ public class PaymentOutServiceImpl implements PaymentOutService {
     @Override
     @Transactional(readOnly = true)
     public PageResponseDto<PaymentListResponseDto> getPaymentOuts(int page, int size) {
-        Page<Payment> payments = paymentRepository.findByPaymentTypeAndOrganizationIdOrderByIdDesc(
+        Page<Payment> payments = paymentRepository.findByPaymentTypeAndOrganizationIdAndIsDeletedFalseOrderByIdDesc(
                 FinanceSupport.PAYMENT_OUT,
                 currentOrganizationService.getOrganizationId(),
                 PageRequest.of(page, size)
@@ -112,6 +112,68 @@ public class PaymentOutServiceImpl implements PaymentOutService {
             throw new ResourceNotFoundException("Payment out not found", "PAYMENT_OUT_NOT_FOUND");
         }
         return toDetailResponse(payment);
+    }
+
+    @Override
+    @Transactional
+    public PaymentOutCreateResponseDto updatePaymentOut(Long id, PaymentOutRequestDto request) {
+        Payment payment = getPayment(id);
+        if (!FinanceSupport.PAYMENT_OUT.equals(payment.getPaymentType())) {
+            throw new ResourceNotFoundException("Payment out not found", "PAYMENT_OUT_NOT_FOUND");
+        }
+        Organization organization = payment.getOrganization();
+        reverseAllocations(payment);
+
+        Contact supplier = support.getActiveSupplier(request.getSupplierId());
+        PaymentMethod paymentMethod = support.getActivePaymentMethod(request.getPaymentMethodId());
+        payment.setPaymentMethod(paymentMethod);
+        payment.setContact(supplier);
+        payment.setAmount(support.money(request.getAmount()));
+        payment.setPaymentDate(request.getPaymentDate());
+        payment.setReferenceNo(request.getReferenceNo());
+        payment.setNotes(request.getNotes());
+        paymentRepository.save(payment);
+
+        allocateToPurchases(payment, supplier.getId(), request.getPurchaseIds(), organization);
+        financeSupport.saveMoneyMovement(payment, FinanceSupport.PAYMENT_OUT);
+
+        return PaymentOutCreateResponseDto.builder()
+                .paymentId(payment.getId())
+                .paymentNo(payment.getPaymentNo())
+                .amount(payment.getAmount())
+                .supplierBalance(financeSupport.supplierBalance(supplier))
+                .build();
+    }
+
+    @Override
+    @Transactional
+    public void deletePaymentOut(Long id) {
+        Payment payment = getPayment(id);
+        if (!FinanceSupport.PAYMENT_OUT.equals(payment.getPaymentType())) {
+            throw new ResourceNotFoundException("Payment out not found", "PAYMENT_OUT_NOT_FOUND");
+        }
+        reverseAllocations(payment);
+        financeSupport.deleteMoneyMovement(payment);
+        payment.setIsDeleted(true);
+        paymentRepository.save(payment);
+    }
+
+    private void reverseAllocations(Payment payment) {
+        List<PurchasePayment> existingAllocations = purchasePaymentRepository.findByPaymentIdAndOrganizationId(
+                payment.getId(),
+                currentOrganizationService.getOrganizationId()
+        );
+        for (PurchasePayment purchasePayment : existingAllocations) {
+            Purchase purchase = purchasePayment.getPurchase();
+            BigDecimal allocated = support.defaultZero(purchasePayment.getAmount());
+            purchase.setPaidAmount(support.money(support.defaultZero(purchase.getPaidAmount()).subtract(allocated)));
+            purchase.setDueAmount(support.money(support.defaultZero(purchase.getDueAmount()).add(allocated)));
+            if (!support.isCancelled(purchase.getStatus()) && purchase.getDueAmount().compareTo(TransactionSupport.ZERO) > 0) {
+                purchase.setStatus(TransactionSupport.STATUS_ACTIVE);
+            }
+            purchaseRepository.save(purchase);
+        }
+        purchasePaymentRepository.deleteAll(existingAllocations);
     }
 
     private void allocateToPurchases(
@@ -159,7 +221,7 @@ public class PaymentOutServiceImpl implements PaymentOutService {
     }
 
     private Payment getPayment(Long id) {
-        return paymentRepository.findByIdAndOrganizationId(id, currentOrganizationService.getOrganizationId())
+        return paymentRepository.findByIdAndOrganizationIdAndIsDeletedFalse(id, currentOrganizationService.getOrganizationId())
                 .orElseThrow(() -> new ResourceNotFoundException("Payment not found", "PAYMENT_NOT_FOUND"));
     }
 

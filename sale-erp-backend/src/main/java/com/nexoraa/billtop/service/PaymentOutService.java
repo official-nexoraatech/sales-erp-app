@@ -13,4 +13,8 @@ public interface PaymentOutService {
     PageResponseDto<PaymentListResponseDto> getPaymentOuts(int page, int size);
 
     PaymentDetailResponseDto getPaymentOutById(Long id);
+
+    PaymentOutCreateResponseDto updatePaymentOut(Long id, PaymentOutRequestDto request);
+
+    void deletePaymentOut(Long id);
 }

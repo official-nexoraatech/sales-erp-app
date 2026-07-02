@@ -11,6 +11,13 @@ import { getDefaultAuthorizedPath } from '../../auth/featurePermissions';
 import { useAuth } from '../../hooks/useAuth';
 import { authUserFromLoginResponse, isTokenExpired } from '../../utils/authToken';
 import { useTheme } from '../../contexts/ThemeContext';
+import { usePageTranslation } from '../../hooks/usePageTranslation';
+import type { AppLanguage } from '../../hooks/usePageTranslation';
+
+const getStoredLanguage = (): AppLanguage => {
+  const language = localStorage.getItem('language');
+  return language === 'hi' || language === 'gu' || language === 'mr' || language === 'en' ? language : 'en';
+};
 
 const loginSchema = z.object({
   userName: z.string().min(1, 'Username is required'),
@@ -25,6 +32,14 @@ export const LoginPage: React.FC = () => {
   const { isDark, toggleTheme } = useTheme();
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
+  const [language, setLanguage] = useState<AppLanguage>(getStoredLanguage);
+
+  usePageTranslation(language);
+
+  const changeLanguage = (value: AppLanguage) => {
+    setLanguage(value);
+    localStorage.setItem('language', value);
+  };
 
   const {
     register,
@@ -212,9 +227,27 @@ export const LoginPage: React.FC = () => {
           {/* Footer links */}
           <div className="mt-7 text-center">
             <div className="flex items-center justify-center gap-5 text-sm font-medium text-teal-700 dark:text-teal-400">
-              <button type="button" className="hover:underline">English</button>
-              <button type="button" className="hover:underline">Hindi</button>
-              <button type="button" className="hover:underline">Marathi</button>
+              <button
+                type="button"
+                onClick={() => changeLanguage('en')}
+                className={`hover:underline ${language === 'en' ? 'font-bold underline' : ''}`}
+              >
+                English
+              </button>
+              <button
+                type="button"
+                onClick={() => changeLanguage('hi')}
+                className={`hover:underline ${language === 'hi' ? 'font-bold underline' : ''}`}
+              >
+                Hindi
+              </button>
+              <button
+                type="button"
+                onClick={() => changeLanguage('mr')}
+                className={`hover:underline ${language === 'mr' ? 'font-bold underline' : ''}`}
+              >
+                Marathi
+              </button>
             </div>
             <p className="mt-4 text-xs tracking-wide text-slate-400 dark:text-slate-500">Version 2.4</p>
           </div>

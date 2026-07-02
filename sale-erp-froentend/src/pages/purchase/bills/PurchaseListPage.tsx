@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { Ban, Edit } from 'lucide-react';
+import { Ban, Edit, Eye, Trash2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { purchaseApi, supplierApi } from '../../../api/endpoints';
@@ -16,6 +16,7 @@ import { useDebounce } from '../../../hooks/useDebounce';
 import { usePagination } from '../../../hooks/usePagination';
 import { formatCurrency } from '../../../utils/formatCurrency';
 import { formatDate } from '../../../utils/formatDate';
+import { downloadCsv, downloadExcel, printTable } from '../../../utils/tableExport';
 import { PERMISSIONS } from '../../../auth/permissions';
 
 const exportColumns = ['Purchase Code', 'Date', 'Days', 'Supplier', 'Total', 'Balance', 'Status'];
@@ -57,6 +58,15 @@ export const PurchaseListPage: React.FC<Props> = ({ mode = 'bill' }) => {
     onError: (error: any) => toast.error(error?.message || 'Failed to cancel purchase'),
   });
 
+  const deletePurchase = useMutation({
+    mutationFn: purchaseApi.delete,
+    onSuccess: () => {
+      toast.success(isOrder ? 'Purchase order deleted' : 'Purchase deleted');
+      queryClient.invalidateQueries({ queryKey: ['purchases'] });
+    },
+    onError: (error: any) => toast.error(error?.message || 'Failed to delete purchase'),
+  });
+
   const rows = (purchases.data?.data?.content || []).filter((purchase) => {
     if (!supplierId) return true;
     const supplier = suppliers.data?.data?.content.find((entry) => entry.id === supplierId);
@@ -75,15 +85,9 @@ export const PurchaseListPage: React.FC<Props> = ({ mode = 'bill' }) => {
   ]);
 
   const download = (extension: 'csv' | 'xls') => {
-    const separator = extension === 'csv' ? ',' : '\t';
-    const content = [exportColumns, ...exportRows()].map((row) => row.map((value) => `"${String(value).replaceAll('"', '""')}"`).join(separator)).join('\n');
-    const blob = new Blob([content], { type: extension === 'csv' ? 'text/csv' : 'application/vnd.ms-excel' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `purchases.${extension}`;
-    link.click();
-    URL.revokeObjectURL(url);
+    const filename = isOrder ? 'purchase-orders' : 'purchases';
+    if (extension === 'csv') downloadCsv(exportColumns, exportRows(), filename);
+    else downloadExcel(exportColumns, exportRows(), filename, isOrder ? 'Purchase Orders' : 'Purchases');
   };
 
   const copy = async () => {
@@ -92,10 +96,9 @@ export const PurchaseListPage: React.FC<Props> = ({ mode = 'bill' }) => {
   };
 
   const printPdf = () => {
-    const popup = window.open('', '_blank');
-    if (!popup) return;
-    popup.document.write(`<html><head><title>Purchases</title></head><body><h2>Purchase List</h2><table border="1" cellspacing="0" cellpadding="6"><thead><tr>${exportColumns.map((column) => `<th>${column}</th>`).join('')}</tr></thead><tbody>${exportRows().map((row) => `<tr>${row.map((value) => `<td>${value}</td>`).join('')}</tr>`).join('')}</tbody></table><script>window.print()</script></body></html>`);
-    popup.document.close();
+    if (!printTable(exportColumns, exportRows(), isOrder ? 'Purchase Order List' : 'Purchase List')) {
+      toast.error('Please allow popups to print');
+    }
   };
 
   const cancelSelected = async () => {
@@ -188,6 +191,7 @@ export const PurchaseListPage: React.FC<Props> = ({ mode = 'bill' }) => {
                     <td className="border p-3">{formatDate(purchase.purchaseDate)}</td>
                     <td className="border p-3">
                       <div className="flex items-center gap-2">
+                        <button onClick={() => navigate(isOrder ? `/purchase/orders/${purchase.purchaseId}` : `/purchase/bills/${purchase.purchaseId}`)} className="text-blue-600" title="View"><Eye size={17} /></button>
                         {canUpdate && <button onClick={() => navigate(isOrder ? `/purchase/orders/${purchase.purchaseId}/edit` : `/purchase/bills/${purchase.purchaseId}/edit`)} className="text-orange-600" title="Edit"><Edit size={17} /></button>}
                         {canDelete && <button
                           onClick={async () => {
@@ -203,6 +207,21 @@ export const PurchaseListPage: React.FC<Props> = ({ mode = 'bill' }) => {
                           title="Cancel"
                         >
                           <Ban size={17} />
+                        </button>}
+                        {canDelete && <button
+                          onClick={async () => {
+                            const confirmed = await confirmAction({
+                              title: isOrder ? 'Delete Purchase Order' : 'Delete Purchase',
+                              message: isOrder ? 'Delete this purchase order? This cannot be undone.' : 'Delete this purchase? This cannot be undone.',
+                              confirmText: 'Delete',
+                              variant: 'danger',
+                            });
+                            if (confirmed) deletePurchase.mutate(purchase.purchaseId);
+                          }}
+                          className="text-red-600"
+                          title="Delete"
+                        >
+                          <Trash2 size={17} />
                         </button>}
                       </div>
                     </td>

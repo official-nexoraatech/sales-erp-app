@@ -22,6 +22,13 @@ public final class PurchaseSpecification {
         );
     }
 
+    public static Specification<Purchase> notDeleted() {
+        return (root, query, criteriaBuilder) -> criteriaBuilder.or(
+                criteriaBuilder.isNull(root.get("isDeleted")),
+                criteriaBuilder.isFalse(root.get("isDeleted"))
+        );
+    }
+
     public static Specification<Purchase> organization(Long organizationId) {
         return (root, query, criteriaBuilder) -> criteriaBuilder.equal(root.get("organization").get("id"), organizationId);
     }

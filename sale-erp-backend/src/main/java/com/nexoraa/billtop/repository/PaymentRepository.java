@@ -27,6 +27,12 @@ public interface PaymentRepository extends JpaRepository<Payment, Long> {
             Pageable pageable
     );
 
+    Page<Payment> findByPaymentTypeAndOrganizationIdAndIsDeletedFalseOrderByIdDesc(
+            String paymentType,
+            Long organizationId,
+            Pageable pageable
+    );
+
     List<Payment> findByPaymentDateAndPaymentTypeIn(LocalDate paymentDate, List<String> paymentTypes);
 
     List<Payment> findByPaymentDateAndPaymentTypeInAndOrganizationId(
@@ -44,4 +50,6 @@ public interface PaymentRepository extends JpaRepository<Payment, Long> {
     );
 
     Optional<Payment> findByIdAndOrganizationId(Long id, Long organizationId);
+
+    Optional<Payment> findByIdAndOrganizationIdAndIsDeletedFalse(Long id, Long organizationId);
 }

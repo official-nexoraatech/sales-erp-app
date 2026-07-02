@@ -79,6 +79,8 @@ public class ErrorMessage {
     public static final String SALES_RETURN_NOT_FOUND = "Sales return not found";
     public static final String PURCHASE_ALREADY_CANCELLED = "Purchase is already cancelled";
     public static final String SALE_ALREADY_CANCELLED = "Sales invoice is already cancelled";
+    public static final String SALE_HAS_PAYMENTS = "Cannot delete a sale that has payments applied to it";
+    public static final String PURCHASE_HAS_PAYMENTS = "Cannot delete a purchase that has payments applied to it";
 
     // Role Errors
     public static final String ROLE_NOT_FOUND = "Role not found";

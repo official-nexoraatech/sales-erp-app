@@ -80,6 +80,7 @@ public class PurchaseServiceImpl implements PurchaseService {
             LocalDate toDate
     ) {
         Specification<Purchase> specification = PurchaseSpecification.notCancelled()
+                .and(PurchaseSpecification.notDeleted())
                 .and(PurchaseSpecification.organization(currentOrganizationService.getOrganizationId()))
                 .and(PurchaseSpecification.search(search))
                 .and(PurchaseSpecification.dateBetween(fromDate, toDate));
@@ -119,6 +120,20 @@ public class PurchaseServiceImpl implements PurchaseService {
         ensureNotCancelled(purchase);
         reversePurchaseStock(purchase, TX_PURCHASE_CANCEL);
         purchase.setStatus(TransactionSupport.STATUS_CANCELLED);
+        purchaseRepository.save(purchase);
+    }
+
+    @Override
+    @Transactional
+    public void deletePurchase(Long id) {
+        Purchase purchase = getPurchase(id);
+        if (support.defaultZero(purchase.getPaidAmount()).compareTo(TransactionSupport.ZERO) > 0) {
+            throw new BadRequestException(ErrorMessage.PURCHASE_HAS_PAYMENTS, "PURCHASE_HAS_PAYMENTS");
+        }
+        if (!support.isCancelled(purchase.getStatus())) {
+            reversePurchaseStock(purchase, TX_PURCHASE_CANCEL);
+        }
+        purchase.setIsDeleted(true);
         purchaseRepository.save(purchase);
     }
 
@@ -225,7 +240,7 @@ public class PurchaseServiceImpl implements PurchaseService {
     }
 
     private Purchase getPurchase(Long id) {
-        return purchaseRepository.findByIdAndOrganizationId(id, currentOrganizationService.getOrganizationId())
+        return purchaseRepository.findByIdAndOrganizationIdAndIsDeletedFalse(id, currentOrganizationService.getOrganizationId())
                 .orElseThrow(() -> new ResourceNotFoundException(ErrorMessage.PURCHASE_NOT_FOUND, "PURCHASE_NOT_FOUND"));
     }
 
