@@ -1,0 +1,116 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    environment: 'local'
+    project: 'cloth-retail-erp'
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: []  # Configure alertmanager endpoint in production
+
+rule_files:
+  - 'alert-rules.yml'
+
+scrape_configs:
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # ─── ERP Backend Services ──────────────────────────────────────────────────
+  - job_name: 'erp-auth-service'
+    static_configs:
+      - targets: ['host.docker.internal:3010']
+    metrics_path: '/metrics'
+    scrape_interval: 15s
+
+  - job_name: 'erp-tenant-service'
+    static_configs:
+      - targets: ['host.docker.internal:3011']
+    metrics_path: '/metrics'
+    scrape_interval: 15s
+
+  - job_name: 'erp-inventory-service'
+    static_configs:
+      - targets: ['host.docker.internal:3012']
+    metrics_path: '/metrics'
+    scrape_interval: 15s
+
+  - job_name: 'erp-sales-service'
+    static_configs:
+      - targets: ['host.docker.internal:3013']
+    metrics_path: '/metrics'
+    scrape_interval: 15s
+
+  - job_name: 'erp-notification-service'
+    static_configs:
+      - targets: ['host.docker.internal:3014']
+    metrics_path: '/metrics'
+    scrape_interval: 15s
+
+  - job_name: 'erp-report-service'
+    static_configs:
+      - targets: ['host.docker.internal:3015']
+    metrics_path: '/metrics'
+    scrape_interval: 15s
+
+  - job_name: 'erp-scheduler-service'
+    static_configs:
+      - targets: ['host.docker.internal:3016']
+    metrics_path: '/metrics'
+    scrape_interval: 15s
+
+  - job_name: 'erp-search-service'
+    static_configs:
+      - targets: ['host.docker.internal:3017']
+    metrics_path: '/metrics'
+    scrape_interval: 15s
+
+  - job_name: 'erp-gst-service'
+    static_configs:
+      - targets: ['host.docker.internal:3018']
+    metrics_path: '/metrics'
+    scrape_interval: 15s
+
+  - job_name: 'erp-accounting-service'
+    static_configs:
+      - targets: ['host.docker.internal:3019']
+    metrics_path: '/metrics'
+    scrape_interval: 15s
+
+  - job_name: 'erp-event-service'
+    static_configs:
+      - targets: ['host.docker.internal:3023']
+    metrics_path: '/metrics'
+    scrape_interval: 15s
+
+  - job_name: 'erp-api-gateway'
+    static_configs:
+      - targets: ['host.docker.internal:3000']
+    metrics_path: '/metrics'
+    scrape_interval: 15s
+
+  # ─── Infrastructure Metrics ────────────────────────────────────────────────
+  - job_name: 'node-exporter'
+    static_configs:
+      - targets: ['host.docker.internal:9100']
+    scrape_interval: 30s
+
+  - job_name: 'kafka'
+    static_configs:
+      - targets: ['kafka:9308']
+    metrics_path: '/metrics'
+    scrape_interval: 30s
+
+  - job_name: 'postgres-exporter'
+    static_configs:
+      - targets: ['postgres-exporter:9187']
+    metrics_path: '/metrics'
+    scrape_interval: 30s
+
+  - job_name: 'redis-exporter'
+    static_configs:
+      - targets: ['redis-exporter:9121']
+    metrics_path: '/metrics'
+    scrape_interval: 30s

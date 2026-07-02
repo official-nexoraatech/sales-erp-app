@@ -1,0 +1,183 @@
+groups:
+  # ─── API Error Rate Alerts ─────────────────────────────────────────────────
+  - name: erp.api.errors
+    rules:
+      - alert: HighAPIErrorRate
+        expr: |
+          sum(rate(http_requests_total{status=~"5.."}[5m])) by (service)
+          /
+          sum(rate(http_requests_total[5m])) by (service)
+          > 0.05
+        for: 5m
+        labels:
+          severity: critical
+          channel: pagerduty
+        annotations:
+          summary: "High API error rate on {{ $labels.service }}"
+          description: "{{ $labels.service }} error rate is {{ $value | humanizePercentage }} (threshold: 5%) for 5+ minutes."
+          runbook: "Check service logs: kubectl logs -n erp-system -l app={{ $labels.service }} --tail=100"
+
+      - alert: APILatencyP95High
+        expr: |
+          histogram_quantile(0.95, sum(rate(http_request_duration_ms_bucket[5m])) by (le, service))
+          > 2000
+        for: 3m
+        labels:
+          severity: warning
+          channel: slack-infra-alerts
+        annotations:
+          summary: "P95 latency above 2000ms on {{ $labels.service }}"
+          description: "{{ $labels.service }} P95 latency is {{ $value | humanizeDuration }} — performance degradation."
+
+  # ─── Dead Letter Queue Alerts ─────────────────────────────────────────────
+  - name: erp.kafka.dlq
+    rules:
+      - alert: DLQDepthHigh
+        expr: |
+          sum(erp_dlq_depth) by (topic) > 10
+        for: 2m
+        labels:
+          severity: warning
+          channel: slack-infra-alerts
+        annotations:
+          summary: "DLQ depth > 10 on topic {{ $labels.topic }}"
+          description: "{{ $value }} unprocessed messages in DLQ for topic {{ $labels.topic }}. Manual replay required."
+          runbook: "Navigate to: ERP Admin → Distributed Systems → Dead Letter Queue → Replay messages"
+
+      - alert: KafkaConsumerLagHigh
+        expr: |
+          sum(kafka_consumer_group_lag) by (consumergroup, topic) > 1000
+        for: 5m
+        labels:
+          severity: warning
+          channel: slack-infra-alerts
+        annotations:
+          summary: "Kafka consumer lag > 1000 for {{ $labels.consumergroup }}"
+          description: "Consumer group {{ $labels.consumergroup }} on topic {{ $labels.topic }} is {{ $value }} messages behind."
+
+  # ─── Database Alerts ──────────────────────────────────────────────────────
+  - name: erp.database
+    rules:
+      - alert: DBReplicationLagHigh
+        expr: |
+          pg_replication_lag_seconds > 30
+        for: 2m
+        labels:
+          severity: warning
+          channel: slack-infra-alerts
+        annotations:
+          summary: "PostgreSQL replication lag > 30s"
+          description: "Replication lag is {{ $value | humanizeDuration }}. Replica is falling behind primary."
+          runbook: "Check: docker exec erp-postgres-replica psql -U erp -c 'SELECT now() - pg_last_xact_replay_timestamp();'"
+
+      - alert: DBConnectionPoolExhausted
+        expr: |
+          sum(pg_stat_activity_count{state="active"}) by (datname) > 80
+        for: 2m
+        labels:
+          severity: critical
+          channel: pagerduty
+        annotations:
+          summary: "DB connection pool near exhaustion ({{ $value }} active connections)"
+          description: "PostgreSQL has {{ $value }} active connections. Max is 100. Connection pool exhaustion imminent."
+
+      - alert: SlowQueryDetected
+        expr: |
+          rate(pg_stat_statements_total_time[5m]) / rate(pg_stat_statements_calls[5m]) > 500
+        for: 5m
+        labels:
+          severity: warning
+          channel: slack-infra-alerts
+        annotations:
+          summary: "Slow query detected (avg > 500ms)"
+          description: "A query is averaging {{ $value }}ms execution time. Check pg_stat_statements."
+
+  # ─── Saga Health Alerts ───────────────────────────────────────────────────
+  - name: erp.sagas
+    rules:
+      - alert: StalledSagaDetected
+        expr: |
+          sum(erp_saga_stalled_count) > 0
+        for: 30m
+        labels:
+          severity: warning
+          channel: slack-engineering
+        annotations:
+          summary: "{{ $value }} saga(s) stalled for > 30 minutes"
+          description: "Sagas stuck in non-terminal state for 30+ minutes. Manual intervention may be needed."
+          runbook: "Navigate to: ERP Admin → Distributed Systems → Saga Monitor → View stalled sagas"
+
+      - alert: SagaCompensationRateHigh
+        expr: |
+          rate(erp_saga_compensation_total[10m]) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          channel: slack-engineering
+        annotations:
+          summary: "High saga compensation rate ({{ $value | humanizePercentage }})"
+          description: "More than 10% of sagas are compensating — indicates systemic business or infra issue."
+
+  # ─── Business Health Alerts ───────────────────────────────────────────────
+  - name: erp.business
+    rules:
+      - alert: StockWentNegative
+        expr: |
+          min(erp_stock_available_qty) by (tenant_id, item_id, warehouse_id) < 0
+        for: 0m
+        labels:
+          severity: critical
+          channel: pagerduty
+        annotations:
+          summary: "CRITICAL: Stock went negative for item {{ $labels.item_id }}"
+          description: "Stock quantity is {{ $value }} for item {{ $labels.item_id }} in warehouse {{ $labels.warehouse_id }} (tenant {{ $labels.tenant_id }}). This should NEVER happen — data integrity issue."
+          runbook: "IMMEDIATE: Check inventory_ledger for item={{ $labels.item_id }}, investigate concurrent write issue."
+
+      - alert: InvoiceCreateFailureRateHigh
+        expr: |
+          sum(rate(erp_invoice_create_failed_total[5m])) /
+          sum(rate(erp_invoice_create_total[5m])) > 0.05
+        for: 3m
+        labels:
+          severity: warning
+          channel: slack-engineering
+        annotations:
+          summary: "Invoice creation failing at > 5% rate"
+          description: "{{ $value | humanizePercentage }} of invoice create attempts are failing."
+
+  # ─── Infrastructure Alerts ────────────────────────────────────────────────
+  - name: erp.infrastructure
+    rules:
+      - alert: PodMemoryHigh
+        expr: |
+          container_memory_usage_bytes{namespace="erp-system"} /
+          container_spec_memory_limit_bytes{namespace="erp-system"} > 0.85
+        for: 5m
+        labels:
+          severity: warning
+          channel: slack-infra-alerts
+        annotations:
+          summary: "Pod {{ $labels.pod }} memory at {{ $value | humanizePercentage }}"
+          description: "Container {{ $labels.container }} in pod {{ $labels.pod }} is using {{ $value | humanizePercentage }} of memory limit."
+
+      - alert: PodCrashLooping
+        expr: |
+          rate(kube_pod_container_status_restarts_total{namespace="erp-system"}[15m]) * 60 * 15 > 3
+        for: 5m
+        labels:
+          severity: critical
+          channel: pagerduty
+        annotations:
+          summary: "Pod {{ $labels.pod }} is crash-looping"
+          description: "Pod {{ $labels.pod }} has restarted more than 3 times in the last 15 minutes."
+
+      - alert: RedisDown
+        expr: |
+          redis_connected_clients == 0 or absent(redis_connected_clients)
+        for: 1m
+        labels:
+          severity: critical
+          channel: pagerduty
+        annotations:
+          summary: "Redis appears to be down"
+          description: "No Redis clients detected — auth token cache and distributed locks are unavailable."

@@ -1,0 +1,23 @@
+{
+  "name": "@erp/uat-seed",
+  "version": "1.0.0",
+  "private": true,
+  "description": "UAT environment seed data — 500 customers, 200 items, 50 suppliers, 3 months invoices",
+  "type": "module",
+  "scripts": {
+    "seed": "tsx src/seed.ts",
+    "seed:customers": "tsx src/seed.ts --entity=customers",
+    "seed:items": "tsx src/seed.ts --entity=items",
+    "seed:invoices": "tsx src/seed.ts --entity=invoices",
+    "seed:all": "tsx src/seed.ts --entity=all"
+  },
+  "dependencies": {
+    "@faker-js/faker": "^9.0.0",
+    "postgres": "^3.4.5"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.3",
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.2"
+  }
+}

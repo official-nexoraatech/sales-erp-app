@@ -1,0 +1,121 @@
+/* 1. Design tokens (CSS custom properties only — no @layer here) */
+@import "./styles/tokens.css";
+
+/* 2. Tailwind v4 — must come before any @utility or @layer utilities */
+@import "tailwindcss";
+
+/* 3. Dark-mode variant — class-based (.dark on <html>) */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* 4. Custom utility classes — MUST be after @import "tailwindcss" in Tailwind v4 */
+@layer utilities {
+  /* ── Surface backgrounds ───────────────────────────────────────────────── */
+  .bg-surface-page    { background-color: var(--surface-page); }
+  .bg-surface-card    { background-color: var(--surface-card); }
+  .bg-surface-raised  { background-color: var(--surface-raised); }
+  .bg-surface-overlay { background-color: var(--surface-overlay); }
+  .bg-surface-subtle  { background-color: var(--surface-subtle); }
+  .bg-surface-sunken  { background-color: var(--surface-sunken); }
+
+  /* ── Text colors ────────────────────────────────────────────────────────── */
+  .text-primary       { color: var(--text-primary); }
+  .text-secondary     { color: var(--text-secondary); }
+  .text-disabled      { color: var(--text-disabled); }
+  .text-inverse       { color: var(--text-inverse); }
+  .text-placeholder   { color: var(--text-placeholder); }
+  .text-link          { color: var(--text-link); }
+
+  /* ── Border colors ──────────────────────────────────────────────────────── */
+  .border-default     { border-color: var(--border-default); }
+  .border-strong      { border-color: var(--border-strong); }
+  .border-focus       { border-color: var(--border-focus); }
+  .border-error       { border-color: var(--border-error); }
+
+  /* ── Brand ──────────────────────────────────────────────────────────────── */
+  .bg-primary         { background-color: var(--brand-primary); }
+  .bg-primary-hover   { background-color: var(--brand-primary-hover); }
+  .bg-primary-subtle  { background-color: var(--brand-primary-subtle); }
+  .bg-brand           { background-color: var(--brand-primary); }
+  .bg-brand-hover     { background-color: var(--brand-primary-hover); }
+  .text-primary-fg    { color: var(--brand-primary-foreground); }
+  .text-brand         { color: var(--brand-primary); }
+
+  /* ── Semantic — Success ─────────────────────────────────────────────────── */
+  .text-success       { color: var(--color-success); }
+  .bg-success-bg      { background-color: var(--color-success-bg); }
+  .border-success     { border-color: var(--color-success-border); }
+  .text-success-fg    { color: var(--color-success-foreground); }
+
+  /* ── Semantic — Warning ─────────────────────────────────────────────────── */
+  .text-warning       { color: var(--color-warning); }
+  .bg-warning-bg      { background-color: var(--color-warning-bg); }
+  .border-warning     { border-color: var(--color-warning-border); }
+  .text-warning-fg    { color: var(--color-warning-foreground); }
+
+  /* ── Semantic — Danger ──────────────────────────────────────────────────── */
+  .text-danger        { color: var(--color-danger); }
+  .bg-danger-bg       { background-color: var(--color-danger-bg); }
+  .border-danger      { border-color: var(--color-danger-border); }
+  .text-danger-fg     { color: var(--color-danger-foreground); }
+
+  /* ── Semantic — Info ────────────────────────────────────────────────────── */
+  .text-info          { color: var(--color-info); }
+  .bg-info-bg         { background-color: var(--color-info-bg); }
+  .border-info        { border-color: var(--color-info-border); }
+  .text-info-fg       { color: var(--color-info-foreground); }
+
+  /* ── Sidebar ────────────────────────────────────────────────────────────── */
+  .bg-sidebar              { background-color: var(--sidebar-bg); }
+  .border-sidebar          { border-color: var(--sidebar-border); }
+  .text-sidebar            { color: var(--sidebar-text); }
+  .text-sidebar-muted      { color: var(--sidebar-text-muted); }
+  .text-sidebar-icon       { color: var(--sidebar-icon); }
+  .bg-sidebar-item-hover   { background-color: var(--sidebar-item-hover-bg); }
+  .bg-sidebar-item-active  { background-color: var(--sidebar-item-active-bg); }
+  .text-sidebar-active     { color: var(--sidebar-item-active-text); }
+
+  /* ── Dividers ───────────────────────────────────────────────────────────── */
+  .divide-default > * + * { border-color: var(--border-default); }
+
+  /* ── Shadows ────────────────────────────────────────────────────────────── */
+  .shadow-token-xs    { box-shadow: var(--shadow-xs); }
+  .shadow-token-sm    { box-shadow: var(--shadow-sm); }
+  .shadow-token-md    { box-shadow: var(--shadow-md); }
+  .shadow-token-lg    { box-shadow: var(--shadow-lg); }
+  .shadow-token-modal { box-shadow: var(--shadow-modal); }
+
+  /* ── Focus ring ─────────────────────────────────────────────────────────── */
+  .ring-brand         { --tw-ring-color: var(--brand-primary); }
+  .ring-focus         { --tw-ring-color: var(--brand-primary); }
+}
+
+/* 5. Animations */
+@keyframes slideInRight {
+  from { transform: translateX(100%); }
+  to   { transform: translateX(0); }
+}
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* 6. Base styles */
+:root {
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background-color: var(--surface-page);
+  color: var(--text-primary);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar        { width: 6px; height: 6px; }
+::-webkit-scrollbar-track  { background: transparent; }
+::-webkit-scrollbar-thumb  { background-color: var(--border-strong); border-radius: var(--radius-full); }
+::-webkit-scrollbar-thumb:hover { background-color: var(--text-disabled); }

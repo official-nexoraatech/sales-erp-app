@@ -1,0 +1,4 @@
+# PgBouncer userlist — plain-text passwords for local development only
+# Format: "username" "password"
+# Production: replace with MD5 hashes: md5 + md5(password + username)
+"erp" "erp_password"

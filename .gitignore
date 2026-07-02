@@ -1,0 +1,53 @@
+# Build outputs
+dist/
+build/
+coverage/
+.nyc_output/
+*.tsbuildinfo
+
+# Tooling caches
+.turbo/
+.cache/
+.parcel-cache/
+.vite/
+.eslintcache
+.pnpm-store/
+
+# Dependencies
+node_modules/
+
+# Environment — never commit secrets
+.env
+.env.local
+.env.*.local
+.env.docker
+!.env.example
+
+# Editor / IDE
+.vscode/
+.idea/
+*.suo
+*.user
+*.iml
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.pid
+*.seed
+
+# Docker
+*.override.yml
+
+# Local AI / workspace artifacts
+.claude/

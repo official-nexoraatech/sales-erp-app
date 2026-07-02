@@ -1,0 +1,24 @@
+# Istio mTLS — STRICT mode for all services in erp-system namespace
+# All pod-to-pod communication must use mutual TLS — no plaintext allowed
+apiVersion: security.istio.io/v1beta1
+kind: PeerAuthentication
+metadata:
+  name: erp-mtls-strict
+  namespace: erp-system
+spec:
+  mtls:
+    mode: STRICT
+---
+# Allow Prometheus scraping from erp-infra namespace
+apiVersion: security.istio.io/v1beta1
+kind: PeerAuthentication
+metadata:
+  name: metrics-scraping
+  namespace: erp-system
+spec:
+  selector:
+    matchLabels:
+      expose-metrics: "true"
+  portLevelMtls:
+    9090:
+      mode: PERMISSIVE

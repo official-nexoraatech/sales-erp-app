@@ -1,0 +1,67 @@
+# HashiCorp Vault configuration for ERP secrets management
+# Vault is deployed via Helm: helm install vault hashicorp/vault --namespace vault
+#
+# Vault policy — auth-service can read its own secrets
+# Apply with: vault policy write auth-service-policy - <<EOF
+# path "erp/data/auth-service/*" { capabilities = ["read"] }
+# EOF
+---
+# Kubernetes ServiceAccount for Vault authentication
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: vault-auth
+  namespace: erp-system
+---
+# ClusterRoleBinding — allow Vault to validate ERP service accounts
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: vault-auth-delegator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:auth-delegator
+subjects:
+  - kind: ServiceAccount
+    name: vault-auth
+    namespace: erp-system
+---
+# Vault Agent Injector configuration (stored as ConfigMap for reference)
+# The actual injection is configured via pod annotations (see auth-service.yaml)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vault-agent-config
+  namespace: erp-system
+data:
+  # Vault Kubernetes auth method setup commands (run during cluster bootstrap)
+  setup.sh: |
+    #!/bin/sh
+    # Enable Kubernetes auth method
+    vault auth enable kubernetes
+
+    # Configure Kubernetes auth
+    vault write auth/kubernetes/config \
+      kubernetes_host="https://kubernetes.default.svc.cluster.local" \
+      kubernetes_ca_cert=@/var/run/secrets/kubernetes.io/serviceaccount/ca.crt \
+      token_reviewer_jwt=@/var/run/secrets/kubernetes.io/serviceaccount/token
+
+    # Enable KV secrets engine v2
+    vault secrets enable -path=erp kv-v2
+
+    # Create auth-service policy
+    vault policy write auth-service - <<POLICY
+    path "erp/data/auth-service/*" {
+      capabilities = ["read"]
+    }
+    POLICY
+
+    # Bind auth-service Kubernetes ServiceAccount to Vault policy
+    vault write auth/kubernetes/role/auth-service \
+      bound_service_account_names=auth-service \
+      bound_service_account_namespaces=erp-system \
+      policies=auth-service \
+      ttl=1h
+
+    echo "Vault setup complete"

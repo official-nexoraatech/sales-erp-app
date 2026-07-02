@@ -1,0 +1,28 @@
+{
+  "name": "@erp/migration-cli",
+  "version": "1.0.0",
+  "private": true,
+  "description": "ERP data migration toolkit — Busy Accounting, Tally ERP, Excel → ERP import",
+  "type": "module",
+  "bin": {
+    "erp-migrate": "./bin/erp-migrate.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/cli.ts"
+  },
+  "dependencies": {
+    "fast-xml-parser": "^4.5.0",
+    "xlsx": "^0.18.5",
+    "zod": "^3.24.0",
+    "postgres": "^3.4.5"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.3",
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.2"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

@@ -1,0 +1,198 @@
+/* NEXORAA ERP — Design Token System
+ * Single source of truth for all CSS custom properties.
+ * All components and pages MUST use these tokens — no hardcoded colors.
+ * Reference: ERP-PLANNING/ERP_FRONTEND_DESIGN_SYSTEM.md Part 2
+ */
+
+:root {
+  /* ── Brand ──────────────────────────────────────────────────────────────── */
+  --brand-primary: #4f46e5;
+  --brand-primary-hover: #4338ca;
+  --brand-primary-active: #3730a3;
+  --brand-primary-foreground: #ffffff;
+  --brand-primary-subtle: #eef2ff;
+  --brand-primary-subtle-foreground: #3730a3;
+
+  /* ── Surface ────────────────────────────────────────────────────────────── */
+  --surface-page: #f8f9fb;
+  --surface-card: #ffffff;
+  --surface-raised: #f3f4f6;
+  --surface-overlay: #ffffff;
+  --surface-subtle: #f1f5f9;
+  --surface-sunken: #e5e7eb;
+
+  /* ── Text ───────────────────────────────────────────────────────────────── */
+  --text-primary: #111827;
+  --text-secondary: #6b7280;
+  --text-disabled: #9ca3af;
+  --text-inverse: #ffffff;
+  --text-placeholder: #9ca3af;
+  --text-link: #4f46e5;
+  --text-link-hover: #4338ca;
+
+  /* ── Border ─────────────────────────────────────────────────────────────── */
+  --border-default: #e5e7eb;
+  --border-strong: #d1d5db;
+  --border-focus: #4f46e5;
+  --border-error: #ef4444;
+
+  /* ── Semantic — Success ─────────────────────────────────────────────────── */
+  --color-success: #16a34a;
+  --color-success-hover: #15803d;
+  --color-success-bg: #f0fdf4;
+  --color-success-border: #bbf7d0;
+  --color-success-foreground: #14532d;
+
+  /* ── Semantic — Warning ─────────────────────────────────────────────────── */
+  --color-warning: #d97706;
+  --color-warning-hover: #b45309;
+  --color-warning-bg: #fffbeb;
+  --color-warning-border: #fde68a;
+  --color-warning-foreground: #78350f;
+
+  /* ── Semantic — Danger ──────────────────────────────────────────────────── */
+  --color-danger: #dc2626;
+  --color-danger-hover: #b91c1c;
+  --color-danger-bg: #fef2f2;
+  --color-danger-border: #fecaca;
+  --color-danger-foreground: #7f1d1d;
+
+  /* ── Semantic — Info ────────────────────────────────────────────────────── */
+  --color-info: #2563eb;
+  --color-info-hover: #1d4ed8;
+  --color-info-bg: #eff6ff;
+  --color-info-border: #bfdbfe;
+  --color-info-foreground: #1e3a8a;
+
+  /* ── Sidebar ────────────────────────────────────────────────────────────── */
+  --sidebar-bg: #1e1b4b;
+  --sidebar-border: #312e81;
+  --sidebar-text: #c7d2fe;
+  --sidebar-text-muted: #818cf8;
+  --sidebar-icon: #a5b4fc;
+  --sidebar-item-hover-bg: rgba(255, 255, 255, 0.08);
+  --sidebar-item-active-bg: rgba(255, 255, 255, 0.15);
+  --sidebar-item-active-text: #ffffff;
+
+  /* ── Elevation / Shadow ─────────────────────────────────────────────────── */
+  --shadow-xs: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  --shadow-sm: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+  --shadow-xl: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
+  --shadow-modal: 0 25px 50px -12px rgb(0 0 0 / 0.25);
+
+  /* ── Z-index ────────────────────────────────────────────────────────────── */
+  --z-base: 0;
+  --z-raised: 10;
+  --z-dropdown: 100;
+  --z-sticky: 200;
+  --z-sidebar: 300;
+  --z-header: 400;
+  --z-overlay: 500;
+  --z-modal: 600;
+  --z-popover: 700;
+  --z-toast: 900;
+
+  /* ── Spacing ────────────────────────────────────────────────────────────── */
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 12px;
+  --space-lg: 16px;
+  --space-xl: 20px;
+  --space-2xl: 24px;
+  --space-3xl: 32px;
+  --space-4xl: 40px;
+  --space-5xl: 48px;
+
+  /* ── Border Radius ──────────────────────────────────────────────────────── */
+  --radius-xs: 2px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius-2xl: 16px;
+  --radius-full: 9999px;
+
+  /* ── Animation ──────────────────────────────────────────────────────────── */
+  --duration-fast: 100ms;
+  --duration-normal: 150ms;
+  --duration-slow: 300ms;
+  --ease-default: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --ease-out: cubic-bezier(0, 0, 0.2, 1);
+
+  /* ── Typography ─────────────────────────────────────────────────────────── */
+  --font-sans: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', ui-monospace, 'Cascadia Code', monospace;
+}
+
+/* ── Dark Mode Overrides ─────────────────────────────────────────────────── */
+.dark {
+  /* Brand */
+  --brand-primary: #6366f1;
+  --brand-primary-hover: #818cf8;
+  --brand-primary-active: #a5b4fc;
+  --brand-primary-subtle: #1e1b4b;
+  --brand-primary-subtle-foreground: #c7d2fe;
+
+  /* Surface */
+  --surface-page: #0f172a;
+  --surface-card: #1e293b;
+  --surface-raised: #1e293b;
+  --surface-overlay: #1e293b;
+  --surface-subtle: #0f172a;
+  --surface-sunken: #0d1425;
+
+  /* Text */
+  --text-primary: #f1f5f9;
+  --text-secondary: #94a3b8;
+  --text-disabled: #475569;
+  --text-inverse: #0f172a;
+  --text-placeholder: #475569;
+  --text-link: #818cf8;
+  --text-link-hover: #a5b4fc;
+
+  /* Border */
+  --border-default: #334155;
+  --border-strong: #475569;
+  --border-focus: #6366f1;
+  --border-error: #f87171;
+
+  /* Semantic — Success */
+  --color-success: #4ade80;
+  --color-success-hover: #86efac;
+  --color-success-bg: #052e16;
+  --color-success-border: #166534;
+  --color-success-foreground: #bbf7d0;
+
+  /* Semantic — Warning */
+  --color-warning: #fbbf24;
+  --color-warning-hover: #fcd34d;
+  --color-warning-bg: #1c0a00;
+  --color-warning-border: #92400e;
+  --color-warning-foreground: #fde68a;
+
+  /* Semantic — Danger */
+  --color-danger: #f87171;
+  --color-danger-hover: #fca5a5;
+  --color-danger-bg: #1c0000;
+  --color-danger-border: #7f1d1d;
+  --color-danger-foreground: #fecaca;
+
+  /* Semantic — Info */
+  --color-info: #60a5fa;
+  --color-info-hover: #93c5fd;
+  --color-info-bg: #0c1a3d;
+  --color-info-border: #1e3a8a;
+  --color-info-foreground: #bfdbfe;
+
+  /* Shadows (darkened) */
+  --shadow-xs: 0 1px 2px 0 rgb(0 0 0 / 0.3);
+  --shadow-sm: 0 1px 3px 0 rgb(0 0 0 / 0.4), 0 1px 2px -1px rgb(0 0 0 / 0.4);
+  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.4), 0 2px 4px -2px rgb(0 0 0 / 0.4);
+  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.4), 0 4px 6px -4px rgb(0 0 0 / 0.4);
+  --shadow-modal: 0 25px 50px -12px rgb(0 0 0 / 0.7);
+}
+
+/* Utility classes are defined in index.css after @import "tailwindcss" */

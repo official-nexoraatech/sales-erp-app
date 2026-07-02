@@ -1,0 +1,58 @@
+# Deny all traffic by default in erp-system
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: deny-all
+  namespace: erp-system
+spec: {}
+---
+# Allow API gateway to call auth-service
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-api-gateway-to-auth
+  namespace: erp-system
+spec:
+  selector:
+    matchLabels:
+      app: auth-service
+  rules:
+    - from:
+        - source:
+            principals: ["cluster.local/ns/erp-system/sa/api-gateway"]
+      to:
+        - operation:
+            methods: ["POST"]
+            paths: ["/auth/*"]
+---
+# Allow all services to call auth-service for token validation
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-services-to-auth-health
+  namespace: erp-system
+spec:
+  selector:
+    matchLabels:
+      app: auth-service
+  rules:
+    - to:
+        - operation:
+            methods: ["GET"]
+            paths: ["/health"]
+---
+# Allow Prometheus (from erp-infra) to scrape all services
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-prometheus-scraping
+  namespace: erp-system
+spec:
+  rules:
+    - from:
+        - source:
+            namespaces: ["erp-infra"]
+      to:
+        - operation:
+            methods: ["GET"]
+            paths: ["/metrics"]

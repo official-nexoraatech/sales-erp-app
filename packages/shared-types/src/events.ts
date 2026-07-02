@@ -1,0 +1,70 @@
+export interface ERPEventPayload {
+  eventId: string;
+  eventType: string;
+  schemaVersion: number;
+  aggregateType: string;
+  aggregateId: number;
+  tenantId: number;
+  userId: number;
+  correlationId: string;
+  causationId: string;
+  occurredAt: string;
+  payload: Record<string, unknown>;
+}
+
+export const EventTypes = {
+  // Sales
+  INVOICE_CONFIRMED: 'INVOICE_CONFIRMED',
+  INVOICE_CANCELLED: 'INVOICE_CANCELLED',
+  INVOICE_PAYMENT_RECORDED: 'INVOICE_PAYMENT_RECORDED',
+  QUOTATION_CREATED: 'QUOTATION_CREATED',
+  QUOTATION_CONVERTED: 'QUOTATION_CONVERTED',
+  SALE_RETURN_APPROVED: 'SALE_RETURN_APPROVED',
+  CREDIT_NOTE_ISSUED: 'CREDIT_NOTE_ISSUED',
+  // Inventory
+  STOCK_DEDUCTED: 'STOCK_DEDUCTED',
+  STOCK_RECEIVED: 'STOCK_RECEIVED',
+  RESERVATION_CREATED: 'RESERVATION_CREATED',
+  RESERVATION_EXPIRED: 'RESERVATION_EXPIRED',
+  RESERVATION_FULFILLED: 'RESERVATION_FULFILLED',
+  STOCK_TRANSFER_INITIATED: 'STOCK_TRANSFER_INITIATED',
+  STOCK_TRANSFER_COMPLETED: 'STOCK_TRANSFER_COMPLETED',
+  STOCK_ADJUSTMENT_POSTED: 'STOCK_ADJUSTMENT_POSTED',
+  // Customer
+  CUSTOMER_CREATED: 'CUSTOMER_CREATED',
+  CUSTOMER_CREDIT_LIMIT_CHANGED: 'CUSTOMER_CREDIT_LIMIT_CHANGED',
+  CUSTOMER_BLOCKED: 'CUSTOMER_BLOCKED',
+  // Purchase
+  GRN_APPROVED: 'GRN_APPROVED',
+  PO_CREATED: 'PO_CREATED',
+  PURCHASE_RETURN_APPROVED: 'PURCHASE_RETURN_APPROVED',
+  // Payments
+  PAYMENT_RECEIVED: 'PAYMENT_RECEIVED',
+  PAYMENT_MADE: 'PAYMENT_MADE',
+  CHEQUE_BOUNCED: 'CHEQUE_BOUNCED',
+  // HR
+  EMPLOYEE_JOINED: 'EMPLOYEE_JOINED',
+  PAYROLL_PROCESSED: 'PAYROLL_PROCESSED',
+  LEAVE_APPROVED: 'LEAVE_APPROVED',
+  // Accounting
+  JOURNAL_POSTED: 'JOURNAL_POSTED',
+  FINANCIAL_YEAR_CLOSED: 'FINANCIAL_YEAR_CLOSED',
+  // GST
+  EINVOICE_GENERATED: 'EINVOICE_GENERATED',
+  EWAY_BILL_GENERATED: 'EWAY_BILL_GENERATED',
+  // Tenant
+  TENANT_PROVISIONED: 'TENANT_PROVISIONED',
+  TENANT_SUSPENDED: 'TENANT_SUSPENDED',
+} as const;
+
+export type EventType = (typeof EventTypes)[keyof typeof EventTypes];
+
+export interface KafkaTopics {
+  readonly INVOICE_CONFIRMED: 'erp.sales.invoice.confirmed';
+  readonly INVOICE_CANCELLED: 'erp.sales.invoice.cancelled';
+  readonly STOCK_DEDUCTED: 'erp.inventory.stock.deducted';
+  readonly STOCK_RECEIVED: 'erp.inventory.stock.received';
+  readonly JOURNAL_POSTED: 'erp.accounting.entry.posted';
+  readonly EINVOICE_GENERATED: 'erp.gst.einvoice.generated';
+  readonly PAYROLL_PROCESSED: 'erp.hr.payroll.processed';
+}
