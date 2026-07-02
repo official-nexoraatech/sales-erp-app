@@ -14,6 +14,7 @@ import jakarta.validation.constraints.Positive;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -81,5 +82,11 @@ public class PurchaseController {
     public ResponseEntity<ApiResponseDto<Void>> cancelPurchase(@PathVariable @Positive Long id) {
         purchaseService.cancelPurchase(id);
         return ResponseEntity.ok(ApiResponseDto.success(ResponseMessage.PURCHASE_CANCELLED));
+    }
+
+    @DeleteMapping("/{id}")
+    public ResponseEntity<ApiResponseDto<Void>> deletePurchase(@PathVariable @Positive Long id) {
+        purchaseService.deletePurchase(id);
+        return ResponseEntity.ok(ApiResponseDto.success(ResponseMessage.PURCHASE_DELETED));
     }
 }

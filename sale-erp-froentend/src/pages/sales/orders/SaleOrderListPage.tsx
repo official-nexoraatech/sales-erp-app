@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { Ban, Edit } from 'lucide-react';
+import { Ban, Edit, Eye, Trash2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { customerApi, salesApi } from '../../../api/endpoints';
@@ -15,6 +15,7 @@ import { useDebounce } from '../../../hooks/useDebounce';
 import { usePagination } from '../../../hooks/usePagination';
 import { formatCurrency } from '../../../utils/formatCurrency';
 import { formatDate } from '../../../utils/formatDate';
+import { downloadCsv, downloadExcel, printTable } from '../../../utils/tableExport';
 import { PERMISSIONS } from '../../../auth/permissions';
 import { TableExportButtons } from '../../../components/common/TableExportButtons';
 
@@ -62,6 +63,15 @@ export const SaleOrderListPage: React.FC = () => {
     onError: (error: any) => toast.error(error?.message || 'Failed to cancel sale order'),
   });
 
+  const deleteSale = useMutation({
+    mutationFn: salesApi.delete,
+    onSuccess: () => {
+      toast.success('Sale order deleted');
+      queryClient.invalidateQueries({ queryKey: ['sale-orders'] });
+    },
+    onError: (error: any) => toast.error(error?.message || 'Failed to delete sale order'),
+  });
+
   const rows = (sales.data?.data?.content || []).filter((sale) => {
     if (!customerId) return true;
     const customer = customers.data?.data?.content.find((entry) => entry.id === customerId);
@@ -80,17 +90,8 @@ export const SaleOrderListPage: React.FC = () => {
   ]);
 
   const download = (extension: 'csv' | 'xls') => {
-    const separator = extension === 'csv' ? ',' : '\t';
-    const content = [exportColumns, ...exportRows()]
-      .map((row) => row.map((value) => `"${String(value).replaceAll('"', '""')}"`).join(separator))
-      .join('\n');
-    const blob = new Blob([content], { type: extension === 'csv' ? 'text/csv' : 'application/vnd.ms-excel' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `sale-orders.${extension}`;
-    link.click();
-    URL.revokeObjectURL(url);
+    if (extension === 'csv') downloadCsv(exportColumns, exportRows(), 'sale-orders');
+    else downloadExcel(exportColumns, exportRows(), 'sale-orders', 'Sale Orders');
   };
 
   const copy = async () => {
@@ -99,10 +100,9 @@ export const SaleOrderListPage: React.FC = () => {
   };
 
   const printPdf = () => {
-    const popup = window.open('', '_blank');
-    if (!popup) return;
-    popup.document.write(`<html><head><title>Sale Orders</title></head><body><h2>Sale Order List</h2><table border="1" cellspacing="0" cellpadding="6"><thead><tr>${exportColumns.map((column) => `<th>${column}</th>`).join('')}</tr></thead><tbody>${exportRows().map((row) => `<tr>${row.map((value) => `<td>${value}</td>`).join('')}</tr>`).join('')}</tbody></table><script>window.print()</script></body></html>`);
-    popup.document.close();
+    if (!printTable(exportColumns, exportRows(), 'Sale Order List')) {
+      toast.error('Please allow popups to print');
+    }
   };
 
   const cancelSelected = async () => {
@@ -190,8 +190,10 @@ export const SaleOrderListPage: React.FC = () => {
                     <td className="border p-3">{formatDate(sale.invoiceDate)}</td>
                     <td className="border p-3">
                       <div className="flex items-center gap-2">
+                        <button onClick={() => navigate(`/sales/orders/${sale.saleId}`)} className="text-blue-600" title="View"><Eye size={17} /></button>
                         {canUpdate && <button onClick={() => navigate(`/sales/orders/${sale.saleId}/edit`)} className="text-orange-600" title="Edit"><Edit size={17} /></button>}
                         {canDelete && <button onClick={async () => { if (await confirmAction({ title: 'Cancel Sale Order', message: 'Cancel this sale order?', confirmText: 'Cancel', variant: 'danger' })) cancel.mutate(sale.saleId); }} className="text-red-600" title="Cancel"><Ban size={17} /></button>}
+                        {canDelete && <button onClick={async () => { if (await confirmAction({ title: 'Delete Sale Order', message: 'Delete this sale order? This cannot be undone.', confirmText: 'Delete', variant: 'danger' })) deleteSale.mutate(sale.saleId); }} className="text-red-600" title="Delete"><Trash2 size={17} /></button>}
                       </div>
                     </td>
                   </tr>

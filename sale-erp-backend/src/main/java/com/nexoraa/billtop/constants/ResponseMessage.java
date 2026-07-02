@@ -86,6 +86,7 @@ public class ResponseMessage {
     public static final String PURCHASE_CREATED = "Purchase created successfully";
     public static final String PURCHASE_UPDATED = "Purchase updated successfully";
     public static final String PURCHASE_CANCELLED = "Purchase cancelled successfully";
+    public static final String PURCHASE_DELETED = "Purchase deleted successfully";
     public static final String PURCHASE_RETRIEVED = "Purchase retrieved successfully";
     public static final String PURCHASES_RETRIEVED = "Purchases retrieved successfully";
 
@@ -98,6 +99,7 @@ public class ResponseMessage {
     public static final String SALES_INVOICE_CREATED = "Sales invoice created successfully";
     public static final String SALES_INVOICE_UPDATED = "Sales invoice updated successfully";
     public static final String SALES_INVOICE_CANCELLED = "Sales invoice cancelled successfully";
+    public static final String SALES_INVOICE_DELETED = "Sales invoice deleted successfully";
     public static final String SALES_INVOICE_RETRIEVED = "Sales invoice retrieved successfully";
     public static final String SALES_INVOICES_RETRIEVED = "Sales invoices retrieved successfully";
     public static final String SALES_INVOICE_PRINT_RETRIEVED = "Sales invoice retrieved successfully";
@@ -121,6 +123,10 @@ public class ResponseMessage {
     public static final String PAYMENT_MADE = "Payment made successfully";
     public static final String PAYMENTS_RETRIEVED = "Payments retrieved successfully";
     public static final String PAYMENT_RETRIEVED = "Payment retrieved successfully";
+    public static final String PAYMENT_IN_UPDATED = "Payment in updated successfully";
+    public static final String PAYMENT_IN_DELETED = "Payment in deleted successfully";
+    public static final String PAYMENT_OUT_UPDATED = "Payment out updated successfully";
+    public static final String PAYMENT_OUT_DELETED = "Payment out deleted successfully";
 
     // Stock Movement Messages
     public static final String STOCK_ADJUSTMENT_COMPLETED = "Stock adjustment completed";

@@ -25,4 +25,6 @@ public interface PurchaseService {
     void updatePurchase(Long id, PurchaseRequestDto request);
 
     void cancelPurchase(Long id);
+
+    void deletePurchase(Long id);
 }

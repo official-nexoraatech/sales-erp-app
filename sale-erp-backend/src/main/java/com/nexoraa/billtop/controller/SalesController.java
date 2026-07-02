@@ -14,6 +14,7 @@ import jakarta.validation.constraints.Positive;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -79,6 +80,12 @@ public class SalesController {
     public ResponseEntity<ApiResponseDto<Void>> cancelSale(@PathVariable @Positive Long id) {
         salesService.cancelSale(id);
         return ResponseEntity.ok(ApiResponseDto.success(ResponseMessage.SALES_INVOICE_CANCELLED));
+    }
+
+    @DeleteMapping("/{id}")
+    public ResponseEntity<ApiResponseDto<Void>> deleteSale(@PathVariable @Positive Long id) {
+        salesService.deleteSale(id);
+        return ResponseEntity.ok(ApiResponseDto.success(ResponseMessage.SALES_INVOICE_DELETED));
     }
 
     @GetMapping("/{id}/invoice")

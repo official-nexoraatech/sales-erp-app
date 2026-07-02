@@ -82,6 +82,7 @@ public class SalesServiceImpl implements SalesService {
             LocalDate toDate
     ) {
         Specification<Sale> specification = SaleSpecification.notCancelled()
+                .and(SaleSpecification.notDeleted())
                 .and(SaleSpecification.organization(currentOrganizationService.getOrganizationId()))
                 .and(SaleSpecification.search(search))
                 .and(SaleSpecification.dateBetween(fromDate, toDate));
@@ -125,6 +126,20 @@ public class SalesServiceImpl implements SalesService {
     }
 
     @Override
+    @Transactional
+    public void deleteSale(Long id) {
+        Sale sale = getSale(id);
+        if (support.defaultZero(sale.getPaidAmount()).compareTo(TransactionSupport.ZERO) > 0) {
+            throw new BadRequestException(ErrorMessage.SALE_HAS_PAYMENTS, "SALE_HAS_PAYMENTS");
+        }
+        if (!support.isCancelled(sale.getStatus())) {
+            reverseSaleStock(sale, TX_SALE_CANCEL);
+        }
+        sale.setIsDeleted(true);
+        saleRepository.save(sale);
+    }
+
+    @Override
     @Transactional(readOnly = true)
     public SalesInvoiceResponseDto getInvoice(Long id) {
         Sale sale = getSale(id);
@@ -153,7 +168,7 @@ public class SalesServiceImpl implements SalesService {
 
         for (SalesItemRequestDto itemRequest : request.getItems()) {
             Item item = support.getActiveItem(itemRequest.getItemId());
-            ItemBatch batch = getAvailableBatch(item, warehouse, itemRequest.getQuantity());
+            List<BatchAllocation> allocations = getAvailableBatches(item, warehouse, itemRequest.getQuantity());
             TransactionSupport.LineTotals lineTotals = support.calculateLine(
                     itemRequest.getQuantity(),
                     itemRequest.getUnitPrice(),
@@ -164,7 +179,7 @@ public class SalesServiceImpl implements SalesService {
             discountAmount = discountAmount.add(lineTotals.discountAmount());
             taxAmount = taxAmount.add(lineTotals.taxAmount());
             grandTotal = grandTotal.add(lineTotals.totalAmount());
-            items.add(new PreparedSalesItem(item, batch, itemRequest, lineTotals));
+            items.add(new PreparedSalesItem(item, allocations, itemRequest));
         }
 
         BigDecimal paidAmount = support.money(support.defaultZero(sale.getPaidAmount()));
@@ -188,17 +203,28 @@ public class SalesServiceImpl implements SalesService {
         return new PreparedSale(sale, items);
     }
 
-    private ItemBatch getAvailableBatch(Item item, Warehouse warehouse, BigDecimal requiredQuantity) {
-        return support.getStocksForItemAndWarehouse(item.getId(), warehouse.getId())
-                .stream()
-                .filter(stock -> stock.getBatch() != null)
-                .filter(stock -> support.defaultZero(stock.getAvailableQty()).compareTo(requiredQuantity) >= 0)
-                .map(Stock::getBatch)
-                .findFirst()
-                .orElseThrow(() -> new BadRequestException(
-                        ErrorMessage.INSUFFICIENT_STOCK,
-                        "INSUFFICIENT_STOCK"
-                ));
+    private List<BatchAllocation> getAvailableBatches(Item item, Warehouse warehouse, BigDecimal requiredQuantity) {
+        List<BatchAllocation> allocations = new ArrayList<>();
+        BigDecimal remaining = requiredQuantity;
+        for (Stock stock : support.getStocksForItemAndWarehouse(item.getId(), warehouse.getId())) {
+            if (remaining.compareTo(TransactionSupport.ZERO) <= 0) {
+                break;
+            }
+            if (stock.getBatch() == null) {
+                continue;
+            }
+            BigDecimal availableQty = support.defaultZero(stock.getAvailableQty());
+            if (availableQty.compareTo(TransactionSupport.ZERO) <= 0) {
+                continue;
+            }
+            BigDecimal allocatedQty = availableQty.min(remaining);
+            allocations.add(new BatchAllocation(stock.getBatch(), allocatedQty));
+            remaining = remaining.subtract(allocatedQty);
+        }
+        if (remaining.compareTo(TransactionSupport.ZERO) > 0) {
+            throw new BadRequestException(ErrorMessage.INSUFFICIENT_STOCK, "INSUFFICIENT_STOCK");
+        }
+        return allocations;
     }
 
     private void saveItemsAndDecreaseStock(
@@ -208,29 +234,37 @@ public class SalesServiceImpl implements SalesService {
             Organization organization
     ) {
         for (PreparedSalesItem preparedItem : items) {
-            SalesItem salesItem = SalesItem.builder()
-                    .organization(organization)
-                    .sale(sale)
-                    .item(preparedItem.item())
-                    .batch(preparedItem.batch())
-                    .qty(support.quantity(preparedItem.request().getQuantity()))
-                    .unitPrice(support.money(preparedItem.request().getUnitPrice()))
-                    .discountPercent(support.defaultZero(preparedItem.request().getDiscountPercent()))
-                    .discountAmount(preparedItem.totals().discountAmount())
-                    .taxPercent(support.defaultZero(preparedItem.request().getTaxPercent()))
-                    .taxAmount(preparedItem.totals().taxAmount())
-                    .totalAmount(preparedItem.totals().totalAmount())
-                    .build();
-            salesItemRepository.save(salesItem);
-            support.decreaseStock(
-                    preparedItem.item(),
-                    sale.getWarehouse(),
-                    preparedItem.batch(),
-                    preparedItem.request().getQuantity(),
-                    transactionType,
-                    sale.getId(),
-                    "Sales invoice " + sale.getInvoiceNo()
-            );
+            for (BatchAllocation allocation : preparedItem.allocations()) {
+                TransactionSupport.LineTotals lineTotals = support.calculateLine(
+                        allocation.qty(),
+                        preparedItem.request().getUnitPrice(),
+                        preparedItem.request().getDiscountPercent(),
+                        preparedItem.request().getTaxPercent()
+                );
+                SalesItem salesItem = SalesItem.builder()
+                        .organization(organization)
+                        .sale(sale)
+                        .item(preparedItem.item())
+                        .batch(allocation.batch())
+                        .qty(support.quantity(allocation.qty()))
+                        .unitPrice(support.money(preparedItem.request().getUnitPrice()))
+                        .discountPercent(support.defaultZero(preparedItem.request().getDiscountPercent()))
+                        .discountAmount(lineTotals.discountAmount())
+                        .taxPercent(support.defaultZero(preparedItem.request().getTaxPercent()))
+                        .taxAmount(lineTotals.taxAmount())
+                        .totalAmount(lineTotals.totalAmount())
+                        .build();
+                salesItemRepository.save(salesItem);
+                support.decreaseStock(
+                        preparedItem.item(),
+                        sale.getWarehouse(),
+                        allocation.batch(),
+                        allocation.qty(),
+                        transactionType,
+                        sale.getId(),
+                        "Sales invoice " + sale.getInvoiceNo()
+                );
+            }
         }
     }
 
@@ -262,7 +296,7 @@ public class SalesServiceImpl implements SalesService {
     }
 
     private Sale getSale(Long id) {
-        return saleRepository.findByIdAndOrganizationId(id, currentOrganizationService.getOrganizationId())
+        return saleRepository.findByIdAndOrganizationIdAndIsDeletedFalse(id, currentOrganizationService.getOrganizationId())
                 .orElseThrow(() -> new ResourceNotFoundException(ErrorMessage.SALE_NOT_FOUND, "SALE_NOT_FOUND"));
     }
 
@@ -347,10 +381,12 @@ public class SalesServiceImpl implements SalesService {
 
     private record PreparedSalesItem(
             Item item,
-            ItemBatch batch,
-            SalesItemRequestDto request,
-            TransactionSupport.LineTotals totals
+            List<BatchAllocation> allocations,
+            SalesItemRequestDto request
     ) {
+    }
+
+    private record BatchAllocation(ItemBatch batch, BigDecimal qty) {
     }
 }
 

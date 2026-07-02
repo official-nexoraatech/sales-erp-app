@@ -22,15 +22,19 @@ import { QuotationListPage } from '../pages/sales/quotations/QuotationListPage';
 import { QuotationCreatePage } from '../pages/sales/quotations/QuotationCreatePage';
 import { PaymentInListPage } from '../pages/sales/payment-in/PaymentInListPage';
 import { PaymentInCreatePage } from '../pages/sales/payment-in/PaymentInCreatePage';
+import { PaymentInEditPage } from '../pages/sales/payment-in/PaymentInEditPage';
 import { PaymentInViewPage } from '../pages/sales/payment-in/PaymentInViewPage';
 import { SaleOrderListPage } from '../pages/sales/orders/SaleOrderListPage';
 import { SaleOrderCreatePage } from '../pages/sales/orders/SaleOrderCreatePage';
 import { SaleOrderEditPage } from '../pages/sales/orders/SaleOrderEditPage';
+import { SaleOrderViewPage } from '../pages/sales/orders/SaleOrderViewPage';
 import { PurchaseListPage } from '../pages/purchase/bills/PurchaseListPage';
 import { PurchaseCreatePage } from '../pages/purchase/bills/PurchaseCreatePage';
 import { PurchaseEditPage } from '../pages/purchase/bills/PurchaseEditPage';
+import { PurchaseViewPage } from '../pages/purchase/bills/PurchaseViewPage';
 import { PaymentOutListPage } from '../pages/purchase/payment-out/PaymentOutListPage';
 import { PaymentOutCreatePage } from '../pages/purchase/payment-out/PaymentOutCreatePage';
+import { PaymentOutEditPage } from '../pages/purchase/payment-out/PaymentOutEditPage';
 import { PaymentOutViewPage } from '../pages/purchase/payment-out/PaymentOutViewPage';
 import { PurchaseOrderListPage } from '../pages/purchase/orders/PurchaseOrderListPage';
 import { PurchaseOrderCreatePage } from '../pages/purchase/orders/PurchaseOrderCreatePage';
@@ -243,19 +247,24 @@ export const router = createBrowserRouter([
   { path: '/sales/quotations/create', element: <ProtectedRoute permissions={PERMISSIONS.SALES_CREATE}><AppLayout><QuotationCreatePage /></AppLayout></ProtectedRoute> },
   { path: '/sales/payment-in', element: <ProtectedRoute permissions={PERMISSIONS.PAYMENT_IN_VIEW}><AppLayout><PaymentInListPage /></AppLayout></ProtectedRoute> },
   { path: '/sales/payment-in/create', element: <ProtectedRoute permissions={PERMISSIONS.PAYMENT_IN_CREATE}><AppLayout><PaymentInCreatePage /></AppLayout></ProtectedRoute> },
+  { path: '/sales/payment-in/:id/edit', element: <ProtectedRoute permissions={[PERMISSIONS.PAYMENT_IN_UPDATE, PERMISSIONS.PAYMENT_IN_VIEW]} requireAll><AppLayout><PaymentInEditPage /></AppLayout></ProtectedRoute> },
   { path: '/sales/payment-in/:id', element: <ProtectedRoute permissions={PERMISSIONS.PAYMENT_IN_VIEW}><AppLayout><PaymentInViewPage /></AppLayout></ProtectedRoute> },
   { path: '/sales/orders', element: <ProtectedRoute permissions={PERMISSIONS.SALES_VIEW}><AppLayout><SaleOrderListPage /></AppLayout></ProtectedRoute> },
   { path: '/sales/orders/create', element: <ProtectedRoute permissions={PERMISSIONS.SALES_CREATE}><AppLayout><SaleOrderCreatePage /></AppLayout></ProtectedRoute> },
   { path: '/sales/orders/:id/edit', element: <ProtectedRoute permissions={[PERMISSIONS.SALES_UPDATE, PERMISSIONS.SALES_VIEW]} requireAll><AppLayout><SaleOrderEditPage /></AppLayout></ProtectedRoute> },
+  { path: '/sales/orders/:id', element: <ProtectedRoute permissions={PERMISSIONS.SALES_VIEW}><AppLayout><SaleOrderViewPage /></AppLayout></ProtectedRoute> },
   { path: '/purchase/bills', element: <ProtectedRoute permissions={PERMISSIONS.PURCHASE_VIEW}><AppLayout><PurchaseListPage /></AppLayout></ProtectedRoute> },
   { path: '/purchase/bills/create', element: <ProtectedRoute permissions={PERMISSIONS.PURCHASE_CREATE}><AppLayout><PurchaseCreatePage /></AppLayout></ProtectedRoute> },
   { path: '/purchase/bills/:id/edit', element: <ProtectedRoute permissions={[PERMISSIONS.PURCHASE_UPDATE, PERMISSIONS.PURCHASE_VIEW]} requireAll><AppLayout><PurchaseEditPage /></AppLayout></ProtectedRoute> },
+  { path: '/purchase/bills/:id', element: <ProtectedRoute permissions={PERMISSIONS.PURCHASE_VIEW}><AppLayout><PurchaseViewPage /></AppLayout></ProtectedRoute> },
   { path: '/purchase/payment-out', element: <ProtectedRoute permissions={PERMISSIONS.PAYMENT_OUT_VIEW}><AppLayout><PaymentOutListPage /></AppLayout></ProtectedRoute> },
   { path: '/purchase/payment-out/create', element: <ProtectedRoute permissions={PERMISSIONS.PAYMENT_OUT_CREATE}><AppLayout><PaymentOutCreatePage /></AppLayout></ProtectedRoute> },
+  { path: '/purchase/payment-out/:id/edit', element: <ProtectedRoute permissions={[PERMISSIONS.PAYMENT_OUT_UPDATE, PERMISSIONS.PAYMENT_OUT_VIEW]} requireAll><AppLayout><PaymentOutEditPage /></AppLayout></ProtectedRoute> },
   { path: '/purchase/payment-out/:id', element: <ProtectedRoute permissions={PERMISSIONS.PAYMENT_OUT_VIEW}><AppLayout><PaymentOutViewPage /></AppLayout></ProtectedRoute> },
   { path: '/purchase/orders', element: <ProtectedRoute permissions={PERMISSIONS.PURCHASE_VIEW}><AppLayout><PurchaseOrderListPage /></AppLayout></ProtectedRoute> },
   { path: '/purchase/orders/create', element: <ProtectedRoute permissions={PERMISSIONS.PURCHASE_CREATE}><AppLayout><PurchaseOrderCreatePage /></AppLayout></ProtectedRoute> },
   { path: '/purchase/orders/:id/edit', element: <ProtectedRoute permissions={[PERMISSIONS.PURCHASE_UPDATE, PERMISSIONS.PURCHASE_VIEW]} requireAll><AppLayout><PurchaseOrderEditPage /></AppLayout></ProtectedRoute> },
+  { path: '/purchase/orders/:id', element: <ProtectedRoute permissions={PERMISSIONS.PURCHASE_VIEW}><AppLayout><PurchaseViewPage /></AppLayout></ProtectedRoute> },
   { path: '/purchase/returns', element: <ProtectedRoute permissions={PERMISSIONS.PURCHASE_RETURN_VIEW}><AppLayout><PurchaseReturnListPage /></AppLayout></ProtectedRoute> },
   { path: '/purchase/returns/create', element: <ProtectedRoute permissions={PERMISSIONS.PURCHASE_RETURN_CREATE}><AppLayout><PurchaseReturnCreatePage /></AppLayout></ProtectedRoute> },
   { path: '/purchase/returns/:id', element: <ProtectedRoute permissions={PERMISSIONS.PURCHASE_RETURN_VIEW}><AppLayout><PurchaseReturnViewPage /></AppLayout></ProtectedRoute> },

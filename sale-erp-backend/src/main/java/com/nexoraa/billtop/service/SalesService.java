@@ -27,5 +27,7 @@ public interface SalesService {
 
     void cancelSale(Long id);
 
+    void deleteSale(Long id);
+
     SalesInvoiceResponseDto getInvoice(Long id);
 }

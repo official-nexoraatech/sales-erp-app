@@ -18,4 +18,6 @@ public interface SaleRepository extends JpaRepository<Sale, Long>, JpaSpecificat
     Optional<Sale> findTopByInvoiceNoStartingWithAndOrganizationIdOrderByIdDesc(String prefix, Long organizationId);
 
     Optional<Sale> findByIdAndOrganizationId(Long id, Long organizationId);
+
+    Optional<Sale> findByIdAndOrganizationIdAndIsDeletedFalse(Long id, Long organizationId);
 }

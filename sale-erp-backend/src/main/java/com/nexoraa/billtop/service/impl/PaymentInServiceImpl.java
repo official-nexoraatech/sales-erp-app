@@ -90,7 +90,7 @@ public class PaymentInServiceImpl implements PaymentInService {
     @Override
     @Transactional(readOnly = true)
     public PageResponseDto<PaymentListResponseDto> getPaymentIns(int page, int size) {
-        Page<Payment> payments = paymentRepository.findByPaymentTypeAndOrganizationIdOrderByIdDesc(
+        Page<Payment> payments = paymentRepository.findByPaymentTypeAndOrganizationIdAndIsDeletedFalseOrderByIdDesc(
                 FinanceSupport.PAYMENT_IN,
                 currentOrganizationService.getOrganizationId(),
                 PageRequest.of(page, size)
@@ -113,6 +113,68 @@ public class PaymentInServiceImpl implements PaymentInService {
             throw new ResourceNotFoundException("Payment in not found", "PAYMENT_IN_NOT_FOUND");
         }
         return toDetailResponse(payment);
+    }
+
+    @Override
+    @Transactional
+    public PaymentInCreateResponseDto updatePaymentIn(Long id, PaymentInRequestDto request) {
+        Payment payment = getPayment(id);
+        if (!FinanceSupport.PAYMENT_IN.equals(payment.getPaymentType())) {
+            throw new ResourceNotFoundException("Payment in not found", "PAYMENT_IN_NOT_FOUND");
+        }
+        Organization organization = payment.getOrganization();
+        reverseAllocations(payment);
+
+        Contact customer = support.getActiveCustomer(request.getCustomerId());
+        PaymentMethod paymentMethod = support.getActivePaymentMethod(request.getPaymentMethodId());
+        payment.setPaymentMethod(paymentMethod);
+        payment.setContact(customer);
+        payment.setAmount(support.money(request.getAmount()));
+        payment.setPaymentDate(request.getPaymentDate());
+        payment.setReferenceNo(request.getReferenceNo());
+        payment.setNotes(request.getNotes());
+        paymentRepository.save(payment);
+
+        allocateToSales(payment, customer.getId(), request.getSaleIds(), organization);
+        financeSupport.saveMoneyMovement(payment, FinanceSupport.PAYMENT_IN);
+
+        return PaymentInCreateResponseDto.builder()
+                .paymentId(payment.getId())
+                .paymentNo(payment.getPaymentNo())
+                .amount(payment.getAmount())
+                .customerBalance(financeSupport.customerBalance(customer))
+                .build();
+    }
+
+    @Override
+    @Transactional
+    public void deletePaymentIn(Long id) {
+        Payment payment = getPayment(id);
+        if (!FinanceSupport.PAYMENT_IN.equals(payment.getPaymentType())) {
+            throw new ResourceNotFoundException("Payment in not found", "PAYMENT_IN_NOT_FOUND");
+        }
+        reverseAllocations(payment);
+        financeSupport.deleteMoneyMovement(payment);
+        payment.setIsDeleted(true);
+        paymentRepository.save(payment);
+    }
+
+    private void reverseAllocations(Payment payment) {
+        List<SalesPayment> existingAllocations = salesPaymentRepository.findByPaymentIdAndOrganizationId(
+                payment.getId(),
+                currentOrganizationService.getOrganizationId()
+        );
+        for (SalesPayment salesPayment : existingAllocations) {
+            Sale sale = salesPayment.getSale();
+            BigDecimal allocated = support.defaultZero(salesPayment.getAmount());
+            sale.setPaidAmount(support.money(support.defaultZero(sale.getPaidAmount()).subtract(allocated)));
+            sale.setDueAmount(support.money(support.defaultZero(sale.getDueAmount()).add(allocated)));
+            if (!support.isCancelled(sale.getStatus()) && sale.getDueAmount().compareTo(TransactionSupport.ZERO) > 0) {
+                sale.setStatus(TransactionSupport.STATUS_ACTIVE);
+            }
+            saleRepository.save(sale);
+        }
+        salesPaymentRepository.deleteAll(existingAllocations);
     }
 
     private void allocateToSales(Payment payment, Long customerId, List<Long> saleIds, Organization organization) {
@@ -155,7 +217,7 @@ public class PaymentInServiceImpl implements PaymentInService {
     }
 
     private Payment getPayment(Long id) {
-        return paymentRepository.findByIdAndOrganizationId(id, currentOrganizationService.getOrganizationId())
+        return paymentRepository.findByIdAndOrganizationIdAndIsDeletedFalse(id, currentOrganizationService.getOrganizationId())
                 .orElseThrow(() -> new ResourceNotFoundException("Payment not found", "PAYMENT_NOT_FOUND"));
     }
 

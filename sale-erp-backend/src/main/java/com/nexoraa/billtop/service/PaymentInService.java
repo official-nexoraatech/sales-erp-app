@@ -13,4 +13,8 @@ public interface PaymentInService {
     PageResponseDto<PaymentListResponseDto> getPaymentIns(int page, int size);
 
     PaymentDetailResponseDto getPaymentInById(Long id);
+
+    PaymentInCreateResponseDto updatePaymentIn(Long id, PaymentInRequestDto request);
+
+    void deletePaymentIn(Long id);
 }

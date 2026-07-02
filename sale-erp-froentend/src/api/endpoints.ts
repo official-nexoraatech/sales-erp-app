@@ -477,6 +477,7 @@ export const salesApi = {
   create: (payload: SaleRequest) => axiosClient.post<ApiResponse<void>, ApiResponse<void>>('/api/v1/sales', payload),
   update: (id: number, payload: SaleRequest) => axiosClient.put<ApiResponse<void>, ApiResponse<void>>(`/api/v1/sales/${id}`, payload),
   cancel: (id: number) => axiosClient.put<ApiResponse<void>, ApiResponse<void>>(`/api/v1/sales/${id}/cancel`),
+  delete: (id: number) => axiosClient.delete<ApiResponse<void>, ApiResponse<void>>(`/api/v1/sales/${id}`),
   getInvoice: (id: number) => axiosClient.get<ApiResponse<SaleInvoice>, ApiResponse<SaleInvoice>>(`/api/v1/sales/${id}/invoice`),
 };
 
@@ -502,6 +503,10 @@ export const paymentInApi = {
     axiosClient.get<ApiResponse<PaymentDetail>, ApiResponse<PaymentDetail>>(`/api/v1/payment-in/${id}`),
   create: (payload: PaymentInRequest) =>
     axiosClient.post<ApiResponse<void>, ApiResponse<void>>('/api/v1/payment-in', payload),
+  update: (id: number, payload: PaymentInRequest) =>
+    axiosClient.put<ApiResponse<void>, ApiResponse<void>>(`/api/v1/payment-in/${id}`, payload),
+  delete: (id: number) =>
+    axiosClient.delete<ApiResponse<void>, ApiResponse<void>>(`/api/v1/payment-in/${id}`),
 };
 
 export const purchaseApi = {
@@ -515,6 +520,8 @@ export const purchaseApi = {
     axiosClient.put<ApiResponse<void>, ApiResponse<void>>(`/api/v1/purchases/${id}`, payload),
   cancel: (id: number) =>
     axiosClient.put<ApiResponse<void>, ApiResponse<void>>(`/api/v1/purchases/${id}/cancel`),
+  delete: (id: number) =>
+    axiosClient.delete<ApiResponse<void>, ApiResponse<void>>(`/api/v1/purchases/${id}`),
 };
 
 export const paymentOutApi = {
@@ -524,6 +531,10 @@ export const paymentOutApi = {
     axiosClient.get<ApiResponse<PaymentDetail>, ApiResponse<PaymentDetail>>(`/api/v1/payment-out/${id}`),
   create: (payload: PaymentOutRequest) =>
     axiosClient.post<ApiResponse<void>, ApiResponse<void>>('/api/v1/payment-out', payload),
+  update: (id: number, payload: PaymentOutRequest) =>
+    axiosClient.put<ApiResponse<void>, ApiResponse<void>>(`/api/v1/payment-out/${id}`, payload),
+  delete: (id: number) =>
+    axiosClient.delete<ApiResponse<void>, ApiResponse<void>>(`/api/v1/payment-out/${id}`),
 };
 
 export const purchaseReturnApi = {

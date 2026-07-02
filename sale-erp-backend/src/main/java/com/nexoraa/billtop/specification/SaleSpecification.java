@@ -22,6 +22,13 @@ public final class SaleSpecification {
         );
     }
 
+    public static Specification<Sale> notDeleted() {
+        return (root, query, criteriaBuilder) -> criteriaBuilder.or(
+                criteriaBuilder.isNull(root.get("isDeleted")),
+                criteriaBuilder.isFalse(root.get("isDeleted"))
+        );
+    }
+
     public static Specification<Sale> organization(Long organizationId) {
         return (root, query, criteriaBuilder) -> criteriaBuilder.equal(root.get("organization").get("id"), organizationId);
     }
