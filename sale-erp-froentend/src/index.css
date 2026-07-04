@@ -309,11 +309,19 @@ button {
 }
 
 html {
+  height: 100%;
+  overflow: hidden;
   scroll-behavior: smooth;
   -webkit-text-size-adjust: 100%;
 }
 
+#root {
+  height: 100%;
+}
+
 body {
+  height: 100%;
+  overflow: hidden;
   background-color: var(--color-bg-app);
   color: var(--color-text-primary);
   font-feature-settings: "kern" 1, "liga" 1;

@@ -206,10 +206,14 @@ public class ReportServiceImpl implements ReportService {
 
     @Override
     @Transactional(readOnly = true)
-    public List<TopSellingItemResponseDto> getTopSellingItems() {
+    public List<TopSellingItemResponseDto> getTopSellingItems(LocalDate fromDate, LocalDate toDate) {
         Map<Long, TopSellingAccumulator> accumulators = new LinkedHashMap<>();
         for (SalesItem salesItem : salesItemRepository.findByOrganizationId(currentOrganizationService.getOrganizationId())) {
-            if (salesItem.getSale() == null || support.isCancelled(salesItem.getSale().getStatus())) {
+            Sale sale = salesItem.getSale();
+            if (sale == null
+                    || Boolean.TRUE.equals(sale.getIsDeleted())
+                    || support.isCancelled(sale.getStatus())
+                    || !isDateInRange(sale.getInvoiceDate(), fromDate, toDate)) {
                 continue;
             }
             Item item = salesItem.getItem();
@@ -272,14 +276,29 @@ public class ReportServiceImpl implements ReportService {
 
     private List<Sale> salesBetween(LocalDate fromDate, LocalDate toDate) {
         return saleRepository.findAll(SaleSpecification.notCancelled()
+                .and(SaleSpecification.notDeleted())
                 .and(SaleSpecification.organization(currentOrganizationService.getOrganizationId()))
                 .and(SaleSpecification.dateBetween(fromDate, toDate)));
     }
 
     private List<Purchase> purchasesBetween(LocalDate fromDate, LocalDate toDate) {
         return purchaseRepository.findAll(PurchaseSpecification.notCancelled()
+                .and(PurchaseSpecification.notDeleted())
                 .and(PurchaseSpecification.organization(currentOrganizationService.getOrganizationId()))
                 .and(PurchaseSpecification.dateBetween(fromDate, toDate)));
+    }
+
+    private boolean isDateInRange(LocalDate value, LocalDate fromDate, LocalDate toDate) {
+        if (value == null) {
+            return false;
+        }
+        if (fromDate != null && value.isBefore(fromDate)) {
+            return false;
+        }
+        if (toDate != null && value.isAfter(toDate)) {
+            return false;
+        }
+        return true;
     }
 
     private BigDecimal sumSales(LocalDate fromDate, LocalDate toDate) {

@@ -9,6 +9,7 @@ import com.nexoraa.billtop.service.ExpenseService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.Positive;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -20,6 +21,8 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.time.LocalDate;
 
 @Validated
 @RestController
@@ -43,11 +46,13 @@ public class ExpenseController {
     @GetMapping
     public ResponseEntity<ApiResponseDto<PageResponseDto<ExpenseResponseDto>>> getExpenses(
             @RequestParam(defaultValue = "0") @Min(0) int page,
-            @RequestParam(defaultValue = "20") @Positive int size
+            @RequestParam(defaultValue = "20") @Positive int size,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fromDate,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate toDate
     ) {
         return ResponseEntity.ok(ApiResponseDto.success(
                 ResponseMessage.EXPENSES_RETRIEVED,
-                expenseService.getExpenses(page, size)
+                expenseService.getExpenses(page, size, fromDate, toDate)
         ));
     }
 

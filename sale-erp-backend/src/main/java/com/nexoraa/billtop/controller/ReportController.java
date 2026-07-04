@@ -93,8 +93,11 @@ public class ReportController {
     }
 
     @GetMapping("/top-selling-items")
-    public ResponseEntity<ApiResponseDto<List<TopSellingItemResponseDto>>> getTopSellingItems() {
-        return ResponseEntity.ok(ApiResponseDto.success(ResponseMessage.REPORT_RETRIEVED, reportService.getTopSellingItems()));
+    public ResponseEntity<ApiResponseDto<List<TopSellingItemResponseDto>>> getTopSellingItems(
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fromDate,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate toDate
+    ) {
+        return ResponseEntity.ok(ApiResponseDto.success(ResponseMessage.REPORT_RETRIEVED, reportService.getTopSellingItems(fromDate, toDate)));
     }
 
     @GetMapping("/day-book")

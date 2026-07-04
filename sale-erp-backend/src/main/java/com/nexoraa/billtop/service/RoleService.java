@@ -18,4 +18,12 @@ public interface RoleService {
     void updateRole(Long id, RoleRequestDto request);
 
     void deleteRole(Long id);
+
+    void createRoleForOrganization(Long organizationId, RoleRequestDto request);
+
+    RoleResponseDto getRoleByIdForOrganization(Long organizationId, Long id);
+
+    void updateRoleForOrganization(Long organizationId, Long id, RoleRequestDto request);
+
+    void deleteRoleForOrganization(Long organizationId, Long id);
 }

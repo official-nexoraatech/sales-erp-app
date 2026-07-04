@@ -112,7 +112,7 @@ export const UserPermissionsPage: React.FC = () => {
     <div className="space-y-5">
       <div className="text-sm text-gray-500 dark:text-slate-400">Home &gt; Users &gt; Permissions</div>
 
-      <div className="flex max-h-[calc(100vh-7rem)] min-h-[620px] flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow dark:border-slate-700 dark:bg-slate-800 dark:shadow-slate-950/40">
+      <div className="flex flex-col rounded-xl border border-slate-200 bg-white shadow dark:border-slate-700 dark:bg-slate-800 dark:shadow-slate-950/40">
         <div className="flex flex-col gap-3 border-b border-slate-200 px-5 py-4 dark:border-slate-700 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h1 className="text-xl font-semibold text-gray-900 dark:text-slate-100">User Permissions</h1>
@@ -179,7 +179,7 @@ export const UserPermissionsPage: React.FC = () => {
           )}
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-5">
+        <div className="px-5 pb-5">
           {permissions.isLoading || selectedUserPermissions.isFetching ? (
             <div className="p-12"><Loader /></div>
           ) : permissions.isError ? (
@@ -216,7 +216,7 @@ export const UserPermissionsPage: React.FC = () => {
                         return (
                           <label
                             key={permission.id}
-                            className={`flex cursor-pointer items-start gap-3 px-4 py-3 transition ${
+                            className={`relative flex cursor-pointer items-start gap-3 px-4 py-3 transition ${
                               checked ? 'bg-blue-50/60 dark:bg-blue-950/30' : 'hover:bg-slate-50 dark:hover:bg-slate-700/50'
                             }`}
                           >

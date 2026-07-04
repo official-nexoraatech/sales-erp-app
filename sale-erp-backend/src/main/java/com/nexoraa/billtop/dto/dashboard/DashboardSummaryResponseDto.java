@@ -23,4 +23,11 @@ public class DashboardSummaryResponseDto {
     private long totalCustomers;
     private long totalSuppliers;
     private long lowStockItems;
+    private long pendingSaleOrders;
+    private long completedSaleOrders;
+    private BigDecimal paymentReceivables;
+    private BigDecimal paymentPayables;
+    private long pendingPurchaseOrders;
+    private long completedPurchaseOrders;
+    private BigDecimal totalExpense;
 }

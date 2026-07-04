@@ -279,6 +279,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const navigate = useNavigate();
   const { user, logout, hasPermission, hasAnyPermission, hasAllPermissions } = useAuth();
   const defaultPath = getDefaultAuthorizedPath(user?.permissions, user?.role);
+  const organizationLogoUrl = user?.organizationLogoUrl?.trim();
+  const organizationLogoAlt = user?.organizationName ? `${user.organizationName} logo` : 'Organization logo';
 
   const visibleMenuItems = useMemo(() =>
     menuItems
@@ -366,11 +368,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <div className="flex h-16 shrink-0 items-center justify-between gap-2 border-b border-slate-200 px-3 dark:border-slate-700">
           {!collapsed && (
             <Link to={defaultPath} onClick={onClose} className="flex min-w-0 flex-1 items-center py-2">
-              <img
-                src="/texmintra-logo.svg"
-                alt="Texmintra"
-                className="w-40 max-w-full object-contain dark:brightness-110"
-              />
+              {organizationLogoUrl ? (
+                <img
+                  src={organizationLogoUrl}
+                  alt={organizationLogoAlt}
+                  className="max-h-10 w-40 max-w-full object-contain object-left dark:brightness-110"
+                />
+              ) : (
+                <span className="truncate text-sm font-semibold text-slate-800 dark:text-slate-100">
+                  {user?.organizationName || 'Organization'}
+                </span>
+              )}
             </Link>
           )}
           {/* Mobile close */}
@@ -581,7 +589,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   {user?.userName || 'User'}
                 </p>
                 <p className="truncate text-xs text-slate-500 dark:text-slate-400">
-                  {user?.role || user?.organizationName || 'Texmintra'}
+                  {user?.role || user?.organizationName || 'Organization'}
                 </p>
               </div>
               <ChevronRight

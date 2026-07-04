@@ -14,6 +14,7 @@ import com.nexoraa.billtop.repository.SaleRepository;
 import com.nexoraa.billtop.repository.StockRepository;
 import com.nexoraa.billtop.security.CurrentOrganizationService;
 import com.nexoraa.billtop.service.DashboardService;
+import com.nexoraa.billtop.specification.ExpenseSpecification;
 import com.nexoraa.billtop.specification.PurchaseSpecification;
 import com.nexoraa.billtop.specification.SaleSpecification;
 import org.springframework.data.jpa.domain.Specification;
@@ -63,9 +64,12 @@ public class DashboardServiceImpl implements DashboardService {
     }
 
     @Override
-    @Transactional
-    public DashboardSummaryResponseDto getSummary() {
+    @Transactional(readOnly = true)
+    public DashboardSummaryResponseDto getSummary(LocalDate fromDate, LocalDate toDate) {
         LocalDate today = LocalDate.now();
+        List<Sale> periodSales = salesBetween(fromDate, toDate);
+        List<Purchase> periodPurchases = purchasesBetween(fromDate, toDate);
+        List<Expense> periodExpenses = expensesBetween(fromDate, toDate);
         BigDecimal todaySales = saleRepository.findAll(todaySalesSpec(today)).stream()
                 .map(Sale::getGrandTotal)
                 .map(support::defaultZero)
@@ -91,6 +95,18 @@ public class DashboardServiceImpl implements DashboardService {
                 .map(Payment::getAmount)
                 .map(support::defaultZero)
                 .reduce(TransactionSupport.ZERO, BigDecimal::add);
+        BigDecimal paymentReceivables = periodSales.stream()
+                .map(Sale::getDueAmount)
+                .map(support::defaultZero)
+                .reduce(TransactionSupport.ZERO, BigDecimal::add);
+        BigDecimal paymentPayables = periodPurchases.stream()
+                .map(Purchase::getDueAmount)
+                .map(support::defaultZero)
+                .reduce(TransactionSupport.ZERO, BigDecimal::add);
+        BigDecimal totalExpense = periodExpenses.stream()
+                .map(Expense::getAmount)
+                .map(support::defaultZero)
+                .reduce(TransactionSupport.ZERO, BigDecimal::add);
 
         return DashboardSummaryResponseDto.builder()
                 .todaySales(support.money(todaySales))
@@ -109,17 +125,52 @@ public class DashboardServiceImpl implements DashboardService {
                         currentOrganizationService.getOrganizationId(),
                 com.nexoraa.billtop.enums.Status.ACTIVE))
                 .lowStockItems(lowStockCount())
+                .pendingSaleOrders(periodSales.stream().filter(sale -> !isCompleted(sale.getStatus(), sale.getDueAmount())).count())
+                .completedSaleOrders(periodSales.stream().filter(sale -> isCompleted(sale.getStatus(), sale.getDueAmount())).count())
+                .paymentReceivables(support.money(paymentReceivables))
+                .paymentPayables(support.money(paymentPayables))
+                .pendingPurchaseOrders(periodPurchases.stream().filter(purchase -> !isCompleted(purchase.getStatus(), purchase.getDueAmount())).count())
+                .completedPurchaseOrders(periodPurchases.stream().filter(purchase -> isCompleted(purchase.getStatus(), purchase.getDueAmount())).count())
+                .totalExpense(support.money(totalExpense))
                 .build();
+    }
+
+    private List<Sale> salesBetween(LocalDate fromDate, LocalDate toDate) {
+        return saleRepository.findAll(SaleSpecification.notCancelled()
+                .and(SaleSpecification.notDeleted())
+                .and(SaleSpecification.organization(currentOrganizationService.getOrganizationId()))
+                .and(SaleSpecification.dateBetween(fromDate, toDate)));
+    }
+
+    private List<Purchase> purchasesBetween(LocalDate fromDate, LocalDate toDate) {
+        return purchaseRepository.findAll(PurchaseSpecification.notCancelled()
+                .and(PurchaseSpecification.notDeleted())
+                .and(PurchaseSpecification.organization(currentOrganizationService.getOrganizationId()))
+                .and(PurchaseSpecification.dateBetween(fromDate, toDate)));
+    }
+
+    private List<Expense> expensesBetween(LocalDate fromDate, LocalDate toDate) {
+        return expenseRepository.findAll(ExpenseSpecification.notDeleted()
+                .and(ExpenseSpecification.organization(currentOrganizationService.getOrganizationId()))
+                .and(ExpenseSpecification.dateBetween(fromDate, toDate)));
+    }
+
+    private boolean isCompleted(String status, BigDecimal balance) {
+        String normalized = status == null ? "" : status.trim().toUpperCase();
+        return List.of("PAID", "COMPLETED", "COMPLETE", "CLOSED").contains(normalized)
+                || support.defaultZero(balance).compareTo(TransactionSupport.ZERO) <= 0;
     }
 
     private Specification<Sale> todaySalesSpec(LocalDate today) {
         return SaleSpecification.notCancelled()
+                .and(SaleSpecification.notDeleted())
                 .and(SaleSpecification.organization(currentOrganizationService.getOrganizationId()))
                 .and(SaleSpecification.dateBetween(today, today));
     }
 
     private Specification<Purchase> todayPurchaseSpec(LocalDate today) {
         return PurchaseSpecification.notCancelled()
+                .and(PurchaseSpecification.notDeleted())
                 .and(PurchaseSpecification.organization(currentOrganizationService.getOrganizationId()))
                 .and(PurchaseSpecification.dateBetween(today, today));
     }
@@ -143,5 +194,3 @@ public class DashboardServiceImpl implements DashboardService {
                 .orElse(TransactionSupport.ZERO);
     }
 }
-
-

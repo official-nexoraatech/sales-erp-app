@@ -5,11 +5,13 @@ import com.nexoraa.billtop.dto.expense.ExpenseCreateResponseDto;
 import com.nexoraa.billtop.dto.expense.ExpenseRequestDto;
 import com.nexoraa.billtop.dto.expense.ExpenseResponseDto;
 
+import java.time.LocalDate;
+
 public interface ExpenseService {
 
     ExpenseCreateResponseDto createExpense(ExpenseRequestDto request);
 
-    PageResponseDto<ExpenseResponseDto> getExpenses(int page, int size);
+    PageResponseDto<ExpenseResponseDto> getExpenses(int page, int size, LocalDate fromDate, LocalDate toDate);
 
     ExpenseResponseDto getExpenseById(Long id);
 

@@ -26,7 +26,7 @@ export const canAccessRule = (
     : hasAnyPermission(accessRule.permissions);
 };
 
-const isSuperAdminRole = (role?: string) => role?.trim().toLowerCase() === 'super admin';
+export const isSuperAdminRole = (role?: string) => role?.trim().toLowerCase() === 'super admin';
 
 export const canAccessRuleFromPermissions = (
   accessRule: AccessRule | undefined,

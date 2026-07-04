@@ -43,8 +43,12 @@ public class RoleServiceImpl implements RoleService {
     @Override
     @Transactional
     public void createRole(RoleRequestDto request) {
-        Long organizationId = currentOrganizationService.getOrganizationId();
-        
+        createRoleForOrganization(currentOrganizationService.getOrganizationId(), request);
+    }
+
+    @Override
+    @Transactional
+    public void createRoleForOrganization(Long organizationId, RoleRequestDto request) {
         var organization = organizationRepository.findByIdAndStatusAndIsDeletedFalse(organizationId, Status.ACTIVE)
                 .orElseThrow(() -> new ResourceNotFoundException(
                         ErrorMessage.ORGANIZATION_NOT_FOUND,
@@ -92,17 +96,29 @@ public class RoleServiceImpl implements RoleService {
     @Override
     @Transactional(readOnly = true)
     public RoleResponseDto getRoleById(Long id) {
-        return roleMapper.toResponse(getActiveRole(id));
+        return roleMapper.toResponse(getActiveRole(id, currentOrganizationService.getOrganizationId()));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public RoleResponseDto getRoleByIdForOrganization(Long organizationId, Long id) {
+        return roleMapper.toResponse(getActiveRole(id, organizationId));
     }
 
     @Override
     @Transactional
     public void updateRole(Long id, RoleRequestDto request) {
-        Role role = getActiveRole(id);
+        updateRoleForOrganization(currentOrganizationService.getOrganizationId(), id, request);
+    }
+
+    @Override
+    @Transactional
+    public void updateRoleForOrganization(Long organizationId, Long id, RoleRequestDto request) {
+        Role role = getActiveRole(id, organizationId);
         if (roleRepository.existsByNameIgnoreCaseAndIdNotAndOrganizationIdAndStatusAndIsDeletedFalse(
                 request.getName(),
                 id,
-                currentOrganizationService.getOrganizationId(),
+                organizationId,
                 Status.ACTIVE
         )) {
             throw new BadRequestException(ErrorMessage.ROLE_ALREADY_EXISTS, "ROLE_ALREADY_EXISTS");
@@ -114,16 +130,22 @@ public class RoleServiceImpl implements RoleService {
     @Override
     @Transactional
     public void deleteRole(Long id) {
-        Role role = getActiveRole(id);
+        deleteRoleForOrganization(currentOrganizationService.getOrganizationId(), id);
+    }
+
+    @Override
+    @Transactional
+    public void deleteRoleForOrganization(Long organizationId, Long id) {
+        Role role = getActiveRole(id, organizationId);
         role.setStatus(Status.INACTIVE);
         role.setIsDeleted(true);
         roleRepository.save(role);
     }
 
-    private Role getActiveRole(Long id) {
+    private Role getActiveRole(Long id, Long organizationId) {
         return roleRepository.findByIdAndOrganizationIdAndStatusAndIsDeletedFalse(
                         id,
-                        currentOrganizationService.getOrganizationId(),
+                        organizationId,
                         Status.ACTIVE
                 )
                 .orElseThrow(() -> new ResourceNotFoundException(ErrorMessage.ROLE_NOT_FOUND, "ROLE_NOT_FOUND"));

@@ -73,7 +73,7 @@ public class UserService {
         }
 
         Organization organization = organizationRepository.findByIdAndStatusAndIsDeletedFalse(
-                        request.getOrganizationId(),
+                        resolveOrganizationIdForCreate(request),
                         Status.ACTIVE
                 )
                 .orElseThrow(() -> new BadRequestException(
@@ -99,17 +99,24 @@ public class UserService {
 
     @Transactional(readOnly = true)
     public List<UserResponseDto> getUsersByOrganization(String search) {
+        return getUsersByOrganizationId(currentOrganizationService.getOrganizationId(), search);
+    }
+
+    @Transactional(readOnly = true)
+    public List<UserResponseDto> getUsersByOrganizationId(Long organizationId, String search) {
         String searchPattern = StringUtils.hasText(search)
                 ? "%" + search.trim().toLowerCase(Locale.ROOT) + "%"
                 : null;
 
-        return userRepository.findUsersByOrganization(
-                        currentOrganizationService.getOrganizationId(),
-                        searchPattern
-                )
+        return userRepository.findUsersByOrganization(organizationId, searchPattern)
                 .stream()
                 .map(userMapper::toResponseDto)
                 .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public UserResponseDto getUserByIdForOrganization(Long organizationId, Long id) {
+        return userMapper.toResponseDto(getActiveUser(id, organizationId));
     }
 
     @Transactional(readOnly = true)
@@ -126,7 +133,11 @@ public class UserService {
 
     @Transactional
     public void updateUser(Long id, UpdateUserRequestDto request) {
-        Long organizationId = currentOrganizationService.getOrganizationId();
+        updateUserForOrganization(currentOrganizationService.getOrganizationId(), id, request);
+    }
+
+    @Transactional
+    public void updateUserForOrganization(Long organizationId, Long id, UpdateUserRequestDto request) {
         User user = getActiveUser(id, organizationId);
 
         if (userRepository.existsByUserNameAndIdNot(request.getUserName(), id)) {
@@ -154,7 +165,12 @@ public class UserService {
 
     @Transactional
     public void deleteUser(Long id) {
-        User user = getActiveUser(id, currentOrganizationService.getOrganizationId());
+        deleteUserForOrganization(currentOrganizationService.getOrganizationId(), id);
+    }
+
+    @Transactional
+    public void deleteUserForOrganization(Long organizationId, Long id) {
+        User user = getActiveUser(id, organizationId);
         user.setStatus(Status.INACTIVE);
         user.setIsDeleted(true);
         userRepository.save(user);
@@ -219,6 +235,22 @@ public class UserService {
     private User getActiveUser(Long id, Long organizationId) {
         return userRepository.findByIdAndOrganizationIdAndStatusAndIsDeletedFalse(id, organizationId, Status.ACTIVE)
                 .orElseThrow(() -> new ResourceNotFoundException(ErrorMessage.USER_NOT_FOUND, "USER_NOT_FOUND"));
+    }
+
+    /**
+     * A regular (non-super-admin) logged-in user always gets their own org from the
+     * token, regardless of what is in the request body. Super admins (and anonymous
+     * callers bootstrapping a brand-new organization's first user) use the org id
+     * supplied in the request.
+     */
+    private Long resolveOrganizationIdForCreate(CreateUserRequestDto request) {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication != null
+                && authentication.getPrincipal() instanceof BillTopUserDetails userDetails
+                && !userDetails.isSuperAdmin()) {
+            return userDetails.organizationId();
+        }
+        return request.getOrganizationId();
     }
 
     private Role getActiveRole(Long roleId, Long organizationId) {
