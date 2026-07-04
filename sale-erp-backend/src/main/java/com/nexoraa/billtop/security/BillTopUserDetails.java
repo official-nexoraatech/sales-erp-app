@@ -4,6 +4,7 @@ import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.UserDetails;
 
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 
@@ -19,11 +20,22 @@ public record BillTopUserDetails(
         boolean enabled
 ) implements UserDetails {
 
+    private static final String SUPER_ADMIN_ROLE_NAME = "Super Admin";
+    public static final String SUPER_ADMIN_AUTHORITY = "SUPER_ADMIN";
+
+    public boolean isSuperAdmin() {
+        return role != null && role.trim().equalsIgnoreCase(SUPER_ADMIN_ROLE_NAME);
+    }
+
     @Override
     public Collection<? extends GrantedAuthority> getAuthorities() {
-        return permissions.stream()
+        List<GrantedAuthority> authorities = new ArrayList<>(permissions.stream()
                 .map(SimpleGrantedAuthority::new)
-                .toList();
+                .toList());
+        if (isSuperAdmin()) {
+            authorities.add(new SimpleGrantedAuthority(SUPER_ADMIN_AUTHORITY));
+        }
+        return authorities;
     }
 
     @Override

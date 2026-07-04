@@ -283,8 +283,8 @@ export const carrierApi = {
 };
 
 export const dashboardApi = {
-  getSummary: () =>
-    axiosClient.get<ApiResponse<DashboardSummary>, ApiResponse<DashboardSummary>>('/api/v1/dashboard/summary'),
+  getSummary: (params?: { fromDate?: string; toDate?: string }) =>
+    axiosClient.get<ApiResponse<DashboardSummary>, ApiResponse<DashboardSummary>>('/api/v1/dashboard/summary', { params }),
 };
 
 export const itemApi = {
@@ -464,6 +464,11 @@ export const rolesApi = {
     axiosClient.put<ApiResponse<void>, ApiResponse<void>>(`/api/v1/roles/${id}`, payload),
   delete: (id: number) =>
     axiosClient.delete<ApiResponse<void>, ApiResponse<void>>(`/api/v1/roles/${id}`),
+};
+
+export const adminRolesApi = {
+  create: (payload: RoleRequest) =>
+    axiosClient.post<ApiResponse<void>, ApiResponse<void>>('/api/v2/admin/organizations/roles', payload),
 };
 
 export const posApi = {
@@ -662,7 +667,7 @@ export const cashApi = {
 };
 
 export const reportsApi = {
-  topSellingItems: () => axiosClient.get<ApiResponse<TopSellingItem[]>, ApiResponse<TopSellingItem[]>>('/api/v1/reports/top-selling-items'),
+  topSellingItems: (params?: { fromDate?: string; toDate?: string }) => axiosClient.get<ApiResponse<TopSellingItem[]>, ApiResponse<TopSellingItem[]>>('/api/v1/reports/top-selling-items', { params }),
   supplierLedger: (supplierId: number) => axiosClient.get<ApiResponse<any>, ApiResponse<any>>(`/api/v1/reports/supplier-ledger/${supplierId}`),
   stocks: () => axiosClient.get<ApiResponse<any>, ApiResponse<any>>('/api/v1/reports/stocks'),
   sales: (params?: any) => axiosClient.get<ApiResponse<any>, ApiResponse<any>>('/api/v1/reports/sales', { params }),

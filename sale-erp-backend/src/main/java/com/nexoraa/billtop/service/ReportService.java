@@ -32,7 +32,7 @@ public interface ReportService {
 
     InventoryValuationResponseDto getInventoryValuation();
 
-    List<TopSellingItemResponseDto> getTopSellingItems();
+    List<TopSellingItemResponseDto> getTopSellingItems(LocalDate fromDate, LocalDate toDate);
 
     List<DayBookEntryResponseDto> getDayBook(LocalDate date);
 }

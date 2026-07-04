@@ -2,11 +2,14 @@ import React, { useEffect, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { rolesApi } from '../../api/endpoints';
+import { adminRolesApi, rolesApi } from '../../api/endpoints';
 import type { RoleRequest } from '../../api/endpoints';
 import { queryClient } from '../../app/queryClient';
 import { Button } from '../../components/ui/Button';
 import { Loader } from '../../components/ui/Loader';
+import { useAuth } from '../../hooks/useAuth';
+import { isSuperAdminRole } from '../../auth/featurePermissions';
+import { OrganizationSelector } from './OrganizationSelector';
 
 interface Props {
   mode: 'create' | 'edit';
@@ -23,6 +26,8 @@ export const RoleFormPage: React.FC<Props> = ({ mode }) => {
   const returnTo = requestedReturnTo?.startsWith('/') && !requestedReturnTo.startsWith('//')
     ? requestedReturnTo
     : '/users/roles';
+  const { user } = useAuth();
+  const isSuperAdmin = isSuperAdminRole(user?.role);
   const [form, setForm] = useState<RoleRequest>({ name: '', status: 'ACTIVE', organizationId });
 
   const role = useQuery({
@@ -39,7 +44,10 @@ export const RoleFormPage: React.FC<Props> = ({ mode }) => {
   }, [role.data]);
 
   const mutation = useMutation({
-    mutationFn: () => mode === 'edit' ? rolesApi.update(id, form) : rolesApi.create(form),
+    mutationFn: () => {
+      if (mode === 'edit') return rolesApi.update(id, form);
+      return isSuperAdmin ? adminRolesApi.create(form) : rolesApi.create(form);
+    },
     onSuccess: () => {
       toast.success(`Role ${mode === 'edit' ? 'updated' : 'created'} successfully`);
       queryClient.invalidateQueries({ queryKey: ['roles'] });
@@ -51,6 +59,10 @@ export const RoleFormPage: React.FC<Props> = ({ mode }) => {
   const submit = () => {
     if (!form.name.trim()) {
       toast.error('Role name is required');
+      return;
+    }
+    if (mode === 'create' && isSuperAdmin && !form.organizationId) {
+      toast.error('Organization is required');
       return;
     }
     mutation.mutate();
@@ -69,6 +81,13 @@ export const RoleFormPage: React.FC<Props> = ({ mode }) => {
         ) : (
           <>
             <div className="grid grid-cols-1 gap-4 p-5 md:grid-cols-2">
+              {mode === 'create' && isSuperAdmin && (
+                <OrganizationSelector
+                  value={form.organizationId || 0}
+                  onChange={(newOrganizationId) => setForm((current) => ({ ...current, organizationId: newOrganizationId || undefined }))}
+                  onCreate={() => navigate('/organizations/create?returnTo=/users/roles/create')}
+                />
+              )}
               <label className="text-sm text-gray-600">
                 Role Name
                 <input className={`${inputClass} mt-1`} value={form.name} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} />

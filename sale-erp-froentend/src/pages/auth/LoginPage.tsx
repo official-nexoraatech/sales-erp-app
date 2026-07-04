@@ -67,7 +67,7 @@ export const LoginPage: React.FC = () => {
   });
 
   return (
-    <main className="relative min-h-screen bg-slate-50 dark:bg-slate-900 lg:grid lg:grid-cols-[58%_42%]">
+    <main className="relative h-screen overflow-y-auto bg-slate-50 dark:bg-slate-900 lg:grid lg:grid-cols-[58%_42%]">
       {/* Theme toggle — top-right corner */}
       <button
         type="button"
@@ -185,7 +185,7 @@ export const LoginPage: React.FC = () => {
 
             {/* Remember me + forgot password */}
             <div className="flex items-center justify-between gap-4 text-sm">
-              <label className="flex cursor-pointer items-center gap-3 text-slate-600 dark:text-slate-400">
+              <label className="relative flex cursor-pointer items-center gap-3 text-slate-600 dark:text-slate-400">
                 <input
                   type="checkbox"
                   checked={rememberMe}

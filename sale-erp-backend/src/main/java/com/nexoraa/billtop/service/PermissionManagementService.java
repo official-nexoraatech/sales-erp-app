@@ -84,7 +84,11 @@ public class PermissionManagementService {
 
     @Transactional(readOnly = true)
     public List<PermissionResponseDto> getUserPermissions(Long userId) {
-        Long organizationId = currentOrganizationService.getOrganizationId();
+        return getUserPermissionsForOrganization(currentOrganizationService.getOrganizationId(), userId);
+    }
+
+    @Transactional(readOnly = true)
+    public List<PermissionResponseDto> getUserPermissionsForOrganization(Long organizationId, Long userId) {
         User user = userRepository.findByIdAndOrganizationIdAndStatusAndIsDeletedFalse(
                         userId,
                         organizationId,
@@ -118,7 +122,11 @@ public class PermissionManagementService {
 
     @Transactional
     public void assignPermissionsToUser(AssignUserPermissionsRequestDto request) {
-        Long organizationId = currentOrganizationService.getOrganizationId();
+        assignPermissionsToUserForOrganization(currentOrganizationService.getOrganizationId(), request);
+    }
+
+    @Transactional
+    public void assignPermissionsToUserForOrganization(Long organizationId, AssignUserPermissionsRequestDto request) {
         User user = userRepository.findByIdAndOrganizationIdAndStatusAndIsDeletedFalse(
                         request.getUserId(),
                         organizationId,

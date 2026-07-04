@@ -1,9 +1,10 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   ArrowDownCircle,
   ArrowUp,
   ArrowUpCircle,
+  CalendarDays,
   CheckCircle2,
   CircleDollarSign,
   PackageSearch,
@@ -46,7 +47,6 @@ import { useAuth } from '../../hooks/useAuth';
 import type {
   DashboardLowStockItem,
   DashboardRecentInvoice,
-  DashboardTrendPoint,
   DashboardTrendingItem,
   PurchaseListItem,
   SaleListItem,
@@ -66,23 +66,167 @@ const isCompleted = (status?: string, balance?: number) => {
   return ['PAID', 'COMPLETED', 'COMPLETE', 'CLOSED'].includes(normalized) || numberValue(balance) <= 0;
 };
 
-const monthKey = (value: string | Date) => {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '';
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+type DatePreset =
+  | 'lastSixMonths'
+  | 'last30Days'
+  | 'last7Days'
+  | 'lastWeek'
+  | 'thisMonth'
+  | 'lastMonth'
+  | 'thisQuarter'
+  | 'thisYear'
+  | 'today'
+  | 'yesterday'
+  | 'custom';
+
+type FixedDatePreset = Exclude<DatePreset, 'custom'>;
+type TrendGranularity = 'day' | 'month';
+
+interface DashboardDateRange {
+  fromDate: string;
+  toDate: string;
+  label: string;
+}
+
+interface TrendBucket {
+  key: string;
+  label: string;
+  granularity: TrendGranularity;
+}
+
+const DEFAULT_DATE_PRESET: FixedDatePreset = 'lastSixMonths';
+
+const DATE_PRESET_OPTIONS: Array<{ value: DatePreset; label: string }> = [
+  { value: 'lastSixMonths', label: 'Last 6 Months' },
+  { value: 'last30Days', label: 'Last 30 Days' },
+  { value: 'last7Days', label: 'Last 7 Days' },
+  { value: 'lastWeek', label: 'Last Week' },
+  { value: 'thisMonth', label: 'This Month' },
+  { value: 'lastMonth', label: 'Last Month' },
+  { value: 'thisQuarter', label: 'This Quarter' },
+  { value: 'thisYear', label: 'This Year' },
+  { value: 'today', label: 'Today' },
+  { value: 'yesterday', label: 'Yesterday' },
+  { value: 'custom', label: 'Custom' },
+];
+
+const dateInputValue = (date: Date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 };
 
-const lastSixMonths = () => {
-  const result: Array<{ key: string; label: string }> = [];
-  const now = new Date();
-  for (let offset = 5; offset >= 0; offset -= 1) {
-    const date = new Date(now.getFullYear(), now.getMonth() - offset, 1);
-    result.push({
-      key: monthKey(date),
-      label: date.toLocaleDateString('en-IN', { month: 'short' }),
+const monthInputKey = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+
+const tryParseDateInput = (value?: string) => {
+  const token = value?.slice(0, 10) || '';
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(token)) return null;
+  const [year, month, day] = token.split('-').map(Number);
+  const parsed = new Date(year, month - 1, day);
+  if (parsed.getFullYear() !== year || parsed.getMonth() !== month - 1 || parsed.getDate() !== day) return null;
+  return parsed;
+};
+
+const parseDateInput = (value: string) => tryParseDateInput(value) || new Date();
+
+const addDays = (date: Date, days: number) => {
+  const result = new Date(date);
+  result.setDate(result.getDate() + days);
+  return result;
+};
+
+const startOfWeek = (date: Date) => {
+  const current = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const day = current.getDay();
+  return addDays(current, day === 0 ? -6 : 1 - day);
+};
+
+const startOfQuarter = (date: Date) => {
+  const quarterStartMonth = Math.floor(date.getMonth() / 3) * 3;
+  return new Date(date.getFullYear(), quarterStartMonth, 1);
+};
+
+const normalizeDateRange = (fromDate: string, toDate: string, label: string): DashboardDateRange => {
+  const from = parseDateInput(fromDate);
+  const to = parseDateInput(toDate);
+  const start = from <= to ? from : to;
+  const end = from <= to ? to : from;
+  return { fromDate: dateInputValue(start), toDate: dateInputValue(end), label };
+};
+
+const getPresetDateRange = (preset: FixedDatePreset): DashboardDateRange => {
+  const today = new Date();
+  const current = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  let start = current;
+  let end = current;
+  const label = DATE_PRESET_OPTIONS.find((option) => option.value === preset)?.label || 'Date Range';
+
+  if (preset === 'lastSixMonths') {
+    start = new Date(current.getFullYear(), current.getMonth() - 5, 1);
+  } else if (preset === 'last30Days') {
+    start = addDays(current, -29);
+  } else if (preset === 'last7Days') {
+    start = addDays(current, -6);
+  } else if (preset === 'lastWeek') {
+    const thisWeekStart = startOfWeek(current);
+    start = addDays(thisWeekStart, -7);
+    end = addDays(thisWeekStart, -1);
+  } else if (preset === 'thisMonth') {
+    start = new Date(current.getFullYear(), current.getMonth(), 1);
+  } else if (preset === 'lastMonth') {
+    start = new Date(current.getFullYear(), current.getMonth() - 1, 1);
+    end = new Date(current.getFullYear(), current.getMonth(), 0);
+  } else if (preset === 'thisQuarter') {
+    start = startOfQuarter(current);
+  } else if (preset === 'thisYear') {
+    start = new Date(current.getFullYear(), 0, 1);
+  } else if (preset === 'yesterday') {
+    start = addDays(current, -1);
+    end = start;
+  }
+
+  return { fromDate: dateInputValue(start), toDate: dateInputValue(end), label };
+};
+
+const buildTrendBuckets = (fromDate: string, toDate: string): TrendBucket[] => {
+  const start = parseDateInput(fromDate);
+  const end = parseDateInput(toDate);
+  const orderedStart = start <= end ? start : end;
+  const orderedEnd = start <= end ? end : start;
+  const dayCount = Math.round((orderedEnd.getTime() - orderedStart.getTime()) / 86400000) + 1;
+  const granularity: TrendGranularity = dayCount <= 45 ? 'day' : 'month';
+  const buckets: TrendBucket[] = [];
+
+  if (granularity === 'day') {
+    for (let date = new Date(orderedStart); date <= orderedEnd; date = addDays(date, 1)) {
+      buckets.push({
+        key: dateInputValue(date),
+        label: date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }),
+        granularity,
+      });
+    }
+    return buckets;
+  }
+
+  for (
+    let date = new Date(orderedStart.getFullYear(), orderedStart.getMonth(), 1);
+    date <= new Date(orderedEnd.getFullYear(), orderedEnd.getMonth(), 1);
+    date = new Date(date.getFullYear(), date.getMonth() + 1, 1)
+  ) {
+    buckets.push({
+      key: monthInputKey(date),
+      label: date.toLocaleDateString('en-IN', { month: 'short', year: '2-digit' }),
+      granularity,
     });
   }
-  return result;
+  return buckets;
+};
+
+const trendBucketKey = (value: string | undefined, granularity: TrendGranularity) => {
+  const date = tryParseDateInput(value);
+  if (!date) return '';
+  return granularity === 'day' ? dateInputValue(date) : monthInputKey(date);
 };
 
 const metricValue = (value: number, currency = false) =>
@@ -165,9 +309,19 @@ const ViewAllButton: React.FC<{ onClick: () => void }> = ({ onClick }) => (
 export const DashboardPage: React.FC = () => {
   const navigate = useNavigate();
   const { hasPermission } = useAuth();
-  const months = useMemo(lastSixMonths, []);
-  const fromDate = `${months[0].key}-01`;
-  const toDate = new Date().toISOString().slice(0, 10);
+  const defaultDateRange = useMemo(() => getPresetDateRange(DEFAULT_DATE_PRESET), []);
+  const [datePreset, setDatePreset] = useState<DatePreset>(DEFAULT_DATE_PRESET);
+  const [customFromDate, setCustomFromDate] = useState(defaultDateRange.fromDate);
+  const [customToDate, setCustomToDate] = useState(defaultDateRange.toDate);
+  const selectedDateRange = useMemo(
+    () => datePreset === 'custom'
+      ? normalizeDateRange(customFromDate, customToDate, 'Custom')
+      : getPresetDateRange(datePreset),
+    [customFromDate, customToDate, datePreset],
+  );
+  const { fromDate, toDate } = selectedDateRange;
+  const dashboardDateParams = useMemo(() => ({ fromDate, toDate }), [fromDate, toDate]);
+  const trendBuckets = useMemo(() => buildTrendBuckets(fromDate, toDate), [fromDate, toDate]);
 
   const canViewDashboard   = hasPermission(PERMISSIONS.DASHBOARD_VIEW);
   const canViewSales       = hasPermission(PERMISSIONS.SALES_VIEW);
@@ -176,12 +330,12 @@ export const DashboardPage: React.FC = () => {
   const canViewLowStock    = hasPermission(PERMISSIONS.REPORT_LOW_STOCK_VIEW);
   const canViewTopItems    = hasPermission(PERMISSIONS.REPORT_TOP_SELLING_ITEMS_VIEW);
 
-  const summaryQuery   = useQuery({ queryKey: ['dashboard-summary'], queryFn: dashboardApi.getSummary, enabled: canViewDashboard, retry: false });
+  const summaryQuery   = useQuery({ queryKey: ['dashboard-summary', fromDate, toDate], queryFn: () => dashboardApi.getSummary(dashboardDateParams), enabled: canViewDashboard, retry: false });
   const salesQuery     = useQuery({ queryKey: ['dashboard-sales', fromDate, toDate], queryFn: () => salesApi.getAll({ page: 0, size: 200, fromDate, toDate }), enabled: canViewSales, retry: false });
   const purchasesQuery = useQuery({ queryKey: ['dashboard-purchases', fromDate, toDate], queryFn: () => purchaseApi.getAll({ page: 0, size: 200, fromDate, toDate }), enabled: canViewPurchases, retry: false });
   const expensesQuery  = useQuery({ queryKey: ['dashboard-expenses', fromDate, toDate], queryFn: () => expenseApi.getAll({ page: 0, size: 200, fromDate, toDate }), enabled: canViewExpenses, retry: false });
   const lowStockQuery  = useQuery({ queryKey: ['dashboard-low-stock'], queryFn: reportsApi.lowStock, enabled: canViewLowStock, retry: false });
-  const topItemsQuery  = useQuery({ queryKey: ['dashboard-top-selling-items'], queryFn: reportsApi.topSellingItems, enabled: canViewTopItems, retry: false });
+  const topItemsQuery  = useQuery({ queryKey: ['dashboard-top-selling-items', fromDate, toDate], queryFn: () => reportsApi.topSellingItems(dashboardDateParams), enabled: canViewTopItems, retry: false });
 
   const summary   = summaryQuery.data?.data;
   const sales     = salesQuery.data?.data?.content || [];
@@ -224,48 +378,58 @@ export const DashboardPage: React.FC = () => {
 
   /* ── Today stats ── */
   const todayStats = useMemo(() => {
-    const todayStr = new Date().toISOString().slice(0, 10);
     return {
-      sales:      summary?.todaySales      ?? sales.filter((s) => s.invoiceDate?.startsWith(todayStr)).reduce((t, s) => t + numberValue(s.grandTotal), 0),
-      purchase:   summary?.todayPurchase   ?? purchases.filter((p) => p.purchaseDate?.startsWith(todayStr)).reduce((t, p) => t + numberValue(p.grandTotal), 0),
-      expense:    summary?.todayExpense    ?? expenses.filter((e) => e.expenseDate?.startsWith(todayStr)).reduce((t, e) => t + numberValue(e.amount), 0),
-      collection: summary?.todayCollection ?? sales.filter((s) => s.invoiceDate?.startsWith(todayStr) && isCompleted(s.status, s.dueAmount)).reduce((t, s) => t + numberValue(s.grandTotal), 0),
+      sales:      summary?.todaySales      ?? 0,
+      purchase:   summary?.todayPurchase   ?? 0,
+      expense:    summary?.todayExpense    ?? 0,
+      collection: summary?.todayCollection ?? 0,
     };
-  }, [summary, sales, purchases, expenses]);
+  }, [summary]);
 
   /* ── Sale vs Purchase chart ── */
   const chartData = useMemo(() => {
-    if (summary?.saleVsPurchase?.length) {
-      return summary.saleVsPurchase.map((entry: DashboardTrendPoint) => ({
-        month:     entry.label || entry.month || entry.period || '',
-        sales:     numberValue(entry.sales ?? entry.saleAmount),
-        purchases: numberValue(entry.purchases ?? entry.purchaseAmount),
-      }));
-    }
-    const grouped = new Map(months.map((m) => [m.key, { month: m.label, sales: 0, purchases: 0 }]));
-    sales.forEach((s) => { const e = grouped.get(monthKey(s.invoiceDate)); if (e) e.sales += numberValue(s.grandTotal); });
-    purchases.forEach((p) => { const e = grouped.get(monthKey(p.purchaseDate)); if (e) e.purchases += numberValue(p.grandTotal); });
+    const grouped = new Map(trendBuckets.map((bucket) => [bucket.key, { month: bucket.label, sales: 0, purchases: 0 }]));
+    const granularity = trendBuckets[0]?.granularity || 'month';
+    sales.forEach((sale) => {
+      const entry = grouped.get(trendBucketKey(sale.invoiceDate, granularity));
+      if (entry) entry.sales += numberValue(sale.grandTotal);
+    });
+    purchases.forEach((purchase) => {
+      const entry = grouped.get(trendBucketKey(purchase.purchaseDate, granularity));
+      if (entry) entry.purchases += numberValue(purchase.grandTotal);
+    });
     return [...grouped.values()];
-  }, [months, purchases, sales, summary?.saleVsPurchase]);
+  }, [purchases, sales, trendBuckets]);
 
   /* ── Expense trend chart ── */
   const expenseTrendData = useMemo(() => {
-    const grouped = new Map(months.map((m) => [m.key, { month: m.label, expense: 0 }]));
-    expenses.forEach((e) => {
-      const entry = grouped.get(monthKey(e.expenseDate || ''));
-      if (entry) entry.expense += numberValue(e.amount);
+    const grouped = new Map(trendBuckets.map((bucket) => [bucket.key, { month: bucket.label, expense: 0 }]));
+    const granularity = trendBuckets[0]?.granularity || 'month';
+    expenses.forEach((expense) => {
+      const entry = grouped.get(trendBucketKey(expense.expenseDate, granularity));
+      if (entry) entry.expense += numberValue(expense.amount);
     });
     return [...grouped.values()];
-  }, [months, expenses]);
+  }, [expenses, trendBuckets]);
 
   /* ── Net Profit trend ── */
   const profitTrendData = useMemo(() => {
-    const grouped = new Map(months.map((m) => [m.key, { month: m.label, revenue: 0, cost: 0, expense: 0 }]));
-    sales.forEach((s) => { const e = grouped.get(monthKey(s.invoiceDate)); if (e) e.revenue += numberValue(s.grandTotal); });
-    purchases.forEach((p) => { const e = grouped.get(monthKey(p.purchaseDate)); if (e) e.cost += numberValue(p.grandTotal); });
-    expenses.forEach((ex) => { const e = grouped.get(monthKey(ex.expenseDate || '')); if (e) e.expense += numberValue(ex.amount); });
-    return [...grouped.values()].map((m) => ({ ...m, profit: m.revenue - m.cost - m.expense }));
-  }, [months, sales, purchases, expenses]);
+    const grouped = new Map(trendBuckets.map((bucket) => [bucket.key, { month: bucket.label, revenue: 0, cost: 0, expense: 0 }]));
+    const granularity = trendBuckets[0]?.granularity || 'month';
+    sales.forEach((sale) => {
+      const entry = grouped.get(trendBucketKey(sale.invoiceDate, granularity));
+      if (entry) entry.revenue += numberValue(sale.grandTotal);
+    });
+    purchases.forEach((purchase) => {
+      const entry = grouped.get(trendBucketKey(purchase.purchaseDate, granularity));
+      if (entry) entry.cost += numberValue(purchase.grandTotal);
+    });
+    expenses.forEach((expense) => {
+      const entry = grouped.get(trendBucketKey(expense.expenseDate, granularity));
+      if (entry) entry.expense += numberValue(expense.amount);
+    });
+    return [...grouped.values()].map((entry) => ({ ...entry, profit: entry.revenue - entry.cost - entry.expense }));
+  }, [expenses, purchases, sales, trendBuckets]);
 
   /* ── Sales payment status for pie ── */
   const salesPaymentStatus = useMemo(() => [
@@ -290,7 +454,6 @@ export const DashboardPage: React.FC = () => {
 
   /* ── Recent invoices ── */
   const recentInvoices = useMemo<DashboardRecentInvoice[]>(() => {
-    if (summary?.recentInvoices?.length) return summary.recentInvoices.slice(0, 6);
     return [...sales]
       .sort((a, b) => new Date(b.invoiceDate).getTime() - new Date(a.invoiceDate).getTime())
       .slice(0, 6)
@@ -300,7 +463,7 @@ export const DashboardPage: React.FC = () => {
         balance: numberValue(sale.dueAmount),
         status: isCompleted(sale.status, sale.dueAmount) ? 'PAID' : sale.status || 'DUE',
       }));
-  }, [sales, summary?.recentInvoices]);
+  }, [sales]);
 
   /* ── Recent purchases ── */
   const recentPurchases = useMemo(() =>
@@ -308,7 +471,8 @@ export const DashboardPage: React.FC = () => {
       .sort((a, b) => new Date(b.purchaseDate).getTime() - new Date(a.purchaseDate).getTime())
       .slice(0, 6)
       .map((p: PurchaseListItem) => ({
-        purchaseId: p.purchaseId, purchaseDate: p.purchaseDate,
+        purchaseId: p.purchaseId, purchaseNo: p.purchaseNo || p.purchaseCode || '-',
+        purchaseDate: p.purchaseDate,
         supplierName: p.supplierName, grandTotal: numberValue(p.grandTotal),
         dueAmount: numberValue(p.dueAmount),
         status: isCompleted(p.status, p.dueAmount) ? 'PAID' : p.status || 'DUE',
@@ -346,6 +510,54 @@ export const DashboardPage: React.FC = () => {
         </div>
       )}
 
+      <div className="flex flex-col gap-3 rounded-xl bg-white px-4 py-3 shadow-[0_2px_10px_rgba(79,70,229,0.10)] dark:bg-[#111827] lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex min-w-0 items-center gap-3">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-sky-50 text-sky-600 dark:bg-sky-900/30 dark:text-sky-300">
+            <CalendarDays size={18} />
+          </span>
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">Dashboard Period</p>
+            <p className="truncate text-xs text-slate-500 dark:text-slate-400">
+              {formatDate(fromDate)} - {formatDate(toDate)}
+            </p>
+          </div>
+        </div>
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 lg:w-auto lg:min-w-[520px]">
+          <label className="block">
+            <span className="mb-1 block text-[10px] font-semibold uppercase text-slate-400">Range</span>
+            <select
+              value={datePreset}
+              onChange={(event) => setDatePreset(event.target.value as DatePreset)}
+              className="h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:focus:ring-sky-900/40"
+            >
+              {DATE_PRESET_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-[10px] font-semibold uppercase text-slate-400">From</span>
+            <input
+              type="date"
+              value={customFromDate}
+              disabled={datePreset !== 'custom'}
+              onChange={(event) => setCustomFromDate(event.target.value)}
+              className="h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100 disabled:bg-slate-50 disabled:text-slate-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:disabled:bg-slate-800 dark:focus:ring-sky-900/40"
+            />
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-[10px] font-semibold uppercase text-slate-400">To</span>
+            <input
+              type="date"
+              value={customToDate}
+              disabled={datePreset !== 'custom'}
+              onChange={(event) => setCustomToDate(event.target.value)}
+              className="h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100 disabled:bg-slate-50 disabled:text-slate-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:disabled:bg-slate-800 dark:focus:ring-sky-900/40"
+            />
+          </label>
+        </div>
+      </div>
+
       {/* ── Today at a Glance ── */}
       <div>
         <p className="mb-2 text-[11px] font-semibold uppercase tracking-widest text-slate-400">Today at a Glance</p>
@@ -374,7 +586,7 @@ export const DashboardPage: React.FC = () => {
 
       {/* ── Financial Performance Cards ── */}
       <div>
-        <p className="mb-2 text-[11px] font-semibold uppercase tracking-widest text-slate-400">Financial Performance (Last 6 Months)</p>
+        <p className="mb-2 text-[11px] font-semibold uppercase tracking-widest text-slate-400">Financial Performance ({selectedDateRange.label})</p>
         <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
           <MetricCard title="Total Revenue" value={financialMetrics.totalRevenue} color="#1684ed" icon={<Wallet size={20} />} currency />
           <MetricCard title="Total Purchase Cost" value={financialMetrics.totalCost} color="#f5b800" icon={<ShoppingBag size={20} />} currency />
@@ -392,7 +604,7 @@ export const DashboardPage: React.FC = () => {
 
       {/* ── Charts Row ── */}
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-3">
-        <Panel title="Sale vs. Purchase — Last 6 Months" className="xl:col-span-2">
+        <Panel title={`Sale vs. Purchase - ${selectedDateRange.label}`} className="xl:col-span-2">
           <div className="h-[280px] p-4">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
@@ -408,7 +620,7 @@ export const DashboardPage: React.FC = () => {
           </div>
         </Panel>
 
-        <Panel title="Monthly Expense Trend">
+        <Panel title={`Expense Trend - ${selectedDateRange.label}`}>
           <div className="h-[280px] p-4">
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={expenseTrendData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
@@ -431,7 +643,7 @@ export const DashboardPage: React.FC = () => {
 
       {/* ── Net Profit Trend + Payment Status Charts ── */}
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-3">
-        <Panel title="Net Profit Trend — Last 6 Months" className="xl:col-span-2">
+        <Panel title={`Net Profit Trend - ${selectedDateRange.label}`} className="xl:col-span-2">
           <div className="h-[260px] p-4">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={profitTrendData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
@@ -544,10 +756,10 @@ export const DashboardPage: React.FC = () => {
       </div>
 
       {/* ── Recent Invoices + Recent Purchases ── */}
-      <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
+      <div className="space-y-5">
         <Panel title="Recent Sales Invoices" action={canViewSales ? <ViewAllButton onClick={() => navigate('/sales/invoices')} /> : undefined}>
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[480px] text-xs">
+            <table className="w-full min-w-[700px] text-xs">
               <thead className="bg-slate-50 text-left text-[10px] uppercase text-slate-500 dark:bg-[#1f2937]">
                 <tr>
                   {['#', 'Date', 'Invoice', 'Customer', 'Total', 'Balance', 'Status'].map((h) => (
@@ -582,10 +794,10 @@ export const DashboardPage: React.FC = () => {
 
         <Panel title="Recent Purchases" action={canViewPurchases ? <ViewAllButton onClick={() => navigate('/purchase/bills')} /> : undefined}>
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[480px] text-xs">
+            <table className="w-full min-w-[700px] text-xs">
               <thead className="bg-slate-50 text-left text-[10px] uppercase text-slate-500 dark:bg-[#1f2937]">
                 <tr>
-                  {['#', 'Date', 'Supplier', 'Total', 'Due', 'Status'].map((h) => (
+                  {['#', 'Date', 'Purchase', 'Supplier', 'Total', 'Due', 'Status'].map((h) => (
                     <th key={h} className="px-3 py-2.5 font-semibold">{h}</th>
                   ))}
                 </tr>
@@ -597,6 +809,7 @@ export const DashboardPage: React.FC = () => {
                   >
                     <td className="px-3 py-2.5">{index + 1}</td>
                     <td className="px-3 py-2.5">{formatDate(p.purchaseDate)}</td>
+                    <td className="px-3 py-2.5 font-medium">{p.purchaseNo}</td>
                     <td className="px-3 py-2.5 font-medium">{p.supplierName}</td>
                     <td className="px-3 py-2.5 font-semibold">{formatCurrency(p.grandTotal)}</td>
                     <td className="px-3 py-2.5 font-semibold text-rose-500">{formatCurrency(p.dueAmount)}</td>
@@ -607,7 +820,7 @@ export const DashboardPage: React.FC = () => {
                     </td>
                   </tr>
                 )) : (
-                  <tr><td colSpan={6} className="py-8 text-center text-slate-400">No recent purchases</td></tr>
+                  <tr><td colSpan={7} className="py-8 text-center text-slate-400">No recent purchases</td></tr>
                 )}
               </tbody>
             </table>

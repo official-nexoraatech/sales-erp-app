@@ -76,6 +76,7 @@ public class SecurityConfig {
                                 "/api/v1/states/**"
                         ).permitAll()
                         .requestMatchers(PUBLIC_ENDPOINTS).permitAll()
+                        .requestMatchers("/api/v2/admin/**").hasAuthority(BillTopUserDetails.SUPER_ADMIN_AUTHORITY)
                         .anyRequest().authenticated()
                 )
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)

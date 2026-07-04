@@ -17,12 +17,15 @@ import com.nexoraa.billtop.repository.ExpenseRepository;
 import com.nexoraa.billtop.repository.PaymentRepository;
 import com.nexoraa.billtop.security.CurrentOrganizationService;
 import com.nexoraa.billtop.service.ExpenseService;
+import com.nexoraa.billtop.specification.ExpenseSpecification;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
 
 @Service
 public class ExpenseServiceImpl implements ExpenseService {
@@ -77,9 +80,12 @@ public class ExpenseServiceImpl implements ExpenseService {
 
     @Override
     @Transactional(readOnly = true)
-    public PageResponseDto<ExpenseResponseDto> getExpenses(int page, int size) {
-        Page<Expense> expenses = expenseRepository.findByOrganizationId(
-                currentOrganizationService.getOrganizationId(),
+    public PageResponseDto<ExpenseResponseDto> getExpenses(int page, int size, LocalDate fromDate, LocalDate toDate) {
+        Specification<Expense> specification = ExpenseSpecification.notDeleted()
+                .and(ExpenseSpecification.organization(currentOrganizationService.getOrganizationId()))
+                .and(ExpenseSpecification.dateBetween(fromDate, toDate));
+        Page<Expense> expenses = expenseRepository.findAll(
+                specification,
                 PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "id"))
         );
         return PageResponseDto.from(expenses.map(this::toResponse));

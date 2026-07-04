@@ -11,6 +11,7 @@ import { useAuth } from '../../hooks/useAuth';
 import { OrganizationSelector } from './OrganizationSelector';
 import { RoleSelector } from './RoleSelector';
 import { PERMISSIONS } from '../../auth/permissions';
+import { isSuperAdminRole } from '../../auth/featurePermissions';
 
 const inputClass = 'h-10 w-full rounded border border-gray-300 bg-white px-3 text-sm text-gray-900 outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-gray-50';
 
@@ -22,6 +23,7 @@ export const UserCreatePage: React.FC<Props> = ({ mode = 'create' }) => {
   const [searchParams] = useSearchParams();
   const state = useLocation().state as UserListItem | undefined;
   const { user, hasPermission } = useAuth();
+  const isSuperAdmin = isSuperAdminRole(user?.role);
   const pictureRef = useRef<HTMLInputElement>(null);
   const [form, setForm] = useState<CreateUserRequest>({
     firstName: state?.firstName || '',
@@ -59,7 +61,7 @@ export const UserCreatePage: React.FC<Props> = ({ mode = 'create' }) => {
     if (!form.userName.trim()) return toast.error('Username is required');
     if (!form.email.trim()) return toast.error('Email is required');
     if (!form.roleId) return toast.error('Role is required');
-    if (mode === 'create' && !form.organizationId) return toast.error('Organization is required');
+    if (mode === 'create' && isSuperAdmin && !form.organizationId) return toast.error('Organization is required');
     mutation.mutate();
   };
 
@@ -89,7 +91,7 @@ export const UserCreatePage: React.FC<Props> = ({ mode = 'create' }) => {
               </div>
             </div>
           </div>
-          {mode === 'create' && (
+          {mode === 'create' && isSuperAdmin && (
             <OrganizationSelector
               value={form.organizationId}
               onChange={(organizationId) => setForm((current) => ({

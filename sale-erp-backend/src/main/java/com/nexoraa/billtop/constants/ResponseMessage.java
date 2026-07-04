@@ -184,6 +184,7 @@ public class ResponseMessage {
     public static final String USER_CREATED = "User created successfully";
     public static final String USER_UPDATED = "User updated successfully";
     public static final String USER_DELETED = "User deleted successfully";
+    public static final String USER_RETRIEVED = "User retrieved successfully";
     public static final String USERS_RETRIEVED = "Users retrieved successfully";
     public static final String PASSWORD_CHANGED = "Password changed successfully";
     public static final String PROFILE_UPDATED = "Profile updated successfully";
