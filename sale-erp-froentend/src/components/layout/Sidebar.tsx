@@ -16,10 +16,6 @@ import {
   Mail,
   BarChart3,
   ChevronDown,
-  CalendarCheck,
-  ClipboardList,
-  Settings,
-  UserCog,
   WalletCards,
   ChevronLeft,
   ChevronRight,
@@ -33,6 +29,7 @@ import {
   ANY_REPORT_RULE,
   CONTACT_IMPORT_RULE,
   FEATURE_PERMISSIONS,
+  isSuperAdminRole,
   ITEM_IMPORT_RULE,
   type AccessRule,
   canAccessRule,
@@ -47,6 +44,7 @@ interface MenuItem {
   href?: string;
   submenu?: MenuItem[];
   access?: AccessRule;
+  superAdminOnly?: boolean;
 }
 
 const menuItems: MenuItem[] = [
@@ -61,6 +59,7 @@ const menuItems: MenuItem[] = [
     icon: <Building2 size={20} />,
     href: '/organizations',
     access: rule(FEATURE_PERMISSIONS.organization.view),
+    superAdminOnly: true,
   },
   {
     label: 'Contacts',
@@ -151,17 +150,6 @@ const menuItems: MenuItem[] = [
       { label: 'Users', href: '/users', icon: <Users size={18} />, access: rule(FEATURE_PERMISSIONS.user.view) },
       { label: 'Roles', href: '/users/roles', icon: <Users size={18} />, access: rule(FEATURE_PERMISSIONS.role.view) },
       { label: 'Permissions', href: '/users/permissions', icon: <ShieldCheck size={18} />, access: rule([FEATURE_PERMISSIONS.user.view, FEATURE_PERMISSIONS.user.update], 'all') },
-    ],
-  },
-  {
-    label: 'Staff Management',
-    icon: <UserCog size={20} />,
-    submenu: [
-      { label: 'Employees', href: '/staff/employees', icon: <UserCog size={18} />, access: rule(FEATURE_PERMISSIONS.staffEmployee.view) },
-      { label: 'Attendance', href: '/staff/attendance', icon: <CalendarCheck size={18} />, access: rule(FEATURE_PERMISSIONS.staffAttendance.view) },
-      { label: 'Leaves', href: '/staff/leaves', icon: <ClipboardList size={18} />, access: rule(FEATURE_PERMISSIONS.staffLeave.view) },
-      { label: 'Payroll', href: '/staff/payroll', icon: <WalletCards size={18} />, access: rule(FEATURE_PERMISSIONS.staffPayroll.view) },
-      { label: 'Settings', href: '/staff/settings', icon: <Settings size={18} />, access: rule(FEATURE_PERMISSIONS.staffSetting.view) },
     ],
   },
   {
@@ -279,6 +267,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const navigate = useNavigate();
   const { user, logout, hasPermission, hasAnyPermission, hasAllPermissions } = useAuth();
   const defaultPath = getDefaultAuthorizedPath(user?.permissions, user?.role);
+  const isSuperAdmin = isSuperAdminRole(user?.role);
   const organizationLogoUrl = user?.organizationLogoUrl?.trim();
   const organizationLogoAlt = user?.organizationName ? `${user.organizationName} logo` : 'Organization logo';
 
@@ -291,10 +280,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
         return item.submenu ? { ...item, submenu } : item;
       })
       .filter((item) => {
+        if (item.superAdminOnly && !isSuperAdmin) return false;
         if (!canAccessRule(item.access, hasAnyPermission, hasAllPermissions)) return false;
         return !item.submenu || item.submenu.length > 0;
       }),
-    [hasAllPermissions, hasAnyPermission, user?.permissions],
+    [hasAllPermissions, hasAnyPermission, isSuperAdmin, user?.permissions],
   );
 
   useEffect(() => {

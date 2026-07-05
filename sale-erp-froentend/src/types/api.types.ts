@@ -222,6 +222,8 @@ export interface UserListItem {
   mobile?: string;
   roleId?: number;
   roleName?: string;
+  organizationId?: number;
+  organizationName?: string;
   status?: boolean | string;
   createdAt?: string;
 }

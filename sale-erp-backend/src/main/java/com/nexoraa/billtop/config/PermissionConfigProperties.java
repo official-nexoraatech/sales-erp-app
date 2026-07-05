@@ -12,7 +12,7 @@ import java.util.List;
  * throughout the application for role-based access control.
  *
  * The permissions are persisted in the database via Flyway migration:
- * - File: db/migration/V11__insert_permissions.sql
+ * - File: db/migration/V3__insert_permissions.sql
  * - Table: permissions
  *
  * Usage:

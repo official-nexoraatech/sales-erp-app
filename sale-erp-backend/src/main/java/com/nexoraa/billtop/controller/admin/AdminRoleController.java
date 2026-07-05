@@ -17,17 +17,20 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
 
 /**
- * Super Admin API (v2) for managing roles inside a specific organization,
- * identified explicitly by {organizationId} rather than the caller's token.
+ * Super Admin API (v2) for managing roles across the platform. Organization-scoped
+ * endpoints identify the organization explicitly via {organizationId} rather than
+ * the caller's token; the flat listing endpoint applies an organization filter
+ * only when one is supplied, otherwise it spans every organization.
  */
 @Validated
 @RestController
-@RequestMapping("/api/v2/admin/organizations/{organizationId}/roles")
+@RequestMapping("/api/v2/admin")
 @PreAuthorize("hasAuthority('SUPER_ADMIN')")
 public class AdminRoleController {
 
@@ -37,7 +40,18 @@ public class AdminRoleController {
         this.roleService = roleService;
     }
 
-    @PostMapping
+    @GetMapping("/roles")
+    public ResponseEntity<ApiResponseDto<List<RoleResponseDto>>> getRoles(
+            @RequestParam(required = false) @Positive Long organizationId,
+            @RequestParam(required = false) String search
+    ) {
+        return ResponseEntity.ok(ApiResponseDto.success(
+                ResponseMessage.ROLES_RETRIEVED,
+                roleService.getRolesForAdmin(organizationId, search)
+        ));
+    }
+
+    @PostMapping("/organizations/{organizationId}/roles")
     public ResponseEntity<ApiResponseDto<Void>> createRole(
             @PathVariable @Positive Long organizationId,
             @Valid @RequestBody RoleRequestDto request
@@ -46,8 +60,8 @@ public class AdminRoleController {
         return ResponseEntity.ok(ApiResponseDto.success(ResponseMessage.ROLE_CREATED));
     }
 
-    @GetMapping
-    public ResponseEntity<ApiResponseDto<List<RoleResponseDto>>> getRoles(
+    @GetMapping("/organizations/{organizationId}/roles")
+    public ResponseEntity<ApiResponseDto<List<RoleResponseDto>>> getRolesByOrganization(
             @PathVariable @Positive Long organizationId
     ) {
         return ResponseEntity.ok(ApiResponseDto.success(
@@ -56,7 +70,7 @@ public class AdminRoleController {
         ));
     }
 
-    @GetMapping("/{id}")
+    @GetMapping("/organizations/{organizationId}/roles/{id}")
     public ResponseEntity<ApiResponseDto<RoleResponseDto>> getRoleById(
             @PathVariable @Positive Long organizationId,
             @PathVariable @Positive Long id
@@ -67,7 +81,7 @@ public class AdminRoleController {
         ));
     }
 
-    @PutMapping("/{id}")
+    @PutMapping("/organizations/{organizationId}/roles/{id}")
     public ResponseEntity<ApiResponseDto<Void>> updateRole(
             @PathVariable @Positive Long organizationId,
             @PathVariable @Positive Long id,
@@ -77,7 +91,7 @@ public class AdminRoleController {
         return ResponseEntity.ok(ApiResponseDto.success(ResponseMessage.ROLE_UPDATED));
     }
 
-    @DeleteMapping("/{id}")
+    @DeleteMapping("/organizations/{organizationId}/roles/{id}")
     public ResponseEntity<ApiResponseDto<Void>> deleteRole(
             @PathVariable @Positive Long organizationId,
             @PathVariable @Positive Long id

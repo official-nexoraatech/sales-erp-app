@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { Box, CalendarDays, ChevronDown, CreditCard, LayoutDashboard, Loader2, Minus, PackageSearch, Plus, Search, Trash2, UserRound, Users, Warehouse as WarehouseIcon } from 'lucide-react';
+import { Box, ChevronDown, CreditCard, LayoutDashboard, Loader2, Minus, PackageSearch, Plus, Search, Trash2, UserRound, Users } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { customerApi, itemApi, organizationApi, paymentMethodApi, posApi, warehouseApi } from '../../../api/endpoints';
@@ -17,7 +17,7 @@ import type { CustomerListItem } from '../../../types/customer.types';
 interface CartLine extends ItemListItem { quantity: number }
 
 const controlClass = 'h-10 w-full rounded border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100';
-const topControlClass = 'h-14 w-full rounded border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-800 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100';
+const topControlClass = 'h-10 w-full rounded border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-800 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100';
 const fieldLabelClass = 'text-sm font-medium text-slate-600';
 
 const parseScannedItemId = (value: string) => {
@@ -113,21 +113,17 @@ export const PosPage: React.FC = () => {
   const canViewItems = hasPermission(PERMISSIONS.ITEM_VIEW);
   const canViewPaymentIn = hasPermission(PERMISSIONS.PAYMENT_IN_VIEW);
   const canCreateExpenseMaster = hasPermission(PERMISSIONS.EXPENSE_CREATE);
-  const canCreateWarehouse = hasPermission(PERMISSIONS.WAREHOUSE_CREATE);
   const [customerId, setCustomerId] = useState(0);
   const [warehouseId, setWarehouseId] = useState(0);
   const [paymentMethodId, setPaymentMethodId] = useState(0);
-  const [warehouseSearch, setWarehouseSearch] = useState('');
   const [paymentMethodSearch, setPaymentMethodSearch] = useState('');
   const [customerSearch, setCustomerSearch] = useState('');
   const [selectedCustomerLabel, setSelectedCustomerLabel] = useState('');
-  const [warehouseMenuOpen, setWarehouseMenuOpen] = useState(false);
   const [paymentMethodMenuOpen, setPaymentMethodMenuOpen] = useState(false);
   const [customerMenuOpen, setCustomerMenuOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [cart, setCart] = useState<CartLine[]>([]);
   const [roundOff, setRoundOff] = useState(false);
-  const warehouseSelectRef = useRef<HTMLDivElement | null>(null);
   const paymentMethodSelectRef = useRef<HTMLDivElement | null>(null);
   const customerSelectRef = useRef<HTMLDivElement | null>(null);
   const scannerInputRef = useRef<HTMLInputElement | null>(null);
@@ -153,14 +149,7 @@ export const PosPage: React.FC = () => {
   const warehouseRows = warehouses.data?.data || [];
   const paymentMethodRows = (paymentMethods.data?.data?.content || [])
     .filter((method) => method.status === 'ACTIVE' || method.id === paymentMethodId);
-  const selectedWarehouse = warehouseRows.find((warehouse) => warehouse.id === warehouseId);
   const selectedPaymentMethod = paymentMethodRows.find((method) => method.id === paymentMethodId);
-  const filteredWarehouseRows = warehouseRows.filter((warehouse) => {
-    const normalizedSearch = warehouseSearch.trim().toLowerCase();
-    return !normalizedSearch
-      || warehouse.name.toLowerCase().includes(normalizedSearch)
-      || String(warehouse.warehouseCode || '').toLowerCase().includes(normalizedSearch);
-  });
   const filteredPaymentMethodRows = paymentMethodRows.filter((method) => {
     const normalizedSearch = paymentMethodSearch.trim().toLowerCase();
     return !normalizedSearch
@@ -170,9 +159,6 @@ export const PosPage: React.FC = () => {
 
   useEffect(() => {
     const closeOpenMenus = (event: MouseEvent) => {
-      if (warehouseSelectRef.current && !warehouseSelectRef.current.contains(event.target as Node)) {
-        setWarehouseMenuOpen(false);
-      }
       if (paymentMethodSelectRef.current && !paymentMethodSelectRef.current.contains(event.target as Node)) {
         setPaymentMethodMenuOpen(false);
       }
@@ -195,6 +181,14 @@ export const PosPage: React.FC = () => {
       setPaymentMethodId(paymentMethodRows[0].id);
     }
   }, [paymentMethodId, paymentMethodRows]);
+  useEffect(() => {
+    if (customerId || !customerRows.length) return;
+    const walkInCustomer = customerRows.find((customer) => customer.customerName.trim().toLowerCase() === 'walk-in customer');
+    if (walkInCustomer) {
+      setCustomerId(walkInCustomer.id);
+      setSelectedCustomerLabel(getCustomerLabel(walkInCustomer));
+    }
+  }, [customerId, customerRows]);
 
   const addItem = useCallback((item: ItemListItem) => setCart((current) => {
     const availableQty = Number(item.availableQty ?? 0);
@@ -622,8 +616,8 @@ export const PosPage: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-[#f5f6ff] text-slate-700">
-      <header className="flex h-12 items-center justify-between border-b bg-white px-3 shadow-sm">
+    <div className="flex h-screen flex-col overflow-hidden bg-[#f5f6ff] text-slate-700">
+      <header className="flex h-12 shrink-0 items-center justify-between border-b bg-white px-3 shadow-sm">
         <button onClick={() => navigate(defaultPath)} className="text-xl font-semibold text-blue-600">Texmintra</button>
         <nav className="hidden items-center gap-5 text-xs text-slate-600 md:flex">
           {canViewDashboard && <button onClick={() => navigate('/dashboard')} className="flex items-center gap-1 hover:text-blue-600"><LayoutDashboard size={13} />Dashboard</button>}
@@ -634,89 +628,8 @@ export const PosPage: React.FC = () => {
         </nav>
       </header>
 
-      <main className="pb-16">
+      <main className="flex-1 overflow-y-auto pb-16">
         <div className="grid grid-cols-1 gap-3 border-b p-3 md:grid-cols-2 xl:grid-cols-4">
-          <label className={`${fieldLabelClass} min-w-0`}>Date
-            <div className="relative mt-1">
-              <input type="date" className={`${topControlClass} pr-11`} defaultValue={new Date().toISOString().slice(0, 10)} />
-              <CalendarDays className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
-            </div>
-          </label>
-          <div className={`${fieldLabelClass} relative min-w-0`} ref={warehouseSelectRef}>
-            <span>Warehouse</span>
-            <div className="mt-1 flex">
-              <button
-                type="button"
-                onClick={() => {
-                  setWarehouseMenuOpen((open) => !open);
-                  setWarehouseSearch('');
-                }}
-                className={[
-                  'flex min-w-0 flex-1 items-center gap-3 text-left',
-                  topControlClass,
-                  canCreateWarehouse ? 'rounded-r-none' : '',
-                  warehouseMenuOpen ? 'border-blue-500 ring-2 ring-blue-100' : 'hover:border-blue-300',
-                ].filter(Boolean).join(' ')}
-                aria-expanded={warehouseMenuOpen}
-              >
-                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-slate-50 text-slate-500">
-                  <WarehouseIcon size={17} />
-                </span>
-                <span className={`min-w-0 flex-1 truncate text-base font-normal ${selectedWarehouse ? 'text-slate-800' : 'text-slate-400'}`}>
-                  {selectedWarehouse?.name || 'Select warehouse'}
-                </span>
-                {warehouses.isFetching ? <Loader2 className="shrink-0 animate-spin text-blue-500" size={18} /> : <ChevronDown className={`shrink-0 text-slate-600 transition ${warehouseMenuOpen ? 'rotate-180' : ''}`} size={20} />}
-              </button>
-              {canCreateWarehouse && <button type="button" onClick={() => navigate(`/warehouses/create?returnTo=${encodeURIComponent('/sales/pos')}`)} className="flex h-14 w-14 shrink-0 items-center justify-center rounded-r border border-l-0 border-blue-400 bg-white text-blue-600 transition hover:bg-blue-50" title="Create warehouse">
-                <Plus size={17} />
-              </button>}
-            </div>
-            {warehouseMenuOpen && (
-              <div className={`absolute left-0 z-30 mt-1 max-h-80 overflow-hidden rounded-b border border-blue-400 bg-white shadow-xl ${canCreateWarehouse ? 'right-14' : 'right-0'}`}>
-                <div className="border-b border-slate-100 p-2">
-                  <div className="relative">
-                    <Search className="pointer-events-none absolute left-3 top-2.5 text-slate-400" size={15} />
-                    <input
-                      value={warehouseSearch}
-                      onChange={(event) => setWarehouseSearch(event.target.value)}
-                      className="h-9 w-full rounded border border-slate-200 bg-white pl-9 pr-3 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
-                      placeholder="Search warehouse"
-                      autoFocus
-                    />
-                  </div>
-                </div>
-                <div className="max-h-60 overflow-y-auto">
-                  {warehouses.isLoading ? (
-                    <div className="flex h-20 items-center justify-center gap-2 text-sm text-slate-500">
-                      <Loader2 className="animate-spin" size={16} />
-                      Loading warehouses...
-                    </div>
-                  ) : filteredWarehouseRows.length ? filteredWarehouseRows.map((warehouse) => (
-                    <button
-                      key={warehouse.id}
-                      type="button"
-                      onClick={() => {
-                        setWarehouseId(warehouse.id);
-                        setWarehouseSearch('');
-                        setWarehouseMenuOpen(false);
-                      }}
-                      className={`flex w-full items-center gap-4 border-b border-slate-100 px-7 py-5 text-left transition last:border-b-0 ${warehouse.id === warehouseId ? 'bg-blue-50' : 'hover:bg-slate-50'}`}
-                    >
-                      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-slate-50 text-slate-500">
-                        <WarehouseIcon size={17} />
-                      </span>
-                      <span className="min-w-0">
-                        <span className="block truncate text-base font-medium text-slate-800">{warehouse.name}</span>
-                        <span className="mt-1 block truncate text-xs font-normal text-slate-500">{warehouse.warehouseCode || warehouse.address || 'Warehouse'}</span>
-                      </span>
-                    </button>
-                  )) : (
-                    <div className="px-7 py-6 text-sm font-normal text-slate-500">No warehouses found</div>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
           <div className={`${fieldLabelClass} relative min-w-0`} ref={paymentMethodSelectRef}>
             <span>Payment Method</span>
             <div className="mt-1 flex">
@@ -735,20 +648,20 @@ export const PosPage: React.FC = () => {
                 ].filter(Boolean).join(' ')}
                 aria-expanded={paymentMethodMenuOpen}
               >
-                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-slate-50 text-slate-500">
-                  <CreditCard size={17} />
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-slate-50 text-slate-500">
+                  <CreditCard size={15} />
                 </span>
                 <span className={`min-w-0 flex-1 truncate text-base font-normal ${selectedPaymentMethod ? 'text-slate-800' : 'text-slate-400'}`}>
                   {paymentMethods.isLoading ? 'Loading payment methods...' : paymentMethods.isError ? 'Failed to load payment methods' : selectedPaymentMethod?.name || 'Select payment method'}
                 </span>
                 {paymentMethods.isFetching ? <Loader2 className="shrink-0 animate-spin text-blue-500" size={18} /> : <ChevronDown className={`shrink-0 text-slate-600 transition ${paymentMethodMenuOpen ? 'rotate-180' : ''}`} size={20} />}
               </button>
-              {canCreateExpenseMaster && <button type="button" onClick={() => navigate(`/expenses/payment-types/create?returnTo=${encodeURIComponent('/sales/pos')}`)} className="flex h-14 w-14 shrink-0 items-center justify-center rounded-r border border-l-0 border-blue-400 bg-white text-blue-600 transition hover:bg-blue-50" title="Create payment method">
+              {canCreateExpenseMaster && <button type="button" onClick={() => navigate(`/expenses/payment-types/create?returnTo=${encodeURIComponent('/sales/pos')}`)} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-r border border-l-0 border-blue-400 bg-white text-blue-600 transition hover:bg-blue-50" title="Create payment method">
                 <Plus size={17} />
               </button>}
             </div>
             {paymentMethodMenuOpen && (
-              <div className={`absolute left-0 z-30 mt-1 max-h-80 overflow-hidden rounded-b border border-blue-400 bg-white shadow-xl ${canCreateExpenseMaster ? 'right-14' : 'right-0'}`}>
+              <div className={`absolute left-0 z-30 mt-1 max-h-80 overflow-hidden rounded-b border border-blue-400 bg-white shadow-xl ${canCreateExpenseMaster ? 'right-10' : 'right-0'}`}>
                 <div className="border-b border-slate-100 p-2">
                   <div className="relative">
                     <Search className="pointer-events-none absolute left-3 top-2.5 text-slate-400" size={15} />
@@ -810,20 +723,20 @@ export const PosPage: React.FC = () => {
                 ].filter(Boolean).join(' ')}
                 aria-expanded={customerMenuOpen}
               >
-                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-slate-50 text-slate-500">
-                  <UserRound size={17} />
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-slate-50 text-slate-500">
+                  <UserRound size={15} />
                 </span>
                 <span className={`min-w-0 flex-1 truncate text-base font-normal ${customerDisplayLabel ? 'text-slate-800' : 'text-slate-400'}`}>
                   {customerDisplayLabel || 'Select customer'}
                 </span>
                 {customers.isFetching ? <Loader2 className="shrink-0 animate-spin text-blue-500" size={18} /> : <ChevronDown className={`shrink-0 text-slate-600 transition ${customerMenuOpen ? 'rotate-180' : ''}`} size={20} />}
               </button>
-              {canCreateCustomer && <button type="button" onClick={() => navigate(`/contacts/customers/create?returnTo=${encodeURIComponent('/sales/pos')}`)} className="flex h-14 w-14 shrink-0 items-center justify-center rounded-r border border-l-0 border-blue-400 bg-white text-blue-600 transition hover:bg-blue-50" title="Create customer">
+              {canCreateCustomer && <button type="button" onClick={() => navigate(`/contacts/customers/create?returnTo=${encodeURIComponent('/sales/pos')}`)} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-r border border-l-0 border-blue-400 bg-white text-blue-600 transition hover:bg-blue-50" title="Create customer">
                 <Plus size={17} />
               </button>}
             </div>
             {customerMenuOpen && (
-              <div className={`absolute left-0 z-30 mt-1 max-h-80 overflow-hidden rounded-b border border-blue-400 bg-white shadow-xl ${canCreateCustomer ? 'right-14' : 'right-0'}`}>
+              <div className={`absolute left-0 z-30 mt-1 max-h-80 overflow-hidden rounded-b border border-blue-400 bg-white shadow-xl ${canCreateCustomer ? 'right-10' : 'right-0'}`}>
                 <div className="border-b border-slate-100 p-2">
                   <div className="relative">
                     <Search className="pointer-events-none absolute left-3 top-2.5 text-slate-400" size={15} />

@@ -60,8 +60,8 @@ public class User extends BaseEntity {
     @JoinColumn(name = "role_id", nullable = false)
     private Role role;
 
-    @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "organization_id", nullable = false)
+    @ManyToOne(fetch = FetchType.LAZY, optional = true)
+    @JoinColumn(name = "organization_id", nullable = true)
     private Organization organization;
 
     @NotBlank

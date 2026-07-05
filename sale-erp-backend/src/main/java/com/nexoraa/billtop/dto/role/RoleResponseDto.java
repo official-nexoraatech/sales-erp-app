@@ -17,6 +17,8 @@ public class RoleResponseDto {
     private Long id;
     private String name;
     private Status status;
+    private Long organizationId;
+    private String organizationName;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

@@ -1,6 +1,7 @@
 package com.nexoraa.billtop.service;
 
 import com.nexoraa.billtop.constants.ErrorMessage;
+import com.nexoraa.billtop.dto.PageResponseDto;
 import com.nexoraa.billtop.dto.common.FileUploadResponseDto;
 import com.nexoraa.billtop.dto.user.ChangePasswordRequestDto;
 import com.nexoraa.billtop.dto.user.CreateUserRequestDto;
@@ -21,6 +22,11 @@ import com.nexoraa.billtop.repository.UserRepository;
 import com.nexoraa.billtop.security.BillTopUserDetails;
 import com.nexoraa.billtop.security.CurrentOrganizationService;
 import com.nexoraa.billtop.exception.UnauthorizedException;
+import com.nexoraa.billtop.specification.UserSpecification;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -36,6 +42,7 @@ import java.util.Locale;
 public class UserService {
 
     private static final String DEFAULT_PASSWORD_SUFFIX = "@123";
+    private static final String ADMIN_ROLE_NAME = "Admin";
 
     private final UserRepository userRepository;
     private final RoleRepository roleRepository;
@@ -81,6 +88,7 @@ public class UserService {
                         "ORGANIZATION_NOT_FOUND"
                 ));
         Role role = getActiveRole(request.getRoleId(), organization.getId());
+        guardAdminUserProtection(role.getName());
 
         User user = User.builder()
                 .firstName(request.getFirstName())
@@ -119,6 +127,34 @@ public class UserService {
         return userMapper.toResponseDto(getActiveUser(id, organizationId));
     }
 
+    /**
+     * Super Admin listing: {@code organizationId} is optional. When present the
+     * result is filtered to that organization; when absent users across every
+     * organization are returned, each including their role and organization.
+     */
+    @Transactional(readOnly = true)
+    public PageResponseDto<UserResponseDto> getUsersForAdmin(Long organizationId, String search, int page, int size) {
+        if (organizationId != null) {
+            organizationRepository.findByIdAndStatusAndIsDeletedFalse(organizationId, Status.ACTIVE)
+                    .orElseThrow(() -> new ResourceNotFoundException(
+                            ErrorMessage.ORGANIZATION_NOT_FOUND,
+                            "ORGANIZATION_NOT_FOUND"
+                    ));
+        }
+
+        Specification<User> specification = UserSpecification.notDeleted()
+                .and(UserSpecification.search(search));
+        if (organizationId != null) {
+            specification = specification.and(UserSpecification.organization(organizationId));
+        }
+
+        Page<User> users = userRepository.findAll(
+                specification,
+                PageRequest.of(page, size, Sort.by(Sort.Direction.ASC, "firstName", "lastName", "id"))
+        );
+        return PageResponseDto.from(users.map(userMapper::toResponseDto));
+    }
+
     @Transactional(readOnly = true)
     public UserProfileResponseDto getProfile() {
         BillTopUserDetails userDetails = getCurrentUserDetails();
@@ -139,6 +175,7 @@ public class UserService {
     @Transactional
     public void updateUserForOrganization(Long organizationId, Long id, UpdateUserRequestDto request) {
         User user = getActiveUser(id, organizationId);
+        guardAdminUserProtection(user.getRole().getName());
 
         if (userRepository.existsByUserNameAndIdNot(request.getUserName(), id)) {
             throw new BadRequestException(ErrorMessage.USER_ALREADY_EXISTS, "USER_ALREADY_EXISTS");
@@ -171,6 +208,7 @@ public class UserService {
     @Transactional
     public void deleteUserForOrganization(Long organizationId, Long id) {
         User user = getActiveUser(id, organizationId);
+        guardAdminUserProtection(user.getRole().getName());
         user.setStatus(Status.INACTIVE);
         user.setIsDeleted(true);
         userRepository.save(user);
@@ -251,6 +289,22 @@ public class UserService {
             return userDetails.organizationId();
         }
         return request.getOrganizationId();
+    }
+
+    /**
+     * An Admin-role user cannot create, update, or delete another user whose
+     * role is "Admin" — only a Super Admin (whose token role is never "Admin")
+     * may. This is keyed off the caller's own role, so Super Admin callers are
+     * unaffected.
+     */
+    private void guardAdminUserProtection(String targetRoleName) {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication != null
+                && authentication.getPrincipal() instanceof BillTopUserDetails userDetails
+                && userDetails.isAdmin()
+                && ADMIN_ROLE_NAME.equalsIgnoreCase(targetRoleName)) {
+            throw new BadRequestException(ErrorMessage.ADMIN_USER_PROTECTED, "ADMIN_USER_PROTECTED");
+        }
     }
 
     private Role getActiveRole(Long roleId, Long organizationId) {

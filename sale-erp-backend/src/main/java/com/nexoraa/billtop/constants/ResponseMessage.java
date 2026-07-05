@@ -195,6 +195,7 @@ public class ResponseMessage {
     public static final String PERMISSIONS_RETRIEVED = "Permissions retrieved successfully";
     public static final String USER_PERMISSIONS_RETRIEVED = "User permissions retrieved successfully";
     public static final String USER_PERMISSIONS_ASSIGNED = "User permissions assigned successfully";
+    public static final String USER_PERMISSIONS_UPDATED = "User permissions updated successfully";
 
     // SMS Messages
     public static final String SMS_TEMPLATE_CREATED = "SMS template created successfully";
@@ -211,33 +212,5 @@ public class ResponseMessage {
     public static final String EMAIL_TEMPLATE_RETRIEVED = "Email template retrieved successfully";
     public static final String EMAIL_TEMPLATES_RETRIEVED = "Email templates retrieved successfully";
     public static final String EMAIL_SENT = "Email sent successfully";
-
-    // Staff Messages
-    public static final String STAFF_EMPLOYEE_CREATED = "Employee created successfully";
-    public static final String STAFF_EMPLOYEE_UPDATED = "Employee updated successfully";
-    public static final String STAFF_EMPLOYEE_DELETED = "Employee deleted successfully";
-    public static final String STAFF_EMPLOYEE_RETRIEVED = "Employee retrieved successfully";
-    public static final String STAFF_EMPLOYEES_RETRIEVED = "Employees retrieved successfully";
-    public static final String STAFF_ATTENDANCE_RETRIEVED = "Attendance records retrieved successfully";
-    public static final String STAFF_ATTENDANCE_MARKED = "Attendance marked successfully";
-    public static final String STAFF_ATTENDANCE_UPDATED = "Attendance updated successfully";
-    public static final String STAFF_ATTENDANCE_SUMMARY_RETRIEVED = "Attendance summary retrieved successfully";
-    public static final String STAFF_LEAVE_CREATED = "Leave request created successfully";
-    public static final String STAFF_LEAVES_RETRIEVED = "Leave requests retrieved successfully";
-    public static final String STAFF_LEAVE_APPROVED = "Leave request approved successfully";
-    public static final String STAFF_LEAVE_REJECTED = "Leave request rejected successfully";
-    public static final String STAFF_LEAVE_CANCELLED = "Leave request cancelled successfully";
-    public static final String STAFF_LEAVE_BALANCE_RETRIEVED = "Leave balance retrieved successfully";
-    public static final String STAFF_PAYROLL_GENERATED = "Payroll generated successfully";
-    public static final String STAFF_PAYROLL_RETRIEVED = "Payroll retrieved successfully";
-    public static final String STAFF_PAYROLLS_RETRIEVED = "Payroll records retrieved successfully";
-    public static final String STAFF_PAYROLL_MARKED_PAID = "Payroll marked paid successfully";
-    public static final String STAFF_SETTING_CREATED = "Staff setting created successfully";
-    public static final String STAFF_SETTING_UPDATED = "Staff setting updated successfully";
-    public static final String STAFF_SETTING_DELETED = "Staff setting deleted successfully";
-    public static final String STAFF_SETTINGS_RETRIEVED = "Staff settings retrieved successfully";
-    public static final String STAFF_DOCUMENT_UPLOADED = "Employee document uploaded successfully";
-    public static final String STAFF_DOCUMENTS_RETRIEVED = "Employee documents retrieved successfully";
-    public static final String STAFF_DOCUMENT_DELETED = "Employee document deleted successfully";
 }
 
