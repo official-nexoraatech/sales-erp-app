@@ -49,6 +49,9 @@ public class CustomerServiceImpl implements CustomerService {
     private static final String SHIPPING = "SHIPPING";
     private static final String CANCELLED = "CANCELLED";
     private static final BigDecimal ZERO = BigDecimal.ZERO;
+    private static final String WALK_IN_FIRST_NAME = "Walk-in";
+    private static final String WALK_IN_LAST_NAME = "Customer";
+    private static final String WALK_IN_MOBILE = "0000000000";
 
     private final ContactRepository contactRepository;
     private final AddressRepository addressRepository;
@@ -94,6 +97,20 @@ public class CustomerServiceImpl implements CustomerService {
                 .id(savedContact.getId())
                 .customerCode(customerMapper.toCustomerCode(savedContact.getId()))
                 .build();
+    }
+
+    @Override
+    @Transactional
+    public void createWalkInCustomerForOrganization(Organization organization) {
+        Contact contact = Contact.builder()
+                .organization(organization)
+                .contactType(CUSTOMER)
+                .firstName(WALK_IN_FIRST_NAME)
+                .lastName(WALK_IN_LAST_NAME)
+                .mobile(WALK_IN_MOBILE)
+                .isWholesale(false)
+                .build();
+        contactRepository.save(contact);
     }
 
     @Override

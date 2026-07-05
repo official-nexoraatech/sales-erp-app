@@ -15,6 +15,7 @@ import com.nexoraa.billtop.mapper.OrganizationMapper;
 import com.nexoraa.billtop.repository.AddressRepository;
 import com.nexoraa.billtop.repository.OrganizationRepository;
 import com.nexoraa.billtop.repository.StateRepository;
+import com.nexoraa.billtop.service.CustomerService;
 import com.nexoraa.billtop.service.FileStorageService;
 import com.nexoraa.billtop.service.OrganizationService;
 import com.nexoraa.billtop.specification.MasterDataSpecification;
@@ -41,19 +42,22 @@ public class OrganizationServiceImpl implements OrganizationService {
     private final StateRepository stateRepository;
     private final OrganizationMapper organizationMapper;
     private final FileStorageService fileStorageService;
+    private final CustomerService customerService;
 
     public OrganizationServiceImpl(
             OrganizationRepository organizationRepository,
             AddressRepository addressRepository,
             StateRepository stateRepository,
             OrganizationMapper organizationMapper,
-            FileStorageService fileStorageService
+            FileStorageService fileStorageService,
+            CustomerService customerService
     ) {
         this.organizationRepository = organizationRepository;
         this.addressRepository = addressRepository;
         this.stateRepository = stateRepository;
         this.organizationMapper = organizationMapper;
         this.fileStorageService = fileStorageService;
+        this.customerService = customerService;
     }
 
     @Override
@@ -64,6 +68,7 @@ public class OrganizationServiceImpl implements OrganizationService {
         }
         Organization organization = organizationRepository.save(organizationMapper.toEntity(request));
         saveAddress(organization, request.getAddress());
+        customerService.createWalkInCustomerForOrganization(organization);
     }
 
     @Override

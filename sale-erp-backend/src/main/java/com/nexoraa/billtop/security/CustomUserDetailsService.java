@@ -63,9 +63,9 @@ public class CustomUserDetailsService implements UserDetailsService {
 
         return new BillTopUserDetails(
                 user.getId(),
-                user.getOrganization().getId(),
-                user.getOrganization().getName(),
-                user.getOrganization().getLogoUrl(),
+                user.getOrganization() != null ? user.getOrganization().getId() : null,
+                user.getOrganization() != null ? user.getOrganization().getName() : null,
+                user.getOrganization() != null ? user.getOrganization().getLogoUrl() : null,
                 user.getUserName(),
                 user.getPassword(),
                 user.getRole().getName(),

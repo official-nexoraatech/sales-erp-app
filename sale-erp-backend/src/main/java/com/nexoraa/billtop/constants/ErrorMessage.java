@@ -85,6 +85,10 @@ public class ErrorMessage {
     // Role Errors
     public static final String ROLE_NOT_FOUND = "Role not found";
     public static final String ROLE_ALREADY_EXISTS = "Role already exists";
+    public static final String ADMIN_ROLE_PROTECTED = "The Admin role cannot be deleted";
+
+    // User Errors
+    public static final String ADMIN_USER_PROTECTED = "Admin users can only be managed by a Super Admin";
 
     // Permission Errors
     public static final String PERMISSION_NOT_FOUND = "Permission not found";
@@ -101,22 +105,6 @@ public class ErrorMessage {
     public static final String EMAIL_TEMPLATE_ALREADY_EXISTS = "Email template already exists";
     public static final String INVALID_EMAIL_IDS = "One or more email IDs are invalid";
     public static final String EMAIL_SEND_FAILED = "Email send failed";
-
-    // Staff Errors
-    public static final String STAFF_EMPLOYEE_NOT_FOUND = "Employee not found";
-    public static final String STAFF_EMPLOYEE_ALREADY_EXISTS = "Employee already exists";
-    public static final String STAFF_ATTENDANCE_NOT_FOUND = "Attendance record not found";
-    public static final String STAFF_ATTENDANCE_ALREADY_EXISTS = "Attendance record already exists";
-    public static final String STAFF_LEAVE_NOT_FOUND = "Leave request not found";
-    public static final String STAFF_PAYROLL_NOT_FOUND = "Payroll record not found";
-    public static final String STAFF_SETTING_NOT_FOUND = "Staff setting not found";
-    public static final String STAFF_SETTING_ALREADY_EXISTS = "Staff setting already exists";
-    public static final String STAFF_DOCUMENT_NOT_FOUND = "Employee document not found";
-    public static final String INVALID_STAFF_SETTING_TYPE = "Invalid staff setting type";
-    public static final String INVALID_STATUS = "Invalid status";
-    public static final String INVALID_DATE = "Invalid date";
-    public static final String INVALID_MONTH = "Invalid month";
-    public static final String INVALID_YEAR = "Invalid year";
 
     // General Errors
     public static final String BAD_REQUEST = "Bad request";

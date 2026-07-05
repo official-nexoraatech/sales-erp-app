@@ -2,11 +2,13 @@ package com.nexoraa.billtop.controller.admin;
 
 import com.nexoraa.billtop.constants.ResponseMessage;
 import com.nexoraa.billtop.dto.ApiResponseDto;
+import com.nexoraa.billtop.dto.PageResponseDto;
 import com.nexoraa.billtop.dto.user.CreateUserRequestDto;
 import com.nexoraa.billtop.dto.user.UpdateUserRequestDto;
 import com.nexoraa.billtop.dto.user.UserResponseDto;
 import com.nexoraa.billtop.service.UserService;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.Positive;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -24,12 +26,14 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.List;
 
 /**
- * Super Admin API (v2) for managing users inside a specific organization,
- * identified explicitly by {organizationId} rather than the caller's token.
+ * Super Admin API (v2) for managing users across the platform. Organization-scoped
+ * endpoints identify the organization explicitly via {organizationId} rather than
+ * the caller's token; the flat listing endpoint is paginated, searchable, and
+ * applies an organization filter only when one is supplied.
  */
 @Validated
 @RestController
-@RequestMapping("/api/v2/admin/organizations/{organizationId}/users")
+@RequestMapping("/api/v2/admin")
 @PreAuthorize("hasAuthority('SUPER_ADMIN')")
 public class AdminUserController {
 
@@ -39,7 +43,20 @@ public class AdminUserController {
         this.userService = userService;
     }
 
-    @PostMapping
+    @GetMapping("/users")
+    public ResponseEntity<ApiResponseDto<PageResponseDto<UserResponseDto>>> getUsers(
+            @RequestParam(required = false) @Positive Long organizationId,
+            @RequestParam(required = false) String search,
+            @RequestParam(defaultValue = "0") @Min(0) int page,
+            @RequestParam(defaultValue = "20") @Positive int size
+    ) {
+        return ResponseEntity.ok(ApiResponseDto.success(
+                ResponseMessage.USERS_RETRIEVED,
+                userService.getUsersForAdmin(organizationId, search, page, size)
+        ));
+    }
+
+    @PostMapping("/organizations/{organizationId}/users")
     public ResponseEntity<ApiResponseDto<Void>> createUser(
             @PathVariable @Positive Long organizationId,
             @Valid @RequestBody CreateUserRequestDto request
@@ -49,8 +66,8 @@ public class AdminUserController {
         return ResponseEntity.ok(ApiResponseDto.success(ResponseMessage.USER_CREATED));
     }
 
-    @GetMapping
-    public ResponseEntity<ApiResponseDto<List<UserResponseDto>>> getUsers(
+    @GetMapping("/organizations/{organizationId}/users")
+    public ResponseEntity<ApiResponseDto<List<UserResponseDto>>> getUsersByOrganization(
             @PathVariable @Positive Long organizationId,
             @RequestParam(required = false) String search
     ) {
@@ -60,7 +77,7 @@ public class AdminUserController {
         ));
     }
 
-    @GetMapping("/{id}")
+    @GetMapping("/organizations/{organizationId}/users/{id}")
     public ResponseEntity<ApiResponseDto<UserResponseDto>> getUserById(
             @PathVariable @Positive Long organizationId,
             @PathVariable @Positive Long id
@@ -71,7 +88,7 @@ public class AdminUserController {
         ));
     }
 
-    @PutMapping("/{id}")
+    @PutMapping("/organizations/{organizationId}/users/{id}")
     public ResponseEntity<ApiResponseDto<Void>> updateUser(
             @PathVariable @Positive Long organizationId,
             @PathVariable @Positive Long id,
@@ -81,7 +98,7 @@ public class AdminUserController {
         return ResponseEntity.ok(ApiResponseDto.success(ResponseMessage.USER_UPDATED));
     }
 
-    @DeleteMapping("/{id}")
+    @DeleteMapping("/organizations/{organizationId}/users/{id}")
     public ResponseEntity<ApiResponseDto<Void>> deleteUser(
             @PathVariable @Positive Long organizationId,
             @PathVariable @Positive Long id

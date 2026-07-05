@@ -31,6 +31,8 @@ public interface RoleMapper {
     @Mapping(target = "status", expression = "java(request.getStatus() == null ? role.getStatus() : request.getStatus())")
     void updateEntity(RoleRequestDto request, @MappingTarget Role role);
 
+    @Mapping(target = "organizationId", source = "organization.id")
+    @Mapping(target = "organizationName", source = "organization.name")
     RoleResponseDto toResponse(Role role);
 }
 

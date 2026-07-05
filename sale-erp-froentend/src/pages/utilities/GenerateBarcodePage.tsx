@@ -8,6 +8,7 @@ import { itemApi } from '../../api/endpoints';
 import type { ItemListItem } from '../../api/endpoints';
 import { Button } from '../../components/ui/Button';
 import { Loader } from '../../components/ui/Loader';
+import { useAuth } from '../../hooks/useAuth';
 import { useDebounce } from '../../hooks/useDebounce';
 import { formatCurrency } from '../../utils/formatCurrency';
 
@@ -22,6 +23,20 @@ interface LabelOption {
   heightMm: number;
 }
 
+interface LabelTierStyle {
+  padding: string;
+  gap: string;
+  orgFontSize: string;
+  itemFontSize: string;
+  priceFontSize: string;
+  mrpFontSize: string;
+  idFontSize: string;
+  barcodeHeight: number;
+  barcodeWidth: number;
+  barcodeFontSize: number;
+  qrSize: number;
+}
+
 const inputClass = 'h-10 w-full rounded border border-gray-300 bg-white px-3 text-sm text-gray-900 outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-gray-50';
 const tableHeadings = ['ITEM ID', 'ITEM', 'ITEM CODE', 'SKU', 'BARCODE VALUE', 'HSN', 'CATEGORY', 'BRAND', 'PURCHASE PRICE', 'SALE PRICE', 'MRP', 'QTY', 'UNIT', 'TRACKING', 'STATUS'];
 const labelOptions: LabelOption[] = [
@@ -30,12 +45,57 @@ const labelOptions: LabelOption[] = [
   { value: '50x25', label: '50 x 25mm', widthMm: 50, heightMm: 25 },
 ];
 
+// Every side of a label gets the same padding value, and each label size has
+// its own tuned font/barcode scale so the three options render distinctly
+// instead of collapsing into one "compact" look.
+const LABEL_TIERS: Record<LabelSizeValue, LabelTierStyle> = {
+  '100x50': {
+    padding: '3.5mm',
+    gap: '1.5mm',
+    orgFontSize: '11px',
+    itemFontSize: '13px',
+    priceFontSize: '14px',
+    mrpFontSize: '10px',
+    idFontSize: '9px',
+    barcodeHeight: 58,
+    barcodeWidth: 1.6,
+    barcodeFontSize: 13,
+    qrSize: 118,
+  },
+  '100x25': {
+    padding: '2mm',
+    gap: '0.8mm',
+    orgFontSize: '8px',
+    itemFontSize: '9px',
+    priceFontSize: '9.5px',
+    mrpFontSize: '7px',
+    idFontSize: '6.5px',
+    barcodeHeight: 26,
+    barcodeWidth: 1.3,
+    barcodeFontSize: 9,
+    qrSize: 58,
+  },
+  '50x25': {
+    padding: '1.5mm',
+    gap: '0.6mm',
+    orgFontSize: '6.5px',
+    itemFontSize: '7.5px',
+    priceFontSize: '8px',
+    mrpFontSize: '6px',
+    idFontSize: '5.5px',
+    barcodeHeight: 22,
+    barcodeWidth: 1,
+    barcodeFontSize: 7,
+    qrSize: 44,
+  },
+};
+
 const itemCodeValue = (item: ItemListItem) => String(item.id);
 const availableBarcodeCount = (item: ItemListItem | null) => Math.max(0, Math.floor(Number(item?.availableQty ?? 0)));
 const statusText = (status: boolean | string) => (status === true || status === 'ACTIVE' ? 'ACTIVE' : 'INACTIVE');
 const labelOptionByValue = (value: LabelSizeValue) => labelOptions.find((option) => option.value === value) || labelOptions[0];
 
-const BarcodeSvg = ({ value, type, compact }: { value: string; type: LinearBarcodeType; compact: boolean }) => {
+const BarcodeSvg = ({ value, type, tier }: { value: string; type: LinearBarcodeType; tier: LabelTierStyle }) => {
   const svgRef = useRef<SVGSVGElement | null>(null);
 
   useEffect(() => {
@@ -43,32 +103,31 @@ const BarcodeSvg = ({ value, type, compact }: { value: string; type: LinearBarco
     try {
       JsBarcode(svgRef.current, value, {
         format: type,
-        width: 2,
-        height: compact ? 34 : 76,
+        width: tier.barcodeWidth,
+        height: tier.barcodeHeight,
         displayValue: true,
-        fontSize: compact ? 10 : 16,
-        margin: compact ? 2 : 8,
+        fontSize: tier.barcodeFontSize,
+        margin: 0,
         lineColor: '#111827',
         background: '#ffffff',
       });
     } catch {
       svgRef.current.replaceChildren();
     }
-  }, [compact, type, value]);
+  }, [tier, type, value]);
 
-  return <svg ref={svgRef} className={compact ? 'max-h-12 max-w-full' : 'max-h-28 max-w-full'} />;
+  return <svg ref={svgRef} className="max-w-full" style={{ maxHeight: tier.barcodeHeight + tier.barcodeFontSize + 6 }} />;
 };
 
-const QrSvg = ({ value, compact }: { value: string; compact: boolean }) => {
+const QrSvg = ({ value, size }: { value: string; size: number }) => {
   const [markup, setMarkup] = useState('');
-  const qrSize = compact ? 48 : 140;
 
   useEffect(() => {
     let active = true;
     setMarkup('');
     qrToString(value, {
       type: 'svg',
-      width: qrSize,
+      width: size,
       margin: 1,
       errorCorrectionLevel: 'M',
       color: { dark: '#111827', light: '#ffffff' },
@@ -81,40 +140,52 @@ const QrSvg = ({ value, compact }: { value: string; compact: boolean }) => {
     return () => {
       active = false;
     };
-  }, [qrSize, value]);
+  }, [size, value]);
 
   return (
     <div
-      className={`qr-code shrink-0 overflow-hidden ${compact ? 'h-12 w-12' : 'h-36 w-36'} [&_svg]:block [&_svg]:h-full [&_svg]:w-full`}
-      style={{ width: qrSize, height: qrSize }}
+      className="qr-code shrink-0 overflow-hidden [&_svg]:block [&_svg]:h-full [&_svg]:w-full"
+      style={{ width: size, height: size }}
       dangerouslySetInnerHTML={{ __html: markup }}
     />
   );
 };
 
-const BarcodePreview = ({ item, type, label }: { item: ItemListItem; type: BarcodeType; label: LabelOption }) => {
+const BarcodePreview = ({ item, type, label, organizationName }: { item: ItemListItem; type: BarcodeType; label: LabelOption; organizationName: string }) => {
   const value = itemCodeValue(item);
-  const compact = label.heightMm <= 25;
+  const tier = LABEL_TIERS[label.value];
   const labelStyle: React.CSSProperties = {
     width: `${label.widthMm}mm`,
     height: `${label.heightMm}mm`,
-    padding: compact ? '2mm 3mm' : '4mm',
+    padding: tier.padding,
+    gap: tier.gap,
   };
 
   return (
     <div
-      className={`barcode-label flex shrink-0 flex-col items-center justify-center overflow-hidden rounded border border-dashed border-gray-300 bg-white text-center ${compact ? 'gap-1' : 'gap-2'}`}
+      className="barcode-label box-border flex shrink-0 flex-col items-center justify-center overflow-hidden rounded border border-dashed border-gray-300 bg-white text-center"
       style={labelStyle}
       data-label-size={label.value}
     >
-      <div className={`max-w-full truncate font-semibold text-gray-900 ${compact ? 'text-[10px] leading-tight' : 'text-sm'}`}>{item.itemName}</div>
-      {type === 'QR_CODE' ? <QrSvg value={value} compact={compact} /> : <BarcodeSvg value={value} type={type} compact={compact} />}
-      <div className={`font-semibold uppercase text-gray-500 ${compact ? 'text-[9px] leading-tight' : 'text-xs'}`}>Item ID: {value}</div>
+      <div className="max-w-full truncate font-bold uppercase tracking-wide text-gray-900" style={{ fontSize: tier.orgFontSize, lineHeight: 1.1 }}>
+        {organizationName}
+      </div>
+      <div className="max-w-full truncate font-semibold text-gray-900" style={{ fontSize: tier.itemFontSize, lineHeight: 1.15 }}>
+        {item.itemName}
+      </div>
+      {type === 'QR_CODE' ? <QrSvg value={value} size={tier.qrSize} /> : <BarcodeSvg value={value} type={type} tier={tier} />}
+      <div className="flex max-w-full items-baseline gap-1.5 leading-tight">
+        <span className="font-medium text-gray-500" style={{ fontSize: tier.mrpFontSize }}>MRP: {formatCurrency(item.mrp || 0)}</span>
+        <span className="font-bold text-gray-900" style={{ fontSize: tier.priceFontSize }}>{formatCurrency(item.salePrice || 0)}</span>
+      </div>
+      <div className="font-semibold uppercase text-gray-500" style={{ fontSize: tier.idFontSize, lineHeight: 1.1 }}>Item ID: {value}</div>
     </div>
   );
 };
 
 export const GenerateBarcodePage: React.FC = () => {
+  const { user } = useAuth();
+  const organizationName = user?.organizationName || '';
   const [barcodeType, setBarcodeType] = useState<LinearBarcodeType>('CODE128');
   const [labelSize, setLabelSize] = useState<LabelSizeValue>(labelOptions[0].value);
   const [search, setSearch] = useState('');
@@ -167,16 +238,20 @@ export const GenerateBarcodePage: React.FC = () => {
         <head>
           <title>Barcode - ${generatedItem.itemName}</title>
           <style>
-            body { font-family: Arial, sans-serif; padding: 24px; }
+            /* Zero the browser's default page margin so every printed label gets
+               identical, predictable spacing on all sides — the label's own
+               padding (set inline per element below) is the only spacing. */
+            @page { margin: 0; size: auto; }
+            * { box-sizing: border-box; }
+            body { font-family: Arial, sans-serif; margin: 0; padding: 4mm; }
             .barcode-print-grid {
               display: grid;
               grid-template-columns: repeat(auto-fit, minmax(${selectedLabel.widthMm}mm, ${selectedLabel.widthMm}mm));
-              gap: 4mm;
+              gap: 3mm;
               align-items: start;
             }
             .barcode-print-grid > div { break-inside: avoid; display: flex; justify-content: center; }
             .barcode-label {
-              box-sizing: border-box;
               display: flex;
               flex-direction: column;
               align-items: center;
@@ -187,27 +262,6 @@ export const GenerateBarcodePage: React.FC = () => {
               background: #ffffff;
               text-align: center;
             }
-            .barcode-label[data-label-size="100x50"] { gap: 2mm; }
-            .barcode-label[data-label-size="100x25"],
-            .barcode-label[data-label-size="50x25"] { gap: 1mm; }
-            .barcode-label > div:first-child {
-              max-width: 100%;
-              overflow: hidden;
-              text-overflow: ellipsis;
-              white-space: nowrap;
-              font-weight: 600;
-            }
-            .barcode-label > div:last-child {
-              font-weight: 600;
-              color: #6b7280;
-              text-transform: uppercase;
-            }
-            .barcode-label[data-label-size="100x50"] > div:first-child { font-size: 14px; }
-            .barcode-label[data-label-size="100x50"] > div:last-child { font-size: 12px; }
-            .barcode-label[data-label-size="100x25"] > div:first-child,
-            .barcode-label[data-label-size="50x25"] > div:first-child { font-size: 10px; line-height: 1.1; }
-            .barcode-label[data-label-size="100x25"] > div:last-child,
-            .barcode-label[data-label-size="50x25"] > div:last-child { font-size: 9px; line-height: 1.1; }
             .qr-code { flex-shrink: 0; overflow: hidden; }
             .qr-code svg { display: block; width: 100%; height: 100%; }
             svg { max-width: 100%; }
@@ -344,10 +398,14 @@ export const GenerateBarcodePage: React.FC = () => {
           {generatedItem ? (
             <>
               <p className="mb-4 text-sm font-semibold text-gray-700">Generated {generatedCount} barcode{generatedCount === 1 ? '' : 's'} from available quantity.</p>
-              <div ref={barcodeSectionRef} className="grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(220px,1fr))]">
+              <div
+                ref={barcodeSectionRef}
+                className="grid gap-3"
+                style={{ gridTemplateColumns: `repeat(auto-fit, minmax(min(${selectedLabel.widthMm}mm, 31%), 1fr))` }}
+              >
               {Array.from({ length: generatedCount }).map((_, index) => (
                 <div key={`${generatedItem.id}-${index}`} className="flex justify-center">
-                  <BarcodePreview item={generatedItem} type={generatedType} label={selectedLabel} />
+                  <BarcodePreview item={generatedItem} type={generatedType} label={selectedLabel} organizationName={organizationName} />
                 </div>
               ))}
               </div>

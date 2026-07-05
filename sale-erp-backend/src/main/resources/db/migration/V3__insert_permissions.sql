@@ -3,9 +3,6 @@
 -- This script inserts all API permissions into the system
 -- =====================================================
 
--- Disable foreign key checks (if needed)
--- SET FOREIGN_KEY_CHECKS = 0;
-
 -- ===================== ITEM MANAGEMENT =====================
 INSERT INTO permissions (name, group_name, description, endpoint, status, is_deleted, created_at, updated_at) VALUES
 ('ITEM_CREATE', 'Item', 'Create a new item in the inventory', 'POST /api/v1/items', 'ACTIVE', FALSE, NOW(), NOW()),
@@ -241,5 +238,63 @@ INSERT INTO permissions (name, group_name, description, endpoint, status, is_del
 ('ITEM_TEMPLATE_DOWNLOAD', 'Item', 'Download item import template', 'GET /api/v1/items/excel/template', 'ACTIVE', FALSE, NOW(), NOW()),
 ('CONTACT_TEMPLATE_DOWNLOAD', 'Contact Import', 'Download contact import template', 'GET /api/v1/contacts/excel/template', 'ACTIVE', FALSE, NOW(), NOW());
 
--- Re-enable foreign key checks
--- SET FOREIGN_KEY_CHECKS = 1;
+-- =====================================================
+-- Platform-level Super Admin
+-- The "Super Admin" role is platform-wide and intentionally has no organization
+-- (organization_id is NULL). It grants access to the /api/v2/admin/** endpoints
+-- (see BillTopUserDetails.isSuperAdmin()).
+-- =====================================================
+INSERT INTO roles (name, status, organization_id, created_by, created_at, is_deleted)
+SELECT 'Super Admin', 'ACTIVE', NULL, 'SYSTEM', CURRENT_TIMESTAMP, FALSE
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM roles
+    WHERE LOWER(name) = LOWER('Super Admin')
+);
+
+INSERT INTO users (
+    first_name,
+    last_name,
+    user_name,
+    email,
+    mobile_no,
+    status,
+    role_id,
+    organization_id,
+    password,
+    created_by,
+    created_at,
+    is_deleted
+)
+SELECT
+    'Dipak',
+    'Admin',
+    'dipakdagade',
+    'dipakdagade@nexoraa.com',
+    NULL,
+    'ACTIVE',
+    role.id,
+    NULL,
+    '$2a$10$gc2NS8Xm8AdSj11lNVCVB.0sAlsvnx33um8bqAvi4yUW.7Kx.oRTC',
+    'SYSTEM',
+    CURRENT_TIMESTAMP,
+    FALSE
+FROM roles role
+WHERE LOWER(role.name) = LOWER('Super Admin')
+  AND role.is_deleted = FALSE
+  AND NOT EXISTS (
+      SELECT 1
+      FROM users existing_user
+      WHERE LOWER(existing_user.user_name) = LOWER('dipakdagade')
+         OR LOWER(existing_user.email) = LOWER('dipakdagade@nexoraa.com')
+  );
+
+INSERT INTO role_permission_mapping (role_id, permission_id)
+SELECT role.id, permission.id
+FROM roles role
+JOIN permissions permission
+    ON permission.status = 'ACTIVE'
+   AND permission.is_deleted = FALSE
+WHERE LOWER(role.name) = LOWER('Super Admin')
+  AND role.is_deleted = FALSE
+ON CONFLICT (role_id, permission_id) DO NOTHING;

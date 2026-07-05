@@ -3,33 +3,44 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { Check, Search, ShieldCheck, UserRound } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { permissionsApi, usersApi } from '../../api/endpoints';
+import { adminPermissionsApi, adminUsersApi, permissionsApi, usersApi } from '../../api/endpoints';
 import { queryClient } from '../../app/queryClient';
 import { Button } from '../../components/ui/Button';
 import { Loader } from '../../components/ui/Loader';
+import { useAuth } from '../../hooks/useAuth';
+import { isSuperAdminRole } from '../../auth/featurePermissions';
 
 export const UserPermissionsPage: React.FC = () => {
   const [searchParams] = useSearchParams();
   const [selectedUserId, setSelectedUserId] = useState(Number(searchParams.get('userId')) || 0);
   const [selectedPermissionIds, setSelectedPermissionIds] = useState<number[]>([]);
   const [search, setSearch] = useState('');
+  const { user } = useAuth();
+  const isSuperAdmin = isSuperAdminRole(user?.role);
+  const isAdmin = (user?.role || '').trim().toLowerCase() === 'admin';
 
   const users = useQuery({
-    queryKey: ['users', 'permission-assignment'],
-    queryFn: () => usersApi.getAll({ page: 0, size: 500, search: '' }),
+    queryKey: ['users', 'permission-assignment', isSuperAdmin],
+    queryFn: () => (isSuperAdmin
+      ? adminUsersApi.getAll({ page: 0, size: 500, search: '' })
+      : usersApi.getAll({ page: 0, size: 500, search: '' })),
   });
   const permissions = useQuery({
-    queryKey: ['permissions', 'grouped'],
-    queryFn: permissionsApi.getAll,
+    queryKey: ['permissions', 'grouped', isSuperAdmin],
+    queryFn: () => (isSuperAdmin ? adminPermissionsApi.getAll() : permissionsApi.getAll()),
   });
+  const userRows = (users.data?.data?.content || []).filter((entry) => !isAdmin || entry.id !== user?.userId);
+  const selectedUser = userRows.find((entry) => entry.id === selectedUserId);
+  const selectedOrganizationId = selectedUser?.organizationId;
+
   const selectedUserPermissions = useQuery({
-    queryKey: ['permissions', 'user', selectedUserId],
-    queryFn: () => permissionsApi.getForUser(selectedUserId),
-    enabled: selectedUserId > 0,
+    queryKey: ['permissions', 'user', selectedUserId, selectedOrganizationId],
+    queryFn: () => (isSuperAdmin && selectedOrganizationId
+      ? adminPermissionsApi.getForUser(selectedOrganizationId, selectedUserId)
+      : permissionsApi.getForUser(selectedUserId)),
+    enabled: selectedUserId > 0 && (!isSuperAdmin || Boolean(selectedOrganizationId)),
   });
 
-  const userRows = users.data?.data?.content || [];
-  const selectedUser = userRows.find((entry) => entry.id === selectedUserId);
   const permissionGroups = permissions.data?.data || {};
 
   useEffect(() => {
@@ -64,7 +75,9 @@ export const UserPermissionsPage: React.FC = () => {
     && allPermissionIds.every((permissionId) => selectedPermissionIds.includes(permissionId));
 
   const assignment = useMutation({
-    mutationFn: permissionsApi.assignToUser,
+    mutationFn: (payload: { userId: number; permissionIds: number[] }) => (isSuperAdmin && selectedOrganizationId
+      ? adminPermissionsApi.updateForUser(selectedOrganizationId, payload)
+      : permissionsApi.assignToUser(payload)),
     onSuccess: async () => {
       toast.success('Permissions assigned successfully. The user must sign in again to receive a new token.');
       await queryClient.invalidateQueries({ queryKey: ['permissions', 'user', selectedUserId] });
@@ -141,6 +154,7 @@ export const UserPermissionsPage: React.FC = () => {
                     : entry.userName || entry.username || `User ${entry.id}`}
                   {' - '}
                   {entry.userName || entry.username || entry.email || entry.id}
+                  {isSuperAdmin && entry.organizationName ? ` (${entry.organizationName})` : ''}
                 </option>
               ))}
             </select>

@@ -1,27 +1,5 @@
 import axiosClient from './axiosClient';
 import type { ApiResponse, PageResponse } from './apiResponse';
-export { staffApi } from './staffApi';
-export type {
-  Attendance,
-  AttendanceRequest,
-  AttendanceStatus,
-  Employee,
-  EmployeeAddress,
-  EmployeeAddressRequest,
-  EmployeeRequest,
-  EmployeeStatus,
-  EmploymentType,
-  LeaveBalance,
-  LeaveRequestItem,
-  LeaveRequestPayload,
-  LeaveStatus,
-  Payroll,
-  PayrollRequest,
-  PayrollStatus,
-  StaffListResponse,
-  StaffSetting,
-  StaffSettingType,
-} from '../types/staff.types';
 import type { LoginRequest, LoginResponse } from '../types/auth.types';
 import type { CustomerDetail, CustomerListItem } from '../types/customer.types';
 import type { CreateCustomerRequest, UpdateCustomerRequest } from '../types/customer.types';
@@ -469,6 +447,32 @@ export const rolesApi = {
 export const adminRolesApi = {
   create: (payload: RoleRequest) =>
     axiosClient.post<ApiResponse<void>, ApiResponse<void>>('/api/v2/admin/organizations/roles', payload),
+  getAll: (params?: { organizationId?: number; search?: string }) =>
+    axiosClient.get<ApiResponse<Role[]>, ApiResponse<Role[]>>('/api/v2/admin/roles', { params }),
+};
+
+export const adminUsersApi = {
+  getAll: (params?: { organizationId?: number; search?: string; page?: number; size?: number }) =>
+    axiosClient.get<ApiResponse<PageResponse<UserListItem>>, ApiResponse<PageResponse<UserListItem>>>('/api/v2/admin/users', { params }),
+};
+
+export const adminPermissionsApi = {
+  getAll: () =>
+    axiosClient.get<ApiResponse<PermissionGroups>, ApiResponse<PermissionGroups>>('/api/v2/admin/permissions'),
+  getForUser: (organizationId: number, userId: number) =>
+    axiosClient.get<ApiResponse<AssignedPermission[]>, ApiResponse<AssignedPermission[]>>(
+      `/api/v2/admin/organizations/${organizationId}/users/${userId}/permissions`
+    ),
+  assignToUser: (organizationId: number, payload: AssignUserPermissionsRequest) =>
+    axiosClient.post<ApiResponse<void>, ApiResponse<void>>(
+      `/api/v2/admin/organizations/${organizationId}/users/${payload.userId}/permissions`,
+      payload
+    ),
+  updateForUser: (organizationId: number, payload: AssignUserPermissionsRequest) =>
+    axiosClient.put<ApiResponse<void>, ApiResponse<void>>(
+      `/api/v2/admin/organizations/${organizationId}/users/${payload.userId}/permissions`,
+      payload
+    ),
 };
 
 export const posApi = {

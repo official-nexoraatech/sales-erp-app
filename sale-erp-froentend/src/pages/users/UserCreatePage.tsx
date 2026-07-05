@@ -103,10 +103,10 @@ export const UserCreatePage: React.FC<Props> = ({ mode = 'create' }) => {
               canCreate={hasPermission(PERMISSIONS.ORGANIZATION_CREATE)}
             />
           )}
-          <label className="text-sm text-gray-600">First Name<input className={`${inputClass} mt-1`} value={form.firstName} onChange={(event) => setText('firstName', event.target.value)} /></label>
-          <label className="text-sm text-gray-600">Last Name<input className={`${inputClass} mt-1`} value={form.lastName} onChange={(event) => setText('lastName', event.target.value)} /></label>
-          <label className="text-sm text-gray-600">Username<input className={`${inputClass} mt-1`} value={form.userName} onChange={(event) => setText('userName', event.target.value)} /></label>
-          <label className="text-sm text-gray-600">Email Address<input className={`${inputClass} mt-1`} type="email" value={form.email} onChange={(event) => setText('email', event.target.value)} /></label>
+          <label className="text-sm text-gray-600">First Name *<input className={`${inputClass} mt-1`} value={form.firstName} onChange={(event) => setText('firstName', event.target.value)} /></label>
+          <label className="text-sm text-gray-600">Last Name *<input className={`${inputClass} mt-1`} value={form.lastName} onChange={(event) => setText('lastName', event.target.value)} /></label>
+          <label className="text-sm text-gray-600">Username *<input className={`${inputClass} mt-1`} value={form.userName} onChange={(event) => setText('userName', event.target.value)} /></label>
+          <label className="text-sm text-gray-600">Email Address *<input className={`${inputClass} mt-1`} type="email" value={form.email} onChange={(event) => setText('email', event.target.value)} /></label>
           <label className="text-sm text-gray-600">Mobile<input className={`${inputClass} mt-1`} value={form.mobileNo} onChange={(event) => setText('mobileNo', event.target.value)} /></label>
           <RoleSelector
             organizationId={form.organizationId}

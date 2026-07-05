@@ -10,10 +10,13 @@ import com.nexoraa.billtop.exception.ResourceNotFoundException;
 import com.nexoraa.billtop.mapper.RoleMapper;
 import com.nexoraa.billtop.repository.OrganizationRepository;
 import com.nexoraa.billtop.repository.RoleRepository;
+import com.nexoraa.billtop.security.BillTopUserDetails;
 import com.nexoraa.billtop.security.CurrentOrganizationService;
 import com.nexoraa.billtop.service.RoleService;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -22,6 +25,8 @@ import java.util.List;
 
 @Service
 public class RoleServiceImpl implements RoleService {
+
+    private static final String ADMIN_ROLE_NAME = "Admin";
 
     private final RoleRepository roleRepository;
     private final RoleMapper roleMapper;
@@ -137,9 +142,25 @@ public class RoleServiceImpl implements RoleService {
     @Transactional
     public void deleteRoleForOrganization(Long organizationId, Long id) {
         Role role = getActiveRole(id, organizationId);
+        guardAdminRoleProtection(role);
         role.setStatus(Status.INACTIVE);
         role.setIsDeleted(true);
         roleRepository.save(role);
+    }
+
+    /**
+     * An Admin-role user cannot delete the "Admin" role itself — only a Super
+     * Admin (whose token role is never "Admin") may. This is keyed off the
+     * caller's own role, so Super Admin callers are unaffected.
+     */
+    private void guardAdminRoleProtection(Role role) {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication != null
+                && authentication.getPrincipal() instanceof BillTopUserDetails userDetails
+                && userDetails.isAdmin()
+                && ADMIN_ROLE_NAME.equalsIgnoreCase(role.getName())) {
+            throw new BadRequestException(ErrorMessage.ADMIN_ROLE_PROTECTED, "ADMIN_ROLE_PROTECTED");
+        }
     }
 
     private Role getActiveRole(Long id, Long organizationId) {
@@ -151,11 +172,48 @@ public class RoleServiceImpl implements RoleService {
                 .orElseThrow(() -> new ResourceNotFoundException(ErrorMessage.ROLE_NOT_FOUND, "ROLE_NOT_FOUND"));
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public List<RoleResponseDto> getRolesForAdmin(Long organizationId, String search) {
+        if (organizationId != null) {
+            organizationRepository.findByIdAndStatusAndIsDeletedFalse(organizationId, Status.ACTIVE)
+                    .orElseThrow(() -> new ResourceNotFoundException(
+                            ErrorMessage.ORGANIZATION_NOT_FOUND,
+                            "ORGANIZATION_NOT_FOUND"
+                    ));
+        }
+
+        Specification<Role> specification = adminRoleSpecification(organizationId, search);
+        return roleRepository.findAll(specification, Sort.by(Sort.Direction.ASC, "name"))
+                .stream()
+                .map(roleMapper::toResponse)
+                .toList();
+    }
+
     private Specification<Role> roleSearchSpecification(String search) {
         Specification<Role> specification = (root, query, criteriaBuilder) -> criteriaBuilder.and(
                 criteriaBuilder.equal(root.get("organization").get("id"), currentOrganizationService.getOrganizationId()),
                 criteriaBuilder.isFalse(root.get("isDeleted"))
         );
+
+        if (!StringUtils.hasText(search)) {
+            return specification;
+        }
+
+        String pattern = "%" + search.trim().toLowerCase() + "%";
+        return specification.and((root, query, criteriaBuilder) ->
+                criteriaBuilder.like(criteriaBuilder.lower(root.get("name")), pattern)
+        );
+    }
+
+    private Specification<Role> adminRoleSpecification(Long organizationId, String search) {
+        Specification<Role> specification = (root, query, criteriaBuilder) -> criteriaBuilder.isFalse(root.get("isDeleted"));
+
+        if (organizationId != null) {
+            specification = specification.and((root, query, criteriaBuilder) ->
+                    criteriaBuilder.equal(root.get("organization").get("id"), organizationId)
+            );
+        }
 
         if (!StringUtils.hasText(search)) {
             return specification;

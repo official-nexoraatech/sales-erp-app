@@ -21,10 +21,15 @@ public record BillTopUserDetails(
 ) implements UserDetails {
 
     private static final String SUPER_ADMIN_ROLE_NAME = "Super Admin";
+    private static final String ADMIN_ROLE_NAME = "Admin";
     public static final String SUPER_ADMIN_AUTHORITY = "SUPER_ADMIN";
 
     public boolean isSuperAdmin() {
         return role != null && role.trim().equalsIgnoreCase(SUPER_ADMIN_ROLE_NAME);
+    }
+
+    public boolean isAdmin() {
+        return role != null && role.trim().equalsIgnoreCase(ADMIN_ROLE_NAME);
     }
 
     @Override

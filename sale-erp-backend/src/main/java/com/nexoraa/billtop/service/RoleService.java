@@ -26,4 +26,11 @@ public interface RoleService {
     void updateRoleForOrganization(Long organizationId, Long id, RoleRequestDto request);
 
     void deleteRoleForOrganization(Long organizationId, Long id);
+
+    /**
+     * Super Admin listing: {@code organizationId} is optional. When present the
+     * result is filtered to that organization; when absent roles across every
+     * organization are returned.
+     */
+    List<RoleResponseDto> getRolesForAdmin(Long organizationId, String search);
 }

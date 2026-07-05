@@ -83,13 +83,6 @@ import { UserCreatePage } from '../pages/users/UserCreatePage';
 import { RolesPage } from '../pages/users/RolesPage';
 import { RoleFormPage } from '../pages/users/RoleFormPage';
 import { UserPermissionsPage } from '../pages/users/UserPermissionsPage';
-import { StaffAttendancePage } from '../pages/staff/StaffAttendancePage';
-import { StaffEmployeeFormPage } from '../pages/staff/StaffEmployeeFormPage';
-import { StaffEmployeeViewPage } from '../pages/staff/StaffEmployeeViewPage';
-import { StaffEmployeesPage } from '../pages/staff/StaffEmployeesPage';
-import { StaffLeavesPage } from '../pages/staff/StaffLeavesPage';
-import { StaffPayrollPage } from '../pages/staff/StaffPayrollPage';
-import { StaffSettingsPage } from '../pages/staff/StaffSettingsPage';
 import { CreateSmsPage } from '../pages/sms/CreateSmsPage';
 import { CreateEmailPage } from '../pages/email/CreateEmailPage';
 import { MessageTemplateListPage } from '../pages/common/MessageTemplateListPage';
@@ -331,14 +324,6 @@ export const router = createBrowserRouter([
   { path: '/users/roles/create', element: <ProtectedRoute permissions={PERMISSIONS.ROLE_CREATE}><AppLayout><RoleFormPage mode="create" /></AppLayout></ProtectedRoute> },
   { path: '/users/roles/:id/edit', element: <ProtectedRoute permissions={[PERMISSIONS.ROLE_UPDATE, PERMISSIONS.ROLE_VIEW]} requireAll><AppLayout><RoleFormPage mode="edit" /></AppLayout></ProtectedRoute> },
   { path: '/users/permissions', element: <ProtectedRoute permissions={[PERMISSIONS.USER_UPDATE, PERMISSIONS.USER_VIEW]} requireAll><AppLayout><UserPermissionsPage /></AppLayout></ProtectedRoute> },
-  { path: '/staff/employees', element: <ProtectedRoute permissions={PERMISSIONS.STAFF_EMPLOYEE_VIEW}><AppLayout><StaffEmployeesPage /></AppLayout></ProtectedRoute> },
-  { path: '/staff/employees/create', element: <ProtectedRoute permissions={PERMISSIONS.STAFF_EMPLOYEE_CREATE}><AppLayout><StaffEmployeeFormPage /></AppLayout></ProtectedRoute> },
-  { path: '/staff/employees/:id/edit', element: <ProtectedRoute permissions={[PERMISSIONS.STAFF_EMPLOYEE_UPDATE, PERMISSIONS.STAFF_EMPLOYEE_VIEW]} requireAll><AppLayout><StaffEmployeeFormPage mode="edit" /></AppLayout></ProtectedRoute> },
-  { path: '/staff/employees/:id', element: <ProtectedRoute permissions={PERMISSIONS.STAFF_EMPLOYEE_VIEW}><AppLayout><StaffEmployeeViewPage /></AppLayout></ProtectedRoute> },
-  { path: '/staff/attendance', element: <ProtectedRoute permissions={PERMISSIONS.STAFF_ATTENDANCE_VIEW}><AppLayout><StaffAttendancePage /></AppLayout></ProtectedRoute> },
-  { path: '/staff/leaves', element: <ProtectedRoute permissions={PERMISSIONS.STAFF_LEAVE_VIEW}><AppLayout><StaffLeavesPage /></AppLayout></ProtectedRoute> },
-  { path: '/staff/payroll', element: <ProtectedRoute permissions={PERMISSIONS.STAFF_PAYROLL_VIEW}><AppLayout><StaffPayrollPage /></AppLayout></ProtectedRoute> },
-  { path: '/staff/settings', element: <ProtectedRoute permissions={PERMISSIONS.STAFF_SETTING_VIEW}><AppLayout><StaffSettingsPage /></AppLayout></ProtectedRoute> },
   { path: '/sms/create', element: <ProtectedRoute permissions={PERMISSIONS.SMS_SEND}><AppLayout><CreateSmsPage /></AppLayout></ProtectedRoute> },
   { path: '/sms/templates', element: <ProtectedRoute permissions={PERMISSIONS.SMS_TEMPLATE_VIEW}><AppLayout><MessageTemplateListPage type="sms" /></AppLayout></ProtectedRoute> },
   { path: '/sms/templates/create', element: <ProtectedRoute permissions={PERMISSIONS.SMS_TEMPLATE_CREATE}><AppLayout><MessageTemplateFormPage type="sms" /></AppLayout></ProtectedRoute> },
