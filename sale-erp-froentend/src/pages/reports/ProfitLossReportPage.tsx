@@ -6,11 +6,7 @@ import { Loader } from '../../components/ui/Loader';
 
 const inputClass = 'h-10 w-full rounded border border-gray-300 bg-white px-3 text-sm text-gray-900 outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-gray-50';
 
-const formatDateForApi = (value: string) => {
-  if (!value) return '';
-  const [year, month, day] = value.split('-');
-  return day && month && year ? `${day}/${month}/${year}` : value;
-};
+const formatDateForApi = (value: string) => value;
 
 const numberValue = (data: any, keys: string[], fallback = 0) => {
   for (const key of keys) {
