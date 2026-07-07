@@ -25,4 +25,17 @@ public interface BankTransactionRepository extends JpaRepository<BankTransaction
     List<BankTransaction> findByPaymentId(Long paymentId);
 
     List<BankTransaction> findByPaymentIdAndOrganizationId(Long paymentId, Long organizationId);
+
+    List<BankTransaction> findByOrganizationIdAndTransactionDateBetweenOrderByTransactionDateAscIdAsc(
+            Long organizationId,
+            LocalDate fromDate,
+            LocalDate toDate
+    );
+
+    List<BankTransaction> findByBankAccountIdAndOrganizationIdAndTransactionDateBetweenOrderByTransactionDateAscIdAsc(
+            Long bankAccountId,
+            Long organizationId,
+            LocalDate fromDate,
+            LocalDate toDate
+    );
 }

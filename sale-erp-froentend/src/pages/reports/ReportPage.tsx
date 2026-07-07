@@ -1,7 +1,22 @@
 import React, { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { cashApi, expenseApi, reportsApi, stockAdjustmentApi, stockTransferApi } from '../../api/endpoints';
+import {
+  bankAccountApi,
+  brandApi,
+  cashApi,
+  categoryApi,
+  customerApi,
+  expenseApi,
+  expenseSubCategoryApi,
+  itemApi,
+  paymentMethodApi,
+  reportsApi,
+  stockAdjustmentApi,
+  stockTransferApi,
+  supplierApi,
+  warehouseApi,
+} from '../../api/endpoints';
 import { Button } from '../../components/ui/Button';
 import { Loader } from '../../components/ui/Loader';
 
@@ -64,11 +79,7 @@ const inputClass = 'h-10 w-full rounded border border-gray-300 bg-white px-3 tex
 const defaultFrom = '2026-05-30';
 const defaultTo = '2026-05-30';
 
-const formatDateForApi = (value: string) => {
-  if (!value) return '';
-  const [year, month, day] = value.split('-');
-  return day && month && year ? `${day}/${month}/${year}` : value;
-};
+const formatDateForApi = (value: string) => value;
 
 const unwrapRows = (response: any) => {
   const data = response?.data ?? response;
@@ -175,7 +186,14 @@ const configs: Record<ReportKey, ReportConfig> = {
       { key: 'warehouse', label: 'Warehouse', type: 'select', placeholder: 'Select Warehouse' },
     ],
     columns: ['#', 'DATE', 'TYPE', 'INVOICE/REFERENCE NO.', 'PARTY NAME', 'WAREHOUSE', 'ITEM NAME', 'BRAND', 'BATCH NO.', 'QUANTITY', 'STOCK'],
-    fetch: async () => ({ data: [] }),
+    fetch: (filters) => reportsApi.itemTransactionsBatch({
+      fromDate: formatDateForApi(filters.fromDate),
+      toDate: formatDateForApi(filters.toDate),
+      itemId: filters.itemName || undefined,
+      brandId: filters.brand || undefined,
+      batchNo: filters.batchNo || undefined,
+      warehouseId: filters.warehouse || undefined,
+    }),
   },
   serial: {
     title: 'Serial Transaction Report',
@@ -188,7 +206,14 @@ const configs: Record<ReportKey, ReportConfig> = {
       { key: 'warehouse', label: 'Warehouse', type: 'select', placeholder: 'Select Warehouse' },
     ],
     columns: ['#', 'DATE', 'TYPE', 'INVOICE/REFERENCE NO.', 'PARTY NAME', 'WAREHOUSE', 'ITEM NAME', 'BRAND', 'SERIAL/IMEI'],
-    fetch: async () => ({ data: [] }),
+    fetch: (filters) => reportsApi.itemTransactionsSerial({
+      fromDate: formatDateForApi(filters.fromDate),
+      toDate: formatDateForApi(filters.toDate),
+      itemId: filters.itemName || undefined,
+      brandId: filters.brand || undefined,
+      serialImei: filters.serial || undefined,
+      warehouseId: filters.warehouse || undefined,
+    }),
   },
   general: {
     title: 'General Transaction Report',
@@ -200,7 +225,13 @@ const configs: Record<ReportKey, ReportConfig> = {
       { key: 'warehouse', label: 'Warehouse', type: 'select', placeholder: 'Select Warehouse' },
     ],
     columns: ['#', 'DATE', 'TYPE', 'INVOICE/REFERENCE NO.', 'PARTY NAME', 'WAREHOUSE', 'ITEM NAME', 'BRAND', 'QUANTITY', 'STOCK IMPACT'],
-    fetch: async () => ({ data: [] }),
+    fetch: (filters) => reportsApi.itemTransactionsGeneral({
+      fromDate: formatDateForApi(filters.fromDate),
+      toDate: formatDateForApi(filters.toDate),
+      itemId: filters.itemName || undefined,
+      brandId: filters.brand || undefined,
+      warehouseId: filters.warehouse || undefined,
+    }),
   },
   purchase: {
     title: 'Purchase Report',
@@ -234,7 +265,12 @@ const configs: Record<ReportKey, ReportConfig> = {
       { key: 'paymentType', label: 'Payment Type', type: 'select', placeholder: 'Select Supplier' },
     ],
     columns: ['#', 'DATE', 'INVOICE/REFERENCE NO.', 'SUPPLIER', 'PAYMENT TYPE', 'PAID AMOUNT'],
-    fetch: async () => ({ data: [] }),
+    fetch: (filters) => reportsApi.purchasePayments({
+      fromDate: formatDateForApi(filters.fromDate),
+      toDate: formatDateForApi(filters.toDate),
+      supplierId: filters.supplier || undefined,
+      paymentMethodId: filters.paymentType || undefined,
+    }),
   },
   sale: {
     title: 'Sale Report',
@@ -268,19 +304,24 @@ const configs: Record<ReportKey, ReportConfig> = {
       { key: 'paymentType', label: 'Payment Type', type: 'select', placeholder: 'Select Supplier' },
     ],
     columns: ['#', 'DATE', 'INVOICE/REFERENCE NO.', 'CUSTOMER', 'PAYMENT TYPE', 'PAID AMOUNT'],
-    fetch: async () => ({ data: [] }),
+    fetch: (filters) => reportsApi.salePayments({
+      fromDate: formatDateForApi(filters.fromDate),
+      toDate: formatDateForApi(filters.toDate),
+      customerId: filters.customer || undefined,
+      paymentMethodId: filters.paymentType || undefined,
+    }),
   },
   customerDue: {
     title: 'Customer Due Payment Report',
     fields: [{ key: 'customer', label: 'Customer', type: 'select', placeholder: 'Select Customer' }],
     columns: ['#', 'CUSTOMER', 'DUE PAYMENT', 'PAYMENT STATUS'],
-    fetch: async () => ({ data: [] }),
+    fetch: (filters) => reportsApi.customerDues({ customerId: filters.customer || undefined }),
   },
   supplierDue: {
     title: 'Supplier Due Payment Report',
     fields: [{ key: 'supplier', label: 'Supplier', type: 'select', placeholder: 'Select Supplier' }],
     columns: ['#', 'SUPPLIER', 'DUE PAYMENT', 'PAYMENT STATUS'],
-    fetch: async () => ({ data: [] }),
+    fetch: (filters) => reportsApi.supplierDues({ supplierId: filters.supplier || undefined }),
   },
   expense: {
     title: 'Expense Report',
@@ -303,7 +344,11 @@ const configs: Record<ReportKey, ReportConfig> = {
       { key: 'expenseItem', label: 'Expense Item', type: 'select', placeholder: 'Select Item' },
     ],
     columns: ['#', 'DATE', 'EXPENSE CODE', 'ITEM NAME', 'CATEGORY', 'SUBCATEGORY', 'UNIT PRICE', 'QUANTITY', 'TOTAL'],
-    fetch: async () => ({ data: [] }),
+    fetch: (filters) => reportsApi.expenseItems({
+      fromDate: formatDateForApi(filters.fromDate),
+      toDate: formatDateForApi(filters.toDate),
+      categoryId: filters.category || undefined,
+    }),
   },
   expensePayment: {
     title: 'Expense Payment Report',
@@ -315,7 +360,12 @@ const configs: Record<ReportKey, ReportConfig> = {
       { key: 'paymentType', label: 'Payment Type', type: 'select', placeholder: 'Select Supplier' },
     ],
     columns: ['#', 'DATE', 'EXPENSE CODE', 'CATEGORY', 'SUBCATEGORY', 'PAYMENT TYPE', 'PAID AMOUNT'],
-    fetch: async () => ({ data: [] }),
+    fetch: (filters) => reportsApi.expensePayments({
+      fromDate: formatDateForApi(filters.fromDate),
+      toDate: formatDateForApi(filters.toDate),
+      categoryId: filters.category || undefined,
+      paymentMethodId: filters.paymentType || undefined,
+    }),
   },
   cashFlow: {
     title: 'Cash flow',
@@ -331,9 +381,14 @@ const configs: Record<ReportKey, ReportConfig> = {
     fields: [
       { key: 'fromDate', label: 'From Date', type: 'date' },
       { key: 'toDate', label: 'To Date', type: 'date' },
+      { key: 'bankAccount', label: 'Bank Account', type: 'select', placeholder: 'Select Bank Account' },
     ],
     columns: ['#', 'DATE', 'DESCRIPTION', 'WITHDRAWAL AMOUNT', 'DEPOSIT AMOUNT', 'BALANCE'],
-    fetch: async () => ({ data: [] }),
+    fetch: (filters) => reportsApi.bankStatement({
+      fromDate: formatDateForApi(filters.fromDate),
+      toDate: formatDateForApi(filters.toDate),
+      bankAccountId: filters.bankAccount || undefined,
+    }),
   },
   supplierLedger: {
     title: 'Supplier Ledger Report',
@@ -496,7 +551,15 @@ const configs: Record<ReportKey, ReportConfig> = {
       { key: 'warehouse', label: 'Warehouse', type: 'select', placeholder: 'Select Warehouse' },
     ],
     columns: ['#', 'WAREHOUSE', 'ITEM NAME', 'BRAND', 'BATCH NO.', 'DAYS UNTIL EXPIRY', 'QUANTITY'],
-    fetch: async () => ({ data: [] }),
+    fetch: (filters) => reportsApi.expiredItems({
+      filterType: filters.filterType,
+      fromDate: formatDateForApi(filters.fromDate),
+      toDate: formatDateForApi(filters.toDate),
+      itemId: filters.itemName || undefined,
+      brandId: filters.brand || undefined,
+      batchNo: filters.batchNo || undefined,
+      warehouseId: filters.warehouse || undefined,
+    }),
   },
   reorderItem: {
     title: 'Reorder Item Report',
@@ -515,10 +578,50 @@ const initialFilters = (config: ReportConfig) => Object.fromEntries((config.fiel
   field.type === 'date' ? (field.key === 'toDate' ? defaultTo : defaultFrom) : field.type === 'radio' ? field.options?.[0]?.value || '' : '',
 ]));
 
+const useLookupOptions = () => {
+  const customers = useQuery({ queryKey: ['report-lookup', 'customers'], queryFn: () => customerApi.getAll({ page: 0, size: 100 }) });
+  const suppliers = useQuery({ queryKey: ['report-lookup', 'suppliers'], queryFn: () => supplierApi.getAll({ page: 0, size: 100 }) });
+  const items = useQuery({ queryKey: ['report-lookup', 'items'], queryFn: () => itemApi.getAll({ page: 0, size: 100 }) });
+  const brands = useQuery({ queryKey: ['report-lookup', 'brands'], queryFn: () => brandApi.getAll({ page: 0, size: 100 }) });
+  const categories = useQuery({ queryKey: ['report-lookup', 'categories'], queryFn: () => categoryApi.getAll({ page: 0, size: 100 }) });
+  const expenseSubCategories = useQuery({ queryKey: ['report-lookup', 'expense-subcategories'], queryFn: () => expenseSubCategoryApi.getAll() });
+  const warehouses = useQuery({ queryKey: ['report-lookup', 'warehouses'], queryFn: () => warehouseApi.getAll() });
+  const paymentMethods = useQuery({ queryKey: ['report-lookup', 'payment-methods'], queryFn: () => paymentMethodApi.getAll() });
+  const bankAccounts = useQuery({ queryKey: ['report-lookup', 'bank-accounts'], queryFn: () => bankAccountApi.getAll() });
+
+  return useMemo(() => {
+    const warehouseOptions = (warehouses.data?.data || []).map((warehouse) => ({ value: String(warehouse.id), label: warehouse.name }));
+    return {
+      customer: (customers.data?.data?.content || []).map((customer) => ({ value: String(customer.id), label: customer.customerName })),
+      supplier: (suppliers.data?.data?.content || []).map((supplier) => ({ value: String(supplier.id), label: supplier.supplierName })),
+      itemName: (items.data?.data?.content || []).map((item) => ({ value: String(item.id), label: item.itemName })),
+      brand: (brands.data?.data?.content || []).map((brand) => ({ value: String(brand.id), label: brand.name })),
+      category: (categories.data?.data?.content || []).map((category) => ({ value: String(category.id), label: category.name })),
+      subcategory: (expenseSubCategories.data?.data?.content || []).map((subCategory: any) => ({ value: String(subCategory.id), label: subCategory.name })),
+      warehouse: warehouseOptions,
+      fromWarehouse: warehouseOptions,
+      toWarehouse: warehouseOptions,
+      paymentType: (paymentMethods.data?.data?.content || []).map((method: any) => ({ value: String(method.id), label: method.name })),
+      bankAccount: (bankAccounts.data?.data?.content || []).map((account: any) => ({ value: String(account.id), label: account.bankName ? `${account.bankName} - ${account.accountName}` : account.accountName })),
+    } as Record<string, Array<{ value: string; label: string }>>;
+  }, [
+    customers.data,
+    suppliers.data,
+    items.data,
+    brands.data,
+    categories.data,
+    expenseSubCategories.data,
+    warehouses.data,
+    paymentMethods.data,
+    bankAccounts.data,
+  ]);
+};
+
 export const ReportPage: React.FC<{ report: ReportKey }> = ({ report }) => {
   const config = configs[report];
   const [filters, setFilters] = useState<Record<string, string>>(() => initialFilters(config));
   const [submittedFilters, setSubmittedFilters] = useState<Record<string, string> | null>(config.fields?.length ? null : filters);
+  const lookupOptions = useLookupOptions();
   const rowsQuery = useQuery({
     queryKey: ['report', report, submittedFilters],
     queryFn: () => config.fetch(submittedFilters || filters),
@@ -567,6 +670,9 @@ export const ReportPage: React.FC<{ report: ReportKey }> = ({ report }) => {
                 ) : field.type === 'select' ? (
                   <select className={`${inputClass} mt-1`} value={filters[field.key] || ''} onChange={(event) => setFilters((current) => ({ ...current, [field.key]: event.target.value }))}>
                     <option value="">{field.placeholder || 'Choose one thing'}</option>
+                    {(lookupOptions[field.key] || []).map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
                   </select>
                 ) : (
                   <input className={`${inputClass} mt-1`} type={field.type} placeholder={field.placeholder} value={filters[field.key] || ''} onChange={(event) => setFilters((current) => ({ ...current, [field.key]: event.target.value }))} />

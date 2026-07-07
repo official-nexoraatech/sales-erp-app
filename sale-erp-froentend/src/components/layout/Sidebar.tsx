@@ -357,12 +357,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {/* Sidebar header */}
         <div className="flex h-16 shrink-0 items-center justify-between gap-2 border-b border-slate-200 px-3 dark:border-slate-700">
           {!collapsed && (
-            <Link to={defaultPath} onClick={onClose} className="flex min-w-0 flex-1 items-center py-2">
+            <Link to={defaultPath} onClick={onClose} className="flex h-11 min-w-0 flex-1 items-center overflow-hidden">
               {organizationLogoUrl ? (
                 <img
                   src={organizationLogoUrl}
                   alt={organizationLogoAlt}
-                  className="max-h-10 w-40 max-w-full object-contain object-left dark:brightness-110"
+                  className="h-full max-w-full w-auto object-contain object-left dark:brightness-110"
                 />
               ) : (
                 <span className="truncate text-sm font-semibold text-slate-800 dark:text-slate-100">

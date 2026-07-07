@@ -5,6 +5,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 
@@ -21,4 +22,6 @@ public interface SalesReturnRepository extends JpaRepository<SalesReturn, Long> 
     Optional<SalesReturn> findByIdAndOrganizationId(Long id, Long organizationId);
 
     Page<SalesReturn> findByOrganizationId(Long organizationId, Pageable pageable);
+
+    List<SalesReturn> findByOrganizationIdAndReturnDateBetween(Long organizationId, LocalDate fromDate, LocalDate toDate);
 }

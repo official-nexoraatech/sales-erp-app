@@ -18,4 +18,12 @@ public class ProfitLossReportResponseDto {
     private BigDecimal totalExpense;
     private BigDecimal grossProfit;
     private BigDecimal netProfit;
+
+    private BigDecimal saleWithoutTax;
+    private BigDecimal saleReturnWithoutTax;
+    private BigDecimal purchaseWithoutTax;
+    private BigDecimal purchaseReturnWithoutTax;
+    private BigDecimal expenseWithoutTax;
+    private BigDecimal shippingCharge;
+    private BigDecimal netSummary;
 }
