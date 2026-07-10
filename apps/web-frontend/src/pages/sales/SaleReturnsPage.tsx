@@ -1,10 +1,12 @@
-﻿import { useState } from 'react';
+import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { saleReturnApi } from '../../api/endpoints.js';
+import { useAuthStore } from '../../store/auth.store.js';
+import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
 import ERPSwitch from '../../components/erp/ERPSwitch.js';
-import DataTable from '../../components/ui/DataTable.js';
+import ERPDataGrid, { type ERPColumnDef } from '../../components/erp/ERPDataGrid.js';
 import Button from '../../components/ui/Button.js';
 import Badge from '../../components/ui/Badge.js';
 import Modal from '../../components/ui/Modal.js';
@@ -26,20 +28,24 @@ interface SaleReturn {
 
 export default function SaleReturnsPage() {
   const qc = useQueryClient();
+  const canCreateReturn = useAuthStore((s) => s.hasPermission(PERMISSIONS.INVOICE_CANCEL));
   const [showCreate, setShowCreate] = useState(false);
   const [invoiceId, setInvoiceId] = useState('');
   const [customerId, setCustomerId] = useState('');
   const [reason, setReason] = useState('DEFECTIVE');
   const [returnDate, setReturnDate] = useState<string>(new Date().toISOString().substring(0, 10));
   const [isPhysical, setIsPhysical] = useState(true);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
 
   const { data, isLoading } = useQuery({
-    queryKey: ['sale-returns'],
-    queryFn: () => saleReturnApi.list(),
+    queryKey: ['sale-returns', page, pageSize],
+    queryFn: () => saleReturnApi.list({ page, pageSize }),
     staleTime: 30_000,
   });
 
-  const rows: SaleReturn[] = (data as { data?: SaleReturn[] })?.data ?? [];
+  const rows: SaleReturn[] = (data as Record<string, unknown>)?.content as SaleReturn[] ?? [];
+  const totalElements = (data as Record<string, unknown>)?.totalElements as number ?? 0;
 
   const createMutation = useMutation({
     mutationFn: (d: Record<string, unknown>) => saleReturnApi.create(d),
@@ -51,18 +57,18 @@ export default function SaleReturnsPage() {
     onError: (e: Error) => toast.error(e.message),
   });
 
-  const columns = [
-    { key: 'returnNumber', header: 'Return #', className: 'font-mono text-sm' },
+  const columns: ERPColumnDef<SaleReturn>[] = [
+    { key: 'returnNumber', header: 'Return #', mono: true, sortable: true },
     { key: 'invoiceId', header: 'Invoice' },
     { key: 'reason', header: 'Reason' },
-    { key: 'totalAmount', header: 'Amount', render: (r: SaleReturn) => formatCurrency(parseFloat(r.totalAmount)) },
-    { key: 'returnDate', header: 'Date', render: (r: SaleReturn) => formatDate(r.returnDate) },
-    { key: 'status', header: 'Status', render: (r: SaleReturn) => <Badge variant={r.status === 'APPROVED' ? 'success' : r.status === 'CANCELLED' ? 'danger' : 'default'}>{r.status}</Badge> },
+    { key: 'totalAmount', header: 'Amount', align: 'right', sortable: true, render: (r) => formatCurrency(parseFloat(r.totalAmount)) },
+    { key: 'returnDate', header: 'Date', sortable: true, render: (r) => formatDate(r.returnDate) },
+    { key: 'status', header: 'Status', sortable: true, render: (r) => <Badge variant={r.status === 'APPROVED' ? 'success' : r.status === 'CANCELLED' ? 'danger' : 'default'}>{r.status}</Badge> },
     {
       key: 'creditNoteId',
       header: 'Credit Note',
-      render: (r: SaleReturn) => r.creditNoteId
-        ? <span className="font-mono text-sm text-blue-600">CN-{r.creditNoteId}</span>
+      render: (r) => r.creditNoteId
+        ? <span className="font-mono text-sm text-link">CN-{r.creditNoteId}</span>
         : '—',
     },
   ];
@@ -70,10 +76,18 @@ export default function SaleReturnsPage() {
   return (
     <div>
       <ERPPageHeader variant="list" title="Sale Returns" subtitle="Process customer returns and credit notes">
-        <Button onClick={() => setShowCreate(true)}>+ New Return</Button>
+        {canCreateReturn && <Button onClick={() => setShowCreate(true)}>+ New Return</Button>}
       </ERPPageHeader>
 
-      <DataTable columns={columns} data={rows} isLoading={isLoading} emptyMessage="No sale returns found" />
+      <ERPDataGrid
+        columns={columns}
+        data={rows}
+        isLoading={isLoading}
+        rowKey="id"
+        pagination={{ page, pageSize, total: totalElements }}
+        onPageChange={setPage}
+        onPageSizeChange={(size) => { setPageSize(size); setPage(1); }}
+      />
 
       <Modal isOpen={showCreate} onClose={() => setShowCreate(false)} title="Create Sale Return">
         <div className="space-y-4">

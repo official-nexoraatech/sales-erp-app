@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { PlatformContextFactory } from '@erp/sdk';
 import { supplierPayments } from '@erp/db';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { PERMISSIONS } from '@erp/types';
 import { authenticate } from '../middleware/authenticate.js';
@@ -64,7 +64,12 @@ export async function supplierPaymentRoutes(
         .limit(pageSize)
         .offset(offset);
 
-      return reply.send({ data: rows, page, pageSize });
+      const [countRow] = await ctx.db.raw
+        .select({ count: sql<number>`count(*)::int` })
+        .from(supplierPayments)
+        .where(and(...conditions));
+
+      return reply.send({ data: { content: rows, totalElements: countRow?.count ?? 0, page, pageSize } });
     },
   });
 

@@ -1,11 +1,13 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { eq, and, isNull } from 'drizzle-orm';
-import { users, userRoles, rolePermissions, refreshTokens } from '@erp/db';
+import { users, refreshTokens } from '@erp/db';
 import type { ErpDatabase } from '@erp/db';
 import { signAccessToken } from '../jwt.js';
 import { generateSecureToken, sha256Hex } from '../crypto.js';
 import type { AuthConfig } from '../config.js';
+import { rotateSession } from '../domain/session.js';
+import { loadUserRolesAndPermissions } from '../domain/roles.js';
 
 const RefreshBody = z.object({
   refreshToken: z.string().min(1),
@@ -50,41 +52,40 @@ export async function refreshRoute(fastify: FastifyInstance, db: ErpDatabase, co
         .set({ revokedAt: now })
         .where(eq(refreshTokens.id, tokenRow.id));
 
-      // Reload permissions
-      const permissionsSet = new Set<string>();
-      const userRoleRows = await db
-        .select({ roleId: userRoles.roleId })
-        .from(userRoles)
-        .where(and(eq(userRoles.userId, user.id), eq(userRoles.tenantId, tokenRow.tenantId)));
-
-      if (userRoleRows.length > 0) {
-        const permRows = await db
-          .select({ permission: rolePermissions.permission })
-          .from(rolePermissions)
-          .where(eq(rolePermissions.tenantId, tokenRow.tenantId));
-        permRows.forEach((r: { permission: string }) => permissionsSet.add(r.permission));
-      }
+      // Reload roles and permissions
+      const { roleNames, permissions, branchIds } = await loadUserRolesAndPermissions(db, user.id, tokenRow.tenantId);
 
       const accessToken = await signAccessToken({
         sub: String(user.id),
         tenantId: tokenRow.tenantId,
         email: user.email,
-        roles: [],
-        permissions: Array.from(permissionsSet),
+        roles: roleNames,
+        permissions,
+        branchIds,
       });
 
       const plainRefreshToken = generateSecureToken(32);
       const newTokenHash = sha256Hex(plainRefreshToken);
       const expiresAt = new Date(Date.now() + config.jwtRefreshTokenTtlDays * 24 * 60 * 60 * 1000);
 
-      await db.insert(refreshTokens).values({
-        userId: user.id,
-        tenantId: tokenRow.tenantId,
-        tokenHash: newTokenHash,
-        expiresAt,
-        userAgent: request.headers['user-agent'] ?? null,
-        ipAddress: request.ip,
-      });
+      const [newTokenRow] = await db
+        .insert(refreshTokens)
+        .values({
+          userId: user.id,
+          tenantId: tokenRow.tenantId,
+          tokenHash: newTokenHash,
+          expiresAt,
+          userAgent: request.headers['user-agent'] ?? null,
+          ipAddress: request.ip,
+        })
+        .returning();
+
+      if (newTokenRow) {
+        await rotateSession(db, tokenRow.id, newTokenRow.id, {
+          ip: request.ip,
+          userAgent: request.headers['user-agent'] ?? null,
+        });
+      }
 
       return reply.code(200).send({
         accessToken,

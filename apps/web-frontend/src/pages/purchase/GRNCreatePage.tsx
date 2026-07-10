@@ -3,6 +3,8 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { purchaseOrderApi, grnApi, warehouseApi } from '../../api/endpoints.js';
+import { useAuthStore } from '../../store/auth.store.js';
+import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
 import Button from '../../components/ui/Button.js';
 import Input from '../../components/ui/Input.js';
@@ -40,6 +42,7 @@ interface GRNLineInput {
 
 export default function GRNCreatePage() {
   const navigate = useNavigate();
+  const hasPermission = useAuthStore((s) => s.hasPermission);
   const [searchParams] = useSearchParams();
   const urlPoId = searchParams.get('poId');
 
@@ -58,10 +61,10 @@ export default function GRNCreatePage() {
     enabled: loadedPoId !== null,
   });
 
-  const { data: warehouseData } = useQuery({ queryKey: ['warehouses'], queryFn: () => warehouseApi.list() });
+  const { data: warehouseData } = useQuery({ queryKey: ['warehouses'], queryFn: () => warehouseApi.list(), enabled: hasPermission(PERMISSIONS.WAREHOUSE_VIEW) });
 
-  const po = (poData as { data?: PODetail })?.data;
-  const warehouses = (warehouseData as { data?: Array<{ id: number; name: string }> })?.data ?? [];
+  const po = (poData as PODetail);
+  const warehouses = (warehouseData as { content?: Array<{ id: number; name: string }> })?.content ?? [];
 
   useEffect(() => {
     if (!po) return;
@@ -263,12 +266,6 @@ export default function GRNCreatePage() {
             </table>
           </div>
 
-          <div className="flex justify-end gap-3">
-            <Button variant="ghost" onClick={() => navigate('/purchase/grns')}>Cancel</Button>
-            <Button isLoading={createMutation.isPending} onClick={handleSubmit}>
-              Create GRN
-            </Button>
-          </div>
         </>
       )}
 
@@ -283,6 +280,15 @@ export default function GRNCreatePage() {
           Enter a Purchase Order ID above and click "Load PO" to begin receiving goods.
         </div>
       )}
+
+      <div className="flex justify-end gap-3 mt-4">
+        <Button variant="ghost" onClick={() => navigate('/purchase/grns')}>Cancel</Button>
+        {po && (
+          <Button isLoading={createMutation.isPending} onClick={handleSubmit}>
+            Create GRN
+          </Button>
+        )}
+      </div>
     </div>
   );
 }

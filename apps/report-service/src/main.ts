@@ -1,10 +1,12 @@
-import Fastify from 'fastify';
+import Fastify, { type FastifyError } from 'fastify';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
-import { createDatabaseClient, type ErpDatabase } from '@erp/db';
-import { HELMET_OPTIONS, PERMISSIONS_POLICY } from '@erp/sdk';
-import { createLogger } from '@erp/logger';
-import { requireEnv } from '@erp/config';
+import rateLimit from '@fastify/rate-limit';
+import Redis from 'ioredis';
+import { createDatabaseClient, createReadReplicaClient, ReplicaRouter } from '@erp/db';
+import { HELMET_OPTIONS, PERMISSIONS_POLICY, registerHealthRoute, tenantOrIpKeyGenerator, checkDatabase, initializeTelemetry, initTenantStatusEnforcement } from '@erp/sdk';
+import { createLogger, createMetricsHandler, createHttpMetricsHook, createCorrelationIdHook, erpReplicaFallbackTotal } from '@erp/logger';
+import { loadConfigWithSecrets } from '@erp/config';
 import { ERPError } from '@erp/types';
 import { PdfEngine } from './domain/PdfEngine.js';
 import { reportRoutes } from './api/report.routes.js';
@@ -12,16 +14,41 @@ import { analyticsReportsRoutes } from './api/analytics-reports.routes.js';
 import { dashboardRoutes } from './api/dashboard.routes.js';
 import { ScheduledReportJob } from './scheduler/ScheduledReportJob.js';
 
+initializeTelemetry({ serviceName: 'report-service' });
+
 async function bootstrap(): Promise<void> {
   const port = parseInt(process.env['REPORT_SERVICE_PORT'] ?? '3015', 10);
-  const databaseUrl = requireEnv('DATABASE_URL');
+  const config = await loadConfigWithSecrets('report-service');
+  const databaseUrl = config.databaseUrl;
 
-  const logger = createLogger({ serviceName: 'report-service', level: 'info' });
+  const lokiUrl = process.env['LOKI_URL'];
+  const logger = createLogger({ serviceName: 'report-service', level: 'info', ...(lokiUrl ? { lokiUrl } : {}) });
   const db = createDatabaseClient({ url: databaseUrl });
+  initTenantStatusEnforcement(db);
+
+  // PG-005: report definitions + dashboard queries are read-only — route them through the
+  // read replica (docker-compose's erp-postgres-replica) with a lag-aware fallback to `db`.
+  // Report definitions use ReplicaRouter's 5s default; dashboards get a looser 120s threshold
+  // matching projection_dashboard_daily's own documented staleness tolerance (event-service's
+  // STALE_TOLERANCE_MS), since a replica within that window is already "fresh enough" today.
+  const replicaDb = createReadReplicaClient({ url: config.databaseReplicaUrl });
+  const onReplicaFallback = (): void => { erpReplicaFallbackTotal.inc({ service: 'report-service' }); };
+  const reportReplicaRouter = new ReplicaRouter(db, replicaDb, { onFallback: onReplicaFallback });
+  const dashboardReplicaRouter = new ReplicaRouter(db, replicaDb, { maxLagMs: 120_000, onFallback: onReplicaFallback });
+
+  // ES-26 (M7): 3-minute cache for the GST-payable report — the only cached query in this service.
+  const redisUrl = process.env['REDIS_URL'] ?? 'redis://localhost:6380';
+  const redis = new Redis(redisUrl, { maxRetriesPerRequest: null, lazyConnect: true });
+  await redis.connect().catch((err: Error) => {
+    logger.warn({ err: err.message }, 'Redis connect failed — report caching disabled');
+  });
 
   const pdfEngine = new PdfEngine();
+  const metricsHandler = await createMetricsHandler('report-service');
 
   const fastify = Fastify({ logger: false, trustProxy: true });
+
+  fastify.addHook('onRequest', createCorrelationIdHook());
 
   await fastify.register(helmet, HELMET_OPTIONS);
   fastify.addHook('onSend', async (_request, reply) => {
@@ -31,29 +58,48 @@ async function bootstrap(): Promise<void> {
     origin: process.env['ALLOWED_ORIGINS']?.split(',') ?? ['http://localhost:3000'],
     credentials: true,
   });
+  // Rate limiting still uses the in-memory store, not the report-cache Redis connection above
+  // (same fallback auth-service uses when Redis is unavailable).
+  await fastify.register(rateLimit, {
+    global: true,
+    max: 200,
+    timeWindow: '1 minute',
+    keyGenerator: tenantOrIpKeyGenerator,
+  });
+  fastify.addHook('onResponse', createHttpMetricsHook('report-service'));
 
-  fastify.get('/health', async (_req, reply) => {
-    return reply.code(200).send({ status: 'ok', service: 'report-service' });
+  // Redis backs an optional 3-min report cache only (see ReportEngine) — not a health-gate
+  // dependency, since every cached report has a working Postgres fallback on cache miss/failure.
+  registerHealthRoute(fastify, 'report-service', {
+    db: () => checkDatabase(db),
   });
 
   fastify.get('/metrics', async (_req, reply) => {
-    return reply.code(200).send('# report-service metrics\n');
+    const body = await metricsHandler.handler();
+    return reply.code(200).header('Content-Type', metricsHandler.contentType).send(body);
   });
 
-  // Existing routes (PDF generation, number series)
+  // PG-010: reportRoutes' handlers use bare paths (/reports/pdf etc.) — dual-registered
+  // unprefixed (legacy, deprecation window) and under /api/v2 (baseline convention).
+  // analyticsReportsRoutes/dashboardRoutes already hardcode /api/v2 (and /api/v1, for the
+  // two aging reports) directly into their literal route paths — registering them a second
+  // time under an outer /api/v2 prefix would double it (/api/v2/api/v2/reports), so they
+  // stay registered once, as-is; their pre-existing versioning is untouched by this change.
   await reportRoutes(fastify, db, pdfEngine);
+  await fastify.register(async (sub) => {
+    await reportRoutes(sub, db, pdfEngine);
+  }, { prefix: '/api/v2' });
 
-  // Phase 11: Analytics reports + dashboard + POS analytics
-  await analyticsReportsRoutes(fastify, db);
-  await dashboardRoutes(fastify, db);
+  await analyticsReportsRoutes(fastify, db, redis, reportReplicaRouter);
+  await dashboardRoutes(fastify, db, dashboardReplicaRouter);
 
-  fastify.setErrorHandler((error, request, reply) => {
+  fastify.setErrorHandler<FastifyError>((error, request, reply) => {
     if (error instanceof ERPError) {
       return reply.code(error.statusCode).send({
         error: { code: error.code, message: error.message, details: error.details },
       });
     }
-    logger.error({ err: error.message, url: request.url }, 'Unhandled error');
+    logger.error({ err: error.message, url: request.url, correlationId: (request as { correlationId?: string }).correlationId }, 'Unhandled error');
     return reply.code(500).send({ error: { code: 'INTERNAL_ERROR', message: 'Internal error' } });
   });
 
@@ -62,6 +108,7 @@ async function bootstrap(): Promise<void> {
   const gracefulShutdown = async (): Promise<void> => {
     await scheduledJob.stop();
     await pdfEngine.close();
+    await redis.quit().catch(() => undefined);
     await fastify.close();
     process.exit(0);
   };

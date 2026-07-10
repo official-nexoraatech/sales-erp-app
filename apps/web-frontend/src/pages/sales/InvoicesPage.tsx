@@ -1,14 +1,20 @@
-﻿import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
+import { Eye, Copy, IndianRupee, Ban } from 'lucide-react';
 import { invoiceApi } from '../../api/endpoints.js';
+import { useDebounce } from '../../hooks/useDebounce.js';
+import { useAuthStore } from '../../store/auth.store.js';
+import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
-import DataTable from '../../components/ui/DataTable.js';
+import ERPDataGrid, { type ERPColumnDef } from '../../components/erp/ERPDataGrid.js';
+import ERPDropdownMenu, { type ERPMenuItem } from '../../components/erp/ERPDropdownMenu.js';
 import Button from '../../components/ui/Button.js';
 import Badge from '../../components/ui/Badge.js';
 import Input from '../../components/ui/Input.js';
-import { formatDate, formatDatetime, formatCurrency } from '../../lib/format.js';
+import Select from '../../components/ui/Select.js';
+import { formatDate, formatCurrency } from '../../lib/format.js';
 
 interface Invoice {
   id: number;
@@ -33,17 +39,27 @@ const STATUS_COLORS: Record<string, 'default' | 'success' | 'warning' | 'danger'
 export default function InvoicesPage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const hasPermission = useAuthStore((s) => s.hasPermission);
+  const canCreateInvoice = hasPermission(PERMISSIONS.INVOICE_CREATE);
+  const canCreatePayment = hasPermission(PERMISSIONS.PAYMENT_CREATE);
+  const canCancelInvoice = hasPermission(PERMISSIONS.INVOICE_CANCEL);
   const [search, setSearch] = useState('');
+  const debouncedSearch = useDebounce(search, 250);
   const [status, setStatus] = useState('');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+
+  useEffect(() => { setPage(1); }, [debouncedSearch, status]);
 
   const { data, isLoading } = useQuery({
-    queryKey: ['invoices', search, status],
+    queryKey: ['invoices', debouncedSearch, status, page, pageSize],
     queryFn: () =>
-      invoiceApi.list({ ...(search ? { search } : {}), ...(status ? { status } : {}) }),
+      invoiceApi.list({ search: debouncedSearch || undefined, status: status || undefined, page, pageSize }),
     staleTime: 30_000,
   });
 
-  const rows: Invoice[] = (data as { data?: Invoice[] })?.data ?? [];
+  const rows: Invoice[] = (data as Record<string, unknown>)?.content as Invoice[] ?? [];
+  const totalElements = (data as Record<string, unknown>)?.totalElements as number ?? 0;
 
   const cancelMutation = useMutation({
     mutationFn: ({ id, reason }: { id: number; reason: string }) =>
@@ -54,74 +70,71 @@ export default function InvoicesPage() {
 
   const duplicateMutation = useMutation({
     mutationFn: (id: number) => invoiceApi.duplicate(id),
-    onSuccess: (data: unknown, id) => {
-      const result = data as { data?: { id?: number } };
-      if (result?.data?.id) navigate(`/sales/invoices/${result.data.id}`);
+    onSuccess: (data: unknown) => {
+      const result = data as { id?: number };
+      if (result?.id) navigate(`/sales/invoices/${result.id}`);
     },
     onError: (e: Error) => toast.error(e.message),
   });
 
-  const columns = [
+  const columns: ERPColumnDef<Invoice>[] = [
     {
       key: 'invoiceNumber',
       header: 'Invoice #',
-      render: (r: Invoice) => r.invoiceNumber
+      mono: true,
+      render: (r) => r.invoiceNumber
         ? <span className="font-mono text-sm">{r.invoiceNumber}</span>
-        : <span className="text-gray-400 text-sm italic">Draft</span>,
+        : <span className="text-disabled text-sm italic">Draft</span>,
     },
     { key: 'customerId', header: 'Customer' },
     {
       key: 'grandTotal',
       header: 'Amount',
-      render: (r: Invoice) => formatCurrency(parseFloat(r.grandTotal)),
+      align: 'right',
+      sortable: true,
+      render: (r) => formatCurrency(parseFloat(r.grandTotal)),
     },
     {
       key: 'balanceDue',
       header: 'Balance Due',
-      render: (r: Invoice) => {
+      align: 'right',
+      render: (r) => {
         const bal = parseFloat(r.balanceDue);
-        return <span className={bal > 0 ? 'text-red-600 font-semibold' : 'text-green-600'}>
+        return <span className={bal > 0 ? 'text-danger font-semibold' : 'text-success'}>
           {formatCurrency(bal)}
         </span>;
       },
     },
-    { key: 'invoiceDate', header: 'Date', render: (r: Invoice) => formatDate(r.invoiceDate) },
-    { key: 'dueDate', header: 'Due', render: (r: Invoice) => formatDate(r.dueDate) },
+    { key: 'invoiceDate', header: 'Date', sortable: true, render: (r) => formatDate(r.invoiceDate) },
+    { key: 'dueDate', header: 'Due', render: (r) => formatDate(r.dueDate) },
     {
       key: 'status',
       header: 'Status',
-      render: (r: Invoice) => <Badge variant={STATUS_COLORS[r.status] ?? 'default'}>{r.status}</Badge>,
+      sortable: true,
+      render: (r) => <Badge variant={STATUS_COLORS[r.status] ?? 'default'}>{r.status}</Badge>,
     },
     {
       key: 'actions',
       header: '',
-      render: (r: Invoice) => (
-        <div className="flex gap-2">
-          <Button size="sm" variant="ghost" onClick={() => navigate(`/sales/invoices/${r.id}`)}>View</Button>
-          <Button size="sm" variant="ghost" onClick={() => duplicateMutation.mutate(r.id)}>Copy</Button>
-          {['CONFIRMED', 'PARTIALLY_PAID'].includes(r.status) && (
-            <Button size="sm" variant="ghost" onClick={() => navigate(`/sales/payments/new?invoiceId=${r.id}`)}>
-              Pay
-            </Button>
-          )}
-          {r.status === 'DRAFT' && (
-            <Button
-              size="sm"
-              variant="danger"
-              onClick={() => cancelMutation.mutate({ id: r.id, reason: 'Cancelled by user' })}
-            >
-              Cancel
-            </Button>
-          )}
-        </div>
-      ),
+      align: 'right',
+      render: (r) => {
+        const items: ERPMenuItem[] = [{ label: 'View', icon: Eye, onClick: () => navigate(`/sales/invoices/${r.id}`) }];
+        if (canCreateInvoice) items.push({ label: 'Duplicate', icon: Copy, onClick: () => duplicateMutation.mutate(r.id) });
+        if (canCreatePayment && ['CONFIRMED', 'PARTIALLY_PAID'].includes(r.status)) {
+          items.push({ label: 'Record Payment', icon: IndianRupee, onClick: () => navigate(`/sales/payments/new?invoiceId=${r.id}`) });
+        }
+        if (canCancelInvoice && r.status === 'DRAFT') {
+          items.push({ label: 'Cancel', icon: Ban, variant: 'danger', onClick: () => cancelMutation.mutate({ id: r.id, reason: 'Cancelled by user' }) });
+        }
+        return <ERPDropdownMenu items={items} />;
+      },
     },
   ];
 
   return (
     <div>
       <ERPPageHeader variant="list" title="Invoices" subtitle="Create and manage sales invoices">
-        <Button onClick={() => navigate('/sales/invoices/new')}>+ New Invoice</Button>
+        {canCreateInvoice && <Button onClick={() => navigate('/sales/invoices/new')}>+ New Invoice</Button>}
       </ERPPageHeader>
 
       <div className="flex gap-4 mb-4">
@@ -132,19 +145,23 @@ export default function InvoicesPage() {
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
-        <select
-          value={status}
-          onChange={(e) => setStatus(e.target.value)}
-          className="rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm px-3 py-2"
-        >
+        <Select value={status} onChange={(e) => setStatus(e.target.value)} className="w-44">
           <option value="">All Statuses</option>
           {['DRAFT', 'CONFIRMED', 'PARTIALLY_PAID', 'PAID', 'OVERDUE', 'CANCELLED'].map((s) => (
             <option key={s} value={s}>{s}</option>
           ))}
-        </select>
+        </Select>
       </div>
 
-      <DataTable columns={columns} data={rows} isLoading={isLoading} emptyMessage="No invoices found" />
+      <ERPDataGrid
+        columns={columns}
+        data={rows}
+        isLoading={isLoading}
+        rowKey="id"
+        pagination={{ page, pageSize, total: totalElements }}
+        onPageChange={setPage}
+        onPageSizeChange={(size) => { setPageSize(size); setPage(1); }}
+      />
     </div>
   );
 }

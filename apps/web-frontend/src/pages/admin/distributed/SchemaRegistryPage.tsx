@@ -5,6 +5,8 @@ import { schemaRegistryApi } from '../../../api/endpoints.js';
 import { useAuthStore } from '../../../store/auth.store.js';
 import { PERMISSIONS } from '../../../constants/permissions.js';
 import ERPPageHeader from '../../../components/erp/ERPPageHeader.js';
+import { ERPTableSkeleton } from '../../../components/erp/ERPSkeleton.js';
+import ERPEmptyState from '../../../components/erp/ERPEmptyState.js';
 import Button from '../../../components/ui/Button.js';
 import Badge from '../../../components/ui/Badge.js';
 import { formatDate } from '../../../lib/format.js';
@@ -92,7 +94,7 @@ export default function SchemaRegistryPage() {
       {/* Catalog table */}
       <div className="card overflow-hidden">
         {isLoading ? (
-          <div className="p-8 text-center text-secondary">Loading schemas…</div>
+          <ERPTableSkeleton rows={6} cols={6} />
         ) : (
           <table className="w-full text-sm">
             <thead className="bg-surface-hover">
@@ -121,7 +123,16 @@ export default function SchemaRegistryPage() {
                 </tr>
               ))}
               {schemas.length === 0 && (
-                <tr><td colSpan={6} className="px-4 py-8 text-center text-secondary">No schemas registered</td></tr>
+                <tr><td colSpan={6}>
+                  <ERPEmptyState
+                    type="no-data"
+                    title="No schemas registered"
+                    description="Registered event schema versions will appear here."
+                    {...(hasPermission(PERMISSIONS.SCHEMA_REGISTRY_MANAGE)
+                      ? { action: { label: 'Register Schema', onClick: () => setShowRegister(true) } }
+                      : {})}
+                  />
+                </td></tr>
               )}
             </tbody>
           </table>

@@ -1,5 +1,5 @@
 # ES-14 — Input Validations & Business Rules
-## STATUS: 🔴 PENDING
+## STATUS: ✅ COMPLETED (adapted — see ES-14_COMPLETION.md; most validation already existed, real gaps were narrower than assumed)
 ## Sprint: 3 | Effort: 3–4 days | Risk: Medium
 ## Depends on: ES-08 (sales), ES-09 (purchase)
 ## Unlocks: ES-16

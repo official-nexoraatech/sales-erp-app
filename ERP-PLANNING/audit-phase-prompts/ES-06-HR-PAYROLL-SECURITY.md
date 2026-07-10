@@ -1,5 +1,5 @@
 # ES-06 — HR Payroll Correctness & Data Security
-## STATUS: 🔴 PENDING
+## STATUS: ✅ COMPLETED (code) — ⚠ manual deployment checklist unconfirmed, see ES-06_COMPLETION.md
 ## Sprint: 2 | Effort: 3–4 days | Risk: Medium
 ## Depends on: None (independent)
 ## Unlocks: ES-12

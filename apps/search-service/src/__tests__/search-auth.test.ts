@@ -18,6 +18,7 @@ vi.mock('../middleware/authenticate.js', () => ({
       email: 'test@example.com',
       roles: ['ADMIN'],
       permissions: ['SEARCH_GLOBAL', 'SEARCH_REINDEX'],
+      branchIds: [],
       userId: 1,
     };
   },

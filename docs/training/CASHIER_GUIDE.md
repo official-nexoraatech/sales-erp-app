@@ -17,44 +17,86 @@
 ### Billing a Customer
 
 **Step 1 — Add items**
-- Scan the barcode with the barcode scanner (plug into USB)
-- OR type the item name/code in the search box and press Enter
-- Each scan adds the item to the bill
+- Scan the barcode with the barcode scanner (plug into USB) — a beep and a green flash
+  confirm the item was added; a red flash and error message mean the barcode wasn't found
+- On a tablet with no scanner attached, tap the 📷 button to scan with the camera instead
+- OR type the item name in the search box and press Enter to match the on-screen quick-item grid
+- Fast-moving items also show as tiles in the grid below — tap to add
 
 **Step 2 — Adjust quantity**
-- Click on the quantity number next to an item and type the new value
-- For fabric: enter metres (e.g., 2.5 for 2.5 metres)
+- Use the **−** / **+** buttons, or type directly into the quantity box
+- For fabric: enter metres directly (e.g., 2.5 for 2.5 metres) — fractional quantities are supported
 
 **Step 3 — Apply discount (if allowed)**
-- Click **Discount** on any line item
-- Type the discount amount (₹) or percentage (%)
-- Discounts above your allowed limit require manager approval
+- Type a discount % directly into the small box next to any line item
+- Or use **Order discount** (above the total) to apply the same % to every line at once
+- Discounts above the store's limit will be rejected — ask a manager to log in and complete the sale
 
 **Step 4 — Select customer (optional)**
 - For regular customers: type their name/phone in the customer search box
+- New customer: tap **+ New**, enter name and phone
 - For walk-in customers: leave blank (bills as "Walk-in Customer")
+- If the customer has loyalty points, a redeem box appears in the payment step
 
 **Step 5 — Process payment**
-- Click **Pay** (green button, bottom right)
-- Select payment mode:
-  - **Cash** — enter amount received, system shows change to return
-  - **UPI** — show QR code to customer, confirm payment received
-  - **Card** — swipe/tap and enter last 4 digits for reference
-  - **Split** — enter amounts for each mode (total must equal bill amount)
-- Click **Confirm Payment**
+- Tap **Charge** (or press **F8**)
+- Select payment mode — **Cash** (enter amount received, system shows change), **Card**, or **UPI**
+  (shows a QR code for the customer to scan)
+- To split the bill across modes, check **Split payment across modes** and enter an amount per mode
+- Tap **Complete Sale**
 
-**Step 6 — Print / WhatsApp receipt**
-- Receipt prints automatically if printer is connected
-- Click **WhatsApp** to send digital receipt to customer's phone
+**Step 6 — Print / WhatsApp / Email receipt**
+- The receipt screen opens automatically after the sale — pick **58mm** / **80mm** / **A4** paper size
+  and tap **Print Receipt** (this opens your browser's print dialog for whichever printer is installed)
+- Tap **WhatsApp** or **Email** to send a digital receipt instead (customer must be selected on the sale)
+
+### Holding a sale
+- Tap **Held Sales** (top bar) any time to see parked sales, or start a sale and leave it — nothing is
+  auto-saved, so use **Hold** (next to Charge) if you need to step away mid-sale
+- **Resume** restores the cart exactly as it was; **Discard** removes it
+
+### Working Offline
+
+The POS keeps working with no internet — you can still scan/search items (from the last synced
+catalog), look up existing customers, create new customers, and complete sales. Nothing is lost;
+everything queues locally and syncs automatically once the connection returns.
+
+**The connectivity dot** (top bar, next to "Last sync"):
+- 🟢 **Online** — connected, nothing waiting to sync
+- 🟡 **N pending sync** — connected, but N sale(s)/customer(s) are still being sent
+- 🔴 **Offline** — no connection right now; everything you do is being queued locally
+
+**Last sync** next to the dot shows when the app last successfully synced — "just now", "5m ago",
+"3h ago", etc. If it's been many hours and you're online, tap **Sync now** if it appears, or check
+your connection.
+
+**"⚠ N item(s) need attention — Retry"** — one or more queued sales/customers failed to sync
+repeatedly (usually a persistent connection problem). Tap **Retry** to reset and try again. If it
+keeps happening, tell your manager — there may be a server-side issue.
+
+**"⚠ N stock conflict(s) — Resolve"** — a queued sale can't sync because the stock for an item
+changed while you were offline (e.g., another counter sold the last units). Tap **Resolve** to open
+the conflict screen, which shows what you queued vs. what's actually available for each item:
+- **Adjust & retry** — reduces that line to the available quantity and completes the sale with the
+  adjusted quantity
+- **Cancel sale** — drops the sale entirely; nothing is charged and no invoice is created
+Either way, exactly one outcome happens — you won't end up with a duplicate invoice or a lost sale.
+A receipt for a sale completed while offline is marked **"Saved offline — will sync when back
+online"** until it actually syncs.
 
 ### Common POS Issues
 
 | Issue | Solution |
 |-------|---------|
-| Barcode not scanning | Check USB connection. Try typing the code manually |
-| Item not found | The item may not be in the system. Tell manager to add it |
+| Barcode not scanning | Check USB connection, or use the 📷 camera-scan button. Try typing the item name manually |
+| Item not found | Red flash + error toast means the barcode isn't in the system. Tell manager to add it |
 | "Insufficient stock" error | Item is out of stock. Check with owner |
 | "Credit limit exceeded" | Customer has unpaid bills. Call manager for override |
+| "Discount above X% requires a manager" | A manager needs to log in to complete this sale |
+| Connectivity dot stuck on 🔴 Offline | Check WiFi/network. Sales/customers you create still queue safely and will sync once reconnected |
+| "⚠ N item(s) need attention — Retry" won't clear | Tap Retry once; if it recurs, tell your manager — the server may be rejecting the sync for another reason |
+| "⚠ N stock conflict(s) — Resolve" | Open it, adjust quantity to what's available (or cancel that sale), per "Working Offline" above |
+| Forced back to the login screen after being offline a long time | Your session expired while offline. Log in again — queued sales are still saved locally and will sync after you log in |
 
 ---
 

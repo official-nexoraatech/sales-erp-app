@@ -107,6 +107,7 @@ export const reportRunHistory = pgTable(
     triggeredBy: varchar('triggered_by', { length: 20 }).notNull().default('MANUAL').$type<'MANUAL' | 'SCHEDULED'>(),
     rowCount: integer('row_count'),
     durationMs: integer('duration_ms'),
+    resultData: jsonb('result_data'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => [

@@ -1,14 +1,24 @@
-﻿import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
+import { Eye, Pencil, Trash2 } from 'lucide-react';
 import { customerApi } from '../../api/endpoints.js';
+import { useDebounce } from '../../hooks/useDebounce.js';
+import { useUrlParams, toNumber } from '../../hooks/useUrlParam.js';
+import { useAuthStore } from '../../store/auth.store.js';
+import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
-import DataTable from '../../components/ui/DataTable.js';
+import ERPEmptyState from '../../components/erp/ERPEmptyState.js';
+import ERPDataGrid, { type ERPColumnDef } from '../../components/erp/ERPDataGrid.js';
+import ERPDropdownMenu, { type ERPMenuItem } from '../../components/erp/ERPDropdownMenu.js';
 import Button from '../../components/ui/Button.js';
 import Badge from '../../components/ui/Badge.js';
 import Input from '../../components/ui/Input.js';
 import Select from '../../components/ui/Select.js';
+import { CUSTOMER_TYPES } from '../../schemas/customer.schema.js';
+
+const URL_DEFAULTS = { q: '', status: '', type: '', page: '1', size: '50' };
 
 interface Customer {
   id: number;
@@ -25,16 +35,43 @@ interface Customer {
 export default function CustomersPage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
-  const [search, setSearch] = useState('');
-  const [status, setStatus] = useState('');
-  const [customerType, setCustomerType] = useState('');
+  const hasPermission = useAuthStore((s) => s.hasPermission);
+  const canCreateCustomer = hasPermission(PERMISSIONS.CUSTOMER_CREATE);
+  const canEditCustomer = hasPermission(PERMISSIONS.CUSTOMER_EDIT);
+  const canDeleteCustomer = hasPermission(PERMISSIONS.CUSTOMER_DELETE);
+  const [urlState, setUrlState] = useUrlParams(URL_DEFAULTS);
+  const [search, setSearch] = useState(urlState.q);
+  const debouncedSearch = useDebounce(search, 250);
+  const status = urlState.status;
+  const customerType = urlState.type;
+  const page = toNumber(urlState.page, 1);
+  const pageSize = toNumber(urlState.size, 50);
 
-  const { data, isLoading } = useQuery({
-    queryKey: ['customers', search, status, customerType],
-    queryFn: () => customerApi.list({ search: search || undefined, status: status || undefined, customerType: customerType || undefined, page: 0, size: 50 }),
+  function setStatus(v: string): void { setUrlState({ status: v, page: '1' }); }
+  function setCustomerType(v: string): void { setUrlState({ type: v, page: '1' }); }
+  function setPage(p: number): void { setUrlState({ page: String(p) }); }
+  function setPageSize(s: number): void { setUrlState({ size: String(s), page: '1' }); }
+
+  // Only the debounced value hits the URL — syncing on every keystroke would thrash
+  // history/URL updates during typing (ERP-PLANNING/02_ERP_NAVIGATION_ARCHITECTURE.md §17).
+  // Skips the reset on mount — otherwise a deep-linked/refreshed ?page=3 would immediately
+  // snap back to 1, defeating the URL-restore this effect exists to support. status/type
+  // reset the page inline in their own onChange handlers above (a single atomic
+  // setUrlState call each) rather than reactively here, specifically to avoid two effects
+  // racing to patch the same URL in the same tick — see useUrlParam.ts's doc comment.
+  const isFirstSearchRun = useRef(true);
+  useEffect(() => {
+    if (isFirstSearchRun.current) { isFirstSearchRun.current = false; return; }
+    setUrlState({ q: debouncedSearch, page: '1' });
+  }, [debouncedSearch]);
+
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ['customers', debouncedSearch, status, customerType, page, pageSize],
+    queryFn: () => customerApi.list({ search: debouncedSearch || undefined, status: status || undefined, customerType: customerType || undefined, page: page - 1, size: pageSize }),
   });
 
-  const customers: Customer[] = ((data as Record<string, unknown>)?.data as Record<string, unknown>)?.content as Customer[] ?? [];
+  const customers: Customer[] = (data as Record<string, unknown>)?.content as Customer[] ?? [];
+  const totalElements = (data as Record<string, unknown>)?.totalElements as number ?? 0;
 
   const deleteMutation = useMutation({
     mutationFn: (id: number) => customerApi.delete(id),
@@ -42,40 +79,39 @@ export default function CustomersPage() {
     onError: (err: Error) => toast.error(err.message),
   });
 
-  const columns = [
-    { key: 'customerCode', header: 'Code', className: 'font-mono text-xs' },
+  const columns: ERPColumnDef<Customer>[] = [
+    { key: 'customerCode', header: 'Code', mono: true, sortable: true, hideable: false },
     {
-      key: 'displayName', header: 'Name',
-      render: (r: Customer) => (
+      key: 'displayName', header: 'Name', sortable: true,
+      render: (r) => (
         <div>
-          <button onClick={() => navigate(`/customers/${r.id}`)} className="font-medium text-indigo-600 dark:text-indigo-400 hover:underline">
+          <button onClick={() => navigate(`/customers/${r.id}`)} className="font-medium text-link hover:underline">
             {r.displayName}
           </button>
-          {r.phone && <p className="text-xs text-gray-400">{r.phone}</p>}
+          {r.phone && <p className="text-xs text-secondary">{r.phone}</p>}
         </div>
       ),
     },
-    { key: 'gstin', header: 'GSTIN', className: 'font-mono text-xs' },
+    { key: 'gstin', header: 'GSTIN', mono: true },
     {
       key: 'customerType', header: 'Type',
-      render: (r: Customer) => <Badge label={r.customerType} color="blue" />,
+      render: (r) => <Badge variant="info">{r.customerType}</Badge>,
     },
     {
-      key: 'status', header: 'Status',
-      render: (r: Customer) => (
-        <Badge label={r.status} color={r.status === 'ACTIVE' ? 'green' : r.status === 'BLOCKED' ? 'red' : 'gray'} />
+      key: 'status', header: 'Status', sortable: true,
+      render: (r) => (
+        <Badge variant={r.status === 'ACTIVE' ? 'success' : r.status === 'BLOCKED' ? 'danger' : 'default'}>{r.status}</Badge>
       ),
     },
-    { key: 'creditLimit', header: 'Credit Limit', className: 'text-right' },
+    { key: 'creditLimit', header: 'Credit Limit', align: 'right' },
     {
-      key: 'actions', header: '',
-      render: (r: Customer) => (
-        <div className="flex gap-2">
-          <Button size="sm" variant="ghost" onClick={() => navigate(`/customers/${r.id}`)}>View</Button>
-          <Button size="sm" variant="ghost" onClick={() => navigate(`/customers/${r.id}/edit`)}>Edit</Button>
-          <Button size="sm" variant="danger" onClick={() => deleteMutation.mutate(r.id)}>Delete</Button>
-        </div>
-      ),
+      key: 'actions', header: '', align: 'right',
+      render: (r) => {
+        const items: ERPMenuItem[] = [{ label: 'View', icon: Eye, onClick: () => navigate(`/customers/${r.id}`) }];
+        if (canEditCustomer) items.push({ label: 'Edit', icon: Pencil, onClick: () => navigate(`/customers/${r.id}/edit`) });
+        if (canDeleteCustomer) items.push({ label: 'Delete', icon: Trash2, variant: 'danger', onClick: () => deleteMutation.mutate(r.id) });
+        return <ERPDropdownMenu items={items} />;
+      },
     },
   ];
 
@@ -84,31 +120,43 @@ export default function CustomersPage() {
       <ERPPageHeader variant="list"
         title="Customers"
         subtitle="Manage your customer database."
-        actions={<Button onClick={() => navigate('/customers/new')}>+ New Customer</Button>}
+        actions={canCreateCustomer ? <Button onClick={() => navigate('/customers/new')}>+ New Customer</Button> : undefined}
       />
 
       <div className="flex gap-3 mb-4">
         <Input
+          aria-label="Search customers"
           placeholder="Search name, phone, GSTIN…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className="max-w-xs"
         />
-        <Select value={status} onChange={(e) => setStatus(e.target.value)} className="w-36">
+        <Select aria-label="Filter by status" value={status} onChange={(e) => setStatus(e.target.value)} className="w-36">
           <option value="">All Statuses</option>
           <option value="ACTIVE">Active</option>
           <option value="INACTIVE">Inactive</option>
           <option value="BLOCKED">Blocked</option>
         </Select>
-        <Select value={customerType} onChange={(e) => setCustomerType(e.target.value)} className="w-40">
+        <Select aria-label="Filter by customer type" value={customerType} onChange={(e) => setCustomerType(e.target.value)} className="w-40">
           <option value="">All Types</option>
-          <option value="RETAIL">Retail</option>
-          <option value="WHOLESALE">Wholesale</option>
-          <option value="CORPORATE">Corporate</option>
+          {CUSTOMER_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
         </Select>
       </div>
 
-      <DataTable columns={columns} data={customers} loading={isLoading} emptyMessage="No customers found." />
+      {isError ? (
+        <ERPEmptyState type="error" />
+      ) : (
+        <ERPDataGrid
+          columns={columns}
+          data={customers}
+          isLoading={isLoading}
+          rowKey="id"
+          tableId="customers"
+          pagination={{ page, pageSize, total: totalElements }}
+          onPageChange={setPage}
+          onPageSizeChange={setPageSize}
+        />
+      )}
     </div>
   );
 }

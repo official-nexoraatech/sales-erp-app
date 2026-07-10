@@ -1,6 +1,9 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import Redlock from 'redlock';
 import { DistributedLockManager } from '../../src/locks.js';
 import { delay } from '../fixtures/platform.fixtures.js';
+
+vi.mock('redlock', () => ({ default: vi.fn() }));
 
 // ─── Deterministic In-Memory Lock for unit testing ────────────────────────
 // Tests the BEHAVIOR of the DistributedLockManager without requiring real Redis
@@ -44,6 +47,53 @@ function createTestLockManager(): {
     isLocked: (resource: string) => lock.isLocked(`erp:lock:${resource}`),
   };
 }
+
+describe('DistributedLockManager.acquire() — lock release on failure', () => {
+  beforeEach(() => {
+    vi.mocked(Redlock).mockReset();
+  });
+
+  it('releases the underlying lock if incr() fails after acquisition (no leak until TTL)', async () => {
+    const releaseMock = vi.fn().mockResolvedValue(undefined);
+    const acquireMock = vi.fn().mockResolvedValue({ release: releaseMock });
+    vi.mocked(Redlock).mockImplementation(() => ({ acquire: acquireMock, on: vi.fn() }) as never);
+
+    const fakeRedis = {
+      incr: vi.fn().mockRejectedValue(new Error('Redis connection lost')),
+      expire: vi.fn(),
+      exists: vi.fn(),
+    };
+
+    const manager = new DistributedLockManager(fakeRedis as never);
+
+    await expect(manager.acquire('item-fifo:1:2:3', { ttlMs: 5000 })).rejects.toThrow(
+      'Redis connection lost'
+    );
+
+    expect(acquireMock).toHaveBeenCalledTimes(1);
+    expect(releaseMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('releases the underlying lock if expire() fails after acquisition', async () => {
+    const releaseMock = vi.fn().mockResolvedValue(undefined);
+    const acquireMock = vi.fn().mockResolvedValue({ release: releaseMock });
+    vi.mocked(Redlock).mockImplementation(() => ({ acquire: acquireMock, on: vi.fn() }) as never);
+
+    const fakeRedis = {
+      incr: vi.fn().mockResolvedValue(1),
+      expire: vi.fn().mockRejectedValue(new Error('Redis timeout')),
+      exists: vi.fn(),
+    };
+
+    const manager = new DistributedLockManager(fakeRedis as never);
+
+    await expect(manager.acquire('item-valuation:99', { ttlMs: 5000 })).rejects.toThrow(
+      'Redis timeout'
+    );
+
+    expect(releaseMock).toHaveBeenCalledTimes(1);
+  });
+});
 
 describe('DistributedLockManager — mutual exclusion semantics', () => {
   let lockManager: ReturnType<typeof createTestLockManager>;

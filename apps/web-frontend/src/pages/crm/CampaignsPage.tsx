@@ -3,9 +3,12 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { crmApi } from '../../api/endpoints.js';
+import { useConfirm } from '../../context/ConfirmContext.js';
 import { useAuthStore } from '../../store/auth.store.js';
 import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
+import { ERPTableSkeleton } from '../../components/erp/ERPSkeleton.js';
+import ERPEmptyState from '../../components/erp/ERPEmptyState.js';
 import Button from '../../components/ui/Button.js';
 import Badge from '../../components/ui/Badge.js';
 import { formatDatetime } from '../../lib/format.js';
@@ -26,6 +29,53 @@ interface Campaign {
   createdAt: string;
 }
 
+interface CampaignRecipient {
+  id: number;
+  customerId: number;
+  customerName: string;
+  status: 'PENDING' | 'SENT' | 'DELIVERED' | 'FAILED';
+  errorMessage?: string | null;
+  sentAt?: string | null;
+}
+
+function RecipientDrilldown({ campaignId }: { campaignId: number }) {
+  const { data, isLoading } = useQuery({
+    queryKey: ['campaign-recipients', campaignId],
+    queryFn: () => crmApi.campaignRecipients(campaignId),
+  });
+  const recipients = (data as CampaignRecipient[] | undefined) ?? [];
+
+  if (isLoading) return <p className="text-xs text-secondary px-5 py-2">Loading recipients…</p>;
+  if (recipients.length === 0) return <p className="text-xs text-secondary px-5 py-2">No recipients yet.</p>;
+
+  return (
+    <div className="px-5 py-3 bg-surface-subtle max-h-64 overflow-y-auto">
+      <table className="w-full text-xs">
+        <thead>
+          <tr className="text-left text-secondary">
+            <th className="pb-1">Customer</th>
+            <th className="pb-1">Status</th>
+            <th className="pb-1">Sent At</th>
+            <th className="pb-1">Error</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-default">
+          {recipients.map((r) => (
+            <tr key={r.id}>
+              <td className="py-1">{r.customerName}</td>
+              <td className="py-1">
+                <Badge label={r.status} color={r.status === 'FAILED' ? 'red' : r.status === 'PENDING' ? 'yellow' : 'green'} />
+              </td>
+              <td className="py-1">{r.sentAt ? formatDatetime(r.sentAt) : '—'}</td>
+              <td className="py-1 text-danger">{r.errorMessage ?? '—'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 const STATUS_COLORS: Record<string, 'green' | 'yellow' | 'red' | 'blue' | 'gray'> = {
   DRAFT: 'gray',
   SCHEDULED: 'yellow',
@@ -38,6 +88,7 @@ const STATUS_COLORS: Record<string, 'green' | 'yellow' | 'red' | 'blue' | 'gray'
 export default function CampaignsPage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const confirm = useConfirm();
   const hasPermission = useAuthStore((s) => s.hasPermission);
   const canCreate = hasPermission(PERMISSIONS.CRM_CAMPAIGN_CREATE);
   const canSend = hasPermission(PERMISSIONS.CRM_CAMPAIGN_SEND);
@@ -45,12 +96,13 @@ export default function CampaignsPage() {
   const [statusFilter, setStatusFilter] = useState('');
   const [scheduleModal, setScheduleModal] = useState<{ open: boolean; id: number }>({ open: false, id: 0 });
   const [scheduleAt, setScheduleAt] = useState('');
+  const [expandedId, setExpandedId] = useState<number | null>(null);
 
   const { data, isLoading } = useQuery({
     queryKey: ['campaigns', statusFilter],
     queryFn: () => crmApi.listCampaigns(statusFilter ? { status: statusFilter } : undefined),
   });
-  const campaigns: Campaign[] = (data as Record<string, unknown>)?.data as Campaign[] ?? [];
+  const campaigns: Campaign[] = (data as { content?: Campaign[] })?.content ?? [];
 
   const sendMut = useMutation({
     mutationFn: (id: number) => crmApi.sendCampaign(id),
@@ -108,13 +160,19 @@ export default function CampaignsPage() {
 
       <div className="bg-surface-card rounded-xl border border-default">
         {isLoading ? (
-          <div className="p-8 text-center text-sm text-secondary">Loading…</div>
+          <ERPTableSkeleton rows={6} cols={4} />
         ) : campaigns.length === 0 ? (
-          <div className="p-8 text-center text-sm text-secondary">No campaigns found.</div>
+          <ERPEmptyState
+            type="no-data"
+            title="No campaigns found"
+            description="SMS, WhatsApp, Email and in-app marketing campaigns will appear here."
+            {...(canCreate ? { action: { label: '+ New Campaign', onClick: () => navigate('/crm/campaigns/new') } } : {})}
+          />
         ) : (
           <div className="divide-y divide-default">
             {campaigns.map((c) => (
-              <div key={c.id} className="flex items-center gap-4 px-5 py-4">
+              <div key={c.id}>
+              <div className="flex items-center gap-4 px-5 py-4">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
                     <p className="text-sm font-semibold text-primary truncate">{c.name}</p>
@@ -123,7 +181,9 @@ export default function CampaignsPage() {
                   </div>
                   <div className="flex items-center gap-4 mt-1 text-xs text-secondary">
                     {c.totalRecipients != null && (
-                      <span>{c.totalRecipients} recipients — {c.sentCount ?? 0} sent / {c.deliveredCount ?? 0} delivered / {c.failedCount ?? 0} failed</span>
+                      <button onClick={() => setExpandedId(expandedId === c.id ? null : c.id)} className="underline hover:text-primary">
+                        {c.totalRecipients} recipients — {c.sentCount ?? 0} sent / {c.deliveredCount ?? 0} delivered / {c.failedCount ?? 0} failed
+                      </button>
                     )}
                     {c.scheduledAt && <span>Scheduled: {formatDatetime(c.scheduledAt)}</span>}
                     {c.sentAt && <span>Sent: {formatDatetime(c.sentAt)}</span>}
@@ -142,24 +202,32 @@ export default function CampaignsPage() {
                       </Button>
                       <Button
                         size="sm"
-                        onClick={() => { if (confirm('Send campaign now?')) sendMut.mutate(c.id); }}
+                        onClick={async () => {
+                          const ok = await confirm({ title: 'Send Campaign', message: 'Send campaign now?', confirmLabel: 'Send Now' });
+                          if (ok) sendMut.mutate(c.id);
+                        }}
                         disabled={sendMut.isPending}
                       >
                         Send Now
                       </Button>
                     </>
                   )}
-                  {(c.status === 'DRAFT' || c.status === 'SCHEDULED') && (
+                  {canCreate && (c.status === 'DRAFT' || c.status === 'SCHEDULED') && (
                     <Button
                       variant="danger"
                       size="sm"
-                      onClick={() => { if (confirm('Cancel this campaign?')) cancelMut.mutate(c.id); }}
+                      onClick={async () => {
+                        const ok = await confirm({ title: 'Cancel Campaign', message: 'Cancel this campaign?', confirmLabel: 'Cancel Campaign', variant: 'danger' });
+                        if (ok) cancelMut.mutate(c.id);
+                      }}
                       disabled={cancelMut.isPending}
                     >
                       Cancel
                     </Button>
                   )}
                 </div>
+              </div>
+              {expandedId === c.id && <RecipientDrilldown campaignId={c.id} />}
               </div>
             ))}
           </div>
@@ -182,7 +250,7 @@ export default function CampaignsPage() {
           <div className="flex gap-2 justify-end pt-2">
             <Button variant="ghost" onClick={() => setScheduleModal({ open: false, id: 0 })}>Cancel</Button>
             <Button
-              onClick={() => scheduleMut.mutate({ id: scheduleModal.id, scheduledAt: scheduleAt })}
+              onClick={() => scheduleMut.mutate({ id: scheduleModal.id, scheduledAt: new Date(scheduleAt).toISOString() })}
               disabled={scheduleMut.isPending || !scheduleAt}
             >
               {scheduleMut.isPending ? 'Scheduling…' : 'Schedule'}

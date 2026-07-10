@@ -8,7 +8,7 @@ global:
 alerting:
   alertmanagers:
     - static_configs:
-        - targets: []  # Configure alertmanager endpoint in production
+        - targets: ['alertmanager:9093']
 
 rule_files:
   - 'alert-rules.yml'
@@ -85,9 +85,24 @@ scrape_configs:
     metrics_path: '/metrics'
     scrape_interval: 15s
 
-  - job_name: 'erp-api-gateway'
+  # api-gateway target removed (ES-27) — still a stub, not a running service. See
+  # ERP-PLANNING/phase-completions/ES-27_COMPLETION.md and TECH_AUDIT.md §Reverse Proxy.
+
+  - job_name: 'erp-hr-service'
     static_configs:
-      - targets: ['host.docker.internal:3000']
+      - targets: ['host.docker.internal:3021']
+    metrics_path: '/metrics'
+    scrape_interval: 15s
+
+  - job_name: 'erp-purchase-service'
+    static_configs:
+      - targets: ['host.docker.internal:3020']
+    metrics_path: '/metrics'
+    scrape_interval: 15s
+
+  - job_name: 'erp-production-service'
+    static_configs:
+      - targets: ['host.docker.internal:3022']
     metrics_path: '/metrics'
     scrape_interval: 15s
 
@@ -113,4 +128,18 @@ scrape_configs:
     static_configs:
       - targets: ['redis-exporter:9121']
     metrics_path: '/metrics'
+    scrape_interval: 30s
+
+  - job_name: 'alertmanager'
+    static_configs:
+      - targets: ['alertmanager:9093']
+    scrape_interval: 30s
+
+  # PG-024 — batch/cron jobs (backup.sh) push here instead of being scraped
+  # directly; honor_labels keeps the `job`/`instance` labels the pusher sets
+  # (job=erp_backup) rather than overwriting them with 'pushgateway'.
+  - job_name: 'pushgateway'
+    honor_labels: true
+    static_configs:
+      - targets: ['pushgateway:9091']
     scrape_interval: 30s

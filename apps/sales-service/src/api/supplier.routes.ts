@@ -1,10 +1,10 @@
 import type { FastifyInstance } from 'fastify';
 import type { PlatformContextFactory } from '@erp/sdk';
 import { suppliers, suppliersHistory } from '@erp/db';
-import { and, eq, isNull, or, ilike } from 'drizzle-orm';
+import { and, eq, isNull, or, ilike, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { NotFoundError, OptimisticLockError, ValidationError } from '@erp/types';
-import { PERMISSIONS } from '@erp/types';
+import { PERMISSIONS, OptionalGSTINSchema, OptionalPANSchema, OptionalIFSCSchema, OptionalBankAccountSchema } from '@erp/types';
 import { createHash } from 'crypto';
 import { authenticate } from '../middleware/authenticate.js';
 import { requirePermission } from '../middleware/authorize.js';
@@ -14,16 +14,8 @@ const SupplierSchema = z.object({
   companyName: z.string().max(300).optional(),
   contactPerson: z.string().max(200).optional(),
   supplierType: z.enum(['DOMESTIC', 'IMPORT', 'MANUFACTURER', 'AGENT']).default('DOMESTIC'),
-  gstin: z
-    .string()
-    .regex(/^\d{2}[A-Z]{5}\d{4}[A-Z]{1}[A-Z\d]{1}[Z]{1}[A-Z\d]{1}$/, 'Invalid GSTIN')
-    .optional()
-    .or(z.literal('')),
-  pan: z
-    .string()
-    .regex(/^[A-Z]{5}\d{4}[A-Z]{1}$/, 'Invalid PAN')
-    .optional()
-    .or(z.literal('')),
+  gstin: OptionalGSTINSchema,
+  pan: OptionalPANSchema,
   phone: z.string().min(10).max(20),
   altPhone: z.string().max(20).optional(),
   email: z.string().email().max(255).optional().or(z.literal('')),
@@ -34,14 +26,14 @@ const SupplierSchema = z.object({
       city: z.string().min(1),
       state: z.string().min(1),
       stateCode: z.string().min(2).max(2),
-      pincode: z.string().regex(/^\d{6}$/),
+      pincode: z.string().regex(/^[1-9][0-9]{5}$/, 'Invalid pincode'),
       country: z.string().default('India'),
     })
     .optional(),
   // Bank — encrypted before storage; simplified here
-  bankAccountNo: z.string().max(20).optional(),
+  bankAccountNo: OptionalBankAccountSchema,
   bankName: z.string().max(200).optional(),
-  bankIfsc: z.string().max(20).optional(),
+  bankIfsc: OptionalIFSCSchema,
   bankBranch: z.string().max(200).optional(),
   branchId: z.number().int().positive(),
   creditDays: z.number().int().min(0).default(0),
@@ -90,7 +82,8 @@ export async function supplierRoutes(
     }
 
     const rows = await ctx.db.raw.select().from(suppliers).where(whereClause).limit(size).offset(page * size);
-    return reply.code(200).send({ data: { content: rows, totalElements: rows.length, page, size } });
+    const [countRow] = await ctx.db.raw.select({ count: sql<number>`count(*)::int` }).from(suppliers).where(whereClause);
+    return reply.code(200).send({ data: { content: rows, totalElements: countRow?.count ?? 0, page, size } });
   });
 
   // ── GET /suppliers/:id ─────────────────────────────────────────────────────

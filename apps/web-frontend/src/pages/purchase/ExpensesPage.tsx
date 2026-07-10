@@ -1,9 +1,13 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
+import { Send, CheckCircle2, IndianRupee } from 'lucide-react';
 import { expenseApi } from '../../api/endpoints.js';
+import { useAuthStore } from '../../store/auth.store.js';
+import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
-import DataTable from '../../components/ui/DataTable.js';
+import ERPDataGrid, { type ERPColumnDef } from '../../components/erp/ERPDataGrid.js';
+import ERPDropdownMenu, { type ERPMenuItem } from '../../components/erp/ERPDropdownMenu.js';
 import Button from '../../components/ui/Button.js';
 import Badge from '../../components/ui/Badge.js';
 import Modal from '../../components/ui/Modal.js';
@@ -33,6 +37,9 @@ const EXPENSE_TYPES = ['RENT', 'ELECTRICITY', 'SALARY', 'FREIGHT', 'MARKETING', 
 
 export default function ExpensesPage() {
   const qc = useQueryClient();
+  const hasPermission = useAuthStore((s) => s.hasPermission);
+  const canCreateExpense = hasPermission(PERMISSIONS.EXPENSE_CREATE);
+  const canApproveExpense = hasPermission(PERMISSIONS.EXPENSE_APPROVE);
   const [status, setStatus] = useState('');
   const [showCreate, setShowCreate] = useState(false);
   const [expenseType, setExpenseType] = useState<string>('MISC');
@@ -44,14 +51,19 @@ export default function ExpensesPage() {
   const [payId, setPayId] = useState<number | null>(null);
   const [payMode, setPayMode] = useState('CASH');
   const [payDate, setPayDate] = useState<string>(new Date().toISOString().substring(0, 10));
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+
+  useEffect(() => { setPage(1); }, [status]);
 
   const { data, isLoading } = useQuery({
-    queryKey: ['expenses', status],
-    queryFn: () => expenseApi.list(status ? { status } : {}),
+    queryKey: ['expenses', status, page, pageSize],
+    queryFn: () => expenseApi.list({ status: status || undefined, page, pageSize }),
     staleTime: 30_000,
   });
 
-  const rows: Expense[] = (data as { data?: Expense[] })?.data ?? [];
+  const rows: Expense[] = (data as Record<string, unknown>)?.content as Expense[] ?? [];
+  const totalElements = (data as Record<string, unknown>)?.totalElements as number ?? 0;
 
   const createMutation = useMutation({
     mutationFn: (d: Record<string, unknown>) => expenseApi.create(d),
@@ -89,56 +101,53 @@ export default function ExpensesPage() {
     onError: (e: Error) => toast.error(e.message),
   });
 
-  const columns = [
-    { key: 'expenseNumber', header: 'Number', render: (r: Expense) => <span className="font-mono text-sm">{r.expenseNumber}</span> },
+  const columns: ERPColumnDef<Expense>[] = [
+    { key: 'expenseNumber', header: 'Number', mono: true, sortable: true },
     { key: 'expenseType', header: 'Type' },
-    { key: 'description', header: 'Description', render: (r: Expense) => r.description ?? '—' },
-    { key: 'totalAmount', header: 'Amount', render: (r: Expense) => formatCurrency(parseFloat(r.totalAmount)) },
-    { key: 'expenseDate', header: 'Date', render: (r: Expense) => formatDate(r.expenseDate) },
-    {
-      key: 'status',
-      header: 'Status',
-      render: (r: Expense) => <Badge variant={STATUS_COLORS[r.status] ?? 'default'}>{r.status}</Badge>,
-    },
+    { key: 'description', header: 'Description', render: (r) => r.description ?? '—' },
+    { key: 'totalAmount', header: 'Amount', align: 'right', sortable: true, render: (r) => formatCurrency(parseFloat(r.totalAmount)) },
+    { key: 'expenseDate', header: 'Date', sortable: true, render: (r) => formatDate(r.expenseDate) },
+    { key: 'status', header: 'Status', sortable: true, render: (r) => <Badge variant={STATUS_COLORS[r.status] ?? 'default'}>{r.status}</Badge> },
     {
       key: 'actions',
       header: '',
-      render: (r: Expense) => (
-        <div className="flex gap-1">
-          {r.status === 'DRAFT' && (
-            <Button size="sm" onClick={() => submitMutation.mutate(r.id)}>Submit</Button>
-          )}
-          {r.status === 'SUBMITTED' && (
-            <Button size="sm" variant="primary" onClick={() => approveMutation.mutate(r.id)}>Approve</Button>
-          )}
-          {r.status === 'APPROVED' && (
-            <Button size="sm" onClick={() => { setPayId(r.id); setPayDate(new Date().toISOString().substring(0, 10)); }}>Pay</Button>
-          )}
-        </div>
-      ),
+      align: 'right',
+      render: (r) => {
+        const items: ERPMenuItem[] = [];
+        if (canCreateExpense && r.status === 'DRAFT') items.push({ label: 'Submit', icon: Send, onClick: () => submitMutation.mutate(r.id) });
+        if (canApproveExpense && r.status === 'SUBMITTED') items.push({ label: 'Approve', icon: CheckCircle2, onClick: () => approveMutation.mutate(r.id) });
+        if (canApproveExpense && r.status === 'APPROVED') {
+          items.push({ label: 'Mark Paid', icon: IndianRupee, onClick: () => { setPayId(r.id); setPayDate(new Date().toISOString().substring(0, 10)); } });
+        }
+        return items.length > 0 ? <ERPDropdownMenu items={items} /> : null;
+      },
     },
   ];
 
   return (
     <div>
       <ERPPageHeader variant="list" title="Expenses" subtitle="Track and approve business expenses">
-        <Button onClick={() => setShowCreate(true)}>+ New Expense</Button>
+        {canCreateExpense && <Button onClick={() => setShowCreate(true)}>+ New Expense</Button>}
       </ERPPageHeader>
 
       <div className="flex gap-4 mb-4">
-        <select
-          value={status}
-          onChange={(e) => setStatus(e.target.value)}
-          className="rounded-lg border border-default bg-surface-card text-primary text-sm px-3 py-2"
-        >
+        <Select value={status} onChange={(e) => setStatus(e.target.value)} className="w-44">
           <option value="">All Statuses</option>
           {['DRAFT', 'SUBMITTED', 'APPROVED', 'PAID', 'REJECTED'].map((s) => (
             <option key={s} value={s}>{s}</option>
           ))}
-        </select>
+        </Select>
       </div>
 
-      <DataTable columns={columns} data={rows} isLoading={isLoading} emptyMessage="No expenses found" />
+      <ERPDataGrid
+        columns={columns}
+        data={rows}
+        isLoading={isLoading}
+        rowKey="id"
+        pagination={{ page, pageSize, total: totalElements }}
+        onPageChange={setPage}
+        onPageSizeChange={(size) => { setPageSize(size); setPage(1); }}
+      />
 
       <Modal isOpen={showCreate} onClose={() => setShowCreate(false)} title="Create Expense">
         <div className="space-y-4">

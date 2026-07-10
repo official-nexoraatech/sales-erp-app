@@ -13,6 +13,7 @@ export * from './src/schema/accounting';
 export * from './src/schema/inventory';
 export * from './src/schema/sales';
 export * from './src/schema/production';
+export * from './src/schema/purchase';
 
 // Platform tables defined inline in src/schema/index.ts
 import {

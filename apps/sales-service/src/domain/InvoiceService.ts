@@ -9,15 +9,24 @@ import {
   projectionDashboardDaily,
   projectionCustomerBalance,
   quotations,
+  deliveryChallans,
+  inventoryLedger,
 } from '@erp/db';
 import type { ErpDatabase } from '@erp/db';
 import { BusinessError, NotFoundError, ERPError } from '@erp/types';
+import {
+  SagaOrchestrator,
+  SagaExecutionError,
+  DuplicateOperationError,
+  isUniqueConstraintViolation,
+} from '@erp/sdk';
 import { GSTCalculator } from './GSTCalculator.js';
+import { ValuationService } from './ValuationService.js';
 import { ulid } from 'ulid';
 
 export class InsufficientStockError extends ERPError {
-  constructor(public itemId: number, public available: number) {
-    super('INSUFFICIENT_STOCK', `Item ${itemId} has only ${available} units available`, 422);
+  constructor(public itemId: number, public available: number, public requested: number) {
+    super('INSUFFICIENT_STOCK', `Item ${itemId} has only ${available} units available`, 422, { itemId, available, requested });
   }
 }
 
@@ -33,6 +42,15 @@ export class PriceFloorViolationError extends ERPError {
   }
 }
 
+// OFFLINE-02: thrown when create()'s insert collides on (tenantId, clientOperationId) —
+// i.e. this is a retried offline POS-sale sync, not a genuinely new sale. The caller
+// (pos.routes.ts) catches this and returns the already-committed original result instead
+// of propagating a 500 or creating a duplicate invoice/stock deduction/payment.
+// PG-011: DuplicateOperationError/isUniqueConstraintViolation now live in @erp/sdk's
+// idempotency.ts (re-exported here so existing imports from this module keep working) —
+// see ERP_MASTER_SPEC.md §4.10 for the three-pillar distributed-consistency story.
+export { DuplicateOperationError };
+
 export interface InvoiceLineInput {
   itemId: number;
   variantId?: number;
@@ -43,6 +61,7 @@ export interface InvoiceLineInput {
   discountPct?: number;
   discountAmount?: number;
   gstRate: number;
+  cessRate?: number;
   hsnCode?: string;
   warehouseId?: number;
 }
@@ -66,12 +85,26 @@ export interface CreateInvoiceParams {
   createdBy: number;
   overrideCreditLimit?: boolean;
   overridePriceFloor?: boolean;
+  // OFFLINE-02: client-generated idempotency key for offline-queued POS sales (undefined
+  // for every other invoice-creation path — unique constraint only fires on non-null values).
+  clientOperationId?: string;
 }
 
 export class InvoiceService {
   constructor(private db: ErpDatabase) {}
 
   async create(params: CreateInvoiceParams): Promise<number> {
+    try {
+      return await this.createInTransaction(params);
+    } catch (err) {
+      if (isUniqueConstraintViolation(err, 'invoices_tenant_client_operation_id')) {
+        throw new DuplicateOperationError(params.clientOperationId!);
+      }
+      throw err;
+    }
+  }
+
+  private async createInTransaction(params: CreateInvoiceParams): Promise<number> {
     return this.db.transaction(async (trx) => {
       // Step 1 — Validate credit limit
       const [customer] = await trx
@@ -94,6 +127,7 @@ export class InvoiceService {
           discountPct: l.discountPct ?? 0,
           discountAmount: l.discountAmount ?? 0,
           gstRate: l.gstRate,
+          cessRate: l.cessRate ?? 0,
           sellerStateCode: params.sellerStateCode,
           placeOfSupply: params.placeOfSupply,
         });
@@ -152,12 +186,14 @@ export class InvoiceService {
           cgstAmount: String(totals.cgstAmount),
           sgstAmount: String(totals.sgstAmount),
           igstAmount: String(totals.igstAmount),
+          cessAmount: String(totals.cessAmount),
           grandTotal: String(totals.grandTotal),
           balanceDue: String(totals.grandTotal),
           notes: params.notes,
           deliveryDate: params.deliveryDate,
           deliveryAddress: params.deliveryAddress,
           createdBy: params.createdBy,
+          clientOperationId: params.clientOperationId,
         })
         .returning({ id: invoices.id });
 
@@ -185,6 +221,8 @@ export class InvoiceService {
           cgstAmount: String(l.cgstAmount),
           sgstAmount: String(l.sgstAmount),
           igstAmount: String(l.igstAmount),
+          cessRate: String(l.cessRate),
+          cessAmount: String(l.cessAmount),
           lineTotal: String(l.lineTotal),
           hsnCode: l.hsnCode,
           warehouseId: l.warehouseId ?? params.warehouseId,
@@ -199,6 +237,26 @@ export class InvoiceService {
         performedBy: params.createdBy,
       });
 
+      // Search-service sync: DRAFT invoices have no invoiceNumber yet (assigned at
+      // confirm()) — the INVOICE_CONFIRMED event above already carries the full payload,
+      // this just gets a DRAFT invoice indexed as soon as it exists.
+      await trx.insert(outboxEvents).values({
+        eventId: ulid(),
+        eventType: 'INVOICE_CREATED',
+        aggregateType: 'Invoice',
+        aggregateId: invoiceId,
+        tenantId: params.tenantId,
+        payload: {
+          invoiceId,
+          customerId: params.customerId,
+          status: 'DRAFT',
+          grandTotal: String(totals.grandTotal),
+          invoiceDate: params.invoiceDate,
+          branchId: params.branchId,
+        },
+        published: false,
+      });
+
       // Mark quotation as converted if linked
       if (params.quotationId) {
         await trx
@@ -207,11 +265,65 @@ export class InvoiceService {
           .where(and(eq(quotations.id, params.quotationId), eq(quotations.tenantId, params.tenantId)));
       }
 
+      // Mark delivery challan as converted if linked
+      if (params.deliveryChallanId) {
+        await trx
+          .update(deliveryChallans)
+          .set({ status: 'CONVERTED', convertedInvoiceId: invoiceId, convertedAt: new Date() })
+          .where(and(eq(deliveryChallans.id, params.deliveryChallanId), eq(deliveryChallans.tenantId, params.tenantId)));
+      }
+
       return invoiceId;
     });
   }
 
+  // ES-24 [H3]: proof-of-concept INVOICE_CREATION saga. `confirmInTransaction()` below is
+  // unchanged and still runs as ONE atomic Postgres transaction (per ES-03's architecture
+  // notes: everything it touches — stock deduction, ledger, invoice status, outbox events —
+  // lives in this same database, so a single transaction already gives it a stronger
+  // guarantee than saga-style compensation could: on any failure, Postgres guarantees zero
+  // partial writes, so there is nothing for a compensate() step to undo. Wrapping it in
+  // SagaOrchestrator.run() as a single RETRYABLE step still gets confirm() genuine saga_log
+  // tracking (visible in the admin saga viewer, retriable via the admin API) without
+  // fabricating step boundaries that don't correspond to anything real in this flow, or
+  // trading away the transaction's atomicity for a false sense of "compensation" safety.
+  // The orchestrator's actual multi-step compensation mechanism (a later, genuinely
+  // independent step failing and triggering rollback of an earlier COMPENSATABLE step) is
+  // exercised directly in packages/platform-sdk/src/__tests__/saga.test.ts.
   async confirm(
+    id: number,
+    tenantId: number,
+    invoiceNumber: string,
+    userId: number
+  ): Promise<void> {
+    const orchestrator = new SagaOrchestrator(this.db);
+    try {
+      await orchestrator.run({
+        sagaType: 'INVOICE_CREATION',
+        tenantId,
+        correlationId: ulid(),
+        payload: { invoiceId: id, invoiceNumber, userId },
+        context: { id, tenantId, invoiceNumber, userId },
+        steps: [
+          {
+            name: 'confirmInvoiceTransaction',
+            type: 'RETRYABLE',
+            execute: async (ctx: { id: number; tenantId: number; invoiceNumber: string; userId: number }) => {
+              await this.confirmInTransaction(ctx.id, ctx.tenantId, ctx.invoiceNumber, ctx.userId);
+            },
+          },
+        ],
+      });
+    } catch (err) {
+      const cause = err instanceof SagaExecutionError ? err.cause : err;
+      if (isUniqueConstraintViolation(cause, 'invoices_tenant_number')) {
+        throw new BusinessError('INVOICE_NUMBER_DUPLICATE', `Invoice number ${invoiceNumber} already exists`);
+      }
+      throw cause;
+    }
+  }
+
+  private async confirmInTransaction(
     id: number,
     tenantId: number,
     invoiceNumber: string,
@@ -226,14 +338,55 @@ export class InvoiceService {
       if (invoice.status !== 'DRAFT')
         throw new BusinessError('INVALID_STATUS', `Cannot confirm invoice in status ${invoice.status}`);
 
+      // ES-14: duplicate invoice number guard — the DB unique index
+      // (invoices_tenant_number) is the ultimate backstop, but a raw
+      // constraint-violation surfaces as an opaque 500. Check proactively so a
+      // clash returns a clear 422 instead.
+      const [duplicate] = await trx
+        .select({ id: invoices.id })
+        .from(invoices)
+        .where(and(eq(invoices.tenantId, tenantId), eq(invoices.invoiceNumber, invoiceNumber)));
+      if (duplicate && duplicate.id !== id) {
+        throw new BusinessError('INVOICE_NUMBER_DUPLICATE', `Invoice number ${invoiceNumber} already exists`);
+      }
+
+      // ES-14: period closure guard — cannot confirm (post) an invoice dated
+      // inside an accounting period the tenant has already closed. Queries the
+      // shared `period_closures` table directly (same pattern as
+      // JournalEngine.checkPeriodOpen in accounting-service — duplicated here
+      // rather than imported, since sales-service doesn't call into
+      // accounting-service's domain classes; see ES-03's architecture notes).
+      const invoiceDate = new Date(invoice.invoiceDate);
+      const [closure] = await trx.execute(
+        sql`SELECT status FROM period_closures
+            WHERE tenant_id = ${tenantId}
+              AND period_month = ${invoiceDate.getMonth() + 1}
+              AND period_year = ${invoiceDate.getFullYear()}
+            LIMIT 1`
+      ) as { status: string }[];
+      if (closure?.status === 'CLOSED') {
+        throw new BusinessError('PERIOD_CLOSED', 'Cannot confirm an invoice dated in a closed accounting period');
+      }
+
       const lines = await trx
         .select()
         .from(invoiceLines)
         .where(eq(invoiceLines.invoiceId, id));
 
       // Step — Deduct stock atomically per line
+      // ES-03: inventory_ledger row is written via a direct insert on the shared
+      // @erp/db schema (not an HTTP call to inventory-service) so the ledger write
+      // is inside this same Drizzle transaction and rolls back with it if anything
+      // fails. A cross-process HTTP call to POST /internal/ledger cannot be undone
+      // if this transaction later aborts, so it would break the atomicity this
+      // phase requires (see ERP-PLANNING/audit-phase-prompts/ES-03 Architecture
+      // Rule #3, Option B). unit_cost is written as 0 (sale price, not cost basis,
+      // lives on the invoice line) — ES-13's FIFO/WACC engine populates the real
+      // cost basis on cogs_per_unit below.
+      let invoiceCogsTotal = 0;
       for (const line of lines) {
         const lineQty = parseFloat(String(line.quantity));
+        const lineWarehouseId = line.warehouseId ?? invoice.warehouseId;
         const result = await trx
           .update(items)
           .set({
@@ -247,7 +400,7 @@ export class InvoiceService {
               sql`${items.availableQty} >= ${lineQty}`
             )
           )
-          .returning({ id: items.id });
+          .returning({ id: items.id, availableQty: items.availableQty });
 
         if (result.length === 0) {
           const [itemRow] = await trx
@@ -256,10 +409,40 @@ export class InvoiceService {
             .where(and(eq(items.id, line.itemId), eq(items.tenantId, tenantId)));
           throw new InsufficientStockError(
             line.itemId,
-            parseFloat(String(itemRow?.availableQty ?? 0))
+            parseFloat(String(itemRow?.availableQty ?? 0)),
+            lineQty
           );
         }
+
+        const afterQty = parseFloat(String(result[0]!.availableQty ?? '0'));
+        const beforeQty = afterQty + lineQty;
+        const lineCogs = await ValuationService.consumeForStockOut(trx, {
+          tenantId,
+          itemId: line.itemId,
+          warehouseId: lineWarehouseId,
+          quantity: lineQty,
+        });
+        invoiceCogsTotal += lineCogs;
+        const cogsPerUnit = lineQty > 0 ? Math.round((lineCogs / lineQty) * 100) / 100 : 0;
+
+        await trx.insert(inventoryLedger).values({
+          tenantId,
+          itemId: line.itemId,
+          variantId: line.variantId ?? undefined,
+          warehouseId: lineWarehouseId,
+          movementType: 'STOCK_OUT',
+          quantity: String(lineQty),
+          quantityBefore: String(beforeQty),
+          quantityAfter: String(afterQty),
+          referenceType: 'INVOICE',
+          referenceId: id,
+          referenceLineId: line.id,
+          unitCost: '0',
+          cogsPerUnit: String(cogsPerUnit),
+          createdBy: userId,
+        });
       }
+      invoiceCogsTotal = Math.round(invoiceCogsTotal * 100) / 100;
 
       // Step — Assign invoice number + confirm
       await trx
@@ -319,15 +502,61 @@ export class InvoiceService {
         });
 
       // Step — Write INVOICE_CONFIRMED to outbox (IRREVERSIBLE — last step)
+      // ES-10: previously this payload only carried {invoiceId, invoiceNumber, customerId,
+      // grandTotal} — the gst-service consumer (InvoiceGstConsumer) reads taxableAmount/
+      // cgstAmount/sgstAmount/igstAmount/customerGstin/placeOfSupply etc from the payload,
+      // so every GST ledger entry for every sales invoice was silently recorded with zero
+      // tax amounts. Fixed by carrying the full breakdown already computed on `invoice`.
+      const [customer] = await trx
+        .select({ displayName: customers.displayName, gstin: customers.gstin })
+        .from(customers)
+        .where(and(eq(customers.id, invoice.customerId), eq(customers.tenantId, tenantId)));
+
       await trx.insert(outboxEvents).values({
         eventId: ulid(),
         eventType: 'INVOICE_CONFIRMED',
         aggregateType: 'Invoice',
         aggregateId: id,
         tenantId,
-        payload: { invoiceId: id, invoiceNumber, customerId: invoice.customerId, grandTotal: invoice.grandTotal },
+        payload: {
+          invoiceId: id,
+          invoiceNumber,
+          invoiceDate: invoice.invoiceDate,
+          customerId: invoice.customerId,
+          customerName: customer?.displayName ?? null,
+          customerGstin: customer?.gstin ?? null,
+          placeOfSupply: invoice.placeOfSupply,
+          taxableAmount: invoice.taxableAmount,
+          cgstAmount: invoice.cgstAmount,
+          sgstAmount: invoice.sgstAmount,
+          igstAmount: invoice.igstAmount,
+          cessAmount: invoice.cessAmount,
+          grandTotal: invoice.grandTotal,
+          isInterstate: parseFloat(String(invoice.igstAmount)) > 0,
+          branchId: invoice.branchId,
+        },
         published: false,
       });
+
+      // ES-13: COGS journal (DR Cost of Goods Sold / CR Inventory) is a separate
+      // journal entry from the revenue recognition above — accounting-service posts
+      // it on COGS_CALCULATED, independently of INVOICE_CONFIRMED.
+      if (invoiceCogsTotal > 0) {
+        await trx.insert(outboxEvents).values({
+          eventId: ulid(),
+          eventType: 'COGS_CALCULATED',
+          aggregateType: 'Invoice',
+          aggregateId: id,
+          tenantId,
+          payload: {
+            invoiceId: id,
+            invoiceNumber,
+            cogsTotal: String(invoiceCogsTotal),
+            branchId: invoice.branchId,
+          },
+          published: false,
+        });
+      }
 
       await trx.insert(invoiceHistory).values({
         invoiceId: id,
@@ -358,13 +587,34 @@ export class InvoiceService {
           .where(eq(invoiceLines.invoiceId, id));
 
         for (const line of lines) {
-          await trx
+          const lineQty = parseFloat(String(line.quantity));
+          const result = await trx
             .update(items)
             .set({
-              availableQty: sql`${items.availableQty} + ${parseFloat(String(line.quantity))}`,
+              availableQty: sql`${items.availableQty} + ${lineQty}`,
               version: sql`${items.version} + 1`,
             })
-            .where(and(eq(items.id, line.itemId), eq(items.tenantId, tenantId)));
+            .where(and(eq(items.id, line.itemId), eq(items.tenantId, tenantId)))
+            .returning({ availableQty: items.availableQty });
+
+          const afterQty = parseFloat(String(result[0]?.availableQty ?? '0'));
+          const beforeQty = afterQty - lineQty;
+          await trx.insert(inventoryLedger).values({
+            tenantId,
+            itemId: line.itemId,
+            variantId: line.variantId ?? undefined,
+            warehouseId: line.warehouseId ?? invoice.warehouseId,
+            movementType: 'STOCK_IN',
+            quantity: String(lineQty),
+            quantityBefore: String(beforeQty),
+            quantityAfter: String(afterQty),
+            referenceType: 'INVOICE',
+            referenceId: id,
+            referenceLineId: line.id,
+            unitCost: '0',
+            notes: reason,
+            createdBy: userId,
+          });
         }
 
         // Update projections

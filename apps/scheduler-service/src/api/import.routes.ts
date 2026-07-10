@@ -3,6 +3,7 @@ import type { ErpDatabase } from '@erp/db';
 import { PERMISSIONS } from '@erp/types';
 import { z } from 'zod';
 import { ImportEngine, type ImportEntity } from '../domain/ImportEngine.js';
+import { authenticate } from '../middleware/authenticate.js';
 
 type AuthedRequest = { auth: { tenantId: number; userId: number; permissions: string[] } };
 
@@ -16,7 +17,7 @@ const MappingSchema = z.object({
   transform: z.enum(['TRIM', 'UPPERCASE', 'LOWERCASE', 'DATE_ISO', 'NUMBER']).optional(),
 });
 
-const VALID_ENTITIES: ImportEntity[] = ['customer', 'supplier', 'item', 'employee', 'opening-stock'];
+const VALID_ENTITIES: ImportEntity[] = ['customer', 'supplier', 'item', 'employee', 'opening-stock', 'attendance'];
 
 export async function importRoutes(fastify: FastifyInstance, db: ErpDatabase): Promise<void> {
   const engine = new ImportEngine(db);
@@ -24,6 +25,7 @@ export async function importRoutes(fastify: FastifyInstance, db: ErpDatabase): P
   // ── POST /imports/upload ──────────────────────────────────────────────────
   fastify.post<{ Body: { entityType: string; csvData: string; fileName: string } }>(
     '/imports/upload',
+    { preHandler: authenticate },
     async (request, reply) => {
       if (!hasPermission(request, PERMISSIONS.IMPORT_VIEW)) {
         return reply.code(403).send({ error: { code: 'PERMISSION_DENIED', message: 'Missing permission: IMPORT_VIEW' } });
@@ -44,6 +46,7 @@ export async function importRoutes(fastify: FastifyInstance, db: ErpDatabase): P
   // ── POST /imports/:jobId/map ──────────────────────────────────────────────
   fastify.post<{ Params: { jobId: string }; Body: { mappings: unknown[] } }>(
     '/imports/:jobId/map',
+    { preHandler: authenticate },
     async (request, reply) => {
       if (!hasPermission(request, PERMISSIONS.IMPORT_VIEW)) {
         return reply.code(403).send({ error: { code: 'PERMISSION_DENIED', message: 'Missing permission: IMPORT_VIEW' } });
@@ -64,6 +67,7 @@ export async function importRoutes(fastify: FastifyInstance, db: ErpDatabase): P
   // ── POST /imports/:jobId/validate ─────────────────────────────────────────
   fastify.post<{ Params: { jobId: string } }>(
     '/imports/:jobId/validate',
+    { preHandler: authenticate },
     async (request, reply) => {
       if (!hasPermission(request, PERMISSIONS.IMPORT_VIEW)) {
         return reply.code(403).send({ error: { code: 'PERMISSION_DENIED', message: 'Missing permission: IMPORT_VIEW' } });
@@ -78,13 +82,14 @@ export async function importRoutes(fastify: FastifyInstance, db: ErpDatabase): P
   // ── POST /imports/:jobId/execute ──────────────────────────────────────────
   fastify.post<{ Params: { jobId: string } }>(
     '/imports/:jobId/execute',
+    { preHandler: authenticate },
     async (request, reply) => {
       if (!hasPermission(request, PERMISSIONS.IMPORT_EXECUTE)) {
         return reply.code(403).send({ error: { code: 'PERMISSION_DENIED', message: 'Missing permission: IMPORT_EXECUTE' } });
       }
 
-      const { tenantId } = (request as unknown as AuthedRequest).auth;
-      const result = await engine.execute(tenantId, request.params.jobId);
+      const { tenantId, permissions } = (request as unknown as AuthedRequest).auth;
+      const result = await engine.execute(tenantId, request.params.jobId, permissions);
       return reply.code(200).send({ data: result });
     }
   );
@@ -92,6 +97,7 @@ export async function importRoutes(fastify: FastifyInstance, db: ErpDatabase): P
   // ── GET /imports/:jobId/status ────────────────────────────────────────────
   fastify.get<{ Params: { jobId: string } }>(
     '/imports/:jobId/status',
+    { preHandler: authenticate },
     async (request, reply) => {
       if (!hasPermission(request, PERMISSIONS.IMPORT_VIEW)) {
         return reply.code(403).send({ error: { code: 'PERMISSION_DENIED', message: 'Missing permission: IMPORT_VIEW' } });
@@ -144,6 +150,7 @@ export async function importRoutes(fastify: FastifyInstance, db: ErpDatabase): P
   // ── POST /imports/:jobId/rollback ─────────────────────────────────────────
   fastify.post<{ Params: { jobId: string } }>(
     '/imports/:jobId/rollback',
+    { preHandler: authenticate },
     async (request, reply) => {
       if (!hasPermission(request, PERMISSIONS.IMPORT_ROLLBACK)) {
         return reply.code(403).send({ error: { code: 'PERMISSION_DENIED', message: 'Missing permission: IMPORT_ROLLBACK' } });
@@ -158,6 +165,7 @@ export async function importRoutes(fastify: FastifyInstance, db: ErpDatabase): P
   // ── GET /imports/templates/:entityType ────────────────────────────────────
   fastify.get<{ Params: { entityType: string } }>(
     '/imports/templates/:entityType',
+    { preHandler: authenticate },
     async (request, reply) => {
       const { entityType } = request.params;
       if (!VALID_ENTITIES.includes(entityType as ImportEntity)) {

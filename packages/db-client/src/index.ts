@@ -4,6 +4,8 @@ import * as schema from './schema/index.js';
 
 export * from './schema/index.js';
 export type { PostgresJsDatabase };
+export { isReplicaHealthy } from './replica-health.js';
+export { ReplicaRouter, type ReplicaRouterOptions } from './replica-router.js';
 
 export type ErpDatabase = PostgresJsDatabase<typeof schema>;
 

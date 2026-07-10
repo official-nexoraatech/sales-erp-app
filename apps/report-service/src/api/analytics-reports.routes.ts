@@ -1,6 +1,7 @@
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import type { ErpDatabase } from '@erp/db';
+import type { ErpDatabase, ReplicaRouter } from '@erp/db';
+import type Redis from 'ioredis';
 import { authenticate } from '../middleware/authenticate.js';
 import { requirePermission } from '../middleware/authorize.js';
 import { REPORT_REGISTRY, getReportDefinition } from '../domain/ReportRegistry.js';
@@ -26,13 +27,18 @@ const ScheduleCreateSchema = z.object({
 
 type DbClient = ErpDatabase;
 
-export async function analyticsReportsRoutes(fastify: FastifyInstance, db: DbClient): Promise<void> {
-  const engine = new ReportEngine(db);
+export async function analyticsReportsRoutes(
+  fastify: FastifyInstance,
+  db: DbClient,
+  redis?: Redis,
+  replicaRouter?: ReplicaRouter
+): Promise<void> {
+  const engine = new ReportEngine(db, redis, replicaRouter);
   const formatter = new ReportFormatter();
 
   // GET /api/v2/reports — list all report definitions
   fastify.get('/api/v2/reports', {
-    preHandler: [authenticate, requirePermission('INVOICE_VIEW')],
+    preHandler: [authenticate, requirePermission('REPORT_VIEW')],
   }, async (_req, reply) => {
     const grouped = REPORT_REGISTRY.reduce<Record<string, typeof REPORT_REGISTRY>>((acc, r) => {
       if (!acc[r.category]) acc[r.category] = [];
@@ -44,7 +50,7 @@ export async function analyticsReportsRoutes(fastify: FastifyInstance, db: DbCli
 
   // GET /api/v2/reports/:slug — get report definition
   fastify.get<{ Params: { slug: string } }>('/api/v2/reports/:slug', {
-    preHandler: [authenticate, requirePermission('INVOICE_VIEW')],
+    preHandler: [authenticate, requirePermission('REPORT_VIEW')],
   }, async (req, reply) => {
     const definition = getReportDefinition(req.params.slug);
     if (!definition) {
@@ -102,6 +108,12 @@ export async function analyticsReportsRoutes(fastify: FastifyInstance, db: DbCli
               completedAt: new Date(),
               rowCount: result.totalRows,
               durationMs: Date.now() - startTime,
+              resultData: {
+                rows: result.rows,
+                totalRows: result.totalRows,
+                generatedAt: result.generatedAt,
+                totals: formatter.summarize(result, definition),
+              },
             })
             .where(eq(reportRunHistory.id, run!.id));
         } catch (err) {
@@ -152,7 +164,7 @@ export async function analyticsReportsRoutes(fastify: FastifyInstance, db: DbCli
 
   // GET /api/v2/reports/run-history — list run history
   fastify.get('/api/v2/reports/run-history', {
-    preHandler: [authenticate, requirePermission('INVOICE_VIEW')],
+    preHandler: [authenticate, requirePermission('REPORT_VIEW')],
   }, async (req, reply) => {
     const runs = await db
       .select()
@@ -165,7 +177,7 @@ export async function analyticsReportsRoutes(fastify: FastifyInstance, db: DbCli
 
   // GET /api/v2/reports/run-history/:runId — get run status
   fastify.get<{ Params: { runId: string } }>('/api/v2/reports/run-history/:runId', {
-    preHandler: [authenticate, requirePermission('INVOICE_VIEW')],
+    preHandler: [authenticate, requirePermission('REPORT_VIEW')],
   }, async (req, reply) => {
     const [run] = await db
       .select()
@@ -182,7 +194,7 @@ export async function analyticsReportsRoutes(fastify: FastifyInstance, db: DbCli
 
   // POST /api/v2/report-schedules — create schedule
   fastify.post('/api/v2/report-schedules', {
-    preHandler: [authenticate, requirePermission('REPORT_CREATE_SCHEDULE')],
+    preHandler: [authenticate, requirePermission('REPORT_SCHEDULE')],
   }, async (req, reply) => {
     const parsed = ScheduleCreateSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -225,7 +237,7 @@ export async function analyticsReportsRoutes(fastify: FastifyInstance, db: DbCli
 
   // DELETE /api/v2/report-schedules/:id — delete schedule
   fastify.delete<{ Params: { id: string } }>('/api/v2/report-schedules/:id', {
-    preHandler: [authenticate, requirePermission('REPORT_DELETE_SCHEDULE')],
+    preHandler: [authenticate, requirePermission('REPORT_SCHEDULE')],
   }, async (req, reply) => {
     const [deleted] = await db
       .delete(reportSchedules)

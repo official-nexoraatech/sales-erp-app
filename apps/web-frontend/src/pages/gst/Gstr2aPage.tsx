@@ -3,6 +3,9 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { RefreshCcw, Upload, CheckCircle, AlertTriangle, XCircle, Info } from 'lucide-react';
 import { gstApi } from '../../api/endpoints.js';
 import toast from 'react-hot-toast';
+import { ERPTableSkeleton } from '../../components/erp/ERPSkeleton.js';
+import ERPEmptyState from '../../components/erp/ERPEmptyState.js';
+import ERPTabs from '../../components/erp/ERPTabs.js';
 
 function getCurrentPeriod(): string {
   const now = new Date();
@@ -47,7 +50,7 @@ export function Gstr2aPage() {
   const importMutation = useMutation({
     mutationFn: (entries: unknown[]) => gstApi.importGstr2a(period, entries),
     onSuccess: (res) => {
-      const d = (res as { data: Record<string, unknown> }).data;
+      const d = (res as Record<string, unknown>);
       toast.success(`Imported ${String(d.imported ?? 0)} entries, ${String(d.skippedDuplicates ?? 0)} duplicates skipped`);
       void qc.invalidateQueries({ queryKey: ['gstr2a-reconciliation', period] });
     },
@@ -129,34 +132,25 @@ export function Gstr2aPage() {
 
       {/* Tolerance note */}
       <div className="flex items-start gap-2 text-xs text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-900/50 rounded-lg px-4 py-3">
-        <Info className="w-4 h-4 flex-shrink-0 mt-0.5 text-gray-400" />
+        <Info className="w-4 h-4 flex-shrink-0 mt-0.5 text-gray-400 dark:text-gray-500" />
         <span>Match tolerance: ±1% on GST amounts. Entries within tolerance are marked MATCHED automatically.</span>
       </div>
 
       {/* Tabs */}
-      <div className="border-b border-gray-200 dark:border-gray-700">
-        <nav className="flex gap-1">
-          {[
-            { key: 'gstr2a' as const, label: `GSTR-2A Entries (${gstr2aEntries.length})` },
-            { key: 'books' as const, label: `Books Only (${booksOnlyEntries.length})` },
-          ].map(({ key, label }) => (
-            <button
-              key={key}
-              onClick={() => setActiveTab(key)}
-              className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-                activeTab === key
-                  ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400'
-                  : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
-              }`}
-            >
-              {label}
-            </button>
-          ))}
-        </nav>
-      </div>
+      <ERPTabs
+        tabs={[
+          { key: 'gstr2a', label: `GSTR-2A Entries (${gstr2aEntries.length})` },
+          { key: 'books', label: `Books Only (${booksOnlyEntries.length})` },
+        ]}
+        active={activeTab}
+        onChange={(key) => setActiveTab(key as typeof activeTab)}
+      />
 
       {/* Table */}
       <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
+        {isLoading ? (
+          <ERPTableSkeleton rows={6} cols={7} />
+        ) : (
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
             <thead className="bg-gray-50 dark:bg-gray-900/50">
@@ -169,15 +163,16 @@ export function Gstr2aPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-              {isLoading ? (
-                <tr><td colSpan={7} className="py-8 text-center text-sm text-gray-400">Loading reconciliation data...</td></tr>
-              ) : activeTab === 'gstr2a' ? (
+              {activeTab === 'gstr2a' ? (
                 gstr2aEntries.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="py-12 text-center">
-                      <RefreshCcw className="w-8 h-8 text-gray-300 dark:text-gray-600 mx-auto mb-2" />
-                      <p className="text-sm text-gray-400">No GSTR-2A entries imported for {period}</p>
-                      <p className="text-xs text-gray-400 mt-1">Upload a JSON file from the GST portal to start reconciliation</p>
+                    <td colSpan={7}>
+                      <ERPEmptyState
+                        type="no-data"
+                        title="No GSTR-2A entries imported"
+                        description={`Upload a JSON file from the GST portal to start reconciliation for ${period}.`}
+                        action={{ label: 'Import 2A (JSON)', onClick: () => fileInputRef.current?.click() }}
+                      />
                     </td>
                   </tr>
                 ) : (
@@ -195,7 +190,7 @@ export function Gstr2aPage() {
                         <td className="px-4 py-3 text-sm text-right">
                           {r.matchVariance != null
                             ? <span className={Number(r.matchVariance) > 0 ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'}>{formatCurrency(r.matchVariance)}</span>
-                            : <span className="text-gray-400">—</span>
+                            : <span className="text-gray-400 dark:text-gray-500">—</span>
                           }
                         </td>
                       </tr>
@@ -205,8 +200,8 @@ export function Gstr2aPage() {
               ) : (
                 booksOnlyEntries.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="py-8 text-center text-sm text-gray-400">
-                      <CheckCircle className="w-8 h-8 text-green-400 mx-auto mb-2" />
+                    <td colSpan={7} className="py-8 text-center text-sm text-secondary">
+                      <CheckCircle className="w-8 h-8 text-green-400 dark:text-green-500 mx-auto mb-2" />
                       All purchase entries are matched
                     </td>
                   </tr>
@@ -222,7 +217,7 @@ export function Gstr2aPage() {
                         <td className="px-4 py-3 text-sm text-right text-gray-700 dark:text-gray-300">{formatCurrency(r.taxableAmount)}</td>
                         <td className="px-4 py-3 text-sm text-right text-gray-700 dark:text-gray-300">{formatCurrency(totalGst)}</td>
                         <td className="px-4 py-3"><StatusBadge status="BOOKS_ONLY" /></td>
-                        <td className="px-4 py-3 text-sm text-gray-400 text-center">—</td>
+                        <td className="px-4 py-3 text-sm text-disabled text-center">—</td>
                       </tr>
                     );
                   })
@@ -231,6 +226,7 @@ export function Gstr2aPage() {
             </tbody>
           </table>
         </div>
+        )}
       </div>
     </div>
   );

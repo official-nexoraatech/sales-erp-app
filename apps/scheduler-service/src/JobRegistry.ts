@@ -9,6 +9,10 @@ export interface JobConfig {
   description: string;
   tenantScoped: boolean;
   timeout?: number;
+  // Rebuild-on-demand jobs (e.g. projection rebuild — PG-008) have no meaningful
+  // cron; register() still creates their Worker, but main.ts's startup loop must
+  // skip calling schedule() for them so they don't get a recurring BullMQ repeat job.
+  manualOnly?: boolean;
 }
 
 export type JobHandler = (job: Job, tenantId?: number) => Promise<void>;
@@ -88,18 +92,23 @@ export class JobRegistry {
     const job = this.jobs.get(name);
     if (!job) throw new Error(`Unknown job: ${name}`);
 
+    // BullMQ dedupes repeatable jobs on (name, repeat options, jobId) — without a
+    // per-tenant jobId here, scheduling the same tenantScoped job for multiple
+    // tenants would collapse into a single repeatable entry instead of one per tenant.
+    const jobId = tenantId !== undefined ? `${name}:${tenantId}` : name;
+
     await job.queue.add(
       name,
       { tenantId },
-      { repeat: { pattern: job.config.cron } }
+      { repeat: { pattern: job.config.cron }, jobId }
     );
   }
 
-  async triggerManual(name: string, tenantId?: number): Promise<string> {
+  async triggerManual(name: string, tenantId?: number, data?: Record<string, unknown>): Promise<string> {
     const job = this.jobs.get(name);
     if (!job) throw new Error(`Unknown job: ${name}`);
 
-    const added = await job.queue.add(name, { tenantId, manual: true }, {
+    const added = await job.queue.add(name, { tenantId, manual: true, ...data }, {
       priority: 1,
     });
     return added.id ?? 'unknown';

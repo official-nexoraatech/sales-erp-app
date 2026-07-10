@@ -1,0 +1,10 @@
+apiVersion: v2
+name: erp
+description: >-
+  Helm chart for the ERP platform's 14 backend services (auth, tenant, inventory, sales,
+  notification, report, scheduler, search, gst, accounting, purchase, hr, production,
+  event). Templates the Deployment/Service/HPA/PDB/ServiceAccount shape already used by
+  the flat manifests in infrastructure/k8s/, parameterized per service via values.yaml.
+type: application
+version: 0.1.0
+appVersion: "1.0.0"

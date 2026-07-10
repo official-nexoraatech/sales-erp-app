@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { physicalVerifApi } from '../../api/endpoints.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
+import { ERPDetailSkeleton } from '../../components/erp/ERPSkeleton.js';
 import Button from '../../components/ui/Button.js';
 import Badge from '../../components/ui/Badge.js';
 import { formatDate, formatDatetime, formatCurrency } from '../../lib/format.js';
@@ -39,11 +40,11 @@ export default function PhysicalVerificationDetailPage() {
   const { data: varianceData } = useQuery({
     queryKey: ['physical-verif-variances', id],
     queryFn: () => physicalVerifApi.variances(Number(id)),
-    enabled: !!(id && (data as { data?: Verification })?.data?.status === 'COUNTING'),
+    enabled: !!(id && (data as { status?: string })?.status === 'COUNTING'),
   });
 
-  const verif = (data as { data?: Verification })?.data;
-  const variances: VerifLine[] = (varianceData as { data?: VerifLine[] })?.data ?? [];
+  const verif = (data as Verification);
+  const variances: VerifLine[] = (varianceData as VerifLine[]) ?? [];
 
   const startMutation = useMutation({
     mutationFn: () => physicalVerifApi.startCounting(Number(id)),
@@ -68,7 +69,7 @@ export default function PhysicalVerificationDetailPage() {
     onError: (e: Error) => toast.error(e.message),
   });
 
-  if (isLoading || !verif) return <div className="p-8 text-center text-gray-500">Loading…</div>;
+  if (isLoading || !verif) return <ERPDetailSkeleton />;
 
   return (
     <div>
@@ -122,7 +123,7 @@ export default function PhysicalVerificationDetailPage() {
                           className="w-28 rounded border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm px-2 py-1"
                         />
                       </td>
-                      <td className={`py-2 font-medium ${variance === undefined ? '' : variance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                      <td className={`py-2 font-medium ${variance === undefined ? '' : variance >= 0 ? 'text-success' : 'text-danger'}`}>
                         {variance !== undefined ? (variance >= 0 ? '+' : '') + variance.toFixed(3) : '–'}
                       </td>
                     </tr>

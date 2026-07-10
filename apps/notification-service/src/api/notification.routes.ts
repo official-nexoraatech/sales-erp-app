@@ -3,9 +3,12 @@ import type { ErpDatabase } from '@erp/db';
 import { notificationLog, notificationPreferences, notificationTemplates } from '@erp/db';
 import { eq, and, desc } from 'drizzle-orm';
 import { z } from 'zod';
-import { ValidationError } from '@erp/types';
+import { ValidationError, PERMISSIONS } from '@erp/types';
+import { timingSafeEqual } from 'node:crypto';
 import { NotificationEngine } from '../domain/NotificationEngine.js';
 import type { NotificationServiceConfig } from '../config.js';
+import { authenticate, authenticateStream } from '../middleware/authenticate.js';
+import { requirePermission } from '../middleware/authorize.js';
 
 const SendSchema = z.object({
   eventType: z.string().min(1),
@@ -14,6 +17,9 @@ const SendSchema = z.object({
   recipientEmail: z.string().email().optional(),
   templateData: z.record(z.unknown()).default({}),
   channels: z.array(z.enum(['SMS', 'EMAIL', 'WHATSAPP', 'IN_APP'])).optional(),
+  // ES-26 (M8): callers with a natural dedup key (e.g. invoiceId+reminderDate) should pass this
+  // instead of relying on the derived tenant+event+recipient+data+time-bucket hash.
+  idempotencyKey: z.string().min(1).max(200).optional(),
 });
 
 const InternalSendSchema = SendSchema.extend({
@@ -28,12 +34,19 @@ const SendRawInternalSchema = z.object({
   recipientEmail: z.string().email().optional(),
   subject: z.string().optional(),
   body: z.string().min(1),
+  idempotencyKey: z.string().min(1).max(200).optional(),
 });
 
 function requireInternalKey(req: { headers: Record<string, string | string[] | undefined> }, reply: { code: (n: number) => { send: (b: unknown) => void } }): boolean {
   const key = req.headers['x-internal-key'];
   const expected = process.env['INTERNAL_API_KEY'];
-  if (!expected || key !== expected) {
+  const keyBuffer = Buffer.from(typeof key === 'string' ? key : '');
+  const expectedBuffer = Buffer.from(expected ?? '');
+  const matches =
+    !!expected &&
+    keyBuffer.length === expectedBuffer.length &&
+    timingSafeEqual(keyBuffer, expectedBuffer);
+  if (!matches) {
     reply.code(401).send({ error: { code: 'UNAUTHORIZED', message: 'Unauthorized' } });
     return false;
   }
@@ -59,12 +72,12 @@ export async function notificationRoutes(
   const engine = new NotificationEngine(db, config);
 
   // ── POST /notifications/send — Send a notification ──────────────────────
-  fastify.post('/notifications/send', async (request, reply) => {
+  fastify.post('/notifications/send', { preHandler: [authenticate, requirePermission(PERMISSIONS.NOTIFICATION_SEND)] }, async (request, reply) => {
     const { tenantId } = (request as unknown as AuthedRequest).auth;
     const body = SendSchema.safeParse(request.body);
     if (!body.success) throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
 
-    const { recipientUserId, recipientPhone, recipientEmail, channels, ...rest } = body.data;
+    const { recipientUserId, recipientPhone, recipientEmail, channels, idempotencyKey, ...rest } = body.data;
     const results = await engine.send({
       tenantId,
       ...rest,
@@ -72,6 +85,7 @@ export async function notificationRoutes(
       ...(recipientPhone !== undefined ? { recipientPhone } : {}),
       ...(recipientEmail !== undefined ? { recipientEmail } : {}),
       ...(channels !== undefined ? { channels } : {}),
+      ...(idempotencyKey !== undefined ? { idempotencyKey } : {}),
     });
     return reply.code(200).send({ data: { results } });
   });
@@ -82,13 +96,14 @@ export async function notificationRoutes(
     const body = InternalSendSchema.safeParse(request.body);
     if (!body.success) throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
 
-    const { recipientUserId, recipientPhone, recipientEmail, channels, ...rest } = body.data;
+    const { recipientUserId, recipientPhone, recipientEmail, channels, idempotencyKey, ...rest } = body.data;
     const results = await engine.send({
       ...rest,
       ...(recipientUserId !== undefined ? { recipientUserId } : {}),
       ...(recipientPhone !== undefined ? { recipientPhone } : {}),
       ...(recipientEmail !== undefined ? { recipientEmail } : {}),
       ...(channels !== undefined ? { channels } : {}),
+      ...(idempotencyKey !== undefined ? { idempotencyKey } : {}),
     });
     return reply.code(200).send({ data: { results } });
   });
@@ -99,12 +114,13 @@ export async function notificationRoutes(
     const body = SendRawInternalSchema.safeParse(request.body);
     if (!body.success) throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
 
-    const { recipientPhone, recipientEmail, subject, ...rest } = body.data;
+    const { recipientPhone, recipientEmail, subject, idempotencyKey, ...rest } = body.data;
     const result = await engine.sendRaw({
       ...rest,
       ...(recipientPhone !== undefined ? { recipientPhone } : {}),
       ...(recipientEmail !== undefined ? { recipientEmail } : {}),
       ...(subject !== undefined ? { subject } : {}),
+      ...(idempotencyKey !== undefined ? { idempotencyKey } : {}),
     });
     return reply.code(200).send({ data: result });
   });
@@ -157,8 +173,71 @@ export async function notificationRoutes(
     return reply.code(200).send({ data: { message: 'HR templates seeded', count } });
   });
 
+  // ── POST /notifications/templates/seed-auth — Seed Auth domain templates ─
+  fastify.post('/notifications/templates/seed-auth', async (request, reply) => {
+    if (!requireInternalKey(request as never, reply as never)) return;
+    const body = z.object({ tenantId: z.number().int().positive(), createdBy: z.number().int().positive().default(0) }).safeParse(request.body);
+    if (!body.success) throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
+
+    const templates = [
+      {
+        name: 'Password Reset',
+        eventType: 'PASSWORD_RESET_REQUESTED',
+        channel: 'EMAIL' as const,
+        subject: 'Reset your password',
+        bodyTemplate: '<p>We received a request to reset your password.</p><p><a href="{{resetLink}}">Click here to reset your password</a></p><p>If you did not request this, you can safely ignore this email.</p>',
+        isSystem: true,
+      },
+    ];
+
+    let count = 0;
+    for (const t of templates) {
+      const [inserted] = await db
+        .insert(notificationTemplates)
+        .values({ tenantId: body.data.tenantId, createdBy: body.data.createdBy, ...t })
+        .onConflictDoNothing()
+        .returning();
+      if (inserted) count++;
+    }
+
+    return reply.code(200).send({ data: { message: 'Auth templates seeded', count } });
+  });
+
+  // ── POST /notifications/templates/seed-tenant — Seed tenant-provisioning templates ─
+  // PG-026: WELCOME_EMAIL was never seeded anywhere — TenantProvisioner's welcome-email
+  // step called a nonexistent endpoint with a mismatched body shape, so even fixing the
+  // call itself would still have silently no-op'd without a template row to look up.
+  fastify.post('/notifications/templates/seed-tenant', async (request, reply) => {
+    if (!requireInternalKey(request as never, reply as never)) return;
+    const body = z.object({ tenantId: z.number().int().positive(), createdBy: z.number().int().positive().default(0) }).safeParse(request.body);
+    if (!body.success) throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
+
+    const templates = [
+      {
+        name: 'Welcome Email',
+        eventType: 'WELCOME_EMAIL',
+        channel: 'EMAIL' as const,
+        subject: 'Welcome to {{tenantName}}',
+        bodyTemplate: '<p>Hi {{firstName}},</p><p>Welcome to {{tenantName}}! Your account has been created and is ready to use.</p>',
+        isSystem: true,
+      },
+    ];
+
+    let count = 0;
+    for (const t of templates) {
+      const [inserted] = await db
+        .insert(notificationTemplates)
+        .values({ tenantId: body.data.tenantId, createdBy: body.data.createdBy, ...t })
+        .onConflictDoNothing()
+        .returning();
+      if (inserted) count++;
+    }
+
+    return reply.code(200).send({ data: { message: 'Tenant-provisioning templates seeded', count } });
+  });
+
   // ── GET /notifications — List in-app notifications for current user ──────
-  fastify.get('/notifications', async (request, reply) => {
+  fastify.get('/notifications', { preHandler: authenticate }, async (request, reply) => {
     const { tenantId, userId = 0 } = (request as unknown as AuthedRequest).auth;
     const query = (request.query as { page?: string; size?: string });
     const page = parseInt(query.page ?? '0', 10);
@@ -186,7 +265,7 @@ export async function notificationRoutes(
   });
 
   // ── POST /notifications/:id/read — Mark in-app notification as read ──────
-  fastify.post<{ Params: { id: string } }>('/notifications/:id/read', async (request, reply) => {
+  fastify.post<{ Params: { id: string } }>('/notifications/:id/read', { preHandler: authenticate }, async (request, reply) => {
     const { tenantId } = (request as unknown as AuthedRequest).auth;
     const id = parseInt(request.params.id, 10);
 
@@ -199,7 +278,7 @@ export async function notificationRoutes(
   });
 
   // ── POST /notifications/preferences — Update per-user channel prefs ──────
-  fastify.post('/notifications/preferences', async (request, reply) => {
+  fastify.post('/notifications/preferences', { preHandler: authenticate }, async (request, reply) => {
     const { tenantId, userId = 0 } = (request as unknown as AuthedRequest).auth;
     const body = PreferencesSchema.safeParse(request.body);
     if (!body.success) throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
@@ -237,14 +316,14 @@ export async function notificationRoutes(
   });
 
   // ── GET /notifications/unread-count — Fast unread bell count ─────────────
-  fastify.get('/notifications/unread-count', async (request, reply) => {
+  fastify.get('/notifications/unread-count', { preHandler: authenticate }, async (request, reply) => {
     const { tenantId, userId = 0 } = (request as unknown as AuthedRequest).auth;
     const count = await engine.getUnreadCount(tenantId, userId);
     return reply.code(200).send({ data: { count } });
   });
 
   // ── SSE: GET /notifications/stream — Real-time in-app push ───────────────
-  fastify.get('/notifications/stream', async (request, reply) => {
+  fastify.get('/notifications/stream', { preHandler: authenticateStream }, async (request, reply) => {
     const { tenantId, userId = 0 } = (request as unknown as AuthedRequest).auth;
 
     reply.raw.writeHead(200, {

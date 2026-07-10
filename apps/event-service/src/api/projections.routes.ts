@@ -3,9 +3,22 @@ import type { PlatformContextFactory } from '@erp/sdk';
 import { projectionMetadata } from '@erp/db';
 import { and, eq, sql } from 'drizzle-orm';
 import { z } from 'zod';
+import { Queue } from 'bullmq';
 import { PERMISSIONS } from '@erp/types';
 import { authenticate } from '../middleware/authenticate.js';
 import { requirePermission } from '../middleware/authorize.js';
+
+// PG-008: BullMQ queue name per projection — must match
+// PROJECTION_QUEUE_NAMES in apps/scheduler-service/src/jobs/projectionRebuildJobs.ts
+// exactly. event-service enqueues here; scheduler-service's JobRegistry Worker
+// (registerProjectionRebuildJobs) is the only consumer — no HTTP call, no
+// duplicated business logic, just a shared Redis connection and an agreed queue name.
+const PROJECTION_QUEUE_NAMES: Record<string, string> = {
+  projection_stock_level: 'projection-rebuild-stock-level',
+  projection_dashboard_daily: 'projection-rebuild-dashboard-daily',
+  projection_customer_balance: 'projection-rebuild-customer-balance',
+  projection_supplier_balance: 'projection-rebuild-supplier-balance',
+};
 
 const STALE_TOLERANCE_MS: Record<string, number> = {
   projection_dashboard_daily: 120_000,   // 2 minutes
@@ -37,9 +50,20 @@ export async function projectionRoutes(
 ): Promise<void> {
   fastify.addHook('preHandler', authenticate);
 
+  // Created once at route-registration time (not per-request), reusing the same
+  // ioredis connection ctxFactory already holds for rate-limiting. BullMQ treats an
+  // externally-supplied connection as shared — it will not be closed by these Queue
+  // instances.
+  const rebuildQueues: Record<string, Queue> = Object.fromEntries(
+    Object.entries(PROJECTION_QUEUE_NAMES).map(([projectionName, queueName]) => [
+      projectionName,
+      new Queue(queueName, { connection: ctxFactory.getRedis() }),
+    ])
+  );
+
   // GET /admin/projections — list all projections with metadata
   fastify.get('/admin/projections', {
-    preHandler: requirePermission(PERMISSIONS.AUDIT_LOG_VIEW),
+    preHandler: requirePermission(PERMISSIONS.PROJECTION_VIEW),
     handler: async (request, reply) => {
       const ctx = ctxFactory.create({ tenantId: request.auth.tenantId, userId: request.auth.userId, correlationId: (request.headers['x-correlation-id'] as string) ?? 'system' });
       const db = ctx.db.raw;
@@ -57,7 +81,7 @@ export async function projectionRoutes(
 
   // GET /admin/projections/:name — single projection metadata
   fastify.get<{ Params: { name: string } }>('/admin/projections/:name', {
-    preHandler: requirePermission(PERMISSIONS.AUDIT_LOG_VIEW),
+    preHandler: requirePermission(PERMISSIONS.PROJECTION_VIEW),
     handler: async (request, reply) => {
       const { name } = request.params;
       const ctx = ctxFactory.create({ tenantId: request.auth.tenantId, userId: request.auth.userId, correlationId: (request.headers['x-correlation-id'] as string) ?? 'system' });
@@ -81,7 +105,7 @@ export async function projectionRoutes(
 
   // POST /admin/projections/:name/rebuild — trigger projection rebuild
   fastify.post<{ Params: { name: string } }>('/admin/projections/:name/rebuild', {
-    preHandler: requirePermission(PERMISSIONS.AUDIT_LOG_VIEW),
+    preHandler: requirePermission(PERMISSIONS.PROJECTION_MANAGE),
     handler: async (request, reply) => {
       const { name } = request.params;
       const ctx = ctxFactory.create({ tenantId: request.auth.tenantId, userId: request.auth.userId, correlationId: (request.headers['x-correlation-id'] as string) ?? 'system' });
@@ -101,36 +125,28 @@ export async function projectionRoutes(
         return reply.code(422).send({ error: { code: 'REBUILD_IN_PROGRESS', message: `Projection '${name}' is already being rebuilt` } });
       }
 
+      const queue = rebuildQueues[name];
+      if (!queue) {
+        return reply.code(400).send({ error: { code: 'UNSUPPORTED_PROJECTION', message: `No rebuild job registered for '${name}'` } });
+      }
+
       // Mark as REBUILDING
       await db
         .update(projectionMetadata)
         .set({ status: 'REBUILDING', rebuildStartedAt: new Date(), updatedAt: new Date() })
         .where(eq(projectionMetadata.projectionName, name));
 
-      // Trigger rebuild asynchronously (in production, would enqueue a BullMQ job)
-      setImmediate(async () => {
-        try {
-          // Simulate rebuild time based on projection type
-          const delay = name === 'projection_dashboard_daily' ? 2000 : 500;
-          await new Promise((resolve) => setTimeout(resolve, delay));
-
-          await db
-            .update(projectionMetadata)
-            .set({
-              status: 'UP_TO_DATE',
-              lastUpdatedAt: new Date(),
-              rebuildCompletedAt: new Date(),
-              updatedAt: new Date(),
-            })
-            .where(eq(projectionMetadata.projectionName, name));
-        } catch (err) {
-          const errMsg = err instanceof Error ? err.message : String(err);
-          await db
-            .update(projectionMetadata)
-            .set({ status: 'ERROR', errorMessage: errMsg, updatedAt: new Date() })
-            .where(eq(projectionMetadata.projectionName, name));
-        }
-      });
+      // Enqueue onto scheduler-service's JobRegistry Worker — see PG-008.
+      try {
+        await queue.add(name, { tenantId: request.auth.tenantId });
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        await db
+          .update(projectionMetadata)
+          .set({ status: 'ERROR', errorMessage: errMsg, updatedAt: new Date() })
+          .where(eq(projectionMetadata.projectionName, name));
+        return reply.code(500).send({ error: { code: 'REBUILD_ENQUEUE_FAILED', message: 'Failed to enqueue rebuild job' } });
+      }
 
       return reply.code(202).send({
         data: { projectionName: name, status: 'REBUILDING', message: 'Rebuild initiated' },
@@ -140,7 +156,7 @@ export async function projectionRoutes(
 
   // POST /admin/projections/:name/heartbeat — update projection lag (called by projection workers)
   fastify.post<{ Params: { name: string } }>('/admin/projections/:name/heartbeat', {
-    preHandler: requirePermission(PERMISSIONS.AUDIT_LOG_VIEW),
+    preHandler: requirePermission(PERMISSIONS.PROJECTION_MANAGE),
     handler: async (request, reply) => {
       const { name } = request.params;
       const body = request.body as { lastEventId?: string; lastEventOccurredAt?: string };

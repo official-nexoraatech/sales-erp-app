@@ -1,6 +1,7 @@
 import {
   bigserial,
   boolean,
+  date,
   decimal,
   index,
   integer,
@@ -43,6 +44,7 @@ export const inventoryLedger = pgTable(
     referenceId: integer('reference_id'),
     referenceLineId: integer('reference_line_id'),
     unitCost: decimal('unit_cost', { precision: 15, scale: 2 }),
+    cogsPerUnit: decimal('cogs_per_unit', { precision: 15, scale: 2 }), // ES-13: cost used for this STOCK_OUT movement
     notes: text('notes'),
     createdBy: integer('created_by').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
@@ -51,6 +53,29 @@ export const inventoryLedger = pgTable(
     index('idx_inv_ledger_tenant_item_wh').on(t.tenantId, t.itemId, t.warehouseId, t.createdAt),
     index('idx_inv_ledger_reference').on(t.tenantId, t.referenceType, t.referenceId),
     index('idx_inv_ledger_tenant_date').on(t.tenantId, t.createdAt),
+    // ES-16: warehouse-agnostic item ledger history (costing/report reads that don't filter by warehouse)
+    index('idx_inventory_ledger_tenant_item_date').on(t.tenantId, t.itemId, t.createdAt),
+  ]
+);
+
+// ─── FIFO Cost Layers (ES-13: one row per STOCK_IN for items costed via FIFO) ─
+export const inventoryFifoLayers = pgTable(
+  'inventory_fifo_layers',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    tenantId: integer('tenant_id').notNull(),
+    itemId: integer('item_id').notNull(),
+    variantId: integer('variant_id'),
+    warehouseId: integer('warehouse_id').notNull(),
+    receivedAt: timestamp('received_at', { withTimezone: true }).notNull(),
+    originalQty: decimal('original_qty', { precision: 15, scale: 3 }).notNull(),
+    remainingQty: decimal('remaining_qty', { precision: 15, scale: 3 }).notNull(),
+    unitCost: decimal('unit_cost', { precision: 15, scale: 2 }).notNull(),
+    sourceLedgerId: integer('source_ledger_id').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    index('idx_fifo_layers_consume_order').on(t.tenantId, t.itemId, t.warehouseId, t.receivedAt),
   ]
 );
 
@@ -377,7 +402,25 @@ export const reconciliationErrors = pgTable(
   ]
 );
 
+// ─── Stock Valuation Snapshots (PG-026 — daily persisted snapshot) ────────
+export const stockValuationSnapshots = pgTable(
+  'stock_valuation_snapshots',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    tenantId: integer('tenant_id').notNull(),
+    asOfDate: date('as_of_date').notNull(),
+    totalStockValue: decimal('total_stock_value', { precision: 15, scale: 2 }).notNull(),
+    itemCount: integer('item_count').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    unique('stock_valuation_snapshots_tenant_date').on(t.tenantId, t.asOfDate),
+    index('idx_stock_valuation_snapshots_tenant').on(t.tenantId, t.asOfDate),
+  ]
+);
+
 export type InventoryLedgerEntry = typeof inventoryLedger.$inferInsert;
+export type StockValuationSnapshot = typeof stockValuationSnapshots.$inferSelect;
 export type StockReservation = typeof stockReservations.$inferSelect;
 export type NewStockReservation = typeof stockReservations.$inferInsert;
 export type StockTransfer = typeof stockTransfers.$inferSelect;
@@ -391,3 +434,5 @@ export type PhysicalVerificationLine = typeof physicalVerificationLines.$inferSe
 export type FabricRoll = typeof fabricRolls.$inferSelect;
 export type FabricCut = typeof fabricCuts.$inferSelect;
 export type ProjectionStockLevel = typeof projectionStockLevel.$inferSelect;
+export type InventoryFifoLayer = typeof inventoryFifoLayers.$inferSelect;
+export type NewInventoryFifoLayer = typeof inventoryFifoLayers.$inferInsert;

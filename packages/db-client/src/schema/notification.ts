@@ -65,6 +65,10 @@ export const notificationLog = pgTable(
     errorMessage: text('error_message'),
     metadata: jsonb('metadata').default({}),
     readAt: timestamp('read_at', { withTimezone: true }),
+    // ES-26 (M8): caller-supplied or derived dedup key (tenant+eventType+channel+recipient+
+    // templateData hash + 5-min time bucket) — a unique index on (tenantId, idempotencyKey)
+    // rejects a retry that lands on an already-recently-sent notification.
+    idempotencyKey: varchar('idempotency_key', { length: 200 }),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
     createdBy: integer('created_by').notNull(),
@@ -74,6 +78,7 @@ export const notificationLog = pgTable(
     index('idx_notif_log_tenant_status').on(t.tenantId, t.status, t.createdAt),
     index('idx_notif_log_recipient').on(t.recipientUserId, t.tenantId),
     index('idx_notif_log_event').on(t.eventType, t.tenantId),
+    unique('notif_log_idempotency_key').on(t.tenantId, t.idempotencyKey),
   ]
 );
 

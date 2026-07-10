@@ -6,6 +6,8 @@ import { PERMISSIONS } from '@erp/types';
 import { authenticate } from '../middleware/authenticate.js';
 import { requirePermission } from '../middleware/authorize.js';
 import { GstReturnTrackerService } from '../domain/GstReturnTrackerService.js';
+import { Gstr3bService } from '../domain/Gstr3bService.js';
+import type { Gstr3bDischargeData } from '../domain/Gstr3bService.js';
 
 type AuthedRequest = { auth: { tenantId: number; userId: number } };
 const PERIOD_REGEX = /^\d{4}-\d{2}$/;
@@ -58,7 +60,17 @@ export async function gstReturnsRoutes(
     const body = BodySchema.safeParse(request.body);
     if (!body.success) throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
 
-    await GstReturnTrackerService.markFiled(ctx.db, tenantId, userId, returnType, body.data.period, body.data.referenceNumber);
+    // PG-040 — for GSTR3B, compute the real cash/ITC discharge split now, at the moment of
+    // filing, and persist it (see GstReturnTrackerService.markFiled) so GSTR-9 Table 9 can
+    // later report actual tax paid instead of mirroring Table 4's liability figure.
+    let dischargeData: Gstr3bDischargeData | undefined;
+    if (returnType === 'GSTR3B') {
+      const manualAdjustments = await GstReturnTrackerService.getGstr3bManualAdjustments(ctx.db, tenantId, body.data.period);
+      const gstr3bResult = await Gstr3bService.compute(ctx.db, tenantId, body.data.period, manualAdjustments ?? undefined);
+      dischargeData = Gstr3bService.deriveDischargeData(gstr3bResult.itcSetoff);
+    }
+
+    await GstReturnTrackerService.markFiled(ctx.db, tenantId, userId, returnType, body.data.period, body.data.referenceNumber, dischargeData);
 
     await ctx.audit.log({
       action: 'GST_RETURN_FILED',

@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import type { PlatformContextFactory } from '@erp/sdk';
+import type { PlatformContextFactory, SagaOrchestrator } from '@erp/sdk';
 import { sagaLog } from '@erp/db';
 import { and, eq, sql, desc, gte } from 'drizzle-orm';
 import { z } from 'zod';
@@ -16,13 +16,14 @@ const SagaListSchema = z.object({
 
 export async function sagaRoutes(
   fastify: FastifyInstance,
-  ctxFactory: PlatformContextFactory
+  ctxFactory: PlatformContextFactory,
+  registeredOrchestrator: SagaOrchestrator
 ): Promise<void> {
   fastify.addHook('preHandler', authenticate);
 
   // GET /admin/sagas/summary — counts by status and type
   fastify.get('/admin/sagas/summary', {
-    preHandler: requirePermission(PERMISSIONS.AUDIT_LOG_VIEW),
+    preHandler: requirePermission(PERMISSIONS.SAGA_VIEW),
     handler: async (request, reply) => {
       const ctx = ctxFactory.create({ tenantId: request.auth.tenantId, userId: request.auth.userId, correlationId: (request.headers['x-correlation-id'] as string) ?? 'system' });
       const db = ctx.db.raw;
@@ -72,7 +73,7 @@ export async function sagaRoutes(
 
   // GET /admin/sagas — list sagas with optional status filter
   fastify.get('/admin/sagas', {
-    preHandler: requirePermission(PERMISSIONS.AUDIT_LOG_VIEW),
+    preHandler: requirePermission(PERMISSIONS.SAGA_VIEW),
     handler: async (request, reply) => {
       const parsed = SagaListSchema.safeParse(request.query);
       if (!parsed.success) {
@@ -109,7 +110,7 @@ export async function sagaRoutes(
 
   // GET /admin/sagas/:id — full saga step history
   fastify.get<{ Params: { id: string } }>('/admin/sagas/:id', {
-    preHandler: requirePermission(PERMISSIONS.AUDIT_LOG_VIEW),
+    preHandler: requirePermission(PERMISSIONS.SAGA_VIEW),
     handler: async (request, reply) => {
       const { id } = request.params;
       const ctx = ctxFactory.create({ tenantId: request.auth.tenantId, userId: request.auth.userId, correlationId: (request.headers['x-correlation-id'] as string) ?? 'system' });
@@ -130,60 +131,31 @@ export async function sagaRoutes(
   });
 
   // POST /admin/sagas/:id/retry — retry from last failed step
+  // ES-24 [H3]: previously just flipped saga_log.status to STARTED without re-running
+  // anything. Now genuinely calls SagaOrchestrator.retry(), which reconstructs the step
+  // list from the saga's registered step factory and resumes execution from the step
+  // that failed. Only succeeds for saga types whose factory is registered in THIS
+  // process — event-service doesn't own domain logic for sagas like INVOICE_CREATION
+  // (that lives in sales-service), so retrying those from here surfaces a clear
+  // SAGA_TYPE_NOT_REGISTERED error instead of a silent no-op that used to look like success.
   fastify.post<{ Params: { id: string } }>('/admin/sagas/:id/retry', {
-    preHandler: requirePermission(PERMISSIONS.AUDIT_LOG_VIEW),
+    preHandler: requirePermission(PERMISSIONS.SAGA_MANAGE),
     handler: async (request, reply) => {
       const { id } = request.params;
-      const ctx = ctxFactory.create({ tenantId: request.auth.tenantId, userId: request.auth.userId, correlationId: (request.headers['x-correlation-id'] as string) ?? 'system' });
-      const db = ctx.db.raw;
+      const result = await registeredOrchestrator.retry(id, request.auth.tenantId);
 
-      const rows = await db
-        .select()
-        .from(sagaLog)
-        .where(and(eq(sagaLog.sagaId, id), eq(sagaLog.tenantId, request.auth.tenantId)))
-        .limit(1);
-
-      if (!rows[0]) {
-        return reply.code(404).send({ error: { code: 'NOT_FOUND', message: 'Saga not found' } });
-      }
-
-      if (rows[0].status !== 'FAILED' && rows[0].status !== 'COMPENSATING') {
-        return reply.code(422).send({ error: { code: 'INVALID_STATE', message: `Cannot retry saga in status: ${rows[0].status}` } });
-      }
-
-      await db
-        .update(sagaLog)
-        .set({ status: 'STARTED', updatedAt: new Date() })
-        .where(and(eq(sagaLog.sagaId, id), eq(sagaLog.tenantId, request.auth.tenantId)));
-
-      return reply.code(200).send({ data: { sagaId: id, status: 'STARTED', message: 'Saga retry initiated' } });
+      return reply.code(200).send({ data: { ...result, message: `Saga retry completed with status: ${result.status}` } });
     },
   });
 
   // POST /admin/sagas/:id/compensate — manually trigger compensation
   fastify.post<{ Params: { id: string } }>('/admin/sagas/:id/compensate', {
-    preHandler: requirePermission(PERMISSIONS.AUDIT_LOG_VIEW),
+    preHandler: requirePermission(PERMISSIONS.SAGA_MANAGE),
     handler: async (request, reply) => {
       const { id } = request.params;
-      const ctx = ctxFactory.create({ tenantId: request.auth.tenantId, userId: request.auth.userId, correlationId: (request.headers['x-correlation-id'] as string) ?? 'system' });
-      const db = ctx.db.raw;
+      const result = await registeredOrchestrator.compensate(id, request.auth.tenantId);
 
-      const rows = await db
-        .select()
-        .from(sagaLog)
-        .where(and(eq(sagaLog.sagaId, id), eq(sagaLog.tenantId, request.auth.tenantId)))
-        .limit(1);
-
-      if (!rows[0]) {
-        return reply.code(404).send({ error: { code: 'NOT_FOUND', message: 'Saga not found' } });
-      }
-
-      await db
-        .update(sagaLog)
-        .set({ status: 'COMPENSATING', updatedAt: new Date() })
-        .where(and(eq(sagaLog.sagaId, id), eq(sagaLog.tenantId, request.auth.tenantId)));
-
-      return reply.code(200).send({ data: { sagaId: id, status: 'COMPENSATING', message: 'Compensation triggered' } });
+      return reply.code(200).send({ data: { ...result, message: 'Compensation completed' } });
     },
   });
 }

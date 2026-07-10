@@ -11,6 +11,10 @@ import { JournalEngine } from '../domain/JournalEngine.js';
 
 type AuthedRequest = { auth: { tenantId: number; userId: number } };
 
+const ReverseJournalSchema = z.object({
+  reason: z.string().max(500).optional(),
+});
+
 const ManualJournalSchema = z.object({
   description: z.string().min(1).max(500),
   referenceType: z.string().max(50).optional(),
@@ -132,13 +136,16 @@ export async function journalRoutes(
           ...(l.description ? { description: l.description } : {}),
           ...(l.narration ? { narration: l.narration } : {}),
         })),
-      });
+      }, ctx.tenant.correlationId);
 
       await ctx.audit.log({
         action: 'CREATE',
         entityType: 'journal',
         metadata: { journalId: result.journalId },
       });
+
+      // JournalEngine.post() already writes a JOURNAL_POSTED outbox event (with the correct
+      // numeric aggregateId) inside its own transaction — no separate publish needed here.
 
       return reply.code(201).send({ data: result });
     }
@@ -152,9 +159,9 @@ export async function journalRoutes(
       const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
       const ctx = ctxFactory.create({ tenantId, userId, correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID() });
       const journalId = request.params.id;
-      const { reason } = (request.body as { reason?: string }) ?? {};
+      const { reason } = ReverseJournalSchema.parse(request.body ?? {});
 
-      const result = await JournalEngine.reverse(ctx.db, tenantId, userId, journalId, reason);
+      const result = await JournalEngine.reverse(ctx.db, tenantId, userId, journalId, reason, ctx.tenant.correlationId);
 
       await ctx.audit.log({
         action: 'UPDATE',

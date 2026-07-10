@@ -2,6 +2,10 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Trash2, Clock, Mail } from 'lucide-react';
 import { reportSchedulesApi, reportsEngineApi } from '../../api/endpoints.js';
+import { useAuthStore } from '../../store/auth.store.js';
+import { PERMISSIONS } from '../../constants/permissions.js';
+import { ERPCardSkeleton } from '../../components/erp/ERPSkeleton.js';
+import ERPEmptyState from '../../components/erp/ERPEmptyState.js';
 
 interface Schedule {
   id: number;
@@ -27,6 +31,7 @@ const CRON_PRESETS = [
 
 export default function SchedulesPage() {
   const qc = useQueryClient();
+  const hasPermission = useAuthStore((s) => s.hasPermission);
   const [showForm, setShowForm] = useState(false);
   const [reportSlug, setReportSlug] = useState('');
   const [format, setFormat] = useState<'PDF' | 'EXCEL' | 'CSV'>('EXCEL');
@@ -41,6 +46,7 @@ export default function SchedulesPage() {
   const { data: reportsData } = useQuery({
     queryKey: ['report-list'],
     queryFn: reportsEngineApi.list,
+    enabled: hasPermission(PERMISSIONS.REPORT_VIEW),
   });
 
   const allReports: ReportDef[] = reportsData
@@ -182,13 +188,19 @@ export default function SchedulesPage() {
       )}
 
       {/* Schedules list */}
-      {isLoading && <p className="text-secondary text-sm">Loading schedules...</p>}
+      {isLoading && (
+        <div className="space-y-3">
+          {Array.from({ length: 3 }).map((_, i) => <ERPCardSkeleton key={i} lines={2} />)}
+        </div>
+      )}
 
       {!isLoading && schedulesArr.length === 0 && (
-        <div className="text-center py-16 text-secondary">
-          <Clock size={28} className="mx-auto mb-3 opacity-30" />
-          <p className="text-sm">No schedules yet. Create one to auto-dispatch reports by email.</p>
-        </div>
+        <ERPEmptyState
+          type="no-data"
+          title="No schedules yet"
+          description="Create one to auto-dispatch reports by email."
+          action={{ label: 'New Schedule', onClick: () => setShowForm(true) }}
+        />
       )}
 
       <div className="space-y-3">

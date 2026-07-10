@@ -77,8 +77,17 @@ export async function ewayBillRoutes(
     const body = GenerateEwbSchema.safeParse(request.body);
     if (!body.success) throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
 
-    const result = await EwayBillService.generate(ctx.db, tenantId, body.data.invoiceId, body.data.payload as EwayBillPayload);
+    const result = await EwayBillService.generate(
+      ctx.db,
+      tenantId,
+      userId,
+      body.data.invoiceId,
+      body.data.payload as EwayBillPayload,
+      ctx.tenant.correlationId
+    );
 
+    // ES-28 [M16-b]: EWAY_BILL_GENERATED is now published inside the same
+    // transaction as the state-transition write (see EwayBillService.generate).
     await ctx.audit.log({
       action: 'EWAY_BILL_GENERATED',
       entityType: 'INVOICE',

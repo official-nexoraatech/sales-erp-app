@@ -1,5 +1,6 @@
 import { useEffect, useRef, type ReactNode } from 'react';
 import { X } from 'lucide-react';
+import { useFocusTrap } from '../../hooks/useFocusTrap.js';
 
 interface Props {
   open?: boolean;
@@ -51,16 +52,9 @@ export default function Modal({
     return () => document.removeEventListener('keydown', onKey);
   }, [isVisible, onClose]);
 
-  // Move focus into modal on open
-  useEffect(() => {
-    if (!isVisible) return;
-    const el = panelRef.current;
-    if (!el) return;
-    const first = el.querySelector<HTMLElement>(
-      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
-    );
-    first?.focus();
-  }, [isVisible]);
+  // Trap Tab focus inside the modal, focus the first element on open, and
+  // restore focus to the trigger element on close.
+  useFocusTrap(panelRef, isVisible);
 
   if (!isVisible) return null;
 

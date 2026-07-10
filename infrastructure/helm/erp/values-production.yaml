@@ -1,0 +1,44 @@
+# Production environment overlay.
+#
+# Usage:
+#   helm template ./infrastructure/helm/erp -f infrastructure/helm/erp/values-production.yaml
+#
+# The chart's base values.yaml already encodes the settings taken directly from the existing
+# infrastructure/k8s/*.yaml manifests (2 replicas, 100m/500m CPU, 128Mi/512Mi memory, HPA
+# min 2 / max 10) — those ARE the production-grade numbers today, so this overlay is
+# intentionally a thin, explicit restatement rather than a scale-up, to avoid silently
+# changing production capacity as a side effect of introducing Helm.
+#
+# global.imageTag is intentionally left at the chart default here (see values-staging.yaml for
+# why) — CI pins the real release tag at deploy time.
+#
+# Hostname/Ingress routing is NOT templated by this chart yet — see README.md "Known gaps";
+# adding an Ingress/Gateway is PG-022 Session 2 scope, not this one.
+
+global:
+  namespace: erp-system
+  replicaCount: 2
+
+  resources:
+    default:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+
+  hpa:
+    minReplicas: 2
+    maxReplicas: 10
+
+services:
+  report-service:
+    replicaCount: 2
+    resources:
+      requests:
+        cpu: 250m
+        memory: 512Mi
+      limits:
+        cpu: 1000m
+        memory: 1536Mi

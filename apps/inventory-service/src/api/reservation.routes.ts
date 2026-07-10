@@ -4,6 +4,7 @@ import { eq, and } from 'drizzle-orm';
 import { stockReservations } from '@erp/db';
 import { PERMISSIONS } from '@erp/types';
 import type { PlatformContextFactory } from '@erp/sdk';
+import { timingSafeEqual } from 'node:crypto';
 import { authenticate } from '../middleware/authenticate.js';
 import { requirePermission } from '../middleware/authorize.js';
 import { ReservationEngine } from '../domain/ReservationEngine.js';
@@ -32,7 +33,10 @@ export async function reservationRoutes(
     async (request, reply) => {
       const apiKey = (request.headers['x-internal-key'] as string | undefined) ?? '';
       const expected = process.env['INTERNAL_API_KEY'] ?? '';
-      if (!expected || apiKey !== expected) {
+      const keyBuffer = Buffer.from(apiKey);
+      const expectedBuffer = Buffer.from(expected);
+      const matches = !!expected && keyBuffer.length === expectedBuffer.length && timingSafeEqual(keyBuffer, expectedBuffer);
+      if (!matches) {
         return reply.code(401).send({ error: { code: 'UNAUTHORIZED', message: 'Invalid internal API key' } });
       }
 

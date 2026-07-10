@@ -1,10 +1,17 @@
-﻿import { useState } from 'react';
+﻿import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import toast from 'react-hot-toast';
+import { Pencil, Trash2 } from 'lucide-react';
 import { branchApi } from '../../api/endpoints.js';
+import { useDebounce } from '../../hooks/useDebounce.js';
+import { useConfirm } from '../../context/ConfirmContext.js';
+import { useAuthStore } from '../../store/auth.store.js';
+import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
-import DataTable from '../../components/ui/DataTable.js';
+import ERPDataGrid, { type ERPColumnDef } from '../../components/erp/ERPDataGrid.js';
+import ERPDropdownMenu, { type ERPMenuItem } from '../../components/erp/ERPDropdownMenu.js';
+import ERPEmptyState from '../../components/erp/ERPEmptyState.js';
 import Button from '../../components/ui/Button.js';
 import Modal from '../../components/ui/Modal.js';
 import Input from '../../components/ui/Input.js';
@@ -23,12 +30,22 @@ interface Branch {
 
 export default function BranchesPage() {
   const qc = useQueryClient();
+  const confirm = useConfirm();
+  const canManageBranch = useAuthStore((s) => s.hasPermission(PERMISSIONS.BRANCH_MANAGE));
   const [modal, setModal] = useState<{ open: boolean; branch?: Branch }>({ open: false });
+  const [search, setSearch] = useState('');
+  const debouncedSearch = useDebounce(search, 250);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
+
+  useEffect(() => { setPage(1); }, [debouncedSearch]);
+
   const { data, isLoading } = useQuery({
-    queryKey: ['branches'],
-    queryFn: () => branchApi.list(),
+    queryKey: ['branches', debouncedSearch, page, pageSize],
+    queryFn: () => branchApi.list({ search: debouncedSearch || undefined, page: page - 1, size: pageSize }),
   });
-  const branches: Branch[] = (data as { data?: { content?: Branch[] } })?.data?.content ?? [];
+  const branches: Branch[] = (data as { content?: Branch[] })?.content ?? [];
+  const totalElements = (data as { totalElements?: number })?.totalElements ?? 0;
 
   const { register, handleSubmit, reset, formState: { errors, isSubmitting } } = useForm<Partial<Branch> & { pinCode?: string; phone?: string; isHeadOffice?: boolean }>();
 
@@ -52,27 +69,35 @@ export default function BranchesPage() {
     onError: (err: Error) => toast.error(err.message),
   });
 
-  const columns = [
-    { key: 'code', header: 'Code', className: 'font-mono' },
-    { key: 'name', header: 'Name' },
-    { key: 'city', header: 'City' },
+  const columns: ERPColumnDef<Branch>[] = [
+    { key: 'code', header: 'Code', mono: true, sortable: true },
+    { key: 'name', header: 'Name', sortable: true },
+    { key: 'city', header: 'City', sortable: true },
     { key: 'state', header: 'State' },
     {
       key: 'isHeadOffice', header: 'HO',
-      render: (r: Branch) => r.isHeadOffice ? <Badge label="HQ" color="indigo" /> : null,
+      render: (r) => r.isHeadOffice ? <Badge variant="info">HQ</Badge> : null,
     },
     {
-      key: 'isActive', header: 'Status',
-      render: (r: Branch) => <Badge label={r.isActive ? 'Active' : 'Inactive'} color={r.isActive ? 'green' : 'gray'} />,
+      key: 'isActive', header: 'Status', sortable: true,
+      render: (r) => <Badge variant={r.isActive ? 'success' : 'default'}>{r.isActive ? 'Active' : 'Inactive'}</Badge>,
     },
     {
-      key: 'actions', header: '',
-      render: (r: Branch) => (
-        <div className="flex items-center gap-2">
-          <Button size="sm" variant="ghost" onClick={() => openEdit(r)}>Edit</Button>
-          <Button size="sm" variant="danger" onClick={() => deleteMutation.mutate(r.id)}>Delete</Button>
-        </div>
-      ),
+      key: 'actions', header: '', align: 'right', sticky: 'right',
+      render: (r) => {
+        const items: ERPMenuItem[] = [];
+        if (canManageBranch) items.push({ label: 'Edit', icon: Pencil, onClick: () => openEdit(r) });
+        if (canManageBranch) items.push({ label: 'Delete', icon: Trash2, variant: 'danger', onClick: async () => {
+          const ok = await confirm({
+            title: 'Delete Branch',
+            message: `Are you sure you want to delete branch "${r.name}"? This cannot be undone.`,
+            confirmLabel: 'Delete',
+            variant: 'danger',
+          });
+          if (ok) deleteMutation.mutate(r.id);
+        } });
+        return items.length > 0 ? <ERPDropdownMenu items={items} /> : null;
+      },
     },
   ];
 
@@ -81,10 +106,23 @@ export default function BranchesPage() {
       <ERPPageHeader variant="list"
         title="Branches"
         subtitle="Manage your store branches and locations."
-        actions={<Button onClick={openNew}>+ New Branch</Button>}
+        actions={canManageBranch ? <Button onClick={openNew}>+ New Branch</Button> : undefined}
       />
 
-      <DataTable columns={columns} data={branches} loading={isLoading} emptyMessage="No branches found. Create your first branch." />
+      <div className="flex gap-3 mb-4">
+        <Input placeholder="Search branches…" value={search} onChange={(e) => setSearch(e.target.value)} className="max-w-xs" />
+      </div>
+
+      <ERPDataGrid
+        columns={columns}
+        data={branches}
+        isLoading={isLoading}
+        rowKey="id"
+        emptyState={<ERPEmptyState type="no-data" title="No branches found" description="Create your first branch." />}
+        pagination={{ page, pageSize, total: totalElements }}
+        onPageChange={setPage}
+        onPageSizeChange={(size) => { setPageSize(size); setPage(1); }}
+      />
 
       <Modal open={modal.open} onClose={() => setModal({ open: false })} title={modal.branch ? 'Edit Branch' : 'New Branch'}>
         <form onSubmit={handleSubmit((d) => saveMutation.mutate(d as Record<string, unknown>))} className="space-y-4">
@@ -100,7 +138,7 @@ export default function BranchesPage() {
           </div>
           <Input label="Phone" {...register('phone')} />
           <div className="flex items-center gap-2">
-            <input type="checkbox" id="isHeadOffice" {...register('isHeadOffice')} className="rounded border-gray-300" />
+            <input type="checkbox" id="isHeadOffice" {...register('isHeadOffice')} className="rounded border-gray-300 dark:border-gray-600" />
             <label htmlFor="isHeadOffice" className="text-sm text-gray-700 dark:text-gray-300">Head Office</label>
           </div>
           <div className="flex justify-end gap-3 pt-2">

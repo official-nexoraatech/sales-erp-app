@@ -1,8 +1,10 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { BookOpen, TrendingUp, TrendingDown, AlertCircle, Download } from 'lucide-react';
+import { BookOpen, TrendingUp, TrendingDown, Download } from 'lucide-react';
 import { gstApi } from '../../api/endpoints.js';
 import toast from 'react-hot-toast';
+import { ERPTableSkeleton } from '../../components/erp/ERPSkeleton.js';
+import ERPEmptyState from '../../components/erp/ERPEmptyState.js';
 
 function getCurrentPeriod(): string {
   const now = new Date();
@@ -118,7 +120,7 @@ export function GstRegisterPage() {
                 <div className="text-lg font-semibold text-gray-900 dark:text-white">
                   {formatCurrency(s?.totalGst)}
                 </div>
-                <div className="text-xs text-gray-400 mt-1">Taxable: {formatCurrency(s?.taxableAmount)}</div>
+                <div className="text-xs text-secondary mt-1">Taxable: {formatCurrency(s?.taxableAmount)}</div>
               </div>
             );
           })}
@@ -127,6 +129,9 @@ export function GstRegisterPage() {
 
       {/* Table */}
       <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
+        {regLoading ? (
+          <ERPTableSkeleton rows={8} cols={11} />
+        ) : (
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
             <thead className="bg-gray-50 dark:bg-gray-900/50">
@@ -139,13 +144,10 @@ export function GstRegisterPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-              {regLoading ? (
-                <tr><td colSpan={11} className="px-4 py-8 text-center text-sm text-gray-400">Loading...</td></tr>
-              ) : entries.length === 0 ? (
+              {entries.length === 0 ? (
                 <tr>
-                  <td colSpan={11} className="px-4 py-12 text-center">
-                    <AlertCircle className="w-8 h-8 text-gray-300 dark:text-gray-600 mx-auto mb-2" />
-                    <span className="text-sm text-gray-400">No GST entries for {period}</span>
+                  <td colSpan={11}>
+                    <ERPEmptyState type="no-results" title="No GST entries" description={`No GST entries for ${period}.`} />
                   </td>
                 </tr>
               ) : entries.map((row, i) => (
@@ -171,13 +173,14 @@ export function GstRegisterPage() {
                   <td className="px-4 py-3 text-center">
                     {row.itcEligible
                       ? <span className="text-xs font-medium text-green-600 dark:text-green-400">Yes</span>
-                      : <span className="text-xs text-gray-400">No</span>}
+                      : <span className="text-xs text-disabled">No</span>}
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
+        )}
         {entries.length > 0 && (
           <div className="px-4 py-3 border-t border-gray-200 dark:border-gray-700 text-xs text-gray-500 dark:text-gray-400">
             {entries.length} entries

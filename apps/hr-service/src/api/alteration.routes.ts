@@ -70,7 +70,7 @@ async function sendNotification(input: {
   const notificationUrl = process.env['NOTIFICATION_SERVICE_URL'] ?? 'http://localhost:3014';
   const apiKey = process.env['INTERNAL_API_KEY'] ?? '';
   try {
-    await fetch(`${notificationUrl}/api/v2/notifications/send-internal`, {
+    await fetch(`${notificationUrl}/notifications/send-internal`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-internal-key': apiKey },
       body: JSON.stringify(input),

@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { productionApi } from '../../api/endpoints.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
+import { ERPFormSkeleton } from '../../components/erp/ERPSkeleton.js';
 import Button from '../../components/ui/Button.js';
 import Badge from '../../components/ui/Badge.js';
 import Select from '../../components/ui/Select.js';
@@ -33,7 +34,7 @@ export default function JobWorkQualityCheckPage() {
     queryFn: () => productionApi.getJobWorkOrder(Number(id)),
     enabled: !!id,
   });
-  const order = (data as Record<string, unknown>)?.data as OrderDetail | undefined;
+  const order = (data as OrderDetail | undefined);
 
   const [entries, setEntries] = useState<QCEntry[]>([{ pieceNumber: 1, result: 'PASS', defectNotes: '' }]);
   const [receivedQty, setReceivedQty] = useState('');
@@ -79,7 +80,7 @@ export default function JobWorkQualityCheckPage() {
     onError: (e: Error) => toast.error(e.message),
   });
 
-  if (isLoading) return <p className="text-secondary text-sm">Loading…</p>;
+  if (isLoading) return <ERPFormSkeleton />;
   if (!order) return <p className="text-secondary text-sm">Order not found.</p>;
 
   return (
@@ -154,18 +155,9 @@ export default function JobWorkQualityCheckPage() {
       <div className="bg-surface-card rounded-xl border border-default p-6 space-y-4">
         <h3 className="font-semibold text-primary">Complete Order</h3>
         <div className="grid grid-cols-3 gap-4">
-          <div>
-            <label className="block text-xs font-medium text-secondary mb-1">Received Qty *</label>
-            <Input type="number" min="0" step="0.01" value={receivedQty} onChange={(e) => setReceivedQty(e.target.value)} required />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-secondary mb-1">Rejected Qty</label>
-            <Input type="number" min="0" step="0.01" value={rejectedQty} onChange={(e) => setRejectedQty(e.target.value)} />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-secondary mb-1">Scrap Qty</label>
-            <Input type="number" min="0" step="0.01" value={scrapQty} onChange={(e) => setScrapQty(e.target.value)} />
-          </div>
+          <Input label="Received Qty" required type="number" min="0" step="0.01" value={receivedQty} onChange={(e) => setReceivedQty(e.target.value)} />
+          <Input label="Rejected Qty" type="number" min="0" step="0.01" value={rejectedQty} onChange={(e) => setRejectedQty(e.target.value)} />
+          <Input label="Scrap Qty" type="number" min="0" step="0.01" value={scrapQty} onChange={(e) => setScrapQty(e.target.value)} />
         </div>
         <div className="flex gap-3">
           <Button

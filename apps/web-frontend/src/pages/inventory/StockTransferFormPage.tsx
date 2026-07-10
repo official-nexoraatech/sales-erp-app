@@ -3,7 +3,10 @@ import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { stockTransferApi, warehouseApi, itemApi } from '../../api/endpoints.js';
+import { useAuthStore } from '../../store/auth.store.js';
+import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
+import ERPFormSection from '../../components/erp/ERPFormSection.js';
 import Button from '../../components/ui/Button.js';
 import Input from '../../components/ui/Input.js';
 import Select from '../../components/ui/Select.js';
@@ -20,26 +23,27 @@ interface Item { id: number; name: string; itemCode?: string; purchasePrice?: st
 
 export default function StockTransferFormPage() {
   const navigate = useNavigate();
+  const hasPermission = useAuthStore((s) => s.hasPermission);
   const [fromWarehouseId, setFromWarehouseId] = useState('');
   const [toWarehouseId, setToWarehouseId] = useState('');
   const [notes, setNotes] = useState('');
   const [lines, setLines] = useState<TransferLine[]>([]);
   const [itemSearch, setItemSearch] = useState('');
 
-  const { data: whData } = useQuery({ queryKey: ['warehouses'], queryFn: () => warehouseApi.list() });
+  const { data: whData } = useQuery({ queryKey: ['warehouses'], queryFn: () => warehouseApi.list(), enabled: hasPermission(PERMISSIONS.WAREHOUSE_VIEW) });
   const { data: itemData } = useQuery({
     queryKey: ['items', itemSearch],
     queryFn: () => itemApi.list({ search: itemSearch || undefined }),
-    enabled: itemSearch.length > 1,
+    enabled: itemSearch.length > 1 && hasPermission(PERMISSIONS.ITEM_VIEW),
   });
 
-  const warehouses: Warehouse[] = (whData as { data?: Warehouse[] })?.data ?? [];
-  const itemResults: Item[] = (itemData as { data?: Item[] })?.data ?? [];
+  const warehouses: Warehouse[] = (whData as { content?: Warehouse[] })?.content ?? [];
+  const itemResults: Item[] = (itemData as { content?: Item[] })?.content ?? [];
 
   const createMutation = useMutation({
     mutationFn: (payload: Record<string, unknown>) => stockTransferApi.create(payload),
     onSuccess: (res) => {
-      const id = (res as { data?: { id?: number } })?.data?.id;
+      const id = (res as { id?: number })?.id;
       toast.success('Transfer created');
       navigate(`/inventory/transfers/${id}`);
     },
@@ -80,25 +84,26 @@ export default function StockTransferFormPage() {
     <div>
       <ERPPageHeader variant="list" title="New Stock Transfer" subtitle="Move items between warehouses" />
 
-      <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-6 space-y-6">
-        <div className="grid grid-cols-2 gap-4">
+      <div className="space-y-6">
+        <ERPFormSection title="Transfer Details" columns={2}>
           <Select
             label="From Warehouse"
+            required
             value={fromWarehouseId}
             onChange={(e) => setFromWarehouseId(e.target.value)}
             options={[{ value: '', label: 'Select source...' }, ...warehouses.map((w) => ({ value: String(w.id), label: w.name }))]}
           />
           <Select
             label="To Warehouse"
+            required
             value={toWarehouseId}
             onChange={(e) => setToWarehouseId(e.target.value)}
             options={[{ value: '', label: 'Select destination...' }, ...warehouses.map((w) => ({ value: String(w.id), label: w.name }))]}
           />
-        </div>
+          <Input label="Notes" wrapperClassName="sm:col-span-2" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Optional transfer notes" />
+        </ERPFormSection>
 
-        <Input label="Notes" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Optional transfer notes" />
-
-        <div>
+        <div className="bg-surface-card rounded-xl border border-default p-4">
           <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Items</h3>
           <Input
             label="Search item to add"
@@ -115,7 +120,7 @@ export default function StockTransferFormPage() {
                   onClick={() => addLine(item)}
                 >
                   <span className="font-medium">{item.name}</span>
-                  {item.itemCode && <span className="ml-2 text-gray-400 font-mono text-xs">{item.itemCode}</span>}
+                  {item.itemCode && <span className="ml-2 text-secondary font-mono text-xs">{item.itemCode}</span>}
                 </button>
               ))}
             </div>
@@ -158,7 +163,7 @@ export default function StockTransferFormPage() {
                     />
                   </td>
                   <td className="py-2">
-                    <button onClick={() => removeLine(idx)} className="text-red-500 hover:text-red-700">✕</button>
+                    <button onClick={() => removeLine(idx)} className="text-danger hover:text-danger">✕</button>
                   </td>
                 </tr>
               ))}

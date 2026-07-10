@@ -135,6 +135,7 @@ export async function brandRoutes(
       .where(eq(brands.id, id));
 
     await ctx.audit.log({ action: 'DELETE', entityType: 'brand', entityId: id, before: existing });
+    await ctx.events.publish('brand', id, 'BRAND_DELETED', { id });
 
     return reply.code(200).send({ data: { message: 'Brand deleted', id } });
   });

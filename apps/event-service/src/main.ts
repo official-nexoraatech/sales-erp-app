@@ -1,11 +1,14 @@
 /* global process */
-import Fastify from 'fastify';
+import Fastify, { type FastifyError } from 'fastify';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
-import { PlatformContextFactory, HELMET_OPTIONS, PERMISSIONS_POLICY } from '@erp/sdk';
-import { createLogger } from '@erp/logger';
+import rateLimit from '@fastify/rate-limit';
+import { Kafka } from 'kafkajs';
+import { PlatformContextFactory, HELMET_OPTIONS, PERMISSIONS_POLICY, registerHealthRoute, tenantOrIpKeyGenerator, checkKafka, initializeTelemetry, initTenantStatusEnforcement } from '@erp/sdk';
+import { createLogger, createMetricsHandler, createHttpMetricsHook, createCorrelationIdHook } from '@erp/logger';
 import { ERPError } from '@erp/types';
 import { createDatabaseClient } from '@erp/db';
+import { loadConfigWithSecrets } from '@erp/config';
 import { eventStoreRoutes } from './api/event-store.routes.js';
 import { dlqRoutes } from './api/dlq.routes.js';
 import { sagaRoutes } from './api/saga.routes.js';
@@ -14,12 +17,17 @@ import { projectionRoutes } from './api/projections.routes.js';
 import { performanceRoutes } from './api/performance.routes.js';
 import { healthOutboxRoutes } from './api/health.outbox.routes.js';
 import { OutboxRelayWorker } from './outbox/OutboxRelayWorker.js';
+import { createEventServiceGstComplianceOrchestrator } from './sagas/gstComplianceProxy.js';
+
+initializeTelemetry({ serviceName: 'event-service' });
 
 async function bootstrap(): Promise<void> {
   const port = parseInt(process.env['EVENT_SERVICE_PORT'] ?? '3023', 10);
-  const logger = createLogger({ serviceName: 'event-service', level: 'info' });
+  const lokiUrl = process.env['LOKI_URL'];
+  const logger = createLogger({ serviceName: 'event-service', level: 'info', ...(lokiUrl ? { lokiUrl } : {}) });
 
-  const databaseUrl = process.env['DATABASE_URL'] ?? 'postgresql://erp:erp_password@localhost:5435/erp';
+  const config = await loadConfigWithSecrets('event-service');
+  const databaseUrl = config.databaseUrl;
   const kafkaBrokers = (process.env['KAFKA_BROKERS'] ?? 'localhost:29092').split(',');
 
   const ctxFactory = new PlatformContextFactory({
@@ -30,11 +38,18 @@ async function bootstrap(): Promise<void> {
     serviceName: 'event-service',
   });
   await ctxFactory.connect();
+  ctxFactory.subscribeFeatureFlagInvalidations();
+  initTenantStatusEnforcement(ctxFactory.rawDb);
 
   // Dedicated pool for the outbox relay worker — isolated from the HTTP handler
   // pool so the worker's SELECT ... FOR UPDATE SKIP LOCKED does not starve
   // concurrent HTTP requests during heavy throughput.
   const rawDb = createDatabaseClient({ url: databaseUrl, maxConnections: 3 });
+
+  // PG-006: registered once here (not per-request — SagaOrchestrator.register()
+  // populates an in-memory map that a fresh per-request instance would lose
+  // immediately, which was the pre-existing bug in saga.routes.ts).
+  const gstComplianceOrchestrator = createEventServiceGstComplianceOrchestrator(rawDb);
 
   const worker = new OutboxRelayWorker({
     db: rawDb,
@@ -45,7 +60,12 @@ async function bootstrap(): Promise<void> {
     maxRetryAttempts: parseInt(process.env['OUTBOX_MAX_RETRY_ATTEMPTS'] ?? '5', 10),
   });
 
+  const metricsHandler = await createMetricsHandler('event-service');
+  const healthKafka = new Kafka({ clientId: 'event-service-health', brokers: kafkaBrokers });
+
   const fastify = Fastify({ logger: false, trustProxy: true });
+
+  fastify.addHook('onRequest', createCorrelationIdHook());
 
   await fastify.register(helmet, HELMET_OPTIONS);
   fastify.addHook('onSend', async (_request, reply) => {
@@ -55,13 +75,24 @@ async function bootstrap(): Promise<void> {
     origin: process.env['ALLOWED_ORIGINS']?.split(',') ?? ['http://localhost:5173', 'http://localhost:5174'],
     credentials: true,
   });
+  await fastify.register(rateLimit, {
+    global: true,
+    max: 200,
+    timeWindow: '1 minute',
+    redis: ctxFactory.getRedis(),
+    keyGenerator: tenantOrIpKeyGenerator,
+  });
+  fastify.addHook('onResponse', createHttpMetricsHook('event-service'));
 
-  fastify.get('/health', async (_req, reply) => {
-    return reply.code(200).send({ status: 'ok', service: 'event-service' });
+  registerHealthRoute(fastify, 'event-service', {
+    db: () => ctxFactory.checkDb(),
+    redis: () => ctxFactory.checkRedis(),
+    kafka: () => checkKafka(healthKafka),
   });
 
   fastify.get('/metrics', async (_req, reply) => {
-    return reply.code(200).send('# event-service metrics\n');
+    const body = await metricsHandler.handler();
+    return reply.code(200).header('Content-Type', metricsHandler.contentType).send(body);
   });
 
   await healthOutboxRoutes(fastify, worker);
@@ -69,8 +100,8 @@ async function bootstrap(): Promise<void> {
   await fastify.register(
     async (sub) => {
       await eventStoreRoutes(sub, ctxFactory);
-      await dlqRoutes(sub, ctxFactory);
-      await sagaRoutes(sub, ctxFactory);
+      await dlqRoutes(sub, ctxFactory, worker);
+      await sagaRoutes(sub, ctxFactory, gstComplianceOrchestrator);
       await schemaRegistryRoutes(sub, ctxFactory);
       await projectionRoutes(sub, ctxFactory);
       await performanceRoutes(sub, ctxFactory);
@@ -78,13 +109,13 @@ async function bootstrap(): Promise<void> {
     { prefix: '/api/v2' }
   );
 
-  fastify.setErrorHandler((error, request, reply) => {
+  fastify.setErrorHandler<FastifyError>((error, request, reply) => {
     if (error instanceof ERPError) {
       return reply.code(error.statusCode).send({
         error: { code: error.code, message: error.message, details: error.details },
       });
     }
-    logger.error({ err: error.message, url: request.url }, 'Unhandled error in event-service');
+    logger.error({ err: error.message, url: request.url, correlationId: (request as { correlationId?: string }).correlationId }, 'Unhandled error in event-service');
     return reply.code(500).send({ error: { code: 'INTERNAL_ERROR', message: 'An unexpected error occurred' } });
   });
 

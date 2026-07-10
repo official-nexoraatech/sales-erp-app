@@ -2,6 +2,7 @@ import { useEffect, useRef, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import Button from '../ui/Button.js';
+import { useFocusTrap } from '../../hooks/useFocusTrap.js';
 
 type DrawerSize = 'sm' | 'md' | 'lg' | 'xl';
 
@@ -35,14 +36,9 @@ export default function ERPDrawer({
 }: Props) {
   const drawerRef = useRef<HTMLDivElement>(null);
 
-  // Focus first focusable element on open
-  useEffect(() => {
-    if (!open) return;
-    const el = drawerRef.current?.querySelector<HTMLElement>(
-      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
-    );
-    el?.focus();
-  }, [open]);
+  // Trap Tab focus inside the drawer, focus the first element on open, and
+  // restore focus to the trigger element on close.
+  useFocusTrap(drawerRef, open);
 
   // Escape key closes
   useEffect(() => {

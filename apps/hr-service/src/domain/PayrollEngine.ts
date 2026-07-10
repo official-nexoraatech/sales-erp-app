@@ -2,14 +2,19 @@ import { decryptField, encryptField } from '@erp/utils';
 import { requireEnv } from '@erp/config';
 import type { TenantScopedDatabase } from '@erp/sdk';
 import {
+  employees,
   employeeSalaries,
   attendance,
   leaveApplications,
   tailorWorkLog,
   payrollSlips,
+  branches,
+  organizationSettings,
 } from '@erp/db';
 import { and, eq, gte, lte, sql } from 'drizzle-orm';
 import { BusinessError } from '@erp/types';
+import { PTSlabService } from './PTSlabService.js';
+import { EmployeeLoanService, type EmployeeLoanRow } from './EmployeeLoanService.js';
 
 export interface PayrollSlipResult {
   employeeId: number;
@@ -25,6 +30,7 @@ export interface PayrollSlipResult {
   grossSalary: number;
   pfEmployee: number;
   pfEmployer: number;
+  epsAmount: number;
   esiEmployee: number;
   esiEmployer: number;
   professionalTax: number;
@@ -34,18 +40,110 @@ export interface PayrollSlipResult {
   netSalary: number;
 }
 
-// Professional Tax slabs (Maharashtra as default)
-const PT_SLABS = [
-  { upTo: 10000, amount: 0 },
-  { upTo: 15000, amount: 150 },
-  { upTo: Infinity, amount: 200 },
+const PF_BASIC_CAP = 15000;
+const EPS_MONTHLY_CAP = 1250;
+const ESI_GROSS_CAP = 21000;
+
+export interface PFResult {
+  pfEmployee: number;
+  pfEmployer: number;
+  epsAmount: number;
+}
+
+// PF: employee contributes 12% of basic (capped at ₹15,000 basic).
+// Employer's 12% splits into EPS (8.33%, capped ₹1,250) + EPF (remainder).
+export function computePF(basic: number, pfApplicable: boolean): PFResult {
+  if (!pfApplicable) return { pfEmployee: 0, pfEmployer: 0, epsAmount: 0 };
+  const pfBasic = Math.min(basic, PF_BASIC_CAP);
+  const pfEmployee = Math.round(pfBasic * 0.12 * 100) / 100;
+  const epsAmount = Math.min(Math.round(pfBasic * 0.0833 * 100) / 100, EPS_MONTHLY_CAP);
+  const pfEmployer = Math.round((pfEmployee - epsAmount) * 100) / 100;
+  return { pfEmployee, pfEmployer, epsAmount };
+}
+
+export interface ESIResult {
+  esiEmployee: number;
+  esiEmployer: number;
+}
+
+// ESI: applicable when gross salary <= ₹21,000/month.
+export function computeESI(grossSalary: number, esiApplicable: boolean): ESIResult {
+  if (!esiApplicable || grossSalary > ESI_GROSS_CAP) return { esiEmployee: 0, esiEmployer: 0 };
+  return {
+    esiEmployee: Math.round(grossSalary * 0.0075 * 100) / 100,
+    esiEmployer: Math.round(grossSalary * 0.0325 * 100) / 100,
+  };
+}
+
+// Section 192 TDS on salary — FY 2024-25 new regime slabs.
+const INCOME_TAX_SLABS = [
+  { upTo: 300000, rate: 0 },
+  { upTo: 600000, rate: 0.05 },
+  { upTo: 900000, rate: 0.10 },
+  { upTo: 1200000, rate: 0.15 },
+  { upTo: 1500000, rate: 0.20 },
+  { upTo: Infinity, rate: 0.30 },
 ];
 
-function computePT(grossMonthly: number): number {
-  for (const slab of PT_SLABS) {
-    if (grossMonthly <= slab.upTo) return slab.amount;
+export function calculateIncomeTax(taxableIncome: number): number {
+  let tax = 0;
+  let prevLimit = 0;
+  for (const slab of INCOME_TAX_SLABS) {
+    if (taxableIncome <= prevLimit) break;
+    const taxableInSlab = Math.min(taxableIncome, slab.upTo) - prevLimit;
+    tax += taxableInSlab * slab.rate;
+    prevLimit = slab.upTo;
   }
-  return 200;
+  return Math.round(tax);
+}
+
+const STANDARD_DEDUCTION = 75000;
+
+export function computeMonthlyTDS(annualGrossSalary: number): number {
+  const taxableIncome = Math.max(0, annualGrossSalary - STANDARD_DEDUCTION);
+  const annualTax = calculateIncomeTax(taxableIncome);
+  return Math.round(annualTax / 12);
+}
+
+// Resolves which state's PT slabs apply: the employee's branch state, falling back to the
+// tenant's registered (organizationSettings) state when the employee has no branch or the
+// branch has no state on file. `cache` lets a payroll run (many employees, few distinct
+// branches) resolve each branch's state once instead of once per employee.
+export async function resolveEmployeeState(
+  db: TenantScopedDatabase,
+  tenantId: number,
+  branchId: number | null,
+  cache?: Map<number | null, string | null>
+): Promise<string | null> {
+  if (cache?.has(branchId)) return cache.get(branchId) ?? null;
+
+  let state: string | null = null;
+  if (branchId != null) {
+    const [branchRow] = await db.raw
+      .select({ address: branches.address })
+      .from(branches)
+      .where(and(eq(branches.tenantId, tenantId), eq(branches.id, branchId)));
+    state = branchRow?.address?.state ?? null;
+  }
+  if (!state) {
+    const [orgRow] = await db.raw
+      .select({ address: organizationSettings.address })
+      .from(organizationSettings)
+      .where(eq(organizationSettings.tenantId, tenantId));
+    state = orgRow?.address?.state ?? null;
+  }
+
+  cache?.set(branchId, state);
+  return state;
+}
+
+// Sums an employee's active loan EMIs, each capped at that loan's own remaining
+// outstandingBalance so the final EMI never overshoots. Read-only — balances are only
+// decremented at payroll-run approval (EmployeeLoanService.applyMonthlyDeduction), not here,
+// since computeSlip can run repeatedly on a still-DRAFT payroll run.
+export function computeLoanDeduction(activeLoans: Pick<EmployeeLoanRow, 'monthlyDeduction' | 'outstandingBalance'>[]): number {
+  const total = activeLoans.reduce((sum, loan) => sum + Math.min(loan.monthlyDeduction, loan.outstandingBalance), 0);
+  return Math.round(total * 100) / 100;
 }
 
 export class PayrollEngine {
@@ -55,7 +153,8 @@ export class PayrollEngine {
     employeeId: number,
     periodMonth: number,
     periodYear: number,
-    workingDays: number
+    workingDays: number,
+    ptStateCache?: Map<number | null, string | null>
   ): Promise<PayrollSlipResult> {
     const encKey = requireEnv('FIELD_ENCRYPTION_KEY');
 
@@ -75,6 +174,13 @@ export class PayrollEngine {
         `Employee ${employeeId} has no active salary assigned`
       );
     }
+
+    const [empRow] = await db.raw
+      .select({ pfApplicable: employees.pfApplicable, esiApplicable: employees.esiApplicable, branchId: employees.branchId })
+      .from(employees)
+      .where(and(eq(employees.tenantId, tenantId), eq(employees.id, employeeId)));
+    const pfApplicable = empRow?.pfApplicable ?? true;
+    const esiApplicable = empRow?.esiApplicable ?? true;
 
     const basicFull = parseFloat(decryptField(salRow.basicEncrypted, encKey));
     const hraFull = salRow.hraEncrypted ? parseFloat(decryptField(salRow.hraEncrypted, encKey)) : 0;
@@ -138,24 +244,21 @@ export class PayrollEngine {
     const otherAllowances = Math.max(0, (grossFull - basicFull - hraFull - daFull)) * paidDaysRatio;
     const grossSalary = basic + hra + da + otherAllowances + pieceRateAmount;
 
-    // PF: 12% of basic (capped at 15000 basic for EPF)
-    const pfBasic = Math.min(basic, 15000);
-    const pfEmployee = Math.round(pfBasic * 0.12 * 100) / 100;
-    const pfEmployer = Math.round(pfBasic * 0.12 * 100) / 100;
+    const { pfEmployee, pfEmployer, epsAmount } = computePF(basic, pfApplicable);
+    const { esiEmployee, esiEmployer } = computeESI(grossSalary, esiApplicable);
 
-    // ESI: if gross <= 21000
-    let esiEmployee = 0;
-    let esiEmployer = 0;
-    if (grossSalary <= 21000) {
-      esiEmployee = Math.round(grossSalary * 0.0075 * 100) / 100;
-      esiEmployer = Math.round(grossSalary * 0.0325 * 100) / 100;
-    }
+    // Professional Tax (monthly) — state-resolved: employee's branch state, falling back
+    // to the tenant's registered state (PG-044).
+    const employeeState = await resolveEmployeeState(db, tenantId, empRow?.branchId ?? null, ptStateCache);
+    const ptSlabs = employeeState ? await PTSlabService.getSlabsForState(db, employeeState, startDate) : [];
+    const professionalTax = PTSlabService.computePT(grossSalary, ptSlabs);
 
-    // Professional Tax (monthly)
-    const professionalTax = computePT(grossSalary);
-
-    const loanDeduction = 0; // future: from loan_deductions table
-    const tdsDeduction = 0;  // future: from tds computation
+    // Loan EMI (PG-045): read-only sum of active loans, capped per-loan at remaining balance.
+    // outstandingBalance is only decremented at payroll-run approval, not here.
+    const activeLoans = await EmployeeLoanService.getActiveLoansForEmployee(db, tenantId, employeeId);
+    const loanDeduction = computeLoanDeduction(activeLoans);
+    // TDS (Section 192): projected on full (non-prorated) monthly gross × 12
+    const tdsDeduction = computeMonthlyTDS(grossFull * 12);
 
     const totalDeductions = pfEmployee + esiEmployee + professionalTax + loanDeduction + tdsDeduction;
     const netSalary = Math.max(0, grossSalary - totalDeductions);
@@ -174,6 +277,7 @@ export class PayrollEngine {
       grossSalary: Math.round(grossSalary * 100) / 100,
       pfEmployee,
       pfEmployer,
+      epsAmount,
       esiEmployee,
       esiEmployer,
       professionalTax,
@@ -216,6 +320,7 @@ export class PayrollEngine {
       pieceRateAmount: String(slip.pieceRateAmount),
       grossSalary: encryptField(String(slip.grossSalary), encKey),
       pfEmployee: String(slip.pfEmployee),
+      epsAmount: String(slip.epsAmount),
       pfEmployer: String(slip.pfEmployer),
       esiEmployee: String(slip.esiEmployee),
       esiEmployer: String(slip.esiEmployer),

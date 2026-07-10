@@ -1,6 +1,6 @@
 import { NodeSDK } from '@opentelemetry/sdk-node';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
-import { Resource } from '@opentelemetry/resources';
+import { resourceFromAttributes } from '@opentelemetry/resources';
 import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from '@opentelemetry/semantic-conventions';
 import * as api from '@opentelemetry/api';
 import type { Span } from '@opentelemetry/api';
@@ -19,21 +19,29 @@ export interface SpanOptions {
 let sdk: NodeSDK | null = null;
 
 export function initializeTelemetry(options: TelemetryOptions): void {
-  if (!options.enabled && process.env['NODE_ENV'] !== 'production') return;
+  const otlpEndpoint = options.otlpEndpoint ?? process.env['OTEL_EXPORTER_OTLP_ENDPOINT'];
+  const enabled = options.enabled ?? Boolean(otlpEndpoint);
+  if (!enabled || !otlpEndpoint) return;
 
-  const exporter = new OTLPTraceExporter({
-    url: `${options.otlpEndpoint ?? 'http://localhost:4318'}/v1/traces`,
-  });
+  try {
+    const exporter = new OTLPTraceExporter({
+      url: `${otlpEndpoint}/v1/traces`,
+    });
 
-  sdk = new NodeSDK({
-    resource: new Resource({
-      [ATTR_SERVICE_NAME]: options.serviceName,
-      [ATTR_SERVICE_VERSION]: options.serviceVersion ?? '0.1.0',
-    }),
-    traceExporter: exporter,
-  });
+    sdk = new NodeSDK({
+      resource: resourceFromAttributes({
+        [ATTR_SERVICE_NAME]: options.serviceName,
+        [ATTR_SERVICE_VERSION]: options.serviceVersion ?? '0.1.0',
+      }),
+      traceExporter: exporter,
+    });
 
-  sdk.start();
+    sdk.start();
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error('[telemetry] failed to initialize, continuing without tracing:', error);
+    sdk = null;
+  }
 }
 
 export async function shutdownTelemetry(): Promise<void> {

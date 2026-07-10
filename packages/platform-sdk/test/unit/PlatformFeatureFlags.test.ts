@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { PlatformFeatureFlags } from '../../src/feature-flags.js';
+import { PlatformFeatureFlags, createFeatureFlagL1Cache } from '../../src/feature-flags.js';
 import { createMockDb, createMockCache } from '../fixtures/platform.fixtures.js';
 
 describe('PlatformFeatureFlags', () => {
@@ -104,6 +104,26 @@ describe('PlatformFeatureFlags', () => {
 
       expect(cache.del).toHaveBeenCalledWith('flags:feature.y');
       expect(cache.publishInvalidation).toHaveBeenCalled();
+    });
+  });
+
+  describe('ES-25 M10: shared L1 cache across per-request instances', () => {
+    it('only hits L2 once across two separate PlatformFeatureFlags instances sharing one L1 map (simulating two requests)', async () => {
+      const sharedL1 = createFeatureFlagL1Cache();
+      await cache.setJson(`flags:multi-branch.enabled`, { enabled: true });
+
+      const requestOneFlags = new PlatformFeatureFlags(db as never, cache as never, TENANT_A, sharedL1);
+      const requestTwoFlags = new PlatformFeatureFlags(db as never, cache as never, TENANT_A, sharedL1);
+
+      const resultOne = await requestOneFlags.isEnabled('multi-branch.enabled');
+      const callsAfterFirst = (cache.getJson as ReturnType<typeof vi.fn>).mock.calls.length;
+
+      const resultTwo = await requestTwoFlags.isEnabled('multi-branch.enabled');
+      const callsAfterSecond = (cache.getJson as ReturnType<typeof vi.fn>).mock.calls.length;
+
+      expect(resultOne).toBe(true);
+      expect(resultTwo).toBe(true);
+      expect(callsAfterSecond).toBe(callsAfterFirst); // second "request" served from shared L1
     });
   });
 });

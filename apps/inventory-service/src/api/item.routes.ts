@@ -6,16 +6,17 @@ import {
   itemsHistory,
   priceLists,
   priceListItems,
+  inventoryLedger,
 } from '@erp/db';
-import { and, eq, isNull, or, ilike } from 'drizzle-orm';
+import { and, eq, isNull, or, ilike, sql } from 'drizzle-orm';
 import { z } from 'zod';
-import { BusinessError, NotFoundError, OptimisticLockError, ValidationError } from '@erp/types';
+import { BusinessError, NotFoundError, OptimisticLockError, ValidationError, HSN_REGEX } from '@erp/types';
 import { PERMISSIONS } from '@erp/types';
 import { authenticate } from '../middleware/authenticate.js';
 import { requirePermission } from '../middleware/authorize.js';
+import { ItemCacheService } from '../domain/ItemCacheService.js';
 
 const GST_RATES = [0, 5, 12, 18, 28] as const;
-const HSN_REGEX = /^\d{4,8}$/;
 
 const ItemSchema = z.object({
   itemCode: z.string().max(50).optional(),
@@ -25,7 +26,7 @@ const ItemSchema = z.object({
   brandId: z.number().int().positive().optional(),
   unitId: z.number().int().positive(),
   attributeSetId: z.number().int().positive().optional(),
-  hsnCode: z.string().regex(HSN_REGEX, 'HSN code must be 4-8 digits'),
+  hsnCode: z.string().regex(HSN_REGEX, 'HSN code must be 4, 6, or 8 digits'),
   gstRate: z
     .number()
     .refine((v) => (GST_RATES as readonly number[]).includes(v), {
@@ -73,6 +74,8 @@ export async function itemRoutes(
   fastify: FastifyInstance,
   ctxFactory: PlatformContextFactory
 ): Promise<void> {
+  const itemCache = new ItemCacheService();
+
   // ── GET /items/by-barcode/:barcode — Redis-cached < 50ms ─────────────────
   // Cache key: tenant:{id}:barcode:{code}
   fastify.get<{ Params: { barcode: string } }>(
@@ -154,8 +157,13 @@ export async function itemRoutes(
       .limit(size)
       .offset(page * size);
 
+    const [countRow] = await ctx.db.raw
+      .select({ count: sql<number>`count(*)::int` })
+      .from(items)
+      .where(whereClause);
+
     return reply.code(200).send({
-      data: { content: rows, totalElements: rows.length, page, size },
+      data: { content: rows, totalElements: countRow?.count ?? 0, page, size },
     });
   });
 
@@ -169,12 +177,17 @@ export async function itemRoutes(
     });
     const id = parseInt(request.params.id, 10);
 
-    const [item] = await ctx.db.raw
-      .select()
-      .from(items)
-      .where(and(eq(items.id, id), eq(items.tenantId, tenantId), isNull(items.deletedAt)));
+    let item = await itemCache.getItem(ctx.cache, id);
+    if (!item) {
+      const [row] = await ctx.db.raw
+        .select()
+        .from(items)
+        .where(and(eq(items.id, id), eq(items.tenantId, tenantId), isNull(items.deletedAt)));
 
-    if (!item) throw new NotFoundError('Item', id);
+      if (!row) throw new NotFoundError('Item', id);
+      item = row;
+      await itemCache.setItem(ctx.cache, item);
+    }
 
     const variants = await ctx.db.raw
       .select()
@@ -182,24 +195,6 @@ export async function itemRoutes(
       .where(and(eq(itemVariants.itemId, id), eq(itemVariants.tenantId, tenantId), isNull(itemVariants.deletedAt)));
 
     return reply.code(200).send({ data: { ...item, variants } });
-  });
-
-  // ── GET /items/:id/stock — Stock by warehouse (Phase 4 projection) ────────
-  fastify.get<{ Params: { id: string } }>('/items/:id/stock', { preHandler: [authenticate, requirePermission(PERMISSIONS.ITEM_VIEW)] }, async (request, reply) => {
-    const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-    const ctx = ctxFactory.create({
-      tenantId,
-      userId,
-      correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-    });
-    const id = parseInt(request.params.id, 10);
-    const [item] = await ctx.db.raw
-      .select()
-      .from(items)
-      .where(and(eq(items.id, id), eq(items.tenantId, tenantId), isNull(items.deletedAt)));
-    if (!item) throw new NotFoundError('Item', id);
-    // Phase 4 will provide real stock from inventory_ledger projection
-    return reply.code(200).send({ data: { itemId: id, stock: [], _projection: { isStale: true, lagMs: 0 } } });
   });
 
   // ── GET /items/:id/price-history ───────────────────────────────────────────
@@ -325,6 +320,7 @@ export async function itemRoutes(
       updated = row;
     });
 
+    await itemCache.invalidateItem(ctx.cache, id);
     await ctx.events.publish('item', id, 'ITEM_UPDATED', updated as unknown as Record<string, unknown>);
     await ctx.audit.log({ action: 'UPDATE', entityType: 'item', entityId: id, before: existing as unknown as Record<string, unknown>, after: updated as unknown as Record<string, unknown> });
 
@@ -347,13 +343,22 @@ export async function itemRoutes(
       .where(and(eq(items.id, id), eq(items.tenantId, tenantId), isNull(items.deletedAt)));
 
     if (!existing) throw new NotFoundError('Item', id);
-    // TODO Phase 4: check inventory_ledger for stock, block if > 0
+
+    const [ledgerEntry] = await ctx.db.raw
+      .select({ id: inventoryLedger.id })
+      .from(inventoryLedger)
+      .where(and(eq(inventoryLedger.itemId, id), eq(inventoryLedger.tenantId, tenantId)))
+      .limit(1);
+    if (ledgerEntry) {
+      throw new BusinessError('ITEM_HAS_STOCK_HISTORY', 'Cannot delete an item with inventory ledger history');
+    }
 
     await ctx.db.raw
       .update(items)
       .set({ deletedAt: new Date(), deletedBy: userId, status: 'DISCONTINUED' })
-      .where(eq(items.id, id));
+      .where(and(eq(items.id, id), eq(items.tenantId, tenantId)));
 
+    await itemCache.invalidateItem(ctx.cache, id);
     await ctx.events.publish('item', id, 'ITEM_DELETED', { id });
     await ctx.audit.log({ action: 'DELETE', entityType: 'item', entityId: id, before: existing });
 
@@ -418,13 +423,17 @@ export async function itemRoutes(
 
     if (!item) throw new NotFoundError('Item', id);
 
-    const body = request.body as { type?: 'EAN13' | 'CODE128' | 'QR' };
-    const barcodeType = body.type ?? 'EAN13';
+    const body = z.object({ type: z.enum(['EAN13', 'CODE128', 'QR']).default('EAN13') }).parse(request.body ?? {});
+    const barcodeType = body.type;
 
-    // Generate a deterministic barcode based on tenant + item ID
-    // Real implementation: use barcode library (bwip-js)
+    // Deterministic barcode from the item ID, with a real EAN13 check digit
+    // (alternating 1x/3x weights per digit position — same algorithm as
+    // production-service's BarcodeService.computeEan13Check).
     const paddedId = String(id).padStart(11, '0');
-    const checkDigit = (10 - (paddedId.split('').reduce((s, d) => s + parseInt(d, 10), 0) % 10)) % 10;
+    const checkDigitSum = paddedId
+      .split('')
+      .reduce((sum, digit, i) => sum + (i % 2 === 0 ? parseInt(digit, 10) : parseInt(digit, 10) * 3), 0);
+    const checkDigit = (10 - (checkDigitSum % 10)) % 10;
     const generatedBarcode = `${paddedId}${checkDigit}`;
 
     // Update item with generated barcode
@@ -465,8 +474,8 @@ export async function itemRoutes(
       currency: z.string().default('INR'),
       priceIncludesTax: z.boolean().default(false),
       isDefault: z.boolean().default(false),
-      validFrom: z.string().datetime().optional(),
-      validTo: z.string().datetime().optional(),
+      validFrom: z.string().date().optional(),
+      validTo: z.string().date().optional(),
     });
     const body = PriceListSchema.safeParse(request.body);
     if (!body.success) throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));

@@ -19,10 +19,11 @@
     "@erp/sdk": "workspace:*",
     "@erp/types": "workspace:*",
     "@erp/utils": "workspace:*",
-    "fastify": "^4.28.0",
-    "@fastify/cors": "^9.0.1",
-    "@fastify/helmet": "^11.1.1",
-    "drizzle-orm": "^0.38.3",
+    "fastify": "^5.9.0",
+    "@fastify/cors": "^11.2.0",
+    "@fastify/helmet": "^13.0.2",
+    "@fastify/rate-limit": "^11.1.0",
+    "drizzle-orm": "^0.45.2",
     "jose": "^5.9.6",
     "zod": "^3.24.0",
     "ulid": "^2.3.0",
@@ -32,6 +33,6 @@
     "@types/node": "^20.17.0",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3",
-    "vitest": "^2.1.8"
+    "vitest": "^3.2.6"
   }
 }

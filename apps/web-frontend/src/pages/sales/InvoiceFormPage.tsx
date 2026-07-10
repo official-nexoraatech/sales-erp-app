@@ -2,13 +2,19 @@
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { invoiceApi, quotationApi, itemApi, customerApi, warehouseApi, branchApi } from '../../api/endpoints.js';
+import { invoiceApi, quotationApi, deliveryChallanApi, itemApi, customerApi, warehouseApi, branchApi } from '../../api/endpoints.js';
+import { useAuthStore } from '../../store/auth.store.js';
+import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
 import ERPTextarea from '../../components/erp/ERPTextarea.js';
+import ERPAsyncSelect, { type AsyncSelectOption } from '../../components/erp/ERPAsyncSelect.js';
 import Button from '../../components/ui/Button.js';
 import Input from '../../components/ui/Input.js';
 import Select from '../../components/ui/Select.js';
 import { INDIAN_STATES } from '../../lib/indianStates.js';
+import { createSearchLoadOptions } from '../../lib/searchSelectOptions.js';
+
+const loadCustomerOptions = createSearchLoadOptions('customer');
 
 interface LineItem {
   itemId: number;
@@ -40,10 +46,13 @@ function computeLine(l: LineItem, sellerState: string, placeOfSupply: string) {
 
 export default function InvoiceFormPage() {
   const navigate = useNavigate();
+  const hasPermission = useAuthStore((s) => s.hasPermission);
   const [searchParams] = useSearchParams();
   const quotationId = searchParams.get('quotationId');
+  const challanId = searchParams.get('challanId');
 
-  const [customerId, setCustomerId] = useState('');
+  const [selectedCustomer, setSelectedCustomer] = useState<AsyncSelectOption | null>(null);
+  const customerId = selectedCustomer ? String(selectedCustomer.value) : '';
   const [branchId, setBranchId] = useState('');
   const [warehouseId, setWarehouseId] = useState('');
   const [placeOfSupply, setPlaceOfSupply] = useState('27');
@@ -57,22 +66,31 @@ export default function InvoiceFormPage() {
   const { data: itemData } = useQuery({
     queryKey: ['item-search', itemSearch],
     queryFn: () => itemApi.list({ search: itemSearch }),
-    enabled: itemSearch.length > 1,
+    enabled: itemSearch.length > 1 && hasPermission(PERMISSIONS.ITEM_VIEW),
   });
-  const { data: customerData } = useQuery({ queryKey: ['customers-list'], queryFn: () => customerApi.list({}) });
-  const { data: warehouseData } = useQuery({ queryKey: ['warehouses'], queryFn: () => warehouseApi.list() });
-  const { data: branchData } = useQuery({ queryKey: ['branches'], queryFn: () => branchApi.list() });
+  const { data: warehouseData } = useQuery({ queryKey: ['warehouses'], queryFn: () => warehouseApi.list(), enabled: hasPermission(PERMISSIONS.WAREHOUSE_VIEW) });
+  const { data: branchData } = useQuery({ queryKey: ['branches'], queryFn: () => branchApi.list(), enabled: hasPermission(PERMISSIONS.BRANCH_VIEW) });
   const { data: quotData } = useQuery({
     queryKey: ['quotation-detail', quotationId],
     queryFn: () => quotationApi.getById(Number(quotationId)),
     enabled: !!quotationId,
   });
+  const { data: challanData } = useQuery({
+    queryKey: ['delivery-challan-detail', challanId],
+    queryFn: () => deliveryChallanApi.getById(Number(challanId)),
+    enabled: !!challanId,
+  });
 
   useEffect(() => {
     if (!quotData) return;
-    const q = (quotData as { data?: { customerId?: number; placeOfSupply?: string; lines?: Array<{ itemId: number; quantity: string; unitPrice: string; discountPct: string; gstRate: string; hsnCode?: string }> } })?.data;
+    const q = (quotData as { customerId?: number; placeOfSupply?: string; lines?: Array<{ itemId: number; quantity: string; unitPrice: string; discountPct: string; gstRate: string; hsnCode?: string }> });
     if (q) {
-      setCustomerId(String(q.customerId ?? ''));
+      if (q.customerId) {
+        void customerApi.getById(q.customerId).then((c) => {
+          const customer = c as { displayName?: string };
+          setSelectedCustomer({ value: String(q.customerId), label: customer.displayName ?? `Customer ${q.customerId}` });
+        });
+      }
       setPlaceOfSupply(q.placeOfSupply ?? '27');
       setLines((q.lines ?? []).map((l) => ({
         itemId: l.itemId,
@@ -88,9 +106,54 @@ export default function InvoiceFormPage() {
     }
   }, [quotData]);
 
-  const itemOptions = ((itemData as { data?: Array<{ id: number; name: string; gstRate?: number; hsnCode?: string; minSalePrice?: string }> })?.data ?? []);
-  const customers = (customerData as { data?: Array<{ id: number; displayName: string }> })?.data ?? [];
-  const warehouses = (warehouseData as { data?: Array<{ id: number; name: string }> })?.data ?? [];
+  useEffect(() => {
+    if (!challanData) return;
+    const c = (challanData as {
+      customerId?: number;
+      branchId?: number;
+      warehouseId?: number;
+      lines?: Array<{ itemId: number; quantity: string; unitPrice: string | null; hsnCode?: string; description?: string }>;
+    });
+    if (c.customerId) {
+      void customerApi.getById(c.customerId).then((cust) => {
+        const customer = cust as { displayName?: string };
+        setSelectedCustomer({ value: String(c.customerId), label: customer.displayName ?? `Customer ${c.customerId}` });
+      });
+    }
+    setBranchId(String(c.branchId ?? ''));
+    setWarehouseId(String(c.warehouseId ?? ''));
+
+    let cancelled = false;
+    (async () => {
+      const resolvedLines = await Promise.all((c.lines ?? []).map(async (l) => {
+        let gstRate = 18;
+        let itemName = l.description || `Item ${l.itemId}`;
+        try {
+          const item = (await itemApi.getById(l.itemId)) as { name?: string; gstRate?: number };
+          gstRate = item?.gstRate ?? 18;
+          itemName = item?.name ?? itemName;
+        } catch {
+          // item lookup failed — fall back to defaults so the line can still be edited
+        }
+        return {
+          itemId: l.itemId,
+          itemName,
+          quantity: parseFloat(l.quantity),
+          unitPrice: l.unitPrice ? parseFloat(l.unitPrice) : 0,
+          discountPct: 0,
+          gstRate,
+          hsnCode: l.hsnCode ?? '',
+          taxableAmount: 0,
+          lineTotal: 0,
+        };
+      }));
+      if (!cancelled) setLines(resolvedLines);
+    })();
+    return () => { cancelled = true; };
+  }, [challanData]);
+
+  const itemOptions = (itemData as { content?: Array<{ id: number; name: string; gstRate?: number; hsnCode?: string; minSalePrice?: string }> })?.content ?? [];
+  const warehouses = (warehouseData as { content?: Array<{ id: number; name: string }> })?.content ?? [];
   const branches = (branchData as { content?: Array<{ id: number; name: string }> })?.content ?? [];
 
   const computedLines = lines.map((l) => {
@@ -135,9 +198,9 @@ export default function InvoiceFormPage() {
   const createMutation = useMutation({
     mutationFn: (data: Record<string, unknown>) => invoiceApi.create(data),
     onSuccess: (data: unknown) => {
-      const result = data as { data?: { id?: number } };
+      const result = data as { id?: number };
       toast.success('Invoice created');
-      navigate(`/sales/invoices/${result?.data?.id}`);
+      navigate(`/sales/invoices/${result?.id}`);
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -158,6 +221,7 @@ export default function InvoiceFormPage() {
       dueDate: new Date(dueDate).toISOString(),
       notes,
       quotationId: quotationId ? Number(quotationId) : undefined,
+      deliveryChallanId: challanId ? Number(challanId) : undefined,
       lines: lines.map((l) => ({
         itemId: l.itemId,
         quantity: l.quantity,
@@ -175,28 +239,33 @@ export default function InvoiceFormPage() {
       <ERPPageHeader variant="list" title="New Invoice" subtitle="Create a new sales invoice" />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
-        <Select
-          label="Customer *"
-          value={customerId}
-          onChange={(e) => setCustomerId(e.target.value)}
-          options={[{ value: '', label: 'Select customer...' }, ...customers.map((c) => ({ value: String(c.id), label: c.displayName }))]}
+        <ERPAsyncSelect
+          label="Customer"
+          value={selectedCustomer}
+          onChange={setSelectedCustomer}
+          loadOptions={loadCustomerOptions}
+          placeholder="Type to search customers…"
+          required
         />
         <Select
-          label="Branch *"
+          label="Branch"
+          required
           value={branchId}
           onChange={(e) => setBranchId(e.target.value)}
           options={[{ value: '', label: 'Select branch...' }, ...branches.map((b) => ({ value: String(b.id), label: b.name }))]}
         />
         <Select
-          label="Warehouse *"
+          label="Warehouse"
+          required
           value={warehouseId}
           onChange={(e) => setWarehouseId(e.target.value)}
           options={[{ value: '', label: 'Select warehouse...' }, ...warehouses.map((w) => ({ value: String(w.id), label: w.name }))]}
         />
-        <Input label="Invoice Date *" type="date" value={invoiceDate} onChange={(e) => setInvoiceDate(e.target.value)} />
-        <Input label="Due Date *" type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
+        <Input label="Invoice Date" required type="date" value={invoiceDate} onChange={(e) => setInvoiceDate(e.target.value)} />
+        <Input label="Due Date" required type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
         <Select
-          label="Place of Supply *"
+          label="Place of Supply"
+          required
           value={placeOfSupply}
           onChange={(e) => setPlaceOfSupply(e.target.value)}
           options={[

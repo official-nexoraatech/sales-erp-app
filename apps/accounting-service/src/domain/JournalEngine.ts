@@ -2,6 +2,7 @@ import { ulid } from 'ulid';
 import { eq, and, sql } from 'drizzle-orm';
 import { accounts, financialEntries, journals } from '@erp/db';
 import type { TenantScopedDatabase } from '@erp/sdk';
+import { PlatformEventBus } from '@erp/sdk';
 import { BusinessError, FinancialPeriodClosedError, NotFoundError } from '@erp/types';
 
 export interface JournalLine {
@@ -33,7 +34,8 @@ export class JournalEngine {
     db: TenantScopedDatabase,
     tenantId: number,
     userId: number,
-    entry: JournalEntry
+    entry: JournalEntry,
+    correlationId?: string
   ): Promise<PostedJournal> {
     const journalId = entry.journalId ?? ulid();
 
@@ -74,7 +76,7 @@ export class JournalEngine {
 
     await db.transaction(async (trx) => {
       // Insert journal header
-      await trx.raw.insert(journals).values({
+      const [journalRow] = await trx.raw.insert(journals).values({
         tenantId,
         journalId,
         description: entry.description,
@@ -87,7 +89,7 @@ export class JournalEngine {
         periodYear,
         createdBy: userId,
         createdAt: now,
-      } as typeof journals.$inferInsert);
+      } as typeof journals.$inferInsert).returning({ id: journals.id });
 
       // Insert all lines within the same transaction
       // The DEFERRED trigger validate_journal_balance fires at TX commit
@@ -109,6 +111,21 @@ export class JournalEngine {
           createdAt: now,
         } as typeof financialEntries.$inferInsert);
       }
+
+      // ES-24 [M15]: publish JOURNAL_POSTED in the same transaction as the write.
+      // aggregateId must be the journals table's numeric surrogate PK (outbox_events.
+      // aggregate_id is an integer column) — journalId itself is a ulid business key,
+      // carried in the payload for consumers instead.
+      const eventBus = new PlatformEventBus(trx, tenantId, userId, correlationId ?? ulid());
+      await eventBus.publishInTransaction('journal', journalRow!.id, 'JOURNAL_POSTED', {
+        journalId,
+        description: entry.description,
+        referenceType: entry.referenceType,
+        referenceId: entry.referenceId,
+        totalDebit: totalDr,
+        totalCredit: totalCr,
+        linesPosted: entry.lines.length,
+      });
     });
 
     return { journalId, linesPosted: entry.lines.length };
@@ -120,7 +137,8 @@ export class JournalEngine {
     tenantId: number,
     userId: number,
     originalJournalId: string,
-    reason?: string
+    reason?: string,
+    correlationId?: string
   ): Promise<PostedJournal> {
     // Load original journal
     const [originalJournal] = await db.raw
@@ -150,7 +168,7 @@ export class JournalEngine {
 
     await db.transaction(async (trx) => {
       // Insert reversal journal header
-      await trx.raw.insert(journals).values({
+      const [reversalRow] = await trx.raw.insert(journals).values({
         tenantId,
         journalId: reversalJournalId,
         description: reason ?? `Reversal of journal ${originalJournalId}`,
@@ -164,7 +182,7 @@ export class JournalEngine {
         periodYear,
         createdBy: userId,
         createdAt: now,
-      } as typeof journals.$inferInsert);
+      } as typeof journals.$inferInsert).returning({ id: journals.id });
 
       // Flip DR/CR for each line
       for (const entry of originalEntries) {
@@ -191,6 +209,15 @@ export class JournalEngine {
         .update(journals)
         .set({ status: 'REVERSED', reversedBy: reversalJournalId })
         .where(and(eq(journals.tenantId, tenantId), eq(journals.journalId, originalJournalId)));
+
+      // ES-24 [M15]: publish JOURNAL_REVERSED in the same transaction as the write.
+      const eventBus = new PlatformEventBus(trx, tenantId, userId, correlationId ?? ulid());
+      await eventBus.publishInTransaction('journal', reversalRow!.id, 'JOURNAL_REVERSED', {
+        journalId: reversalJournalId,
+        originalJournalId,
+        reason: reason ?? null,
+        linesPosted: originalEntries.length,
+      });
     });
 
     return { journalId: reversalJournalId, linesPosted: originalEntries.length };

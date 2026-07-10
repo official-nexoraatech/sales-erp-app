@@ -21,12 +21,13 @@ export const customerInteractions = pgTable(
     customerId: integer('customer_id').notNull(),
     type: varchar('type', { length: 20 })
       .notNull()
-      .$type<'VISIT' | 'CALL' | 'COMPLAINT' | 'EMAIL' | 'WHATSAPP' | 'OTHER'>(),
+      .$type<'VISIT' | 'CALL' | 'COMPLAINT' | 'EMAIL' | 'WHATSAPP' | 'OTHER' | 'SYSTEM'>(),
     notes: text('notes').notNull(),
     followUpDate: timestamp('follow_up_date', { withTimezone: true }),
     followUpDone: boolean('follow_up_done').notNull().default(false),
     createdBy: integer('created_by').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }),
   },
   (t) => [
     index('idx_cust_interactions_customer').on(t.customerId, t.tenantId, t.createdAt),

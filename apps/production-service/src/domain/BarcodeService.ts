@@ -2,7 +2,7 @@ import { and, eq, desc } from 'drizzle-orm';
 import { barcodeBatches, barcodes, items, itemVariants } from '@erp/db';
 import type { ErpDatabase } from '@erp/db';
 import { BusinessError, NotFoundError } from '@erp/types';
-import Redis from 'ioredis';
+import type { TenantScopedCache } from '@erp/sdk';
 
 const BARCODE_CACHE_TTL_SECONDS = 300; // 5 minutes
 
@@ -12,12 +12,12 @@ export interface GenerateBarcodesParams {
   variantId?: number | undefined;
   quantity: number;
   format: 'EAN13' | 'CODE128' | 'QR';
-  printFormat: 'A4_SHEET' | 'LABEL_40x25' | 'LABEL_60x40';
+  printFormat: 'A4_SHEET' | 'LABEL_40x25' | 'LABEL_60x40' | 'LABEL_50x25' | 'LABEL_100x50';
   createdBy: number;
   baseUrl: string;
 }
 
-function generateBarcodeValue(format: 'EAN13' | 'CODE128' | 'QR', itemId: number, seq: number): string {
+export function generateBarcodeValue(format: 'EAN13' | 'CODE128' | 'QR', itemId: number, seq: number): string {
   const pad = (n: number, len: number): string => String(n).padStart(len, '0');
   if (format === 'EAN13') {
     const raw = `${pad(itemId, 6)}${pad(seq, 5)}`;
@@ -30,7 +30,7 @@ function generateBarcodeValue(format: 'EAN13' | 'CODE128' | 'QR', itemId: number
   return `QR-${pad(itemId, 6)}-${pad(seq, 5)}-${Date.now()}`;
 }
 
-function computeEan13Check(digits11: string): number {
+export function computeEan13Check(digits11: string): number {
   let sum = 0;
   for (let i = 0; i < 11; i++) {
     const d = parseInt(digits11[i] ?? '0', 10);
@@ -42,7 +42,7 @@ function computeEan13Check(digits11: string): number {
 export class BarcodeService {
   constructor(
     private db: ErpDatabase,
-    private redis: Redis
+    private cache: TenantScopedCache
   ) {}
 
   async generate(params: GenerateBarcodesParams): Promise<{ batchId: number; barcodeIds: number[]; printUrl: string }> {
@@ -154,15 +154,15 @@ export class BarcodeService {
       .where(and(eq(barcodes.id, id), eq(barcodes.tenantId, tenantId)));
 
     // Invalidate cache
-    await this.redis.del(`barcode:${tenantId}:${bc.barcodeValue}`);
+    await this.cache.del(`barcode:${bc.barcodeValue}`);
   }
 
   async lookupByValue(value: string, tenantId: number): Promise<unknown> {
-    const cacheKey = `barcode:${tenantId}:${value}`;
+    const cacheKey = `barcode:${value}`;
 
-    const cached = await this.redis.get(cacheKey);
+    const cached = await this.cache.getJson<unknown>(cacheKey);
     if (cached) {
-      return JSON.parse(cached) as unknown;
+      return cached;
     }
 
     // Query barcodes table first (for generated barcodes)
@@ -179,7 +179,7 @@ export class BarcodeService {
 
       if (item) {
         const result = { item, variantId: bc.variantId, source: 'barcode_table' };
-        await this.redis.set(cacheKey, JSON.stringify(result), 'EX', BARCODE_CACHE_TTL_SECONDS);
+        await this.cache.setJson(cacheKey, result, BARCODE_CACHE_TTL_SECONDS);
         return result;
       }
     }
@@ -193,7 +193,7 @@ export class BarcodeService {
     if (!item) throw new NotFoundError('Item', `barcode:${value}`);
 
     const result = { item, variantId: null, source: 'item_barcode' };
-    await this.redis.set(cacheKey, JSON.stringify(result), 'EX', BARCODE_CACHE_TTL_SECONDS);
+    await this.cache.setJson(cacheKey, result, BARCODE_CACHE_TTL_SECONDS);
     return result;
   }
 

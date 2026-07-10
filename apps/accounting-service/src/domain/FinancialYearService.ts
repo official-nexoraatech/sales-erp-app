@@ -2,8 +2,29 @@ import { eq, and, sql } from 'drizzle-orm';
 import { financialYears, periodClosures, journals } from '@erp/db';
 import type { TenantScopedDatabase } from '@erp/sdk';
 import { BusinessError, FinancialPeriodClosedError, NotFoundError } from '@erp/types';
-import { JournalEngine } from './JournalEngine.js';
-import { ReportsEngine } from './ReportsEngine.js';
+import { JournalEngine, type JournalLine } from './JournalEngine.js';
+import { ReportsEngine, type PLLine } from './ReportsEngine.js';
+
+// Splits a signed "amount to close" for a P&L account into a debit/credit pair that
+// zeroes it out. `normalSide` is the side that closes the account when amount >= 0
+// (DEBIT for revenue/other-income, CREDIT for expense/COGS/contra-revenue) — amounts
+// can occasionally come out negative (e.g. a heavily-reversed account), so both sides
+// are handled rather than assuming the typical direction.
+function closingSide(amount: number, normalSide: 'DEBIT' | 'CREDIT'): { debitAmount: number; creditAmount: number } {
+  const abs = Math.abs(amount);
+  const isDebit = amount >= 0 ? normalSide === 'DEBIT' : normalSide === 'CREDIT';
+  return { debitAmount: isDebit ? abs : 0, creditAmount: isDebit ? 0 : abs };
+}
+
+function closingLines(lines: PLLine[], normalSide: 'DEBIT' | 'CREDIT', yearCode: string): JournalLine[] {
+  return lines
+    .filter((l) => Math.abs(l.amount) > 0.01)
+    .map((l) => ({
+      accountId: l.accountId,
+      ...closingSide(l.amount, normalSide),
+      description: `Close ${l.accountName} — ${yearCode}`,
+    }));
+}
 
 function lastDayOfMonth(year: number, month: number): number {
   return new Date(year, month, 0).getDate();
@@ -268,14 +289,19 @@ export class FinancialYearService {
     }
 
     await db.transaction(async (trx) => {
-      // Step 1: Post closing entries (P&L to Retained Earnings)
+      // Step 1: Post closing entries — revenue/expense accounts through Income Summary, then to Retained Earnings
       const pl = await ReportsEngine.getProfitLoss(trx, tenantId, fy.startDate, fy.endDate);
 
-      // Find P&L and Retained Earnings accounts
-      const [plAccount] = await trx.raw.execute(sql`
-        SELECT id, account_code FROM accounts
-        WHERE tenant_id = ${tenantId} AND account_sub_type = 'SALES_REVENUE' LIMIT 1
-      `) as { id: number; account_code: string }[];
+      const [incomeSummaryAccount] = await trx.raw.execute(sql`
+        SELECT id FROM accounts
+        WHERE tenant_id = ${tenantId} AND account_sub_type = 'INCOME_SUMMARY' LIMIT 1
+      `) as { id: number }[];
+      if (!incomeSummaryAccount) {
+        throw new BusinessError(
+          'INCOME_SUMMARY_ACCOUNT_MISSING',
+          'No Income Summary system account found for this tenant. Run the PG-033 backfill migration before closing a year.'
+        );
+      }
 
       const [retainedEarningsAccount] = await trx.raw.execute(sql`
         SELECT id, account_code FROM accounts
@@ -283,28 +309,48 @@ export class FinancialYearService {
       `) as { id: number; account_code: string }[];
 
       let closingJournalId: string | undefined;
-      if (retainedEarningsAccount && Math.abs(pl.netProfit) > 0.01) {
-        const { journalId } = await JournalEngine.post(trx, tenantId, userId, {
-          description: `Year-end closing entry — net profit/loss for ${fy.yearCode}`,
-          referenceType: 'FINANCIAL_YEAR',
-          referenceId: financialYearId,
-          lines: [
-            {
-              accountId: retainedEarningsAccount.id,
-              debitAmount: pl.netProfit > 0 ? 0 : Math.abs(pl.netProfit),
-              creditAmount: pl.netProfit > 0 ? pl.netProfit : 0,
-              description: `Net ${pl.netProfit >= 0 ? 'profit' : 'loss'} — ${fy.yearCode}`,
-            },
-            // Counter-entry using a placeholder income summary account (same account as a self-balancing contra)
-            {
-              accountId: retainedEarningsAccount.id,
-              debitAmount: pl.netProfit > 0 ? pl.netProfit : 0,
-              creditAmount: pl.netProfit > 0 ? 0 : Math.abs(pl.netProfit),
-              description: `Income summary — ${fy.yearCode}`,
-            },
-          ],
-        });
-        closingJournalId = journalId;
+      if (retainedEarningsAccount) {
+        // Step 1a: close revenue/other-income accounts, credited in aggregate to Income Summary
+        const incomeCloseLines = closingLines([...pl.revenue, ...pl.otherIncome], 'DEBIT', fy.yearCode);
+        const totalIncomeToClose = incomeCloseLines.reduce((s, l) => s + l.debitAmount - l.creditAmount, 0);
+
+        // Step 1b: close expense/COGS/financial-charge/contra-revenue accounts, debited in aggregate to Income Summary
+        const expenseCloseLines = closingLines(
+          [...pl.cogs, ...pl.operatingExpenses, ...pl.financialCharges, ...pl.contraRevenue],
+          'CREDIT',
+          fy.yearCode
+        );
+        const totalExpenseToClose = expenseCloseLines.reduce((s, l) => s + l.creditAmount - l.debitAmount, 0);
+
+        // Step 1c: Income Summary's resulting net balance closes into Retained Earnings
+        const netProfit = totalIncomeToClose - totalExpenseToClose;
+
+        const lines: JournalLine[] = [
+          ...incomeCloseLines,
+          ...(Math.abs(totalIncomeToClose) > 0.01
+            ? [{ accountId: incomeSummaryAccount.id, ...closingSide(-totalIncomeToClose, 'DEBIT'), description: `Income summary — revenue/other income closed for ${fy.yearCode}` }]
+            : []),
+          ...expenseCloseLines,
+          ...(Math.abs(totalExpenseToClose) > 0.01
+            ? [{ accountId: incomeSummaryAccount.id, ...closingSide(totalExpenseToClose, 'DEBIT'), description: `Income summary — expenses closed for ${fy.yearCode}` }]
+            : []),
+          ...(Math.abs(netProfit) > 0.01
+            ? [
+                { accountId: incomeSummaryAccount.id, ...closingSide(netProfit, 'DEBIT'), description: `Income summary — net ${netProfit >= 0 ? 'profit' : 'loss'} transferred — ${fy.yearCode}` },
+                { accountId: retainedEarningsAccount.id, ...closingSide(netProfit, 'CREDIT'), description: `Net ${netProfit >= 0 ? 'profit' : 'loss'} — ${fy.yearCode}` },
+              ]
+            : []),
+        ];
+
+        if (lines.length >= 2) {
+          const { journalId } = await JournalEngine.post(trx, tenantId, userId, {
+            description: `Year-end closing entry — net profit/loss for ${fy.yearCode}`,
+            referenceType: 'FINANCIAL_YEAR',
+            referenceId: financialYearId,
+            lines,
+          });
+          closingJournalId = journalId;
+        }
       }
 
       // Step 2: Lock the financial year

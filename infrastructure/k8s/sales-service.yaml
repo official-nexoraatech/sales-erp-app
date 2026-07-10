@@ -1,0 +1,159 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sales-service
+  namespace: erp-system
+  labels:
+    app: sales-service
+    version: v1
+    part-of: erp
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: sales-service
+  template:
+    metadata:
+      labels:
+        app: sales-service
+        version: v1
+      annotations:
+        # Vault agent sidecar injection
+        vault.hashicorp.com/agent-inject: "true"
+        vault.hashicorp.com/role: "sales-service"
+        vault.hashicorp.com/agent-inject-secret-db: "erp/data/sales-service/db"
+        vault.hashicorp.com/agent-inject-template-db: |
+          {{- with secret "erp/data/sales-service/db" -}}
+          export DATABASE_URL="{{ .Data.data.url }}"
+          {{- end }}
+        vault.hashicorp.com/agent-inject-secret-jwt: "erp/data/sales-service/jwt"
+        vault.hashicorp.com/agent-inject-template-jwt: |
+          {{- with secret "erp/data/sales-service/jwt" -}}
+          export JWT_PUBLIC_KEY="{{ .Data.data.public_key }}"
+          {{- end }}
+        # Prometheus scraping
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "3013"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: sales-service
+      imagePullSecrets:
+        - name: ghcr-pull-secret
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        fsGroup: 1001
+      containers:
+        - name: sales-service
+          image: ghcr.io/nexoraatech/erp/sales-service:latest
+          ports:
+            - name: http
+              containerPort: 3013
+              protocol: TCP
+          env:
+            - name: NODE_ENV
+              value: "production"
+            - name: SALES_SERVICE_PORT
+              value: "3013"
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: erp-redis-secret
+                  key: url
+            - name: LOKI_URL
+              value: "http://loki.erp-infra.svc.cluster.local:3100"
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://jaeger-collector.erp-infra.svc.cluster.local:4318"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3013
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3013
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sales-service
+  namespace: erp-system
+  labels:
+    app: sales-service
+spec:
+  selector:
+    app: sales-service
+  ports:
+    - name: http
+      port: 80
+      targetPort: 3013
+      protocol: TCP
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: sales-service-hpa
+  namespace: erp-system
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: sales-service
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: sales-service-pdb
+  namespace: erp-system
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: sales-service
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: sales-service
+  namespace: erp-system
+  labels:
+    app: sales-service

@@ -48,6 +48,7 @@ export default function ERPPagination({
           <div className="flex items-center gap-2">
             <span className="text-xs text-secondary">Rows</span>
             <select
+              aria-label="Rows per page"
               value={pageSize}
               onChange={(e) => onPageSizeChange(Number(e.target.value))}
               className="text-xs rounded-md border border-default bg-surface-card text-primary px-2 py-1 focus:outline-none focus:ring-1 focus:ring-border-focus"

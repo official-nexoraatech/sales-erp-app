@@ -7,6 +7,7 @@ import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
 import ERPErrorBoundary from '../../components/erp/ERPErrorBoundary.js';
 import { ERPTableSkeleton } from '../../components/erp/ERPSkeleton.js';
+import ERPEmptyState from '../../components/erp/ERPEmptyState.js';
 import Button from '../../components/ui/Button.js';
 import Input from '../../components/ui/Input.js';
 import Select from '../../components/ui/Select.js';
@@ -109,7 +110,12 @@ export default function HolidayCalendarPage() {
         {isLoading ? (
           <ERPTableSkeleton rows={5} cols={4} />
         ) : holidays.length === 0 ? (
-          <p className="text-disabled text-sm">No holidays found for {year}.</p>
+          <ERPEmptyState
+            type="no-data"
+            title={`No holidays found for ${year}`}
+            description="Add a holiday or seed the default calendar for this year."
+            {...(canManage ? { action: { label: '+ Add Holiday', onClick: () => setAddOpen(true) } } : {})}
+          />
         ) : (
           <table className="w-full text-sm bg-surface-card rounded-xl border border-default overflow-hidden">
             <thead className="bg-surface-subtle">

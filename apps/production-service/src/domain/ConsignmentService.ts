@@ -4,6 +4,7 @@ import {
   consignmentSettlements,
   items,
   outboxEvents,
+  inventoryLedger,
 } from '@erp/db';
 import type { ErpDatabase } from '@erp/db';
 import { BusinessError, NotFoundError } from '@erp/types';
@@ -80,6 +81,7 @@ export class ConsignmentService {
     tenantId: number,
     itemId: number,
     variantId: number | undefined,
+    warehouseId: number,
     soldQty: number,
     userId: number
   ): Promise<void> {
@@ -103,21 +105,72 @@ export class ConsignmentService {
         if (remaining <= 0) break;
         const available = parseFloat(String(stock.availableQty));
         const toDeduct = Math.min(remaining, available);
-        const newAvailable = available - toDeduct;
-        const newSoldQty = parseFloat(String(stock.soldQty)) + toDeduct;
 
-        const newStatus = newAvailable <= 0 ? 'SETTLED' : 'PARTIAL';
-        await trx
+        // Atomic check-and-deduct: guard on availableQty in the WHERE clause (mirrors the
+        // items update just below) instead of writing a value computed from a stale read.
+        const stockResult = await trx
           .update(consignmentStocks)
           .set({
-            availableQty: String(newAvailable),
-            soldQty: String(newSoldQty),
-            status: newStatus,
+            availableQty: sql`${consignmentStocks.availableQty} - ${toDeduct}`,
+            soldQty: sql`${consignmentStocks.soldQty} + ${toDeduct}`,
+            status: sql`CASE WHEN ${consignmentStocks.availableQty} - ${toDeduct} <= 0 THEN 'SETTLED' ELSE 'PARTIAL' END`,
             updatedBy: userId,
             updatedAt: new Date(),
             version: sql`${consignmentStocks.version} + 1`,
           })
-          .where(eq(consignmentStocks.id, stock.id));
+          .where(
+            and(
+              eq(consignmentStocks.id, stock.id),
+              sql`${consignmentStocks.availableQty} >= ${toDeduct}`
+            )
+          )
+          .returning({ availableQty: consignmentStocks.availableQty });
+
+        if (stockResult.length === 0) {
+          throw new BusinessError(
+            'CONSIGNMENT_STOCK_CHANGED',
+            `Consignment stock ${stock.id} was modified concurrently — retry the sale`
+          );
+        }
+
+        // ES-03: consignment stock was tracked separately but never reduced the main
+        // warehouse's items.available_qty or written to inventory_ledger, so sold
+        // consignment goods were invisible to stock reports and reconciliation.
+        const itemResult = await trx
+          .update(items)
+          .set({
+            availableQty: sql`${items.availableQty} - ${toDeduct}`,
+            version: sql`${items.version} + 1`,
+          })
+          .where(
+            and(
+              eq(items.id, itemId),
+              eq(items.tenantId, tenantId),
+              sql`${items.availableQty} >= ${toDeduct}`
+            )
+          )
+          .returning({ availableQty: items.availableQty });
+
+        if (itemResult.length === 0) {
+          throw new BusinessError('INSUFFICIENT_STOCK', `Item ${itemId} has insufficient main warehouse stock to fulfill consignment sale`);
+        }
+
+        const afterQty = parseFloat(String(itemResult[0]!.availableQty ?? '0'));
+        const beforeQty = afterQty + toDeduct;
+        await trx.insert(inventoryLedger).values({
+          tenantId,
+          itemId,
+          variantId,
+          warehouseId,
+          movementType: 'STOCK_OUT',
+          quantity: String(toDeduct),
+          quantityBefore: String(beforeQty),
+          quantityAfter: String(afterQty),
+          referenceType: 'CONSIGNMENT_SALE',
+          referenceId: stock.id,
+          unitCost: String(stock.agreedRate ?? '0'),
+          createdBy: userId,
+        });
 
         remaining -= toDeduct;
       }
@@ -143,17 +196,35 @@ export class ConsignmentService {
       if (returnQty > available)
         throw new BusinessError('INVALID_RETURN_QTY', `Cannot return ${returnQty} — only ${available} available`);
 
-      await trx
+      // ES-23 [L1]: atomic check-and-deduct, mirroring the fix already applied to
+      // recordSale() in this same file — the WHERE guard re-checks availableQty
+      // against its CURRENT value, not the one read above, so a concurrent sale or
+      // return against this same stock row can't be lost.
+      const result = await trx
         .update(consignmentStocks)
         .set({
-          availableQty: String(available - returnQty),
+          availableQty: sql`${consignmentStocks.availableQty} - ${returnQty}`,
           returnedQty: sql`${consignmentStocks.returnedQty} + ${returnQty}`,
-          status: available - returnQty <= 0 ? 'RETURNED' : 'PARTIAL',
+          status: sql`CASE WHEN ${consignmentStocks.availableQty} - ${returnQty} <= 0 THEN 'RETURNED' ELSE 'PARTIAL' END`,
           updatedBy: userId,
           updatedAt: new Date(),
           version: sql`${consignmentStocks.version} + 1`,
         })
-        .where(and(eq(consignmentStocks.id, id), eq(consignmentStocks.tenantId, tenantId)));
+        .where(
+          and(
+            eq(consignmentStocks.id, id),
+            eq(consignmentStocks.tenantId, tenantId),
+            sql`${consignmentStocks.availableQty} >= ${returnQty}`
+          )
+        )
+        .returning({ id: consignmentStocks.id });
+
+      if (result.length === 0) {
+        throw new BusinessError(
+          'CONSIGNMENT_STOCK_CHANGED',
+          `Consignment stock ${id} was modified concurrently — retry the return`
+        );
+      }
 
       await trx.insert(outboxEvents).values({
         eventId: ulid(),

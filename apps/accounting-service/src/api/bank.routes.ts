@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { PlatformContextFactory } from '@erp/sdk';
 import { z } from 'zod';
-import { ValidationError } from '@erp/types';
+import { ValidationError, OptionalIFSCSchema, OptionalBankAccountSchema } from '@erp/types';
 import { PERMISSIONS } from '@erp/types';
 import { authenticate } from '../middleware/authenticate.js';
 import { requirePermission } from '../middleware/authorize.js';
@@ -12,9 +12,13 @@ type AuthedRequest = { auth: { tenantId: number; userId: number } };
 const CreateBankAccountSchema = z.object({
   accountId: z.number().int().positive(),
   bankName: z.string().min(1).max(200),
-  accountNumber: z.string().max(50).optional(),
-  ifscCode: z.string().max(20).optional(),
+  accountNumber: OptionalBankAccountSchema,
+  ifscCode: OptionalIFSCSchema,
   branchName: z.string().max(200).optional(),
+});
+
+const FinalizeReconciliationSchema = z.object({
+  statementId: z.number().int().positive(),
 });
 
 const ImportStatementSchema = z.object({
@@ -140,8 +144,7 @@ export async function bankRoutes(
       const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
       const ctx = ctxFactory.create({ tenantId, userId, correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID() });
       const bankAccountId = parseInt(request.params.accountId, 10);
-      const { statementId } = (request.body as { statementId: number }) ?? {};
-      if (!statementId) throw new ValidationError('statementId is required');
+      const { statementId } = FinalizeReconciliationSchema.parse(request.body);
 
       await BankReconciliationService.finalizeReconciliation(ctx.db, tenantId, bankAccountId, statementId);
       return reply.code(200).send({ data: { message: 'Reconciliation finalized' } });

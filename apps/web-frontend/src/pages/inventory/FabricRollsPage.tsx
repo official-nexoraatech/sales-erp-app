@@ -1,15 +1,19 @@
-﻿import { useState } from 'react';
+import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
+import { Scissors } from 'lucide-react';
 import { fabricRollApi, itemApi, warehouseApi } from '../../api/endpoints.js';
+import { useAuthStore } from '../../store/auth.store.js';
+import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
-import DataTable from '../../components/ui/DataTable.js';
+import ERPDataGrid, { type ERPColumnDef } from '../../components/erp/ERPDataGrid.js';
+import ERPDropdownMenu, { type ERPMenuItem } from '../../components/erp/ERPDropdownMenu.js';
 import Button from '../../components/ui/Button.js';
 import Badge from '../../components/ui/Badge.js';
 import Modal from '../../components/ui/Modal.js';
 import Input from '../../components/ui/Input.js';
 import Select from '../../components/ui/Select.js';
-import { formatDate, formatDatetime, formatCurrency } from '../../lib/format.js';
+import { formatDate } from '../../lib/format.js';
 
 interface FabricRoll {
   id: number;
@@ -34,6 +38,8 @@ const STATUS_COLORS: Record<string, 'default' | 'success' | 'warning' | 'danger'
 
 export default function FabricRollsPage() {
   const qc = useQueryClient();
+  const hasPermission = useAuthStore((s) => s.hasPermission);
+  const canEditFabricRoll = hasPermission(PERMISSIONS.ITEM_EDIT);
   const [filterItemId, setFilterItemId] = useState('');
   const [showReceive, setShowReceive] = useState(false);
   const [showCut, setShowCut] = useState<{ rollId: number; rollNumber: string } | null>(null);
@@ -52,11 +58,11 @@ export default function FabricRollsPage() {
   });
 
   const { data: itemData } = useQuery({ queryKey: ['fabric-items'], queryFn: () => itemApi.list({ search: '' }) });
-  const { data: whData } = useQuery({ queryKey: ['warehouses'], queryFn: () => warehouseApi.list() });
+  const { data: whData } = useQuery({ queryKey: ['warehouses'], queryFn: () => warehouseApi.list(), enabled: hasPermission(PERMISSIONS.WAREHOUSE_VIEW) });
 
-  const rolls: FabricRoll[] = (data as { data?: FabricRoll[] })?.data ?? [];
-  const items: Item[] = (itemData as { data?: Item[] })?.data ?? [];
-  const warehouses: Warehouse[] = (whData as { data?: Warehouse[] })?.data ?? [];
+  const rolls: FabricRoll[] = (data as FabricRoll[]) ?? [];
+  const items: Item[] = (itemData as { content?: Item[] })?.content ?? [];
+  const warehouses: Warehouse[] = (whData as { content?: Warehouse[] })?.content ?? [];
 
   const receiveMutation = useMutation({
     mutationFn: (d: Record<string, unknown>) => fabricRollApi.receive(d),
@@ -71,46 +77,44 @@ export default function FabricRollsPage() {
     onError: (e: Error) => toast.error(e.message),
   });
 
-  const columns = [
-    { key: 'rollNumber', header: 'Roll #', className: 'font-mono text-sm' },
+  const columns: ERPColumnDef<FabricRoll>[] = [
+    { key: 'rollNumber', header: 'Roll #', mono: true, sortable: true },
     {
       key: 'itemId',
       header: 'Item',
-      render: (r: FabricRoll) => items.find((i) => i.id === r.itemId)?.name ?? String(r.itemId),
+      render: (r) => items.find((i) => i.id === r.itemId)?.name ?? String(r.itemId),
     },
-    { key: 'originalMeters', header: 'Original (m)', render: (r: FabricRoll) => parseFloat(r.originalMeters).toFixed(2) },
+    { key: 'originalMeters', header: 'Original (m)', align: 'right', render: (r) => parseFloat(r.originalMeters).toFixed(2) },
     {
       key: 'remainingMeters',
       header: 'Remaining (m)',
-      render: (r: FabricRoll) => {
+      align: 'right',
+      sortable: true,
+      render: (r) => {
         const rem = parseFloat(r.remainingMeters);
         const orig = parseFloat(r.originalMeters);
         const pct = orig > 0 ? (rem / orig) * 100 : 0;
-        return (
-          <span className={pct < 20 ? 'text-red-600 font-semibold' : 'font-medium'}>
-            {rem.toFixed(2)}
-          </span>
-        );
+        return <span className={pct < 20 ? 'text-danger font-semibold' : 'font-medium'}>{rem.toFixed(2)}</span>;
       },
     },
-    { key: 'status', header: 'Status', render: (r: FabricRoll) => <Badge variant={STATUS_COLORS[r.status] ?? 'default'}>{r.status}</Badge> },
-    { key: 'receivedAt', header: 'Received', render: (r: FabricRoll) => formatDate(r.receivedAt) },
+    { key: 'status', header: 'Status', sortable: true, render: (r) => <Badge variant={STATUS_COLORS[r.status] ?? 'default'}>{r.status}</Badge> },
+    { key: 'receivedAt', header: 'Received', sortable: true, render: (r) => formatDate(r.receivedAt) },
     {
       key: 'actions',
       header: '',
-      render: (r: FabricRoll) =>
-        (r.status === 'AVAILABLE' || r.status === 'PARTIALLY_CUT') && (
-          <Button size="sm" onClick={() => setShowCut({ rollId: r.id, rollNumber: r.rollNumber })}>
-            Cut
-          </Button>
-        ),
+      align: 'right',
+      render: (r) => {
+        if (!canEditFabricRoll || !(r.status === 'AVAILABLE' || r.status === 'PARTIALLY_CUT')) return null;
+        const items: ERPMenuItem[] = [{ label: 'Cut', icon: Scissors, onClick: () => setShowCut({ rollId: r.id, rollNumber: r.rollNumber }) }];
+        return <ERPDropdownMenu items={items} />;
+      },
     },
   ];
 
   return (
     <div>
       <ERPPageHeader variant="list" title="Fabric Rolls" subtitle="FIFO fabric roll inventory — receive, cut, and track">
-        <Button onClick={() => setShowReceive(true)}>+ Receive Roll</Button>
+        {canEditFabricRoll && <Button onClick={() => setShowReceive(true)}>+ Receive Roll</Button>}
       </ERPPageHeader>
 
       <div className="mb-4 w-64">
@@ -122,7 +126,7 @@ export default function FabricRollsPage() {
         />
       </div>
 
-      <DataTable columns={columns} data={rolls} isLoading={isLoading} emptyMessage="No fabric rolls found" />
+      <ERPDataGrid columns={columns} data={rolls} isLoading={isLoading} rowKey="id" />
 
       {/* Receive Roll Modal */}
       <Modal isOpen={showReceive} onClose={() => setShowReceive(false)} title="Receive Fabric Roll">

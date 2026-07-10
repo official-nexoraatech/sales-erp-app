@@ -1,0 +1,14 @@
+/* NEXORAA ERP — Design Tokens (pos-frontend)
+ * Re-exports the shared token system so web-frontend and pos-frontend never drift —
+ * see packages/design-tokens/tokens.css for the actual values (single source of truth)
+ * and ERP-PLANNING/05_ERP_THEME_SYSTEM.md §7 for why. Only genuinely POS-only values
+ * (below) belong in this file.
+ */
+@import "@erp/design-tokens/tokens.css";
+
+:root {
+  /* Cashier-facing screens are touch-first (tablet/all-in-one terminals) — every
+     tappable control (qty steppers, payment mode buttons, cart row actions) should
+     meet this minimum hit area regardless of visual size. */
+  --pos-touch-target: 44px;
+}

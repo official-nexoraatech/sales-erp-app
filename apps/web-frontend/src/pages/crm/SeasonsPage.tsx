@@ -5,6 +5,8 @@ import { crmApi } from '../../api/endpoints.js';
 import { useAuthStore } from '../../store/auth.store.js';
 import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
+import { ERPTableSkeleton } from '../../components/erp/ERPSkeleton.js';
+import ERPEmptyState from '../../components/erp/ERPEmptyState.js';
 import Button from '../../components/ui/Button.js';
 import Badge from '../../components/ui/Badge.js';
 import Modal from '../../components/ui/Modal.js';
@@ -46,18 +48,18 @@ export default function SeasonsPage() {
   const [form, setForm] = useState({ ...BLANK_FORM });
 
   const { data, isLoading } = useQuery({ queryKey: ['crm-seasons'], queryFn: () => crmApi.listSeasons() });
-  const seasons: Season[] = (data as Record<string, unknown>)?.data as Season[] ?? [];
+  const seasons: Season[] = (data as { content?: Season[] })?.content ?? [];
 
   const { data: activeData } = useQuery({ queryKey: ['crm-active-season'], queryFn: () => crmApi.activeSeason() });
-  const active = (activeData as Record<string, unknown>)?.data as Season | null | undefined;
+  const active = (activeData as Season | null | undefined);
 
   const createMut = useMutation({
     mutationFn: () =>
       crmApi.createSeason({
         name: form.name,
         seasonType: form.seasonType,
-        startDate: form.startDate,
-        endDate: form.endDate,
+        startDate: new Date(form.startDate).toISOString(),
+        endDate: new Date(form.endDate).toISOString(),
         stockMultiplier: parseFloat(form.stockMultiplier),
         loyaltyMultiplier: parseFloat(form.loyaltyMultiplier),
         salesTarget: form.salesTarget ? parseFloat(form.salesTarget) : undefined,
@@ -77,8 +79,8 @@ export default function SeasonsPage() {
       crmApi.updateSeason(editSeason!.id, {
         name: form.name,
         seasonType: form.seasonType,
-        startDate: form.startDate,
-        endDate: form.endDate,
+        startDate: new Date(form.startDate).toISOString(),
+        endDate: new Date(form.endDate).toISOString(),
         stockMultiplier: parseFloat(form.stockMultiplier),
         loyaltyMultiplier: parseFloat(form.loyaltyMultiplier),
         salesTarget: form.salesTarget ? parseFloat(form.salesTarget) : undefined,
@@ -98,8 +100,8 @@ export default function SeasonsPage() {
     setForm({
       name: s.name,
       seasonType: s.seasonType,
-      startDate: s.startDate,
-      endDate: s.endDate,
+      startDate: s.startDate.slice(0, 10),
+      endDate: s.endDate.slice(0, 10),
       stockMultiplier: String(s.stockMultiplier),
       loyaltyMultiplier: String(s.loyaltyMultiplier),
       salesTarget: s.salesTarget != null ? String(s.salesTarget) : '',
@@ -184,9 +186,14 @@ export default function SeasonsPage() {
       {/* Seasons list */}
       <div className="bg-surface-card rounded-xl border border-default">
         {isLoading ? (
-          <div className="p-8 text-center text-sm text-secondary">Loading…</div>
+          <ERPTableSkeleton rows={6} cols={4} />
         ) : seasons.length === 0 ? (
-          <div className="p-8 text-center text-sm text-secondary">No seasons configured yet.</div>
+          <ERPEmptyState
+            type="no-data"
+            title="No seasons configured yet"
+            description="Manage business seasons, stock multipliers, and loyalty bonuses."
+            {...(canManage ? { action: { label: '+ New Season', onClick: () => { setForm({ ...BLANK_FORM }); setCreateOpen(true); } } } : {})}
+          />
         ) : (
           <div className="divide-y divide-default">
             {seasons.map((s) => {

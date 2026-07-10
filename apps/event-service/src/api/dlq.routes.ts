@@ -4,8 +4,12 @@ import { dlqItems } from '@erp/db';
 import { and, eq, sql, desc } from 'drizzle-orm';
 import { z } from 'zod';
 import { PERMISSIONS } from '@erp/types';
+import { createLogger } from '@erp/logger';
 import { authenticate } from '../middleware/authenticate.js';
 import { requirePermission } from '../middleware/authorize.js';
+import type { OutboxRelayWorker } from '../outbox/OutboxRelayWorker.js';
+
+const logger = createLogger({ serviceName: 'event-service' });
 
 const PaginationSchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
@@ -14,13 +18,14 @@ const PaginationSchema = z.object({
 
 export async function dlqRoutes(
   fastify: FastifyInstance,
-  ctxFactory: PlatformContextFactory
+  ctxFactory: PlatformContextFactory,
+  worker: OutboxRelayWorker
 ): Promise<void> {
   fastify.addHook('preHandler', authenticate);
 
   // GET /admin/dlq/summary — all topics with depth counts
   fastify.get('/admin/dlq/summary', {
-    preHandler: requirePermission(PERMISSIONS.AUDIT_LOG_VIEW),
+    preHandler: requirePermission(PERMISSIONS.DLQ_VIEW),
     handler: async (request, reply) => {
       const ctx = ctxFactory.create({ tenantId: request.auth.tenantId, userId: request.auth.userId, correlationId: (request.headers['x-correlation-id'] as string) ?? 'system' });
       const db = ctx.db.raw;
@@ -49,7 +54,7 @@ export async function dlqRoutes(
 
   // GET /admin/dlq/:topic — messages in DLQ (paginated)
   fastify.get<{ Params: { topic: string } }>('/admin/dlq/:topic', {
-    preHandler: requirePermission(PERMISSIONS.AUDIT_LOG_VIEW),
+    preHandler: requirePermission(PERMISSIONS.DLQ_VIEW),
     handler: async (request, reply) => {
       const parsed = PaginationSchema.safeParse(request.query);
       if (!parsed.success) {
@@ -83,7 +88,7 @@ export async function dlqRoutes(
 
   // GET /admin/dlq/:topic/:id — single message detail
   fastify.get<{ Params: { topic: string; id: string } }>('/admin/dlq/:topic/:id', {
-    preHandler: requirePermission(PERMISSIONS.AUDIT_LOG_VIEW),
+    preHandler: requirePermission(PERMISSIONS.DLQ_VIEW),
     handler: async (request, reply) => {
       const id = parseInt(request.params.id, 10);
       if (isNaN(id)) {
@@ -109,7 +114,7 @@ export async function dlqRoutes(
 
   // POST /admin/dlq/:topic/replay — replay all PENDING messages for a topic
   fastify.post<{ Params: { topic: string } }>('/admin/dlq/:topic/replay', {
-    preHandler: requirePermission(PERMISSIONS.AUDIT_LOG_VIEW),
+    preHandler: requirePermission(PERMISSIONS.DLQ_MANAGE),
     handler: async (request, reply) => {
       const { topic } = request.params;
       const ctx = ctxFactory.create({ tenantId: request.auth.tenantId, userId: request.auth.userId, correlationId: (request.headers['x-correlation-id'] as string) ?? 'system' });
@@ -120,23 +125,44 @@ export async function dlqRoutes(
         .from(dlqItems)
         .where(and(eq(dlqItems.topic, topic), eq(dlqItems.status, 'PENDING')));
 
-      // Mark as REPLAYED (in a real system, would re-publish to Kafka)
-      if (pending.length > 0) {
-        await db
-          .update(dlqItems)
-          .set({ status: 'REPLAYED', lastRetriedAt: new Date(), updatedAt: new Date() })
-          .where(and(eq(dlqItems.topic, topic), eq(dlqItems.status, 'PENDING')));
+      let replayed = 0;
+      let failed = 0;
+
+      for (const row of pending) {
+        try {
+          await worker.publishRaw(
+            row.topic,
+            String(row.id),
+            row.payload as Record<string, unknown>,
+            row.headers as Record<string, string>
+          );
+          await db
+            .update(dlqItems)
+            .set({ status: 'REPLAYED', lastRetriedAt: new Date(), updatedAt: new Date() })
+            .where(eq(dlqItems.id, row.id));
+          replayed += 1;
+        } catch (err) {
+          failed += 1;
+          await db
+            .update(dlqItems)
+            .set({ retryCount: row.retryCount + 1, lastRetriedAt: new Date(), updatedAt: new Date() })
+            .where(eq(dlqItems.id, row.id));
+          logger.warn(
+            { id: row.id, topic: row.topic, err: err instanceof Error ? err.message : String(err) },
+            'DLQ replay: failed to republish, item remains PENDING'
+          );
+        }
       }
 
       return reply.code(200).send({
-        data: { replayed: pending.length, topic },
+        data: { replayed, failed, topic },
       });
     },
   });
 
   // POST /admin/dlq/:id/discard — discard a message after investigation
   fastify.post<{ Params: { id: string } }>('/admin/dlq/:id/discard', {
-    preHandler: requirePermission(PERMISSIONS.AUDIT_LOG_VIEW),
+    preHandler: requirePermission(PERMISSIONS.DLQ_MANAGE),
     handler: async (request, reply) => {
       const id = parseInt(request.params.id, 10);
       if (isNaN(id)) {

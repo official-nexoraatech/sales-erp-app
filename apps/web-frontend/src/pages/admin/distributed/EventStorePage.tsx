@@ -5,6 +5,8 @@ import { eventStoreApi } from '../../../api/endpoints.js';
 import { useAuthStore } from '../../../store/auth.store.js';
 import { PERMISSIONS } from '../../../constants/permissions.js';
 import ERPPageHeader from '../../../components/erp/ERPPageHeader.js';
+import { ERPTableSkeleton } from '../../../components/erp/ERPSkeleton.js';
+import ERPEmptyState from '../../../components/erp/ERPEmptyState.js';
 import Button from '../../../components/ui/Button.js';
 import { formatDate } from '../../../lib/format.js';
 
@@ -153,7 +155,7 @@ export default function EventStorePage() {
       {/* Events table */}
       <div className="card overflow-hidden">
         {isLoading ? (
-          <div className="p-8 text-center text-secondary">Loading events…</div>
+          <ERPTableSkeleton rows={6} cols={6} />
         ) : (
           <table className="w-full text-sm">
             <thead className="bg-surface-hover">
@@ -180,7 +182,9 @@ export default function EventStorePage() {
                 </tr>
               ))}
               {events.length === 0 && (
-                <tr><td colSpan={6} className="px-4 py-8 text-center text-secondary">No events match the current filters</td></tr>
+                <tr><td colSpan={6}>
+                  <ERPEmptyState type="no-results" title="No events match the current filters" description="Try adjusting your filters." />
+                </td></tr>
               )}
             </tbody>
           </table>

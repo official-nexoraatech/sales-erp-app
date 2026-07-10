@@ -6,6 +6,9 @@ import { customerApi, crmApi } from '../../api/endpoints.js';
 import { useAuthStore } from '../../store/auth.store.js';
 import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
+import { ERPDetailSkeleton, ERPTableSkeleton } from '../../components/erp/ERPSkeleton.js';
+import ERPEmptyState from '../../components/erp/ERPEmptyState.js';
+import ERPTabs from '../../components/erp/ERPTabs.js';
 import Button from '../../components/ui/Button.js';
 import Badge from '../../components/ui/Badge.js';
 import Modal from '../../components/ui/Modal.js';
@@ -35,19 +38,19 @@ interface Interaction {
 const INTERACTION_TYPES = ['VISIT', 'CALL', 'COMPLAINT', 'EMAIL', 'WHATSAPP', 'OTHER'] as const;
 
 const ACTIVITY_COLOR: Record<string, string> = {
-  INVOICE: 'text-blue-500',
-  PAYMENT: 'text-green-500',
-  RETURN: 'text-red-400',
-  ALTERATION: 'text-purple-500',
-  LOYALTY_EARN: 'text-yellow-500',
-  LOYALTY_REDEEM: 'text-yellow-600',
-  LOYALTY_EXPIRE: 'text-gray-400',
-  VISIT: 'text-teal-500',
-  CALL: 'text-teal-400',
-  COMPLAINT: 'text-red-500',
-  EMAIL: 'text-blue-400',
-  WHATSAPP: 'text-green-400',
-  OTHER: 'text-gray-400',
+  INVOICE: 'text-blue-500 dark:text-blue-400',
+  PAYMENT: 'text-green-500 dark:text-green-400',
+  RETURN: 'text-red-400 dark:text-red-300',
+  ALTERATION: 'text-purple-500 dark:text-purple-400',
+  LOYALTY_EARN: 'text-yellow-500 dark:text-yellow-400',
+  LOYALTY_REDEEM: 'text-yellow-600 dark:text-yellow-400',
+  LOYALTY_EXPIRE: 'text-gray-400 dark:text-gray-300',
+  VISIT: 'text-teal-500 dark:text-teal-400',
+  CALL: 'text-teal-400 dark:text-teal-300',
+  COMPLAINT: 'text-red-500 dark:text-red-400',
+  EMAIL: 'text-blue-400 dark:text-blue-300',
+  WHATSAPP: 'text-green-400 dark:text-green-300',
+  OTHER: 'text-gray-400 dark:text-gray-300',
 };
 
 function activityLabel(item: ActivityItem): string {
@@ -72,6 +75,7 @@ export default function CustomerViewPage() {
   const hasPermission = useAuthStore((s) => s.hasPermission);
   const canLogInteraction = hasPermission(PERMISSIONS.CRM_INTERACTION_CREATE);
   const canViewInteractions = hasPermission(PERMISSIONS.CRM_INTERACTION_VIEW);
+  const canEditCustomer = hasPermission(PERMISSIONS.CUSTOMER_EDIT);
 
   const [tab, setTab] = useState<'details' | 'timeline' | 'interactions'>('details');
   const [logOpen, setLogOpen] = useState(false);
@@ -82,7 +86,7 @@ export default function CustomerViewPage() {
     queryKey: ['customers', id],
     queryFn: () => customerApi.getById(Number(id)),
   });
-  const customer = (data as Record<string, unknown>)?.data as Record<string, unknown> | undefined;
+  const customer = (data as Record<string, unknown> | undefined);
 
   const { data: timelineData, isFetching: timelineFetching } = useQuery({
     queryKey: ['customer-timeline', id, timelinePage],
@@ -97,7 +101,7 @@ export default function CustomerViewPage() {
     queryFn: () => crmApi.listInteractions(Number(id)),
     enabled: tab === 'interactions' && canViewInteractions,
   });
-  const interactions: Interaction[] = (interactionData as Record<string, unknown>)?.data as Interaction[] ?? [];
+  const interactions: Interaction[] = (interactionData as Interaction[]) ?? [];
 
   const logMut = useMutation({
     mutationFn: () =>
@@ -116,8 +120,18 @@ export default function CustomerViewPage() {
     onError: () => toast.error('Failed to log interaction'),
   });
 
-  if (isLoading) return <p className="text-sm text-gray-400">Loading…</p>;
-  if (!customer) return <p className="text-sm text-red-400">Customer not found.</p>;
+  const optOutMut = useMutation({
+    mutationFn: (data: { optOutSms?: boolean; optOutWhatsapp?: boolean; optOutEmail?: boolean }) =>
+      customerApi.optOut(Number(id), data),
+    onSuccess: () => {
+      toast.success('Communication preferences updated');
+      qc.invalidateQueries({ queryKey: ['customers', id] });
+    },
+    onError: () => toast.error('Failed to update communication preferences'),
+  });
+
+  if (isLoading) return <ERPDetailSkeleton />;
+  if (!customer) return <ERPEmptyState type="no-data" title="Customer not found" />;
 
   const billing = customer.billingAddress as Record<string, string> | undefined;
   const healthSeg = customer.healthSegment as string | undefined;
@@ -163,22 +177,16 @@ export default function CustomerViewPage() {
         </div>
       )}
 
-      {/* Tabs */}
-      <div className="flex gap-1 mb-5 border-b border-default">
-        {(['details', 'timeline', 'interactions'] as const).map((t) => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={`px-4 py-2 text-sm font-medium capitalize transition-colors border-b-2 -mb-px ${
-              tab === t
-                ? 'border-primary text-primary'
-                : 'border-transparent text-secondary hover:text-primary'
-            }`}
-          >
-            {t === 'timeline' ? 'Activity Timeline' : t === 'interactions' ? 'Interactions' : 'Details'}
-          </button>
-        ))}
-      </div>
+      <ERPTabs
+        className="mb-5"
+        tabs={[
+          { key: 'details', label: 'Details' },
+          { key: 'timeline', label: 'Activity Timeline' },
+          { key: 'interactions', label: 'Interactions' },
+        ]}
+        active={tab}
+        onChange={(key) => setTab(key as typeof tab)}
+      />
 
       {/* Details Tab */}
       {tab === 'details' && (
@@ -198,7 +206,7 @@ export default function CustomerViewPage() {
                   { label: 'Loyalty Card', value: customer.loyaltyCardNumber },
                 ].map(({ label, value }) => (
                   <div key={label}>
-                    <dt className="text-xs text-gray-400">{label}</dt>
+                    <dt className="text-xs text-disabled">{label}</dt>
                     <dd className="text-sm text-gray-800 dark:text-gray-200 font-medium">{value as React.ReactNode ?? '–'}</dd>
                   </div>
                 ))}
@@ -221,10 +229,35 @@ export default function CustomerViewPage() {
               { label: 'Loyalty Points', value: String(customer.loyaltyPoints ?? 0) },
             ].map(({ label, value }) => (
               <div key={label} className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
-                <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">{label}</p>
+                <p className="text-xs text-disabled uppercase tracking-wide mb-1">{label}</p>
                 <p className="text-lg font-bold text-gray-900 dark:text-gray-100">{value}</p>
               </div>
             ))}
+            <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
+              <p className="text-xs text-disabled uppercase tracking-wide mb-3">Communication Preferences</p>
+              <div className="space-y-2.5">
+                {([
+                  { key: 'optOutSms', label: 'SMS' },
+                  { key: 'optOutWhatsapp', label: 'WhatsApp' },
+                  { key: 'optOutEmail', label: 'Email' },
+                ] as const).map(({ key, label }) => {
+                  const optedOut = Boolean(customer[key]);
+                  return (
+                    <label key={key} className="flex items-center justify-between text-sm text-gray-700 dark:text-gray-300">
+                      <span>{label}</span>
+                      <input
+                        type="checkbox"
+                        checked={!optedOut}
+                        disabled={!canEditCustomer || optOutMut.isPending}
+                        onChange={(e) => optOutMut.mutate({ [key]: !e.target.checked } as Record<string, boolean>)}
+                        className="h-4 w-4 rounded border-default accent-primary disabled:opacity-50"
+                      />
+                    </label>
+                  );
+                })}
+              </div>
+              <p className="text-xs text-disabled mt-3">Checked = customer receives messages on that channel.</p>
+            </div>
           </div>
         </div>
       )}
@@ -233,15 +266,17 @@ export default function CustomerViewPage() {
       {tab === 'timeline' && (
         <div className="bg-surface-card rounded-xl border border-default">
           {timelineFetching ? (
-            <div className="p-8 text-center text-sm text-secondary">Loading…</div>
+            <div className="p-4">
+              <ERPTableSkeleton rows={5} cols={2} />
+            </div>
           ) : timelineItems.length === 0 ? (
-            <div className="p-8 text-center text-sm text-secondary">No activity recorded yet.</div>
+            <ERPEmptyState type="no-data" title="No activity recorded yet" description="Invoices, payments, and loyalty events for this customer will appear here." />
           ) : (
             <>
               <div className="divide-y divide-default">
                 {timelineItems.map((item, i) => (
                   <div key={`${item.type}-${item.id}-${i}`} className="flex items-start gap-4 px-5 py-3">
-                    <div className={`mt-0.5 text-xs font-bold uppercase ${ACTIVITY_COLOR[item.type] ?? 'text-gray-400'}`}>
+                    <div className={`mt-0.5 text-xs font-bold uppercase ${ACTIVITY_COLOR[item.type] ?? 'text-gray-400 dark:text-gray-300'}`}>
                       {item.type.replace(/_/g, ' ')}
                     </div>
                     <div className="flex-1 min-w-0">
@@ -282,9 +317,14 @@ export default function CustomerViewPage() {
       {tab === 'interactions' && (
         <div className="bg-surface-card rounded-xl border border-default">
           {!canViewInteractions ? (
-            <div className="p-8 text-center text-sm text-secondary">No permission to view interactions.</div>
+            <ERPEmptyState type="no-access" title="No permission to view interactions" />
           ) : interactions.length === 0 ? (
-            <div className="p-8 text-center text-sm text-secondary">No interactions logged yet.</div>
+            <ERPEmptyState
+              type="no-data"
+              title="No interactions logged yet"
+              description="Calls, visits, complaints and other interactions will appear here."
+              {...(canLogInteraction ? { action: { label: '+ Log Interaction', onClick: () => setLogOpen(true) } } : {})}
+            />
           ) : (
             <div className="divide-y divide-default">
               {interactions.map((i) => (

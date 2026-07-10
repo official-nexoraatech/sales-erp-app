@@ -28,7 +28,12 @@ vi.mock('@erp/db', () => ({
   users: {},
   userRoles: {},
   rolePermissions: {},
+  roles: {},
+  userBranches: {},
   refreshTokens: {},
+  activeSessions: {},
+  blockedIps: {},
+  securityAuditLog: {},
   createDatabaseClient: vi.fn(),
 }));
 
@@ -36,6 +41,11 @@ vi.mock('drizzle-orm', () => ({
   eq: vi.fn(() => '__eq__'),
   and: vi.fn(() => '__and__'),
   isNull: vi.fn(() => '__isNull__'),
+  gt: vi.fn(() => '__gt__'),
+  inArray: vi.fn(() => '__inArray__'),
+  // PG-002: login.ts now imports TenantScopedCache from '@erp/sdk', whose barrel pulls
+  // in modules (e.g. tenantStatus.ts) that reference drizzle-orm's `sql` at import time.
+  sql: vi.fn((strings: TemplateStringsArray, ...values: unknown[]) => ({ strings, values })),
 }));
 
 vi.mock('argon2', () => ({
@@ -104,15 +114,45 @@ function makeUpdate(): { set: ReturnType<typeof vi.fn>; chain: unknown } {
   return { set, chain: { set } };
 }
 
-function makeInsert(): unknown {
-  return { values: vi.fn().mockResolvedValue([]) };
+function makeInsert(returningRows: unknown[] = []): unknown {
+  // Supports both `await db.insert(x).values(y)` and
+  // `await db.insert(x).values(y).returning()` call shapes used across routes.
+  const chain = Object.assign(Promise.resolve([]), {
+    returning: vi.fn().mockResolvedValue(returningRows),
+    onConflictDoUpdate: vi.fn().mockResolvedValue([]),
+  });
+  return { values: vi.fn().mockReturnValue(chain) };
+}
+
+function makeRedis(): Record<string, ReturnType<typeof vi.fn>> {
+  const store = new Map<string, string>();
+  return {
+    get: vi.fn(async (key: string) => store.get(key) ?? null),
+    setex: vi.fn(async (key: string, _ttl: number, value: string) => {
+      store.set(key, value);
+      return 'OK';
+    }),
+    del: vi.fn(async (key: string) => {
+      const existed = store.delete(key);
+      return existed ? 1 : 0;
+    }),
+    incr: vi.fn(async (key: string) => {
+      const next = parseInt(store.get(key) ?? '0', 10) + 1;
+      store.set(key, String(next));
+      return next;
+    }),
+    expire: vi.fn(async () => 1),
+  };
 }
 
 // ─── Test app factory ─────────────────────────────────────────────────────
 
-async function buildApp(db: Record<string, unknown>): Promise<FastifyInstance> {
+async function buildApp(
+  db: Record<string, unknown>,
+  redis: Record<string, unknown> = makeRedis()
+): Promise<FastifyInstance> {
   const app = Fastify({ logger: false });
-  await loginRoute(app, db as never, TEST_CONFIG as never);
+  await loginRoute(app, db as never, TEST_CONFIG as never, redis as never);
   await refreshRoute(app, db as never, TEST_CONFIG as never);
   return app;
 }
@@ -156,8 +196,11 @@ describe('Phase 13 — Auth Security Hardening', () => {
 
       const { set: updateSetSpy } = makeUpdate();
       const db = {
-        select: vi.fn().mockReturnValue(makeSelectLimit([mockUser])),
+        select: vi.fn()
+          .mockReturnValueOnce(makeSelectLimit([]))       // blocked_ips lookup — IP not blocked
+          .mockReturnValue(makeSelectLimit([mockUser])),  // users lookup
         update: vi.fn().mockReturnValue({ set: updateSetSpy }),
+        insert: vi.fn().mockReturnValue(makeInsert()),
       };
 
       const app = await buildApp(db);
@@ -194,7 +237,9 @@ describe('Phase 13 — Auth Security Hardening', () => {
       };
 
       const db = {
-        select: vi.fn().mockReturnValue(makeSelectLimit([lockedUser])),
+        select: vi.fn()
+          .mockReturnValueOnce(makeSelectLimit([]))          // blocked_ips lookup — IP not blocked
+          .mockReturnValue(makeSelectLimit([lockedUser])),   // users lookup
         update: vi.fn(),
       };
 
@@ -289,9 +334,11 @@ describe('Phase 13 — Auth Security Hardening', () => {
         select: vi.fn()
           .mockReturnValueOnce(makeSelectLimit([tokenRow]))   // refreshTokens lookup
           .mockReturnValueOnce(makeSelectLimit([userRow]))    // users lookup
-          .mockReturnValue(makeSelectWhere([])),              // userRoles + rolePermissions
+          .mockReturnValueOnce(makeSelectWhere([]))           // userRoles lookup (empty -> skips rolePermissions)
+          .mockReturnValueOnce(makeSelectWhere([]))           // userBranches lookup (queried in parallel with userRoles)
+          .mockReturnValue(makeSelectLimit([])),              // rotateSession's activeSessions lookup
         update: vi.fn().mockReturnValue({ set: revokeSpy }),
-        insert: vi.fn().mockReturnValue(makeInsert()),
+        insert: vi.fn().mockReturnValue(makeInsert([{ id: 99 }])),
       };
 
       const app = await buildApp(db);

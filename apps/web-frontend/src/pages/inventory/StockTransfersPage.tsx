@@ -1,14 +1,18 @@
-﻿import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
+import { Eye, CheckCircle2, Truck, PackageCheck } from 'lucide-react';
 import { stockTransferApi } from '../../api/endpoints.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
-import DataTable from '../../components/ui/DataTable.js';
+import ERPDataGrid, { type ERPColumnDef } from '../../components/erp/ERPDataGrid.js';
+import ERPDropdownMenu, { type ERPMenuItem } from '../../components/erp/ERPDropdownMenu.js';
 import Button from '../../components/ui/Button.js';
 import Badge from '../../components/ui/Badge.js';
 import Select from '../../components/ui/Select.js';
-import { formatDate, formatDatetime, formatCurrency } from '../../lib/format.js';
+import Input from '../../components/ui/Input.js';
+import { useDebounce } from '../../hooks/useDebounce.js';
+import { formatDate } from '../../lib/format.js';
 
 interface Transfer {
   id: number;
@@ -35,13 +39,20 @@ export default function StockTransfersPage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const [status, setStatus] = useState('');
+  const [search, setSearch] = useState('');
+  const debouncedSearch = useDebounce(search, 250);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+
+  useEffect(() => { setPage(1); }, [status, debouncedSearch]);
 
   const { data, isLoading } = useQuery({
-    queryKey: ['stock-transfers', status],
-    queryFn: () => stockTransferApi.list({ status: status || undefined }),
+    queryKey: ['stock-transfers', status, debouncedSearch, page, pageSize],
+    queryFn: () => stockTransferApi.list({ status: status || undefined, search: debouncedSearch || undefined, page, limit: pageSize }),
   });
 
-  const transfers: Transfer[] = (data as { data?: Transfer[] })?.data ?? [];
+  const transfers: Transfer[] = (data as Record<string, unknown>)?.content as Transfer[] ?? [];
+  const totalElements = (data as Record<string, unknown>)?.totalElements as number ?? 0;
 
   const approveMutation = useMutation({
     mutationFn: (id: number) => stockTransferApi.approve(id),
@@ -55,36 +66,29 @@ export default function StockTransfersPage() {
     onError: (e: Error) => toast.error(e.message),
   });
 
-  const columns = [
-    { key: 'transferNumber', header: 'Transfer #', className: 'font-mono text-sm' },
+  const columns: ERPColumnDef<Transfer>[] = [
+    { key: 'transferNumber', header: 'Transfer #', mono: true, sortable: true },
     {
       key: 'status',
       header: 'Status',
-      render: (r: Transfer) => <Badge variant={STATUS_COLORS[r.status] ?? 'default'}>{r.status}</Badge>,
+      sortable: true,
+      render: (r) => <Badge variant={STATUS_COLORS[r.status] ?? 'default'}>{r.status}</Badge>,
     },
-    { key: 'notes', header: 'Notes', render: (r: Transfer) => r.notes ?? '–' },
-    { key: 'createdAt', header: 'Created', render: (r: Transfer) => formatDate(r.createdAt) },
+    { key: 'notes', header: 'Notes', render: (r) => r.notes ?? '–' },
+    { key: 'createdAt', header: 'Created', sortable: true, render: (r) => formatDate(r.createdAt) },
     {
       key: 'actions',
       header: '',
-      render: (r: Transfer) => (
-        <div className="flex gap-2">
-          <Button size="sm" variant="ghost" onClick={() => navigate(`/inventory/transfers/${r.id}`)}>
-            View
-          </Button>
-          {r.status === 'SUBMITTED' && (
-            <Button size="sm" onClick={() => approveMutation.mutate(r.id)}>Approve</Button>
-          )}
-          {r.status === 'APPROVED' && (
-            <Button size="sm" onClick={() => dispatchMutation.mutate(r.id)}>Dispatch</Button>
-          )}
-          {(r.status === 'DISPATCHED' || r.status === 'IN_TRANSIT') && (
-            <Button size="sm" variant="primary" onClick={() => navigate(`/inventory/transfers/${r.id}/receive`)}>
-              Receive
-            </Button>
-          )}
-        </div>
-      ),
+      align: 'right',
+      render: (r) => {
+        const items: ERPMenuItem[] = [{ label: 'View', icon: Eye, onClick: () => navigate(`/inventory/transfers/${r.id}`) }];
+        if (r.status === 'SUBMITTED') items.push({ label: 'Approve', icon: CheckCircle2, onClick: () => approveMutation.mutate(r.id) });
+        if (r.status === 'APPROVED') items.push({ label: 'Dispatch', icon: Truck, onClick: () => dispatchMutation.mutate(r.id) });
+        if (r.status === 'DISPATCHED' || r.status === 'IN_TRANSIT') {
+          items.push({ label: 'Receive', icon: PackageCheck, onClick: () => navigate(`/inventory/transfers/${r.id}/receive`) });
+        }
+        return <ERPDropdownMenu items={items} />;
+      },
     },
   ];
 
@@ -94,9 +98,13 @@ export default function StockTransfersPage() {
         <Button onClick={() => navigate('/inventory/transfers/new')}>+ New Transfer</Button>
       </ERPPageHeader>
 
-      <div className="mb-4 w-48">
+      <div className="flex gap-4 mb-4">
+        <div className="flex-1 max-w-sm">
+          <Input placeholder="Search by transfer number..." value={search} onChange={(e) => setSearch(e.target.value)} />
+        </div>
         <Select
           label="Filter by Status"
+          wrapperClassName="w-48"
           value={status}
           onChange={(e) => setStatus(e.target.value)}
           options={[
@@ -112,7 +120,15 @@ export default function StockTransfersPage() {
         />
       </div>
 
-      <DataTable columns={columns} data={transfers} isLoading={isLoading} emptyMessage="No transfers found" />
+      <ERPDataGrid
+        columns={columns}
+        data={transfers}
+        isLoading={isLoading}
+        rowKey="id"
+        pagination={{ page, pageSize, total: totalElements }}
+        onPageChange={setPage}
+        onPageSizeChange={(size) => { setPageSize(size); setPage(1); }}
+      />
     </div>
   );
 }

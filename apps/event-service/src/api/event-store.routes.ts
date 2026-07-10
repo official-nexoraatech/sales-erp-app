@@ -24,7 +24,7 @@ export async function eventStoreRoutes(
 
   // GET /admin/events/store — query event store
   fastify.get('/admin/events/store', {
-    preHandler: requirePermission(PERMISSIONS.AUDIT_LOG_VIEW),
+    preHandler: requirePermission(PERMISSIONS.EVENT_STORE_VIEW),
     handler: async (request, reply) => {
       const parsed = EventStoreQuerySchema.safeParse(request.query);
       if (!parsed.success) {
@@ -54,7 +54,7 @@ export async function eventStoreRoutes(
   fastify.post<{ Params: { aggregateType: string; aggregateId: string } }>(
     '/admin/events/replay/:aggregateType/:aggregateId',
     {
-      preHandler: requirePermission(PERMISSIONS.AUDIT_LOG_VIEW),
+      preHandler: requirePermission(PERMISSIONS.EVENT_STORE_VIEW),
       handler: async (request, reply) => {
         const { aggregateType, aggregateId } = request.params;
         if (!aggregateType || !aggregateId) {

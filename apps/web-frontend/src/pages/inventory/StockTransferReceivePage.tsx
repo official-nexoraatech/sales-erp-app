@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { stockTransferApi } from '../../api/endpoints.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
+import { ERPDetailSkeleton } from '../../components/erp/ERPSkeleton.js';
 import Button from '../../components/ui/Button.js';
 
 interface TransferLine {
@@ -33,7 +34,7 @@ export default function StockTransferReceivePage() {
     enabled: !!id,
   });
 
-  const transfer = (data as { data?: Transfer })?.data;
+  const transfer = (data as Transfer);
 
   const receiveMutation = useMutation({
     mutationFn: (lines: Array<{ lineId: number; receivedQty: number }>) =>
@@ -46,7 +47,7 @@ export default function StockTransferReceivePage() {
     onError: (e: Error) => toast.error(e.message),
   });
 
-  if (isLoading || !transfer) return <div className="p-8 text-center text-gray-500">Loading…</div>;
+  if (isLoading || !transfer) return <ERPDetailSkeleton />;
 
   const lines = transfer.lines ?? [];
 

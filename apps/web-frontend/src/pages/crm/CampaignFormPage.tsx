@@ -3,7 +3,10 @@ import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { crmApi } from '../../api/endpoints.js';
+import { useAuthStore } from '../../store/auth.store.js';
+import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
+import { ERPFormSkeleton } from '../../components/erp/ERPSkeleton.js';
 import Button from '../../components/ui/Button.js';
 import Input from '../../components/ui/Input.js';
 
@@ -28,6 +31,7 @@ const TEMPLATE_VARS = ['{{customerName}}', '{{balance}}', '{{loyaltyPoints}}', '
 
 export default function CampaignFormPage() {
   const navigate = useNavigate();
+  const hasPermission = useAuthStore((s) => s.hasPermission);
   const [form, setForm] = useState({
     name: '',
     channel: 'WHATSAPP' as Channel,
@@ -38,35 +42,40 @@ export default function CampaignFormPage() {
   const [previewCount, setPreviewCount] = useState<number | null>(null);
   const [previewMsg, setPreviewMsg] = useState('');
 
-  const { data: segData } = useQuery({ queryKey: ['crm-segments'], queryFn: () => crmApi.listSegments() });
-  const segments: Segment[] = (segData as Record<string, unknown>)?.data as Segment[] ?? [];
+  const { data: segData, isLoading: segmentsLoading } = useQuery({ queryKey: ['crm-segments'], queryFn: () => crmApi.listSegments(), enabled: hasPermission(PERMISSIONS.CRM_SEGMENT_VIEW) });
+  const segments: Segment[] = (segData as { content?: Segment[] })?.content ?? [];
 
   const warnings = charWarnings(form.channel, form.messageTemplate);
 
   const previewMut = useMutation({
     mutationFn: () =>
-      crmApi.previewSegment({
+      crmApi.previewCampaign({
         segmentId: form.segmentId ? Number(form.segmentId) : undefined,
         messageTemplate: form.messageTemplate,
+        channel: form.channel,
       }),
     onSuccess: (res) => {
-      const d = (res as Record<string, unknown>)?.data as Record<string, unknown>;
+      const d = (res as Record<string, unknown>);
       setPreviewCount(d?.recipientCount as number ?? 0);
       setPreviewMsg(d?.sampleMessage as string ?? '');
     },
   });
 
   const createMut = useMutation({
-    mutationFn: () =>
-      crmApi.createCampaign({
+    mutationFn: async () => {
+      const created = await crmApi.createCampaign({
         name: form.name,
         channel: form.channel,
         messageTemplate: form.messageTemplate,
         segmentId: form.segmentId ? Number(form.segmentId) : undefined,
-        scheduledAt: form.scheduledAt || undefined,
-      }),
+      }) as { id?: number };
+      if (form.scheduledAt && created?.id) {
+        await crmApi.scheduleCampaign(created.id, { scheduledAt: new Date(form.scheduledAt).toISOString() });
+      }
+      return created;
+    },
     onSuccess: () => {
-      toast.success('Campaign created');
+      toast.success(form.scheduledAt ? 'Campaign created and scheduled' : 'Campaign created');
       navigate('/crm/campaigns');
     },
     onError: () => toast.error('Failed to create campaign'),
@@ -81,6 +90,15 @@ export default function CampaignFormPage() {
     setForm((prev) => ({ ...prev, [key]: val }));
 
   const canSubmit = form.name && form.channel && form.messageTemplate && form.segmentId;
+
+  if (segmentsLoading) {
+    return (
+      <div>
+        <ERPPageHeader variant="list" title="New Campaign" subtitle="Configure and launch a customer campaign" />
+        <ERPFormSkeleton />
+      </div>
+    );
+  }
 
   return (
     <div>

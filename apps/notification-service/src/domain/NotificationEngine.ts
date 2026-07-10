@@ -1,4 +1,5 @@
 import Handlebars from 'handlebars';
+import { createHash } from 'crypto';
 import { eq, and } from 'drizzle-orm';
 import type { ErpDatabase } from '@erp/db';
 import { notificationTemplates, notificationLog, notificationPreferences } from '@erp/db';
@@ -15,6 +16,7 @@ export interface SendNotificationInput {
   recipientEmail?: string;
   templateData: Record<string, unknown>;
   channels?: Array<'SMS' | 'EMAIL' | 'WHATSAPP' | 'IN_APP'>;
+  idempotencyKey?: string;
 }
 
 export interface NotificationResult {
@@ -32,6 +34,24 @@ export interface SendRawInput {
   subject?: string;
   body: string;
   createdBy?: number;
+  idempotencyKey?: string;
+}
+
+// ES-26 (M8): dedup key for a caller retry landing on an already-recently-sent notification.
+// Callers with a natural dedup key (e.g. sales-service's invoiceId+reminderDate) should pass
+// idempotencyKey explicitly instead of relying on this derived, time-bucketed hash.
+const IDEMPOTENCY_BUCKET_MS = 5 * 60 * 1000;
+
+function deriveIdempotencyKey(
+  tenantId: number,
+  eventType: string,
+  channel: string,
+  recipient: string,
+  templateData: unknown
+): string {
+  const bucket = Math.floor(Date.now() / IDEMPOTENCY_BUCKET_MS);
+  const raw = `${tenantId}:${eventType}:${channel}:${recipient}:${JSON.stringify(templateData)}:${bucket}`;
+  return createHash('sha256').update(raw).digest('hex');
 }
 
 const QUIET_HOURS_START = 22; // 22:00 IST
@@ -126,6 +146,14 @@ export class NotificationEngine {
       const body = renderTemplate(template.bodyTemplate, input.templateData);
       const subject = template.subject ? renderTemplate(template.subject, input.templateData) : undefined;
 
+      // ES-26 (M8): dedup — a caller retry with the same key (explicit or derived) within the
+      // time bucket must not re-dispatch. onConflictDoNothing means a colliding insert returns
+      // nothing rather than throwing.
+      const recipient = input.recipientPhone ?? input.recipientEmail ?? String(input.recipientUserId ?? '');
+      const idempotencyKey = input.idempotencyKey
+        ? `${input.idempotencyKey}:${channel}`
+        : deriveIdempotencyKey(input.tenantId, input.eventType, channel, recipient, input.templateData);
+
       // Create log entry (PENDING)
       const [logEntry] = await this.db
         .insert(notificationLog)
@@ -142,10 +170,16 @@ export class NotificationEngine {
           status: 'PENDING',
           attemptCount: 0,
           createdBy: input.recipientUserId ?? 0,
+          idempotencyKey,
         })
+        .onConflictDoNothing({ target: [notificationLog.tenantId, notificationLog.idempotencyKey] })
         .returning();
 
-      if (!logEntry) continue;
+      if (!logEntry) {
+        logger.info({ tenantId: input.tenantId, channel, eventType: input.eventType }, 'Notification deduped — idempotency key already sent recently');
+        results.push({ channel, status: 'SKIPPED', logId: 0 });
+        continue;
+      }
 
       const sent = await this.deliverWithRetry(channel, {
         ...(input.recipientPhone !== undefined ? { phone: input.recipientPhone } : {}),
@@ -175,6 +209,11 @@ export class NotificationEngine {
       return { channel: input.channel, status: 'SKIPPED', logId: 0 };
     }
 
+    const recipient = input.recipientPhone ?? input.recipientEmail ?? '';
+    const idempotencyKey = input.idempotencyKey
+      ? `${input.idempotencyKey}:${input.channel}`
+      : deriveIdempotencyKey(input.tenantId, input.eventType, input.channel, recipient, input.body);
+
     const [logEntry] = await this.db
       .insert(notificationLog)
       .values({
@@ -189,10 +228,15 @@ export class NotificationEngine {
         status: 'PENDING',
         attemptCount: 0,
         createdBy: input.createdBy ?? 0,
+        idempotencyKey,
       })
+      .onConflictDoNothing({ target: [notificationLog.tenantId, notificationLog.idempotencyKey] })
       .returning();
 
-    if (!logEntry) return { channel: input.channel, status: 'FAILED', logId: 0 };
+    if (!logEntry) {
+      logger.info({ tenantId: input.tenantId, channel: input.channel, eventType: input.eventType }, 'Raw notification deduped — idempotency key already sent recently');
+      return { channel: input.channel, status: 'SKIPPED', logId: 0 };
+    }
 
     const sent = await this.deliverWithRetry(input.channel, {
       ...(input.recipientPhone !== undefined ? { phone: input.recipientPhone } : {}),

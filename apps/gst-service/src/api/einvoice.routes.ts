@@ -1,6 +1,9 @@
 import type { FastifyInstance } from 'fastify';
 import type { PlatformContextFactory } from '@erp/sdk';
+import { timingSafeEqual } from 'crypto';
 import { z } from 'zod';
+import { and, desc, eq } from 'drizzle-orm';
+import { einvoiceData } from '@erp/db';
 import { ValidationError } from '@erp/types';
 import { PERMISSIONS } from '@erp/types';
 import { authenticate } from '../middleware/authenticate.js';
@@ -9,6 +12,22 @@ import { EInvoiceService } from '../domain/EInvoiceService.js';
 import type { NicEInvoicePayload } from '../domain/EInvoiceService.js';
 
 type AuthedRequest = { auth: { tenantId: number; userId: number } };
+
+function requireInternalKey(req: { headers: Record<string, string | string[] | undefined> }, reply: { code: (n: number) => { send: (b: unknown) => void } }): boolean {
+  const key = req.headers['x-internal-key'];
+  const expected = process.env['INTERNAL_API_KEY'];
+  const keyBuffer = Buffer.from(typeof key === 'string' ? key : '');
+  const expectedBuffer = Buffer.from(expected ?? '');
+  const matches =
+    !!expected &&
+    keyBuffer.length === expectedBuffer.length &&
+    timingSafeEqual(keyBuffer, expectedBuffer);
+  if (!matches) {
+    reply.code(401).send({ error: 'Unauthorized' });
+    return false;
+  }
+  return true;
+}
 
 const NicItemSchema = z.object({
   SlNo: z.string(),
@@ -104,9 +123,12 @@ export async function einvoiceRoutes(
       tenantId,
       userId,
       invoiceId,
-      body.data.payload as unknown as NicEInvoicePayload
+      body.data.payload as unknown as NicEInvoicePayload,
+      ctx.tenant.correlationId
     );
 
+    // ES-28 [M16-b]: EINVOICE_GENERATED is now published inside the same
+    // transaction as the state-transition write (see EInvoiceService.generateIrn).
     await ctx.audit.log({
       action: 'EINVOICE_IRN_GENERATED',
       entityType: 'INVOICE',
@@ -145,14 +167,41 @@ export async function einvoiceRoutes(
     return reply.code(200).send({ data: { message: 'IRN cancelled at NIC successfully' } });
   });
 
+  // POST /gst/einvoice/retry/:invoiceId — manual retry for a single FAILED_IRN/PENDING_IRN
+  // invoice, re-using the NIC payload stored on the original attempt (EInvoicePage "Retry" button).
+  fastify.post<{ Params: { invoiceId: string } }>('/gst/einvoice/retry/:invoiceId', {
+    preHandler: [authenticate, requirePermission(PERMISSIONS.EINVOICE_GENERATE)],
+  }, async (request, reply) => {
+    const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
+    const ctx = ctxFactory.create({
+      tenantId, userId,
+      correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
+    });
+
+    const invoiceId = parseInt(request.params.invoiceId, 10);
+    if (isNaN(invoiceId)) throw new ValidationError('Invalid invoiceId');
+
+    const irnResponse = await EInvoiceService.retrySingle(ctx.db, tenantId, userId, invoiceId);
+
+    await ctx.audit.log({
+      action: 'EINVOICE_IRN_RETRIED',
+      entityType: 'INVOICE',
+      entityId: invoiceId,
+      after: { irn: irnResponse.Irn, ackNumber: irnResponse.AckNo } as Record<string, unknown>,
+    });
+
+    return reply.code(200).send({ data: irnResponse });
+  });
+
   // POST /gst/einvoice/retry-pending — internal scheduler endpoint
   fastify.post('/gst/einvoice/retry-pending', {
-    config: { internalOnly: true },
-  }, async (_request, reply) => {
-    // Retry all PENDING_IRN records across all tenants (scheduler-triggered)
-    // tenantId=0 is a sentinel for "system/all tenants" — EInvoiceService handles the query without tenant scoping
-    const result = await EInvoiceService.retryPendingIrns();
-    return reply.code(200).send({ data: result });
+    handler: async (request, reply) => {
+      if (!requireInternalKey(request as never, reply as never)) return;
+      // Retry all PENDING_IRN records across all tenants (scheduler-triggered)
+      // tenantId=0 is a sentinel for "system/all tenants" — EInvoiceService handles the query without tenant scoping
+      const result = await EInvoiceService.retryPendingIrns();
+      return reply.code(200).send({ data: result });
+    },
   });
 
   // GET /gst/einvoice/status/:invoiceId
@@ -170,5 +219,45 @@ export async function einvoiceRoutes(
 
     const status = await EInvoiceService.getStatus(ctx.db, tenantId, invoiceId);
     return reply.code(200).send({ data: status });
+  });
+
+  // GET /gst/einvoice/list — invoices with an e-Invoice/e-Way Bill record on file,
+  // most recently updated first. Only covers invoices IRN generation has been attempted
+  // for at least once (auto-triggered on INVOICE_CONFIRMED, or manually retried).
+  fastify.get<{ Querystring: { status?: string; limit?: string } }>('/gst/einvoice/list', {
+    preHandler: [authenticate, requirePermission(PERMISSIONS.GST_VIEW)],
+  }, async (request, reply) => {
+    const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
+    const ctx = ctxFactory.create({
+      tenantId, userId,
+      correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
+    });
+    const limit = Math.min(parseInt(request.query.limit ?? '50', 10) || 50, 200);
+
+    const conditions = [eq(einvoiceData.tenantId, tenantId)];
+    if (request.query.status) {
+      conditions.push(eq(einvoiceData.irnStatus, request.query.status as never));
+    }
+
+    const rows = await ctx.db.raw
+      .select({
+        invoiceId: einvoiceData.invoiceId,
+        invoiceNumber: einvoiceData.invoiceNumber,
+        irnStatus: einvoiceData.irnStatus,
+        irn: einvoiceData.irn,
+        ackNumber: einvoiceData.ackNumber,
+        signedQrCode: einvoiceData.signedQrCode,
+        retryCount: einvoiceData.retryCount,
+        failureReason: einvoiceData.failureReason,
+        ewbNumber: einvoiceData.ewbNumber,
+        ewbValidUpto: einvoiceData.ewbValidUpto,
+        updatedAt: einvoiceData.updatedAt,
+      })
+      .from(einvoiceData)
+      .where(and(...conditions))
+      .orderBy(desc(einvoiceData.updatedAt))
+      .limit(limit);
+
+    return reply.code(200).send({ data: { content: rows, totalElements: rows.length } });
   });
 }

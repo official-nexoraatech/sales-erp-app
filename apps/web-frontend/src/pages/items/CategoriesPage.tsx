@@ -2,9 +2,13 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import toast from 'react-hot-toast';
+import { Pencil, Trash2 } from 'lucide-react';
 import { categoryApi } from '../../api/endpoints.js';
+import { useAuthStore } from '../../store/auth.store.js';
+import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
-import DataTable from '../../components/ui/DataTable.js';
+import ERPDataGrid, { type ERPColumnDef } from '../../components/erp/ERPDataGrid.js';
+import ERPDropdownMenu, { type ERPMenuItem } from '../../components/erp/ERPDropdownMenu.js';
 import Button from '../../components/ui/Button.js';
 import Modal from '../../components/ui/Modal.js';
 import Input from '../../components/ui/Input.js';
@@ -13,9 +17,13 @@ interface Category { id: number; name: string; code?: string; description?: stri
 
 export default function CategoriesPage() {
   const qc = useQueryClient();
+  const hasPermission = useAuthStore((s) => s.hasPermission);
+  const canCreateCategory = hasPermission(PERMISSIONS.CATEGORY_CREATE);
+  const canUpdateCategory = hasPermission(PERMISSIONS.CATEGORY_UPDATE);
+  const canDeleteCategory = hasPermission(PERMISSIONS.CATEGORY_DELETE);
   const [modal, setModal] = useState<{ open: boolean; cat?: Category }>({ open: false });
   const { data, isLoading } = useQuery({ queryKey: ['categories'], queryFn: () => categoryApi.list() });
-  const cats: Category[] = (data as { data?: { content?: Category[] } })?.data?.content ?? [];
+  const cats: Category[] = (data as { content?: Category[] })?.content ?? [];
 
   const { register, handleSubmit, reset, formState: { errors, isSubmitting } } = useForm<Partial<Category>>();
 
@@ -35,25 +43,25 @@ export default function CategoriesPage() {
     onError: (err: Error) => toast.error(err.message),
   });
 
-  const columns = [
-    { key: 'code', header: 'Code', className: 'font-mono text-xs' },
-    { key: 'name', header: 'Name' },
+  const columns: ERPColumnDef<Category>[] = [
+    { key: 'code', header: 'Code', mono: true, sortable: true },
+    { key: 'name', header: 'Name', sortable: true },
     { key: 'description', header: 'Description' },
     {
-      key: 'actions', header: '',
-      render: (r: Category) => (
-        <div className="flex gap-2">
-          <Button size="sm" variant="ghost" onClick={() => openEdit(r)}>Edit</Button>
-          <Button size="sm" variant="danger" onClick={() => deleteMutation.mutate(r.id)}>Delete</Button>
-        </div>
-      ),
+      key: 'actions', header: '', align: 'right',
+      render: (r) => {
+        const items: ERPMenuItem[] = [];
+        if (canUpdateCategory) items.push({ label: 'Edit', icon: Pencil, onClick: () => openEdit(r) });
+        if (canDeleteCategory) items.push({ label: 'Delete', icon: Trash2, variant: 'danger', onClick: () => deleteMutation.mutate(r.id) });
+        return items.length > 0 ? <ERPDropdownMenu items={items} /> : null;
+      },
     },
   ];
 
   return (
     <div>
-      <ERPPageHeader variant="list" title="Item Categories" actions={<Button onClick={openNew}>+ New Category</Button>} />
-      <DataTable columns={columns} data={cats} loading={isLoading} emptyMessage="No categories." />
+      <ERPPageHeader variant="list" title="Item Categories" actions={canCreateCategory ? <Button onClick={openNew}>+ New Category</Button> : undefined} />
+      <ERPDataGrid columns={columns} data={cats} isLoading={isLoading} rowKey="id" />
 
       <Modal open={modal.open} onClose={() => setModal({ open: false })} title={modal.cat ? 'Edit Category' : 'New Category'} size="sm">
         <form onSubmit={handleSubmit((d) => saveMutation.mutate(d as Record<string, unknown>))} className="space-y-4">

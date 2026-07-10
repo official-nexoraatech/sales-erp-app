@@ -2,11 +2,14 @@ import {
   bigserial,
   boolean,
   index,
+  inet,
   integer,
+  jsonb,
   pgTable,
   text,
   timestamp,
   unique,
+  uuid,
   varchar,
 } from 'drizzle-orm/pg-core';
 
@@ -27,11 +30,21 @@ export const users = pgTable(
     lockedUntil: timestamp('locked_until', { withTimezone: true }),
     lastLoginAt: timestamp('last_login_at', { withTimezone: true }),
     emailVerifiedAt: timestamp('email_verified_at', { withTimezone: true }),
+    // ES-19 — TOTP 2FA: totpSecret is AES-256-GCM ciphertext, never plaintext
+    totpSecret: text('totp_secret'),
+    totpEnabled: boolean('totp_enabled').notNull().default(false),
+    backupCodes: text('backup_codes').array(),
+    // PG-020: populated on first successful SSO login (session B) to pin the IdP subject
+    // claim to this user, rather than re-matching by email on every login — schema only
+    // in this change, nothing writes these columns yet.
+    ssoProvider: varchar('sso_provider', { length: 30 }),
+    ssoSubject: varchar('sso_subject', { length: 255 }),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => [
     unique('users_tenant_email').on(t.tenantId, t.email),
+    unique('users_tenant_provider_subject').on(t.tenantId, t.ssoProvider, t.ssoSubject),
     index('idx_users_tenant').on(t.tenantId),
     index('idx_users_email').on(t.email),
   ]
@@ -127,9 +140,75 @@ export const passwordResetTokens = pgTable(
   ]
 );
 
+// ─── Active Sessions (ES-19 — session management / remote logout) ─────────
+export const activeSessions = pgTable(
+  'active_sessions',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    tenantId: integer('tenant_id').notNull(),
+    userId: integer('user_id').notNull(),
+    deviceInfo: varchar('device_info', { length: 500 }),
+    ipAddress: inet('ip_address').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).defaultNow().notNull(),
+    refreshTokenId: integer('refresh_token_id'),
+  },
+  (t) => [
+    index('idx_active_sessions_user').on(t.tenantId, t.userId),
+    index('idx_active_sessions_refresh_token').on(t.refreshTokenId),
+  ]
+);
+
+// ─── Security Audit Log (ES-19 — impersonation, MFA, session, suspicious login) ─
+export const securityAuditLog = pgTable(
+  'security_audit_log',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    tenantId: integer('tenant_id').notNull(),
+    actorId: integer('actor_id').notNull(),
+    actorRole: varchar('actor_role', { length: 50 }),
+    targetUserId: integer('target_user_id'),
+    action: varchar('action', { length: 50 })
+      .notNull()
+      .$type<
+        | 'IMPERSONATION_START'
+        | 'IMPERSONATION_END'
+        | 'MFA_ENABLED'
+        | 'MFA_DISABLED'
+        | 'SESSION_TERMINATED'
+        | 'SUSPICIOUS_LOGIN'
+      >(),
+    ipAddress: inet('ip_address'),
+    details: jsonb('details'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    index('idx_security_audit_actor').on(t.tenantId, t.actorId, t.createdAt),
+    index('idx_security_audit_action').on(t.tenantId, t.action, t.createdAt),
+  ]
+);
+
+// ─── Blocked IPs (ES-19 — suspicious login detection) ──────────────────────
+export const blockedIps = pgTable(
+  'blocked_ips',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    ipAddress: inet('ip_address').notNull(),
+    blockedUntil: timestamp('blocked_until', { withTimezone: true }).notNull(),
+    reason: varchar('reason', { length: 100 }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [unique('blocked_ips_ip_unique').on(t.ipAddress)]
+);
+
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
 export type Role = typeof roles.$inferSelect;
 export type NewRole = typeof roles.$inferInsert;
 export type RefreshToken = typeof refreshTokens.$inferSelect;
 export type PasswordResetToken = typeof passwordResetTokens.$inferSelect;
+export type ActiveSession = typeof activeSessions.$inferSelect;
+export type NewActiveSession = typeof activeSessions.$inferInsert;
+export type SecurityAuditLogEntry = typeof securityAuditLog.$inferSelect;
+export type NewSecurityAuditLogEntry = typeof securityAuditLog.$inferInsert;
+export type BlockedIp = typeof blockedIps.$inferSelect;

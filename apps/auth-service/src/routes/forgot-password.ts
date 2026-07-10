@@ -11,6 +11,33 @@ const ForgotPasswordBody = z.object({
   tenantId: z.number().int().positive(),
 });
 
+// Fire-and-forget: mirrors the internal-call pattern used by hr-service's alteration
+// notifications and sales-service's InvoiceNotificationService. Deliberately not awaited —
+// awaiting a cross-service call here (only reachable when the user exists) would leak a
+// timing side-channel that defeats the enumeration protection below.
+function sendPasswordResetEmail(
+  fastify: FastifyInstance,
+  input: { tenantId: number; userId: number; email: string; resetLink: string }
+): void {
+  const notificationUrl = process.env['NOTIFICATION_SERVICE_URL'] ?? 'http://localhost:3014';
+  const internalKey = process.env['INTERNAL_API_KEY'] ?? '';
+
+  fetch(`${notificationUrl}/notifications/send-internal`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-internal-key': internalKey },
+    body: JSON.stringify({
+      tenantId: input.tenantId,
+      eventType: 'PASSWORD_RESET_REQUESTED',
+      recipientUserId: input.userId,
+      recipientEmail: input.email,
+      channels: ['EMAIL'],
+      templateData: { resetLink: input.resetLink },
+    }),
+  }).catch((err) => {
+    fastify.log.warn({ err, userId: input.userId }, 'Password reset email delivery failed (non-fatal)');
+  });
+}
+
 export async function forgotPasswordRoute(
   fastify: FastifyInstance,
   db: ErpDatabase,
@@ -44,12 +71,12 @@ export async function forgotPasswordRoute(
           expiresAt,
         });
 
-        // In production, send via SMTP. In dev, log the reset link (token is not sensitive itself — only hash stored)
-        fastify.log.info(
-          { userId: user.id, tenantId, expiresAt },
-          'Password reset token generated — deliver via SMTP'
-        );
-        // TODO (Milestone 0.6): trigger notification-service event for email delivery
+        const resetLink = `${config.frontendUrl}/reset-password?token=${plainToken}`;
+        sendPasswordResetEmail(fastify, { tenantId, userId: user.id, email: user.email, resetLink });
+
+        if (config.nodeEnv !== 'production') {
+          fastify.log.debug({ userId: user.id, tenantId, resetLink }, 'Password reset requested (dev only)');
+        }
       }
 
       return reply.code(200).send({ message: 'If this email exists, a reset link has been sent' });

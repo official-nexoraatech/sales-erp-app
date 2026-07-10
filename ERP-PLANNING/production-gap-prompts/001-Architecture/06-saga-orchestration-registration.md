@@ -1,0 +1,147 @@
+## Verification note (read this before implementing)
+
+The roadmap's suggested candidate for this package was the cross-service chain "invoice-confirmation → stock-deduction → COGS-posting → GST-ledger." Direct grep/read of the current codebase during this pass shows that candidate **does not fit** `SagaOrchestrator`'s design, for two independently-verified reasons documented below (Overview → Current architecture). This file registers a different, real, in-process saga instead — the e-Invoice/e-Way Bill NIC generation flow in `gst-service` — which genuinely needs compensation and is achievable without a cross-service architecture change. The mismatched candidate is kept in "Pending Components" for a future, explicitly-scoped package rather than silently dropped.
+
+# [PG-006] Saga Orchestration Registration
+
+> Template version 1.0. Every gap-prompt file in this tree must follow this exact section order. Do not add sections; do not omit sections that apply. If a section genuinely does not apply to this gap, write "Not applicable — <one-line reason>" instead of deleting it, so the structure stays diffable across files.
+
+**Category:** Architecture
+**Priority:** Critical
+**Complexity:** L — the orchestrator engine (`packages/platform-sdk/src/saga.ts`) is already fully built and tested; the work is registering a real step factory against real domain services and wiring `.run()` into an existing request path without duplicating the async consumers that already exist
+**Depends on:** none
+**Blocks:** none (references PG-007 DLQ replay and PG-011 idempotency standardization for related reliability work)
+**Primary service(s)/package(s):** apps/gst-service, packages/platform-sdk (`saga.ts`, already built — reused not modified), apps/event-service (`api/saga.routes.ts`, admin console — unchanged)
+
+---
+
+## Overview
+
+- **Business objective:** the admin Saga Monitor (`apps/web-frontend/src/pages/admin/distributed/SagaMonitorPage.tsx`) presents retry/compensate as real operational controls, and `event-service`'s `POST /admin/sagas/:id/retry` and `/compensate` routes genuinely call `SagaOrchestrator.retry()`/`.compensate()` (this was hardened in ES-24, per the code comment at `apps/event-service/src/api/saga.routes.ts:134-140`). But **zero saga types are registered anywhere in the codebase** — confirmed by grepping every `apps/*/src` tree for `SagaOrchestrator`, `.register(`, and `orchestrator.run`: the only hits are the import and the two admin routes in `event-service` itself, which construct `new SagaOrchestrator(ctx.db.raw)` fresh per-request with an **empty factory map**. Any `saga_log` row that ever reaches `FAILED`/`COMPENSATING` status is therefore permanently stuck — `retry()`/`compensate()` will always throw `SAGA_TYPE_NOT_REGISTERED` (`packages/platform-sdk/src/saga.ts:97-100, 119-122`) no matter which saga type it is, because no service registers a factory. The mechanism is fully built and totally unreachable in production.
+- **Current implementation:** `SagaOrchestrator` (`packages/platform-sdk/src/saga.ts`) is a complete, tested (`packages/platform-sdk/src/__tests__/saga.test.ts`) in-process orchestrator: `run()` persists a `saga_log` row and executes a step list against a context; `retry()`/`compensate()` reconstruct steps+context from the persisted `payload` via a registered `SagaStepFactory`, keyed by `sagaType`. `register(sagaType, factory)` is the only way to make `retry()`/`compensate()` work for a given `sagaType` — and it is never called. `event-service`'s `saga.routes.ts` never calls `.run()` either — it has no business logic of its own to start a saga; it is purely the admin-console read/retry/compensate surface.
+- **Current architecture:** the actual invoice-confirmation flow is NOT the multi-service chain the roadmap speculated. Verified directly in `apps/sales-service/src/domain/InvoiceService.ts`: stock deduction (`inventoryLedger` insert, line 437) and the COGS journal write for FIFO/WACC costing (line 611, guarded by the `// ES-13` comment) happen in the **same Postgres transaction** as the invoice insert, in the **same service process** — this is already atomic, no saga needed. The comment at line 386-387 is explicit: *"inventory_ledger row is written via a direct insert on the shared `@erp/db` schema (not an HTTP call to inventory-service) so the ledger write [is transactional with the invoice]."* Separately, `accounting-service` and `gst-service` post their own journal/GST-ledger entries **asynchronously**, as Kafka consumers reacting to the `INVOICE_CONFIRMED`/`INVOICE_CREATED` outbox event (`apps/gst-service/src/consumers/InvoiceGstConsumer.ts`, `EInvoiceEventConsumer.ts`) — and this is deliberate, not an oversight: `EInvoiceEventConsumer.ts:136-139` explicitly swallows NIC/IRN errors so "GST ledger recording must still succeed" regardless of e-Invoice outcome. **`sales-service` registers zero Kafka consumers** (confirmed: grepping `kafka.consumer|Consumer(` across `apps/sales-service/src`, `apps/inventory-service/src` returns nothing; only `accounting-service` and `gst-service` have consumers) — so even if this package wanted to wire a true distributed saga where a downstream posting failure compensates the original invoice, there is today **no inbound channel** for such a compensation signal to reach sales-service. Building one would mean adding a new consumer and inverting an intentional, documented architectural choice (see `[[architecture_no_cross_service_valuation]]` in project memory: ledger-writing services duplicate domain logic rather than call back into the originating service) — that is a much larger, separate architectural decision, not "registering the first saga."
+- **Current limitations:** the concrete, real saga-shaped gap that *does* fit `SagaOrchestrator`'s in-process model exists in `gst-service` itself: e-Invoice IRN generation (`EInvoiceService.generateIrn`, `apps/gst-service/src/domain/EInvoiceService.ts:234`) and e-Way Bill generation (`EwayBillService.generate`, `apps/gst-service/src/domain/EwayBillService.ts:68`) are two sequential external-NIC-API calls for the same invoice, but they are **not chained today** — e-Way Bill generation has no auto-trigger consumer at all (confirmed: only `EInvoiceEventConsumer.ts` subscribes to `INVOICE_CONFIRMED`; there is no equivalent auto-EWB consumer, and `eway-bill.routes.ts` is manual-trigger-only). If a tenant's invoice exceeds the ₹50,000 e-Way Bill threshold (`EwayBillService.ts:19`, `EWB_VALUE_THRESHOLD`) and staff forget the manual step, the invoice sits with a valid IRN but no e-Way Bill — a real compliance gap with no automated remediation and no compensation if the manual step is later attempted and fails after the 24-hour IRN cancellation window (`EInvoiceEventConsumer.ts:10, 160-170`).
+
+## Existing Code Analysis
+
+- **What already exists and should be reused:** `SagaOrchestrator` in full (`run`/`retry`/`compensate`/`register`, `packages/platform-sdk/src/saga.ts`) — do not modify its engine logic, only call `.register()` from `gst-service`'s bootstrap. `EInvoiceService.generateIrn`/`.cancelIrn` and `EwayBillService.generate` (no existing `.cancel` for EWB — see Architecture below for how compensation is scoped around this). The existing `fetchWithRetry` NIC HTTP retry helper (`apps/gst-service/src/domain/nicRetry.ts`) stays exactly as-is inside each step's `execute()` — the saga step boundary is coarser than the HTTP-retry boundary, they compose, not conflict.
+- **What should never be modified:** `EInvoiceEventConsumer.ts`'s existing `INVOICE_CONFIRMED`/`INVOICE_CANCELLED` async handlers stay exactly as they are — the new saga is an **additional**, explicit trigger point (see Architecture), not a replacement of the existing auto-IRN-on-confirm behavior. Do not touch `InvoiceService.ts`'s atomic stock/COGS transaction — it is already correct and does not need saga wrapping (see Overview). Do not add a Kafka consumer to `sales-service` as part of this package — that is a distinct, larger architectural decision, explicitly out of scope here (see Pending Components).
+- **Prior related work:** ES-24 (`[[es24_saga_orchestrator_design]]` in project memory) built the registry-based orchestrator and wired the two admin routes to genuinely call `retry()`/`compensate()` instead of the prior no-op status flip — but left the registry deliberately empty, noting "cross-service retry not solved (sales-service has no Kafka consumers)," which this package's verification confirms is still true today.
+
+## Architecture
+
+- **New trigger point:** add a `POST /internal/invoices/:invoiceId/gst-compliance` route in `gst-service` (internal-key-authenticated, same convention as `apps/sales-service/src/api/internal.routes.ts` — `x-internal-key` header + `timingSafeEqual`), callable either by an operator via the admin console or, going forward, synchronously from `sales-service`'s invoice-confirmation handler as an optional non-blocking fire-and-forget call (deliberately NOT awaited inline with invoice confirmation — a failure here must never block or roll back the invoice itself, consistent with the existing `EInvoiceEventConsumer` philosophy). This keeps the async-choreography model for the invoice-confirmation event itself and adds a saga **only** around the two-step NIC compliance sequence that genuinely benefits from it.
+- **Saga type registered:** `sagaType: 'GST_COMPLIANCE_GENERATION'`. Steps (both `COMPENSATABLE`):
+  1. **`generate_irn`** — `execute()` calls `EInvoiceService.generateIrn(...)` (build payload from invoice/lines/org/customer exactly as `EInvoiceEventConsumer.ts:89-131` already does — extract that payload-building logic into a small shared helper both the existing consumer and the new saga factory call, so there is one source of truth for NIC payload shape, not two). `compensate()` calls `EInvoiceService.cancelIrn(...)` (existing method, respects the 24h window already enforced inside it).
+  2. **`generate_eway_bill`** — only included in the step list when `invoice.grandTotal > EWB_VALUE_THRESHOLD` (the factory decides this when reconstructing the step list, not a runtime skip inside execute — keeps `stepHistory` accurate). `execute()` calls `EwayBillService.generate(...)`. `compensate()`: EWB has no NIC "cancel" call in the current codebase (`EwayBillService.ts` exposes no `.cancel`); compensation here is `IRREVERSIBLE`-adjacent in practice, but the step is still marked `COMPENSATABLE` with a compensate function that updates the local `einvoiceData`/e-way-bill status row to `EWB_GENERATION_FAILED_MANUAL_REVIEW` and logs a warning — this is a deliberate, documented simplification (no synthetic "undo" is invented for an NIC action the platform cannot actually reverse), matching this repo's convention of being honest about irreversible external side effects (see `EInvoiceEventConsumer.ts`'s own `CANCEL_REQUIRED_MANUALLY` status for the same class of problem).
+- **Step factory registration:** `gst-service`'s `main.ts` bootstrap calls `orchestrator.register('GST_COMPLIANCE_GENERATION', gstComplianceStepFactory)` once at startup (mirrors the pattern already used for Kafka consumer registration in the same file). The factory reconstructs `{ steps, context }` from the saga's persisted `payload` (`{ invoiceId }`) plus a fresh DB lookup — required so `event-service`'s admin `retry()`/`compensate()` calls (a **different process**) can resolve the same step list `gst-service` would have built at `run()` time. This only works because `event-service` and `gst-service` share the same Postgres and the same `SagaStepFactory` contract from `@erp/sdk` — no new IPC is needed, but it does mean `event-service`'s `saga.routes.ts` `retry()`/`compensate()` calls will still throw `SAGA_TYPE_NOT_REGISTERED` unless `gst-service`'s factory registration code is imported into `event-service` too (see Backend below) — **this is the one piece of real cross-process wiring this package must get right**, otherwise the "first real saga" would only be retryable from within `gst-service` itself, not from the admin console it's meant to serve.
+- **Component interactions / data flow:** (1) invoice confirmed in `sales-service` → outbox → Kafka `INVOICE_CONFIRMED` (unchanged); (2) `gst-service`'s existing `EInvoiceEventConsumer` still auto-fires IRN generation exactly as today (unchanged, for backward compatibility with tenants relying on today's behavior); (3) **new**: the same consumer, after successful IRN generation, additionally calls `orchestrator.run({ sagaType: 'GST_COMPLIANCE_GENERATION', ... })` when the invoice exceeds the EWB threshold, so the two NIC calls become one saga run with real compensation instead of two independent fire-and-forget calls; (4) if `generate_eway_bill` fails, the orchestrator automatically compensates step 1 (`cancelIrn`) before surfacing the error, preventing the "IRN generated but no EWB and no one told the accountant" silent gap described in Current Limitations; (5) if a saga is stuck (rare — e.g., NIC outage mid-sequence), an operator uses the existing Saga Monitor UI's retry/compensate buttons, which now resolve to a real registered factory instead of `SAGA_TYPE_NOT_REGISTERED`.
+
+## Database Changes
+
+- Not applicable — no schema change. `saga_log` (`packages/db-client/src/schema/index.ts:105-128`) already has every column this saga needs (`sagaType`, `payload`, `stepHistory`, `currentStep`, `status`). `einvoiceData` already has the status enum values needed for the EWB compensation write (verify `EWB_GENERATION_FAILED_MANUAL_REVIEW` exists as a value at implementation time; if not, it is a one-line additive enum-value change, not a new column/table).
+
+## Backend
+
+- **Files to add in `apps/gst-service/src/domain/`:** `GstComplianceSaga.ts` — exports `gstComplianceStepFactory: SagaStepFactory<GstComplianceContext>` (the two-step definition above) and a `runGstComplianceSaga(orchestrator, tenantId, correlationId, invoiceId)` convenience wrapper that builds the initial context and calls `orchestrator.run(...)`.
+- **Files to modify:** `apps/gst-service/src/consumers/EInvoiceEventConsumer.ts` — after a successful `EInvoiceService.generateIrn` call, additionally invoke `runGstComplianceSaga(...)` when EWB is required (do not remove or alter the existing direct `generateIrn` call — the saga factory's step 1 re-derives IRN state idempotently via `EInvoiceService`'s existing "already exists" short-circuit at line 253, so calling it twice in sequence is safe, not a double-charge to NIC). `apps/gst-service/src/main.ts` — construct one `SagaOrchestrator` instance at bootstrap and call `.register('GST_COMPLIANCE_GENERATION', gstComplianceStepFactory)` before the Kafka consumer starts. `apps/event-service/src/main.ts` — import and call the **same** `gstComplianceStepFactory` registration (import from `@erp/sdk`-adjacent shared location — see Coding Standards for why this needs a small shared home) against event-service's own `SagaOrchestrator` instance used by `saga.routes.ts`'s `retry`/`compensate` handlers, so admin retries actually resolve.
+- **Shared factory location:** since both `gst-service` and `event-service` need the identical `SagaStepFactory`, and `event-service` must not import `gst-service`'s domain code directly (services don't import each other's `src/`), extract `gstComplianceStepFactory` into a new small file under `packages/platform-sdk/src/sagas/gst-compliance.ts` (a `sagas/` subfolder is a reasonable, narrow addition to the SDK — it is exactly the kind of shared cross-process contract the SDK exists for, per `ERP_MASTER_SPEC` §4.1 "all infrastructure access MUST go through the SDK"). Both services import it from `@erp/sdk`.
+- **Events/Kafka:** no new topics. Reuses the existing `INVOICE_CONFIRMED` consumption path.
+- **Validation, authorization, audit:** the new internal route (if added, per Architecture) reuses the existing `x-internal-key` convention (service-to-service, not user-facing — no `requirePermission` needed, matching `apps/sales-service/src/api/internal.routes.ts`). The saga's own steps write to `einvoiceData`/e-way-bill tables already covered by existing tenant-scoping.
+- **Idempotency:** `generate_irn`'s idempotency is already handled by `EInvoiceService.generateIrn`'s existing-record short-circuit (line 253) — the saga step does not need its own dedup key. `generate_eway_bill` has no existing short-circuit; add one (check `einvoiceData` for an existing `ewbNumber` before calling NIC, mirroring the IRN pattern) since `retry()` could otherwise call NIC twice for the same invoice.
+
+## Frontend
+
+- Not applicable — the existing Saga Monitor page (`apps/web-frontend/src/pages/admin/distributed/SagaMonitorPage.tsx`) already renders whatever `sagaType`/`status`/`stepHistory` values exist in `saga_log`; it requires no code change to display the new `GST_COMPLIANCE_GENERATION` saga type or to make its existing retry/compensate buttons work — they call the same `/admin/sagas/:id/retry` and `/compensate` endpoints, which will now succeed instead of throwing `SAGA_TYPE_NOT_REGISTERED`.
+
+## API Contract
+
+- `POST /internal/invoices/:invoiceId/gst-compliance` (gst-service, internal-key auth) → `202 { data: { sagaId, status: 'STARTED' } }`. Errors: `401` (bad/missing internal key), `404` (invoice not found for tenant).
+- Existing (unchanged behavior, now functional instead of always-erroring for this one saga type): `POST /admin/sagas/:id/retry`, `POST /admin/sagas/:id/compensate` (event-service, `AUDIT_LOG_VIEW`-gated per current code — see Security).
+
+## Multi-Tenant Considerations
+
+- `saga_log.tenantId` already scopes every row; `SagaOrchestrator.loadSaga` already filters `and(eq(sagaId), eq(tenantId))` (`saga.ts:137-145`) — no change needed. The new step factory receives `tenantId` from the saga's persisted row (not from request context), so `retry()`/`compensate()` called from `event-service` (a different process/request) still enforce the correct tenant scope for the NIC calls it triggers.
+
+## Integration
+
+- **gst-service**: owns the new saga steps and the step factory registration for its own `.run()` calls.
+- **event-service**: registers the same shared factory (from `@erp/sdk`) so its existing admin `retry`/`compensate` routes work for this saga type — this is the one piece of genuinely new cross-service wiring.
+- **sales-service**: unchanged — still publishes `INVOICE_CONFIRMED` via the existing outbox path; no new consumer, no new dependency.
+- **web-frontend**: unchanged, per Frontend section.
+
+## Coding Standards
+
+- Reuses `SagaOrchestrator`/`SagaStepDefinition`/`SagaStepFactory` from `@erp/sdk` exactly as designed — no new orchestration primitive introduced. Reuses the existing `x-internal-key` service-to-service auth convention rather than inventing a new one. The one novel-but-justified addition is the `packages/platform-sdk/src/sagas/` subfolder for a shared, cross-process step factory — justified because this is the first saga type any two processes must agree on identically, and duplicating the factory definition in both services (rather than sharing it via the SDK) would silently drift the two copies out of sync, defeating the point of `retry()` working from a different process than `run()`.
+
+## Performance
+
+- Negligible — this adds at most one additional sequential NIC HTTP call (already rate-limited by `fetchWithRetry`'s existing backoff) per qualifying invoice (only those exceeding the ₹50,000 EWB threshold), replacing what would otherwise be a second, unlinked manual action.
+
+## Security
+
+- No new permission surface — the internal route uses the existing internal-key mechanism (service-to-service trust, not user-facing). Existing `event-service` saga admin routes remain gated on `PERMISSIONS.AUDIT_LOG_VIEW` (tracked as a known granularity mismatch vs. the dedicated `SAGA_VIEW`/`SAGA_MANAGE` constants that already exist in `packages/shared-types/src/permissions.ts:379-380` — that reconciliation is explicitly PG-015's scope, not this package's; do not fix it here to avoid scope creep across two Critical-priority packages).
+
+## Testing
+
+- New `apps/gst-service/src/__tests__/GstComplianceSaga.test.ts`: step factory builds the correct step list (with/without the EWB step depending on `grandTotal`), a failing `generate_eway_bill` step triggers `cancelIrn` compensation, `stepHistory` records both steps correctly, and re-running the factory for an invoice with an existing IRN short-circuits without a second NIC call (idempotency).
+- Update `packages/platform-sdk/src/__tests__/saga.test.ts` only if the new `sagas/` subfolder needs its own barrel test — otherwise no change to the existing orchestrator tests (they remain valid, engine logic is untouched).
+- Manual repro: with `NIC_API_KEY` set to a sandbox/mock value, confirm an invoice over ₹50,000 triggers both NIC calls in sequence via the Saga Monitor UI, and that forcing the second call to fail (e.g., temporarily invalidate the EWB payload) shows the saga transition to `COMPENSATED` with the IRN cancelled.
+
+## Acceptance Criteria
+
+- [ ] `packages/platform-sdk/src/sagas/gst-compliance.ts` exists, exports `gstComplianceStepFactory`, and is imported by both `gst-service` and `event-service` at bootstrap.
+- [ ] `orchestrator.register('GST_COMPLIANCE_GENERATION', gstComplianceStepFactory)` is called in both services' `main.ts`.
+- [ ] An invoice exceeding the EWB threshold produces one `saga_log` row with `sagaType = 'GST_COMPLIANCE_GENERATION'` and two entries in `stepHistory`.
+- [ ] `POST /admin/sagas/:id/retry` and `/compensate` (event-service) succeed (no `SAGA_TYPE_NOT_REGISTERED`) for a saga of this type.
+- [ ] A forced failure of `generate_eway_bill` results in `cancelIrn` being called and the saga ending in `COMPENSATED` (or `FAILED` if compensation itself fails, per the orchestrator's existing `compensationFailed` handling).
+- [ ] `pnpm --filter @erp/gst-service test` and `pnpm --filter @erp/platform-sdk test` pass.
+
+## Deliverables
+
+- **Files to create:** `packages/platform-sdk/src/sagas/gst-compliance.ts`, `apps/gst-service/src/domain/GstComplianceSaga.ts` (thin wrapper re-exporting/invoking the SDK factory), `apps/gst-service/src/__tests__/GstComplianceSaga.test.ts`.
+- **Files to modify:** `apps/gst-service/src/consumers/EInvoiceEventConsumer.ts`, `apps/gst-service/src/main.ts`, `apps/event-service/src/main.ts`, `packages/platform-sdk/src/index.ts` (export the new saga factory type/function).
+- **Migrations:** none (unless the `einvoiceData` EWB-failure status value needs adding — verify at implementation time, one-line additive change if so).
+- **APIs added/changed:** new internal `POST /internal/invoices/:invoiceId/gst-compliance` (gst-service).
+- **Events added/changed:** none — reuses `INVOICE_CONFIRMED`.
+- **Tests added:** `GstComplianceSaga.test.ts`.
+
+---
+
+## Context Preservation (for a fresh AI session with no prior history)
+
+**Previous Work Summary:** `SagaOrchestrator` (`packages/platform-sdk/src/saga.ts`) is a fully built, tested, in-process saga engine. ES-24 wired `event-service`'s admin `retry`/`compensate` routes to genuinely call it (previously they just flipped a status column). But no service anywhere calls `orchestrator.register(...)`, so every retry/compensate call throws `SAGA_TYPE_NOT_REGISTERED` — the mechanism has never actually run in this codebase. This package's own verification pass found the roadmap's suggested candidate (a cross-service invoice→stock→COGS→GST saga) does not fit: stock/COGS are already atomic within one DB transaction in `sales-service`, and COGS/GST postings are a deliberate async Kafka choreography with no compensation path back into `sales-service` (which has zero Kafka consumers).
+
+**Current Objective:** register the first real saga type — `GST_COMPLIANCE_GENERATION`, covering e-Invoice IRN generation followed by e-Way Bill generation in `gst-service` — proving `run()`/`retry()`/`compensate()` end-to-end against real NIC-integration domain code, without altering the existing async invoice-confirmation choreography.
+
+**Architecture Snapshot:** `SagaOrchestrator.register(sagaType, factory)` must be called in every process that needs to `retry()`/`compensate()` that saga type (factories are per-process, in-memory maps) — this is why both `gst-service` (which runs the saga) and `event-service` (whose admin console retries it) both need the registration call, sourced from one shared `@erp/sdk` location. `EInvoiceService.generateIrn`/`.cancelIrn` and `EwayBillService.generate` already exist and are NIC-API-calling, retry-wrapped (`nicRetry.ts`) domain methods — the saga wraps them, it does not reimplement them.
+
+**Completed Components:** `SagaOrchestrator` engine + tests (ES-24). Admin Saga Monitor UI (already generic, needs no changes). e-Invoice auto-generation on `INVOICE_CONFIRMED` (existing, unchanged).
+
+**Pending Components:** the cross-service invoice→stock→COGS→GST saga originally speculated by the roadmap is explicitly NOT part of this package — it would require adding a Kafka consumer to `sales-service` (currently has none) and inverting the documented "no cross-service transactional logic" architecture choice. If ever pursued, it needs its own dedicated package with its own architecture review, not a silent scope-add here. PG-015's DLQ/SAGA/PROJECTION permission-granularity fix (routes currently gated on `AUDIT_LOG_VIEW` instead of the dedicated `SAGA_VIEW`/`SAGA_MANAGE` constants) is also explicitly out of scope here.
+
+**Known Constraints:** single shared Postgres, no RLS — `saga_log.tenantId` is the isolation boundary, already enforced by the orchestrator. `sales-service` has zero Kafka consumers (verified by grep) — any future package attempting true cross-service saga compensation must budget for adding one.
+
+**Coding Standards:** see Coding Standards section — reuses `@erp/sdk`'s `SagaOrchestrator` unmodified; the only new pattern is a shared cross-process step-factory living in the SDK, justified because two different service processes must resolve the identical step list for `retry()`/`compensate()` to work across process boundaries.
+
+**Reusable Components:** `SagaOrchestrator`, `SagaStepDefinition`, `SagaStepFactory` (`@erp/sdk`), `EInvoiceService.generateIrn`/`.cancelIrn`, `EwayBillService.generate` (`apps/gst-service/src/domain/`), `fetchWithRetry` (`apps/gst-service/src/domain/nicRetry.ts`), the NIC-payload-building logic currently inline in `EInvoiceEventConsumer.ts:89-131` (extract to a shared helper, do not duplicate).
+
+**APIs Already Available:** `EInvoiceService.generateIrn`/`.cancelIrn`, `EwayBillService.generate` as direct in-process function calls (not HTTP) since the saga runs inside `gst-service` itself.
+
+**Events Already Available:** `INVOICE_CONFIRMED` (Kafka, via outbox) — already consumed by `EInvoiceEventConsumer.ts`; this package hooks the saga trigger onto the same consumer, after its existing IRN-generation call.
+
+**Shared Utilities:** `@erp/sdk` (`SagaOrchestrator` + new `sagas/gst-compliance.ts`), `@erp/logger`, `@erp/types` (`BusinessError`, `NotFoundError` already used by `saga.ts`).
+
+**Feature Flags:** not applicable — e-Invoice/e-Way Bill already gate on `NIC_API_KEY` configuration and the existing `einvoice_enabled` tenant feature flag (unchanged by this package).
+
+**Multi-Tenant Rules:** `saga_log.tenantId` scoping is already enforced by the orchestrator (`saga.ts:137-145`); the new step factory must accept `tenantId` from the saga row, not from ambient request context, since `retry()`/`compensate()` run from a different process/request than `run()`.
+
+**Security Rules:** the new internal route uses the existing internal-key service-to-service convention (`apps/sales-service/src/api/internal.routes.ts` as reference), not `requirePermission()`. Existing admin saga routes stay on `AUDIT_LOG_VIEW` pending PG-015.
+
+**Database State:** `saga_log`, `einvoiceData` tables already exist with all needed columns; verify at implementation time whether an `EWB_GENERATION_FAILED_MANUAL_REVIEW`-equivalent status value already exists on `einvoiceData`'s status enum before assuming a migration is needed.
+
+**Testing Status:** `SagaOrchestrator` itself has full unit coverage (`packages/platform-sdk/src/__tests__/saga.test.ts`). Zero tests exist for any registered saga type today, because none exist — this package's tests are the first of their kind.
+
+**Next Session Plan:** single session — Complexity L reflects integration-testing care (two processes registering the same factory, NIC sandbox behavior), not architectural size.
+
+**Prompt for the Next Session:** "Implement `ERP-PLANNING/production-gap-prompts/001-Architecture/06-saga-orchestration-registration.md` (PG-006). Before writing code, re-confirm via grep that `sales-service` still has zero Kafka consumers and that no saga type has been registered anywhere since this file was authored — both are load-bearing assumptions for why this package targets the `GST_COMPLIANCE_GENERATION` saga instead of the roadmap's originally-speculated cross-service chain. Start with `packages/platform-sdk/src/sagas/gst-compliance.ts`, then wire both `gst-service` and `event-service` registration, then tests."

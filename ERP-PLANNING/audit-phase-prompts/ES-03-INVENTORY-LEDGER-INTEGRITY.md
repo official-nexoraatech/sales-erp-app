@@ -1,5 +1,5 @@
 # ES-03 — Inventory Ledger Integrity
-## STATUS: 🔴 PENDING
+## STATUS: ✅ COMPLETED
 ## Sprint: 1 | Effort: 2–3 days | Risk: Medium
 ## Depends on: ES-02 (deploy first for full effect)
 ## Unlocks: ES-08, ES-09, ES-13, ES-16

@@ -5,6 +5,12 @@ coverage/
 .nyc_output/
 *.tsbuildinfo
 
+# Playwright
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+
 # Tooling caches
 .turbo/
 .cache/

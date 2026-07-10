@@ -87,6 +87,12 @@ const REPORT_SLUGS = [
   'reverse-charge-report',
   'ar-aging',
   'ap-aging',
+  'sales-revenue-trend',
+  'inventory-analytics',
+  'hr-headcount-by-department',
+  'hr-salary-cost-trend',
+  'hr-hires-vs-exits',
+  'hr-gender-diversity',
 ];
 
 const BASE_PARAMS = {

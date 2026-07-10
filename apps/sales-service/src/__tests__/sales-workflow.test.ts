@@ -25,6 +25,8 @@ vi.mock('@erp/db', () => ({
   saleReturns: { id: 'id' },
   saleReturnLines: {},
   creditNotes: { id: 'id' },
+  inventoryLedger: {},
+  deliveryChallans: { id: 'id', tenantId: 'tenant_id', status: 'status', convertedInvoiceId: 'converted_invoice_id', convertedAt: 'converted_at' },
 }));
 
 vi.mock('drizzle-orm', () => ({
@@ -52,6 +54,7 @@ function makeTrx() {
     select: vi.fn().mockReturnThis(),
     from: vi.fn().mockReturnThis(),
     where: vi.fn().mockReturnThis(),
+    innerJoin: vi.fn().mockReturnThis(),
     orderBy: vi.fn().mockReturnThis(),
     limit: vi.fn().mockReturnThis(),
     offset: vi.fn().mockReturnThis(),
@@ -73,6 +76,17 @@ function makeDb(trxFactory?: () => ReturnType<typeof makeTrx>) {
     transaction: vi.fn((fn: (t: typeof trx) => Promise<unknown>) => fn(trx)),
   };
   return { db, trx };
+}
+
+// `where()` sometimes terminates a chain directly (`await ...where(x)`) and
+// sometimes is followed by `.returning(x)` (`await ...where(x).returning(y)`).
+// This resolves the former case as itself while exposing `.returning()` for
+// the latter, delegating to the trx's current `returning` mock so per-test
+// overrides of `trx.returning` still apply.
+function hybridWhere(trx: ReturnType<typeof makeTrx>, value: unknown) {
+  const p = Promise.resolve(value) as Promise<unknown> & { returning: (...args: unknown[]) => unknown };
+  p.returning = (...args: unknown[]) => (trx.returning as (...a: unknown[]) => unknown)(...args);
+  return p;
 }
 
 // ── Test 1 & 2 — Quotation convert ──────────────────────────────────────────
@@ -157,55 +171,63 @@ describe('PaymentService.allocate', () => {
     const { db, trx } = makeDb();
 
     trx.where = vi.fn()
-      .mockResolvedValueOnce([{ id: 10, tenantId, amount: '10000', allocatedAmount: '0', unallocatedAmount: '10000', branchId: 1, paymentDate: new Date(), status: 'RECEIVED' }])
-      .mockResolvedValueOnce([{ balanceDue: '20000', status: 'CONFIRMED', customerId: 42, grandTotal: '20000' }]);
+      .mockImplementationOnce(() => hybridWhere(trx, [{ id: 10, tenantId, amount: '10000', allocatedAmount: '0', unallocatedAmount: '10000', branchId: 1, paymentDate: new Date(), status: 'RECEIVED' }]))
+      .mockImplementationOnce(() => hybridWhere(trx, [{ balanceDue: '20000', status: 'CONFIRMED', customerId: 42, grandTotal: '20000' }]))
+      .mockImplementation(() => hybridWhere(trx, undefined));
 
-    trx.returning = vi.fn().mockResolvedValue([]);
+    // Atomic allocate() now derives status from a SQL CASE expression, not a JS
+    // literal, so this asserts the guarded UPDATE path was taken (non-empty
+    // .returning() result) rather than pattern-matching the mocked SQL fragment.
+    trx.returning = vi.fn().mockResolvedValue([{ balanceDue: '10000' }]);
 
     const svc = new PaymentService(db as never);
     await svc.allocate(10, tenantId, [{ invoiceId: 5, amount: 10000 }], userId);
 
     const setMock = trx.set as ReturnType<typeof vi.fn>;
-    const partialPaidCall = setMock.mock.calls.find((args) => args[0]?.status === 'PARTIALLY_PAID');
-    expect(partialPaidCall).toBeTruthy();
+    const invoiceUpdateCall = setMock.mock.calls.find((args) => args[0]?.balanceDue !== undefined);
+    expect(invoiceUpdateCall).toBeTruthy();
   });
 
   it('sets invoice status to PAID when full balance is allocated', async () => {
     const { db, trx } = makeDb();
 
     trx.where = vi.fn()
-      .mockResolvedValueOnce([{ id: 10, tenantId, amount: '10000', allocatedAmount: '0', unallocatedAmount: '10000', branchId: 1, paymentDate: new Date(), status: 'RECEIVED' }])
-      .mockResolvedValueOnce([{ balanceDue: '10000', status: 'PARTIALLY_PAID', customerId: 42, grandTotal: '20000' }]);
+      .mockImplementationOnce(() => hybridWhere(trx, [{ id: 10, tenantId, amount: '10000', allocatedAmount: '0', unallocatedAmount: '10000', branchId: 1, paymentDate: new Date(), status: 'RECEIVED' }]))
+      .mockImplementationOnce(() => hybridWhere(trx, [{ balanceDue: '10000', status: 'PARTIALLY_PAID', customerId: 42, grandTotal: '20000' }]))
+      .mockImplementation(() => hybridWhere(trx, undefined));
 
-    trx.returning = vi.fn().mockResolvedValue([]);
+    trx.returning = vi.fn().mockResolvedValue([{ balanceDue: '0' }]);
 
     const svc = new PaymentService(db as never);
     await svc.allocate(10, tenantId, [{ invoiceId: 5, amount: 10000 }], userId);
 
     const setMock = trx.set as ReturnType<typeof vi.fn>;
-    const paidCall = setMock.mock.calls.find((args) => args[0]?.status === 'PAID');
-    expect(paidCall).toBeTruthy();
+    const invoiceUpdateCall = setMock.mock.calls.find((args) => args[0]?.balanceDue !== undefined);
+    expect(invoiceUpdateCall).toBeTruthy();
   });
 });
 
 // ── Test 7 & 8 — Invoice cancellation ────────────────────────────────────────
 
 describe('InvoiceService.cancel', () => {
-  it('cancels a CONFIRMED invoice and restores stock', async () => {
+  it('cancels a CONFIRMED invoice, restores stock, and writes STOCK_IN ledger rows', async () => {
     const { db, trx } = makeDb();
 
     trx.where = vi.fn()
-      .mockResolvedValueOnce([{ id: 1, tenantId: 1, status: 'CONFIRMED', customerId: 42, grandTotal: '10000', branchId: 1, invoiceDate: new Date() }])
-      .mockResolvedValueOnce([{ id: 1, itemId: 5, quantity: '10.000' }, { id: 2, itemId: 6, quantity: '5.000' }])
-      .mockResolvedValue(undefined);
+      .mockImplementationOnce(() => hybridWhere(trx, [{ id: 1, tenantId: 1, status: 'CONFIRMED', customerId: 42, grandTotal: '10000', branchId: 1, invoiceDate: new Date(), warehouseId: 7 }]))
+      .mockImplementationOnce(() => hybridWhere(trx, [{ id: 1, itemId: 5, quantity: '10.000' }, { id: 2, itemId: 6, quantity: '5.000' }]))
+      .mockImplementation(() => hybridWhere(trx, undefined));
 
-    trx.returning = vi.fn().mockResolvedValue([]);
+    trx.returning = vi.fn().mockResolvedValue([{ availableQty: '15.000' }]);
 
     const svc = new InvoiceService(db as never);
     await svc.cancel(1, 1, 99, 'Test cancellation');
 
     expect(trx.update).toHaveBeenCalled();
     expect(trx.insert).toHaveBeenCalled();
+    const valuesMock = trx.values as ReturnType<typeof vi.fn>;
+    const stockInCalls = valuesMock.mock.calls.filter((args) => (args[0] as { movementType?: string })?.movementType === 'STOCK_IN');
+    expect(stockInCalls.length).toBe(2);
   });
 
   it('throws INVALID_STATUS when cancelling a PAID invoice', async () => {
@@ -236,17 +258,19 @@ describe('SaleReturnService.create', () => {
     createdBy: 1,
   };
 
-  it('creates a return with valid quantities and emits SALE_RETURN_APPROVED event', async () => {
+  it('creates a return with valid quantities, restores stock, and emits SALE_RETURN_APPROVED event', async () => {
     const { db, trx } = makeDb();
 
     trx.where = vi.fn()
-      .mockResolvedValueOnce([{ id: 5, tenantId: 1, status: 'CONFIRMED' }])
-      .mockResolvedValueOnce([{ id: 10, invoiceId: 5, quantity: '10.000', unitPrice: '1000', cgstAmount: '90', sgstAmount: '90', igstAmount: '0', taxableAmount: '1000' }]);
+      .mockImplementationOnce(() => hybridWhere(trx, [{ id: 5, tenantId: 1, status: 'CONFIRMED' }]))
+      .mockImplementationOnce(() => hybridWhere(trx, [{ id: 10, invoiceId: 5, quantity: '10.000', unitPrice: '1000', cgstAmount: '90', sgstAmount: '90', igstAmount: '0', taxableAmount: '1000' }]))
+      .mockImplementationOnce(() => hybridWhere(trx, [{ alreadyReturned: '0' }])) // ES-23 [H7]: prior-APPROVED-returns SUM
+      .mockImplementation(() => hybridWhere(trx, undefined));
 
     let returningCallCount = 0;
     trx.returning = vi.fn().mockImplementation(() => {
       returningCallCount++;
-      return Promise.resolve([{ id: returningCallCount }]);
+      return Promise.resolve([{ id: returningCallCount, availableQty: '7.000' }]);
     });
 
     const svc = new SaleReturnService(db as never);
@@ -254,6 +278,12 @@ describe('SaleReturnService.create', () => {
 
     expect(result.returnId).toBeDefined();
     expect(result.creditNoteId).toBeDefined();
+    const valuesMock = trx.values as ReturnType<typeof vi.fn>;
+    const stockInCalls = valuesMock.mock.calls.filter((args) => {
+      const v = args[0] as { movementType?: string } | Array<{ movementType?: string }>;
+      return Array.isArray(v) ? v.some((r) => r.movementType === 'STOCK_IN') : v?.movementType === 'STOCK_IN';
+    });
+    expect(stockInCalls.length).toBe(1);
   });
 
   it('throws RETURN_QTY_EXCEEDED when return qty exceeds original qty', async () => {
@@ -261,7 +291,8 @@ describe('SaleReturnService.create', () => {
 
     trx.where = vi.fn()
       .mockResolvedValueOnce([{ id: 5, tenantId: 1, status: 'CONFIRMED' }])
-      .mockResolvedValueOnce([{ id: 10, invoiceId: 5, quantity: '2.000', unitPrice: '1000', cgstAmount: '18', sgstAmount: '18', igstAmount: '0', taxableAmount: '1000' }]);
+      .mockResolvedValueOnce([{ id: 10, invoiceId: 5, quantity: '2.000', unitPrice: '1000', cgstAmount: '18', sgstAmount: '18', igstAmount: '0', taxableAmount: '1000' }])
+      .mockResolvedValueOnce([{ alreadyReturned: '0' }]); // ES-23 [H7]: prior-APPROVED-returns SUM
 
     const svc = new SaleReturnService(db as never);
     await expect(svc.create(baseParams)).rejects.toBeInstanceOf(BusinessError);

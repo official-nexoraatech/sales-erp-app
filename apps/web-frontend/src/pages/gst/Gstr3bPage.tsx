@@ -3,6 +3,9 @@ import { useQuery, useMutation } from '@tanstack/react-query';
 import { Calculator, Download, Info, ChevronDown, ChevronRight } from 'lucide-react';
 import { gstApi } from '../../api/endpoints.js';
 import toast from 'react-hot-toast';
+import { useAuthStore } from '../../store/auth.store.js';
+import { PERMISSIONS } from '../../constants/permissions.js';
+import { ERPCardSkeleton } from '../../components/erp/ERPSkeleton.js';
 
 function getCurrentPeriod(): string {
   const now = new Date();
@@ -47,7 +50,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
         onClick={() => setOpen((o) => !o)}
       >
         <span className="text-sm font-semibold text-gray-900 dark:text-white">{title}</span>
-        {open ? <ChevronDown className="w-4 h-4 text-gray-400" /> : <ChevronRight className="w-4 h-4 text-gray-400" />}
+        {open ? <ChevronDown className="w-4 h-4 text-gray-400 dark:text-gray-500" /> : <ChevronRight className="w-4 h-4 text-gray-400 dark:text-gray-500" />}
       </button>
       {open && <div className="border-t border-gray-100 dark:border-gray-700">{children}</div>}
     </div>
@@ -55,6 +58,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 }
 
 export function Gstr3bPage() {
+  const canFileGstr3b = useAuthStore((s) => s.hasPermission(PERMISSIONS.GSTR3B_FILE));
   const [period, setPeriod] = useState(getCurrentPeriod());
 
   const { data: result, isLoading } = useQuery({
@@ -93,14 +97,16 @@ export function Gstr3bPage() {
             <p className="text-sm text-gray-500 dark:text-gray-400">Monthly Summary Return</p>
           </div>
         </div>
-        <button
-          onClick={() => exportMutation.mutate()}
-          disabled={exportMutation.isPending || !result}
-          className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50"
-        >
-          <Download className="w-4 h-4" />
-          Export JSON
-        </button>
+        {canFileGstr3b && (
+          <button
+            onClick={() => exportMutation.mutate()}
+            disabled={exportMutation.isPending || !result}
+            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50"
+          >
+            <Download className="w-4 h-4" />
+            Export JSON
+          </button>
+        )}
       </div>
 
       <div>
@@ -114,9 +120,12 @@ export function Gstr3bPage() {
       </div>
 
       {isLoading ? (
-        <div className="py-12 text-center text-sm text-gray-400">Computing GSTR-3B...</div>
+        <div className="space-y-4">
+          <ERPCardSkeleton lines={3} />
+          <ERPCardSkeleton lines={3} />
+        </div>
       ) : !result ? (
-        <div className="py-12 text-center text-sm text-gray-400">No data for selected period</div>
+        <div className="py-12 text-center text-sm text-gray-400 dark:text-gray-500">No data for selected period</div>
       ) : (
         <div className="space-y-4">
           {/* Table 3.1 */}

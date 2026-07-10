@@ -38,6 +38,8 @@ spec:
         prometheus.io/path: "/metrics"
     spec:
       serviceAccountName: auth-service
+      imagePullSecrets:
+        - name: ghcr-pull-secret
       securityContext:
         runAsNonRoot: true
         runAsUser: 1001

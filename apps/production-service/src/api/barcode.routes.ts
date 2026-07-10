@@ -2,7 +2,6 @@ import type { FastifyInstance } from 'fastify';
 import type { PlatformContextFactory } from '@erp/sdk';
 import { z } from 'zod';
 import { PERMISSIONS } from '@erp/types';
-import Redis from 'ioredis';
 import { authenticate } from '../middleware/authenticate.js';
 import { requirePermission } from '../middleware/authorize.js';
 import { BarcodeService } from '../domain/BarcodeService.js';
@@ -12,13 +11,12 @@ const GenerateSchema = z.object({
   variantId: z.number().int().positive().optional(),
   quantity: z.number().int().positive().max(1000),
   format: z.enum(['EAN13', 'CODE128', 'QR']),
-  printFormat: z.enum(['A4_SHEET', 'LABEL_40x25', 'LABEL_60x40']),
+  printFormat: z.enum(['A4_SHEET', 'LABEL_40x25', 'LABEL_60x40', 'LABEL_50x25', 'LABEL_100x50']),
 });
 
 export async function barcodeRoutes(
   fastify: FastifyInstance,
-  ctxFactory: PlatformContextFactory,
-  redis: Redis
+  ctxFactory: PlatformContextFactory
 ): Promise<void> {
   fastify.addHook('preHandler', authenticate);
 
@@ -31,7 +29,7 @@ export async function barcodeRoutes(
         userId: req.auth.userId,
         correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
       });
-      const svc = new BarcodeService(ctx.db.raw, redis);
+      const svc = new BarcodeService(ctx.db.raw, ctx.cache);
       const protocol = req.headers['x-forwarded-proto'] ?? 'http';
       const host = req.headers.host ?? 'localhost:3021';
       const baseUrl = `${String(protocol)}://${String(host)}`;
@@ -59,7 +57,7 @@ export async function barcodeRoutes(
         userId: req.auth.userId,
         correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
       });
-      const svc = new BarcodeService(ctx.db.raw, redis);
+      const svc = new BarcodeService(ctx.db.raw, ctx.cache);
       const data = await svc.getPrintData(parseInt(batchId, 10), req.auth.tenantId);
       return reply.send({ data });
     },
@@ -74,7 +72,7 @@ export async function barcodeRoutes(
         userId: req.auth.userId,
         correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
       });
-      const svc = new BarcodeService(ctx.db.raw, redis);
+      const svc = new BarcodeService(ctx.db.raw, ctx.cache);
       await svc.deactivate(parseInt(id, 10), req.auth.tenantId, req.auth.userId);
       return reply.send({ data: { success: true } });
     },
@@ -90,7 +88,7 @@ export async function barcodeRoutes(
         userId: req.auth.userId,
         correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
       });
-      const svc = new BarcodeService(ctx.db.raw, redis);
+      const svc = new BarcodeService(ctx.db.raw, ctx.cache);
       const data = await svc.lookupByValue(value, req.auth.tenantId);
       return reply.send({ data });
     },
@@ -105,7 +103,7 @@ export async function barcodeRoutes(
         userId: req.auth.userId,
         correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
       });
-      const svc = new BarcodeService(ctx.db.raw, redis);
+      const svc = new BarcodeService(ctx.db.raw, ctx.cache);
       const data = await svc.listBatches(req.auth.tenantId, q.itemId ? parseInt(q.itemId, 10) : undefined);
       return reply.send({ data });
     },

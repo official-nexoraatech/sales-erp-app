@@ -6,6 +6,8 @@ import { alterationApi } from '../../api/endpoints.js';
 import { useAuthStore } from '../../store/auth.store.js';
 import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
+import { ERPTableSkeleton } from '../../components/erp/ERPSkeleton.js';
+import ERPEmptyState from '../../components/erp/ERPEmptyState.js';
 import Button from '../../components/ui/Button.js';
 import Badge from '../../components/ui/Badge.js';
 import Select from '../../components/ui/Select.js';
@@ -76,9 +78,16 @@ export default function AlterationsPage() {
       </div>
 
       {isLoading ? (
-        <p className="text-secondary text-sm">Loading…</p>
+        <ERPTableSkeleton rows={6} cols={7} />
       ) : orders.length === 0 ? (
-        <p className="text-disabled text-sm">No alteration orders found.</p>
+        <ERPEmptyState
+          type="no-data"
+          title="No alteration orders yet"
+          description="Receive your first alteration order to get started."
+          {...(hasPermission(PERMISSIONS.ALTERATION_CREATE)
+            ? { action: { label: '+ Receive Order', onClick: () => navigate('/hr/alterations/new') } }
+            : {})}
+        />
       ) : (
         <table className="w-full text-sm bg-surface-card rounded-xl border border-default overflow-hidden">
           <thead className="bg-surface-subtle">

@@ -2,7 +2,11 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { attendanceApi, employeeApi } from '../../api/endpoints.js';
+import { useAuthStore } from '../../store/auth.store.js';
+import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
+import ERPTabs from '../../components/erp/ERPTabs.js';
+import { ERPTableSkeleton } from '../../components/erp/ERPSkeleton.js';
 import Button from '../../components/ui/Button.js';
 import Select from '../../components/ui/Select.js';
 import Input from '../../components/ui/Input.js';
@@ -29,13 +33,19 @@ function currentMonth(): string {
 
 export default function AttendancePage() {
   const qc = useQueryClient();
-  const [tab, setTab] = useState<'mark' | 'calendar' | 'summary'>('mark');
+  const hasPermission = useAuthStore((s) => s.hasPermission);
+  const canMark = hasPermission(PERMISSIONS.ATTENDANCE_MARK);
+  const canViewReport = hasPermission(PERMISSIONS.ATTENDANCE_REPORT);
+  const availableTabs = (['mark', 'calendar', 'summary'] as const).filter(
+    (t) => (t === 'mark' ? canMark : t === 'summary' ? canViewReport : true)
+  );
+  const [tab, setTab] = useState<'mark' | 'calendar' | 'summary'>(canMark ? 'mark' : 'calendar');
   const [selectedEmployeeId, setSelectedEmployeeId] = useState('');
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [status, setStatus] = useState('PRESENT');
   const [month, setMonth] = useState(currentMonth());
 
-  const { data: empData } = useQuery({ queryKey: ['employees-all'], queryFn: () => employeeApi.list() });
+  const { data: empData } = useQuery({ queryKey: ['employees-all'], queryFn: () => employeeApi.list(), enabled: hasPermission(PERMISSIONS.EMPLOYEE_VIEW) });
   const employees: Employee[] = ((empData as Record<string, unknown>)?.content as Employee[]) ?? [];
 
   const markMutation = useMutation({
@@ -54,28 +64,21 @@ export default function AttendancePage() {
   const { data: summaryData, isLoading: summaryLoading } = useQuery({
     queryKey: ['attendance-summary', month],
     queryFn: () => attendanceApi.teamSummary(month),
-    enabled: tab === 'summary',
+    enabled: tab === 'summary' && canViewReport,
   });
-  const summary = ((summaryData as Record<string, unknown>)?.data as Record<string, unknown>)?.summary as
+  const summary = (summaryData as Record<string, unknown>)?.summary as
     Record<string, { presentDays: number; absentDays: number; lopDays: number; lateDays: number }> ?? {};
 
   return (
     <div>
       <ERPPageHeader variant="list" title="Attendance" subtitle="Mark attendance, view calendars, and team summaries." />
 
-      <div className="flex gap-2 mb-5 border-b border-default">
-        {(['mark', 'calendar', 'summary'] as const).map((t) => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px capitalize transition-colors ${
-              tab === t ? 'border-brand text-brand' : 'border-transparent text-secondary hover:text-primary'
-            }`}
-          >
-            {t}
-          </button>
-        ))}
-      </div>
+      <ERPTabs
+        className="mb-5"
+        tabs={availableTabs.map((t) => ({ key: t, label: t[0]!.toUpperCase() + t.slice(1) }))}
+        active={tab}
+        onChange={(key) => setTab(key as typeof tab)}
+      />
 
       {tab === 'mark' && (
         <div className="max-w-xl space-y-4 bg-surface-card rounded-xl border border-default p-5">
@@ -132,7 +135,7 @@ export default function AttendancePage() {
         <div className="space-y-4">
           <Input type="month" value={month} onChange={(e) => setMonth(e.target.value)} className="max-w-[160px]" />
           {summaryLoading ? (
-            <p className="text-secondary text-sm">Loading…</p>
+            <ERPTableSkeleton rows={5} cols={5} />
           ) : (
             <table className="w-full text-sm bg-surface-card rounded-xl border border-default overflow-hidden">
               <thead className="bg-surface-subtle">

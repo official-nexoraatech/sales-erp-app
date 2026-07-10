@@ -5,6 +5,8 @@ import { sagaAdminApi } from '../../../api/endpoints.js';
 import { useAuthStore } from '../../../store/auth.store.js';
 import { PERMISSIONS } from '../../../constants/permissions.js';
 import ERPPageHeader from '../../../components/erp/ERPPageHeader.js';
+import { ERPTableSkeleton } from '../../../components/erp/ERPSkeleton.js';
+import ERPEmptyState from '../../../components/erp/ERPEmptyState.js';
 import Button from '../../../components/ui/Button.js';
 import Badge from '../../../components/ui/Badge.js';
 import Select from '../../../components/ui/Select.js';
@@ -51,7 +53,7 @@ export default function SagaMonitorPage() {
   });
   const summary = summaryData as unknown as SagaSummary | undefined;
 
-  const { data: listData } = useQuery({
+  const { data: listData, isLoading } = useQuery({
     queryKey: ['saga-list', statusFilter],
     queryFn: () => {
       const params: Parameters<typeof sagaAdminApi.list>[0] = {};
@@ -127,35 +129,41 @@ export default function SagaMonitorPage() {
 
       {/* List */}
       <div className="card overflow-hidden">
-        <table className="w-full text-sm">
-          <thead className="bg-surface-hover">
-            <tr>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-secondary uppercase">Saga ID</th>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-secondary uppercase">Type</th>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-secondary uppercase">Status</th>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-secondary uppercase">Created</th>
-              <th className="px-4 py-3 text-left text-xs font-semibold text-secondary uppercase">Updated</th>
-              <th className="px-4 py-3" />
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border">
-            {sagas.map((saga) => (
-              <tr key={saga.id} className="hover:bg-surface-hover">
-                <td className="px-4 py-3 font-mono text-xs text-secondary">{saga.id.substring(0, 12)}…</td>
-                <td className="px-4 py-3 text-primary font-medium">{saga.sagaType}</td>
-                <td className="px-4 py-3"><Badge variant={STATUS_VARIANT[saga.status] ?? 'default'}>{saga.status}</Badge></td>
-                <td className="px-4 py-3 text-secondary">{formatDate(saga.createdAt)}</td>
-                <td className="px-4 py-3 text-secondary">{formatDate(saga.updatedAt)}</td>
-                <td className="px-4 py-3">
-                  <Button size="sm" variant="ghost" onClick={() => setSelectedSaga(saga)}>View</Button>
-                </td>
+        {isLoading ? (
+          <ERPTableSkeleton rows={6} cols={6} />
+        ) : (
+          <table className="w-full text-sm">
+            <thead className="bg-surface-hover">
+              <tr>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-secondary uppercase">Saga ID</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-secondary uppercase">Type</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-secondary uppercase">Status</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-secondary uppercase">Created</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-secondary uppercase">Updated</th>
+                <th className="px-4 py-3" />
               </tr>
-            ))}
-            {sagas.length === 0 && (
-              <tr><td colSpan={6} className="px-4 py-8 text-center text-secondary">No sagas found</td></tr>
-            )}
-          </tbody>
-        </table>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {sagas.map((saga) => (
+                <tr key={saga.id} className="hover:bg-surface-hover">
+                  <td className="px-4 py-3 font-mono text-xs text-secondary">{saga.id.substring(0, 12)}…</td>
+                  <td className="px-4 py-3 text-primary font-medium">{saga.sagaType}</td>
+                  <td className="px-4 py-3"><Badge variant={STATUS_VARIANT[saga.status] ?? 'default'}>{saga.status}</Badge></td>
+                  <td className="px-4 py-3 text-secondary">{formatDate(saga.createdAt)}</td>
+                  <td className="px-4 py-3 text-secondary">{formatDate(saga.updatedAt)}</td>
+                  <td className="px-4 py-3">
+                    <Button size="sm" variant="ghost" onClick={() => setSelectedSaga(saga)}>View</Button>
+                  </td>
+                </tr>
+              ))}
+              {sagas.length === 0 && (
+                <tr><td colSpan={6}>
+                  <ERPEmptyState type={statusFilter ? 'no-results' : 'no-data'} title="No sagas found" description="Distributed transaction sagas will appear here as they run." />
+                </td></tr>
+              )}
+            </tbody>
+          </table>
+        )}
       </div>
 
       {/* Saga detail modal */}

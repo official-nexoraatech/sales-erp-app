@@ -1,8 +1,10 @@
 import { eq, and, lte } from 'drizzle-orm';
 import type { TenantScopedDatabase } from '@erp/sdk';
+import { PlatformEventBus, EWB_VALUE_THRESHOLD } from '@erp/sdk';
 import { einvoiceData } from '@erp/db';
 import { createLogger } from '@erp/logger';
 import { BusinessError, NotFoundError } from '@erp/types';
+import { ulid } from 'ulid';
 
 const logger = createLogger({ serviceName: 'gst-service' });
 
@@ -12,9 +14,6 @@ const NIC_EWB_PROD_URL = process.env['NIC_EWB_URL'] ?? 'https://ewaybillgst.gov.
 function getEwbBaseUrl(): string {
   return process.env['NODE_ENV'] === 'production' ? NIC_EWB_PROD_URL : NIC_EWB_SANDBOX_URL;
 }
-
-// e-Way Bill threshold: goods worth > ₹50,000
-const EWB_VALUE_THRESHOLD = 50000;
 
 export interface EwayBillPayload {
   supplyType: 'O' | 'I'; // Outward | Inward
@@ -66,8 +65,10 @@ export class EwayBillService {
   static async generate(
     db: TenantScopedDatabase,
     tenantId: number,
+    userId: number,
     invoiceId: number,
-    payload: EwayBillPayload
+    payload: EwayBillPayload,
+    correlationId?: string
   ): Promise<{ ewbNumber: string; ewbDate: string; validUpto: string }> {
     if (payload.totalValue <= EWB_VALUE_THRESHOLD) {
       throw new BusinessError('EWB_THRESHOLD_NOT_MET', `e-Way Bill not required for invoice value ≤ ₹${EWB_VALUE_THRESHOLD}`);
@@ -107,15 +108,28 @@ export class EwayBillService {
       .where(and(eq(einvoiceData.tenantId, tenantId), eq(einvoiceData.invoiceId, invoiceId)));
 
     if (existing) {
-      await db.raw
-        .update(einvoiceData)
-        .set({
+      // ES-28 [M16-b]: the state-transition write and its outbox event must commit
+      // atomically — publishing via a separate ctx.events.publish() call after this
+      // returns reproduces the exact split-transaction bug C6 fixed elsewhere.
+      await db.transaction(async (trx) => {
+        await trx.raw
+          .update(einvoiceData)
+          .set({
+            ewbNumber,
+            ewbDate: ewbDate ? new Date(ewbDate.replace(/(\d{2})\/(\d{2})\/(\d{4})/, '$3-$2-$1')) : new Date(),
+            ewbValidUpto: validUpto ? new Date(validUpto.replace(/(\d{2})\/(\d{2})\/(\d{4})/, '$3-$2-$1')) : new Date(),
+            updatedAt: new Date(),
+          })
+          .where(eq(einvoiceData.id, existing.id));
+
+        const eventBus = new PlatformEventBus(trx, tenantId, userId, correlationId ?? ulid());
+        await eventBus.publishInTransaction('invoice', invoiceId, 'EWAY_BILL_GENERATED', {
+          invoiceId,
           ewbNumber,
-          ewbDate: ewbDate ? new Date(ewbDate.replace(/(\d{2})\/(\d{2})\/(\d{4})/, '$3-$2-$1')) : new Date(),
-          ewbValidUpto: validUpto ? new Date(validUpto.replace(/(\d{2})\/(\d{2})\/(\d{4})/, '$3-$2-$1')) : new Date(),
-          updatedAt: new Date(),
-        })
-        .where(eq(einvoiceData.id, existing.id));
+          ewbDate,
+          validUpto,
+        });
+      });
     }
 
     logger.info({ invoiceId, ewbNumber, validUpto }, 'e-Way Bill generated');

@@ -1,16 +1,21 @@
-﻿import { useState } from 'react';
+import { useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
+import { Split, XCircle } from 'lucide-react';
 import { paymentApi, customerApi } from '../../api/endpoints.js';
+import { useAuthStore } from '../../store/auth.store.js';
+import { useBranchStore } from '../../store/branch.store.js';
+import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
-import DataTable from '../../components/ui/DataTable.js';
+import ERPDataGrid, { type ERPColumnDef } from '../../components/erp/ERPDataGrid.js';
+import ERPDropdownMenu, { type ERPMenuItem } from '../../components/erp/ERPDropdownMenu.js';
 import Button from '../../components/ui/Button.js';
 import Badge from '../../components/ui/Badge.js';
 import Modal from '../../components/ui/Modal.js';
 import Input from '../../components/ui/Input.js';
 import Select from '../../components/ui/Select.js';
-import { formatDate, formatDatetime, formatCurrency } from '../../lib/format.js';
+import { formatDate, formatCurrency } from '../../lib/format.js';
 
 interface Payment {
   id: number;
@@ -35,6 +40,11 @@ export default function PaymentsPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const qc = useQueryClient();
+  const hasPermission = useAuthStore((s) => s.hasPermission);
+  const user = useAuthStore((s) => s.user);
+  const currentBranchId = useBranchStore((s) => s.currentBranchId);
+  const branchId = currentBranchId ?? user?.branchIds?.[0] ?? 1;
+  const canManagePayment = hasPermission(PERMISSIONS.PAYMENT_CREATE);
   const [showCreate, setShowCreate] = useState(!!searchParams.get('invoiceId'));
   const [customerId, setCustomerId] = useState('');
   const [paymentDate, setPaymentDate] = useState<string>(new Date().toISOString().substring(0, 10));
@@ -43,17 +53,20 @@ export default function PaymentsPage() {
   const [transactionRef, setTransactionRef] = useState('');
   const [chequeNumber, setChequeNumber] = useState('');
   const [notes, setNotes] = useState('');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
 
   const { data, isLoading } = useQuery({
-    queryKey: ['payments'],
-    queryFn: () => paymentApi.list(),
+    queryKey: ['payments', page, pageSize],
+    queryFn: () => paymentApi.list({ page, pageSize }),
     staleTime: 30_000,
   });
 
   const { data: customerData } = useQuery({ queryKey: ['customers-list'], queryFn: () => customerApi.list({}) });
 
-  const rows: Payment[] = (data as { data?: Payment[] })?.data ?? [];
-  const customers = (customerData as { data?: Array<{ id: number; displayName: string }> })?.data ?? [];
+  const rows: Payment[] = (data as Record<string, unknown>)?.content as Payment[] ?? [];
+  const totalElements = (data as Record<string, unknown>)?.totalElements as number ?? 0;
+  const customers = (customerData as { content?: Array<{ id: number; displayName: string }> })?.content ?? [];
 
   const createMutation = useMutation({
     mutationFn: (d: Record<string, unknown>) => paymentApi.create(d),
@@ -71,65 +84,73 @@ export default function PaymentsPage() {
     onError: (e: Error) => toast.error(e.message),
   });
 
-  const columns = [
-    { key: 'paymentNumber', header: 'Number', className: 'font-mono text-sm' },
+  const columns: ERPColumnDef<Payment>[] = [
+    { key: 'paymentNumber', header: 'Number', mono: true },
     { key: 'customerId', header: 'Customer' },
     { key: 'paymentMode', header: 'Mode' },
-    { key: 'amount', header: 'Amount', render: (r: Payment) => formatCurrency(parseFloat(r.amount)) },
+    { key: 'amount', header: 'Amount', align: 'right', sortable: true, render: (r) => formatCurrency(parseFloat(r.amount)) },
     {
       key: 'unallocatedAmount',
       header: 'Unallocated',
-      render: (r: Payment) => {
+      align: 'right',
+      render: (r) => {
         const u = parseFloat(r.unallocatedAmount);
-        return <span className={u > 0 ? 'text-orange-600 font-medium' : 'text-gray-400'}>
-          {formatCurrency(u)}
-        </span>;
+        return <span className={u > 0 ? 'text-warning font-medium' : 'text-disabled'}>{formatCurrency(u)}</span>;
       },
     },
-    { key: 'paymentDate', header: 'Date', render: (r: Payment) => formatDate(r.paymentDate) },
-    { key: 'status', header: 'Status', render: (r: Payment) => <Badge variant={STATUS_COLORS[r.status] ?? 'default'}>{r.status}</Badge> },
+    { key: 'paymentDate', header: 'Date', sortable: true, render: (r) => formatDate(r.paymentDate) },
+    { key: 'status', header: 'Status', sortable: true, render: (r) => <Badge variant={STATUS_COLORS[r.status] ?? 'default'}>{r.status}</Badge> },
     {
       key: 'actions',
       header: '',
-      render: (r: Payment) => (
-        <div className="flex gap-2">
-          {parseFloat(r.unallocatedAmount) > 0 && (
-            <Button size="sm" onClick={() => navigate(`/sales/payments/${r.id}/allocate`)}>Allocate</Button>
-          )}
-          {r.paymentMode === 'CHEQUE' && r.status === 'RECEIVED' && (
-            <Button size="sm" variant="danger" onClick={() => bounceMutation.mutate({ id: r.id, reason: 'Cheque bounced' })}>
-              Bounce
-            </Button>
-          )}
-        </div>
-      ),
+      align: 'right',
+      render: (r) => {
+        const items: ERPMenuItem[] = [];
+        if (canManagePayment && parseFloat(r.unallocatedAmount) > 0) {
+          items.push({ label: 'Allocate', icon: Split, onClick: () => navigate(`/sales/payments/${r.id}/allocate`) });
+        }
+        if (canManagePayment && r.paymentMode === 'CHEQUE' && r.status === 'RECEIVED') {
+          items.push({ label: 'Mark Bounced', icon: XCircle, variant: 'danger', onClick: () => bounceMutation.mutate({ id: r.id, reason: 'Cheque bounced' }) });
+        }
+        return items.length > 0 ? <ERPDropdownMenu items={items} /> : null;
+      },
     },
   ];
 
   return (
     <div>
       <ERPPageHeader variant="list" title="Payments" subtitle="Record and allocate customer payments">
-        <Button onClick={() => setShowCreate(true)}>+ Record Payment</Button>
+        {canManagePayment && <Button onClick={() => setShowCreate(true)}>+ Record Payment</Button>}
       </ERPPageHeader>
 
-      <DataTable columns={columns} data={rows} isLoading={isLoading} emptyMessage="No payments found" />
+      <ERPDataGrid
+        columns={columns}
+        data={rows}
+        isLoading={isLoading}
+        rowKey="id"
+        pagination={{ page, pageSize, total: totalElements }}
+        onPageChange={setPage}
+        onPageSizeChange={(size) => { setPageSize(size); setPage(1); }}
+      />
 
       <Modal isOpen={showCreate} onClose={() => setShowCreate(false)} title="Record Payment">
         <div className="space-y-4">
           <Select
-            label="Customer *"
+            label="Customer"
+            required
             value={customerId}
             onChange={(e) => setCustomerId(e.target.value)}
             options={[{ value: '', label: 'Select customer...' }, ...customers.map((c) => ({ value: String(c.id), label: c.displayName }))]}
           />
-          <Input label="Payment Date *" type="date" value={paymentDate} onChange={(e) => setPaymentDate(e.target.value)} />
+          <Input label="Payment Date" required type="date" value={paymentDate} onChange={(e) => setPaymentDate(e.target.value)} />
           <Select
-            label="Payment Mode *"
+            label="Payment Mode"
+            required
             value={paymentMode}
             onChange={(e) => setPaymentMode(e.target.value)}
             options={['CASH', 'CARD', 'UPI', 'CHEQUE', 'NEFT', 'RTGS'].map((m) => ({ value: m, label: m }))}
           />
-          <Input label="Amount *" type="number" value={amount} onChange={(e) => setAmount(e.target.value)} />
+          <Input label="Amount" required type="number" value={amount} onChange={(e) => setAmount(e.target.value)} />
           {paymentMode === 'CHEQUE' && (
             <Input label="Cheque Number" value={chequeNumber} onChange={(e) => setChequeNumber(e.target.value)} />
           )}
@@ -144,7 +165,7 @@ export default function PaymentsPage() {
               disabled={!customerId || !amount}
               onClick={() => createMutation.mutate({
                 customerId: Number(customerId),
-                branchId: 1,
+                branchId,
                 paymentDate: new Date(paymentDate).toISOString(),
                 paymentMode,
                 amount: parseFloat(amount),

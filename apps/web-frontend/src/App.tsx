@@ -3,16 +3,22 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import { useAuthStore } from './store/auth.store.js';
 import Layout from './components/Layout.js';
 import { PERMISSIONS } from './constants/permissions.js';
+import { NAV_GROUPS, getFirstAccessiblePath } from './lib/navigation.js';
 import ERPErrorBoundary from './components/erp/ERPErrorBoundary.js';
 import { ERPDetailSkeleton } from './components/erp/ERPSkeleton.js';
 
 // ── Lazy-loaded pages ────────────────────────────────────────────────────────
 const LoginPage                   = lazy(() => import('./pages/auth/LoginPage.js'));
+const ResetPasswordPage           = lazy(() => import('./pages/auth/ResetPasswordPage.js'));
+const SecuritySettingsPage        = lazy(() => import('./pages/auth/SecuritySettingsPage.js'));
 const DashboardPage               = lazy(() => import('./pages/DashboardPage.js'));
 const NotFoundPage                = lazy(() => import('./pages/NotFoundPage.js'));
+const NoModulesAssignedPage       = lazy(() => import('./pages/NoModulesAssignedPage.js'));
+const AccountSuspendedPage        = lazy(() => import('./pages/AccountSuspendedPage.js'));
 
 // Settings
 const OrganizationPage            = lazy(() => import('./pages/settings/OrganizationPage.js'));
+const SsoConfigPage                = lazy(() => import('./pages/settings/SsoConfigPage.js'));
 const BranchesPage                = lazy(() => import('./pages/settings/BranchesPage.js'));
 const WarehousesPage              = lazy(() => import('./pages/settings/WarehousesPage.js'));
 
@@ -42,6 +48,7 @@ const GstConfigPage               = lazy(() => import('./pages/gst/GstConfigPage
 const GstRegisterPage             = lazy(() => import('./pages/gst/GstRegisterPage.js').then((m) => ({ default: m.GstRegisterPage })));
 const Gstr1Page                   = lazy(() => import('./pages/gst/Gstr1Page.js').then((m) => ({ default: m.Gstr1Page })));
 const Gstr3bPage                  = lazy(() => import('./pages/gst/Gstr3bPage.js').then((m) => ({ default: m.Gstr3bPage })));
+const GSTR9Page                   = lazy(() => import('./pages/gst/GSTR9Page.js').then((m) => ({ default: m.GSTR9Page })));
 const EInvoicePage                = lazy(() => import('./pages/gst/EInvoicePage.js').then((m) => ({ default: m.EInvoicePage })));
 const Gstr2aPage                  = lazy(() => import('./pages/gst/Gstr2aPage.js').then((m) => ({ default: m.Gstr2aPage })));
 const GstCompliancePage           = lazy(() => import('./pages/gst/GstCompliancePage.js').then((m) => ({ default: m.GstCompliancePage })));
@@ -59,6 +66,8 @@ const CashFlowPage                = lazy(() => import('./pages/accounting/CashFl
 const BankReconciliationPage      = lazy(() => import('./pages/accounting/BankReconciliationPage.js'));
 const FinancialYearsPage          = lazy(() => import('./pages/accounting/FinancialYearsPage.js'));
 const FixedAssetsPage             = lazy(() => import('./pages/accounting/FixedAssetsPage.js'));
+const FixedAssetFormPage          = lazy(() => import('./pages/accounting/FixedAssetFormPage.js'));
+const FixedAssetDetailPage        = lazy(() => import('./pages/accounting/FixedAssetDetailPage.js'));
 const TDSPage                     = lazy(() => import('./pages/accounting/TDSPage.js'));
 
 // Sales
@@ -70,6 +79,8 @@ const InvoiceDetailPage           = lazy(() => import('./pages/sales/InvoiceDeta
 const PaymentsPage                = lazy(() => import('./pages/sales/PaymentsPage.js'));
 const SaleReturnsPage             = lazy(() => import('./pages/sales/SaleReturnsPage.js'));
 const DeliveryChallansPage        = lazy(() => import('./pages/sales/DeliveryChallansPage.js'));
+const DeliveryChallanFormPage      = lazy(() => import('./pages/sales/DeliveryChallanFormPage.js'));
+const DeliveryChallanDetailPage    = lazy(() => import('./pages/sales/DeliveryChallanDetailPage.js'));
 
 // Purchase
 const PurchaseOrdersPage          = lazy(() => import('./pages/purchase/PurchaseOrdersPage.js'));
@@ -91,6 +102,7 @@ const StockAdjustmentFormPage     = lazy(() => import('./pages/inventory/StockAd
 const PhysicalVerificationPage    = lazy(() => import('./pages/inventory/PhysicalVerificationPage.js'));
 const PhysicalVerificationDetailPage = lazy(() => import('./pages/inventory/PhysicalVerificationDetailPage.js'));
 const FabricRollsPage             = lazy(() => import('./pages/inventory/FabricRollsPage.js'));
+const StockValuationPage          = lazy(() => import('./pages/inventory/StockValuationPage.js'));
 
 // CRM
 const SegmentsPage                = lazy(() => import('./pages/crm/SegmentsPage.js'));
@@ -105,6 +117,7 @@ const JobWorkQualityCheckPage     = lazy(() => import('./pages/production/JobWor
 const ConsignmentStockPage        = lazy(() => import('./pages/production/ConsignmentStockPage.js'));
 const ConsignmentSettlementsPage  = lazy(() => import('./pages/production/ConsignmentSettlementsPage.js'));
 const ReorderReportPage           = lazy(() => import('./pages/production/ReorderReportPage.js'));
+const BarcodeLabelsPage           = lazy(() => import('./pages/production/BarcodeLabelsPage.js'));
 
 // Phase 11 — Reports & Analytics
 const ReportsPage                 = lazy(() => import('./pages/reports/ReportsPage.js'));
@@ -112,6 +125,19 @@ const ReportViewerPage            = lazy(() => import('./pages/reports/ReportVie
 const SchedulesPage               = lazy(() => import('./pages/reports/SchedulesPage.js'));
 const ArAgingPage                 = lazy(() => import('./pages/reports/ArAgingPage.js'));
 const ApAgingPage                 = lazy(() => import('./pages/reports/ApAgingPage.js'));
+const SalesAnalyticsPage          = lazy(() => import('./pages/reports/SalesAnalyticsPage.js'));
+const InventoryAnalyticsPage      = lazy(() => import('./pages/reports/InventoryAnalyticsPage.js'));
+const HRAnalyticsPage             = lazy(() => import('./pages/reports/HRAnalyticsPage.js'));
+
+// ES-19 — Enterprise Security: 2FA & Advanced Auth
+const SecurityAuditLogPage        = lazy(() => import('./pages/admin/SecurityAuditLogPage.js'));
+
+// ES-20 — Audit Trail & Feature Flags
+const AuditLogPage                = lazy(() => import('./pages/admin/AuditLogPage.js'));
+const FeatureFlagsPage            = lazy(() => import('./pages/admin/FeatureFlagsPage.js'));
+
+// Platform Admin — cross-tenant tenant management (PLATFORM_TENANT_MANAGE only)
+const TenantsPage                 = lazy(() => import('./pages/admin/TenantsPage.js'));
 
 // Phase 12 — Distributed Systems Admin
 const DLQPage                     = lazy(() => import('./pages/admin/distributed/DLQPage.js'));
@@ -120,6 +146,7 @@ const EventStorePage              = lazy(() => import('./pages/admin/distributed
 const SchemaRegistryPage          = lazy(() => import('./pages/admin/distributed/SchemaRegistryPage.js'));
 const ProjectionsPage             = lazy(() => import('./pages/admin/distributed/ProjectionsPage.js'));
 const PerformancePage             = lazy(() => import('./pages/admin/distributed/PerformancePage.js'));
+const SearchAnalyticsPage         = lazy(() => import('./pages/admin/SearchAnalyticsPage.js'));
 
 // HR
 const EmployeesPage               = lazy(() => import('./pages/hr/EmployeesPage.js'));
@@ -130,6 +157,9 @@ const LeavesPage                  = lazy(() => import('./pages/hr/LeavesPage.js'
 const PayrollPage                 = lazy(() => import('./pages/hr/PayrollPage.js'));
 const PayslipViewPage             = lazy(() => import('./pages/hr/PayslipViewPage.js'));
 const HolidayCalendarPage         = lazy(() => import('./pages/hr/HolidayCalendarPage.js'));
+const PFChallanPage               = lazy(() => import('./pages/hr/PFChallanPage.js'));
+const ESIChallanPage              = lazy(() => import('./pages/hr/ESIChallanPage.js'));
+const Form16Page                  = lazy(() => import('./pages/hr/Form16Page.js'));
 const AlterationsPage             = lazy(() => import('./pages/hr/AlterationsPage.js'));
 const AlterationFormPage          = lazy(() => import('./pages/hr/AlterationFormPage.js'));
 const AlterationDetailPage        = lazy(() => import('./pages/hr/AlterationDetailPage.js'));
@@ -154,6 +184,15 @@ function PermissionRoute({ permission, element }: { permission: string; element:
   return allowed ? <>{element}</> : <AccessDenied />;
 }
 
+/** Lands the user on the first nav item they can actually access (in NAV_GROUPS priority
+ * order), instead of always assuming /dashboard — a user without DASHBOARD_VIEW would
+ * otherwise land straight on an Access Denied page. */
+function IndexRedirect() {
+  const hasPermission = useAuthStore((s) => s.hasPermission);
+  const firstPath = getFirstAccessiblePath(NAV_GROUPS, hasPermission);
+  return <Navigate to={firstPath ?? '/no-access'} replace />;
+}
+
 // ── Suspense wrapper for each page ───────────────────────────────────────────
 function Page({ children }: { children: ReactNode }) {
   return (
@@ -170,6 +209,8 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<Page><LoginPage /></Page>} />
+      <Route path="/reset-password" element={<Page><ResetPasswordPage /></Page>} />
+      <Route path="/account-suspended" element={<Page><AccountSuspendedPage /></Page>} />
 
       <Route
         path="/"
@@ -179,11 +220,14 @@ export default function App() {
           </ProtectedRoute>
         }
       >
-        <Route index element={<Navigate to="/dashboard" replace />} />
-        <Route path="dashboard" element={<Page><DashboardPage /></Page>} />
+        <Route index element={<IndexRedirect />} />
+        <Route path="no-access" element={<Page><NoModulesAssignedPage /></Page>} />
+        <Route path="dashboard" element={<Page><PermissionRoute permission={PERMISSIONS.DASHBOARD_VIEW} element={<DashboardPage />} /></Page>} />
+        <Route path="security" element={<Page><SecuritySettingsPage /></Page>} />
 
         {/* Settings */}
-        <Route path="settings/organization" element={<Page><PermissionRoute permission={PERMISSIONS.ORGANIZATION_SETTINGS_VIEW} element={<OrganizationPage />} /></Page>} />
+        <Route path="settings/organization" element={<Page><PermissionRoute permission={PERMISSIONS.ORGANIZATION_VIEW} element={<OrganizationPage />} /></Page>} />
+        <Route path="settings/sso"          element={<Page><PermissionRoute permission={PERMISSIONS.SSO_CONFIG_MANAGE} element={<SsoConfigPage />} /></Page>} />
         <Route path="settings/branches"     element={<Page><PermissionRoute permission={PERMISSIONS.BRANCH_VIEW}                 element={<BranchesPage />} /></Page>} />
         <Route path="settings/warehouses"   element={<Page><PermissionRoute permission={PERMISSIONS.WAREHOUSE_VIEW}              element={<WarehousesPage />} /></Page>} />
 
@@ -201,7 +245,7 @@ export default function App() {
         {/* Suppliers */}
         <Route path="suppliers"          element={<Page><PermissionRoute permission={PERMISSIONS.SUPPLIER_VIEW}   element={<SuppliersPage />} /></Page>} />
         <Route path="suppliers/new"      element={<Page><PermissionRoute permission={PERMISSIONS.SUPPLIER_CREATE} element={<SupplierFormPage />} /></Page>} />
-        <Route path="suppliers/:id/edit" element={<Page><PermissionRoute permission={PERMISSIONS.SUPPLIER_UPDATE} element={<SupplierFormPage />} /></Page>} />
+        <Route path="suppliers/:id/edit" element={<Page><PermissionRoute permission={PERMISSIONS.SUPPLIER_EDIT}   element={<SupplierFormPage />} /></Page>} />
 
         {/* Inventory — Items */}
         <Route path="inventory/categories"     element={<Page><PermissionRoute permission={PERMISSIONS.CATEGORY_VIEW}  element={<CategoriesPage />} /></Page>} />
@@ -209,7 +253,7 @@ export default function App() {
         <Route path="inventory/units"          element={<Page><PermissionRoute permission={PERMISSIONS.UNIT_VIEW}      element={<UnitsPage />} /></Page>} />
         <Route path="inventory/items"          element={<Page><PermissionRoute permission={PERMISSIONS.ITEM_VIEW}      element={<ItemsPage />} /></Page>} />
         <Route path="inventory/items/new"      element={<Page><PermissionRoute permission={PERMISSIONS.ITEM_CREATE}    element={<ItemFormPage />} /></Page>} />
-        <Route path="inventory/items/:id/edit" element={<Page><PermissionRoute permission={PERMISSIONS.ITEM_UPDATE}    element={<ItemFormPage />} /></Page>} />
+        <Route path="inventory/items/:id/edit" element={<Page><PermissionRoute permission={PERMISSIONS.ITEM_EDIT}      element={<ItemFormPage />} /></Page>} />
         <Route path="inventory/price-lists"    element={<Page><PermissionRoute permission={PERMISSIONS.PRICE_LIST_VIEW} element={<PriceListsPage />} /></Page>} />
 
         {/* GST */}
@@ -217,6 +261,7 @@ export default function App() {
         <Route path="gst/register"     element={<Page><PermissionRoute permission={PERMISSIONS.GST_VIEW}           element={<GstRegisterPage />} /></Page>} />
         <Route path="gst/gstr1"        element={<Page><PermissionRoute permission={PERMISSIONS.GSTR1_VIEW}         element={<Gstr1Page />} /></Page>} />
         <Route path="gst/gstr3b"       element={<Page><PermissionRoute permission={PERMISSIONS.GSTR3B_VIEW}        element={<Gstr3bPage />} /></Page>} />
+        <Route path="gst/gstr9"        element={<Page><PermissionRoute permission={PERMISSIONS.GSTR9_VIEW}         element={<GSTR9Page />} /></Page>} />
         <Route path="gst/einvoice"     element={<Page><PermissionRoute permission={PERMISSIONS.GST_VIEW}           element={<EInvoicePage />} /></Page>} />
         <Route path="gst/gstr2a"       element={<Page><PermissionRoute permission={PERMISSIONS.GSTR2A_RECONCILE}   element={<Gstr2aPage />} /></Page>} />
         <Route path="gst/compliance"   element={<Page><PermissionRoute permission={PERMISSIONS.GST_VIEW}           element={<GstCompliancePage />} /></Page>} />
@@ -226,7 +271,7 @@ export default function App() {
         <Route path="accounting/accounts/new"         element={<Page><PermissionRoute permission={PERMISSIONS.ACCOUNT_CREATE}            element={<AccountFormPage />} /></Page>} />
         <Route path="accounting/accounts/:id/edit"    element={<Page><PermissionRoute permission={PERMISSIONS.ACCOUNT_UPDATE}            element={<AccountFormPage />} /></Page>} />
         <Route path="accounting/accounts/:id/ledger"  element={<Page><PermissionRoute permission={PERMISSIONS.LEDGER_VIEW}               element={<LedgerPage />} /></Page>} />
-        <Route path="accounting/opening-balances"     element={<Page><PermissionRoute permission={PERMISSIONS.ACCOUNT_VIEW}              element={<OpeningBalancesPage />} /></Page>} />
+        <Route path="accounting/opening-balances"     element={<Page><PermissionRoute permission={PERMISSIONS.OPENING_BALANCE_LOCK}       element={<OpeningBalancesPage />} /></Page>} />
         <Route path="accounting/journals"             element={<Page><PermissionRoute permission={PERMISSIONS.JOURNAL_VIEW}              element={<JournalsPage />} /></Page>} />
         <Route path="accounting/reports/trial-balance" element={<Page><PermissionRoute permission={PERMISSIONS.TRIAL_BALANCE_VIEW}       element={<TrialBalancePage />} /></Page>} />
         <Route path="accounting/reports/profit-loss"  element={<Page><PermissionRoute permission={PERMISSIONS.PROFIT_LOSS_VIEW}          element={<ProfitLossPage />} /></Page>} />
@@ -235,6 +280,9 @@ export default function App() {
         <Route path="accounting/bank-reconciliation"  element={<Page><PermissionRoute permission={PERMISSIONS.BANK_RECONCILIATION_VIEW}  element={<BankReconciliationPage />} /></Page>} />
         <Route path="accounting/financial-years"      element={<Page><PermissionRoute permission={PERMISSIONS.FINANCIAL_YEAR_VIEW}       element={<FinancialYearsPage />} /></Page>} />
         <Route path="accounting/fixed-assets"         element={<Page><PermissionRoute permission={PERMISSIONS.FIXED_ASSET_VIEW}          element={<FixedAssetsPage />} /></Page>} />
+        <Route path="accounting/fixed-assets/new"     element={<Page><PermissionRoute permission={PERMISSIONS.FIXED_ASSET_CREATE}        element={<FixedAssetFormPage />} /></Page>} />
+        <Route path="accounting/fixed-assets/:id/edit" element={<Page><PermissionRoute permission={PERMISSIONS.FIXED_ASSET_UPDATE}       element={<FixedAssetFormPage />} /></Page>} />
+        <Route path="accounting/fixed-assets/:id"     element={<Page><PermissionRoute permission={PERMISSIONS.FIXED_ASSET_VIEW}          element={<FixedAssetDetailPage />} /></Page>} />
         <Route path="accounting/tds"                  element={<Page><PermissionRoute permission={PERMISSIONS.TDS_VIEW}                  element={<TDSPage />} /></Page>} />
 
         {/* Sales */}
@@ -246,9 +294,10 @@ export default function App() {
         <Route path="sales/invoices/:id"            element={<Page><PermissionRoute permission={PERMISSIONS.INVOICE_VIEW}   element={<InvoiceDetailPage />} /></Page>} />
         <Route path="sales/payments"                element={<Page><PermissionRoute permission={PERMISSIONS.PAYMENT_VIEW}   element={<PaymentsPage />} /></Page>} />
         <Route path="sales/payments/new"            element={<Page><PermissionRoute permission={PERMISSIONS.PAYMENT_CREATE} element={<PaymentsPage />} /></Page>} />
-        <Route path="sales/returns"                 element={<Page><PermissionRoute permission={PERMISSIONS.INVOICE_CANCEL} element={<SaleReturnsPage />} /></Page>} />
+        <Route path="sales/returns"                 element={<Page><PermissionRoute permission={PERMISSIONS.INVOICE_VIEW}   element={<SaleReturnsPage />} /></Page>} />
         <Route path="sales/delivery-challans"       element={<Page><PermissionRoute permission={PERMISSIONS.INVOICE_VIEW}   element={<DeliveryChallansPage />} /></Page>} />
-        <Route path="sales/delivery-challans/new"   element={<Page><PermissionRoute permission={PERMISSIONS.INVOICE_CREATE} element={<DeliveryChallansPage />} /></Page>} />
+        <Route path="sales/delivery-challans/new"   element={<Page><PermissionRoute permission={PERMISSIONS.INVOICE_CREATE} element={<DeliveryChallanFormPage />} /></Page>} />
+        <Route path="sales/delivery-challans/:id"   element={<Page><PermissionRoute permission={PERMISSIONS.INVOICE_VIEW}   element={<DeliveryChallanDetailPage />} /></Page>} />
 
         {/* Purchase */}
         <Route path="purchase/orders"        element={<Page><PermissionRoute permission={PERMISSIONS.PO_VIEW}              element={<PurchaseOrdersPage />} /></Page>} />
@@ -270,6 +319,7 @@ export default function App() {
         <Route path="inventory/physical-verifications"         element={<Page><PermissionRoute permission={PERMISSIONS.WAREHOUSE_MANAGE} element={<PhysicalVerificationPage />} /></Page>} />
         <Route path="inventory/physical-verifications/:id"     element={<Page><PermissionRoute permission={PERMISSIONS.WAREHOUSE_MANAGE} element={<PhysicalVerificationDetailPage />} /></Page>} />
         <Route path="inventory/fabric-rolls"                   element={<Page><PermissionRoute permission={PERMISSIONS.ITEM_VIEW}        element={<FabricRollsPage />} /></Page>} />
+        <Route path="inventory/valuation"                      element={<Page><PermissionRoute permission={PERMISSIONS.REPORT_VIEW}      element={<StockValuationPage />} /></Page>} />
 
         {/* CRM */}
         <Route path="crm/segments"      element={<Page><PermissionRoute permission={PERMISSIONS.CRM_SEGMENT_VIEW}   element={<SegmentsPage />} /></Page>} />
@@ -284,6 +334,7 @@ export default function App() {
         <Route path="production/consignment/stock"     element={<Page><PermissionRoute permission={PERMISSIONS.CONSIGNMENT_VIEW} element={<ConsignmentStockPage />} /></Page>} />
         <Route path="production/consignment/settlements" element={<Page><PermissionRoute permission={PERMISSIONS.CONSIGNMENT_VIEW} element={<ConsignmentSettlementsPage />} /></Page>} />
         <Route path="production/reorder"               element={<Page><PermissionRoute permission={PERMISSIONS.REORDER_VIEW}    element={<ReorderReportPage />} /></Page>} />
+        <Route path="production/barcode-labels"        element={<Page><PermissionRoute permission={PERMISSIONS.BARCODE_GENERATE} element={<BarcodeLabelsPage />} /></Page>} />
 
         {/* HR */}
         <Route path="hr/employees"          element={<Page><PermissionRoute permission={PERMISSIONS.EMPLOYEE_VIEW}   element={<EmployeesPage />} /></Page>} />
@@ -295,16 +346,33 @@ export default function App() {
         <Route path="hr/payroll"               element={<Page><PermissionRoute permission={PERMISSIONS.PAYROLL_VIEW}        element={<PayrollPage />} /></Page>} />
         <Route path="hr/payroll-slips/:id"    element={<Page><PermissionRoute permission={PERMISSIONS.VIEW_SALARY_DETAILS} element={<PayslipViewPage />} /></Page>} />
         <Route path="hr/holidays"             element={<Page><PermissionRoute permission={PERMISSIONS.HR_MANAGE}           element={<HolidayCalendarPage />} /></Page>} />
+        <Route path="hr/pf-challans"          element={<Page><PermissionRoute permission={PERMISSIONS.HR_STATUTORY}        element={<PFChallanPage />} /></Page>} />
+        <Route path="hr/esi-challans"         element={<Page><PermissionRoute permission={PERMISSIONS.HR_STATUTORY}        element={<ESIChallanPage />} /></Page>} />
+        <Route path="hr/form16"               element={<Page><PermissionRoute permission={PERMISSIONS.VIEW_SALARY_DETAILS} element={<Form16Page />} /></Page>} />
         <Route path="hr/alterations"          element={<Page><PermissionRoute permission={PERMISSIONS.ALTERATION_VIEW}     element={<AlterationsPage />} /></Page>} />
         <Route path="hr/alterations/new"    element={<Page><PermissionRoute permission={PERMISSIONS.ALTERATION_CREATE} element={<AlterationFormPage />} /></Page>} />
         <Route path="hr/alterations/:id"    element={<Page><PermissionRoute permission={PERMISSIONS.ALTERATION_VIEW} element={<AlterationDetailPage />} /></Page>} />
 
         {/* Phase 11 — Reports & Analytics */}
         <Route path="reports"                element={<Page><PermissionRoute permission={PERMISSIONS.REPORT_VIEW}          element={<ReportsPage />} /></Page>} />
-        <Route path="reports/schedules"      element={<Page><PermissionRoute permission={PERMISSIONS.REPORT_CREATE_SCHEDULE} element={<SchedulesPage />} /></Page>} />
+        <Route path="reports/schedules"      element={<Page><PermissionRoute permission={PERMISSIONS.REPORT_SCHEDULE}      element={<SchedulesPage />} /></Page>} />
         <Route path="reports/ar-aging"       element={<Page><PermissionRoute permission={PERMISSIONS.REPORT_VIEW}          element={<ArAgingPage />} /></Page>} />
         <Route path="reports/ap-aging"       element={<Page><PermissionRoute permission={PERMISSIONS.REPORT_VIEW}          element={<ApAgingPage />} /></Page>} />
+        {/* ES-17 — Analytics dashboards */}
+        <Route path="reports/sales-analytics"     element={<Page><PermissionRoute permission={PERMISSIONS.REPORT_VIEW}    element={<SalesAnalyticsPage />} /></Page>} />
+        <Route path="reports/inventory-analytics" element={<Page><PermissionRoute permission={PERMISSIONS.REPORT_VIEW}    element={<InventoryAnalyticsPage />} /></Page>} />
+        <Route path="reports/hr-analytics"        element={<Page><PermissionRoute permission={PERMISSIONS.REPORT_VIEW}    element={<HRAnalyticsPage />} /></Page>} />
         <Route path="reports/:slug"          element={<Page><PermissionRoute permission={PERMISSIONS.REPORT_VIEW}          element={<ReportViewerPage />} /></Page>} />
+
+        {/* ES-19 — Enterprise Security */}
+        <Route path="admin/security-audit-log" element={<Page><PermissionRoute permission={PERMISSIONS.VIEW_AUDIT_LOG} element={<SecurityAuditLogPage />} /></Page>} />
+
+        {/* ES-20 — Audit Trail & Feature Flags */}
+        <Route path="admin/audit-logs"     element={<Page><PermissionRoute permission={PERMISSIONS.VIEW_AUDIT_LOG}     element={<AuditLogPage />} /></Page>} />
+        <Route path="admin/feature-flags"  element={<Page><PermissionRoute permission={PERMISSIONS.FEATURE_FLAG_VIEW} element={<FeatureFlagsPage />} /></Page>} />
+
+        {/* Platform Admin — cross-tenant tenant management */}
+        <Route path="admin/tenants"        element={<Page><PermissionRoute permission={PERMISSIONS.PLATFORM_TENANT_MANAGE} element={<TenantsPage />} /></Page>} />
 
         {/* Phase 12 — Distributed Systems Admin */}
         <Route path="admin/distributed/events"      element={<Page><PermissionRoute permission={PERMISSIONS.EVENT_STORE_VIEW}        element={<EventStorePage />} /></Page>} />
@@ -312,7 +380,10 @@ export default function App() {
         <Route path="admin/distributed/sagas"       element={<Page><PermissionRoute permission={PERMISSIONS.SAGA_VIEW}               element={<SagaMonitorPage />} /></Page>} />
         <Route path="admin/distributed/schemas"     element={<Page><PermissionRoute permission={PERMISSIONS.SCHEMA_REGISTRY_VIEW}    element={<SchemaRegistryPage />} /></Page>} />
         <Route path="admin/distributed/projections" element={<Page><PermissionRoute permission={PERMISSIONS.PROJECTION_VIEW}         element={<ProjectionsPage />} /></Page>} />
-        <Route path="admin/distributed/performance" element={<Page><PermissionRoute permission={PERMISSIONS.EVENT_STORE_VIEW}        element={<PerformancePage />} /></Page>} />
+        <Route path="admin/distributed/performance" element={<Page><PermissionRoute permission={PERMISSIONS.PERFORMANCE_VIEW}       element={<PerformancePage />} /></Page>} />
+
+        {/* Global Search — analytics + index sync health */}
+        <Route path="admin/search-analytics" element={<Page><PermissionRoute permission={PERMISSIONS.SEARCH_REINDEX} element={<SearchAnalyticsPage />} /></Page>} />
 
         {/* 404 */}
         <Route path="*" element={<Page><NotFoundPage /></Page>} />

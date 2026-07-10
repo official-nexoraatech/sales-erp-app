@@ -95,7 +95,7 @@ export async function leaveRoutes(
     const body = ApplyLeaveSchema.safeParse(request.body);
     if (!body.success) throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
 
-    const [emp] = await ctx.db.raw.select({ id: employees.id, gender: employees.gender, joiningDate: employees.joiningDate }).from(employees).where(and(eq(employees.id, body.data.employeeId), eq(employees.tenantId, tenantId)));
+    const [emp] = await ctx.db.raw.select({ id: employees.id, displayName: employees.displayName, gender: employees.gender, joiningDate: employees.joiningDate }).from(employees).where(and(eq(employees.id, body.data.employeeId), eq(employees.tenantId, tenantId)));
     if (!emp) throw new NotFoundError('Employee', body.data.employeeId);
 
     const [leaveType] = await ctx.db.raw.select().from(leaveTypes).where(and(eq(leaveTypes.id, body.data.leaveTypeId), eq(leaveTypes.tenantId, tenantId)));
@@ -154,7 +154,15 @@ export async function leaveRoutes(
         .where(eq(employeeLeaveBalance.id, balance.id));
     }
 
-    await ctx.events.publish('leave_application', created.id, 'LEAVE_APPLIED', { leaveApplicationId: created.id, employeeId: body.data.employeeId, tenantId });
+    await ctx.events.publish('leave_application', created.id, 'LEAVE_APPLIED', {
+      leaveApplicationId: created.id,
+      employeeId: body.data.employeeId,
+      employeeName: emp.displayName,
+      startDate: created.startDate,
+      endDate: created.endDate,
+      status: created.status,
+      tenantId,
+    });
     await ctx.audit.log({ action: 'CREATE', entityType: 'leave_application', entityId: created.id });
 
     return reply.code(201).send({ data: created });
@@ -211,7 +219,16 @@ export async function leaveRoutes(
       }
     });
 
-    await ctx.events.publish('leave_application', id, 'LEAVE_APPROVED', { leaveApplicationId: id, employeeId: app.employeeId, tenantId });
+    const [approvedEmp] = await ctx.db.raw.select({ displayName: employees.displayName }).from(employees).where(eq(employees.id, app.employeeId));
+    await ctx.events.publish('leave_application', id, 'LEAVE_APPROVED', {
+      leaveApplicationId: id,
+      employeeId: app.employeeId,
+      employeeName: approvedEmp?.displayName,
+      startDate: app.startDate,
+      endDate: app.endDate,
+      status: 'APPROVED',
+      tenantId,
+    });
     await ctx.audit.log({ action: 'UPDATE', entityType: 'leave_application', entityId: id, metadata: { action: 'APPROVE' } });
 
     return reply.code(200).send({ data: { message: 'Leave approved', id } });
@@ -238,7 +255,16 @@ export async function leaveRoutes(
       await ctx.db.raw.update(employeeLeaveBalance).set({ pendingDays: String(Math.max(0, parseFloat(balance.pendingDays) - days)), updatedAt: new Date() }).where(eq(employeeLeaveBalance.id, balance.id));
     }
 
-    await ctx.events.publish('leave_application', id, 'LEAVE_REJECTED', { leaveApplicationId: id, employeeId: app.employeeId, tenantId });
+    const [rejectedEmp] = await ctx.db.raw.select({ displayName: employees.displayName }).from(employees).where(eq(employees.id, app.employeeId));
+    await ctx.events.publish('leave_application', id, 'LEAVE_REJECTED', {
+      leaveApplicationId: id,
+      employeeId: app.employeeId,
+      employeeName: rejectedEmp?.displayName,
+      startDate: app.startDate,
+      endDate: app.endDate,
+      status: 'REJECTED',
+      tenantId,
+    });
     await ctx.audit.log({ action: 'UPDATE', entityType: 'leave_application', entityId: id, metadata: { action: 'REJECT', reason: body.data.rejectionReason } });
 
     return reply.code(200).send({ data: { message: 'Leave rejected', id } });
@@ -269,7 +295,16 @@ export async function leaveRoutes(
       }
     }
 
-    await ctx.events.publish('leave_application', id, 'LEAVE_CANCELLED', { leaveApplicationId: id, employeeId: app.employeeId, tenantId });
+    const [cancelledEmp] = await ctx.db.raw.select({ displayName: employees.displayName }).from(employees).where(eq(employees.id, app.employeeId));
+    await ctx.events.publish('leave_application', id, 'LEAVE_CANCELLED', {
+      leaveApplicationId: id,
+      employeeId: app.employeeId,
+      employeeName: cancelledEmp?.displayName,
+      startDate: app.startDate,
+      endDate: app.endDate,
+      status: 'CANCELLED',
+      tenantId,
+    });
     await ctx.audit.log({ action: 'UPDATE', entityType: 'leave_application', entityId: id, metadata: { action: 'CANCEL' } });
 
     return reply.code(200).send({ data: { message: 'Leave cancelled', id } });

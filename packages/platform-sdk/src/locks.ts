@@ -51,16 +51,22 @@ export class DistributedLockManager {
 
     const lock: Lock = await this.redlock.acquire([lockKey], options.ttlMs);
 
-    // Monotonically increasing fencing token — prevents stale operations after lock expiry
-    const fencingToken = await this.redis.incr(fenceKey);
-    await this.redis.expire(fenceKey, 86400); // Fence counter expires after 24 hours
+    try {
+      // Monotonically increasing fencing token — prevents stale operations after lock expiry
+      const fencingToken = await this.redis.incr(fenceKey);
+      await this.redis.expire(fenceKey, 86400); // Fence counter expires after 24 hours
 
-    return {
-      fencingToken,
-      release: async () => {
-        await lock.release();
-      },
-    };
+      return {
+        fencingToken,
+        release: async () => {
+          await lock.release();
+        },
+      };
+    } catch (err) {
+      // Don't leak the lock until TTL if anything after acquisition fails
+      await lock.release().catch(() => {});
+      throw err;
+    }
   }
 
   // Check if a resource is currently locked

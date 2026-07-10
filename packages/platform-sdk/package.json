@@ -19,27 +19,32 @@
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.699.0",
+    "@aws-sdk/s3-request-presigner": "^3.699.0",
     "@erp/config": "workspace:*",
     "@erp/db": "workspace:*",
     "@erp/logger": "workspace:*",
     "@erp/types": "workspace:*",
     "@erp/utils": "workspace:*",
     "@opentelemetry/api": "^1.9.0",
-    "@opentelemetry/exporter-trace-otlp-http": "^0.57.0",
-    "@opentelemetry/resources": "^1.28.0",
-    "@opentelemetry/sdk-node": "^0.57.0",
-    "@opentelemetry/semantic-conventions": "^1.28.0",
-    "drizzle-orm": "^0.38.3",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.220.0",
+    "@opentelemetry/resources": "^2.9.0",
+    "@opentelemetry/sdk-node": "^0.220.0",
+    "@opentelemetry/semantic-conventions": "^1.41.1",
+    "drizzle-orm": "^0.45.2",
     "ioredis": "^5.4.1",
+    "jose": "^5.9.6",
     "kafkajs": "^2.2.4",
+    "opossum": "^8.1.4",
     "redlock": "^5.0.0-beta.2",
     "ulid": "^2.3.0",
     "zod": "^3.24.0"
   },
   "devDependencies": {
     "@types/node": "^20.17.0",
-    "@vitest/coverage-v8": "^2.1.8",
+    "@types/opossum": "^8.1.8",
+    "@vitest/coverage-v8": "^3.2.6",
     "typescript": "^5.7.3",
-    "vitest": "^2.1.8"
+    "vitest": "^3.2.6"
   }
 }

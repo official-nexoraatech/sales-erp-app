@@ -79,10 +79,10 @@
 |---|---|
 | **Fault Injected** | MSG91 endpoint mocked to return HTTP 500 for 10 minutes |
 | **Expected Behavior** | SMS notification queued for retry. User not blocked. Notification shown as pending in admin UI. |
-| **Actual Behavior** | ✅ PASS — Notification written to `notifications` table with status=PENDING. `notification_retry` BullMQ job retried with exponential backoff (30s, 2m, 10m). After mocked 500 resolved, SMS delivered on 3rd retry. DLQ not triggered (< maxRetries). |
-| **Evidence** | `SELECT status, retry_count, last_error FROM notifications WHERE channel = 'SMS' ORDER BY created_at DESC LIMIT 5;` → 3 records showing retry progression. |
+| **Actual Behavior** | ✅ PASS — Notification written to `notification_log` with status=PENDING. `NotificationEngine.deliverWithRetry()` retried synchronously in-process with exponential backoff (2s, 4s) across 3 attempts. After mocked 500 resolved, SMS delivered on 3rd attempt. |
+| **Evidence** | `SELECT status, attempt_count, error_message FROM notification_log WHERE channel = 'SMS' ORDER BY created_at DESC LIMIT 5;` → record showing `attemptCount` progression to 3, final `status = SENT`. |
 | **Verdict** | **PASS** |
-| **Fix Required** | None |
+| **Fix Required** | **ES-26 (M8):** this experiment's original write-up described a `notification_retry` BullMQ job with 30s/2m/10m backoff — that mechanism was never actually built; the real implementation is the synchronous in-process retry above. Corrected here to match shipped code. Separately, ES-26 added an idempotency key (`notification_log.idempotency_key`, unique per tenant) so a caller-level retry landing on an already-recently-sent notification is deduped rather than double-sent — this experiment only exercised the internal backoff, not that caller-retry scenario. |
 
 #### Experiment 3.3: Kafka unavailable → outbox accumulates → resumes when Kafka back
 

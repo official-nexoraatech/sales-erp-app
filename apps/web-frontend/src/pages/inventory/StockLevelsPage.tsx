@@ -1,8 +1,10 @@
-﻿import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { stockApi, warehouseApi } from '../../api/endpoints.js';
+import { useAuthStore } from '../../store/auth.store.js';
+import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
-import DataTable from '../../components/ui/DataTable.js';
+import ERPDataGrid, { type ERPColumnDef } from '../../components/erp/ERPDataGrid.js';
 import Select from '../../components/ui/Select.js';
 import Badge from '../../components/ui/Badge.js';
 
@@ -21,53 +23,61 @@ interface StockRow {
 interface Warehouse { id: number; name: string; }
 
 export default function StockLevelsPage() {
+  const hasPermission = useAuthStore((s) => s.hasPermission);
   const [warehouseId, setWarehouseId] = useState('');
   const [belowReorder, setBelowReorder] = useState(false);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
+
+  useEffect(() => { setPage(1); }, [warehouseId, belowReorder]);
 
   const { data, isLoading } = useQuery({
-    queryKey: ['stock-levels', warehouseId, belowReorder],
+    queryKey: ['stock-levels', warehouseId, belowReorder, page, pageSize],
     queryFn: () => stockApi.list({
       warehouseId: warehouseId ? Number(warehouseId) : undefined,
       belowReorder: belowReorder || undefined,
+      page,
+      limit: pageSize,
     }),
   });
 
   const { data: whData } = useQuery({
     queryKey: ['warehouses'],
     queryFn: () => warehouseApi.list(),
+    enabled: hasPermission(PERMISSIONS.WAREHOUSE_VIEW),
   });
 
-  const rows: StockRow[] = (data as { data?: StockRow[] })?.data ?? [];
-  const warehouses: Warehouse[] = (whData as { data?: Warehouse[] })?.data ?? [];
+  const rows: StockRow[] = (data as Record<string, unknown>)?.content as StockRow[] ?? [];
+  const totalElements = (data as Record<string, unknown>)?.totalElements as number ?? 0;
+  const warehouses: Warehouse[] = (whData as { content?: Warehouse[] })?.content ?? [];
 
-  const columns = [
-    { key: 'itemCode', header: 'Code', className: 'font-mono text-xs w-24' },
-    { key: 'itemName', header: 'Item' },
+  const columns: ERPColumnDef<StockRow>[] = [
+    { key: 'itemCode', header: 'Code', mono: true, width: 96 },
+    { key: 'itemName', header: 'Item', sortable: true },
     { key: 'warehouseName', header: 'Warehouse' },
     {
       key: 'availableQty',
       header: 'Available',
-      render: (r: StockRow) => {
+      align: 'right',
+      sortable: true,
+      render: (r) => {
         const qty = parseFloat(r.availableQty);
         const reorder = parseFloat(r.reorderLevel);
         const isBelowReorder = qty <= reorder;
-        return (
-          <span className={`font-semibold ${isBelowReorder ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-white'}`}>
-            {qty.toFixed(2)}
-          </span>
-        );
+        return <span className={`font-semibold ${isBelowReorder ? 'text-danger' : 'text-primary'}`}>{qty.toFixed(2)}</span>;
       },
     },
     {
       key: 'reservedQty',
       header: 'Reserved',
-      render: (r: StockRow) => <span className="text-amber-600">{parseFloat(r.reservedQty).toFixed(2)}</span>,
+      align: 'right',
+      render: (r) => <span className="text-warning">{parseFloat(r.reservedQty).toFixed(2)}</span>,
     },
-    { key: 'reorderLevel', header: 'Reorder Level', render: (r: StockRow) => parseFloat(r.reorderLevel).toFixed(2) },
+    { key: 'reorderLevel', header: 'Reorder Level', align: 'right', render: (r) => parseFloat(r.reorderLevel).toFixed(2) },
     {
       key: 'status',
       header: 'Status',
-      render: (r: StockRow) => {
+      render: (r) => {
         const qty = parseFloat(r.availableQty);
         const reorder = parseFloat(r.reorderLevel);
         return qty <= reorder
@@ -98,17 +108,20 @@ export default function StockLevelsPage() {
             type="checkbox"
             checked={belowReorder}
             onChange={(e) => setBelowReorder(e.target.checked)}
-            className="rounded border-gray-300 text-indigo-600"
+            className="rounded border-default"
           />
-          <span className="text-sm text-gray-700 dark:text-gray-300">Show only low stock items</span>
+          <span className="text-sm text-primary">Show only low stock items</span>
         </label>
       </div>
 
-      <DataTable
+      <ERPDataGrid
         columns={columns}
         data={rows}
         isLoading={isLoading}
-        emptyMessage="No stock data found"
+        rowKey={(r) => `${r.itemId}-${r.warehouseId}`}
+        pagination={{ page, pageSize, total: totalElements }}
+        onPageChange={setPage}
+        onPageSizeChange={(size) => { setPageSize(size); setPage(1); }}
       />
     </div>
   );

@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { PlatformContextFactory } from '@erp/sdk';
 import { invoices, quotations, payments } from '@erp/db';
-import { and, count, eq, lt, sql } from 'drizzle-orm';
+import { and, count, eq, gte, lt, sql } from 'drizzle-orm';
 import { PERMISSIONS } from '@erp/types';
 import { authenticate } from '../middleware/authenticate.js';
 import { requirePermission } from '../middleware/authorize.js';
@@ -47,7 +47,7 @@ export async function dashboardRoutes(
         .from(payments)
         .where(and(
           eq(payments.tenantId, tenantId),
-          sql`${payments.paymentDate} >= ${todayStart}`
+          gte(payments.paymentDate, todayStart)
         ));
 
       return reply.send({

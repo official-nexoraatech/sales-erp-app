@@ -2,6 +2,7 @@ import { eq, and, sql } from 'drizzle-orm';
 import { items, inventoryLedger, projectionStockLevel } from '@erp/db';
 import { ERPError } from '@erp/types';
 import type { ErpDatabase } from '@erp/db';
+import { ValuationService } from './ValuationService.js';
 
 export interface StockMovementParams {
   tenantId: number;
@@ -30,26 +31,33 @@ export class InventoryLedgerService {
     const db = trx ?? this.db;
     const { tenantId, itemId, variantId, warehouseId, quantity } = params;
 
-    const [current] = await db
-      .select({ availableQty: items.availableQty })
-      .from(items)
-      .where(and(eq(items.id, itemId), eq(items.tenantId, tenantId)));
-
-    if (!current) throw new ERPError('ITEM_NOT_FOUND', 'Item not found', 404);
-
-    const before = parseFloat(current.availableQty ?? '0');
-    const after = before + quantity;
-
-    await db
+    // Atomic increment: single UPDATE, before/after derived from the returned row
+    const result = await db
       .update(items)
       .set({
-        availableQty: String(after),
+        availableQty: sql`${items.availableQty} + ${quantity}`,
         version: sql`${items.version} + 1`,
         updatedAt: new Date(),
       })
-      .where(and(eq(items.id, itemId), eq(items.tenantId, tenantId)));
+      .where(and(eq(items.id, itemId), eq(items.tenantId, tenantId)))
+      .returning({ availableQty: items.availableQty });
 
-    await this.writeLedger(db, 'STOCK_IN', before, after, params);
+    if (result.length === 0) throw new ERPError('ITEM_NOT_FOUND', 'Item not found', 404);
+
+    const after = parseFloat(result[0]!.availableQty ?? '0');
+    const before = after - quantity;
+
+    const ledgerId = await this.writeLedger(db, 'STOCK_IN', before, after, params);
+    await ValuationService.applyStockIn(db, {
+      tenantId,
+      itemId,
+      variantId,
+      warehouseId,
+      quantity,
+      unitCost: params.unitCost ?? 0,
+      qtyBeforeStockIn: before,
+      sourceLedgerId: ledgerId,
+    });
     await this.upsertProjection(db, params, quantity, 0);
   }
 
@@ -84,7 +92,9 @@ export class InventoryLedgerService {
 
     const after = parseFloat(result[0]!.availableQty ?? '0');
     const before = after + quantity;
-    await this.writeLedger(db, 'STOCK_OUT', before, after, params);
+    const totalCogs = await ValuationService.consumeForStockOut(db, { tenantId, itemId, warehouseId, quantity });
+    const cogsPerUnit = quantity > 0 ? Math.round((totalCogs / quantity) * 100) / 100 : 0;
+    await this.writeLedger(db, 'STOCK_OUT', before, after, params, cogsPerUnit);
     await this.upsertProjection(db, params, -quantity, 0);
   }
 
@@ -96,26 +106,35 @@ export class InventoryLedgerService {
     const { tenantId, itemId, quantity, direction } = params;
     const delta = direction === 'IN' ? quantity : -quantity;
 
-    const [current] = await db
-      .select({ availableQty: items.availableQty })
-      .from(items)
-      .where(and(eq(items.id, itemId), eq(items.tenantId, tenantId)));
-
-    if (!current) throw new ERPError('ITEM_NOT_FOUND', 'Item not found', 404);
-
-    const before = parseFloat(current.availableQty ?? '0');
-    const after = before + delta;
-
-    if (after < 0) throw new InsufficientStockError(before);
-
-    await db
+    // Atomic check-and-adjust: the "don't go negative" invariant is enforced by the
+    // WHERE clause, not by an app-level check against a value read before the write.
+    const result = await db
       .update(items)
       .set({
-        availableQty: String(after),
+        availableQty: sql`${items.availableQty} + ${delta}`,
         version: sql`${items.version} + 1`,
         updatedAt: new Date(),
       })
-      .where(and(eq(items.id, itemId), eq(items.tenantId, tenantId)));
+      .where(
+        and(
+          eq(items.id, itemId),
+          eq(items.tenantId, tenantId),
+          sql`${items.availableQty} + ${delta} >= 0`
+        )
+      )
+      .returning({ availableQty: items.availableQty });
+
+    if (result.length === 0) {
+      const [current] = await db
+        .select({ availableQty: items.availableQty })
+        .from(items)
+        .where(and(eq(items.id, itemId), eq(items.tenantId, tenantId)));
+      if (!current) throw new ERPError('ITEM_NOT_FOUND', 'Item not found', 404);
+      throw new InsufficientStockError(parseFloat(current.availableQty ?? '0'));
+    }
+
+    const after = parseFloat(result[0]!.availableQty ?? '0');
+    const before = after - delta;
 
     await this.writeLedger(db, 'ADJUSTMENT', before, after, params);
     await this.upsertProjection(db, params, delta, 0);
@@ -181,24 +200,30 @@ export class InventoryLedgerService {
     movementType: typeof inventoryLedger.$inferInsert['movementType'],
     quantityBefore: number,
     quantityAfter: number,
-    params: StockMovementParams
-  ): Promise<void> {
-    await db.insert(inventoryLedger).values({
-      tenantId: params.tenantId,
-      itemId: params.itemId,
-      variantId: params.variantId,
-      warehouseId: params.warehouseId,
-      movementType,
-      quantity: String(Math.abs(quantityAfter - quantityBefore)),
-      quantityBefore: String(quantityBefore),
-      quantityAfter: String(quantityAfter),
-      referenceType: params.referenceType,
-      referenceId: params.referenceId,
-      referenceLineId: params.referenceLineId,
-      unitCost: params.unitCost ? String(params.unitCost) : undefined,
-      notes: params.notes,
-      createdBy: params.createdBy,
-    });
+    params: StockMovementParams,
+    cogsPerUnit?: number
+  ): Promise<number> {
+    const [row] = await db
+      .insert(inventoryLedger)
+      .values({
+        tenantId: params.tenantId,
+        itemId: params.itemId,
+        variantId: params.variantId,
+        warehouseId: params.warehouseId,
+        movementType,
+        quantity: String(Math.abs(quantityAfter - quantityBefore)),
+        quantityBefore: String(quantityBefore),
+        quantityAfter: String(quantityAfter),
+        referenceType: params.referenceType,
+        referenceId: params.referenceId,
+        referenceLineId: params.referenceLineId,
+        unitCost: params.unitCost ? String(params.unitCost) : undefined,
+        cogsPerUnit: cogsPerUnit !== undefined ? String(cogsPerUnit) : undefined,
+        notes: params.notes,
+        createdBy: params.createdBy,
+      })
+      .returning({ id: inventoryLedger.id });
+    return row!.id;
   }
 
   private async upsertProjection(

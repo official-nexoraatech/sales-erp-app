@@ -64,7 +64,7 @@ export default function ApAgingPage() {
     queryFn: () => apAgingApi.get(asOf, supplierId || undefined),
   });
 
-  const rows = data?.data ?? [];
+  const rows = data ?? [];
   const t = totals(rows);
 
   const footer = (

@@ -5,6 +5,8 @@ import { crmApi } from '../../api/endpoints.js';
 import { useAuthStore } from '../../store/auth.store.js';
 import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
+import { ERPCardSkeleton } from '../../components/erp/ERPSkeleton.js';
+import ERPEmptyState from '../../components/erp/ERPEmptyState.js';
 import Button from '../../components/ui/Button.js';
 import Badge from '../../components/ui/Badge.js';
 import Modal from '../../components/ui/Modal.js';
@@ -47,24 +49,24 @@ export default function SegmentsPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [previewCode, setPreviewCode] = useState<string | null>(null);
   const [previewCount, setPreviewCount] = useState<number | null>(null);
-  const [form, setForm] = useState({ name: '', code: '', description: '', field: 'status', operator: 'eq', value: '' });
+  const [form, setForm] = useState({ name: '', description: '', field: 'status', operator: 'eq', value: '' });
 
-  const { data: segData } = useQuery({ queryKey: ['crm-segments'], queryFn: () => crmApi.listSegments() });
-  const segments: Segment[] = (segData as Record<string, unknown>)?.data as Segment[] ?? [];
+  const { data: segData, isLoading: segmentsLoading } = useQuery({ queryKey: ['crm-segments'], queryFn: () => crmApi.listSegments() });
+  const segments: Segment[] = (segData as { content?: Segment[] })?.content ?? [];
 
   const { data: healthData } = useQuery({ queryKey: ['crm-health'], queryFn: () => crmApi.healthSegments() });
-  const health = (healthData as Record<string, unknown>)?.data as HealthCounts | undefined;
+  const health = (healthData as HealthCounts | undefined);
 
   const previewMut = useMutation({
     mutationFn: (code: string) =>
       crmApi.previewSegment(
         PREBUILT_CODES.some((p) => p.code === code)
           ? { segmentCode: code }
-          : { customRule: { rules: [{ field: form.field, operator: form.operator, value: form.value }], logic: 'AND' } }
+          : { rules: [{ field: form.field, operator: form.operator, value: form.value }], logic: 'AND' }
       ),
     onSuccess: (res, code) => {
-      const d = (res as Record<string, unknown>)?.data as Record<string, unknown>;
-      setPreviewCount(d?.recipientCount as number ?? 0);
+      const d = (res as Record<string, unknown>);
+      setPreviewCount(d?.matchingCount as number ?? 0);
       setPreviewCode(code);
     },
   });
@@ -73,15 +75,15 @@ export default function SegmentsPage() {
     mutationFn: () =>
       crmApi.createSegment({
         name: form.name,
-        code: form.code,
         description: form.description,
-        filterDefinition: { rules: [{ field: form.field, operator: form.operator, value: form.value }], logic: 'AND' },
+        rules: [{ field: form.field, operator: form.operator, value: form.value }],
+        logic: 'AND',
       }),
     onSuccess: () => {
       toast.success('Segment created');
       qc.invalidateQueries({ queryKey: ['crm-segments'] });
       setCreateOpen(false);
-      setForm({ name: '', code: '', description: '', field: 'status', operator: 'eq', value: '' });
+      setForm({ name: '', description: '', field: 'status', operator: 'eq', value: '' });
     },
     onError: () => toast.error('Failed to create segment'),
   });
@@ -114,11 +116,11 @@ export default function SegmentsPage() {
       {health && (
         <div className="mb-6 grid grid-cols-2 sm:grid-cols-5 gap-3">
           {[
-            { label: 'Champion', count: health.champion, color: 'text-green-600 bg-green-50 dark:bg-green-900/20' },
-            { label: 'Loyal', count: health.loyal, color: 'text-blue-600 bg-blue-50 dark:bg-blue-900/20' },
-            { label: 'At Risk', count: health.atRisk, color: 'text-yellow-600 bg-yellow-50 dark:bg-yellow-900/20' },
-            { label: 'Lost', count: health.lost, color: 'text-red-600 bg-red-50 dark:bg-red-900/20' },
-            { label: 'Unscored', count: health.unscored, color: 'text-gray-600 bg-gray-50 dark:bg-gray-800' },
+            { label: 'Champion', count: health.champion, color: 'text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-900/20' },
+            { label: 'Loyal', count: health.loyal, color: 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20' },
+            { label: 'At Risk', count: health.atRisk, color: 'text-yellow-600 dark:text-yellow-400 bg-yellow-50 dark:bg-yellow-900/20' },
+            { label: 'Lost', count: health.lost, color: 'text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20' },
+            { label: 'Unscored', count: health.unscored, color: 'text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-800' },
           ].map((s) => (
             <div key={s.label} className={`rounded-xl p-4 text-center ${s.color}`}>
               <p className="text-2xl font-bold">{s.count}</p>
@@ -162,8 +164,17 @@ export default function SegmentsPage() {
         <div className="px-5 py-4 border-b border-default">
           <h2 className="text-sm font-semibold text-primary">Saved Segments</h2>
         </div>
-        {segments.length === 0 ? (
-          <div className="px-5 py-8 text-center text-sm text-secondary">No custom segments yet.</div>
+        {segmentsLoading ? (
+          <div className="p-4">
+            <ERPCardSkeleton lines={2} />
+          </div>
+        ) : segments.length === 0 ? (
+          <ERPEmptyState
+            type="no-data"
+            title="No custom segments yet"
+            description="Custom filter-based segments you create will appear here."
+            {...(canCreate ? { action: { label: '+ New Segment', onClick: () => setCreateOpen(true) } } : {})}
+          />
         ) : (
           <div className="divide-y divide-default">
             {segments.filter((s) => !s.isSystem).map((seg) => (
@@ -191,8 +202,7 @@ export default function SegmentsPage() {
         title="New Custom Segment"
       >
         <div className="space-y-4">
-          <Input label="Segment Name" value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
-          <Input label="Code (unique slug)" value={form.code} onChange={(e) => setForm((f) => ({ ...f, code: e.target.value.toLowerCase().replace(/\s+/g, '-') }))} />
+          <Input label="Segment Name" required value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
           <Input label="Description (optional)" value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} />
           <div>
             <p className="text-xs font-semibold text-secondary mb-2 uppercase tracking-wide">Filter Rule</p>
@@ -220,7 +230,7 @@ export default function SegmentsPage() {
           </div>
           <div className="flex gap-2 justify-end pt-2">
             <Button variant="ghost" onClick={() => setCreateOpen(false)}>Cancel</Button>
-            <Button onClick={() => createMut.mutate()} disabled={createMut.isPending || !form.name || !form.code}>
+            <Button onClick={() => createMut.mutate()} disabled={createMut.isPending || !form.name || !form.value}>
               {createMut.isPending ? 'Creating…' : 'Create'}
             </Button>
           </div>

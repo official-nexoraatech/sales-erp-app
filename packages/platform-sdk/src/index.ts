@@ -4,6 +4,9 @@
 export type { TenantContext, PlatformContext, PlatformContextConfig } from './context.js';
 export { PlatformContextFactory } from './context.js';
 
+export { verifyAccessToken, checkPermission, getBranchScope, AuthTokenError } from './auth.js';
+export type { AuthPayload, PermissionCheckResult, BranchScope } from './auth.js';
+
 export { TenantScopedDatabase } from './database.js';
 
 export { TenantScopedCache } from './cache.js';
@@ -14,11 +17,13 @@ export type { LockOptions, AcquiredLock } from './locks.js';
 export { PlatformAuditLogger } from './audit.js';
 export type { AuditLogEntry } from './audit.js';
 
-export {
-  PlatformEventBus,
-  PlatformEventConsumer,
-  OutboxPublisher,
-} from './events.js';
+export { StorageClient } from './storage.js';
+export type { StorageClientConfig } from './storage.js';
+
+export { PlatformAttachments } from './attachments.js';
+export type { UploadAttachmentInput } from './attachments.js';
+
+export { PlatformEventBus, PlatformEventConsumer } from './events.js';
 export type { EventHandler } from './events.js';
 
 export { PlatformFeatureFlags } from './feature-flags.js';
@@ -57,3 +62,27 @@ export { SchemaRegistry, SchemaCompatibilityError, getUpcaster, upcastEvent } fr
 export type { JsonSchema, SchemaEntry, CompatibilityCheckResult, Upcaster } from './schema-registry.js';
 
 export { HELMET_OPTIONS, PERMISSIONS_POLICY } from './http-security.js';
+
+export { createCircuitBreaker } from './circuitBreaker.js';
+export type { CircuitBreakerOptions } from './circuitBreaker.js';
+
+export { buildHealthResponse, registerHealthRoute, checkKafka, checkDatabase } from './health.js';
+export type { HealthCheckFn, HealthRouteApp, HealthCheckResponse } from './health.js';
+
+export { tenantOrIpKeyGenerator, RATE_LIMIT_DEFAULTS } from './rate-limit.js';
+export type { RateLimitRequest } from './rate-limit.js';
+
+export { SagaOrchestrator, SagaExecutionError } from './saga.js';
+export type { SagaStepDefinition, SagaStepType, SagaStepRecord, SagaStatus, SagaResult, SagaStepFactory } from './saga.js';
+
+export { GST_COMPLIANCE_SAGA_TYPE, EWB_VALUE_THRESHOLD, createGstComplianceStepFactory } from './sagas/gst-compliance.js';
+export type { GstComplianceContext, GstComplianceActionDeps } from './sagas/gst-compliance.js';
+
+export { initTenantStatusEnforcement, assertTenantActive, invalidateTenantStatusCache } from './tenantStatus.js';
+
+export {
+  DuplicateOperationError,
+  isUniqueConstraintViolation,
+  withIdempotentInsert,
+  deriveTimeBucketedDedupKey,
+} from './idempotency.js';

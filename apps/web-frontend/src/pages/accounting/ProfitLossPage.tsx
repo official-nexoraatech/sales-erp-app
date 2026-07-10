@@ -48,7 +48,7 @@ export default function ProfitLossPage() {
     enabled: !!fromDate && !!toDate,
   });
 
-  const pl: PLData | undefined = (data as { data?: PLData })?.data;
+  const pl: PLData | undefined = (data as PLData);
 
   return (
     <div className="space-y-6">

@@ -58,7 +58,9 @@ function makeDb(prefs: unknown[] = [], template: unknown[] = [], logReturn: unkn
       }),
     })),
     insert: vi.fn().mockReturnValue({
-      values: vi.fn().mockReturnValue({ returning: vi.fn().mockResolvedValue(logReturn) }),
+      values: vi.fn().mockReturnValue({
+        onConflictDoNothing: vi.fn().mockReturnValue({ returning: vi.fn().mockResolvedValue(logReturn) }),
+      }),
     }),
     update: vi.fn().mockReturnValue({
       set: vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue(undefined) }),
@@ -120,6 +122,82 @@ describe('NotificationEngine — quiet hours behavior via send()', () => {
     // We only assert it did NOT skip due to quiet hours logic (status could be FAILED due to test environment)
     // The fact that it got past quiet hours check means isQuietHours() returned false ✓
     expect(smsResult).toBeDefined();
+  });
+});
+
+// ES-26 (M8): idempotency key dedup
+// Simulates the real unique-constraint conflict: the first insert for a given idempotencyKey
+// returns a row; a second insert with the same key returns nothing (onConflictDoNothing).
+// No recipientUserId is passed in these tests, so the only select() call per channel is the
+// template lookup (the preferences lookup is skipped entirely) — always return the template.
+function makeIdempotentDb(template: unknown[], insertedKeys: Set<string> = new Set()) {
+  return {
+    select: vi.fn().mockImplementation(() => ({
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockImplementation(() => makeWhereResult(template)),
+      }),
+    })),
+    insert: vi.fn().mockReturnValue({
+      values: vi.fn().mockImplementation((vals: { idempotencyKey: string }) => ({
+        onConflictDoNothing: vi.fn().mockReturnValue({
+          returning: vi.fn().mockImplementation(() => {
+            if (insertedKeys.has(vals.idempotencyKey)) return Promise.resolve([]);
+            insertedKeys.add(vals.idempotencyKey);
+            return Promise.resolve([{ id: insertedKeys.size }]);
+          }),
+        }),
+      })),
+    }),
+    update: vi.fn().mockReturnValue({
+      set: vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue(undefined) }),
+    }),
+  };
+}
+
+describe('NotificationEngine.send — idempotency key dedup (M8)', () => {
+  // IN_APP delivers synchronously with no network call and no quiet-hours gate, so these tests
+  // aren't sensitive to real wall-clock time or retry/backoff timing.
+  const template = [{ id: 't1', channel: 'IN_APP', bodyTemplate: 'Hi {{name}}', isActive: true, subject: null }];
+
+  it('two rapid-fire sends with the same explicit idempotencyKey result in exactly one SENT and one SKIPPED', async () => {
+    const insertedKeys = new Set<string>();
+    const db = makeIdempotentDb(template, insertedKeys);
+    const engine = new NotificationEngine(db as never, MOCK_CONFIG);
+
+    const input = {
+      tenantId: 1,
+      eventType: 'TEST_EVENT',
+      recipientPhone: '9876543210',
+      templateData: { name: 'Raj' },
+      channels: ['IN_APP'] as const,
+      idempotencyKey: 'invoice-42:reminder-2026-07-04',
+    };
+
+    const [first, second] = await Promise.all([engine.send(input), engine.send(input)]);
+    const statuses = [first[0]?.status, second[0]?.status].sort();
+
+    expect(statuses).toEqual(['SENT', 'SKIPPED']);
+  });
+
+  it('two sends with different recipients (same event) are NOT deduped — both dispatch', async () => {
+    const insertedKeys = new Set<string>();
+    const db = makeIdempotentDb(template, insertedKeys);
+    const engine = new NotificationEngine(db as never, MOCK_CONFIG);
+
+    const base = {
+      tenantId: 1,
+      eventType: 'TEST_EVENT',
+      templateData: { name: 'Raj' },
+      channels: ['IN_APP'] as const,
+    };
+
+    const [first, second] = await Promise.all([
+      engine.send({ ...base, recipientPhone: '9876543210' }),
+      engine.send({ ...base, recipientPhone: '9999999999' }),
+    ]);
+
+    expect(first[0]?.status).toBe('SENT');
+    expect(second[0]?.status).toBe('SENT');
   });
 });
 

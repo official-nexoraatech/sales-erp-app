@@ -79,6 +79,7 @@ export default function PayslipViewPage() {
       <div className="max-w-3xl mx-auto">
         <ERPPageHeader
           variant="detail"
+          backTo="/hr/payroll"
           title={`Salary Slip — ${slip.payPeriod ?? ''}`}
           subtitle={slip.employeeName ?? ''}
           actions={

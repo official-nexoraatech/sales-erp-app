@@ -137,6 +137,7 @@ export async function categoryRoutes(
       .where(eq(categories.id, id));
 
     await ctx.audit.log({ action: 'DELETE', entityType: 'category', entityId: id, before: existing });
+    await ctx.events.publish('category', id, 'CATEGORY_DELETED', { id });
 
     return reply.code(200).send({ data: { message: 'Category deleted', id } });
   });

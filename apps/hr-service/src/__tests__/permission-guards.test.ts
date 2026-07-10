@@ -100,8 +100,8 @@ describe('VIEW_SALARY_DETAILS guard on GET /payroll-slips/:id', () => {
     });
 
     expect(res.statusCode).toBe(403);
-    const body = JSON.parse(res.body) as { error: string };
-    expect(body.error).toMatch(/VIEW_SALARY_DETAILS/);
+    const body = JSON.parse(res.body) as { error: { code: string; message: string } };
+    expect(body.error.message).toMatch(/VIEW_SALARY_DETAILS/);
   });
 
   it('does not return 403 when user has VIEW_SALARY_DETAILS', async () => {

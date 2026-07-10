@@ -1,14 +1,35 @@
 import type { FastifyInstance } from 'fastify';
 import type { PlatformContextFactory } from '@erp/sdk';
-import { attendance, shifts, employees } from '@erp/db';
-import { and, eq, gte, isNull, lte } from 'drizzle-orm';
+import { attendance, shifts, employees, biometricDeviceConfigs } from '@erp/db';
+import { and, eq, gte, inArray, isNull, lte } from 'drizzle-orm';
 import { z } from 'zod';
-import { NotFoundError, ValidationError } from '@erp/types';
+import { BusinessError, NotFoundError, ValidationError } from '@erp/types';
 import { PERMISSIONS } from '@erp/types';
 import { authenticate } from '../middleware/authenticate.js';
 import { requirePermission } from '../middleware/authorize.js';
+import { BiometricPunchNormalizer, DEFAULT_BIOMETRIC_CONFIG, type BiometricColumnMapping, type BiometricDeviceConfigInput } from '../domain/BiometricPunchNormalizer.js';
 
 type AuthedRequest = { auth: { tenantId: number; userId: number } };
+
+const MAX_PUNCH_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+const ALLOWED_PUNCH_MIME_TYPES = new Set(['text/csv', 'text/plain']);
+
+async function schedulerRequest(
+  path: string,
+  method: string,
+  authHeader: string,
+  body?: unknown
+): Promise<{ data?: Record<string, unknown>; error?: { message: string } }> {
+  const schedulerUrl = process.env['SCHEDULER_SERVICE_URL'] ?? 'http://localhost:3016';
+  const res = await fetch(`${schedulerUrl}${path}`, {
+    method,
+    headers: { 'Content-Type': 'application/json', Authorization: authHeader },
+    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+  });
+  const json = (await res.json()) as { data?: Record<string, unknown>; error?: { message: string } };
+  if (!res.ok) throw new BusinessError('IMPORT_UPLOAD_FAILED', json.error?.message ?? `Scheduler request failed: ${path}`);
+  return json;
+}
 
 const MarkAttendanceSchema = z.object({
   employeeId: z.number().int().positive(),
@@ -107,7 +128,7 @@ export async function attendanceRoutes(
     if (!body.success) throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
 
     // Verify employee exists
-    const [emp] = await ctx.db.raw.select({ id: employees.id }).from(employees).where(and(eq(employees.id, body.data.employeeId), eq(employees.tenantId, tenantId), isNull(employees.deletedAt)));
+    const [emp] = await ctx.db.raw.select({ id: employees.id, displayName: employees.displayName }).from(employees).where(and(eq(employees.id, body.data.employeeId), eq(employees.tenantId, tenantId), isNull(employees.deletedAt)));
     if (!emp) throw new NotFoundError('Employee', body.data.employeeId);
 
     const { workHours, overtimeHours } = computeWorkHours(body.data.checkInTime, body.data.checkOutTime);
@@ -141,6 +162,12 @@ export async function attendanceRoutes(
       .returning();
 
     await ctx.audit.log({ action: 'CREATE', entityType: 'attendance', entityId: upserted?.id ?? 0, metadata: { employeeId: body.data.employeeId, date: body.data.attendanceDate, status: body.data.status } });
+    if (upserted) {
+      // employeeName is denormalized onto the search index document here — the attendance
+      // table itself only stores employeeId, and ENTITY_MAPPINGS['attendance'] needs a name
+      // to be searchable/displayable at all (see SearchEngine.ts).
+      await ctx.events.publish('attendance', upserted.id, 'ATTENDANCE_MARKED', { ...upserted, employeeName: emp.displayName } as unknown as Record<string, unknown>);
+    }
     return reply.code(200).send({ data: upserted });
   });
 
@@ -221,11 +248,84 @@ export async function attendanceRoutes(
 
     const [updated] = await ctx.db.raw.update(attendance).set(updates as unknown as Partial<typeof attendance.$inferInsert>).where(eq(attendance.id, id)).returning();
     await ctx.audit.log({ action: 'UPDATE', entityType: 'attendance', entityId: id, before: existing as unknown as Record<string, unknown>, after: updated as unknown as Record<string, unknown>, metadata: { reason: body.data.correctionReason } });
+    if (updated) {
+      const [emp] = await ctx.db.raw.select({ displayName: employees.displayName }).from(employees).where(eq(employees.id, updated.employeeId));
+      await ctx.events.publish('attendance', updated.id, 'ATTENDANCE_CORRECTED', { ...updated, employeeName: emp?.displayName } as unknown as Record<string, unknown>);
+    }
     return reply.code(200).send({ data: updated });
   });
 
-  fastify.post('/attendance/import', { preHandler: [authenticate, requirePermission(PERMISSIONS.ATTENDANCE_MARK)] }, async (_request, reply) => {
-    return reply.code(202).send({ data: { message: 'Biometric import queued', status: 'QUEUED' } });
+  fastify.post('/attendance/import', { preHandler: [authenticate, requirePermission(PERMISSIONS.ATTENDANCE_MARK)] }, async (request, reply) => {
+    const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
+    const ctx = ctxFactory.create({ tenantId, userId, correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID() });
+
+    const file = await request.file();
+    if (!file) throw new ValidationError('No file uploaded');
+    if (!ALLOWED_PUNCH_MIME_TYPES.has(file.mimetype)) throw new ValidationError(`Unsupported file type: ${file.mimetype}`);
+    const buffer = await file.toBuffer();
+    if (buffer.length > MAX_PUNCH_FILE_SIZE) throw new ValidationError('File exceeds the 10MB size limit');
+
+    const [configRow] = await ctx.db.raw.select().from(biometricDeviceConfigs).where(eq(biometricDeviceConfigs.tenantId, tenantId));
+    const config: BiometricDeviceConfigInput = configRow
+      ? { columnMapping: configRow.columnMapping as unknown as BiometricColumnMapping, dateFormat: configRow.dateFormat }
+      : DEFAULT_BIOMETRIC_CONFIG;
+
+    const { punches } = BiometricPunchNormalizer.parseRawPunches(buffer.toString('utf-8'), config);
+    const grouped = BiometricPunchNormalizer.groupByEmployeeDay(punches);
+    if (grouped.length === 0) throw new BusinessError('IMPORT_EMPTY', 'No valid punch rows found in file');
+
+    // Bulk-resolve employeeCode → {id, shiftId} and each referenced shift in two queries,
+    // not one per row (a month of 2-shift punches for 100 employees is ~6,000 raw punches).
+    const employeeCodes = [...new Set(grouped.map((g) => g.employeeCode))];
+    const employeeRows = await ctx.db.raw
+      .select({ id: employees.id, employeeCode: employees.employeeCode, shiftId: employees.shiftId })
+      .from(employees)
+      .where(and(eq(employees.tenantId, tenantId), inArray(employees.employeeCode, employeeCodes)));
+    const employeeByCode = new Map(employeeRows.map((e) => [e.employeeCode, e]));
+
+    const shiftIds = [...new Set(employeeRows.map((e) => e.shiftId).filter((id): id is number => id != null))];
+    const shiftRows = shiftIds.length > 0
+      ? await ctx.db.raw.select().from(shifts).where(and(eq(shifts.tenantId, tenantId), inArray(shifts.id, shiftIds)))
+      : [];
+    const [defaultShift] = await ctx.db.raw.select().from(shifts).where(and(eq(shifts.tenantId, tenantId), eq(shifts.isDefault, true)));
+    const shiftById = new Map(shiftRows.map((s) => [s.id, s]));
+
+    const csvRows = grouped.map((g) => {
+      const employee = employeeByCode.get(g.employeeCode);
+      const shift = (employee?.shiftId ? shiftById.get(employee.shiftId) : undefined) ?? defaultShift;
+      const status = BiometricPunchNormalizer.deriveStatus(
+        g.checkInTime,
+        g.checkOutTime,
+        shift ? { startTime: shift.startTime, gracePeriodMinutes: shift.gracePeriodMinutes, halfDayHours: Number(shift.halfDayHours) } : undefined
+      );
+      const checkInTime = `${g.date}T${g.checkInTime}`;
+      const checkOutTime = g.checkOutTime ? `${g.date}T${g.checkOutTime}` : '';
+      return `${g.employeeCode},${g.date},${status},${checkInTime},${checkOutTime},BIOMETRIC`;
+    });
+    const csvData = ['employeeCode,attendanceDate,status,checkInTime,checkOutTime,source', ...csvRows].join('\n');
+
+    // Hand the normalized rows to scheduler-service's generic ImportEngine (entityType
+    // 'attendance') instead of writing a second CSV-parse-validate-execute pipeline here.
+    // The column names above already match the entity schema 1:1, so the mapping step is
+    // a plain identity mapping — there's no interactive column-picking UI for this path.
+    const authHeader = request.headers.authorization ?? '';
+    const uploadRes = await schedulerRequest('/imports/upload', 'POST', authHeader, { entityType: 'attendance', csvData, fileName: file.filename });
+    const jobId = (uploadRes.data as { jobId: string } | undefined)?.jobId;
+    if (!jobId) throw new BusinessError('IMPORT_UPLOAD_FAILED', 'Scheduler service did not return a job id');
+
+    const fields = ['employeeCode', 'attendanceDate', 'status', 'checkInTime', 'checkOutTime', 'source'];
+    await schedulerRequest(`/imports/${jobId}/map`, 'POST', authHeader, { mappings: fields.map((f) => ({ sourceColumn: f, targetField: f })) });
+    await schedulerRequest(`/imports/${jobId}/validate`, 'POST', authHeader);
+    const executeRes = await schedulerRequest(`/imports/${jobId}/execute`, 'POST', authHeader);
+
+    await ctx.audit.log({
+      action: 'CREATE',
+      entityType: 'attendance_import',
+      entityId: 0,
+      metadata: { jobId, rowCount: grouped.length, dateRange: [grouped[0]?.date, grouped[grouped.length - 1]?.date] },
+    });
+
+    return reply.code(202).send({ data: { jobId, ...executeRes.data } });
   });
 
   fastify.get('/attendance/report', { preHandler: [authenticate, requirePermission(PERMISSIONS.ATTENDANCE_REPORT)] }, async (request, reply) => {

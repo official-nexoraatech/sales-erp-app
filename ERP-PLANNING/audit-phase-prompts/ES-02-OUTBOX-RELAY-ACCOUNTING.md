@@ -1,5 +1,5 @@
 # ES-02 — Outbox Relay Worker & Accounting Infrastructure
-## STATUS: 🔴 PENDING
+## STATUS: ✅ COMPLETED
 ## Sprint: 1 | Effort: 3–4 days | Risk: Medium
 ## Depends on: None (independent)
 ## Unlocks: ES-03, ES-05, ES-08, ES-09, ES-10, ES-13, ES-15, ES-16

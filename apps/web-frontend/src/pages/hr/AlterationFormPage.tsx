@@ -4,6 +4,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { alterationApi } from '../../api/endpoints.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
+import ERPFormSection from '../../components/erp/ERPFormSection.js';
 import Input from '../../components/ui/Input.js';
 import Button from '../../components/ui/Button.js';
 import { formatCurrency } from '../../lib/format.js';
@@ -60,15 +61,19 @@ export default function AlterationFormPage() {
     <div>
       <ERPPageHeader variant="list" title="Receive Alteration Order" subtitle="Counter screen — capture customer, items, and assign a tailor next." />
 
-      <div className="max-w-3xl space-y-5">
-        <div className="grid grid-cols-2 gap-4">
+      <div className="space-y-6">
+        <ERPFormSection title="Customer Details" columns={2}>
           <Input label="Customer Name" required value={customerName} onChange={(e) => setCustomerName(e.target.value)} />
-          <Input label="Customer Phone" required value={customerPhone} onChange={(e) => setCustomerPhone(e.target.value)} />
-        </div>
-        <div className="grid grid-cols-2 gap-4">
+          <Input
+            label="Customer Phone"
+            required
+            value={customerPhone}
+            onChange={(e) => setCustomerPhone(e.target.value)}
+            error={customerPhone.length > 0 && customerPhone.length < 10 ? 'Phone must be at least 10 digits' : undefined}
+          />
           <Input label="Received Date" type="date" value={receivedDate} onChange={(e) => setReceivedDate(e.target.value)} />
           <Input label="Promised Date" type="date" required value={promisedDate} onChange={(e) => setPromisedDate(e.target.value)} />
-        </div>
+        </ERPFormSection>
 
         <div className="bg-surface-card rounded-xl border border-default p-4">
           <h3 className="font-semibold text-primary mb-3">Items</h3>
@@ -98,7 +103,7 @@ export default function AlterationFormPage() {
           <Button
             onClick={() => createMutation.mutate()}
             loading={createMutation.isPending}
-            disabled={!customerName || !customerPhone || !promisedDate || items.every((i) => !i.description.trim())}
+            disabled={!customerName || customerPhone.length < 10 || !promisedDate || items.every((i) => !i.description.trim())}
           >
             Receive Order
           </Button>

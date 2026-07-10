@@ -15,6 +15,237 @@
       "when": 1782765335804,
       "tag": "0001_fresh_violations",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1782851735804,
+      "tag": "0002_phase6_accounting",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1782938135804,
+      "tag": "0003_phase7_gst",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1783024535804,
+      "tag": "0004_phase8_hr",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1783110935804,
+      "tag": "0005_phase9_crm",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1783197335804,
+      "tag": "0006_phase12_distributed",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1783283735804,
+      "tag": "0007_phase13_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1783370135804,
+      "tag": "0008_es02_period_closures",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1783456535804,
+      "tag": "0009_es04_production_report_tables",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1783542935804,
+      "tag": "0010_es06_hr_encryption_holidays",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1783629335804,
+      "tag": "0011_es09_purchase_amend_credit_limit",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1783629400000,
+      "tag": "0012_es09b_purchase_schema_tables",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1783715735804,
+      "tag": "0013_es10_gst_cess_rcm",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1783802135804,
+      "tag": "0014_es12_hr_statutory",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1783888535804,
+      "tag": "0015_es13_inventory_valuation",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1783974935804,
+      "tag": "0016_es16_performance_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1784061335804,
+      "tag": "0017_es18_crm_gaps",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1784147735804,
+      "tag": "0018_es19_security_2fa",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1784234135804,
+      "tag": "0019_es20_audit_attachments_flags",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1784320535804,
+      "tag": "0020_es21_platform_operator",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1784406935804,
+      "tag": "0021_es26_notification_idempotency",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1784493335804,
+      "tag": "0022_es28_seed_feature_flag_defaults",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1784579735804,
+      "tag": "0023_dashboard_view_permission_backfill",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1784666135804,
+      "tag": "0024_report_run_result_data",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1784752535804,
+      "tag": "0025_payment_view_create_permission_backfill",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1784838935804,
+      "tag": "0026_pos_barcode_permission_backfill",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1784925335804,
+      "tag": "0027_pos_held_sales",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1785011735804,
+      "tag": "0028_es_search_saved_searches",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1785098135804,
+      "tag": "0029_es_search_analytics",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1785184535804,
+      "tag": "0030_grn_update_permission_backfill",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1785270935804,
+      "tag": "0031_offline02_pos_sale_idempotency",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1785357335804,
+      "tag": "0032_offline05_customer_idempotency",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1785443735804,
+      "tag": "0033_settings_updated_by",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1785530135804,
+      "tag": "0034_organization_theme_config",
+      "breakpoints": true
     }
   ]
 }

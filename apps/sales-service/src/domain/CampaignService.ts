@@ -9,11 +9,31 @@ import {
   type Campaign,
 } from '@erp/db';
 import type { PlatformContext } from '@erp/sdk';
+import { createCircuitBreaker } from '@erp/sdk';
 import { BusinessError, NotFoundError, ValidationError } from '@erp/types';
 import { SegmentService, type SegmentFilterDefinition } from './SegmentService.js';
 
 const SMS_ASCII_LIMIT = 160;
 const SMS_UNICODE_LIMIT = 70;
+
+// ES-16: protects campaign dispatch from notification-service outages — 5 failures
+// in 10s opens the circuit, so a downed notification-service fails every remaining
+// recipient instantly instead of each one waiting out its own HTTP timeout.
+async function sendRawNotification(
+  notificationUrl: string,
+  internalKey: string,
+  body: string
+): Promise<{ httpOk: boolean; json: { data?: { status?: string; logId?: number } } }> {
+  const res = await fetch(`${notificationUrl}/notifications/send-raw-internal`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-internal-key': internalKey },
+    body,
+  });
+  const json = (await res.json()) as { data?: { status?: string; logId?: number } };
+  return { httpOk: res.ok, json };
+}
+
+const notificationBreaker = createCircuitBreaker(sendRawNotification, 'notification-service');
 
 interface RecipientRow {
   id: number;
@@ -51,9 +71,20 @@ export function renderCampaignMessage(
     .replace(/{{\s*customField\s*}}/g, vars.customField ?? '');
 }
 
+// Maps a campaign channel to the opt-out column that must be false for a customer to
+// receive it. IN_APP has no opt-out flag (it's not a marketing-consent-gated channel).
+export function optOutCondition(channel: Campaign['channel']) {
+  if (channel === 'SMS') return eq(customers.optOutSms, false);
+  if (channel === 'WHATSAPP') return eq(customers.optOutWhatsapp, false);
+  if (channel === 'EMAIL') return eq(customers.optOutEmail, false);
+  return undefined;
+}
+
 export class CampaignService {
   /** Resolves the customer rows a campaign should target — either a saved segment or an explicit id list. */
-  static async resolveRecipients(ctx: PlatformContext, campaign: Pick<Campaign, 'segmentId' | 'customerIds'>): Promise<RecipientRow[]> {
+  static async resolveRecipients(ctx: PlatformContext, campaign: Pick<Campaign, 'segmentId' | 'customerIds' | 'channel'>): Promise<RecipientRow[]> {
+    const optOut = optOutCondition(campaign.channel);
+
     if (campaign.segmentId) {
       const [segment] = await ctx.db.raw
         .select()
@@ -61,7 +92,7 @@ export class CampaignService {
         .where(and(eq(customerSegments.id, campaign.segmentId), eq(customerSegments.tenantId, ctx.tenant.tenantId)));
       if (!segment) throw new NotFoundError('Segment', campaign.segmentId);
 
-      const where = await SegmentService.resolveWhere(ctx.db.raw, ctx.tenant.tenantId, {
+      const segmentWhere = await SegmentService.resolveWhere(ctx.db.raw, ctx.tenant.tenantId, {
         code: segment.code,
         isSystem: segment.isSystem,
         filterDefinition: segment.filterDefinition as SegmentFilterDefinition | null,
@@ -70,21 +101,21 @@ export class CampaignService {
       return ctx.db.raw
         .select({ id: customers.id, displayName: customers.displayName, phone: customers.phone, email: customers.email, loyaltyPoints: customers.loyaltyPoints })
         .from(customers)
-        .where(where);
+        .where(optOut ? and(segmentWhere, optOut) : segmentWhere);
     }
 
     if (campaign.customerIds && campaign.customerIds.length > 0) {
       return ctx.db.raw
         .select({ id: customers.id, displayName: customers.displayName, phone: customers.phone, email: customers.email, loyaltyPoints: customers.loyaltyPoints })
         .from(customers)
-        .where(and(eq(customers.tenantId, ctx.tenant.tenantId), inArray(customers.id, campaign.customerIds)));
+        .where(and(eq(customers.tenantId, ctx.tenant.tenantId), inArray(customers.id, campaign.customerIds), ...(optOut ? [optOut] : [])));
     }
 
     throw new ValidationError('Campaign must target either a segmentId or a customerIds list');
   }
 
-  static async previewSample(ctx: PlatformContext, segmentId: number | undefined, customerIds: number[] | undefined, messageTemplate: string): Promise<{ recipientCount: number; sampleMessage: string | null; warnings: string[] }> {
-    const recipients = await CampaignService.resolveRecipients(ctx, { segmentId: segmentId ?? null, customerIds: customerIds ?? null });
+  static async previewSample(ctx: PlatformContext, segmentId: number | undefined, customerIds: number[] | undefined, messageTemplate: string, channel: Campaign['channel']): Promise<{ recipientCount: number; sampleMessage: string | null; warnings: string[] }> {
+    const recipients = await CampaignService.resolveRecipients(ctx, { segmentId: segmentId ?? null, customerIds: customerIds ?? null, channel });
     const [org] = await ctx.db.raw.select({ orgName: organizationSettings.orgName }).from(organizationSettings).where(eq(organizationSettings.tenantId, ctx.tenant.tenantId));
     const shopName = org?.orgName ?? 'Our Store';
 
@@ -134,52 +165,61 @@ export class CampaignService {
     let sentCount = 0;
     let failedCount = 0;
 
-    for (const recipient of recipients) {
-      const balance = await CampaignService.getBalance(ctx, recipient.id);
-      const body = renderCampaignMessage(campaign.messageTemplate, {
-        customerName: recipient.displayName,
-        balance,
-        loyaltyPoints: recipient.loyaltyPoints,
-        shopName,
-      });
-
-      const [recipientRow] = await ctx.db.raw
-        .insert(campaignRecipients)
-        .values({ tenantId: ctx.tenant.tenantId, campaignId, customerId: recipient.id, status: 'PENDING' })
-        .returning();
-
-      try {
-        const res = await fetch(`${notificationUrl}/api/v2/notifications/send-raw-internal`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'x-internal-key': internalKey },
-          body: JSON.stringify({
-            tenantId: ctx.tenant.tenantId,
-            channel: campaign.channel,
-            eventType: 'CRM_CAMPAIGN',
-            ...(campaign.channel !== 'EMAIL' ? { recipientPhone: recipient.phone } : {}),
-            ...(recipient.email ? { recipientEmail: recipient.email } : {}),
-            body,
-          }),
+    // Recipients are sent in bounded-concurrency batches rather than one HTTP round-trip
+    // at a time — a 10k+ recipient segment sent sequentially could take tens of minutes
+    // in a single request/job execution; this keeps it a small, fixed number of batches
+    // without needing a separate queue/worker deployment.
+    const BATCH_SIZE = 25;
+    for (let i = 0; i < recipients.length; i += BATCH_SIZE) {
+      const batch = recipients.slice(i, i + BATCH_SIZE);
+      const results = await Promise.all(batch.map(async (recipient) => {
+        const balance = await CampaignService.getBalance(ctx, recipient.id);
+        const body = renderCampaignMessage(campaign.messageTemplate, {
+          customerName: recipient.displayName,
+          balance,
+          loyaltyPoints: recipient.loyaltyPoints,
+          shopName,
         });
-        const json = (await res.json()) as { data?: { status?: string; logId?: number } };
-        const ok = res.ok && json.data?.status === 'SENT';
 
-        if (recipientRow) {
-          await ctx.db.raw
-            .update(campaignRecipients)
-            .set({ status: ok ? 'SENT' : 'FAILED', notificationLogId: json.data?.logId ?? null, sentAt: new Date(), errorMessage: ok ? null : 'Delivery failed' })
-            .where(eq(campaignRecipients.id, recipientRow.id));
+        const [recipientRow] = await ctx.db.raw
+          .insert(campaignRecipients)
+          .values({ tenantId: ctx.tenant.tenantId, campaignId, customerId: recipient.id, status: 'PENDING' })
+          .returning();
+
+        try {
+          const { httpOk, json } = await notificationBreaker.fire(
+            notificationUrl,
+            internalKey,
+            JSON.stringify({
+              tenantId: ctx.tenant.tenantId,
+              channel: campaign.channel,
+              eventType: 'CRM_CAMPAIGN',
+              ...(campaign.channel !== 'EMAIL' ? { recipientPhone: recipient.phone } : {}),
+              ...(recipient.email ? { recipientEmail: recipient.email } : {}),
+              body,
+            })
+          );
+          const ok = httpOk && json.data?.status === 'SENT';
+
+          if (recipientRow) {
+            await ctx.db.raw
+              .update(campaignRecipients)
+              .set({ status: ok ? 'SENT' : 'FAILED', notificationLogId: json.data?.logId ?? null, sentAt: new Date(), errorMessage: ok ? null : 'Delivery failed' })
+              .where(eq(campaignRecipients.id, recipientRow.id));
+          }
+          return ok;
+        } catch (err) {
+          if (recipientRow) {
+            await ctx.db.raw
+              .update(campaignRecipients)
+              .set({ status: 'FAILED', errorMessage: err instanceof Error ? err.message : String(err) })
+              .where(eq(campaignRecipients.id, recipientRow.id));
+          }
+          return false;
         }
-        if (ok) sentCount++; else failedCount++;
-      } catch (err) {
-        failedCount++;
-        if (recipientRow) {
-          await ctx.db.raw
-            .update(campaignRecipients)
-            .set({ status: 'FAILED', errorMessage: err instanceof Error ? err.message : String(err) })
-            .where(eq(campaignRecipients.id, recipientRow.id));
-        }
-      }
+      }));
+      sentCount += results.filter(Boolean).length;
+      failedCount += results.filter((ok) => !ok).length;
     }
 
     const [updated] = await ctx.db.raw
@@ -248,5 +288,22 @@ export class CampaignService {
       if (row.status === 'PENDING') stats.pending = row.count;
     }
     return stats;
+  }
+
+  /** Per-recipient delivery drill-down — CampaignsPage previously only showed aggregate counts. */
+  static async listRecipients(ctx: PlatformContext, campaignId: number) {
+    return ctx.db.raw
+      .select({
+        id: campaignRecipients.id,
+        customerId: campaignRecipients.customerId,
+        customerName: customers.displayName,
+        status: campaignRecipients.status,
+        errorMessage: campaignRecipients.errorMessage,
+        sentAt: campaignRecipients.sentAt,
+      })
+      .from(campaignRecipients)
+      .innerJoin(customers, eq(customers.id, campaignRecipients.customerId))
+      .where(and(eq(campaignRecipients.campaignId, campaignId), eq(campaignRecipients.tenantId, ctx.tenant.tenantId)))
+      .orderBy(campaignRecipients.id);
   }
 }

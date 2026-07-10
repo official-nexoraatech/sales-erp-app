@@ -41,8 +41,18 @@ const SegmentCreateSchema = z.object({
 });
 
 const SegmentPreviewSchema = z.object({
-  rules: z.array(SegmentFilterRuleSchema).min(1),
+  segmentCode: z.string().optional(),
+  rules: z.array(SegmentFilterRuleSchema).optional(),
   logic: z.enum(['AND', 'OR']).default('AND'),
+}).refine((d) => !!d.segmentCode || (d.rules && d.rules.length > 0), {
+  message: 'Either segmentCode or a non-empty rules array is required',
+});
+
+const CampaignPreviewSchema = z.object({
+  segmentId: z.number().int().positive().optional(),
+  customerIds: z.array(z.number().int().positive()).optional(),
+  messageTemplate: z.string().min(1).max(2000),
+  channel: z.enum(['SMS', 'WHATSAPP', 'EMAIL', 'IN_APP']),
 });
 
 const CampaignCreateSchema = z.object({
@@ -104,6 +114,7 @@ export async function crmRoutes(fastify: FastifyInstance, ctxFactory: PlatformCo
 
       await ctx.cache.invalidate(`crm:activity:${customerId}:*`);
       await ctx.audit.log({ action: 'CREATE', entityType: 'customer_interaction', entityId: created.id, after: created as unknown as Record<string, unknown> });
+      await ctx.events.publish('customer_interaction', created.id, 'CRM_INTERACTION_CREATED', created as unknown as Record<string, unknown>);
 
       return reply.code(201).send({ data: created });
     }
@@ -124,6 +135,49 @@ export async function crmRoutes(fastify: FastifyInstance, ctxFactory: PlatformCo
         .orderBy(sql`created_at DESC`);
 
       return reply.code(200).send({ data: { content: rows, totalElements: rows.length } });
+    }
+  );
+
+  // PUT /customers/:id/interactions/:interactionId — edit within 24h of creation (ES-18)
+  fastify.put<{ Params: { id: string; interactionId: string } }>(
+    '/customers/:id/interactions/:interactionId',
+    { preHandler: [authenticate, requirePermission(PERMISSIONS.CRM_INTERACTION_CREATE)] },
+    async (request, reply) => {
+      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
+      const ctx = ctxFactory.create({ tenantId, userId, correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID() });
+      const customerId = parseInt(request.params.id, 10);
+      const interactionId = parseInt(request.params.interactionId, 10);
+
+      const body = InteractionSchema.safeParse(request.body);
+      if (!body.success) throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
+
+      const [existing] = await ctx.db.raw
+        .select()
+        .from(customerInteractions)
+        .where(and(eq(customerInteractions.id, interactionId), eq(customerInteractions.customerId, customerId), eq(customerInteractions.tenantId, tenantId)));
+      if (!existing) throw new NotFoundError('Interaction', interactionId);
+
+      const ageMs = Date.now() - existing.createdAt.getTime();
+      if (ageMs > 24 * 60 * 60 * 1000) {
+        throw new BusinessError('INTERACTION_EDIT_WINDOW_EXPIRED', 'Interactions can only be edited within 24 hours of creation');
+      }
+
+      const [updated] = await ctx.db.raw
+        .update(customerInteractions)
+        .set({
+          type: body.data.type,
+          notes: body.data.notes,
+          followUpDate: body.data.followUpDate ? new Date(body.data.followUpDate) : null,
+          updatedAt: new Date(),
+        })
+        .where(and(eq(customerInteractions.id, interactionId), eq(customerInteractions.tenantId, tenantId)))
+        .returning();
+      if (!updated) throw new Error('Interaction update failed unexpectedly');
+
+      await ctx.cache.invalidate(`crm:activity:${customerId}:*`);
+      await ctx.audit.log({ action: 'UPDATE', entityType: 'customer_interaction', entityId: interactionId, before: existing as unknown as Record<string, unknown>, after: updated as unknown as Record<string, unknown> });
+
+      return reply.code(200).send({ data: updated });
     }
   );
 
@@ -203,6 +257,7 @@ export async function crmRoutes(fastify: FastifyInstance, ctxFactory: PlatformCo
     if (!created) throw new Error('Segment creation failed unexpectedly');
 
     await ctx.audit.log({ action: 'CREATE', entityType: 'customer_segment', entityId: created.id, after: created as unknown as Record<string, unknown> });
+    await ctx.events.publish('customer_segment', created.id, 'CRM_SEGMENT_CREATED', created as unknown as Record<string, unknown>);
 
     return reply.code(201).send({ data: created });
   });
@@ -214,10 +269,29 @@ export async function crmRoutes(fastify: FastifyInstance, ctxFactory: PlatformCo
     const body = SegmentPreviewSchema.safeParse(request.body);
     if (!body.success) throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
 
-    const where = SegmentService.customWhere(tenantId, body.data as SegmentFilterDefinition);
+    const where = body.data.segmentCode
+      ? await SegmentService.resolveWhere(ctx.db.raw, tenantId, await loadSegment(ctx.db.raw, tenantId, body.data.segmentCode))
+      : SegmentService.customWhere(tenantId, { rules: body.data.rules as SegmentFilterRule[], logic: body.data.logic });
     const count = await SegmentService.countMatching(ctx.db.raw, where);
 
     return reply.code(200).send({ data: { matchingCount: count } });
+  });
+
+  // Standalone campaign-recipient preview — used by the "Preview Recipients" button
+  // before a campaign is created. Reuses the same CampaignService.previewSample logic
+  // that runs during actual campaign creation (see POST /crm/campaigns below).
+  fastify.post('/crm/campaigns/preview', { preHandler: [authenticate, requirePermission(PERMISSIONS.CRM_CAMPAIGN_CREATE)] }, async (request, reply) => {
+    const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
+    const ctx = ctxFactory.create({ tenantId, userId, correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID() });
+
+    const body = CampaignPreviewSchema.safeParse(request.body);
+    if (!body.success) throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
+    if (!body.data.segmentId && (!body.data.customerIds || body.data.customerIds.length === 0)) {
+      throw new ValidationError('Preview requires either segmentId or a non-empty customerIds list');
+    }
+
+    const preview = await CampaignService.previewSample(ctx, body.data.segmentId, body.data.customerIds, body.data.messageTemplate, body.data.channel);
+    return reply.code(200).send({ data: preview });
   });
 
   async function loadSegment(ctxDbRaw: ErpDatabase, tenantId: number, idOrCode: string) {
@@ -292,8 +366,9 @@ export async function crmRoutes(fastify: FastifyInstance, ctxFactory: PlatformCo
       .returning();
     if (!created) throw new Error('Campaign creation failed unexpectedly');
 
-    const preview = await CampaignService.previewSample(ctx, body.data.segmentId, body.data.customerIds, body.data.messageTemplate);
+    const preview = await CampaignService.previewSample(ctx, body.data.segmentId, body.data.customerIds, body.data.messageTemplate, body.data.channel);
     await ctx.audit.log({ action: 'CREATE', entityType: 'campaign', entityId: created.id, after: created as unknown as Record<string, unknown> });
+    await ctx.events.publish('campaign', created.id, 'CRM_CAMPAIGN_CREATED', created as unknown as Record<string, unknown>);
 
     return reply.code(201).send({ data: created, preview, warnings: [...warnings, ...preview.warnings] });
   });
@@ -363,6 +438,18 @@ export async function crmRoutes(fastify: FastifyInstance, ctxFactory: PlatformCo
 
     const stats = await CampaignService.getStats(ctx, id);
     return reply.code(200).send({ data: stats });
+  });
+
+  fastify.get<{ Params: { id: string } }>('/crm/campaigns/:id/recipients', { preHandler: [authenticate, requirePermission(PERMISSIONS.CRM_VIEW)] }, async (request, reply) => {
+    const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
+    const ctx = ctxFactory.create({ tenantId, userId, correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID() });
+    const id = parseInt(request.params.id, 10);
+
+    const [campaign] = await ctx.db.raw.select({ id: campaigns.id }).from(campaigns).where(and(eq(campaigns.id, id), eq(campaigns.tenantId, tenantId)));
+    if (!campaign) throw new NotFoundError('Campaign', id);
+
+    const recipients = await CampaignService.listRecipients(ctx, id);
+    return reply.code(200).send({ data: recipients });
   });
 
   // ════════════════════════════════════════════════════════════════════════

@@ -6,6 +6,7 @@ import { alterationApi, employeeApi } from '../../api/endpoints.js';
 import { useAuthStore } from '../../store/auth.store.js';
 import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
+import { ERPDetailSkeleton } from '../../components/erp/ERPSkeleton.js';
 import Button from '../../components/ui/Button.js';
 import Badge from '../../components/ui/Badge.js';
 import Select from '../../components/ui/Select.js';
@@ -54,7 +55,7 @@ export default function AlterationDetailPage() {
   const { data, isLoading } = useQuery({ queryKey: ['alterations', id], queryFn: () => alterationApi.getById(Number(id)) });
   const order = ((data as Record<string, unknown>)?.data as AlterationOrder) ?? (data as unknown as AlterationOrder);
 
-  const { data: empData } = useQuery({ queryKey: ['employees-all'], queryFn: () => employeeApi.list() });
+  const { data: empData } = useQuery({ queryKey: ['employees-all'], queryFn: () => employeeApi.list(), enabled: hasPermission(PERMISSIONS.EMPLOYEE_VIEW) });
   const employees: Employee[] = ((empData as Record<string, unknown>)?.content as Employee[]) ?? [];
 
   const assignMutation = useMutation({
@@ -75,7 +76,7 @@ export default function AlterationDetailPage() {
     onError: (e: Error) => toast.error(e.message),
   });
 
-  if (isLoading || !order) return <div className="p-8 text-center text-secondary">Loading…</div>;
+  if (isLoading || !order) return <ERPDetailSkeleton />;
 
   const tailorName = employees.find((e) => e.id === order.assignedToId)?.displayName;
 

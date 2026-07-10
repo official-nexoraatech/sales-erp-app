@@ -1,12 +1,13 @@
 import type { FastifyInstance } from 'fastify';
 import type { PlatformContextFactory } from '@erp/sdk';
 import { saleReturns, creditNotes } from '@erp/db';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { PERMISSIONS } from '@erp/types';
 import { authenticate } from '../middleware/authenticate.js';
 import { requirePermission } from '../middleware/authorize.js';
 import { SaleReturnService } from '../domain/SaleReturnService.js';
+import { sendError } from './http-errors.js';
 
 const CreateReturnSchema = z.object({
   invoiceId: z.number().int().positive(),
@@ -56,7 +57,12 @@ export async function saleReturnRoutes(
         .limit(pageSize)
         .offset((page - 1) * pageSize);
 
-      return reply.send({ data: rows, page, pageSize });
+      const [countRow] = await ctx.db.raw
+        .select({ count: sql<number>`count(*)::int` })
+        .from(saleReturns)
+        .where(eq(saleReturns.tenantId, req.auth.tenantId));
+
+      return reply.send({ data: { content: rows, totalElements: countRow?.count ?? 0, page, pageSize } });
     },
   });
 
@@ -86,6 +92,15 @@ export async function saleReturnRoutes(
         createdBy: req.auth.userId,
       } as Parameters<typeof svc.create>[0]);
 
+      await ctx.audit.log({
+        action: 'CREATE',
+        entityType: 'sales_return',
+        entityId: result.returnId,
+        after: { invoiceId: body.invoiceId, returnNumber, creditNoteId: result.creditNoteId },
+        actorEmail: req.auth.email,
+        ipAddress: req.ip,
+      });
+
       return reply.code(201).send({ data: result });
     },
   });
@@ -99,7 +114,7 @@ export async function saleReturnRoutes(
         .select()
         .from(saleReturns)
         .where(and(eq(saleReturns.id, parseInt(id, 10)), eq(saleReturns.tenantId, req.auth.tenantId)));
-      if (!row) return reply.code(404).send({ error: 'Sale return not found' });
+      if (!row) return sendError(reply, 404, 'NOT_FOUND', 'Sale return not found');
       return reply.send({ data: row });
     },
   });

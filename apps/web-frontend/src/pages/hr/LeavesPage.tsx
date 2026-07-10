@@ -5,6 +5,7 @@ import { leaveApi, employeeApi } from '../../api/endpoints.js';
 import { useAuthStore } from '../../store/auth.store.js';
 import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
+import ERPEmptyState from '../../components/erp/ERPEmptyState.js';
 import Button from '../../components/ui/Button.js';
 import Select from '../../components/ui/Select.js';
 import Input from '../../components/ui/Input.js';
@@ -40,7 +41,7 @@ export default function LeavesPage() {
   const [endDate, setEndDate] = useState('');
   const [reason, setReason] = useState('');
 
-  const { data: empData } = useQuery({ queryKey: ['employees-all'], queryFn: () => employeeApi.list() });
+  const { data: empData } = useQuery({ queryKey: ['employees-all'], queryFn: () => employeeApi.list(), enabled: hasPermission(PERMISSIONS.EMPLOYEE_VIEW) });
   const employees: Employee[] = ((empData as Record<string, unknown>)?.content as Employee[]) ?? [];
 
   const { data: typeData } = useQuery({ queryKey: ['leave-types'], queryFn: () => leaveApi.types() });
@@ -90,7 +91,7 @@ export default function LeavesPage() {
         variant="list"
         title="Leave Management"
         subtitle="Apply for leave and manage team approvals."
-        actions={leaveTypes.length === 0 ? <Button variant="secondary" onClick={() => seedMutation.mutate()} loading={seedMutation.isPending}>Seed Default Leave Types</Button> : undefined}
+        actions={leaveTypes.length === 0 && hasPermission(PERMISSIONS.LEAVE_APPROVE) ? <Button variant="secondary" onClick={() => seedMutation.mutate()} loading={seedMutation.isPending}>Seed Default Leave Types</Button> : undefined}
       />
 
       <div className="grid grid-cols-2 gap-6">
@@ -124,7 +125,7 @@ export default function LeavesPage() {
             {pendingLoading ? (
               <p className="text-secondary text-sm">Loading…</p>
             ) : pending.length === 0 ? (
-              <p className="text-disabled text-sm">No pending leave applications.</p>
+              <ERPEmptyState type="no-data" title="No pending leave applications" description="Leave requests awaiting approval will appear here." />
             ) : (
               <ul className="space-y-3">
                 {pending.map((app) => (

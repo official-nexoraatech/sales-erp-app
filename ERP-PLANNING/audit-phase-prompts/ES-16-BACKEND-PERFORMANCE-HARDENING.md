@@ -1,5 +1,5 @@
 # ES-16 — Backend Performance & Hardening
-## STATUS: 🔴 PENDING
+## STATUS: ✅ COMPLETED 
 ## Sprint: 4 | Effort: 4–5 days | Risk: Medium
 ## Depends on: ES-03 (ledger), ES-13 (FIFO), ES-14 (validation)
 ## Unlocks: ES-17

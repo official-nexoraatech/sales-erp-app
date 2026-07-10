@@ -3,6 +3,10 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Calendar, CheckCircle, AlertTriangle, Clock, TrendingUp, Truck } from 'lucide-react';
 import { gstApi } from '../../api/endpoints.js';
 import toast from 'react-hot-toast';
+import { useAuthStore } from '../../store/auth.store.js';
+import { PERMISSIONS } from '../../constants/permissions.js';
+import { ERPTableSkeleton } from '../../components/erp/ERPSkeleton.js';
+import ERPEmptyState from '../../components/erp/ERPEmptyState.js';
 
 function getCurrentFy(): string {
   const now = new Date();
@@ -83,6 +87,7 @@ function MarkFiledModal({ entry, onClose }: { entry: Record<string, unknown>; on
 }
 
 export function GstCompliancePage() {
+  const canFileGst = useAuthStore((s) => s.hasPermission(PERMISSIONS.GST_FILE));
   const [fy, setFy] = useState(getCurrentFy());
   const [markingEntry, setMarkingEntry] = useState<Record<string, unknown> | null>(null);
 
@@ -153,7 +158,7 @@ export function GstCompliancePage() {
 
       {/* Calendar grid */}
       {calLoading ? (
-        <div className="py-12 text-center text-sm text-gray-400">Loading compliance calendar...</div>
+        <ERPTableSkeleton rows={6} cols={5} />
       ) : (
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
           {[
@@ -175,7 +180,7 @@ export function GstCompliancePage() {
                   </thead>
                   <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
                     {entries.length === 0 ? (
-                      <tr><td colSpan={5} className="px-4 py-8 text-center text-sm text-gray-400">No entries</td></tr>
+                      <tr><td colSpan={5}><ERPEmptyState type="no-results" title="No entries" description="No filing entries for this financial year." /></td></tr>
                     ) : entries.map((e, i) => (
                       <tr key={i} className={`${e.isOverdue ? 'bg-red-50/30 dark:bg-red-900/5' : ''} hover:bg-gray-50 dark:hover:bg-gray-700/30`}>
                         <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300 font-medium">{String(e.period ?? '')}</td>
@@ -190,7 +195,7 @@ export function GstCompliancePage() {
                           {e.filedAt ? String(e.filedAt).substring(0, 10) : '—'}
                         </td>
                         <td className="px-4 py-3">
-                          {(e.status === 'PENDING' || e.status === 'OVERDUE') && (
+                          {canFileGst && (e.status === 'PENDING' || e.status === 'OVERDUE') && (
                             <button
                               onClick={() => setMarkingEntry(e)}
                               className="text-xs font-medium text-indigo-600 dark:text-indigo-400 hover:underline"

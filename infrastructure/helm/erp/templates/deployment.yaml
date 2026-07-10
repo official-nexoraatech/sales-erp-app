@@ -1,0 +1,87 @@
+{{- $global := .Values.global }}
+{{- range $name, $svc := .Values.services }}
+{{- $role := $svc.vaultRole | default $name }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  namespace: {{ $global.namespace }}
+  labels:
+    {{- include "erp.labels" (dict "name" $name) | nindent 4 }}
+spec:
+  replicas: {{ $svc.replicaCount | default $global.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "erp.selectorLabels" (dict "name" $name) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        app: {{ $name }}
+        version: v1
+      annotations:
+        # Vault agent sidecar injection
+        vault.hashicorp.com/agent-inject: "true"
+        vault.hashicorp.com/role: {{ $role | quote }}
+        vault.hashicorp.com/agent-inject-secret-db: "erp/data/{{ $role }}/db"
+        vault.hashicorp.com/agent-inject-template-db: |
+          {{- include "erp.vaultDbBlock" $role | nindent 10 }}
+        vault.hashicorp.com/agent-inject-secret-jwt: "erp/data/{{ $role }}/jwt"
+        vault.hashicorp.com/agent-inject-template-jwt: |
+          {{- include "erp.vaultJwtBlock" (dict "Role" $role "Both" (eq ($svc.vaultJwtKeys | default "public") "both")) | nindent 10 }}
+        # Prometheus scraping
+        prometheus.io/scrape: "true"
+        prometheus.io/port: {{ $svc.port | quote }}
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: {{ $name }}
+      imagePullSecrets:
+        - name: {{ $global.imagePullSecret }}
+      securityContext:
+        {{- toYaml $global.podSecurityContext | nindent 8 }}
+      containers:
+        - name: {{ $name }}
+          image: {{ include "erp.image" (dict "global" $global "name" $name) }}
+          ports:
+            - name: http
+              containerPort: {{ $svc.port }}
+              protocol: TCP
+          env:
+            - name: NODE_ENV
+              value: {{ $global.nodeEnv | quote }}
+            - name: {{ $svc.portEnvName }}
+              value: {{ $svc.port | quote }}
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $global.redisSecretName }}
+                  key: {{ $global.redisSecretKey }}
+            - name: LOKI_URL
+              value: {{ $global.lokiUrl | quote }}
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: {{ $global.otelExporterEndpoint | quote }}
+          resources:
+            {{- include "erp.resources" (dict "global" $global "svc" $svc) | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: {{ $svc.port }}
+            initialDelaySeconds: {{ $global.probes.liveness.initialDelaySeconds }}
+            periodSeconds: {{ $global.probes.liveness.periodSeconds }}
+            failureThreshold: {{ $global.probes.liveness.failureThreshold }}
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: {{ $svc.port }}
+            initialDelaySeconds: {{ $global.probes.readiness.initialDelaySeconds }}
+            periodSeconds: {{ $global.probes.readiness.periodSeconds }}
+            failureThreshold: {{ $global.probes.readiness.failureThreshold }}
+          securityContext:
+            {{- toYaml $global.containerSecurityContext | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+{{- end }}

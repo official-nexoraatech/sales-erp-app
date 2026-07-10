@@ -121,6 +121,20 @@ export const TAX_INVOICE_TEMPLATE = `<!DOCTYPE html>
     {{#if roundingAdjustment}}<div>Rounding Adjustment: {{inrFormat roundingAdjustment}}</div>{{/if}}
     {{#if notes}}<div style="margin-top:5px;"><strong>Notes:</strong> {{notes}}</div>{{/if}}
   </div>
+  {{#if irn}}
+  <div class="meta" style="border-top:none;">
+    <div class="meta-left">
+      <div class="label">e-Invoice Details:</div>
+      <div>IRN: {{irn}}</div>
+      {{#if ackNumber}}<div>Ack No: {{ackNumber}}</div>{{/if}}
+    </div>
+    {{#if qrCodeDataUri}}
+    <div class="meta-right" style="text-align:right;">
+      <img src="{{qrCodeDataUri}}" style="max-height:90px;" alt="e-Invoice QR">
+    </div>
+    {{/if}}
+  </div>
+  {{/if}}
   <div class="meta" style="border-top:none;">
     <div class="meta-left">
       <div class="label">Bank Details:</div>
@@ -433,6 +447,73 @@ export const SALARY_SLIP_TEMPLATE = `<!DOCTYPE html>
   </div>
   <div style="border:1px solid #000;border-top:none;padding:8px;font-size:10px;color:#666;">
     This is a computer generated salary slip. No signature required.
+  </div>
+</body>
+</html>`;
+
+export const PROFIT_LOSS_TEMPLATE = `<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8">
+<style>
+  * { margin:0;padding:0;box-sizing:border-box;font-family:Arial,sans-serif;font-size:12px; }
+  body { padding:10px; }
+  .header { border:1px solid #000;padding:10px;text-align:center; }
+  .company-name { font-size:16px;font-weight:bold; }
+  .period { font-size:11px;color:#555; }
+  table { width:100%;border-collapse:collapse;border:1px solid #000;border-top:none; }
+  th { background:#e8e8e8;padding:5px;border:1px solid #000;text-align:left; }
+  td { padding:4px 8px;border:1px solid #ccc; }
+  .text-right { text-align:right; }
+  .section-header td { background:#f0f0f0;font-weight:bold; }
+  .total-row td { font-weight:bold;border-top:2px solid #000; }
+</style>
+</head>
+<body>
+  <div class="header">
+    <div class="company-name">{{org.name}}</div>
+    <div>Profit &amp; Loss Statement</div>
+    <div class="period">For the period {{dateFormat from}} to {{dateFormat to}}</div>
+  </div>
+  <table>
+    <thead><tr><th>Account</th><th class="text-right">Amount</th></tr></thead>
+    <tbody>
+      <tr class="section-header"><td colspan="2">Revenue</td></tr>
+      {{#each revenue}}
+      <tr><td>{{accountCode}} — {{accountName}}</td><td class="text-right">{{inrFormat amount}}</td></tr>
+      {{/each}}
+      <tr class="total-row"><td>Total Revenue</td><td class="text-right">{{inrFormat totalRevenue}}</td></tr>
+
+      <tr class="section-header"><td colspan="2">Cost of Goods Sold</td></tr>
+      {{#each cogs}}
+      <tr><td>{{accountCode}} — {{accountName}}</td><td class="text-right">{{inrFormat amount}}</td></tr>
+      {{/each}}
+      <tr class="total-row"><td>Total COGS</td><td class="text-right">{{inrFormat totalCogs}}</td></tr>
+      <tr class="total-row"><td>Gross Profit</td><td class="text-right">{{inrFormat grossProfit}}</td></tr>
+
+      <tr class="section-header"><td colspan="2">Operating Expenses</td></tr>
+      {{#each operatingExpenses}}
+      <tr><td>{{accountCode}} — {{accountName}}</td><td class="text-right">{{inrFormat amount}}</td></tr>
+      {{/each}}
+      <tr class="total-row"><td>Total Operating Expenses</td><td class="text-right">{{inrFormat totalOperatingExpenses}}</td></tr>
+      <tr class="total-row"><td>Operating Profit</td><td class="text-right">{{inrFormat operatingProfit}}</td></tr>
+
+      <tr class="section-header"><td colspan="2">Other Income</td></tr>
+      {{#each otherIncome}}
+      <tr><td>{{accountCode}} — {{accountName}}</td><td class="text-right">{{inrFormat amount}}</td></tr>
+      {{/each}}
+      <tr class="total-row"><td>Total Other Income</td><td class="text-right">{{inrFormat totalOtherIncome}}</td></tr>
+
+      <tr class="section-header"><td colspan="2">Financial Charges</td></tr>
+      {{#each financialCharges}}
+      <tr><td>{{accountCode}} — {{accountName}}</td><td class="text-right">{{inrFormat amount}}</td></tr>
+      {{/each}}
+      <tr class="total-row"><td>Total Financial Charges</td><td class="text-right">{{inrFormat totalFinancialCharges}}</td></tr>
+
+      <tr class="total-row"><td>Net Profit</td><td class="text-right">{{inrFormat netProfit}}</td></tr>
+    </tbody>
+  </table>
+  <div style="border:1px solid #000;border-top:none;padding:8px;font-size:10px;color:#666;">
+    Generated {{dateFormat generatedAt}}. This is a computer generated statement.
   </div>
 </body>
 </html>`;

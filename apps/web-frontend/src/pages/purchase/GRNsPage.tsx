@@ -1,14 +1,22 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
+import { CheckCircle2, XCircle, Paperclip } from 'lucide-react';
 import { grnApi } from '../../api/endpoints.js';
+import { useAuthStore } from '../../store/auth.store.js';
+import { useDebounce } from '../../hooks/useDebounce.js';
+import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
-import DataTable from '../../components/ui/DataTable.js';
+import ERPDataGrid, { type ERPColumnDef } from '../../components/erp/ERPDataGrid.js';
+import ERPDropdownMenu, { type ERPMenuItem } from '../../components/erp/ERPDropdownMenu.js';
+import ERPDrawer from '../../components/erp/ERPDrawer.js';
+import AttachmentSection from '../../components/erp/AttachmentSection.js';
 import Button from '../../components/ui/Button.js';
 import Badge from '../../components/ui/Badge.js';
 import Modal from '../../components/ui/Modal.js';
 import Input from '../../components/ui/Input.js';
+import Select from '../../components/ui/Select.js';
 import { formatDate, formatCurrency } from '../../lib/format.js';
 
 interface GRN {
@@ -31,19 +39,30 @@ const STATUS_COLORS: Record<string, 'default' | 'success' | 'warning' | 'danger'
 export default function GRNsPage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const hasPermission = useAuthStore((s) => s.hasPermission);
+  const canCreateGRN = hasPermission(PERMISSIONS.GRN_CREATE);
+  const canApproveGRN = hasPermission(PERMISSIONS.GRN_APPROVE);
   const [status, setStatus] = useState('');
+  const [search, setSearch] = useState('');
+  const debouncedSearch = useDebounce(search, 250);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
   const [approveId, setApproveId] = useState<number | null>(null);
   const [grnNumber, setGrnNumber] = useState('');
   const [rejectId, setRejectId] = useState<number | null>(null);
   const [rejectReason, setRejectReason] = useState('');
+  const [attachmentsForId, setAttachmentsForId] = useState<number | null>(null);
+
+  useEffect(() => { setPage(1); }, [status, debouncedSearch]);
 
   const { data, isLoading } = useQuery({
-    queryKey: ['grns', status],
-    queryFn: () => grnApi.list(status ? { status } : {}),
+    queryKey: ['grns', status, debouncedSearch, page, pageSize],
+    queryFn: () => grnApi.list({ status: status || undefined, search: debouncedSearch || undefined, page, pageSize }),
     staleTime: 30_000,
   });
 
-  const rows: GRN[] = (data as { data?: GRN[] })?.data ?? [];
+  const rows: GRN[] = (data as Record<string, unknown>)?.content as GRN[] ?? [];
+  const totalElements = (data as Record<string, unknown>)?.totalElements as number ?? 0;
 
   const approveMutation = useMutation({
     mutationFn: ({ id, num }: { id: number; num: string }) => grnApi.approve(id, { grnNumber: num }),
@@ -67,66 +86,75 @@ export default function GRNsPage() {
     onError: (e: Error) => toast.error(e.message),
   });
 
-  const columns = [
+  const columns: ERPColumnDef<GRN>[] = [
     {
       key: 'grnNumber',
       header: 'GRN #',
-      render: (r: GRN) => r.grnNumber
+      mono: true,
+      render: (r) => r.grnNumber
         ? <span className="font-mono text-sm">{r.grnNumber}</span>
         : <span className="text-secondary italic text-sm">Pending</span>,
     },
-    { key: 'purchaseOrderId', header: 'PO #', render: (r: GRN) => `PO-${r.purchaseOrderId}` },
+    { key: 'purchaseOrderId', header: 'PO #', render: (r) => `PO-${r.purchaseOrderId}` },
     { key: 'supplierId', header: 'Supplier' },
-    { key: 'grandTotal', header: 'Total', render: (r: GRN) => formatCurrency(parseFloat(r.grandTotal)) },
-    { key: 'receivedDate', header: 'Received', render: (r: GRN) => formatDate(r.receivedDate) },
+    { key: 'grandTotal', header: 'Total', align: 'right', sortable: true, render: (r) => formatCurrency(parseFloat(r.grandTotal)) },
+    { key: 'receivedDate', header: 'Received', sortable: true, render: (r) => formatDate(r.receivedDate) },
     {
       key: 'hasPriceVariance',
       header: 'Price Variance',
-      render: (r: GRN) => r.hasPriceVariance
+      render: (r) => r.hasPriceVariance
         ? <Badge variant="danger">Yes</Badge>
         : <Badge variant="default">No</Badge>,
     },
     {
       key: 'status',
       header: 'Status',
-      render: (r: GRN) => <Badge variant={STATUS_COLORS[r.status] ?? 'default'}>{r.status.replace('_', ' ')}</Badge>,
+      sortable: true,
+      render: (r) => <Badge variant={STATUS_COLORS[r.status] ?? 'default'}>{r.status.replace('_', ' ')}</Badge>,
     },
     {
       key: 'actions',
       header: '',
-      render: (r: GRN) => r.status === 'PENDING_APPROVAL' ? (
-        <div className="flex gap-1">
-          <Button size="sm" variant="primary" onClick={() => { setApproveId(r.id); setGrnNumber(''); }}>
-            Approve
-          </Button>
-          <Button size="sm" variant="danger" onClick={() => { setRejectId(r.id); setRejectReason(''); }}>
-            Reject
-          </Button>
-        </div>
-      ) : null,
+      align: 'right',
+      render: (r) => {
+        const items: ERPMenuItem[] = [];
+        if (canApproveGRN && r.status === 'PENDING_APPROVAL') {
+          items.push({ label: 'Approve', icon: CheckCircle2, onClick: () => { setApproveId(r.id); setGrnNumber(''); } });
+          items.push({ label: 'Reject', icon: XCircle, variant: 'danger', onClick: () => { setRejectId(r.id); setRejectReason(''); } });
+        }
+        items.push({ label: 'Attachments', icon: Paperclip, onClick: () => setAttachmentsForId(r.id) });
+        return <ERPDropdownMenu items={items} />;
+      },
     },
   ];
 
   return (
     <div>
       <ERPPageHeader variant="list" title="Goods Receipt Notes" subtitle="Track and approve incoming goods">
-        <Button onClick={() => navigate('/purchase/grns/new')}>+ Create GRN</Button>
+        {canCreateGRN && <Button onClick={() => navigate('/purchase/grns/new')}>+ Create GRN</Button>}
       </ERPPageHeader>
 
       <div className="flex gap-4 mb-4">
-        <select
-          value={status}
-          onChange={(e) => setStatus(e.target.value)}
-          className="rounded-lg border border-default bg-surface-card text-primary text-sm px-3 py-2"
-        >
+        <div className="flex-1 max-w-sm">
+          <Input placeholder="Search by GRN number..." value={search} onChange={(e) => setSearch(e.target.value)} />
+        </div>
+        <Select value={status} onChange={(e) => setStatus(e.target.value)} className="w-48">
           <option value="">All Statuses</option>
           {['PENDING_APPROVAL', 'APPROVED', 'REJECTED'].map((s) => (
             <option key={s} value={s}>{s.replace('_', ' ')}</option>
           ))}
-        </select>
+        </Select>
       </div>
 
-      <DataTable columns={columns} data={rows} isLoading={isLoading} emptyMessage="No GRNs found" />
+      <ERPDataGrid
+        columns={columns}
+        data={rows}
+        isLoading={isLoading}
+        rowKey="id"
+        pagination={{ page, pageSize, total: totalElements }}
+        onPageChange={setPage}
+        onPageSizeChange={(size) => { setPageSize(size); setPage(1); }}
+      />
 
       <Modal isOpen={approveId !== null} onClose={() => setApproveId(null)} title="Approve GRN">
         <div className="space-y-4">
@@ -134,7 +162,8 @@ export default function GRNsPage() {
             Approving will add stock to the warehouse and update the purchase order status.
           </p>
           <Input
-            label="GRN Number *"
+            label="GRN Number"
+            required
             placeholder="e.g. GRN-2025-001"
             value={grnNumber}
             onChange={(e) => setGrnNumber(e.target.value)}
@@ -155,7 +184,8 @@ export default function GRNsPage() {
       <Modal isOpen={rejectId !== null} onClose={() => setRejectId(null)} title="Reject GRN">
         <div className="space-y-4">
           <Input
-            label="Reason *"
+            label="Reason"
+            required
             placeholder="Reason for rejection"
             value={rejectReason}
             onChange={(e) => setRejectReason(e.target.value)}
@@ -173,6 +203,17 @@ export default function GRNsPage() {
           </div>
         </div>
       </Modal>
+
+      <ERPDrawer
+        open={attachmentsForId !== null}
+        onClose={() => setAttachmentsForId(null)}
+        title="GRN Attachments"
+        size="lg"
+      >
+        {attachmentsForId !== null && (
+          <AttachmentSection service="purchase" entityType="GRN" entityId={attachmentsForId} />
+        )}
+      </ERPDrawer>
     </div>
   );
 }

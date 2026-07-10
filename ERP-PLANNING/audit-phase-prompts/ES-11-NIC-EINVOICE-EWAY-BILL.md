@@ -1,5 +1,5 @@
 # ES-11 — NIC E-Invoice & E-Way Bill Integration
-## STATUS: 🔴 PENDING
+## STATUS: ✅ COMPLETED (adapted — see ES-11_COMPLETION.md for architecture deviations)
 ## Sprint: 3 | Effort: 5–7 days | Risk: High
 ## Depends on: ES-10 (correct GST calculation)
 ## Unlocks: ES-17

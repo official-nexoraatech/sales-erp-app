@@ -1,9 +1,12 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { productionApi, supplierApi, itemApi, warehouseApi } from '../../api/endpoints.js';
+import { productionApi, supplierApi, itemApi, warehouseApi, branchApi } from '../../api/endpoints.js';
+import { useAuthStore } from '../../store/auth.store.js';
+import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
+import { ERPFormSkeleton } from '../../components/erp/ERPSkeleton.js';
 import Button from '../../components/ui/Button.js';
 import Input from '../../components/ui/Input.js';
 import Select from '../../components/ui/Select.js';
@@ -17,8 +20,10 @@ interface MaterialLine {
 
 export default function JobWorkOrderCreatePage() {
   const navigate = useNavigate();
+  const hasPermission = useAuthStore((s) => s.hasPermission);
 
   const [supplierId, setSupplierId] = useState('');
+  const [branchId, setBranchId] = useState('');
   const [warehouseId, setWarehouseId] = useState('');
   const [outputItemId, setOutputItemId] = useState('');
   const [orderedQty, setOrderedQty] = useState('');
@@ -30,21 +35,36 @@ export default function JobWorkOrderCreatePage() {
     { itemId: '', requiredQty: '', unitCost: '', warehouseId: '' },
   ]);
 
-  const { data: suppliersData } = useQuery({
+  const { data: suppliersData, isLoading: suppliersLoading } = useQuery({
     queryKey: ['suppliers-list'],
     queryFn: () => supplierApi.list(),
+    enabled: hasPermission(PERMISSIONS.SUPPLIER_VIEW),
   });
   const suppliers = ((suppliersData as Record<string, unknown>)?.content as { id: number; name: string }[]) ?? [];
 
-  const { data: itemsData } = useQuery({
+  const { data: branchesData } = useQuery({
+    queryKey: ['branches'],
+    queryFn: () => branchApi.list(),
+    enabled: hasPermission(PERMISSIONS.BRANCH_VIEW),
+  });
+  const branches = ((branchesData as Record<string, unknown>)?.content as { id: number; name: string }[]) ?? [];
+
+  const userBranchIds = useAuthStore((s) => s.user?.branchIds) ?? [];
+  useEffect(() => {
+    if (!branchId && userBranchIds.length === 1) setBranchId(String(userBranchIds[0]));
+  }, [branchId, userBranchIds]);
+
+  const { data: itemsData, isLoading: itemsLoading } = useQuery({
     queryKey: ['items-list'],
     queryFn: () => itemApi.list(),
+    enabled: hasPermission(PERMISSIONS.ITEM_VIEW),
   });
   const items = ((itemsData as Record<string, unknown>)?.content as { id: number; name: string }[]) ?? [];
 
-  const { data: warehousesData } = useQuery({
+  const { data: warehousesData, isLoading: warehousesLoading } = useQuery({
     queryKey: ['warehouses-list'],
     queryFn: () => warehouseApi.list(),
+    enabled: hasPermission(PERMISSIONS.WAREHOUSE_VIEW),
   });
   const warehouses =
     ((warehousesData as Record<string, unknown>)?.content as { id: number; name: string }[]) ?? [];
@@ -74,6 +94,7 @@ export default function JobWorkOrderCreatePage() {
     e.preventDefault();
     createMutation.mutate({
       supplierId: parseInt(supplierId, 10),
+      branchId: parseInt(branchId, 10),
       warehouseId: parseInt(warehouseId, 10),
       outputItemId: parseInt(outputItemId, 10),
       orderedQty: parseFloat(orderedQty),
@@ -92,6 +113,15 @@ export default function JobWorkOrderCreatePage() {
     });
   }
 
+  if (suppliersLoading || itemsLoading || warehousesLoading) {
+    return (
+      <div className="max-w-3xl">
+        <ERPPageHeader variant="detail" title="New Job Work Order" subtitle="Create an outsourced stitching or processing order." backTo="/production/job-work" />
+        <ERPFormSkeleton />
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-3xl">
       <ERPPageHeader variant="detail" title="New Job Work Order" subtitle="Create an outsourced stitching or processing order." backTo="/production/job-work" />
@@ -100,43 +130,26 @@ export default function JobWorkOrderCreatePage() {
         <div className="bg-surface-card rounded-xl border border-default p-6 space-y-4">
           <h3 className="font-semibold text-primary">Order Details</h3>
           <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-medium text-secondary mb-1">Supplier *</label>
-              <Select value={supplierId} onChange={(e) => setSupplierId(e.target.value)} required>
-                <option value="">Select supplier</option>
-                {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-              </Select>
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-secondary mb-1">Output Warehouse *</label>
-              <Select value={warehouseId} onChange={(e) => setWarehouseId(e.target.value)} required>
-                <option value="">Select warehouse</option>
-                {warehouses.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
-              </Select>
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-secondary mb-1">Output Item *</label>
-              <Select value={outputItemId} onChange={(e) => setOutputItemId(e.target.value)} required>
-                <option value="">Select item</option>
-                {items.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
-              </Select>
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-secondary mb-1">Ordered Qty *</label>
-              <Input type="number" min="0.01" step="0.01" value={orderedQty} onChange={(e) => setOrderedQty(e.target.value)} required />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-secondary mb-1">Job Work Rate (per unit) *</label>
-              <Input type="number" min="0" step="0.01" value={jobWorkRate} onChange={(e) => setJobWorkRate(e.target.value)} required />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-secondary mb-1">Order Date *</label>
-              <Input type="date" value={orderDate} onChange={(e) => setOrderDate(e.target.value)} required />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-secondary mb-1">Expected Completion *</label>
-              <Input type="date" value={expectedDate} onChange={(e) => setExpectedDate(e.target.value)} required />
-            </div>
+            <Select label="Supplier" required value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>
+              <option value="">Select supplier</option>
+              {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </Select>
+            <Select label="Branch" required value={branchId} onChange={(e) => setBranchId(e.target.value)}>
+              <option value="">Select branch</option>
+              {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+            </Select>
+            <Select label="Output Warehouse" required value={warehouseId} onChange={(e) => setWarehouseId(e.target.value)}>
+              <option value="">Select warehouse</option>
+              {warehouses.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
+            </Select>
+            <Select label="Output Item" required value={outputItemId} onChange={(e) => setOutputItemId(e.target.value)}>
+              <option value="">Select item</option>
+              {items.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
+            </Select>
+            <Input label="Ordered Qty" required type="number" min="0.01" step="0.01" value={orderedQty} onChange={(e) => setOrderedQty(e.target.value)} />
+            <Input label="Job Work Rate (per unit)" required type="number" min="0" step="0.01" value={jobWorkRate} onChange={(e) => setJobWorkRate(e.target.value)} />
+            <Input label="Order Date" required type="date" value={orderDate} onChange={(e) => setOrderDate(e.target.value)} />
+            <Input label="Expected Completion" required type="date" value={expectedDate} onChange={(e) => setExpectedDate(e.target.value)} />
           </div>
           <div>
             <label className="block text-xs font-medium text-secondary mb-1">Notes</label>

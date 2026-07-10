@@ -1,5 +1,5 @@
 # ES-09 — Purchase Workflow & GRNI Completeness
-## STATUS: 🔴 PENDING
+## STATUS: ✅ COMPLETED (adapted — see ES-09_COMPLETION.md for architecture deviation on Fixes 3/4)
 ## Sprint: 2 | Effort: 3–4 days | Risk: Medium
 ## Depends on: ES-03 (inventory ledger), ES-07 (RBAC)
 ## Unlocks: ES-13, ES-16

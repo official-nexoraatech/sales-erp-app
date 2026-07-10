@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { eq, and, desc } from 'drizzle-orm';
+import { eq, and, desc, sql, ilike } from 'drizzle-orm';
 import { stockTransfers } from '@erp/db';
 import { PERMISSIONS } from '@erp/types';
 import type { PlatformContextFactory } from '@erp/sdk';
@@ -52,26 +52,33 @@ export async function transferRoutes(
         correlationId: request.id,
       });
 
-      const { page = 1, limit = 50, status } = request.query as {
+      const { page = 1, limit = 50, status, search } = request.query as {
         page?: number;
         limit?: number;
         status?: string;
+        search?: string;
       };
       const offset = ((page as number) - 1) * (limit as number);
 
-      let q = ctx.db.raw
+      const conditions = [eq(stockTransfers.tenantId, request.auth.tenantId)];
+      if (status) conditions.push(eq(stockTransfers.status, status as typeof stockTransfers.$inferSelect['status']));
+      if (search) conditions.push(ilike(stockTransfers.transferNumber, `%${search}%`));
+      const whereClause = and(...conditions);
+
+      const rows = await ctx.db.raw
         .select()
         .from(stockTransfers)
-        .where(eq(stockTransfers.tenantId, request.auth.tenantId))
+        .where(whereClause)
         .orderBy(desc(stockTransfers.createdAt))
-        .$dynamic();
+        .limit(limit as number)
+        .offset(offset);
 
-      if (status) {
-        q = q.where(eq(stockTransfers.status, status as typeof stockTransfers.$inferSelect['status'])) as typeof q;
-      }
+      const [countRow] = await ctx.db.raw
+        .select({ count: sql<number>`count(*)::int` })
+        .from(stockTransfers)
+        .where(whereClause);
 
-      const rows = await q.limit(limit as number).offset(offset);
-      return reply.code(200).send({ data: rows, meta: { page, limit } });
+      return reply.code(200).send({ data: { content: rows, totalElements: countRow?.count ?? 0, page, limit } });
     }
   );
 

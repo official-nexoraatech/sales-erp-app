@@ -1,3 +1,4 @@
+/* global Buffer */
 import type { ErpDatabase } from '@erp/db';
 import { tenants, roles, rolePermissions, users, featureFlags, branches } from '@erp/db';
 import { createLogger } from '@erp/logger';
@@ -6,7 +7,9 @@ import { eq, and } from 'drizzle-orm';
 import argon2 from 'argon2';
 import { randomUUID } from 'node:crypto';
 import { WorkflowEngine, RuleEngine } from '@erp/sdk';
+import type { StorageClient } from '@erp/sdk';
 import { ROLE_DEFAULTS } from '../rbac/role-defaults.js';
+import { BillingService } from './BillingService.js';
 
 export interface ProvisionTenantInput {
   name: string;
@@ -42,6 +45,7 @@ const ALL_PROVISION_STEPS = [
   'CONFIGURE_S3',
   'CREATE_ES_INDICES',
   'SET_FEATURE_FLAGS',
+  'ASSIGN_PLAN_ENTITLEMENTS',
   'SEND_WELCOME_EMAIL',
 ] as const;
 
@@ -51,7 +55,7 @@ export class TenantProvisioner {
   constructor(
     private readonly db: ErpDatabase,
     private readonly esUrl: string,
-    private readonly minioBucket: string
+    private readonly storageClient: StorageClient
   ) {}
 
   async provision(input: ProvisionTenantInput): Promise<ProvisionResult> {
@@ -141,8 +145,29 @@ export class TenantProvisioner {
     // ── STEP 6: Configure S3 prefix ─────────────────────────────────────────
     const s3Prefix = `tenants/${tenantId}`;
     logger.info({ tenantId, s3Prefix }, 'Configuring S3 prefix');
-    // In production: create the MinIO/S3 prefix by uploading a placeholder object
-    // For now we just record the prefix — no actual S3 call needed for a prefix
+    try {
+      const bucketOk = await this.storageClient.bucketExists();
+      if (!bucketOk) {
+        throw new Error('MinIO/S3 bucket does not exist or is unreachable');
+      }
+      // Placeholder object at the tenant's prefix root — S3/MinIO has no concept of an
+      // empty "folder", so the prefix only becomes real/listable once an object exists under it.
+      await this.storageClient.uploadFile(
+        tenantId,
+        'provisioning',
+        '.tenant-init',
+        Buffer.from(''),
+        'application/octet-stream'
+      );
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      logger.error({ tenantId, err }, 'S3 provisioning failed — aborting tenant provisioning');
+      await this.db
+        .update(tenants)
+        .set({ provisioningStatus: 'FAILED', provisioningSteps: completedSteps })
+        .where(eq(tenants.id, tenantId));
+      throw new Error(`S3_PROVISIONING_FAILED: ${reason}`);
+    }
     markStep('CONFIGURE_S3');
 
     await this.db
@@ -179,9 +204,19 @@ export class TenantProvisioner {
       .set({ provisioningStatus: 'FEATURE_FLAGS_SET', provisioningSteps: completedSteps })
       .where(eq(tenants.id, tenantId));
 
-    // ── STEP 9: Send welcome email ───────────────────────────────────────────
+    // ── STEP 9: Assign default plan entitlements (PG-027) ──────────────────
+    logger.info({ tenantId, plan: tenant.plan }, 'Assigning plan entitlements');
+    await new BillingService(this.db).assignPlanEntitlements(tenantId, tenant.plan);
+    markStep('ASSIGN_PLAN_ENTITLEMENTS');
+
+    await this.db
+      .update(tenants)
+      .set({ provisioningStatus: 'PLAN_ENTITLEMENTS_ASSIGNED', provisioningSteps: completedSteps })
+      .where(eq(tenants.id, tenantId));
+
+    // ── STEP 10: Send welcome email ───────────────────────────────────────────
     logger.info({ tenantId, contactEmail: input.contactEmail }, 'Sending welcome email');
-    await this.sendWelcomeEmail(input.contactEmail, input.name, input.adminFirstName);
+    await this.sendWelcomeEmail(tenantId, input.contactEmail, input.name, input.adminFirstName);
     markStep('SEND_WELCOME_EMAIL');
 
     // ── Finalize: mark ACTIVE ────────────────────────────────────────────────
@@ -377,20 +412,38 @@ export class TenantProvisioner {
     }
   }
 
-  private async sendWelcomeEmail(email: string, tenantName: string, firstName: string): Promise<void> {
+  // PG-026 bugfix: this previously called a nonexistent `/api/v2/notifications/send` path
+  // (notification-service registers its routes with no prefix at all) with a body shape
+  // (`templateKey`/`recipient`/`variables`) that never matched any real endpoint's schema —
+  // welcome emails have never been delivered. Fixed to call the real `/notifications/send-internal`
+  // route with its actual InternalSendSchema shape, guarded by x-internal-key like every other
+  // service-to-service notification call in this codebase. Also seeds the WELCOME_EMAIL template
+  // this tenant needs first — no such template was ever seeded anywhere, so even a
+  // correctly-shaped call would have been silently skipped by NotificationEngine's
+  // no-template-row-found path (see [[pg017_password_reset_email_delivery]]'s same gap).
+  private async sendWelcomeEmail(tenantId: number, email: string, tenantName: string, firstName: string): Promise<void> {
     const notificationUrl = process.env['NOTIFICATION_SERVICE_URL'];
     if (!notificationUrl) {
       logger.warn({ email }, 'NOTIFICATION_SERVICE_URL not configured — skipping welcome email');
       return;
     }
+    const internalKey = process.env['INTERNAL_API_KEY'] ?? '';
     try {
-      const res = await fetch(`${notificationUrl}/api/v2/notifications/send`, {
+      await fetch(`${notificationUrl}/notifications/templates/seed-tenant`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'x-internal-key': internalKey },
+        body: JSON.stringify({ tenantId }),
+      });
+
+      const res = await fetch(`${notificationUrl}/notifications/send-internal`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-internal-key': internalKey },
         body: JSON.stringify({
-          templateKey: 'WELCOME_EMAIL',
-          recipient: { email },
-          variables: { firstName, tenantName },
+          tenantId,
+          eventType: 'WELCOME_EMAIL',
+          recipientEmail: email,
+          channels: ['EMAIL'],
+          templateData: { firstName, tenantName },
         }),
       });
       if (!res.ok) {

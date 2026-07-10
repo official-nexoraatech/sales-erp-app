@@ -8,6 +8,9 @@ export interface AuditLogEntry {
   before?: Record<string, unknown>;
   after?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
+  actorEmail?: string;
+  ipAddress?: string;
+  changedFields?: string[];
 }
 
 // Audit log is APPEND-ONLY — never UPDATE or DELETE (ERP_MASTER_SPEC §13 rule 4)
@@ -27,6 +30,9 @@ export class PlatformAuditLogger {
       beforeData: entry.before ?? null,
       afterData: entry.after ?? null,
       metadata: entry.metadata ?? null,
+      actorEmail: entry.actorEmail ?? null,
+      ipAddress: entry.ipAddress ?? null,
+      changedFields: entry.changedFields ?? null,
     });
   }
 
@@ -44,6 +50,9 @@ export class PlatformAuditLogger {
         beforeData: entry.before ?? null,
         afterData: entry.after ?? null,
         metadata: entry.metadata ?? null,
+        actorEmail: entry.actorEmail ?? null,
+        ipAddress: entry.ipAddress ?? null,
+        changedFields: entry.changedFields ?? null,
       }))
     );
   }

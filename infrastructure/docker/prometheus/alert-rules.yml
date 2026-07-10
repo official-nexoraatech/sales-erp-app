@@ -55,6 +55,21 @@ groups:
           summary: "Kafka consumer lag > 1000 for {{ $labels.consumergroup }}"
           description: "Consumer group {{ $labels.consumergroup }} on topic {{ $labels.topic }} is {{ $value }} messages behind."
 
+  # ─── Outbox Relay Alerts ──────────────────────────────────────────────────
+  - name: erp.outbox
+    rules:
+      - alert: OutboxLagHigh
+        expr: |
+          erp_outbox_pending_count > 100
+        for: 5m
+        labels:
+          severity: warning
+          channel: slack-infra-alerts
+        annotations:
+          summary: "Outbox relay backlog > 100 pending events"
+          description: "{{ $value }} events pending in the outbox for 5+ minutes. The relay worker may be stuck or Kafka may be unreachable. (erp_outbox_pending_count is a global gauge with no tenant_id label.)"
+          runbook: "Navigate to: ERP Admin → Distributed Systems → Outbox Monitor; check event-service relay worker logs."
+
   # ─── Database Alerts ──────────────────────────────────────────────────────
   - name: erp.database
     rules:
@@ -133,6 +148,18 @@ groups:
           description: "Stock quantity is {{ $value }} for item {{ $labels.item_id }} in warehouse {{ $labels.warehouse_id }} (tenant {{ $labels.tenant_id }}). This should NEVER happen — data integrity issue."
           runbook: "IMMEDIATE: Check inventory_ledger for item={{ $labels.item_id }}, investigate concurrent write issue."
 
+      - alert: StockNegativeEventDetected
+        expr: |
+          sum(increase(erp_stock_negative_total[5m])) by (tenant_id, item_id) > 0
+        for: 0m
+        labels:
+          severity: critical
+          channel: pagerduty
+        annotations:
+          summary: "CRITICAL: Negative-stock event recorded for item {{ $labels.item_id }}"
+          description: "{{ $value }} negative-stock event(s) in the last 5 minutes for item {{ $labels.item_id }} (tenant {{ $labels.tenant_id }}) — complements StockWentNegative by catching transient dips between scrapes."
+          runbook: "IMMEDIATE: Check inventory_ledger for item={{ $labels.item_id }}, investigate concurrent write issue."
+
       - alert: InvoiceCreateFailureRateHigh
         expr: |
           sum(rate(erp_invoice_create_failed_total[5m])) /
@@ -144,6 +171,47 @@ groups:
         annotations:
           summary: "Invoice creation failing at > 5% rate"
           description: "{{ $value | humanizePercentage }} of invoice create attempts are failing."
+
+  # ─── Security Alerts ───────────────────────────────────────────────────────
+  - name: erp.security
+    rules:
+      - alert: AuthBruteForceSpike
+        expr: |
+          sum(increase(erp_auth_brute_force_total[5m])) by (tenant_id) > 3
+        for: 0m
+        labels:
+          severity: critical
+          channel: pagerduty
+        annotations:
+          summary: "Brute-force lockout spike for tenant {{ $labels.tenant_id }}"
+          description: "{{ $value }} account(s) locked due to brute force in the last 5 minutes for tenant {{ $labels.tenant_id }} — possible live credential-stuffing attack."
+          runbook: "Navigate to: ERP Admin → Security → Auth Audit Log, filter by tenant_id={{ $labels.tenant_id }}"
+
+  # ─── Backup / DR Alerts (PG-024) ──────────────────────────────────────────
+  - name: erp.backup
+    rules:
+      - alert: BackupStale
+        expr: |
+          time() - erp_backup_last_success_timestamp > 90000
+        for: 0m
+        labels:
+          severity: critical
+          channel: pagerduty
+        annotations:
+          summary: "Backup has not succeeded in over 25 hours"
+          description: "erp_backup_last_success_timestamp is {{ $value | humanizeDuration }} old — daily backup.sh (BACKUP_INTERVAL_SECONDS=86400) has silently stopped succeeding. Every invoice/ledger/customer record depends on this backup being current."
+          runbook: "See infrastructure/runbooks/dr-runbook.md §Backup Monitoring — check the `backup` container/CronJob logs first (docker logs erp-backup / kubectl logs -n erp-system -l app=erp-backup)."
+
+      - alert: BackupDurationHigh
+        expr: |
+          erp_backup_duration_seconds > 1800
+        for: 0m
+        labels:
+          severity: warning
+          channel: slack-infra-alerts
+        annotations:
+          summary: "Backup took longer than 30 minutes ({{ $value | humanizeDuration }})"
+          description: "backup.sh's own run duration is approaching BACKUP_INTERVAL_SECONDS (86400s/24h) — an early-warning sign the backup is becoming a bottleneck before it becomes an outright failure. dr-drill-report.md's baseline was ~4m30s total for 1.4GB."
 
   # ─── Infrastructure Alerts ────────────────────────────────────────────────
   - name: erp.infrastructure

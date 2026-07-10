@@ -1,14 +1,38 @@
+/* global process */
 import type { FastifyInstance } from 'fastify';
 import type { PlatformContextFactory } from '@erp/sdk';
 import { z } from 'zod';
+import { timingSafeEqual } from 'node:crypto';
 import { ValidationError, BusinessError } from '@erp/types';
 import { PERMISSIONS } from '@erp/types';
 import { authenticate } from '../middleware/authenticate.js';
 import { requirePermission } from '../middleware/authorize.js';
 import { Gstr1Service } from '../domain/Gstr1Service.js';
+import { Gstr1ExcelFormatter } from '../domain/Gstr1ExcelFormatter.js';
 
 type AuthedRequest = { auth: { tenantId: number; userId: number } };
 const PERIOD_REGEX = /^\d{4}-\d{2}$/;
+
+// Same x-internal-key convention as einvoice.routes.ts's /gst/einvoice/retry-pending.
+function requireInternalKey(req: { headers: Record<string, string | string[] | undefined> }, reply: { code: (n: number) => { send: (b: unknown) => void } }): boolean {
+  const key = req.headers['x-internal-key'];
+  const expected = process.env['INTERNAL_API_KEY'];
+  const keyBuffer = Buffer.from(typeof key === 'string' ? key : '');
+  const expectedBuffer = Buffer.from(expected ?? '');
+  const matches = !!expected && keyBuffer.length === expectedBuffer.length && timingSafeEqual(keyBuffer, expectedBuffer);
+  if (!matches) {
+    reply.code(401).send({ error: 'Unauthorized' });
+    return false;
+  }
+  return true;
+}
+
+// Previous month's period (YYYY-MM) — GSTR-1 for month M is prepared/filed in month M+1.
+function previousPeriod(): string {
+  const now = new Date();
+  const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1));
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+}
 
 export async function gstr1Routes(
   fastify: FastifyInstance,
@@ -94,21 +118,34 @@ export async function gstr1Routes(
       });
     }
 
-    // Excel format — return JSON representation of what would be in Excel
-    // (actual Excel generation requires a spreadsheet library; returning structured data for now)
-    return reply.code(200).send({
-      data: {
-        period: q.data.period,
-        format: 'EXCEL_DATA',
-        sheets: {
-          B2B: sections.b2b,
-          B2CS: sections.b2cs,
-          CDNR: sections.cdnr,
-          HSN: sections.hsn.data,
-          DOC: sections.doc,
-        },
-        exportedAt: new Date().toISOString(),
-      },
-    });
+    const buf = Gstr1ExcelFormatter.toWorkbook(sections);
+    return reply
+      .header('Content-Type', Gstr1ExcelFormatter.getContentType())
+      .header('Content-Disposition', `attachment; filename="${Gstr1ExcelFormatter.getFileName(q.data.period)}"`)
+      .send(buf);
+  });
+
+  // POST /gst/gstr1/auto-prepare?tenantId=... — PG-026, scheduler-triggered
+  fastify.post('/gst/gstr1/auto-prepare', {
+    handler: async (request, reply) => {
+      if (!requireInternalKey(request as never, reply as never)) return;
+      const tenantId = parseInt((request.query as { tenantId?: string }).tenantId ?? '', 10);
+      if (!tenantId) return reply.code(400).send({ error: { code: 'MISSING_TENANT_ID', message: 'tenantId query param required' } });
+
+      const ctx = ctxFactory.create({ tenantId, userId: 0, correlationId: crypto.randomUUID() });
+      const period = previousPeriod();
+      const sections = await Gstr1Service.compute(ctx.db, tenantId, period);
+      const validationErrors = Gstr1Service.validateBeforeExport(sections);
+      const isExportReady = validationErrors.length === 0;
+
+      await ctx.audit.log({
+        action: 'GSTR1_AUTO_PREPARED',
+        entityType: 'GSTR1',
+        entityId: tenantId,
+        after: { period, isExportReady, validationErrorCount: validationErrors.length } as Record<string, unknown>,
+      });
+
+      return reply.code(200).send({ data: { period, isExportReady, validationErrorCount: validationErrors.length } });
+    },
   });
 }

@@ -5,6 +5,8 @@ import { dlqApi } from '../../../api/endpoints.js';
 import { useAuthStore } from '../../../store/auth.store.js';
 import { PERMISSIONS } from '../../../constants/permissions.js';
 import ERPPageHeader from '../../../components/erp/ERPPageHeader.js';
+import { ERPCardSkeleton } from '../../../components/erp/ERPSkeleton.js';
+import ERPEmptyState from '../../../components/erp/ERPEmptyState.js';
 import Button from '../../../components/ui/Button.js';
 import Badge from '../../../components/ui/Badge.js';
 import { formatDate } from '../../../lib/format.js';
@@ -42,7 +44,7 @@ export default function DLQPage() {
   const [selectedTopic, setSelectedTopic] = useState<string | null>(null);
   const [selectedItem, setSelectedItem] = useState<DLQItem | null>(null);
 
-  const { data: summaryData } = useQuery({
+  const { data: summaryData, isLoading: summaryLoading } = useQuery({
     queryKey: ['dlq-summary'],
     queryFn: () => dlqApi.summary(),
     refetchInterval: 30_000,
@@ -53,7 +55,7 @@ export default function DLQPage() {
   const totalReplayed = summary.reduce((acc, s) => acc + s.replayed, 0);
   const totalDiscarded = summary.reduce((acc, s) => acc + s.discarded, 0);
 
-  const { data: listData } = useQuery({
+  const { data: listData, isLoading: itemsLoading } = useQuery({
     queryKey: ['dlq-list', selectedTopic],
     queryFn: () => dlqApi.list(selectedTopic!),
     enabled: !!selectedTopic,
@@ -112,8 +114,10 @@ export default function DLQPage() {
         {/* Topic list */}
         <div className="card p-4 space-y-2">
           <h3 className="text-sm font-semibold text-primary mb-3">Topics</h3>
-          {summary.length === 0 ? (
-            <p className="text-sm text-secondary">No DLQ topics found</p>
+          {summaryLoading ? (
+            <ERPCardSkeleton lines={4} />
+          ) : summary.length === 0 ? (
+            <ERPEmptyState type="no-data" title="No DLQ topics found" description="Failed Kafka messages will appear here grouped by topic." />
           ) : (
             summary.map((row) => (
               <button
@@ -150,25 +154,28 @@ export default function DLQPage() {
                 )}
               </div>
               <div className="space-y-2">
-                {items.map((item) => (
-                  <button
-                    key={item.id}
-                    onClick={() => setSelectedItem(item)}
-                    className="w-full text-left px-3 py-3 rounded-lg border border-border hover:bg-surface-hover transition-colors"
-                  >
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-xs font-mono text-secondary">offset: {item.offset}</span>
-                      <Badge variant={STATUS_VARIANT[item.status] ?? 'default'}>{item.status}</Badge>
-                    </div>
-                    <p className="text-sm text-primary truncate">{item.errorMessage}</p>
-                    <div className="flex items-center gap-4 mt-1 text-xs text-secondary">
-                      <span>Retries: {item.retryCount}</span>
-                      <span>{formatDate(item.createdAt)}</span>
-                    </div>
-                  </button>
-                ))}
-                {items.length === 0 && (
-                  <p className="text-sm text-secondary text-center py-8">No items in this topic</p>
+                {itemsLoading ? (
+                  <ERPCardSkeleton lines={3} />
+                ) : items.length === 0 ? (
+                  <ERPEmptyState type="no-results" title="No items in this topic" description="This topic currently has no dead-letter items." />
+                ) : (
+                  items.map((item) => (
+                    <button
+                      key={item.id}
+                      onClick={() => setSelectedItem(item)}
+                      className="w-full text-left px-3 py-3 rounded-lg border border-border hover:bg-surface-hover transition-colors"
+                    >
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-xs font-mono text-secondary">offset: {item.offset}</span>
+                        <Badge variant={STATUS_VARIANT[item.status] ?? 'default'}>{item.status}</Badge>
+                      </div>
+                      <p className="text-sm text-primary truncate">{item.errorMessage}</p>
+                      <div className="flex items-center gap-4 mt-1 text-xs text-secondary">
+                        <span>Retries: {item.retryCount}</span>
+                        <span>{formatDate(item.createdAt)}</span>
+                      </div>
+                    </button>
+                  ))
                 )}
               </div>
             </>

@@ -1,3 +1,4 @@
+/* global process */
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { createDatabaseClient } from '@erp/db';
 import {
@@ -7,11 +8,18 @@ import {
   alterationOrders,
 } from '@erp/db';
 import { and, eq, isNull, lt, ne } from 'drizzle-orm';
+import { timingSafeEqual } from 'node:crypto';
 
 function requireInternalKey(req: FastifyRequest, reply: FastifyReply): boolean {
   const key = req.headers['x-internal-key'];
   const expected = process.env['INTERNAL_API_KEY'];
-  if (!expected || key !== expected) {
+  const keyBuffer = Buffer.from(typeof key === 'string' ? key : '');
+  const expectedBuffer = Buffer.from(expected ?? '');
+  const matches =
+    !!expected &&
+    keyBuffer.length === expectedBuffer.length &&
+    timingSafeEqual(keyBuffer, expectedBuffer);
+  if (!matches) {
     void reply.code(401).send({ error: { code: 'UNAUTHORIZED', message: 'Unauthorized' } });
     return false;
   }

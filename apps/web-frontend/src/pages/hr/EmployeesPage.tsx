@@ -1,12 +1,15 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
+import { Eye, Pencil } from 'lucide-react';
 import { employeeApi, departmentApi, designationApi } from '../../api/endpoints.js';
+import { useDebounce } from '../../hooks/useDebounce.js';
 import { useAuthStore } from '../../store/auth.store.js';
 import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
-import DataTable from '../../components/ui/DataTable.js';
+import ERPDataGrid, { type ERPColumnDef } from '../../components/erp/ERPDataGrid.js';
+import ERPDropdownMenu, { type ERPMenuItem } from '../../components/erp/ERPDropdownMenu.js';
 import Button from '../../components/ui/Button.js';
 import Badge from '../../components/ui/Badge.js';
 import Input from '../../components/ui/Input.js';
@@ -34,19 +37,27 @@ export default function EmployeesPage() {
   const qc = useQueryClient();
   const hasPermission = useAuthStore((s) => s.hasPermission);
   const [search, setSearch] = useState('');
+  const debouncedSearch = useDebounce(search, 250);
   const [departmentId, setDepartmentId] = useState('');
   const [employmentType, setEmploymentType] = useState('');
   const [deptModalOpen, setDeptModalOpen] = useState(false);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
+
+  useEffect(() => { setPage(1); }, [debouncedSearch, departmentId, employmentType]);
 
   const { data, isLoading } = useQuery({
-    queryKey: ['employees', search, departmentId, employmentType],
+    queryKey: ['employees', debouncedSearch, departmentId, employmentType, page, pageSize],
     queryFn: () => employeeApi.list({
-      search: search || undefined,
+      search: debouncedSearch || undefined,
       departmentId: departmentId ? Number(departmentId) : undefined,
       employmentType: employmentType || undefined,
+      page: page - 1,
+      size: pageSize,
     }),
   });
   const employees: Employee[] = ((data as Record<string, unknown>)?.content as Employee[]) ?? [];
+  const totalElements = (data as Record<string, unknown>)?.totalElements as number ?? 0;
 
   const { data: deptData } = useQuery({ queryKey: ['departments'], queryFn: () => departmentApi.list() });
   const departments: Department[] = ((deptData as Record<string, unknown>)?.content as Department[]) ?? [];
@@ -57,34 +68,31 @@ export default function EmployeesPage() {
   const deptName = (id?: number) => departments.find((d) => d.id === id)?.name ?? '–';
   const desigName = (id?: number) => designations.find((d) => d.id === id)?.name ?? '–';
 
-  const columns = [
-    { key: 'employeeCode', header: 'Code', className: 'font-mono text-xs' },
+  const columns: ERPColumnDef<Employee>[] = [
+    { key: 'employeeCode', header: 'Code', mono: true, sortable: true },
     {
-      key: 'displayName', header: 'Name',
-      render: (r: Employee) => (
+      key: 'displayName', header: 'Name', sortable: true,
+      render: (r) => (
         <div>
           <p className="font-medium">{r.displayName}</p>
-          <p className="text-xs text-gray-400">{r.phone}</p>
+          <p className="text-xs text-secondary">{r.phone}</p>
         </div>
       ),
     },
-    { key: 'department', header: 'Department', render: (r: Employee) => deptName(r.departmentId) },
-    { key: 'designation', header: 'Designation', render: (r: Employee) => desigName(r.designationId) },
-    { key: 'employmentType', header: 'Type', render: (r: Employee) => <Badge variant="outline">{r.employmentType}</Badge> },
+    { key: 'department', header: 'Department', render: (r) => deptName(r.departmentId) },
+    { key: 'designation', header: 'Designation', render: (r) => desigName(r.designationId) },
+    { key: 'employmentType', header: 'Type', render: (r) => <Badge variant="outline">{r.employmentType}</Badge> },
     {
-      key: 'status', header: 'Status',
-      render: (r: Employee) => <Badge variant={r.status === 'ACTIVE' ? 'success' : 'default'}>{r.status}</Badge>,
+      key: 'status', header: 'Status', sortable: true,
+      render: (r) => <Badge variant={r.status === 'ACTIVE' ? 'success' : 'default'}>{r.status}</Badge>,
     },
     {
-      key: 'actions', header: '',
-      render: (r: Employee) => (
-        <div className="flex gap-2">
-          <Button size="sm" variant="ghost" onClick={() => navigate(`/hr/employees/${r.id}`)}>View</Button>
-          {hasPermission(PERMISSIONS.EMPLOYEE_UPDATE) && (
-            <Button size="sm" variant="ghost" onClick={() => navigate(`/hr/employees/${r.id}/edit`)}>Edit</Button>
-          )}
-        </div>
-      ),
+      key: 'actions', header: '', align: 'right',
+      render: (r) => {
+        const items: ERPMenuItem[] = [{ label: 'View', icon: Eye, onClick: () => navigate(`/hr/employees/${r.id}`) }];
+        if (hasPermission(PERMISSIONS.EMPLOYEE_UPDATE)) items.push({ label: 'Edit', icon: Pencil, onClick: () => navigate(`/hr/employees/${r.id}/edit`) });
+        return <ERPDropdownMenu items={items} />;
+      },
     },
   ];
 
@@ -116,7 +124,15 @@ export default function EmployeesPage() {
         </Select>
       </div>
 
-      <DataTable columns={columns} data={employees} loading={isLoading} emptyMessage="No employees found." />
+      <ERPDataGrid
+        columns={columns}
+        data={employees}
+        isLoading={isLoading}
+        rowKey="id"
+        pagination={{ page, pageSize, total: totalElements }}
+        onPageChange={setPage}
+        onPageSizeChange={(size) => { setPageSize(size); setPage(1); }}
+      />
 
       <DepartmentDesignationModal
         open={deptModalOpen}
@@ -134,6 +150,7 @@ function DepartmentDesignationModal({
 }: {
   open: boolean; onClose: () => void; departments: Department[]; designations: Designation[]; onChanged: () => void;
 }) {
+  const canCreate = useAuthStore((s) => s.hasPermission(PERMISSIONS.EMPLOYEE_CREATE));
   const [tab, setTab] = useState<'department' | 'designation'>('department');
   const [name, setName] = useState('');
   const [code, setCode] = useState('');
@@ -157,17 +174,19 @@ function DepartmentDesignationModal({
         <Button size="sm" variant={tab === 'designation' ? 'primary' : 'secondary'} onClick={() => setTab('designation')}>Designations</Button>
       </div>
 
-      <div className="flex gap-2 mb-4">
-        <Input placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
-        <Input placeholder="Code" value={code} onChange={(e) => setCode(e.target.value)} className="max-w-[120px]" />
-        <Button
-          onClick={() => (tab === 'department' ? createDept.mutate() : createDesig.mutate())}
-          loading={createDept.isPending || createDesig.isPending}
-          disabled={!name || !code}
-        >
-          Add
-        </Button>
-      </div>
+      {canCreate && (
+        <div className="flex gap-2 mb-4">
+          <Input placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
+          <Input placeholder="Code" value={code} onChange={(e) => setCode(e.target.value)} className="max-w-[120px]" />
+          <Button
+            onClick={() => (tab === 'department' ? createDept.mutate() : createDesig.mutate())}
+            loading={createDept.isPending || createDesig.isPending}
+            disabled={!name || !code}
+          >
+            Add
+          </Button>
+        </div>
+      )}
 
       <ul className="divide-y divide-default max-h-64 overflow-y-auto">
         {(tab === 'department' ? departments : designations).map((item) => (

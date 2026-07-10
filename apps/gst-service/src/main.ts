@@ -1,30 +1,40 @@
-import Fastify from 'fastify';
+import Fastify, { type FastifyError } from 'fastify';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
+import rateLimit from '@fastify/rate-limit';
 import { Kafka } from 'kafkajs';
-import { PlatformContextFactory, TenantScopedDatabase, type EventHandler, HELMET_OPTIONS, PERMISSIONS_POLICY } from '@erp/sdk';
+import { PlatformContextFactory, TenantScopedDatabase, type EventHandler, HELMET_OPTIONS, PERMISSIONS_POLICY, registerHealthRoute, tenantOrIpKeyGenerator, checkKafka, initializeTelemetry, initTenantStatusEnforcement } from '@erp/sdk';
 import { createDatabaseClient } from '@erp/db';
-import { createLogger } from '@erp/logger';
+import { createLogger, createMetricsHandler, createHttpMetricsHook, createCorrelationIdHook } from '@erp/logger';
 import { ERPError } from '@erp/types';
-import { requireEnv } from '@erp/config';
+import { loadConfigWithSecrets } from '@erp/config';
 import { hsnMaster } from '@erp/db';
 import { gstRoutes } from './api/gst.routes.js';
 import { gstRegisterRoutes } from './api/gst-register.routes.js';
 import { gstr1Routes } from './api/gstr1.routes.js';
 import { gstr3bRoutes } from './api/gstr3b.routes.js';
+import { gstr9Routes } from './api/gstr9.routes.js';
+import { rcmRoutes } from './api/rcm.routes.js';
 import { einvoiceRoutes } from './api/einvoice.routes.js';
 import { ewayBillRoutes } from './api/eway-bill.routes.js';
 import { gstr2aRoutes } from './api/gstr2a.routes.js';
 import { gstReturnsRoutes } from './api/gst-returns.routes.js';
+import { internalRoutes } from './api/internal.routes.js';
 import { HSN_SEED_DATA } from './domain/hsn-seed.js';
 import { handleInvoiceConfirmed } from './consumers/InvoiceGstConsumer.js';
 import { handleSaleReturnApproved } from './consumers/SaleReturnGstConsumer.js';
 import { handleGRNApproved, handlePurchaseReturnApproved } from './consumers/GRNGstConsumer.js';
+import { handleInvoiceConfirmedForEinvoice, handleInvoiceCancelledForEinvoice } from './consumers/EInvoiceEventConsumer.js';
+import { createGstComplianceOrchestrator } from './domain/GstComplianceSaga.js';
+
+initializeTelemetry({ serviceName: 'gst-service' });
 
 async function bootstrap(): Promise<void> {
   const port = parseInt(process.env['GST_SERVICE_PORT'] ?? '3018', 10);
-  const databaseUrl = requireEnv('DATABASE_URL');
-  const logger = createLogger({ serviceName: 'gst-service', level: 'info' });
+  const config = await loadConfigWithSecrets('gst-service');
+  const databaseUrl = config.databaseUrl;
+  const lokiUrl = process.env['LOKI_URL'];
+  const logger = createLogger({ serviceName: 'gst-service', level: 'info', ...(lokiUrl ? { lokiUrl } : {}) });
 
   const ctxFactory = new PlatformContextFactory({
     databaseUrl,
@@ -34,6 +44,8 @@ async function bootstrap(): Promise<void> {
     serviceName: 'gst-service',
   });
   await ctxFactory.connect();
+  ctxFactory.subscribeFeatureFlagInvalidations();
+  initTenantStatusEnforcement(ctxFactory.rawDb);
 
   // ── Kafka event consumers ─────────────────────────────────────────────────
   const kafka = new Kafka({
@@ -43,9 +55,20 @@ async function bootstrap(): Promise<void> {
 
   const consumerDb = createDatabaseClient({ url: databaseUrl, maxConnections: 3 });
 
+  // PG-006: the first registered saga type — e-Invoice IRN generation followed by
+  // (conditionally) e-Way Bill generation, compensable as one unit instead of two
+  // independent fire-and-forget NIC calls. Registered once here so both the
+  // Kafka-triggered run() below and this process's own admin retry()/compensate()
+  // resolve the same step list.
+  const gstComplianceSaga = createGstComplianceOrchestrator(consumerDb);
+
   const eventDispatcher: EventHandler = async (event, db) => {
     switch (event.eventType) {
-      case 'INVOICE_CONFIRMED':       await handleInvoiceConfirmed(event, db); break;
+      case 'INVOICE_CONFIRMED':
+        await handleInvoiceConfirmed(event, db);
+        await handleInvoiceConfirmedForEinvoice(event, db, gstComplianceSaga);
+        break;
+      case 'INVOICE_CANCELLED':       await handleInvoiceCancelledForEinvoice(event, db); break;
       case 'SALE_RETURN_APPROVED':    await handleSaleReturnApproved(event, db); break;
       case 'GRN_APPROVED':            await handleGRNApproved(event, db); break;
       case 'PURCHASE_RETURN_APPROVED': await handlePurchaseReturnApproved(event, db); break;
@@ -56,6 +79,7 @@ async function bootstrap(): Promise<void> {
 
   const gstTopics = [
     'erp.invoice.confirmed',
+    'erp.invoice.cancelled',
     'erp.sale.return.approved',
     'erp.grn.approved',
     'erp.purchase.return.approved',
@@ -71,7 +95,11 @@ async function bootstrap(): Promise<void> {
   logger.info({}, 'GST Kafka consumers started');
 
   // ── Fastify HTTP server ───────────────────────────────────────────────────
+  const metricsHandler = await createMetricsHandler('gst-service');
+
   const fastify = Fastify({ logger: false, trustProxy: true });
+
+  fastify.addHook('onRequest', createCorrelationIdHook());
 
   await fastify.register(helmet, HELMET_OPTIONS);
   fastify.addHook('onSend', async (_request, reply) => {
@@ -81,9 +109,24 @@ async function bootstrap(): Promise<void> {
     origin: process.env['ALLOWED_ORIGINS']?.split(',') ?? ['http://localhost:3000'],
     credentials: true,
   });
+  await fastify.register(rateLimit, {
+    global: true,
+    max: 200,
+    timeWindow: '1 minute',
+    redis: ctxFactory.getRedis(),
+    keyGenerator: tenantOrIpKeyGenerator,
+  });
+  fastify.addHook('onResponse', createHttpMetricsHook('gst-service'));
 
-  fastify.get('/health', async (_req, reply) => {
-    return reply.code(200).send({ status: 'ok', service: 'gst-service' });
+  registerHealthRoute(fastify, 'gst-service', {
+    db: () => ctxFactory.checkDb(),
+    redis: () => ctxFactory.checkRedis(),
+    kafka: () => checkKafka(kafka),
+  });
+
+  fastify.get('/metrics', async (_req, reply) => {
+    const body = await metricsHandler.handler();
+    return reply.code(200).header('Content-Type', metricsHandler.contentType).send(body);
   });
 
   // Seed HSN master on startup (idempotent) — global table, uses direct db
@@ -109,19 +152,22 @@ async function bootstrap(): Promise<void> {
     await gstRegisterRoutes(sub, ctxFactory);
     await gstr1Routes(sub, ctxFactory);
     await gstr3bRoutes(sub, ctxFactory);
+    await gstr9Routes(sub, ctxFactory);
+    await rcmRoutes(sub, ctxFactory);
     await einvoiceRoutes(sub, ctxFactory);
     await ewayBillRoutes(sub, ctxFactory);
     await gstr2aRoutes(sub, ctxFactory);
     await gstReturnsRoutes(sub, ctxFactory);
+    await internalRoutes(sub, ctxFactory, gstComplianceSaga, consumerDb);
   }, { prefix: '/api/v2' });
 
-  fastify.setErrorHandler((error, request, reply) => {
+  fastify.setErrorHandler<FastifyError>((error, request, reply) => {
     if (error instanceof ERPError) {
       return reply.code(error.statusCode).send({
         error: { code: error.code, message: error.message, details: error.details },
       });
     }
-    logger.error({ err: error.message, url: request.url }, 'Unhandled error in gst-service');
+    logger.error({ err: error.message, url: request.url, correlationId: (request as { correlationId?: string }).correlationId }, 'Unhandled error in gst-service');
     return reply.code(500).send({ error: { code: 'INTERNAL_ERROR', message: 'An unexpected error occurred' } });
   });
 

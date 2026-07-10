@@ -1,41 +1,20 @@
 import { useState, type ReactNode } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { Zap, CheckCircle, XCircle, Clock, AlertTriangle, Search, X } from 'lucide-react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { Zap, CheckCircle, XCircle, Clock, AlertTriangle, Search, RefreshCw, Truck } from 'lucide-react';
 import { gstApi } from '../../api/endpoints.js';
+import toast from 'react-hot-toast';
+import { useAuthStore } from '../../store/auth.store.js';
+import { PERMISSIONS } from '../../constants/permissions.js';
+import { ERPTableSkeleton } from '../../components/erp/ERPSkeleton.js';
+import ERPEmptyState from '../../components/erp/ERPEmptyState.js';
 
-const STUB_BANNER_KEY = 'einvoice_stub_banner_dismissed';
-
-// Remove this banner when NIC integration is live (see ES-11)
-function StubWarningBanner() {
-  const [dismissed, setDismissed] = useState(
-    () => sessionStorage.getItem(STUB_BANNER_KEY) === 'true'
-  );
-
-  if (dismissed) return null;
-
-  const handleDismiss = () => {
-    sessionStorage.setItem(STUB_BANNER_KEY, 'true');
-    setDismissed(true);
-  };
-
-  return (
-    <div className="flex items-start gap-3 w-full rounded-xl border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/20 px-4 py-3">
-      <AlertTriangle className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
-      <p className="flex-1 text-sm text-amber-800 dark:text-amber-300 font-medium">
-        ⚠ STUB MODE: e-Invoice and e-Way Bill are not connected to the NIC portal. IRN numbers generated here are test values only. Do not use for real invoices.
-      </p>
-      <button
-        onClick={handleDismiss}
-        aria-label="Dismiss warning"
-        className="shrink-0 text-amber-600 dark:text-amber-400 hover:text-amber-800 dark:hover:text-amber-200"
-      >
-        <X className="w-4 h-4" />
-      </button>
-    </div>
-  );
-}
-
-type IrnStatus = 'PENDING_IRN' | 'IRN_GENERATED' | 'IRN_CANCELLED' | 'FAILED_IRN' | 'NOT_APPLICABLE';
+type IrnStatus =
+  | 'PENDING_IRN'
+  | 'IRN_GENERATED'
+  | 'IRN_CANCELLED'
+  | 'FAILED_IRN'
+  | 'NOT_APPLICABLE'
+  | 'CANCEL_REQUIRED_MANUALLY';
 
 const STATUS_CONFIG: Record<IrnStatus, { label: string; color: string; icon: ReactNode }> = {
   IRN_GENERATED: {
@@ -60,7 +39,12 @@ const STATUS_CONFIG: Record<IrnStatus, { label: string; color: string; icon: Rea
   },
   NOT_APPLICABLE: {
     label: 'Not Applicable',
-    color: 'text-gray-400 bg-gray-100 dark:bg-gray-800',
+    color: 'text-gray-400 dark:text-gray-500 bg-gray-100 dark:bg-gray-800',
+    icon: <AlertTriangle className="w-3.5 h-3.5" />,
+  },
+  CANCEL_REQUIRED_MANUALLY: {
+    label: 'Cancel via Portal',
+    color: 'text-orange-700 dark:text-orange-400 bg-orange-100 dark:bg-orange-900/30',
     icon: <AlertTriangle className="w-3.5 h-3.5" />,
   },
 };
@@ -72,6 +56,119 @@ function StatusBadge({ status }: { status: IrnStatus }) {
       {cfg.icon}
       {cfg.label}
     </span>
+  );
+}
+
+interface EInvoiceListRow {
+  invoiceId: number;
+  invoiceNumber: string;
+  irnStatus: IrnStatus;
+  irn: string | null;
+  ackNumber: string | null;
+  signedQrCode: string | null;
+  retryCount: number;
+  failureReason: string | null;
+  ewbNumber: string | null;
+  ewbValidUpto: string | null;
+  updatedAt: string;
+}
+
+function EInvoiceListTable() {
+  const queryClient = useQueryClient();
+  const canGenerateEInvoice = useAuthStore((s) => s.hasPermission(PERMISSIONS.EINVOICE_GENERATE));
+  const { data, isLoading } = useQuery({
+    queryKey: ['einvoice-list'],
+    queryFn: () => gstApi.einvoiceList(),
+    select: (r) => r.content as unknown as EInvoiceListRow[],
+  });
+
+  const retryMutation = useMutation({
+    mutationFn: (invoiceId: number) => gstApi.retryIrn(invoiceId),
+    onSuccess: () => {
+      toast.success('IRN retry succeeded');
+      void queryClient.invalidateQueries({ queryKey: ['einvoice-list'] });
+    },
+    onError: (err: unknown) => {
+      const message = err instanceof Error ? err.message : 'IRN retry failed';
+      toast.error(message);
+      void queryClient.invalidateQueries({ queryKey: ['einvoice-list'] });
+    },
+  });
+
+  return (
+    <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
+      <div className="px-5 py-4 border-b border-gray-200 dark:border-gray-700">
+        <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Recent e-Invoices</h3>
+        <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+          Invoices for which IRN generation was attempted — auto-triggered on confirmation, or via manual retry
+        </p>
+      </div>
+
+      {isLoading && <ERPTableSkeleton rows={4} cols={5} />}
+      {!isLoading && (data?.length ?? 0) === 0 && (
+        <ERPEmptyState type="no-data" title="No e-Invoice attempts recorded yet" description="IRN generation is triggered automatically when a B2B invoice is confirmed." />
+      )}
+
+      {!isLoading && (data?.length ?? 0) > 0 && (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 dark:bg-gray-900/50 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
+              <tr>
+                <th className="px-5 py-2.5">Invoice</th>
+                <th className="px-5 py-2.5">IRN Status</th>
+                <th className="px-5 py-2.5">IRN / QR</th>
+                <th className="px-5 py-2.5">e-Way Bill</th>
+                <th className="px-5 py-2.5">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
+              {data?.map((row) => (
+                <tr key={row.invoiceId}>
+                  <td className="px-5 py-3 font-medium text-gray-900 dark:text-white">{row.invoiceNumber}</td>
+                  <td className="px-5 py-3">
+                    <StatusBadge status={row.irnStatus} />
+                    {row.irnStatus === 'FAILED_IRN' && row.failureReason && (
+                      <p className="text-xs text-red-600 dark:text-red-400 mt-1 max-w-xs truncate" title={row.failureReason}>
+                        {row.failureReason}
+                      </p>
+                    )}
+                  </td>
+                  <td className="px-5 py-3 font-mono text-xs text-gray-600 dark:text-gray-400">
+                    {row.irn ? `${row.irn.substring(0, 20)}...` : '—'}
+                    {row.signedQrCode && (
+                      <span className="ml-2 inline-block text-[10px] px-1.5 py-0.5 rounded bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400">
+                        QR ready
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-5 py-3 text-xs text-gray-600 dark:text-gray-400">
+                    {row.ewbNumber ? (
+                      <span className="inline-flex items-center gap-1">
+                        <Truck className="w-3.5 h-3.5" /> {row.ewbNumber}
+                      </span>
+                    ) : (
+                      'Not Generated'
+                    )}
+                  </td>
+                  <td className="px-5 py-3">
+                    {canGenerateEInvoice && (row.irnStatus === 'FAILED_IRN' || row.irnStatus === 'PENDING_IRN') && (
+                      <button
+                        onClick={() => retryMutation.mutate(row.invoiceId)}
+                        disabled={retryMutation.isPending}
+                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50"
+                      >
+                        <RefreshCw className="w-3.5 h-3.5" />
+                        Retry
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -112,7 +209,7 @@ function InvoiceStatusLookup() {
         </button>
       </div>
 
-      {isLoading && <p className="mt-4 text-sm text-gray-400">Fetching status...</p>}
+      {isLoading && <p className="mt-4 text-sm text-gray-400 dark:text-gray-500">Fetching status...</p>}
       {error && <p className="mt-4 text-sm text-red-600 dark:text-red-400">Invoice not found or error fetching status</p>}
 
       {data && (
@@ -169,8 +266,6 @@ function InvoiceStatusLookup() {
 export function EInvoicePage() {
   return (
     <div className="p-6 space-y-6">
-      <StubWarningBanner />
-
       <div className="flex items-center gap-3">
         <Zap className="w-6 h-6 text-indigo-600 dark:text-indigo-400" />
         <div>
@@ -198,18 +293,21 @@ export function EInvoicePage() {
         </div>
       </div>
 
+      {/* Recent e-Invoice attempts */}
+      <EInvoiceListTable />
+
       {/* Status lookup */}
       <InvoiceStatusLookup />
 
       {/* Instructions */}
       <div className="bg-gray-50 dark:bg-gray-900/50 border border-gray-200 dark:border-gray-700 rounded-xl p-5">
-        <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">How to Generate IRN</h3>
+        <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">How IRN Generation Works</h3>
         <ol className="space-y-2 text-sm text-gray-600 dark:text-gray-400">
-          <li className="flex gap-2"><span className="flex-shrink-0 w-5 h-5 rounded-full bg-indigo-600 text-white text-xs flex items-center justify-center font-medium">1</span>Confirm the invoice in the Sales module</li>
-          <li className="flex gap-2"><span className="flex-shrink-0 w-5 h-5 rounded-full bg-indigo-600 text-white text-xs flex items-center justify-center font-medium">2</span>Open the invoice detail page</li>
-          <li className="flex gap-2"><span className="flex-shrink-0 w-5 h-5 rounded-full bg-indigo-600 text-white text-xs flex items-center justify-center font-medium">3</span>Click "Generate IRN" — the NIC payload will be pre-filled</li>
-          <li className="flex gap-2"><span className="flex-shrink-0 w-5 h-5 rounded-full bg-indigo-600 text-white text-xs flex items-center justify-center font-medium">4</span>IRN, Ack No, and signed QR code are stored automatically</li>
-          <li className="flex gap-2"><span className="flex-shrink-0 w-5 h-5 rounded-full bg-indigo-600 text-white text-xs flex items-center justify-center font-medium">5</span>Generate e-Way Bill from the same page if goods value &gt; ₹50K</li>
+          <li className="flex gap-2"><span className="flex-shrink-0 w-5 h-5 rounded-full bg-indigo-600 text-white text-xs flex items-center justify-center font-medium">1</span>Confirming a B2B invoice (customer GSTIN on file) auto-triggers IRN generation via NIC</li>
+          <li className="flex gap-2"><span className="flex-shrink-0 w-5 h-5 rounded-full bg-indigo-600 text-white text-xs flex items-center justify-center font-medium">2</span>IRN, Ack No, and signed QR code are stored automatically on success</li>
+          <li className="flex gap-2"><span className="flex-shrink-0 w-5 h-5 rounded-full bg-indigo-600 text-white text-xs flex items-center justify-center font-medium">3</span>Transient NIC failures retry automatically (3x on the call, then every 15 min)</li>
+          <li className="flex gap-2"><span className="flex-shrink-0 w-5 h-5 rounded-full bg-indigo-600 text-white text-xs flex items-center justify-center font-medium">4</span>Use "Retry" on a Failed row above to force an immediate retry</li>
+          <li className="flex gap-2"><span className="flex-shrink-0 w-5 h-5 rounded-full bg-indigo-600 text-white text-xs flex items-center justify-center font-medium">5</span>Generate e-Way Bill from the invoice detail page if goods value &gt; ₹50K</li>
         </ol>
       </div>
 
@@ -226,6 +324,7 @@ export function EInvoicePage() {
                 {status === 'IRN_CANCELLED' && 'Cancelled at NIC portal'}
                 {status === 'FAILED_IRN' && 'Max retries exceeded or invalid data'}
                 {status === 'NOT_APPLICABLE' && 'Below ₹5L threshold'}
+                {status === 'CANCEL_REQUIRED_MANUALLY' && '24h window passed; cancel via NIC portal'}
               </p>
             </div>
           ))}

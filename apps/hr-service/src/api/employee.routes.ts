@@ -1,10 +1,10 @@
 import type { FastifyInstance } from 'fastify';
-import type { PlatformContextFactory } from '@erp/sdk';
+import type { PlatformContextFactory, PlatformContext, PlatformAttachments } from '@erp/sdk';
 import { employees, departments, designations } from '@erp/db';
-import { and, eq, ilike, isNull, or } from 'drizzle-orm';
+import { and, eq, ilike, isNull, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { BusinessError, NotFoundError, ValidationError } from '@erp/types';
-import { PERMISSIONS } from '@erp/types';
+import { PERMISSIONS, OptionalPANSchema, OptionalIFSCSchema, OptionalBankAccountSchema, OptionalUANSchema } from '@erp/types';
 import { encryptField } from '@erp/utils';
 import { requireEnv } from '@erp/config';
 import { createHmac } from 'node:crypto';
@@ -21,10 +21,14 @@ const CreateEmployeeSchema = z.object({
   gender: z.enum(['MALE', 'FEMALE', 'OTHER']).optional(),
   dateOfBirth: z.string().max(10).optional(),
   aadhaarLast4: z.string().length(4).regex(/^\d{4}$/).optional(),
-  pan: z.string().regex(/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/).optional(),
-  bankAccountNo: z.string().max(20).optional(),
+  pan: OptionalPANSchema,
+  bankAccountNo: OptionalBankAccountSchema,
   bankName: z.string().max(200).optional(),
-  bankIfsc: z.string().max(20).optional(),
+  bankIfsc: OptionalIFSCSchema,
+  uan: OptionalUANSchema,
+  esiNumber: z.string().max(17).optional(),
+  pfApplicable: z.boolean().default(true),
+  esiApplicable: z.boolean().default(true),
   employmentType: z.enum(['FULL_TIME', 'PART_TIME', 'CONTRACT', 'DAILY_WAGE', 'TRAINEE', 'TAILOR']).default('FULL_TIME'),
   departmentId: z.number().int().positive().optional(),
   designationId: z.number().int().positive().optional(),
@@ -67,6 +71,16 @@ const ListEmployeeQuerySchema = z.object({
 
 function generateEmployeeCode(id: number): string {
   return `EMP-${String(id).padStart(5, '0')}`;
+}
+
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+const PHOTO_MIME_TYPES = new Set(['image/jpeg', 'image/png']);
+const DOCUMENT_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'application/pdf']);
+const DOCUMENT_TYPES = new Set(['AADHAAR', 'PAN', 'CERTIFICATE', 'OFFER_LETTER', 'OTHER']);
+
+function getAttachments(ctx: PlatformContext): PlatformAttachments {
+  if (!ctx.files) throw new Error('Storage is not configured for this service');
+  return ctx.files;
 }
 
 export async function employeeRoutes(
@@ -197,7 +211,16 @@ export async function employeeRoutes(
       .limit(size)
       .offset(page * size);
 
-    return reply.code(200).send({ data: { content: rows, totalElements: rows.length, page, size } });
+    const [countRow] = await ctx.db.raw
+      .select({ count: sql<number>`count(*)::int` })
+      .from(employees)
+      .where(and(...conditions));
+
+    // photoUrl is a storage object key, not a browsable URL — expose only whether a
+    // photo exists here; GET /employees/:id/photo resolves the real signed URL.
+    const content = rows.map(({ photoUrl, ...row }) => ({ ...row, hasPhoto: photoUrl != null }));
+
+    return reply.code(200).send({ data: { content, totalElements: countRow?.count ?? 0, page, size } });
   });
 
   fastify.get<{ Params: { id: string } }>('/employees/:id', { preHandler: [authenticate, requirePermission(PERMISSIONS.EMPLOYEE_VIEW)] }, async (request, reply) => {
@@ -213,7 +236,9 @@ export async function employeeRoutes(
     // Check if caller has PAYROLL_VIEW permission before returning salary
     const hasPayrollView = request.auth.permissions.includes(PERMISSIONS.PAYROLL_VIEW);
 
-    // Never return encrypted salary in GET detail — only metadata
+    // Never return encrypted salary in GET detail — only metadata. photoUrl is a storage
+    // object key, not a browsable URL — expose only whether a photo exists; GET
+    // /employees/:id/photo resolves the real signed URL.
     const result = {
       ...emp,
       panEncrypted: undefined,
@@ -221,6 +246,8 @@ export async function employeeRoutes(
       bankAccountNoEncrypted: undefined,
       bankAccountNoHash: undefined,
       hasSalaryData: hasPayrollView,
+      photoUrl: undefined,
+      hasPhoto: emp.photoUrl != null,
     };
 
     return reply.code(200).send({ data: result });
@@ -345,24 +372,149 @@ export async function employeeRoutes(
     const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
     const ctx = ctxFactory.create({ tenantId, userId, correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID() });
     const id = parseInt(request.params.id, 10);
-    const [existing] = await ctx.db.raw.select({ id: employees.id }).from(employees).where(and(eq(employees.id, id), eq(employees.tenantId, tenantId)));
+    const [existing] = await ctx.db.raw.select({ id: employees.id }).from(employees).where(and(eq(employees.id, id), eq(employees.tenantId, tenantId), isNull(employees.deletedAt)));
     if (!existing) throw new NotFoundError('Employee', id);
-    // Return a pre-signed URL placeholder; real S3 wiring via MinIO in production
-    const uploadUrl = `/uploads/employees/${id}/photo`;
-    return reply.code(200).send({ data: { uploadUrl, employeeId: id } });
+
+    const file = await request.file();
+    if (!file) throw new ValidationError('No file uploaded');
+    if (!PHOTO_MIME_TYPES.has(file.mimetype)) throw new ValidationError(`Unsupported file type: ${file.mimetype}`);
+    const buffer = await file.toBuffer();
+    if (buffer.length > MAX_FILE_SIZE) throw new ValidationError('File exceeds the 10MB size limit');
+
+    const attachments = getAttachments(ctx);
+    // Photo is a single current value — remove any prior photo attachment before storing the new one.
+    const previousPhotos = await attachments.list('EMPLOYEE_PHOTO', id);
+    for (const previous of previousPhotos) {
+      await attachments.delete(previous.id);
+    }
+
+    const row = await attachments.upload({
+      entityType: 'EMPLOYEE_PHOTO',
+      entityId: id,
+      fileName: file.filename,
+      buffer,
+      mimeType: file.mimetype,
+      fileSize: buffer.length,
+      uploadedBy: userId,
+    });
+
+    await ctx.db.raw.update(employees).set({ photoUrl: row.objectKey, updatedAt: new Date() }).where(eq(employees.id, id));
+    await ctx.audit.log({ action: 'UPDATE', entityType: 'employee', entityId: id, metadata: { action: 'PHOTO_UPLOAD', fileName: file.filename } });
+
+    return reply.code(200).send({ data: { employeeId: id, photoUrl: row.objectKey } });
+  });
+
+  fastify.get<{ Params: { id: string } }>('/employees/:id/photo', { preHandler: [authenticate, requirePermission(PERMISSIONS.EMPLOYEE_VIEW)] }, async (request, reply) => {
+    const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
+    const ctx = ctxFactory.create({ tenantId, userId, correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID() });
+    const id = parseInt(request.params.id, 10);
+    const [existing] = await ctx.db.raw.select({ id: employees.id }).from(employees).where(and(eq(employees.id, id), eq(employees.tenantId, tenantId), isNull(employees.deletedAt)));
+    if (!existing) throw new NotFoundError('Employee', id);
+
+    const attachments = getAttachments(ctx);
+    const [photo] = await attachments.list('EMPLOYEE_PHOTO', id);
+    if (!photo) throw new NotFoundError('Employee photo', id);
+
+    const { url } = await attachments.getDownloadUrl(photo.id);
+    return reply.code(302).redirect(url);
+  });
+
+  fastify.get<{ Params: { id: string } }>('/employees/:id/documents', { preHandler: [authenticate, requirePermission(PERMISSIONS.EMPLOYEE_VIEW)] }, async (request, reply) => {
+    const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
+    const ctx = ctxFactory.create({ tenantId, userId, correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID() });
+    const id = parseInt(request.params.id, 10);
+    const [existing] = await ctx.db.raw.select({ id: employees.id }).from(employees).where(and(eq(employees.id, id), eq(employees.tenantId, tenantId), isNull(employees.deletedAt)));
+    if (!existing) throw new NotFoundError('Employee', id);
+
+    const attachments = getAttachments(ctx);
+    const rows = await attachments.list('EMPLOYEE_DOCUMENT', id);
+    return reply.code(200).send({ data: rows });
   });
 
   fastify.post<{ Params: { id: string } }>('/employees/:id/documents/upload', { preHandler: [authenticate, requirePermission(PERMISSIONS.EMPLOYEE_UPDATE)] }, async (request, reply) => {
     const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
     const ctx = ctxFactory.create({ tenantId, userId, correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID() });
     const id = parseInt(request.params.id, 10);
-    const [existing] = await ctx.db.raw.select({ id: employees.id }).from(employees).where(and(eq(employees.id, id), eq(employees.tenantId, tenantId)));
+    const [existing] = await ctx.db.raw.select({ id: employees.id }).from(employees).where(and(eq(employees.id, id), eq(employees.tenantId, tenantId), isNull(employees.deletedAt)));
     if (!existing) throw new NotFoundError('Employee', id);
-    const uploadUrl = `/uploads/employees/${id}/documents`;
-    return reply.code(200).send({ data: { uploadUrl, employeeId: id } });
+
+    const file = await request.file();
+    if (!file) throw new ValidationError('No file uploaded');
+    const documentType = (file.fields['documentType'] as { value?: string } | undefined)?.value;
+    if (!documentType || !DOCUMENT_TYPES.has(documentType)) {
+      throw new ValidationError('documentType must be one of AADHAAR, PAN, CERTIFICATE, OFFER_LETTER, OTHER');
+    }
+    if (!DOCUMENT_MIME_TYPES.has(file.mimetype)) throw new ValidationError(`Unsupported file type: ${file.mimetype}`);
+    const buffer = await file.toBuffer();
+    if (buffer.length > MAX_FILE_SIZE) throw new ValidationError('File exceeds the 10MB size limit');
+
+    const attachments = getAttachments(ctx);
+    const row = await attachments.upload({
+      entityType: 'EMPLOYEE_DOCUMENT',
+      entityId: id,
+      fileName: `[${documentType}] ${file.filename}`,
+      buffer,
+      mimeType: file.mimetype,
+      fileSize: buffer.length,
+      uploadedBy: userId,
+    });
+
+    await ctx.audit.log({ action: 'UPDATE', entityType: 'employee', entityId: id, metadata: { action: 'DOCUMENT_UPLOAD', fileName: file.filename, documentType } });
+
+    return reply.code(201).send({ data: row });
   });
 
-  fastify.post('/employees/import', { preHandler: [authenticate, requirePermission(PERMISSIONS.EMPLOYEE_IMPORT)] }, async (_request, reply) => {
-    return reply.code(202).send({ data: { message: 'Import queued', status: 'QUEUED' } });
+  fastify.get<{ Params: { id: string; attachmentId: string } }>('/employees/:id/documents/:attachmentId/download', { preHandler: [authenticate, requirePermission(PERMISSIONS.EMPLOYEE_VIEW)] }, async (request, reply) => {
+    const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
+    const ctx = ctxFactory.create({ tenantId, userId, correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID() });
+    const id = parseInt(request.params.id, 10);
+    const [existing] = await ctx.db.raw.select({ id: employees.id }).from(employees).where(and(eq(employees.id, id), eq(employees.tenantId, tenantId), isNull(employees.deletedAt)));
+    if (!existing) throw new NotFoundError('Employee', id);
+
+    const attachmentId = parseInt(request.params.attachmentId, 10);
+    const attachments = getAttachments(ctx);
+    const row = await attachments.get(attachmentId);
+    if (row.entityType !== 'EMPLOYEE_DOCUMENT' || row.entityId !== id) throw new NotFoundError('Document', attachmentId);
+
+    const { url } = await attachments.getDownloadUrl(attachmentId);
+    return reply.code(302).redirect(url);
+  });
+
+  fastify.delete<{ Params: { id: string; attachmentId: string } }>('/employees/:id/documents/:attachmentId', { preHandler: [authenticate, requirePermission(PERMISSIONS.EMPLOYEE_UPDATE)] }, async (request, reply) => {
+    const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
+    const ctx = ctxFactory.create({ tenantId, userId, correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID() });
+    const id = parseInt(request.params.id, 10);
+    const [existing] = await ctx.db.raw.select({ id: employees.id }).from(employees).where(and(eq(employees.id, id), eq(employees.tenantId, tenantId), isNull(employees.deletedAt)));
+    if (!existing) throw new NotFoundError('Employee', id);
+
+    const attachmentId = parseInt(request.params.attachmentId, 10);
+    const attachments = getAttachments(ctx);
+    const row = await attachments.get(attachmentId);
+    if (row.entityType !== 'EMPLOYEE_DOCUMENT' || row.entityId !== id) throw new NotFoundError('Document', attachmentId);
+
+    await attachments.delete(attachmentId);
+    await ctx.audit.log({ action: 'DELETE', entityType: 'employee', entityId: id, metadata: { action: 'DOCUMENT_DELETE', attachmentId } });
+
+    return reply.code(204).send();
+  });
+
+  // Proxies to scheduler-service's generic ImportEngine rather than re-implementing
+  // CSV-parse-validate-execute here — this is a thin upload relay, not a second import
+  // pipeline. The caller polls scheduler-service's own /imports/:jobId/status directly.
+  fastify.post('/employees/import', { preHandler: [authenticate, requirePermission(PERMISSIONS.EMPLOYEE_IMPORT)] }, async (request, reply) => {
+    const file = await request.file();
+    if (!file) throw new ValidationError('No file uploaded');
+    const buffer = await file.toBuffer();
+
+    const schedulerUrl = process.env['SCHEDULER_SERVICE_URL'] ?? 'http://localhost:3016';
+    const res = await fetch(`${schedulerUrl}/imports/upload`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: request.headers.authorization ?? '' },
+      body: JSON.stringify({ entityType: 'employee', csvData: buffer.toString('utf-8'), fileName: file.filename }),
+    });
+    const resBody = (await res.json()) as { data?: { jobId: string }; error?: { message: string } };
+    if (!res.ok) throw new BusinessError('IMPORT_UPLOAD_FAILED', resBody.error?.message ?? 'Failed to create import job');
+
+    return reply.code(202).send({ data: { jobId: resBody.data?.jobId, message: 'Import job created' } });
   });
 }

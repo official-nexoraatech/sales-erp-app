@@ -22,6 +22,12 @@ export interface GSTComputeResult {
 }
 
 export class GSTCalculator {
+  // RCM: buyer self-assesses GST on purchases from unregistered vendors and pays it
+  // directly to the government instead of to the supplier (ES-10).
+  static calculateRCMTax(baseAmount: number, gstRate: number, isInterstate: boolean): GSTComputeResult {
+    return GSTCalculator.compute({ taxableAmount: baseAmount, gstRate, isInterstate });
+  }
+
   static compute(input: GSTComputeInput): GSTComputeResult {
     const { taxableAmount, gstRate, cessRate = 0, isInterstate } = input;
     const halfRate = gstRate / 2;

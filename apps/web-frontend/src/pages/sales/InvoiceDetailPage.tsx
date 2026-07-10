@@ -3,7 +3,12 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { invoiceApi } from '../../api/endpoints.js';
+import { useAuthStore } from '../../store/auth.store.js';
+import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
+import { ERPDetailSkeleton } from '../../components/erp/ERPSkeleton.js';
+import ERPEmptyState from '../../components/erp/ERPEmptyState.js';
+import AttachmentSection from '../../components/erp/AttachmentSection.js';
 import Button from '../../components/ui/Button.js';
 import Badge from '../../components/ui/Badge.js';
 import Modal from '../../components/ui/Modal.js';
@@ -46,10 +51,21 @@ const STATUS_COLORS: Record<string, 'default' | 'success' | 'warning' | 'danger'
   DRAFT: 'default', CONFIRMED: 'success', PARTIALLY_PAID: 'warning', PAID: 'success', CANCELLED: 'danger', OVERDUE: 'danger',
 };
 
+function openPdfInNewTab(blob: Blob) {
+  const url = URL.createObjectURL(blob);
+  window.open(url, '_blank');
+  // Revoke after the new tab has had time to load the object URL, not immediately.
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}
+
 export default function InvoiceDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const hasPermission = useAuthStore((s) => s.hasPermission);
+  const canCreateInvoice = hasPermission(PERMISSIONS.INVOICE_CREATE);
+  const canCreatePayment = hasPermission(PERMISSIONS.PAYMENT_CREATE);
+  const canCancelInvoice = hasPermission(PERMISSIONS.INVOICE_CANCEL);
   const [showConfirm, setShowConfirm] = useState(false);
   const [showCancel, setShowCancel] = useState(false);
   const [invoiceNum, setInvoiceNum] = useState('');
@@ -61,7 +77,7 @@ export default function InvoiceDetailPage() {
     enabled: !!id,
   });
 
-  const invoice = (data as { data?: InvoiceDetail })?.data;
+  const invoice = (data as InvoiceDetail);
 
   const confirmMutation = useMutation({
     mutationFn: () => invoiceApi.confirm(Number(id), { invoiceNumber: invoiceNum }),
@@ -75,20 +91,32 @@ export default function InvoiceDetailPage() {
     onError: (e: Error) => toast.error(e.message),
   });
 
-  if (isLoading || !invoice) return <div className="p-8 text-center text-gray-500">Loading…</div>;
+  const pdfMutation = useMutation({
+    mutationFn: () => invoiceApi.pdf(Number(id)),
+    onSuccess: (blob) => openPdfInNewTab(blob as Blob),
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  if (isLoading) return <ERPDetailSkeleton />;
+  if (!invoice) return <ERPEmptyState type="no-data" title="Invoice not found" />;
 
   return (
     <div>
       <ERPPageHeader variant="list" title={invoice.invoiceNumber ?? 'Draft Invoice'} subtitle={`Customer ${invoice.customerId}`}>
         <div className="flex items-center gap-3">
           <Badge variant={STATUS_COLORS[invoice.status] ?? 'default'}>{invoice.status}</Badge>
-          {invoice.status === 'DRAFT' && (
+          {canCreateInvoice && invoice.status === 'DRAFT' && (
             <Button onClick={() => setShowConfirm(true)}>Confirm Invoice</Button>
           )}
-          {['CONFIRMED', 'PARTIALLY_PAID'].includes(invoice.status) && (
+          {canCreatePayment && ['CONFIRMED', 'PARTIALLY_PAID'].includes(invoice.status) && (
             <Button onClick={() => navigate(`/sales/payments/new?invoiceId=${id}`)} variant="ghost">Record Payment</Button>
           )}
-          {['DRAFT', 'CONFIRMED'].includes(invoice.status) && (
+          {['CONFIRMED', 'PARTIALLY_PAID', 'PAID', 'OVERDUE'].includes(invoice.status) && (
+            <Button variant="ghost" isLoading={pdfMutation.isPending} onClick={() => pdfMutation.mutate()}>
+              Print / Download PDF
+            </Button>
+          )}
+          {canCancelInvoice && ['DRAFT', 'CONFIRMED'].includes(invoice.status) && (
             <Button variant="danger" onClick={() => setShowCancel(true)}>Cancel</Button>
           )}
         </div>
@@ -129,7 +157,7 @@ export default function InvoiceDetailPage() {
             {invoice.lines.map((l) => (
               <tr key={l.id}>
                 <td className="py-2">{l.itemId}</td>
-                <td className="py-2 text-gray-500">{l.hsnCode ?? '—'}</td>
+                <td className="py-2 text-secondary">{l.hsnCode ?? '—'}</td>
                 <td className="py-2">{parseFloat(l.quantity).toFixed(3)}</td>
                 <td className="py-2">₹{parseFloat(l.unitPrice).toFixed(2)}</td>
                 <td className="py-2">₹{parseFloat(l.taxableAmount).toFixed(2)}</td>
@@ -144,15 +172,15 @@ export default function InvoiceDetailPage() {
 
         <div className="mt-4 pt-4 border-t dark:border-gray-700 flex justify-end">
           <div className="w-64 space-y-1 text-sm">
-            <div className="flex justify-between"><span className="text-gray-500">Taxable</span><span>₹{parseFloat(invoice.taxableAmount).toFixed(2)}</span></div>
-            {parseFloat(invoice.cgstAmount) > 0 && <div className="flex justify-between"><span className="text-gray-500">CGST</span><span>₹{parseFloat(invoice.cgstAmount).toFixed(2)}</span></div>}
-            {parseFloat(invoice.sgstAmount) > 0 && <div className="flex justify-between"><span className="text-gray-500">SGST</span><span>₹{parseFloat(invoice.sgstAmount).toFixed(2)}</span></div>}
-            {parseFloat(invoice.igstAmount) > 0 && <div className="flex justify-between"><span className="text-gray-500">IGST</span><span>₹{parseFloat(invoice.igstAmount).toFixed(2)}</span></div>}
+            <div className="flex justify-between"><span className="text-secondary">Taxable</span><span>₹{parseFloat(invoice.taxableAmount).toFixed(2)}</span></div>
+            {parseFloat(invoice.cgstAmount) > 0 && <div className="flex justify-between"><span className="text-secondary">CGST</span><span>₹{parseFloat(invoice.cgstAmount).toFixed(2)}</span></div>}
+            {parseFloat(invoice.sgstAmount) > 0 && <div className="flex justify-between"><span className="text-secondary">SGST</span><span>₹{parseFloat(invoice.sgstAmount).toFixed(2)}</span></div>}
+            {parseFloat(invoice.igstAmount) > 0 && <div className="flex justify-between"><span className="text-secondary">IGST</span><span>₹{parseFloat(invoice.igstAmount).toFixed(2)}</span></div>}
             <div className="flex justify-between font-bold text-base pt-1 border-t dark:border-gray-700">
               <span>Grand Total</span><span>₹{parseFloat(invoice.grandTotal).toFixed(2)}</span>
             </div>
-            <div className="flex justify-between text-green-600"><span>Paid</span><span>₹{parseFloat(invoice.paidAmount).toFixed(2)}</span></div>
-            <div className="flex justify-between font-semibold text-red-600"><span>Balance Due</span><span>₹{parseFloat(invoice.balanceDue).toFixed(2)}</span></div>
+            <div className="flex justify-between text-success"><span>Paid</span><span>₹{parseFloat(invoice.paidAmount).toFixed(2)}</span></div>
+            <div className="flex justify-between font-semibold text-danger"><span>Balance Due</span><span>₹{parseFloat(invoice.balanceDue).toFixed(2)}</span></div>
           </div>
         </div>
       </div>
@@ -163,6 +191,10 @@ export default function InvoiceDetailPage() {
           <p className="text-sm text-gray-600 dark:text-gray-400">{invoice.notes}</p>
         </div>
       )}
+
+      <div className="mb-4">
+        <AttachmentSection service="sales" entityType="INVOICE" entityId={invoice.id} />
+      </div>
 
       {/* Confirm Modal */}
       <Modal isOpen={showConfirm} onClose={() => setShowConfirm(false)} title="Confirm Invoice">

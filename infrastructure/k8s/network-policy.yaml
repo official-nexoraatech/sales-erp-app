@@ -27,7 +27,10 @@ spec:
         - port: 53
           protocol: TCP
 ---
-# Allow auth-service ingress from api-gateway and health checks
+# Allow auth-service ingress from health checks
+# TODO: re-add a from-podSelector entry for api-gateway once it's implemented, see ES-28.
+# api-gateway is currently a 4-line stub (see ES-27_COMPLETION.md) — services are reached
+# directly and each independently enforces its own auth (hardened in ES-21).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -40,12 +43,6 @@ spec:
   policyTypes:
     - Ingress
   ingress:
-    - from:
-        - podSelector:
-            matchLabels:
-              app: api-gateway
-      ports:
-        - port: 3010
     - from:
         - namespaceSelector:
             matchLabels:

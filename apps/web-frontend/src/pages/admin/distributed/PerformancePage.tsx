@@ -1,6 +1,8 @@
 import { useQuery } from '@tanstack/react-query';
 import { performanceAdminApi } from '../../../api/endpoints.js';
 import ERPPageHeader from '../../../components/erp/ERPPageHeader.js';
+import { ERPTableSkeleton } from '../../../components/erp/ERPSkeleton.js';
+import ERPEmptyState from '../../../components/erp/ERPEmptyState.js';
 import Badge from '../../../components/ui/Badge.js';
 import { formatDate } from '../../../lib/format.js';
 
@@ -84,7 +86,7 @@ export default function PerformancePage() {
       {/* Baselines table */}
       <div className="card overflow-hidden">
         {baselinesLoading ? (
-          <div className="p-8 text-center text-secondary">Loading baselines…</div>
+          <ERPTableSkeleton rows={6} cols={8} />
         ) : (
           <table className="w-full text-sm">
             <thead className="bg-surface-hover">
@@ -128,7 +130,9 @@ export default function PerformancePage() {
                 );
               })}
               {baselines.length === 0 && (
-                <tr><td colSpan={8} className="px-4 py-8 text-center text-secondary">No baseline measurements recorded yet</td></tr>
+                <tr><td colSpan={8}>
+                  <ERPEmptyState type="no-data" title="No baseline measurements recorded yet" description="Latency measurements will appear here once endpoints are exercised." />
+                </td></tr>
               )}
             </tbody>
           </table>

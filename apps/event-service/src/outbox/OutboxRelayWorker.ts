@@ -205,4 +205,18 @@ export class OutboxRelayWorker {
     const row = rows[0] as { cnt: number } | undefined;
     return row?.cnt ?? 0;
   }
+
+  async publishRaw(
+    topic: string,
+    key: string,
+    value: Record<string, unknown>,
+    headers: Record<string, string>
+  ): Promise<void> {
+    if (!this.producer) throw new Error('OutboxRelayWorker not started');
+
+    await this.producer.send({
+      topic,
+      messages: [{ key, value: JSON.stringify(value), headers }],
+    });
+  }
 }

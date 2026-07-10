@@ -1,12 +1,14 @@
 import type { FastifyInstance } from 'fastify';
 import type { PlatformContextFactory } from '@erp/sdk';
+import { PlatformEventBus } from '@erp/sdk';
 import { openingBalances, openingBalancesWizard, customers, suppliers, accounts } from '@erp/db';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { z } from 'zod';
 import { BusinessError, NotFoundError, ValidationError } from '@erp/types';
 import { PERMISSIONS } from '@erp/types';
 import { authenticate } from '../middleware/authenticate.js';
 import { requirePermission } from '../middleware/authorize.js';
+import { validateOpeningBalanceTrialBalance } from '../domain/OpeningBalanceValidator.js';
 
 type AuthedRequest = { auth: { tenantId: number; userId: number } };
 
@@ -372,38 +374,63 @@ export async function openingBalancesRoutes(
     if (!wizard) throw new BusinessError('NO_OPENING_BALANCES', 'No opening balances found to lock');
     if (wizard.status === 'LOCKED') throw new BusinessError('ALREADY_LOCKED', 'Opening balances are already locked');
 
-    // Basic trial balance check: total DEBIT opening_balances should = total CREDIT
-    // Simplified check — real implementation computes from all financial entries
+    // Full trial balance check against the openingBalances staging table (locking does
+    // not post to financial_entries anywhere in this codebase, so there is nothing else
+    // to reconcile against). Stock's debit total is included in the overall DR=CR sum
+    // rather than excluded, and any Accounts-step account that duplicates a sub-ledger
+    // category (Customers/Suppliers/Stock/CashBank) is rejected as a double-entry.
     const allBalances = await ctx.db.raw
       .select()
       .from(openingBalances)
       .where(eq(openingBalances.tenantId, tenantId));
 
-    let totalDebit = 0;
-    let totalCredit = 0;
-    for (const b of allBalances) {
-      if (b.entityType === 'STOCK') continue; // stock is always DEBIT
-      const amt = parseFloat(b.amount);
-      if (b.balanceType === 'DEBIT') totalDebit += amt;
-      else totalCredit += amt;
-    }
+    const accountEntityIds = [
+      ...new Set(
+        allBalances
+          .filter((b) => b.entityType === 'ACCOUNT' && b.entityId != null)
+          .map((b) => b.entityId as number)
+      ),
+    ];
+    const accountSubTypes =
+      accountEntityIds.length > 0
+        ? await ctx.db.raw
+            .select({ id: accounts.id, accountSubType: accounts.accountSubType })
+            .from(accounts)
+            .where(and(eq(accounts.tenantId, tenantId), inArray(accounts.id, accountEntityIds)))
+        : [];
 
-    const difference = Math.abs(totalDebit - totalCredit);
-    if (difference > 0.01) {
+    const check = validateOpeningBalanceTrialBalance(allBalances, accountSubTypes);
+
+    if (check.doubleEntryViolations.length > 0) {
+      const subTypes = [...new Set(check.doubleEntryViolations.map((v) => v.accountSubType))];
       throw new BusinessError(
-        'TRIAL_BALANCE_MISMATCH',
-        `Trial balance does not balance. Debit total: ${totalDebit.toFixed(2)}, Credit total: ${totalCredit.toFixed(2)}, Difference: ${difference.toFixed(2)}`
+        'OPENING_BALANCE_DOUBLE_ENTRY',
+        `The Accounts step includes account(s) already represented via the Customers/Suppliers/Stock/CashBank steps (${subTypes.join(', ')}). Remove them from the Accounts step to avoid double-counting.`,
+        { violations: check.doubleEntryViolations }
       );
     }
 
-    await ctx.db.raw
-      .update(openingBalancesWizard)
-      .set({ status: 'LOCKED', lockedAt: new Date(), lockedBy: userId, updatedAt: new Date() })
-      .where(eq(openingBalancesWizard.tenantId, tenantId));
+    if (!check.balanced) {
+      throw new BusinessError(
+        'TRIAL_BALANCE_MISMATCH',
+        `Trial balance does not balance. Debit total: ${check.totalDebit.toFixed(2)}, Credit total: ${check.totalCredit.toFixed(2)}, Difference: ${check.overallDifference.toFixed(2)}`,
+        { ...check.breakdown, overallDifference: check.overallDifference }
+      );
+    }
 
+    const { totalDebit, totalCredit } = check;
     const lockedAt = new Date().toISOString();
 
-    await ctx.events.publish('opening_balance', tenantId, 'OPENING_BALANCES_LOCKED', { tenantId, lockedAt, totalDebit, totalCredit });
+    // ES-24 [C6]: lock write + outbox publish must be one atomic commit.
+    await ctx.db.transaction(async (trx) => {
+      await trx.raw
+        .update(openingBalancesWizard)
+        .set({ status: 'LOCKED', lockedAt: new Date(), lockedBy: userId, updatedAt: new Date() })
+        .where(eq(openingBalancesWizard.tenantId, tenantId));
+
+      const eventBus = new PlatformEventBus(trx, tenantId, userId, ctx.tenant.correlationId);
+      await eventBus.publishInTransaction('opening_balance', tenantId, 'OPENING_BALANCES_LOCKED', { tenantId, lockedAt, totalDebit, totalCredit });
+    });
     await ctx.audit.log({
       action: 'UPDATE',
       entityType: 'opening_balance',

@@ -87,8 +87,8 @@ describe('CANCEL_POSTED_JOURNAL guard on POST /journals/:id/reverse', () => {
     });
 
     expect(res.statusCode).toBe(403);
-    const body = JSON.parse(res.body) as { error: string };
-    expect(body.error).toMatch(/CANCEL_POSTED_JOURNAL/);
+    const body = JSON.parse(res.body) as { error: { code: string; message: string } };
+    expect(body.error.message).toMatch(/CANCEL_POSTED_JOURNAL/);
   });
 
   it('does not return 403 when user has CANCEL_POSTED_JOURNAL', async () => {

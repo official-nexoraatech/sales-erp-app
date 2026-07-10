@@ -2406,6 +2406,10 @@ Use this checklist to audit every existing screen against this design system. Ma
 
 All deviations found in Phase 2–4 frontend code as of 2026-06-30. Each must be corrected before Phase 5 frontend begins.
 
+> **Resolved 2026-07-05:** D-004 and D-033 (no command palette / global search) — `ERPCommandPalette` is now
+> built per the Part 22 spec and wired into `Layout.tsx` behind `Ctrl+K`/`Cmd+K`, gated on `SEARCH_GLOBAL`.
+> See `ERP-PLANNING/phase-completions/GLOBAL-SEARCH_COMPLETION.md`.
+
 ### Critical (blocks new module development)
 
 | ID | File | Deviation | Fix Required |

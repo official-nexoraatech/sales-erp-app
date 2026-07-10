@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { PlatformContextFactory } from '@erp/sdk';
 import { purchaseOrders, purchaseOrderHistory } from '@erp/db';
-import { and, desc, eq, ilike } from 'drizzle-orm';
+import { and, desc, eq, ilike, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { PERMISSIONS } from '@erp/types';
 import { authenticate } from '../middleware/authenticate.js';
@@ -36,6 +36,12 @@ const CreatePOSchema = z.object({
 
 const ApproveSchema = z.object({
   poNumber: z.string().min(1).max(50),
+  overrideCreditLimit: z.boolean().default(false),
+});
+
+const AmendSchema = z.object({
+  amendments: z.record(z.string(), z.unknown()),
+  reason: z.string().min(1).max(500),
 });
 
 const CancelSchema = z.object({
@@ -79,7 +85,12 @@ export async function purchaseOrderRoutes(
         .limit(pageSize)
         .offset(offset);
 
-      return reply.send({ data: rows, page, pageSize });
+      const [countRow] = await ctx.db.raw
+        .select({ count: sql<number>`count(*)::int` })
+        .from(purchaseOrders)
+        .where(and(...conditions));
+
+      return reply.send({ data: { content: rows, totalElements: countRow?.count ?? 0, page, pageSize } });
     },
   });
 
@@ -179,13 +190,34 @@ export async function purchaseOrderRoutes(
     handler: async (req, reply) => {
       const { id } = req.params as { id: string };
       const body = ApproveSchema.parse(req.body);
+
+      if (body.overrideCreditLimit && !req.auth.permissions.includes(PERMISSIONS.CREDIT_LIMIT_OVERRIDE)) {
+        return reply.code(403).send({ error: `Forbidden — missing permission: ${PERMISSIONS.CREDIT_LIMIT_OVERRIDE}` });
+      }
+
       const ctx = ctxFactory.create({
         tenantId: req.auth.tenantId,
         userId: req.auth.userId,
         correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
       });
       const svc = new PurchaseOrderService(ctx.db.raw);
-      await svc.approve(parseInt(id, 10), req.auth.tenantId, req.auth.userId, body.poNumber);
+      await svc.approve(parseInt(id, 10), req.auth.tenantId, req.auth.userId, body.poNumber, body.overrideCreditLimit);
+      return reply.send({ success: true });
+    },
+  });
+
+  fastify.post('/purchase-orders/:id/amend', {
+    preHandler: requirePermission(PERMISSIONS.PO_AMEND),
+    handler: async (req, reply) => {
+      const { id } = req.params as { id: string };
+      const body = AmendSchema.parse(req.body);
+      const ctx = ctxFactory.create({
+        tenantId: req.auth.tenantId,
+        userId: req.auth.userId,
+        correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+      });
+      const svc = new PurchaseOrderService(ctx.db.raw);
+      await svc.amend(parseInt(id, 10), req.auth.tenantId, req.auth.userId, body.amendments, body.reason);
       return reply.send({ success: true });
     },
   });

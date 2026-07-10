@@ -40,6 +40,13 @@ export const DEFAULT_POSTING_RULES: Record<
       description: 'Goods receipt — inventory addition',
     },
   ],
+  COGS_CALCULATED: [
+    {
+      debitCode: '5000',   // Cost of Goods Sold
+      creditCode: '1200',  // Inventory
+      description: 'Cost of goods sold',
+    },
+  ],
   SALE_RETURN_APPROVED: [
     {
       debitCode: '4200',   // Sales Returns & Allowances (Contra Revenue)
@@ -82,6 +89,13 @@ export const DEFAULT_POSTING_RULES: Record<
       description: 'Payroll disbursed — salary payable cleared',
     },
   ],
+  EMPLOYEE_LOAN_DISBURSED: [
+    {
+      debitCode: '1340',   // Employee Loans Receivable
+      creditCode: '1010',  // Cash in Hand / Bank
+      description: 'Employee loan disbursed',
+    },
+  ],
   STOCK_ADJUSTMENT_LOSS: [
     {
       debitCode: '5300',   // Loss on Stock Damage
@@ -94,6 +108,13 @@ export const DEFAULT_POSTING_RULES: Record<
       debitCode: '1120',   // Accounts Receivable (re-debit)
       creditCode: '1010',  // Cash / Bank (reverse the receipt)
       description: 'Cheque bounced — reversal of payment received',
+    },
+  ],
+  RCM_LIABILITY_POSTED: [
+    {
+      debitCode: '1330',   // RCM Tax Input Credit
+      creditCode: '2330',  // RCM Tax Payable
+      description: 'RCM liability — self-assessed GST on unregistered vendor purchase',
     },
   ],
 };

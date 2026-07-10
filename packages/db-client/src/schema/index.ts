@@ -1,6 +1,8 @@
 import {
+  bigint,
   bigserial,
   boolean,
+  date,
   index,
   integer,
   jsonb,
@@ -72,6 +74,9 @@ export const auditLog = pgTable(
     beforeData: jsonb('before_data'),
     afterData: jsonb('after_data'),
     metadata: jsonb('metadata'),
+    actorEmail: varchar('actor_email', { length: 255 }),
+    ipAddress: varchar('ip_address', { length: 45 }),
+    changedFields: text('changed_fields').array(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => [
@@ -124,11 +129,52 @@ export const sagaLog = pgTable(
   ]
 );
 
+// ─── Usage Events (PG-028, tenant-scoped, append-only) ─────────────────────
+// Raw per-action record fed by the outbox pattern (see PlatformEventBus). `quantity` lets
+// a high-volume action (e.g. USAGE_API_CALL_BATCH) carry a batched count in one row instead
+// of one row per occurrence. Never queried directly for dashboard display — only by the
+// nightly rollup job and for drill-down/audit; usage_summary is what the dashboard reads.
+export const usageEvents = pgTable(
+  'usage_events',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    tenantId: integer('tenant_id').notNull(),
+    eventType: varchar('event_type', { length: 50 }).notNull(),
+    quantity: integer('quantity').notNull().default(1),
+    occurredAt: timestamp('occurred_at', { withTimezone: true }).defaultNow().notNull(),
+    metadata: jsonb('metadata'),
+  },
+  (t) => [index('idx_usage_events_tenant_period').on(t.tenantId, t.occurredAt)]
+);
+
+// ─── Usage Summary (PG-028, tenant-scoped) ──────────────────────────────────
+// One row per tenant per calendar month, upserted nightly by the usage-rollup scheduler
+// job — the only table the platform-admin usage dashboard reads from.
+export const usageSummary = pgTable(
+  'usage_summary',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    tenantId: integer('tenant_id').notNull(),
+    periodStart: date('period_start').notNull(),
+    periodEnd: date('period_end').notNull(),
+    invoiceCount: integer('invoice_count').notNull().default(0),
+    activeUserCount: integer('active_user_count').notNull().default(0),
+    storageBytes: bigint('storage_bytes', { mode: 'number' }).notNull().default(0),
+    apiCallCount: bigint('api_call_count', { mode: 'number' }).notNull().default(0),
+    computedAt: timestamp('computed_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [unique('usage_summary_tenant_period').on(t.tenantId, t.periodStart)]
+);
+
 export type OutboxEvent = typeof outboxEvents.$inferInsert;
 export type InboxEvent = typeof inboxEvents.$inferInsert;
 export type AuditLogEntry = typeof auditLog.$inferInsert;
 export type FeatureFlag = typeof featureFlags.$inferSelect;
 export type SagaLogEntry = typeof sagaLog.$inferInsert;
+export type UsageEvent = typeof usageEvents.$inferSelect;
+export type NewUsageEvent = typeof usageEvents.$inferInsert;
+export type UsageSummary = typeof usageSummary.$inferSelect;
+export type NewUsageSummary = typeof usageSummary.$inferInsert;
 
 export * from './auth.js';
 export * from './tenant.js';
@@ -148,3 +194,5 @@ export * from './hr.js';
 export * from './crm.js';
 export * from './production.js';
 export * from './distributed.js';
+export * from './document-attachments.js';
+export * from './search.js';

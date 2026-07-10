@@ -57,7 +57,7 @@ export class TenantScopedDatabase {
     if (where) conditions.push(where);
 
     const combinedWhere = and(...conditions);
-    const query = this._db.select().from(table).where(combinedWhere);
+    const query = this._db.select().from(table as PgTable<TableConfig>).where(combinedWhere);
 
     if (options?.limit !== undefined) (query as unknown as { limit: (n: number) => typeof query }).limit(options.limit);
     if (options?.offset !== undefined) (query as unknown as { offset: (n: number) => typeof query }).offset(options.offset);

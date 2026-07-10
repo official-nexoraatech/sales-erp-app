@@ -10,7 +10,7 @@ export interface CreatePaymentParams {
   customerId: number;
   paymentNumber: string;
   paymentDate: Date;
-  paymentMode: 'CASH' | 'CARD' | 'UPI' | 'CHEQUE' | 'NEFT' | 'RTGS' | 'CREDIT_NOTE' | 'ADVANCE';
+  paymentMode: 'CASH' | 'CARD' | 'UPI' | 'CHEQUE' | 'NEFT' | 'RTGS' | 'CREDIT_NOTE' | 'ADVANCE' | 'LOYALTY';
   amount: number;
   chequeNumber?: string;
   chequeBankName?: string;
@@ -85,7 +85,7 @@ export class PaymentService {
 
       for (const alloc of allocations) {
         const [invoice] = await trx
-          .select({ balanceDue: invoices.balanceDue, status: invoices.status, customerId: invoices.customerId, grandTotal: invoices.grandTotal })
+          .select({ status: invoices.status, customerId: invoices.customerId })
           .from(invoices)
           .where(and(eq(invoices.id, alloc.invoiceId), eq(invoices.tenantId, tenantId)));
         if (!invoice) throw new NotFoundError(`Invoice ${alloc.invoiceId} not found`);
@@ -101,18 +101,28 @@ export class PaymentService {
           allocatedBy: userId,
         });
 
-        // Update invoice balance and status
-        const newBalance = Math.max(0, parseFloat(String(invoice.balanceDue)) - alloc.amount);
-        const newInvoiceStatus = newBalance <= 0.01 ? 'PAID' : 'PARTIALLY_PAID';
-        await trx
+        // Atomic, guarded balance decrement — rejects the allocation outright if it
+        // exceeds the invoice's CURRENT remaining balance (a concurrent allocation, or
+        // this allocation itself being over-sized), instead of the old Math.max(0, ...)
+        // clamp that silently absorbed the overage into the books.
+        const [updatedInvoice] = await trx
           .update(invoices)
           .set({
             paidAmount: sql`${invoices.paidAmount} + ${alloc.amount}`,
-            balanceDue: String(newBalance),
-            status: newInvoiceStatus,
+            balanceDue: sql`${invoices.balanceDue} - ${alloc.amount}`,
+            status: sql`CASE WHEN ${invoices.balanceDue} - ${alloc.amount} <= 0.01 THEN 'PAID' ELSE 'PARTIALLY_PAID' END`,
             updatedAt: new Date(),
           })
-          .where(and(eq(invoices.id, alloc.invoiceId), eq(invoices.tenantId, tenantId)));
+          .where(and(
+            eq(invoices.id, alloc.invoiceId),
+            eq(invoices.tenantId, tenantId),
+            sql`${invoices.balanceDue} >= ${alloc.amount}`
+          ))
+          .returning({ balanceDue: invoices.balanceDue });
+
+        if (!updatedInvoice) {
+          throw new BusinessError('OVER_ALLOCATION', `Allocation of ${alloc.amount} exceeds invoice ${alloc.invoiceId}'s remaining balance`);
+        }
 
         // Update customer projection
         await trx
@@ -129,19 +139,27 @@ export class PaymentService {
           ));
       }
 
-      // Update payment allocated/unallocated amounts and status
-      const newAllocated = parseFloat(String(payment.allocatedAmount)) + totalToAllocate;
-      const newUnallocated = parseFloat(String(payment.unallocatedAmount)) - totalToAllocate;
-      const newPaymentStatus = newUnallocated <= 0.01 ? 'FULLY_ALLOCATED' : 'PARTIALLY_ALLOCATED';
-      await trx
+      // Update payment allocated/unallocated amounts and status — atomic, guarded on
+      // unallocatedAmount so two concurrent allocate() calls against the SAME payment
+      // can't both succeed past what the payment actually has left.
+      const [updatedPayment] = await trx
         .update(payments)
         .set({
-          allocatedAmount: String(newAllocated),
-          unallocatedAmount: String(Math.max(0, newUnallocated)),
-          status: newPaymentStatus,
+          allocatedAmount: sql`${payments.allocatedAmount} + ${totalToAllocate}`,
+          unallocatedAmount: sql`${payments.unallocatedAmount} - ${totalToAllocate}`,
+          status: sql`CASE WHEN ${payments.unallocatedAmount} - ${totalToAllocate} <= 0.01 THEN 'FULLY_ALLOCATED' ELSE 'PARTIALLY_ALLOCATED' END`,
           updatedAt: new Date(),
         })
-        .where(and(eq(payments.id, paymentId), eq(payments.tenantId, tenantId)));
+        .where(and(
+          eq(payments.id, paymentId),
+          eq(payments.tenantId, tenantId),
+          sql`${payments.unallocatedAmount} >= ${totalToAllocate}`
+        ))
+        .returning({ unallocatedAmount: payments.unallocatedAmount });
+
+      if (!updatedPayment) {
+        throw new BusinessError('OVER_ALLOCATION', `Payment ${paymentId} has insufficient unallocated balance (concurrent allocation)`);
+      }
 
       // Dashboard projection: collected amount
       const dateKey = new Date(payment.paymentDate);

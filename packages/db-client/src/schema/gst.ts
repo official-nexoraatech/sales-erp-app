@@ -128,6 +128,10 @@ export const gstReturnFilings = pgTable(
     referenceNumber: varchar('reference_number', { length: 100 }),
     filedBy: integer('filed_by'),
     filingData: jsonb('filing_data'),
+    // PG-039 — manual override for figures that can't be derived from gst_ledger (currently
+    // import-of-goods/import-of-services IGST): { importOfGoodsIgst?, importOfServicesIgst?,
+    // enteredBy, enteredAt }. See Gstr3bService for how this merges into the computed return.
+    manualAdjustments: jsonb('manual_adjustments'),
     notes: text('notes'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
@@ -197,7 +201,7 @@ export const einvoiceData = pgTable(
     irnStatus: varchar('irn_status', { length: 30 })
       .notNull()
       .default('PENDING_IRN')
-      .$type<'PENDING_IRN' | 'IRN_GENERATED' | 'IRN_CANCELLED' | 'FAILED_IRN' | 'NOT_APPLICABLE'>(),
+      .$type<'PENDING_IRN' | 'IRN_GENERATED' | 'IRN_CANCELLED' | 'FAILED_IRN' | 'NOT_APPLICABLE' | 'CANCEL_REQUIRED_MANUALLY'>(),
     retryCount: integer('retry_count').notNull().default(0),
     lastRetryAt: timestamp('last_retry_at', { withTimezone: true }),
     failureReason: text('failure_reason'),
@@ -209,6 +213,10 @@ export const einvoiceData = pgTable(
     ewbNumber: varchar('ewb_number', { length: 30 }),
     ewbDate: timestamp('ewb_date', { withTimezone: true }),
     ewbValidUpto: timestamp('ewb_valid_upto', { withTimezone: true }),
+    // Set only when GST_COMPLIANCE_GENERATION saga compensation runs after a failed EWB
+    // generation — NIC has no "cancel EWB" API, so this flags the row for manual review
+    // instead of inventing a synthetic undo (PG-006).
+    ewbStatus: varchar('ewb_status', { length: 30 }).$type<'EWB_GENERATION_FAILED_MANUAL_REVIEW' | null>(),
     // NIC request payload for audit
     nicRequestPayload: jsonb('nic_request_payload'),
     nicResponsePayload: jsonb('nic_response_payload'),

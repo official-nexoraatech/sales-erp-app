@@ -32,7 +32,7 @@ function ActivitySection({ title, activities, net, color }: { title: string; act
           {activities.map((a, i) => (
             <tr key={i} className="border-b border-gray-100 dark:border-gray-700">
               <td className="px-4 py-2 pl-6 text-secondary">{a.description}</td>
-              <td className={`px-4 py-2 text-right font-mono ${a.amount < 0 ? 'text-red-500' : 'text-green-600'}`}>{formatCurrency(a.amount)}</td>
+              <td className={`px-4 py-2 text-right font-mono ${a.amount < 0 ? 'text-red-500 dark:text-red-400' : 'text-green-600 dark:text-green-400'}`}>{formatCurrency(a.amount)}</td>
             </tr>
           ))}
           {activities.length === 0 && (
@@ -42,7 +42,7 @@ function ActivitySection({ title, activities, net, color }: { title: string; act
         <tfoot className="bg-gray-50 dark:bg-gray-900/30">
           <tr>
             <td className="px-4 py-2.5 font-semibold text-primary">Net {title.split(' ')[0]}</td>
-            <td className={`px-4 py-2.5 text-right font-mono font-semibold ${net < 0 ? 'text-red-500' : 'text-green-600 dark:text-green-400'}`}>{formatCurrency(net)}</td>
+            <td className={`px-4 py-2.5 text-right font-mono font-semibold ${net < 0 ? 'text-red-500 dark:text-red-400' : 'text-green-600 dark:text-green-400'}`}>{formatCurrency(net)}</td>
           </tr>
         </tfoot>
       </table>
@@ -64,7 +64,7 @@ export default function CashFlowPage() {
     enabled: !!fromDate && !!toDate,
   });
 
-  const cf: CFData | undefined = (data as { data?: CFData })?.data;
+  const cf: CFData | undefined = (data as CFData);
 
   return (
     <div className="space-y-6">

@@ -3,12 +3,18 @@ import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { purchaseOrderApi, supplierApi, itemApi, warehouseApi, branchApi } from '../../api/endpoints.js';
+import { useAuthStore } from '../../store/auth.store.js';
+import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
 import ERPTextarea from '../../components/erp/ERPTextarea.js';
+import ERPAsyncSelect, { type AsyncSelectOption } from '../../components/erp/ERPAsyncSelect.js';
 import Button from '../../components/ui/Button.js';
 import Input from '../../components/ui/Input.js';
 import Select from '../../components/ui/Select.js';
 import { INDIAN_STATES } from '../../lib/indianStates.js';
+import { createSearchLoadOptions } from '../../lib/searchSelectOptions.js';
+
+const loadSupplierOptions = createSearchLoadOptions('supplier');
 
 interface LineItem {
   itemId: number;
@@ -37,8 +43,10 @@ function computeLine(l: LineItem, sellerState: string, placeOfSupply: string) {
 
 export default function PurchaseOrderFormPage() {
   const navigate = useNavigate();
+  const hasPermission = useAuthStore((s) => s.hasPermission);
 
-  const [supplierId, setSupplierId] = useState('');
+  const [selectedSupplier, setSelectedSupplier] = useState<AsyncSelectOption | null>(null);
+  const supplierId = selectedSupplier ? String(selectedSupplier.value) : '';
   const [branchId, setBranchId] = useState('');
   const [warehouseId, setWarehouseId] = useState('');
   const [placeOfSupply, setPlaceOfSupply] = useState('27');
@@ -52,19 +60,17 @@ export default function PurchaseOrderFormPage() {
   const [lines, setLines] = useState<LineItem[]>([]);
   const [itemSearch, setItemSearch] = useState('');
 
-  const { data: supplierData } = useQuery({ queryKey: ['suppliers-list'], queryFn: () => supplierApi.list({}) });
-  const { data: warehouseData } = useQuery({ queryKey: ['warehouses'], queryFn: () => warehouseApi.list() });
-  const { data: branchData } = useQuery({ queryKey: ['branches'], queryFn: () => branchApi.list() });
+  const { data: warehouseData } = useQuery({ queryKey: ['warehouses'], queryFn: () => warehouseApi.list(), enabled: hasPermission(PERMISSIONS.WAREHOUSE_VIEW) });
+  const { data: branchData } = useQuery({ queryKey: ['branches'], queryFn: () => branchApi.list(), enabled: hasPermission(PERMISSIONS.BRANCH_VIEW) });
   const { data: itemData } = useQuery({
     queryKey: ['item-search', itemSearch],
     queryFn: () => itemApi.list({ search: itemSearch }),
-    enabled: itemSearch.length > 1,
+    enabled: itemSearch.length > 1 && hasPermission(PERMISSIONS.ITEM_VIEW),
   });
 
-  const suppliers = (supplierData as { data?: Array<{ id: number; displayName: string }> })?.data ?? [];
-  const warehouses = (warehouseData as { data?: Array<{ id: number; name: string }> })?.data ?? [];
+  const warehouses = (warehouseData as { content?: Array<{ id: number; name: string }> })?.content ?? [];
   const branches = (branchData as { content?: Array<{ id: number; name: string }> })?.content ?? [];
-  const itemOptions = (itemData as { data?: Array<{ id: number; name: string; gstRate?: number; hsnCode?: string }> })?.data ?? [];
+  const itemOptions = (itemData as { content?: Array<{ id: number; name: string; gstRate?: number; hsnCode?: string }> })?.content ?? [];
 
   const computedLines = lines.map((l) => ({ ...l, ...computeLine(l, sellerState, placeOfSupply) }));
 
@@ -143,28 +149,33 @@ export default function PurchaseOrderFormPage() {
       <ERPPageHeader variant="list" title="New Purchase Order" subtitle="Create a purchase order for a supplier" />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
-        <Select
-          label="Supplier *"
-          value={supplierId}
-          onChange={(e) => setSupplierId(e.target.value)}
-          options={[{ value: '', label: 'Select supplier…' }, ...suppliers.map((s) => ({ value: String(s.id), label: s.displayName }))]}
+        <ERPAsyncSelect
+          label="Supplier"
+          required
+          value={selectedSupplier}
+          onChange={setSelectedSupplier}
+          loadOptions={loadSupplierOptions}
+          placeholder="Type to search suppliers…"
         />
         <Select
-          label="Branch *"
+          label="Branch"
+          required
           value={branchId}
           onChange={(e) => setBranchId(e.target.value)}
           options={[{ value: '', label: 'Select branch…' }, ...branches.map((b) => ({ value: String(b.id), label: b.name }))]}
         />
         <Select
-          label="Warehouse *"
+          label="Warehouse"
+          required
           value={warehouseId}
           onChange={(e) => setWarehouseId(e.target.value)}
           options={[{ value: '', label: 'Select warehouse…' }, ...warehouses.map((w) => ({ value: String(w.id), label: w.name }))]}
         />
-        <Input label="PO Date *" type="date" value={poDate} onChange={(e) => setPoDate(e.target.value)} />
+        <Input label="PO Date" required type="date" value={poDate} onChange={(e) => setPoDate(e.target.value)} />
         <Input label="Expected Delivery Date" type="date" value={expectedDeliveryDate} onChange={(e) => setExpectedDeliveryDate(e.target.value)} />
         <Select
-          label="Place of Supply *"
+          label="Place of Supply"
+          required
           value={placeOfSupply}
           onChange={(e) => setPlaceOfSupply(e.target.value)}
           options={[
@@ -173,7 +184,8 @@ export default function PurchaseOrderFormPage() {
           ]}
         />
         <Select
-          label="Seller State (Your State) *"
+          label="Seller State (Your State)"
+          required
           value={sellerState}
           onChange={(e) => setSellerState(e.target.value)}
           options={[

@@ -1,3 +1,4 @@
+/* global crypto, process, fetch, Buffer */
 import type { FastifyInstance } from 'fastify';
 import type { PlatformContextFactory } from '@erp/sdk';
 import {
@@ -7,9 +8,12 @@ import {
   employeeSalaries,
   salaryStructures,
   designations,
+  departments,
+  organizationSettings,
 } from '@erp/db';
 import { and, eq, isNull } from 'drizzle-orm';
 import { z } from 'zod';
+import { timingSafeEqual } from 'node:crypto';
 import { BusinessError, NotFoundError, ValidationError } from '@erp/types';
 import { PERMISSIONS } from '@erp/types';
 import { encryptField, decryptField } from '@erp/utils';
@@ -17,8 +21,22 @@ import { requireEnv } from '@erp/config';
 import { authenticate } from '../middleware/authenticate.js';
 import { requirePermission } from '../middleware/authorize.js';
 import { PayrollEngine } from '../domain/PayrollEngine.js';
+import { EmployeeLoanService } from '../domain/EmployeeLoanService.js';
 
 type AuthedRequest = { auth: { tenantId: number; userId: number } };
+
+function requireInternalKey(req: { headers: Record<string, string | string[] | undefined> }, reply: { code: (n: number) => { send: (b: unknown) => void } }): boolean {
+  const key = req.headers['x-internal-key'];
+  const expected = process.env['INTERNAL_API_KEY'];
+  const keyBuffer = Buffer.from(typeof key === 'string' ? key : '');
+  const expectedBuffer = Buffer.from(expected ?? '');
+  const matches = !!expected && keyBuffer.length === expectedBuffer.length && timingSafeEqual(keyBuffer, expectedBuffer);
+  if (!matches) {
+    reply.code(401).send({ error: 'Unauthorized' });
+    return false;
+  }
+  return true;
+}
 
 const CreatePayrollRunSchema = z.object({
   periodMonth: z.number().int().min(1).max(12),
@@ -181,9 +199,10 @@ export async function payrollRoutes(
     let totalGross = 0;
     let totalDeductions = 0;
     let totalNet = 0;
+    const ptStateCache = new Map<number | null, string | null>();
 
     for (const emp of activeEmployees) {
-      const slip = await PayrollEngine.computeSlip(ctx.db, tenantId, emp.id, run.periodMonth, run.periodYear, run.workingDays);
+      const slip = await PayrollEngine.computeSlip(ctx.db, tenantId, emp.id, run.periodMonth, run.periodYear, run.workingDays, ptStateCache);
       await PayrollEngine.upsertSlip(ctx.db, tenantId, id, slip);
       totalGross += slip.grossSalary;
       totalDeductions += slip.totalDeductions;
@@ -218,6 +237,19 @@ export async function payrollRoutes(
 
     await ctx.db.raw.update(payrollRuns).set({ status: 'APPROVED', approvedBy: userId, approvedAt: new Date(), updatedAt: new Date() }).where(eq(payrollRuns.id, id));
     await ctx.db.raw.update(payrollSlips).set({ status: 'APPROVED', updatedAt: new Date() }).where(and(eq(payrollSlips.payrollRunId, id), eq(payrollSlips.tenantId, tenantId)));
+
+    // Loan EMI (PG-045): decrement outstandingBalance + record history exactly once per
+    // approval — computeSlip only ever read loan balances, never mutated them, precisely
+    // to avoid double-decrementing on repeated DRAFT recalculation.
+    const approvedSlips = await ctx.db.raw
+      .select({ id: payrollSlips.id, employeeId: payrollSlips.employeeId, loanDeduction: payrollSlips.loanDeduction })
+      .from(payrollSlips)
+      .where(and(eq(payrollSlips.payrollRunId, id), eq(payrollSlips.tenantId, tenantId)));
+    for (const slip of approvedSlips) {
+      if (parseFloat(slip.loanDeduction) > 0) {
+        await EmployeeLoanService.applyMonthlyDeduction(ctx.db, tenantId, slip.employeeId, slip.id, run.periodMonth, run.periodYear);
+      }
+    }
 
     // Publish event for accounting-service to post salary payable journal (DR Salary Expense / CR Salary Payable)
     await ctx.events.publish('payroll_run', id, 'PAYROLL_RUN_APPROVED', {
@@ -322,6 +354,7 @@ export async function payrollRoutes(
           totalDeductions: parseFloat(String(slip.totalDeductions)),
         },
         pfEmployer: parseFloat(String(slip.pfEmployer)),
+        epsAmount: parseFloat(String(slip.epsAmount)),
         esiEmployer: parseFloat(String(slip.esiEmployer)),
         netSalary,
         status: slip.status,
@@ -335,8 +368,84 @@ export async function payrollRoutes(
     const id = parseInt(request.params.id, 10);
     const [slip] = await ctx.db.raw.select().from(payrollSlips).where(and(eq(payrollSlips.id, id), eq(payrollSlips.tenantId, tenantId)));
     if (!slip) throw new NotFoundError('PayrollSlip', id);
-    // PDF generation delegated to report-service in production; return slip data for now
-    return reply.code(200).send({ data: { message: 'Salary slip data ready for PDF render', slip } });
+
+    const [emp] = await ctx.db.raw
+      .select({
+        displayName: employees.displayName,
+        employeeCode: employees.employeeCode,
+        joiningDate: employees.joiningDate,
+        designationId: employees.designationId,
+        departmentId: employees.departmentId,
+        bankAccountNoEncrypted: employees.bankAccountNoEncrypted,
+      })
+      .from(employees)
+      .where(and(eq(employees.id, slip.employeeId), eq(employees.tenantId, tenantId)));
+
+    const [desig] = emp?.designationId
+      ? await ctx.db.raw.select({ name: designations.name }).from(designations).where(and(eq(designations.id, emp.designationId), eq(designations.tenantId, tenantId)))
+      : [];
+    const [dept] = emp?.departmentId
+      ? await ctx.db.raw.select({ name: departments.name }).from(departments).where(and(eq(departments.id, emp.departmentId), eq(departments.tenantId, tenantId)))
+      : [];
+    const [org] = await ctx.db.raw.select().from(organizationSettings).where(eq(organizationSettings.tenantId, tenantId));
+    const [run] = await ctx.db.raw
+      .select({ periodMonth: payrollRuns.periodMonth, periodYear: payrollRuns.periodYear })
+      .from(payrollRuns)
+      .where(and(eq(payrollRuns.id, slip.payrollRunId), eq(payrollRuns.tenantId, tenantId)));
+
+    const encKey = requireEnv('FIELD_ENCRYPTION_KEY');
+    const bankAccount = emp?.bankAccountNoEncrypted ? decryptField(emp.bankAccountNoEncrypted, encKey) : null;
+    const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
+    const data = {
+      org: { name: org?.orgName, address: org?.address },
+      monthName: run ? monthNames[run.periodMonth - 1] : '',
+      year: run?.periodYear,
+      employee: {
+        name: emp?.displayName,
+        designation: desig?.name,
+        department: dept?.name,
+        code: emp?.employeeCode,
+        joinDate: emp?.joiningDate,
+        bankAccount,
+      },
+      earnings: [
+        { component: 'Basic Salary', amount: slip.basicSalary },
+        { component: 'HRA', amount: slip.hraAmount },
+        { component: 'DA', amount: slip.daAmount },
+        { component: 'Other Allowances', amount: slip.otherAllowances },
+        { component: 'Piece Rate', amount: slip.pieceRateAmount },
+      ],
+      grossSalary: decryptField(slip.grossSalary, encKey),
+      deductions: [
+        { component: 'PF (Employee)', amount: slip.pfEmployee },
+        { component: 'ESI (Employee)', amount: slip.esiEmployee },
+        { component: 'Professional Tax', amount: slip.professionalTax },
+        { component: 'Loan Deduction', amount: slip.loanDeduction },
+        { component: 'TDS', amount: slip.tdsDeduction },
+      ],
+      totalDeductions: slip.totalDeductions,
+      netPay: decryptField(slip.netSalary, encKey),
+      workingDays: slip.workingDays,
+      totalDays: slip.workingDays,
+      lopDays: slip.lopDays,
+    };
+
+    const reportUrl = process.env['REPORT_SERVICE_URL'] ?? 'http://localhost:3015';
+    const internalKey = process.env['INTERNAL_API_KEY'] ?? '';
+    const res = await fetch(`${reportUrl}/reports/pdf`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-internal-key': internalKey },
+      body: JSON.stringify({ documentType: 'SALARY_SLIP', data }),
+    });
+    if (!res.ok) throw new BusinessError('PDF_GENERATION_FAILED', 'Failed to generate payslip PDF');
+    const buffer = Buffer.from(await res.arrayBuffer());
+
+    return reply
+      .code(200)
+      .header('Content-Type', 'application/pdf')
+      .header('Content-Disposition', `inline; filename="payslip-${id}.pdf"`)
+      .send(buffer);
   });
 
   fastify.post<{ Params: { id: string } }>('/payroll-runs/:id/bulk-send', { preHandler: [authenticate, requirePermission(PERMISSIONS.PAYROLL_APPROVE)] }, async (request, reply) => {
@@ -353,5 +462,96 @@ export async function payrollRoutes(
     await ctx.db.raw.update(payrollSlips).set({ slipSentAt: new Date() }).where(and(eq(payrollSlips.payrollRunId, id), eq(payrollSlips.tenantId, tenantId)));
 
     return reply.code(200).send({ data: { message: 'Salary slips queued for sending', count: slips.length } });
+  });
+
+  // ── POST /internal/payroll/prepare?tenantId=... — PG-026, scheduler-triggered ──
+  // Find-or-create this month's payroll run, then run the same calculate logic
+  // /payroll-runs/:id/calculate uses, against every active employee.
+  fastify.post('/internal/payroll/prepare', async (request, reply) => {
+    if (!requireInternalKey(request as never, reply as never)) return;
+    const tenantId = parseInt((request.query as { tenantId?: string }).tenantId ?? '', 10);
+    if (!tenantId) return reply.code(400).send({ error: { code: 'MISSING_TENANT_ID', message: 'tenantId query param required' } });
+
+    const ctx = ctxFactory.create({ tenantId, userId: 0, correlationId: crypto.randomUUID() });
+    const now = new Date();
+    const periodMonth = now.getUTCMonth() + 1;
+    const periodYear = now.getUTCFullYear();
+
+    let [run] = await ctx.db.raw.select().from(payrollRuns).where(and(eq(payrollRuns.tenantId, tenantId), eq(payrollRuns.periodMonth, periodMonth), eq(payrollRuns.periodYear, periodYear)));
+    if (!run) {
+      const [created] = await ctx.db.raw
+        .insert(payrollRuns)
+        .values({ tenantId, createdBy: 0, periodMonth, periodYear, workingDays: 26, status: 'DRAFT' } as typeof payrollRuns.$inferInsert)
+        .returning();
+      if (!created) throw new Error('Payroll run insert failed');
+      run = created;
+    }
+
+    if (run.status === 'APPROVED' || run.status === 'DISBURSED') {
+      return reply.code(200).send({ data: { message: 'Payroll run already finalized — skipped', payrollRunId: run.id, status: run.status } });
+    }
+
+    await ctx.db.raw.update(payrollRuns).set({ status: 'CALCULATING', updatedAt: new Date() }).where(eq(payrollRuns.id, run.id));
+
+    const activeEmployees = await ctx.db.raw.select({ id: employees.id }).from(employees).where(and(eq(employees.tenantId, tenantId), eq(employees.status, 'ACTIVE'), isNull(employees.deletedAt)));
+
+    let totalGross = 0;
+    let totalDeductions = 0;
+    let totalNet = 0;
+    const ptStateCache = new Map<number | null, string | null>();
+    for (const emp of activeEmployees) {
+      const slip = await PayrollEngine.computeSlip(ctx.db, tenantId, emp.id, run.periodMonth, run.periodYear, run.workingDays, ptStateCache);
+      await PayrollEngine.upsertSlip(ctx.db, tenantId, run.id, slip);
+      totalGross += slip.grossSalary;
+      totalDeductions += slip.totalDeductions;
+      totalNet += slip.netSalary;
+    }
+
+    await ctx.db.raw
+      .update(payrollRuns)
+      .set({
+        status: 'CALCULATED',
+        totalEmployees: activeEmployees.length,
+        totalGross: String(Math.round(totalGross * 100) / 100),
+        totalDeductions: String(Math.round(totalDeductions * 100) / 100),
+        totalNet: String(Math.round(totalNet * 100) / 100),
+        updatedAt: new Date(),
+      })
+      .where(eq(payrollRuns.id, run.id));
+
+    await ctx.audit.log({ action: 'UPDATE', entityType: 'payroll_run', entityId: run.id, metadata: { action: 'AUTO_PREPARE', employeeCount: activeEmployees.length } });
+
+    return reply.code(200).send({ data: { payrollRunId: run.id, employeeCount: activeEmployees.length, totalNet } });
+  });
+
+  // ── POST /internal/payroll/send-slips?tenantId=... — PG-026, scheduler-triggered ──
+  // Same publish-then-mark-sent logic as /payroll-runs/:id/bulk-send, but scoped to
+  // this month's run and only slips not already sent (idempotent across cron runs).
+  fastify.post('/internal/payroll/send-slips', async (request, reply) => {
+    if (!requireInternalKey(request as never, reply as never)) return;
+    const tenantId = parseInt((request.query as { tenantId?: string }).tenantId ?? '', 10);
+    if (!tenantId) return reply.code(400).send({ error: { code: 'MISSING_TENANT_ID', message: 'tenantId query param required' } });
+
+    const ctx = ctxFactory.create({ tenantId, userId: 0, correlationId: crypto.randomUUID() });
+    const now = new Date();
+    const periodMonth = now.getUTCMonth() + 1;
+    const periodYear = now.getUTCFullYear();
+
+    const [run] = await ctx.db.raw.select({ id: payrollRuns.id }).from(payrollRuns).where(and(eq(payrollRuns.tenantId, tenantId), eq(payrollRuns.periodMonth, periodMonth), eq(payrollRuns.periodYear, periodYear)));
+    if (!run) return reply.code(200).send({ data: { message: 'No payroll run for this period yet — skipped', count: 0 } });
+
+    const slips = await ctx.db.raw
+      .select({ id: payrollSlips.id, employeeId: payrollSlips.employeeId })
+      .from(payrollSlips)
+      .where(and(eq(payrollSlips.payrollRunId, run.id), eq(payrollSlips.tenantId, tenantId), isNull(payrollSlips.slipSentAt)));
+
+    for (const slip of slips) {
+      await ctx.events.publish('payroll_slip', slip.id, 'SALARY_SLIP_READY', { payrollSlipId: slip.id, employeeId: slip.employeeId, tenantId });
+    }
+    if (slips.length > 0) {
+      await ctx.db.raw.update(payrollSlips).set({ slipSentAt: new Date() }).where(and(eq(payrollSlips.payrollRunId, run.id), eq(payrollSlips.tenantId, tenantId), isNull(payrollSlips.slipSentAt)));
+    }
+
+    return reply.code(200).send({ data: { payrollRunId: run.id, count: slips.length } });
   });
 }

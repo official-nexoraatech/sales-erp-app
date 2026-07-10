@@ -8,6 +8,7 @@ import {
   items,
   outboxEvents,
   projectionCustomerBalance,
+  inventoryLedger,
 } from '@erp/db';
 import type { ErpDatabase } from '@erp/db';
 import { BusinessError, NotFoundError } from '@erp/types';
@@ -53,6 +54,15 @@ export class SaleReturnService {
       let totalAmount = 0;
       let cgstTotal = 0, sgstTotal = 0, igstTotal = 0, subtotal = 0;
       const returnLineValues = [];
+      const stockRestorations: Array<{
+        itemId: number;
+        variantId?: number | undefined;
+        invoiceLineId: number;
+        warehouseId: number;
+        quantity: number;
+        quantityBefore: number;
+        quantityAfter: number;
+      }> = [];
 
       for (const rl of params.lines) {
         const [origLine] = await trx
@@ -62,8 +72,28 @@ export class SaleReturnService {
         if (!origLine) throw new NotFoundError(`Invoice line ${rl.invoiceLineId} not found`);
 
         const origQty = parseFloat(String(origLine.quantity));
-        if (rl.returnQty > origQty)
-          throw new BusinessError('RETURN_QTY_EXCEEDED', `Return qty ${rl.returnQty} exceeds original qty ${origQty} for line ${rl.invoiceLineId}`);
+
+        // ES-23 [H7]: validate against cumulative prior APPROVED returns for this invoice
+        // line, not just the original quantity — otherwise multiple separate returns can
+        // together exceed what was ever sold.
+        const [priorReturns] = await trx
+          .select({ alreadyReturned: sql<string>`COALESCE(SUM(${saleReturnLines.returnQty}), 0)` })
+          .from(saleReturnLines)
+          .innerJoin(saleReturns, eq(saleReturnLines.returnId, saleReturns.id))
+          .where(
+            and(
+              eq(saleReturnLines.invoiceLineId, rl.invoiceLineId),
+              eq(saleReturns.tenantId, params.tenantId),
+              eq(saleReturns.status, 'APPROVED')
+            )
+          );
+        const alreadyReturnedQty = parseFloat(String(priorReturns?.alreadyReturned ?? '0'));
+
+        if (rl.returnQty + alreadyReturnedQty > origQty)
+          throw new BusinessError(
+            'RETURN_QTY_EXCEEDED',
+            `Return qty ${rl.returnQty} (+ ${alreadyReturnedQty} already returned) exceeds original qty ${origQty} for line ${rl.invoiceLineId}`
+          );
         const ratio = rl.returnQty / origQty;
         const unitPrice = parseFloat(String(origLine.unitPrice));
         const cgstAmt = round2(parseFloat(String(origLine.cgstAmount)) * ratio);
@@ -93,13 +123,25 @@ export class SaleReturnService {
 
         // Restore stock if physical return
         if (params.isPhysicalReturn && params.warehouseId) {
-          await trx
+          const [itemResult] = await trx
             .update(items)
             .set({
               availableQty: sql`${items.availableQty} + ${rl.returnQty}`,
               version: sql`${items.version} + 1`,
             })
-            .where(and(eq(items.id, rl.itemId), eq(items.tenantId, params.tenantId)));
+            .where(and(eq(items.id, rl.itemId), eq(items.tenantId, params.tenantId)))
+            .returning({ availableQty: items.availableQty });
+
+          const afterQty = parseFloat(String(itemResult?.availableQty ?? '0'));
+          stockRestorations.push({
+            itemId: rl.itemId,
+            variantId: rl.variantId,
+            invoiceLineId: rl.invoiceLineId,
+            warehouseId: params.warehouseId,
+            quantity: rl.returnQty,
+            quantityBefore: afterQty - rl.returnQty,
+            quantityAfter: afterQty,
+          });
         }
       }
 
@@ -131,6 +173,27 @@ export class SaleReturnService {
       await trx.insert(saleReturnLines).values(
         returnLineValues.map((l) => ({ ...l, returnId: returnRow.id }))
       );
+
+      // Write STOCK_IN inventory ledger rows for stock restored above
+      if (stockRestorations.length > 0) {
+        await trx.insert(inventoryLedger).values(
+          stockRestorations.map((r) => ({
+            tenantId: params.tenantId,
+            itemId: r.itemId,
+            variantId: r.variantId ?? undefined,
+            warehouseId: r.warehouseId,
+            movementType: 'STOCK_IN' as const,
+            quantity: String(r.quantity),
+            quantityBefore: String(r.quantityBefore),
+            quantityAfter: String(r.quantityAfter),
+            referenceType: 'SALE_RETURN',
+            referenceId: returnRow.id,
+            referenceLineId: r.invoiceLineId,
+            unitCost: '0',
+            createdBy: params.createdBy,
+          }))
+        );
+      }
 
       // Auto-create credit note
       const [cnRow] = await trx
@@ -210,10 +273,15 @@ export class SaleReturnService {
       if (!['OPEN', 'PARTIALLY_USED'].includes(cn.status))
         throw new BusinessError('CREDIT_NOTE_EXHAUSTED', 'Credit note has no remaining balance');
 
+      // FOR UPDATE (ES-23 [C5]): applyCreditNote and PaymentService.allocate both
+      // read-then-write invoices.balanceDue; without this lock, a payment allocation
+      // and a credit-note application racing on the same invoice can each compute
+      // applyAmt/newBalance from the same stale snapshot.
       const [invoice] = await trx
         .select({ balanceDue: invoices.balanceDue, status: invoices.status })
         .from(invoices)
-        .where(and(eq(invoices.id, invoiceId), eq(invoices.tenantId, tenantId)));
+        .where(and(eq(invoices.id, invoiceId), eq(invoices.tenantId, tenantId)))
+        .for('update');
       if (!invoice) throw new NotFoundError('Invoice not found');
 
       const remaining = parseFloat(String(cn.remainingAmount));

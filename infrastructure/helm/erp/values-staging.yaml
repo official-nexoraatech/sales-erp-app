@@ -1,0 +1,45 @@
+# Staging environment overlay.
+#
+# Usage:
+#   helm template ./infrastructure/helm/erp -f infrastructure/helm/erp/values-staging.yaml
+#
+# NOTE on namespace: infrastructure/k8s/kustomization.yaml already established that there is
+# no separate `erp-staging` Kubernetes namespace anywhere in this repo/cluster — the existing
+# CI `deploy-staging` job deploys into `erp-system` on whichever cluster KUBECONFIG_STAGING
+# points to. This overlay follows the same convention rather than inventing a new namespace.
+#
+# global.imageTag is intentionally left at the chart default (values.yaml) here — CI pins the
+# real release tag at deploy time (e.g. `--set global.imageTag=<version>`), mirroring how
+# deploy-staging today does `sed -i "s/newTag: latest/newTag: ${version}/"` against
+# kustomization.yaml (see .github/workflows/ci.yml).
+#
+# Hostname/Ingress routing (erp-staging.nexoraatech.com) is NOT templated by this chart yet —
+# see README.md "Known gaps"; adding an Ingress/Gateway is PG-022 Session 2 scope, not this one.
+
+global:
+  namespace: erp-system
+  replicaCount: 1
+
+  resources:
+    default:
+      requests:
+        cpu: 50m
+        memory: 96Mi
+      limits:
+        cpu: 250m
+        memory: 256Mi
+
+  hpa:
+    minReplicas: 1
+    maxReplicas: 4
+
+services:
+  report-service:
+    replicaCount: 1
+    resources:
+      requests:
+        cpu: 150m
+        memory: 384Mi
+      limits:
+        cpu: 500m
+        memory: 1024Mi

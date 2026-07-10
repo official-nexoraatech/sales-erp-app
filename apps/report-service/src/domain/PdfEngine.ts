@@ -9,6 +9,7 @@ import {
   PURCHASE_ORDER_TEMPLATE,
   PAYMENT_RECEIPT_TEMPLATE,
   SALARY_SLIP_TEMPLATE,
+  PROFIT_LOSS_TEMPLATE,
 } from '../templates/index.js';
 
 const logger = createLogger({ serviceName: 'report-service' });
@@ -19,7 +20,8 @@ export type DocumentType =
   | 'DELIVERY_CHALLAN'
   | 'PURCHASE_ORDER'
   | 'PAYMENT_RECEIPT'
-  | 'SALARY_SLIP';
+  | 'SALARY_SLIP'
+  | 'PROFIT_LOSS';
 
 const TEMPLATE_MAP: Record<DocumentType, string> = {
   TAX_INVOICE: TAX_INVOICE_TEMPLATE,
@@ -28,6 +30,7 @@ const TEMPLATE_MAP: Record<DocumentType, string> = {
   PURCHASE_ORDER: PURCHASE_ORDER_TEMPLATE,
   PAYMENT_RECEIPT: PAYMENT_RECEIPT_TEMPLATE,
   SALARY_SLIP: SALARY_SLIP_TEMPLATE,
+  PROFIT_LOSS: PROFIT_LOSS_TEMPLATE,
 };
 
 // Register Handlebars helpers for Indian locale formatting
@@ -41,6 +44,10 @@ Handlebars.registerHelper('dateFormat', (date: string | Date) => {
 Handlebars.registerHelper('numberWords', (num: number) => numberToWords(num));
 Handlebars.registerHelper('ifEquals', function (this: unknown, a: unknown, b: unknown, options: Handlebars.HelperOptions) {
   return a === b ? options.fn(this) : options.inverse(this);
+});
+Handlebars.registerHelper('last4', (value: string | undefined | null) => {
+  if (!value) return '';
+  return value.slice(-4);
 });
 
 export interface PdfGenerateOptions {

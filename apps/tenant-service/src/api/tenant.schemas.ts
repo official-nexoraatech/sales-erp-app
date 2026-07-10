@@ -34,6 +34,15 @@ export const CloseTenantSchema = z.object({
   confirmation: z.literal('CLOSE_TENANT'),
 });
 
+// PG-028
+export const UsagePeriodQuerySchema = z.object({
+  period: z
+    .string()
+    .regex(/^\d{4}-(0[1-9]|1[0-2])$/, 'Period must be in YYYY-MM format')
+    .optional(),
+});
+
 export type CreateTenantInput = z.infer<typeof CreateTenantSchema>;
 export type SuspendTenantInput = z.infer<typeof SuspendTenantSchema>;
 export type CloseTenantInput = z.infer<typeof CloseTenantSchema>;
+export type UsagePeriodQueryInput = z.infer<typeof UsagePeriodQuerySchema>;

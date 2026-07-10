@@ -2,7 +2,9 @@
 import { useQuery } from '@tanstack/react-query';
 import { tdsApi } from '../../api/endpoints.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
+import ERPEmptyState from '../../components/erp/ERPEmptyState.js';
 import { ERPTableSkeleton } from '../../components/erp/ERPSkeleton.js';
+import ERPDataGrid, { type ERPColumnDef } from '../../components/erp/ERPDataGrid.js';
 import { formatCurrency } from '../../lib/format.js';
 
 interface LiabilityData {
@@ -41,8 +43,17 @@ export default function TDSPage() {
     queryFn: () => tdsApi.get26Q({ year, quarter }),
   });
 
-  const liability: LiabilityData | undefined = (liabData as { data?: LiabilityData })?.data;
-  const q26: Q26Data | undefined = (q26Data as { data?: Q26Data })?.data;
+  const liability: LiabilityData | undefined = (liabData as LiabilityData);
+  const q26: Q26Data | undefined = (q26Data as Q26Data);
+
+  const q26Columns: ERPColumnDef<Q26Row>[] = [
+    { key: 'pan', header: 'PAN', mono: true, className: 'text-xs' },
+    { key: 'supplierName', header: 'Supplier' },
+    { key: 'section', header: 'Section', className: 'text-secondary' },
+    { key: 'grossAmount', header: 'Gross Amount', align: 'right', mono: true, render: (row) => formatCurrency(row.grossAmount) },
+    { key: 'tdsAmount', header: 'TDS Amount', align: 'right', mono: true, className: 'text-danger', render: (row) => formatCurrency(row.tdsAmount) },
+    { key: 'dateOfPayment', header: 'Date', className: 'text-secondary text-xs' },
+  ];
 
   return (
     <div className="space-y-6">
@@ -53,29 +64,29 @@ export default function TDSPage() {
       />
 
       {/* Monthly Liability */}
-      <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
+      <div className="bg-surface-card rounded-xl border border-default p-4">
         <div className="flex flex-wrap items-center gap-4 mb-4">
           <h3 className="font-semibold text-primary">Monthly Liability</h3>
           <input
             type="month"
             value={period}
             onChange={(e) => setPeriod(e.target.value)}
-            className="border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-1.5 text-sm bg-white dark:bg-gray-800 text-primary"
+            className="border border-default rounded-lg px-3 py-1.5 text-sm bg-surface-card text-primary outline-none focus:border-focus focus:ring-2 focus:ring-inset focus:ring-focus"
           />
         </div>
         {liabLoading ? (
           <ERPTableSkeleton rows={2} />
         ) : liability ? (
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div className="bg-red-50 dark:bg-red-900/20 rounded-xl p-4 text-center">
-              <div className="text-2xl font-bold text-red-600 dark:text-red-400">{formatCurrency(liability.totalLiability)}</div>
+            <div className="bg-danger-bg rounded-xl p-4 text-center">
+              <div className="text-2xl font-bold text-danger">{formatCurrency(liability.totalLiability)}</div>
               <div className="text-sm text-secondary mt-1">TDS Payable for {period}</div>
             </div>
-            <div className="bg-blue-50 dark:bg-blue-900/20 rounded-xl p-4 text-center">
-              <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">{liability.entryCount}</div>
+            <div className="bg-info-bg rounded-xl p-4 text-center">
+              <div className="text-2xl font-bold text-info">{liability.entryCount}</div>
               <div className="text-sm text-secondary mt-1">Pending TDS Entries</div>
             </div>
-            <div className="bg-gray-50 dark:bg-gray-900/30 rounded-xl p-4 flex items-center justify-center">
+            <div className="bg-surface-subtle rounded-xl p-4 flex items-center justify-center">
               <div className="text-sm text-secondary text-center">Deposit TDS by 7th of next month to avoid interest u/s 201(1A)</div>
             </div>
           </div>
@@ -83,8 +94,8 @@ export default function TDSPage() {
       </div>
 
       {/* 26Q Return */}
-      <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
-        <div className="flex flex-wrap items-center gap-4 mb-4">
+      <div className="space-y-4">
+        <div className="flex flex-wrap items-center gap-4">
           <h3 className="font-semibold text-primary">26Q Quarterly Return</h3>
           <input
             type="number"
@@ -92,12 +103,12 @@ export default function TDSPage() {
             onChange={(e) => setYear(Number(e.target.value))}
             min={2020}
             max={2030}
-            className="border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-1.5 text-sm bg-white dark:bg-gray-800 text-primary w-24"
+            className="border border-default rounded-lg px-3 py-1.5 text-sm bg-surface-card text-primary w-24 outline-none focus:border-focus focus:ring-2 focus:ring-inset focus:ring-focus"
           />
           <select
             value={quarter}
             onChange={(e) => setQuarter(Number(e.target.value) as 1 | 2 | 3 | 4)}
-            className="border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-1.5 text-sm bg-white dark:bg-gray-800 text-primary"
+            className="border border-default rounded-lg px-3 py-1.5 text-sm bg-surface-card text-primary outline-none focus:border-focus focus:ring-2 focus:ring-inset focus:ring-focus"
           >
             <option value={1}>Q1 (Apr–Jun)</option>
             <option value={2}>Q2 (Jul–Sep)</option>
@@ -106,44 +117,23 @@ export default function TDSPage() {
           </select>
         </div>
 
-        {q26Loading ? (
-          <ERPTableSkeleton rows={4} />
-        ) : !q26?.entries.length ? (
-          <div className="flex items-center justify-center py-8 text-secondary text-sm">No TDS deductions in this quarter</div>
-        ) : (
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50 dark:bg-gray-900/40 border-b border-gray-200 dark:border-gray-700">
-              <tr>
-                <th className="px-4 py-3 text-left font-medium text-secondary">PAN</th>
-                <th className="px-4 py-3 text-left font-medium text-secondary">Supplier</th>
-                <th className="px-4 py-3 text-left font-medium text-secondary">Section</th>
-                <th className="px-4 py-3 text-right font-medium text-secondary">Gross Amount</th>
-                <th className="px-4 py-3 text-right font-medium text-secondary">TDS Amount</th>
-                <th className="px-4 py-3 text-left font-medium text-secondary">Date</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
-              {q26.entries.map((row, i) => (
-                <tr key={i} className="hover:bg-gray-50 dark:hover:bg-gray-750">
-                  <td className="px-4 py-2.5 font-mono text-xs">{row.pan}</td>
-                  <td className="px-4 py-2.5 text-primary">{row.supplierName}</td>
-                  <td className="px-4 py-2.5 text-secondary">{row.section}</td>
-                  <td className="px-4 py-2.5 text-right font-mono">{formatCurrency(row.grossAmount)}</td>
-                  <td className="px-4 py-2.5 text-right font-mono text-red-600 dark:text-red-400">{formatCurrency(row.tdsAmount)}</td>
-                  <td className="px-4 py-2.5 text-secondary text-xs">{row.dateOfPayment}</td>
-                </tr>
-              ))}
-            </tbody>
-            <tfoot className="bg-gray-50 dark:bg-gray-900/40 border-t border-gray-200 dark:border-gray-700">
-              <tr>
-                <td colSpan={3} className="px-4 py-3 font-semibold text-primary">Total</td>
-                <td className="px-4 py-3 text-right font-mono font-semibold">{formatCurrency(q26.entries.reduce((s, r) => s + r.grossAmount, 0))}</td>
-                <td className="px-4 py-3 text-right font-mono font-semibold text-red-600">{formatCurrency(q26.entries.reduce((s, r) => s + r.tdsAmount, 0))}</td>
+        <ERPDataGrid
+          columns={q26Columns}
+          data={q26?.entries ?? []}
+          isLoading={q26Loading}
+          rowKey={(r) => `${r.pan}-${r.section}-${r.dateOfPayment}`}
+          emptyState={<ERPEmptyState type="no-results" title="No TDS deductions in this quarter" description="Try selecting a different year or quarter." />}
+          footer={
+            q26 && q26.entries.length > 0 && (
+              <>
+                <td colSpan={3} className="px-4 py-3 text-primary">Total</td>
+                <td className="px-4 py-3 text-right font-mono text-primary">{formatCurrency(q26.entries.reduce((s, r) => s + r.grossAmount, 0))}</td>
+                <td className="px-4 py-3 text-right font-mono text-danger">{formatCurrency(q26.entries.reduce((s, r) => s + r.tdsAmount, 0))}</td>
                 <td />
-              </tr>
-            </tfoot>
-          </table>
-        )}
+              </>
+            )
+          }
+        />
       </div>
     </div>
   );

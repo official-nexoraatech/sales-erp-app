@@ -2,6 +2,8 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { quotationApi } from '../../api/endpoints.js';
+import { useAuthStore } from '../../store/auth.store.js';
+import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
 import { ERPDetailSkeleton } from '../../components/erp/ERPSkeleton.js';
 import ERPEmptyState from '../../components/erp/ERPEmptyState.js';
@@ -60,6 +62,9 @@ export default function QuotationDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const hasPermission = useAuthStore((s) => s.hasPermission);
+  const canCreateQuotation = hasPermission(PERMISSIONS.INVOICE_CREATE);
+  const canConvertQuotation = hasPermission(PERMISSIONS.QUOTATION_CONVERT);
   const [showConvertConfirm, setShowConvertConfirm] = useState(false);
 
   const { data, isLoading } = useQuery({
@@ -68,7 +73,7 @@ export default function QuotationDetailPage() {
     enabled: !!id,
   });
 
-  const q = (data as { data?: QuotationDetail })?.data;
+  const q = (data as QuotationDetail);
 
   const sendMutation = useMutation({
     mutationFn: () => quotationApi.send(Number(id)),
@@ -108,17 +113,17 @@ export default function QuotationDetailPage() {
       >
         <div className="flex items-center gap-3">
           <Badge variant={STATUS_COLORS[q.status] ?? 'default'}>{q.status}</Badge>
-          {q.status === 'DRAFT' && (
+          {canCreateQuotation && q.status === 'DRAFT' && (
             <Button variant="ghost" isLoading={sendMutation.isPending} onClick={() => sendMutation.mutate()}>
               Send
             </Button>
           )}
-          {q.status === 'ACCEPTED' && (
+          {canConvertQuotation && q.status === 'ACCEPTED' && (
             <Button onClick={() => setShowConvertConfirm(true)}>
               Convert to Order
             </Button>
           )}
-          {['ACCEPTED', 'CONVERTED'].includes(q.status) && (
+          {canCreateQuotation && ['ACCEPTED', 'CONVERTED'].includes(q.status) && (
             <Button
               variant="ghost"
               onClick={() => navigate(`/sales/invoices/new?quotationId=${q.id}&customerId=${q.customerId}`)}

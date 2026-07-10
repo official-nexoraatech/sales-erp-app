@@ -2,11 +2,15 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import argon2 from 'argon2';
 import { eq, and } from 'drizzle-orm';
-import { users, userRoles, rolePermissions, refreshTokens } from '@erp/db';
+import type { Redis } from 'ioredis';
+import { TenantScopedCache } from '@erp/sdk';
+import { users } from '@erp/db';
 import type { ErpDatabase } from '@erp/db';
-import { signAccessToken } from '../jwt.js';
-import { generateSecureToken, sha256Hex } from '../crypto.js';
+import { generateSecureToken } from '../crypto.js';
 import type { AuthConfig } from '../config.js';
+import { checkIpBlocked, recordFailedLoginAndMaybeBlock } from '../middleware/suspicious-login.js';
+import { issueTokensAndSession } from '../domain/session.js';
+import { loadUserRolesAndPermissions } from '../domain/roles.js';
 
 const LoginBody = z.object({
   email: z.string().email(),
@@ -14,7 +18,14 @@ const LoginBody = z.object({
   tenantId: z.number().int().positive(),
 });
 
-export async function loginRoute(fastify: FastifyInstance, db: ErpDatabase, config: AuthConfig): Promise<void> {
+const MFA_TOKEN_TTL_SECONDS = 300;
+
+export async function loginRoute(
+  fastify: FastifyInstance,
+  db: ErpDatabase,
+  config: AuthConfig,
+  redis: Redis
+): Promise<void> {
   fastify.post('/auth/login', {
     config: { rateLimit: { max: config.loginRateLimitMax, timeWindow: config.loginRateLimitWindowMs } },
     handler: async (request, reply) => {
@@ -25,6 +36,14 @@ export async function loginRoute(fastify: FastifyInstance, db: ErpDatabase, conf
 
       const { email, password, tenantId } = body.data;
 
+      const ipStatus = await checkIpBlocked(db, request.ip);
+      if (ipStatus.blocked) {
+        return reply.code(429).send({
+          error: 'Too many failed login attempts from this IP',
+          retryAfterSeconds: ipStatus.retryAfterSeconds,
+        });
+      }
+
       const [user] = await db
         .select()
         .from(users)
@@ -34,6 +53,7 @@ export async function loginRoute(fastify: FastifyInstance, db: ErpDatabase, conf
       // Constant-time response to prevent user enumeration
       if (!user) {
         await argon2.hash('dummy-prevent-timing-attack', { type: argon2.argon2id });
+        await recordFailedLoginAndMaybeBlock(db, redis, request.ip, tenantId, config);
         return reply.code(401).send({ error: 'Invalid credentials' });
       }
 
@@ -64,6 +84,8 @@ export async function loginRoute(fastify: FastifyInstance, db: ErpDatabase, conf
           })
           .where(eq(users.id, user.id));
 
+        await recordFailedLoginAndMaybeBlock(db, redis, request.ip, tenantId, config);
+
         if (shouldLock) {
           return reply.code(429).send({
             error: 'Account locked due to too many failed attempts',
@@ -73,45 +95,36 @@ export async function loginRoute(fastify: FastifyInstance, db: ErpDatabase, conf
         return reply.code(401).send({ error: 'Invalid credentials' });
       }
 
-      // Load roles and permissions
-      const userRoleRows = await db
-        .select({ roleId: userRoles.roleId })
-        .from(userRoles)
-        .where(and(eq(userRoles.userId, user.id), eq(userRoles.tenantId, tenantId)));
-
-      const roleIds = userRoleRows.map((r) => r.roleId);
-      const roleNames: string[] = [];
-      const permissionsSet = new Set<string>();
-
-      if (roleIds.length > 0) {
-        const permRows = await db
-          .select({ permission: rolePermissions.permission })
-          .from(rolePermissions)
-          .where(eq(rolePermissions.tenantId, tenantId));
-        permRows.forEach((r: { permission: string }) => permissionsSet.add(r.permission));
+      // Password confirmed — challenge with TOTP before issuing any tokens
+      if (user.totpEnabled) {
+        // The Redis key must be tenant-scoped, but /auth/mfa/verify only receives the
+        // opaque mfaToken back (no tenantId in that request) — so the tenantId travels
+        // as a prefix of the token itself, letting the read side reconstruct the same
+        // TenantScopedCache without changing the API contract.
+        const tokenSecret = generateSecureToken(32);
+        const mfaToken = `${tenantId}.${tokenSecret}`;
+        const cache = new TenantScopedCache(redis, tenantId);
+        await cache.setJson(`mfa:${tokenSecret}`, { userId: user.id, tenantId }, MFA_TOKEN_TTL_SECONDS);
+        return reply.code(200).send({ data: { requiresMFA: true, mfaToken } });
       }
 
-      // Issue tokens
-      const accessToken = await signAccessToken({
-        sub: String(user.id),
-        tenantId,
-        email: user.email,
-        roles: roleNames,
-        permissions: Array.from(permissionsSet),
-      });
+      // Load roles and permissions
+      const { roleNames, permissions, branchIds } = await loadUserRolesAndPermissions(db, user.id, tenantId);
 
-      const plainRefreshToken = generateSecureToken(32);
-      const tokenHash = sha256Hex(plainRefreshToken);
-      const expiresAt = new Date(Date.now() + config.jwtRefreshTokenTtlDays * 24 * 60 * 60 * 1000);
-
-      await db.insert(refreshTokens).values({
-        userId: user.id,
-        tenantId,
-        tokenHash,
-        expiresAt,
-        userAgent: request.headers['user-agent'] ?? null,
-        ipAddress: request.ip,
-      });
+      // Issue tokens + record active session
+      const tokens = await issueTokensAndSession(
+        db,
+        config,
+        {
+          sub: String(user.id),
+          tenantId,
+          email: user.email,
+          roles: roleNames,
+          permissions,
+          branchIds,
+        },
+        { ip: request.ip, userAgent: request.headers['user-agent'] ?? null }
+      );
 
       // Reset failed attempts and record last login
       await db
@@ -119,14 +132,7 @@ export async function loginRoute(fastify: FastifyInstance, db: ErpDatabase, conf
         .set({ failedLoginAttempts: 0, lockedUntil: null, lastLoginAt: new Date(), updatedAt: new Date() })
         .where(eq(users.id, user.id));
 
-      return reply.code(200).send({
-        data: {
-          accessToken,
-          refreshToken: plainRefreshToken,
-          expiresIn: config.jwtAccessTokenTtl,
-          tokenType: 'Bearer',
-        },
-      });
+      return reply.code(200).send({ data: tokens });
     },
   });
 }

@@ -1,140 +1,11 @@
-import { type Kafka, type Producer, type Consumer, Partitioners } from 'kafkajs';
+import { type Kafka, type Consumer } from 'kafkajs';
 import { ulid } from 'ulid';
-import { inboxEvents, outboxEvents, dlqItems } from '@erp/db';
-import { and, eq } from 'drizzle-orm';
+import { inboxEvents } from '@erp/db';
+import { and, eq, sql } from 'drizzle-orm';
 import type { ERPEventPayload } from '@erp/types';
 import type { TenantScopedDatabase } from './database.js';
 
 export type { ERPEventPayload };
-
-// ─── Outbox Publisher (Hardened — M12.3) ──────────────────────────────────
-// Polls every 100ms (was 500ms), validates schema, moves to DLQ on retry_count > 5
-export class OutboxPublisher {
-  private producer: Producer | null = null;
-  private intervalHandle: ReturnType<typeof setInterval> | null = null;
-  private publishLagMs = 0;
-
-  constructor(
-    private readonly kafka: Kafka,
-    private readonly maxRetries: number = 5,
-    private readonly pollIntervalMs: number = 100
-  ) {}
-
-  async start(db: TenantScopedDatabase['raw']): Promise<void> {
-    this.producer = this.kafka.producer({
-      createPartitioner: Partitioners.LegacyPartitioner,
-    });
-    await this.producer.connect();
-
-    this.intervalHandle = setInterval(async () => {
-      await this.publishPending(db);
-    }, this.pollIntervalMs);
-  }
-
-  private async publishPending(db: TenantScopedDatabase['raw']): Promise<void> {
-    if (!this.producer) return;
-
-    const pending = await db
-      .select()
-      .from(outboxEvents)
-      .where(and(eq(outboxEvents.published, false)))
-      .orderBy(outboxEvents.createdAt)
-      .limit(100);
-
-    for (const event of pending) {
-      const payload = event.payload as ERPEventPayload;
-      const insertedAt = event.createdAt;
-      const topic = this.buildTopic(event.eventType);
-
-      try {
-        await this.producer.send({
-          topic,
-          messages: [
-            {
-              key: String(event.aggregateId),
-              value: JSON.stringify(payload),
-              headers: {
-                eventId: event.eventId,
-                eventType: event.eventType,
-                tenantId: String(event.tenantId),
-                schemaVersion: String(payload.schemaVersion ?? 1),
-              },
-            },
-          ],
-        });
-
-        await db
-          .update(outboxEvents)
-          .set({ published: true, publishedAt: new Date() })
-          .where(eq(outboxEvents.id, event.id));
-
-        // Track publish lag
-        this.publishLagMs = Date.now() - insertedAt.getTime();
-
-        // Alert if lag > 30 seconds
-        if (this.publishLagMs > 30_000) {
-          process.stderr.write(
-            `[OutboxPublisher] ALERT: publish lag ${this.publishLagMs}ms for event ${event.eventId} — exceeds 30s threshold\n`
-          );
-        }
-      } catch (err) {
-        const errMsg = err instanceof Error ? err.message : String(err);
-
-        // Check retry count — move to DLQ after maxRetries
-        const currentRetries = (event as unknown as Record<string, unknown>)['retry_count'] as number ?? 0;
-
-        if (currentRetries >= this.maxRetries) {
-          // Move to DLQ
-          await db.insert(dlqItems).values({
-            topic,
-            partition: 0,
-            offset: String(event.id),
-            payload: payload as unknown as Record<string, unknown>,
-            headers: {
-              eventId: event.eventId,
-              eventType: event.eventType,
-              tenantId: String(event.tenantId),
-            },
-            errorMessage: errMsg,
-            retryCount: currentRetries,
-            status: 'PENDING',
-            tenantId: event.tenantId,
-          });
-
-          // Mark as published to prevent retrying
-          await db
-            .update(outboxEvents)
-            .set({ published: true, publishedAt: new Date() })
-            .where(eq(outboxEvents.id, event.id));
-
-          process.stderr.write(
-            `[OutboxPublisher] Moved event ${event.eventId} to DLQ after ${currentRetries} retries: ${errMsg}\n`
-          );
-        } else {
-          process.stderr.write(
-            `[OutboxPublisher] Failed to publish event ${event.eventId} (retry ${currentRetries}/${this.maxRetries}): ${errMsg}\n`
-          );
-        }
-      }
-    }
-  }
-
-  getPublishLagMs(): number {
-    return this.publishLagMs;
-  }
-
-  private buildTopic(eventType: string): string {
-    return `erp.${eventType.toLowerCase().replace(/_/g, '.')}`;
-  }
-
-  async stop(): Promise<void> {
-    if (this.intervalHandle) {
-      clearInterval(this.intervalHandle);
-      this.intervalHandle = null;
-    }
-    await this.producer?.disconnect();
-  }
-}
 
 // ─── Platform Event Bus ────────────────────────────────────────────────────
 // Services NEVER publish directly to Kafka — always through outbox (§4.4)
@@ -227,20 +98,16 @@ export class PlatformEventConsumer {
 
         try {
           await db.transaction(async (trx) => {
-            const existing = await trx.raw
-              .select()
-              .from(inboxEvents)
-              .where(
-                and(
-                  eq(inboxEvents.eventId, event.eventId),
-                  eq(inboxEvents.consumerService, this.serviceName)
-                )
-              )
-              .limit(1);
-
-            if (existing[0]?.status === 'PROCESSED') return;
-
-            await trx.raw
+            // ES-24 [C7]: the insert/upsert's own .returning() IS the idempotency check —
+            // if another transaction already claimed this eventId+consumerService and it's
+            // PROCESSED, the conditional DO UPDATE's WHERE clause makes it a no-op and
+            // returns zero rows, so THIS call skips the handler. A row left PROCESSING (a
+            // prior attempt crashed mid-handler) or FAILED is still re-claimable — that's
+            // the retry path. The old code checked PROCESSED status via a separate SELECT
+            // before inserting, which raced: a second delivery could pass that check, have
+            // its own insert silently no-op via onConflictDoNothing(), and still (wrongly)
+            // run handler() regardless of who "won".
+            const claimed = await trx.raw
               .insert(inboxEvents)
               .values({
                 eventId: event.eventId,
@@ -248,7 +115,14 @@ export class PlatformEventConsumer {
                 status: 'PROCESSING',
                 tenantId: event.tenantId,
               })
-              .onConflictDoNothing();
+              .onConflictDoUpdate({
+                target: [inboxEvents.eventId, inboxEvents.consumerService],
+                set: { status: 'PROCESSING' },
+                setWhere: sql`${inboxEvents.status} != 'PROCESSED'`,
+              })
+              .returning({ id: inboxEvents.id });
+
+            if (claimed.length === 0) return; // another delivery already owns/finished this event
 
             await handler(event, trx);
 

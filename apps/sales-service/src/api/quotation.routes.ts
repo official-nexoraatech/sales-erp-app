@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { PlatformContextFactory } from '@erp/sdk';
 import { quotations, quotationLines } from '@erp/db';
-import { and, desc, eq, ilike, or } from 'drizzle-orm';
+import { and, desc, eq, ilike, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { PERMISSIONS } from '@erp/types';
 import { authenticate } from '../middleware/authenticate.js';
@@ -60,7 +60,12 @@ export async function quotationRoutes(
         .limit(pageSize)
         .offset(offset);
 
-      return reply.send({ data: rows, page, pageSize });
+      const [countRow] = await ctx.db.raw
+        .select({ count: sql<number>`count(*)::int` })
+        .from(quotations)
+        .where(and(...conditions));
+
+      return reply.send({ data: { content: rows, totalElements: countRow?.count ?? 0, page, pageSize } });
     },
   });
 
@@ -87,6 +92,14 @@ export async function quotationRoutes(
         createdBy: req.auth.userId,
       } as Parameters<typeof svc.create>[0]);
 
+      await ctx.events.publish('quotation', id, 'QUOTATION_CREATED', {
+        quotationId: id,
+        quotationNumber,
+        customerId: body.customerId,
+        branchId: body.branchId,
+        status: 'DRAFT',
+      });
+
       return reply.code(201).send({ data: { id, quotationNumber } });
     },
   });
@@ -109,6 +122,7 @@ export async function quotationRoutes(
       const ctx = ctxFactory.create({ tenantId: req.auth.tenantId, userId: req.auth.userId, correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID() });
       const svc = new QuotationService(ctx.db.raw);
       await svc.send(parseInt(id, 10), req.auth.tenantId, req.auth.userId);
+      await ctx.events.publish('quotation', parseInt(id, 10), 'QUOTATION_UPDATED', { quotationId: parseInt(id, 10), status: 'SENT' });
       return reply.send({ success: true });
     },
   });
@@ -119,6 +133,8 @@ export async function quotationRoutes(
       const { id } = req.params as { id: string };
       const ctx = ctxFactory.create({ tenantId: req.auth.tenantId, userId: req.auth.userId, correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID() });
       const svc = new QuotationService(ctx.db.raw);
+      // QuotationService.convert() already writes a QUOTATION_CONVERTED outbox event
+      // inside its own transaction — no separate publish needed here.
       const result = await svc.convert(parseInt(id, 10), req.auth.tenantId, req.auth.userId);
       return reply.send({ data: result });
     },
@@ -133,6 +149,7 @@ export async function quotationRoutes(
         .update(quotations)
         .set({ status: 'EXPIRED', updatedAt: new Date() })
         .where(and(eq(quotations.id, parseInt(id, 10)), eq(quotations.tenantId, req.auth.tenantId)));
+      await ctx.events.publish('quotation', parseInt(id, 10), 'QUOTATION_UPDATED', { quotationId: parseInt(id, 10), status: 'EXPIRED' });
       return reply.send({ success: true });
     },
   });

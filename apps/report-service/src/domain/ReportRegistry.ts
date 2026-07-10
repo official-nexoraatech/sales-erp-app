@@ -17,7 +17,7 @@ export interface ReportParamDef {
 export interface ReportDefinition {
   slug: string;
   name: string;
-  category: 'SALES' | 'PURCHASE' | 'INVENTORY' | 'FINANCIAL' | 'HR' | 'GST';
+  category: 'SALES' | 'PURCHASE' | 'INVENTORY' | 'FINANCIAL' | 'HR' | 'GST' | 'ANALYTICS';
   description: string;
   params: ReportParamDef[];
   columns: ReportColumnDef[];
@@ -1041,6 +1041,7 @@ export const REPORT_REGISTRY: ReportDefinition[] = [
     ],
     columns: [
       { key: 'category', label: 'Category', type: 'string' },
+      { key: 'accountCode', label: 'Code', type: 'string' },
       { key: 'accountName', label: 'Account', type: 'string' },
       { key: 'amount', label: 'Amount', type: 'currency', align: 'right' },
     ],
@@ -1057,6 +1058,7 @@ export const REPORT_REGISTRY: ReportDefinition[] = [
     ],
     columns: [
       { key: 'section', label: 'Section', type: 'string' },
+      { key: 'accountCode', label: 'Code', type: 'string' },
       { key: 'accountName', label: 'Account', type: 'string' },
       { key: 'amount', label: 'Amount', type: 'currency', align: 'right' },
     ],
@@ -1512,6 +1514,106 @@ export const REPORT_REGISTRY: ReportDefinition[] = [
       { key: 'taxableValue', label: 'Taxable Value', type: 'currency', align: 'right' },
       { key: 'rcmTax', label: 'RCM Tax', type: 'currency', align: 'right' },
       { key: 'section', label: 'Section', type: 'string' },
+    ],
+  },
+
+  // ── ANALYTICS REPORTS (ES-17) ──
+  {
+    slug: 'sales-revenue-trend',
+    name: 'Sales Revenue Trend',
+    category: 'ANALYTICS',
+    description: 'Monthly invoiced revenue and invoice count trend',
+    permission: 'REPORT_VIEW',
+    supportsAsync: false,
+    params: [
+      { key: 'fromDate', label: 'From Date', type: 'date', required: false },
+      { key: 'toDate', label: 'To Date', type: 'date', required: false },
+    ],
+    columns: [
+      { key: 'month', label: 'Month', type: 'string' },
+      { key: 'invoiceCount', label: 'Invoices', type: 'number', align: 'right' },
+      { key: 'revenue', label: 'Revenue', type: 'currency', align: 'right' },
+    ],
+  },
+  {
+    slug: 'inventory-analytics',
+    name: 'Inventory Analytics',
+    category: 'ANALYTICS',
+    description: 'Per-item stock, days of supply, last sale date and fast/slow/stockout status',
+    permission: 'REPORT_VIEW',
+    supportsAsync: false,
+    params: [
+      { key: 'fastMoverThreshold', label: 'Fast Mover Threshold (units/30d)', type: 'number', required: false, default: '10' },
+    ],
+    columns: [
+      { key: 'itemCode', label: 'Item Code', type: 'string' },
+      { key: 'itemName', label: 'Item', type: 'string' },
+      { key: 'category', label: 'Category', type: 'string' },
+      { key: 'currentStock', label: 'Current Stock', type: 'number', align: 'right' },
+      { key: 'daysOfSupply', label: 'Days of Supply', type: 'number', align: 'right' },
+      { key: 'lastSaleDate', label: 'Last Sale', type: 'date' },
+      { key: 'status', label: 'Status', type: 'string' },
+    ],
+  },
+  {
+    slug: 'hr-headcount-by-department',
+    name: 'Headcount by Department',
+    category: 'ANALYTICS',
+    description: 'Current active employee count per department',
+    permission: 'REPORT_VIEW',
+    supportsAsync: false,
+    params: [],
+    columns: [
+      { key: 'department', label: 'Department', type: 'string' },
+      { key: 'headcount', label: 'Headcount', type: 'number', align: 'right' },
+    ],
+  },
+  {
+    slug: 'hr-salary-cost-trend',
+    name: 'Salary Cost Trend',
+    category: 'ANALYTICS',
+    description: 'Monthly gross salary cost and deductions across payroll runs',
+    permission: 'REPORT_VIEW',
+    supportsAsync: false,
+    params: [
+      { key: 'fromDate', label: 'From Date', type: 'date', required: false },
+      { key: 'toDate', label: 'To Date', type: 'date', required: false },
+    ],
+    columns: [
+      { key: 'month', label: 'Month', type: 'string' },
+      { key: 'employeeCount', label: 'Employees', type: 'number', align: 'right' },
+      { key: 'grossSalaryCost', label: 'Gross Salary Cost', type: 'currency', align: 'right' },
+      { key: 'totalDeductions', label: 'Deductions', type: 'currency', align: 'right' },
+    ],
+  },
+  {
+    slug: 'hr-hires-vs-exits',
+    name: 'New Hires vs Exits',
+    category: 'ANALYTICS',
+    description: 'Monthly new hires and exits',
+    permission: 'REPORT_VIEW',
+    supportsAsync: false,
+    params: [
+      { key: 'fromDate', label: 'From Date', type: 'date', required: false },
+      { key: 'toDate', label: 'To Date', type: 'date', required: false },
+    ],
+    columns: [
+      { key: 'month', label: 'Month', type: 'string' },
+      { key: 'newHires', label: 'New Hires', type: 'number', align: 'right' },
+      { key: 'exits', label: 'Exits', type: 'number', align: 'right' },
+    ],
+  },
+  {
+    slug: 'hr-gender-diversity',
+    name: 'Gender Diversity',
+    category: 'ANALYTICS',
+    description: 'Current active employee count by gender',
+    permission: 'REPORT_VIEW',
+    supportsAsync: false,
+    params: [],
+    columns: [
+      { key: 'gender', label: 'Gender', type: 'string' },
+      { key: 'headcount', label: 'Headcount', type: 'number', align: 'right' },
     ],
   },
 ];

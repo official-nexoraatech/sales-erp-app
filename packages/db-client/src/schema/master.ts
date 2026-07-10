@@ -36,6 +36,7 @@ export const warehouses = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
     createdBy: integer('created_by').notNull(),
+    updatedBy: integer('updated_by'),
     version: integer('version').notNull().default(0),
   },
   (t) => [
@@ -108,6 +109,10 @@ export const customers = pgTable(
     healthScore: integer('health_score'),
     healthSegment: varchar('health_segment', { length: 20 }).$type<'CHAMPION' | 'LOYAL' | 'AT_RISK' | 'LOST'>(),
     scoredAt: timestamp('scored_at', { withTimezone: true }),
+    // CRM — communication opt-out (ES-18)
+    optOutSms: boolean('opt_out_sms').notNull().default(false),
+    optOutWhatsapp: boolean('opt_out_whatsapp').notNull().default(false),
+    optOutEmail: boolean('opt_out_email').notNull().default(false),
     // Status
     status: varchar('status', { length: 20 })
       .notNull()
@@ -126,9 +131,15 @@ export const customers = pgTable(
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
     createdBy: integer('created_by').notNull(),
     version: integer('version').notNull().default(0),
+    // OFFLINE-05: client-generated idempotency key for offline-queued customer creation
+    // (POS). NULL values never collide under a standard Postgres unique constraint, so
+    // every other customer-creation path (which never supplies this) is unaffected — same
+    // convention as invoices.clientOperationId (see 0031_offline02_pos_sale_idempotency.sql).
+    clientOperationId: varchar('client_operation_id', { length: 100 }),
   },
   (t) => [
     unique('customers_tenant_code').on(t.tenantId, t.customerCode),
+    unique('customers_tenant_client_operation_id').on(t.tenantId, t.clientOperationId),
     index('idx_customers_tenant').on(t.tenantId),
     index('idx_customers_branch').on(t.branchId, t.tenantId),
     index('idx_customers_phone').on(t.phone, t.tenantId),
@@ -175,6 +186,8 @@ export const suppliers = pgTable(
       .default('DOMESTIC')
       .$type<'DOMESTIC' | 'IMPORT' | 'MANUFACTURER' | 'AGENT'>(),
     gstin: varchar('gstin', { length: 20 }),
+    // RCM: unregistered vendors trigger reverse-charge liability on the buyer (ES-10)
+    isRegistered: boolean('is_registered').notNull().default(true),
     pan: varchar('pan', { length: 20 }),
     phone: varchar('phone', { length: 20 }).notNull(),
     altPhone: varchar('alt_phone', { length: 20 }),
@@ -197,6 +210,8 @@ export const suppliers = pgTable(
     bankBranch: varchar('bank_branch', { length: 200 }),
     // Financial
     creditDays: integer('credit_days').notNull().default(0),
+    creditLimit: decimal('credit_limit', { precision: 15, scale: 2 }).notNull().default('0'),
+    creditLimitEnabled: boolean('credit_limit_enabled').notNull().default(false),
     openingBalance: decimal('opening_balance', { precision: 15, scale: 2 }).notNull().default('0'),
     openingBalanceType: varchar('opening_balance_type', { length: 10 })
       .default('CREDIT')

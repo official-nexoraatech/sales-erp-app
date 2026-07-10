@@ -1,15 +1,19 @@
-﻿import { useState } from 'react';
+import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
+import { ClipboardList } from 'lucide-react';
 import { physicalVerifApi, warehouseApi } from '../../api/endpoints.js';
+import { useAuthStore } from '../../store/auth.store.js';
+import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
-import DataTable from '../../components/ui/DataTable.js';
+import ERPDataGrid, { type ERPColumnDef } from '../../components/erp/ERPDataGrid.js';
+import ERPDropdownMenu, { type ERPMenuItem } from '../../components/erp/ERPDropdownMenu.js';
 import Button from '../../components/ui/Button.js';
 import Badge from '../../components/ui/Badge.js';
 import Modal from '../../components/ui/Modal.js';
 import Select from '../../components/ui/Select.js';
-import { formatDate, formatDatetime, formatCurrency } from '../../lib/format.js';
+import { formatDate } from '../../lib/format.js';
 
 interface Verification {
   id: number;
@@ -32,19 +36,26 @@ const STATUS_COLORS: Record<string, 'default' | 'success' | 'warning' | 'danger'
 export default function PhysicalVerificationPage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const hasPermission = useAuthStore((s) => s.hasPermission);
   const [showCreate, setShowCreate] = useState(false);
   const [newWarehouseId, setNewWarehouseId] = useState('');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
 
-  const { data, isLoading } = useQuery({ queryKey: ['physical-verifs'], queryFn: () => physicalVerifApi.list() });
-  const { data: whData } = useQuery({ queryKey: ['warehouses'], queryFn: () => warehouseApi.list() });
+  const { data, isLoading } = useQuery({
+    queryKey: ['physical-verifs', page, pageSize],
+    queryFn: () => physicalVerifApi.list({ page, limit: pageSize }),
+  });
+  const { data: whData } = useQuery({ queryKey: ['warehouses'], queryFn: () => warehouseApi.list(), enabled: hasPermission(PERMISSIONS.WAREHOUSE_VIEW) });
 
-  const verifs: Verification[] = (data as { data?: Verification[] })?.data ?? [];
-  const warehouses: Warehouse[] = (whData as { data?: Warehouse[] })?.data ?? [];
+  const verifs: Verification[] = (data as Record<string, unknown>)?.content as Verification[] ?? [];
+  const totalElements = (data as Record<string, unknown>)?.totalElements as number ?? 0;
+  const warehouses: Warehouse[] = (whData as { content?: Warehouse[] })?.content ?? [];
 
   const createMutation = useMutation({
     mutationFn: (data: Record<string, unknown>) => physicalVerifApi.create(data),
     onSuccess: (res) => {
-      const id = (res as { data?: { id?: number } })?.data?.id;
+      const id = (res as { id?: number })?.id;
       toast.success('Verification created');
       setShowCreate(false);
       qc.invalidateQueries({ queryKey: ['physical-verifs'] });
@@ -53,23 +64,27 @@ export default function PhysicalVerificationPage() {
     onError: (e: Error) => toast.error(e.message),
   });
 
-  const columns = [
-    { key: 'verificationNumber', header: 'Number', className: 'font-mono text-sm' },
+  const columns: ERPColumnDef<Verification>[] = [
+    { key: 'verificationNumber', header: 'Number', mono: true, sortable: true },
     {
       key: 'warehouseId',
       header: 'Warehouse',
-      render: (r: Verification) => warehouses.find((w) => w.id === r.warehouseId)?.name ?? String(r.warehouseId),
+      render: (r) => warehouses.find((w) => w.id === r.warehouseId)?.name ?? String(r.warehouseId),
     },
-    { key: 'status', header: 'Status', render: (r: Verification) => <Badge variant={STATUS_COLORS[r.status] ?? 'default'}>{r.status}</Badge> },
-    { key: 'createdAt', header: 'Date', render: (r: Verification) => formatDate(r.createdAt) },
+    { key: 'status', header: 'Status', sortable: true, render: (r) => <Badge variant={STATUS_COLORS[r.status] ?? 'default'}>{r.status}</Badge> },
+    { key: 'createdAt', header: 'Date', sortable: true, render: (r) => formatDate(r.createdAt) },
     {
       key: 'actions',
       header: '',
-      render: (r: Verification) => (
-        <Button size="sm" variant="ghost" onClick={() => navigate(`/inventory/physical-verifications/${r.id}`)}>
-          {r.status === 'DRAFT' || r.status === 'COUNTING' ? 'Manage' : 'View'}
-        </Button>
-      ),
+      align: 'right',
+      render: (r) => {
+        const items: ERPMenuItem[] = [{
+          label: r.status === 'DRAFT' || r.status === 'COUNTING' ? 'Manage' : 'View',
+          icon: ClipboardList,
+          onClick: () => navigate(`/inventory/physical-verifications/${r.id}`),
+        }];
+        return <ERPDropdownMenu items={items} />;
+      },
     },
   ];
 
@@ -79,7 +94,15 @@ export default function PhysicalVerificationPage() {
         <Button onClick={() => setShowCreate(true)}>+ Start Verification</Button>
       </ERPPageHeader>
 
-      <DataTable columns={columns} data={verifs} isLoading={isLoading} emptyMessage="No verifications found" />
+      <ERPDataGrid
+        columns={columns}
+        data={verifs}
+        isLoading={isLoading}
+        rowKey="id"
+        pagination={{ page, pageSize, total: totalElements }}
+        onPageChange={setPage}
+        onPageSizeChange={(size) => { setPageSize(size); setPage(1); }}
+      />
 
       <Modal isOpen={showCreate} onClose={() => setShowCreate(false)} title="New Physical Verification">
         <div className="space-y-4">

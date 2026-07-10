@@ -1,5 +1,10 @@
 import { forwardRef, useId, useState } from 'react';
 import { CheckCircle2, XCircle } from 'lucide-react';
+import { GSTIN_REGEX } from '@erp/types';
+
+function validateGSTIN(value: string): boolean {
+  return GSTIN_REGEX.test(value.toUpperCase());
+}
 
 interface Props extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'onChange'> {
   label?: string;
@@ -7,13 +12,6 @@ interface Props extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'onCha
   hint?: string;
   value?: string;
   onChange?: (value: string, valid: boolean) => void;
-}
-
-// GSTIN format: 2-digit state code + 10-char PAN + 1-digit entity number + Z + checksum
-const GSTIN_REGEX = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
-
-function validateGSTIN(value: string): boolean {
-  return GSTIN_REGEX.test(value.toUpperCase());
 }
 
 const ERPGSTINInput = forwardRef<HTMLInputElement, Props>(

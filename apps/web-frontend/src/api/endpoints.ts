@@ -1,12 +1,66 @@
-import { apiClient } from './client.js';
+import { apiClient, refreshAccessToken } from './client.js';
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 export const authApi = {
   login: (data: { email: string; password: string; tenantId: number }) =>
-    apiClient.post<{ accessToken: string; refreshToken: string }>('auth', '/auth/login', data),
-  me: () => apiClient.get<{ id: number; tenantId: number; email: string; firstName: string; lastName: string }>('auth', '/users/me'),
+    apiClient.post<{ accessToken?: string; refreshToken?: string; requiresMFA?: boolean; mfaToken?: string }>(
+      'auth',
+      '/auth/login',
+      data
+    ),
+  me: () => apiClient.get<{
+    id: number;
+    tenantId: number;
+    email: string;
+    firstName: string;
+    lastName: string;
+    branches: Array<{ id: number; branchId: number; isPrimary: boolean }>;
+  }>('auth', '/users/me'),
   updateMe: (data: Record<string, unknown>) => apiClient.put('auth', '/users/me', data),
   changePassword: (data: { currentPassword: string; newPassword: string }) => apiClient.put('auth', '/users/me/password', data),
+  refresh: (refreshToken: string) => refreshAccessToken(refreshToken),
+  forgotPassword: (data: { email: string; tenantId: number }) =>
+    apiClient.post<{ message: string }>('auth', '/auth/forgot-password', data),
+  resetPasswordWithToken: (data: { token: string; newPassword: string }) =>
+    apiClient.post<{ message: string }>('auth', '/auth/reset-password', data),
+};
+
+// ── MFA / 2FA (ES-19) ──────────────────────────────────────────────────────────
+export const mfaApi = {
+  verify: (data: { mfaToken: string; code: string }) =>
+    apiClient.post<{ accessToken: string; refreshToken: string }>('auth', '/auth/mfa/verify', data),
+  enroll: () => apiClient.post<{ qrCodeDataUrl: string; backupCodes: string[] }>('auth', '/mfa/enroll'),
+  confirm: (data: { code: string }) => apiClient.post('auth', '/mfa/confirm', data),
+  disable: (data: { code: string; password: string }) => apiClient.delete('auth', '/mfa', data),
+  regenerateBackupCodes: (totpCode: string) =>
+    apiClient.post<{ backupCodes: string[] }>('auth', '/mfa/backup-codes/regenerate', { totpCode }),
+};
+
+// ── Sessions (ES-19) ────────────────────────────────────────────────────────────
+export const sessionsApi = {
+  list: () =>
+    apiClient.get<{ id: string; deviceInfo: string | null; ipAddress: string; createdAt: string; lastSeenAt: string }[]>(
+      'auth',
+      '/sessions'
+    ),
+  terminate: (sessionId: string) => apiClient.delete('auth', `/sessions/${sessionId}`),
+};
+
+// ── Admin: Impersonation + Security Audit Log (ES-19) ──────────────────────────
+export const adminSecurityApi = {
+  impersonate: (data: { targetUserId: number; reason: string }) =>
+    apiClient.post<{ accessToken: string }>('auth', '/admin/impersonate', data),
+  endImpersonation: () => apiClient.post('auth', '/admin/impersonate/end'),
+  auditLog: (params?: { page?: number; size?: number; action?: string }) => {
+    const qs = new URLSearchParams();
+    if (params?.page !== undefined) qs.set('page', String(params.page));
+    if (params?.size !== undefined) qs.set('size', String(params.size));
+    if (params?.action) qs.set('action', params.action);
+    return apiClient.get<{ content: unknown[]; page: number; size: number; totalElements: number }>(
+      'auth',
+      `/admin/security-audit-log?${qs}`
+    );
+  },
 };
 
 // ── Organization ──────────────────────────────────────────────────────────────
@@ -16,9 +70,32 @@ export const organizationApi = {
   uploadLogoUrl: (data: { fileName: string; contentType: string }) => apiClient.post('tenant', '/organization/logo/upload', data),
 };
 
+// ── SSO Configuration (PG-020, Session A — config CRUD only, no login flow yet) ────────
+export const ssoConfigApi = {
+  get: () => apiClient.get('tenant', '/sso-config'),
+  update: (data: Record<string, unknown>) => apiClient.put('tenant', '/sso-config', data),
+  remove: () => apiClient.delete('tenant', '/sso-config'),
+};
+
+// ── Platform Admin: Tenants (cross-tenant, PLATFORM_TENANT_MANAGE only) ────────
+export const adminTenantApi = {
+  list: () => apiClient.get<{ content: unknown[]; totalElements: number }>('tenant', '/admin/tenants'),
+  suspend: (id: number, reason: string) => apiClient.patch('tenant', `/admin/tenants/${id}/suspend`, { reason }),
+  activate: (id: number) => apiClient.patch('tenant', `/admin/tenants/${id}/activate`),
+  close: (id: number, reason: string) =>
+    apiClient.patch('tenant', `/admin/tenants/${id}/close`, { reason, confirmation: 'CLOSE_TENANT' }),
+};
+
 // ── Branches ──────────────────────────────────────────────────────────────────
 export const branchApi = {
-  list: () => apiClient.get<{ content: unknown[] }>('tenant', '/branches'),
+  list: (params?: { page?: number | undefined; size?: number | undefined; search?: string | undefined }) => {
+    const qs = new URLSearchParams();
+    if (params?.page !== undefined) qs.set('page', String(params.page));
+    if (params?.size !== undefined) qs.set('size', String(params.size));
+    if (params?.search) qs.set('search', params.search);
+    const query = qs.toString();
+    return apiClient.get<{ content: unknown[]; totalElements: number }>('tenant', `/branches${query ? `?${query}` : ''}`);
+  },
   getById: (id: number) => apiClient.get('tenant', `/branches/${id}`),
   create: (data: Record<string, unknown>) => apiClient.post('tenant', '/branches', data),
   update: (id: number, data: Record<string, unknown>) => apiClient.put('tenant', `/branches/${id}`, data),
@@ -27,8 +104,15 @@ export const branchApi = {
 
 // ── Warehouses ────────────────────────────────────────────────────────────────
 export const warehouseApi = {
-  list: (params?: { branchId?: number }) =>
-    apiClient.get<{ content: unknown[] }>('inventory', `/warehouses${params?.branchId ? `?branchId=${params.branchId}` : ''}`),
+  list: (params?: { branchId?: number | undefined; page?: number | undefined; size?: number | undefined; search?: string | undefined }) => {
+    const qs = new URLSearchParams();
+    if (params?.branchId !== undefined) qs.set('branchId', String(params.branchId));
+    if (params?.page !== undefined) qs.set('page', String(params.page));
+    if (params?.size !== undefined) qs.set('size', String(params.size));
+    if (params?.search) qs.set('search', params.search);
+    const query = qs.toString();
+    return apiClient.get<{ content: unknown[]; totalElements: number }>('inventory', `/warehouses${query ? `?${query}` : ''}`);
+  },
   getById: (id: number) => apiClient.get('inventory', `/warehouses/${id}`),
   create: (data: Record<string, unknown>) => apiClient.post('inventory', '/warehouses', data),
   update: (id: number, data: Record<string, unknown>) => apiClient.put('inventory', `/warehouses/${id}`, data),
@@ -36,6 +120,10 @@ export const warehouseApi = {
 };
 
 // ── Users ─────────────────────────────────────────────────────────────────────
+export const roleApi = {
+  list: () => apiClient.get<{ content: unknown[]; totalElements: number }>('auth', '/roles'),
+};
+
 export const userApi = {
   list: () => apiClient.get<{ content: unknown[] }>('auth', '/users'),
   getById: (id: number) => apiClient.get('auth', `/users/${id}`),
@@ -68,6 +156,8 @@ export const customerApi = {
   update: (id: number, data: Record<string, unknown>) => apiClient.put('sales', `/customers/${id}`, data),
   delete: (id: number) => apiClient.delete('sales', `/customers/${id}`),
   merge: (data: { sourceId: number; targetId: number }) => apiClient.post('sales', '/customers/merge', data),
+  optOut: (id: number, data: { optOutSms?: boolean; optOutWhatsapp?: boolean; optOutEmail?: boolean }) =>
+    apiClient.patch('sales', `/customers/${id}/opt-out`, data),
 };
 
 // ── Suppliers ─────────────────────────────────────────────────────────────────
@@ -124,7 +214,6 @@ export const itemApi = {
   },
   getById: (id: number) => apiClient.get('inventory', `/items/${id}`),
   byBarcode: (barcode: string) => apiClient.get('inventory', `/items/by-barcode/${barcode}`),
-  stock: (id: number) => apiClient.get('inventory', `/items/${id}/stock`),
   priceHistory: (id: number) => apiClient.get('inventory', `/items/${id}/price-history`),
   create: (data: Record<string, unknown>) => apiClient.post('inventory', '/items', data),
   update: (id: number, data: Record<string, unknown>) => apiClient.put('inventory', `/items/${id}`, data),
@@ -174,6 +263,23 @@ export const gstApi = {
     apiClient.post('gst', `/gst/einvoice/cancel/${invoiceId}`, { reason, remark }),
   einvoiceStatus: (invoiceId: number) =>
     apiClient.get<Record<string, unknown>>('gst', `/gst/einvoice/status/${invoiceId}`),
+  retryIrn: (invoiceId: number) =>
+    apiClient.post('gst', `/gst/einvoice/retry/${invoiceId}`, {}),
+  einvoiceList: (status?: string) =>
+    apiClient.get<{ content: Record<string, unknown>[]; totalElements: number }>(
+      'gst',
+      `/gst/einvoice/list${status ? `?status=${status}` : ''}`
+    ),
+
+  // ES-10 GSTR-9 (Annual Return)
+  gstr9: (year: string) =>
+    apiClient.get<Record<string, unknown>>('gst', `/gst/gstr9?year=${year}`),
+  exportGstr9: (year: string) =>
+    apiClient.get<Record<string, unknown>>('gst', `/gst/gstr9/export?year=${year}&format=json`),
+
+  // ES-10 RCM Register
+  rcmRegister: (period: string) =>
+    apiClient.get<{ content: unknown[]; totalElements: number; period: string }>('gst', `/gst/rcm-register?period=${period}`),
 
   // M7.5 e-Way Bill
   generateEwb: (invoiceId: number, payload: Record<string, unknown>) =>
@@ -227,7 +333,7 @@ export const stockApi = {
     if (params?.belowReorder) qs.set('belowReorder', 'true');
     if (params?.page) qs.set('page', String(params.page));
     if (params?.limit) qs.set('limit', String(params.limit));
-    return apiClient.get('inventory', `/inventory/stock?${qs}`);
+    return apiClient.get<{ content: unknown[]; totalElements: number; page: number; limit: number }>('inventory', `/inventory/stock?${qs}`);
   },
   byItem: (itemId: number) => apiClient.get('inventory', `/inventory/stock/${itemId}`),
   ledger: (itemId: number, params?: { warehouseId?: number; page?: number; limit?: number }) => {
@@ -239,14 +345,35 @@ export const stockApi = {
   },
 };
 
+// ── Stock Valuation Report (ES-13) ─────────────────────────────────────────────
+export interface StockValuationRow {
+  itemId: number;
+  itemCode: string | null;
+  itemName: string;
+  costingMethod: 'FIFO' | 'WACC';
+  qty: number;
+  unitCost: number;
+  totalValue: number;
+}
+
+export const stockValuationApi = {
+  get: (params?: { warehouseId?: number | undefined; asOf?: string | undefined }) => {
+    const qs = new URLSearchParams();
+    if (params?.warehouseId) qs.set('warehouseId', String(params.warehouseId));
+    if (params?.asOf) qs.set('asOf', params.asOf);
+    return apiClient.get<StockValuationRow[]>('inventory', `/inventory/valuation?${qs}`);
+  },
+};
+
 // ── Stock Transfers ───────────────────────────────────────────────────────────
 export const stockTransferApi = {
-  list: (params?: { page?: number; limit?: number; status?: string | undefined }) => {
+  list: (params?: { page?: number; limit?: number; status?: string | undefined; search?: string | undefined }) => {
     const qs = new URLSearchParams();
     if (params?.page) qs.set('page', String(params.page));
     if (params?.limit) qs.set('limit', String(params.limit));
     if (params?.status) qs.set('status', params.status);
-    return apiClient.get('inventory', `/stock-transfers?${qs}`);
+    if (params?.search) qs.set('search', params.search);
+    return apiClient.get<{ content: unknown[]; totalElements: number; page: number; limit: number }>('inventory', `/stock-transfers?${qs}`);
   },
   getById: (id: number) => apiClient.get('inventory', `/stock-transfers/${id}`),
   create: (data: Record<string, unknown>) => apiClient.post('inventory', '/stock-transfers', data),
@@ -266,7 +393,7 @@ export const stockAdjustmentApi = {
     if (params?.page) qs.set('page', String(params.page));
     if (params?.limit) qs.set('limit', String(params.limit));
     if (params?.status) qs.set('status', params.status);
-    return apiClient.get('inventory', `/stock-adjustments?${qs}`);
+    return apiClient.get<{ content: unknown[]; totalElements: number; page: number; limit: number }>('inventory', `/stock-adjustments?${qs}`);
   },
   getById: (id: number) => apiClient.get('inventory', `/stock-adjustments/${id}`),
   create: (data: Record<string, unknown>) => apiClient.post('inventory', '/stock-adjustments', data),
@@ -282,7 +409,7 @@ export const physicalVerifApi = {
     const qs = new URLSearchParams();
     if (params?.page) qs.set('page', String(params.page));
     if (params?.limit) qs.set('limit', String(params.limit));
-    return apiClient.get('inventory', `/physical-verifications?${qs}`);
+    return apiClient.get<{ content: unknown[]; totalElements: number; page: number; limit: number }>('inventory', `/physical-verifications?${qs}`);
   },
   getById: (id: number) => apiClient.get('inventory', `/physical-verifications/${id}`),
   create: (data: Record<string, unknown>) => apiClient.post('inventory', '/physical-verifications', data),
@@ -306,8 +433,14 @@ export const fabricRollApi = {
 
 // ── Phase 4 — Sales ───────────────────────────────────────────────────────────
 export const quotationApi = {
-  list: (params?: Record<string, string>) =>
-    apiClient.get('sales', `/quotations${params ? `?${new URLSearchParams(params)}` : ''}`),
+  list: (params?: { page?: number; pageSize?: number; search?: string | undefined; status?: string | undefined }) => {
+    const qs = new URLSearchParams();
+    if (params?.page !== undefined) qs.set('page', String(params.page));
+    if (params?.pageSize !== undefined) qs.set('pageSize', String(params.pageSize));
+    if (params?.search) qs.set('search', params.search);
+    if (params?.status) qs.set('status', params.status);
+    return apiClient.get<{ content: unknown[]; totalElements: number; page: number; pageSize: number }>('sales', `/quotations?${qs}`);
+  },
   getById: (id: number) => apiClient.get('sales', `/quotations/${id}`),
   create: (data: Record<string, unknown>) => apiClient.post('sales', '/quotations', data),
   send: (id: number) => apiClient.post('sales', `/quotations/${id}/send`, {}),
@@ -316,20 +449,32 @@ export const quotationApi = {
 };
 
 export const invoiceApi = {
-  list: (params?: Record<string, string>) =>
-    apiClient.get('sales', `/invoices${params ? `?${new URLSearchParams(params)}` : ''}`),
+  list: (params?: { page?: number; pageSize?: number; search?: string | undefined; status?: string | undefined }) => {
+    const qs = new URLSearchParams();
+    if (params?.page !== undefined) qs.set('page', String(params.page));
+    if (params?.pageSize !== undefined) qs.set('pageSize', String(params.pageSize));
+    if (params?.search) qs.set('search', params.search);
+    if (params?.status) qs.set('status', params.status);
+    return apiClient.get<{ content: unknown[]; totalElements: number; page: number; pageSize: number }>('sales', `/invoices?${qs}`);
+  },
   getById: (id: number) => apiClient.get('sales', `/invoices/${id}`),
   create: (data: Record<string, unknown>) => apiClient.post('sales', '/invoices', data),
   confirm: (id: number, data: { invoiceNumber: string }) => apiClient.post('sales', `/invoices/${id}/confirm`, data),
   cancel: (id: number, data: { reason: string }) => apiClient.post('sales', `/invoices/${id}/cancel`, data),
   duplicate: (id: number) => apiClient.post('sales', `/invoices/${id}/duplicate`, {}),
   activity: (id: number) => apiClient.get('sales', `/invoices/${id}/activity`),
-  pdf: (id: number) => apiClient.get('sales', `/invoices/${id}/pdf`),
+  pdf: (id: number) => apiClient.getBlob('sales', `/invoices/${id}/pdf`),
 };
 
 export const paymentApi = {
-  list: (params?: Record<string, string>) =>
-    apiClient.get('sales', `/payments${params ? `?${new URLSearchParams(params)}` : ''}`),
+  list: (params?: { page?: number; pageSize?: number; customerId?: number | undefined; status?: string | undefined }) => {
+    const qs = new URLSearchParams();
+    if (params?.page !== undefined) qs.set('page', String(params.page));
+    if (params?.pageSize !== undefined) qs.set('pageSize', String(params.pageSize));
+    if (params?.customerId) qs.set('customerId', String(params.customerId));
+    if (params?.status) qs.set('status', params.status);
+    return apiClient.get<{ content: unknown[]; totalElements: number; page: number; pageSize: number }>('sales', `/payments?${qs}`);
+  },
   getById: (id: number) => apiClient.get('sales', `/payments/${id}`),
   create: (data: Record<string, unknown>) => apiClient.post('sales', '/payments', data),
   allocate: (id: number, data: Record<string, unknown>) => apiClient.post('sales', `/payments/${id}/allocate`, data),
@@ -338,8 +483,12 @@ export const paymentApi = {
 };
 
 export const saleReturnApi = {
-  list: (params?: Record<string, string>) =>
-    apiClient.get('sales', `/sale-returns${params ? `?${new URLSearchParams(params)}` : ''}`),
+  list: (params?: { page?: number; pageSize?: number }) => {
+    const qs = new URLSearchParams();
+    if (params?.page !== undefined) qs.set('page', String(params.page));
+    if (params?.pageSize !== undefined) qs.set('pageSize', String(params.pageSize));
+    return apiClient.get<{ content: unknown[]; totalElements: number; page: number; pageSize: number }>('sales', `/sale-returns?${qs}`);
+  },
   getById: (id: number) => apiClient.get('sales', `/sale-returns/${id}`),
   create: (data: Record<string, unknown>) => apiClient.post('sales', '/sale-returns', data),
   applyCreditNote: (id: number, data: { invoiceId: number }) => apiClient.post('sales', `/credit-notes/${id}/apply`, data),
@@ -347,12 +496,18 @@ export const saleReturnApi = {
 };
 
 export const salesDashboardApi = {
-  summary: () => apiClient.get<{ data: { pendingQuotations: number; overdueInvoices: number; collectedToday: number } }>('sales', '/dashboard/sales-summary'),
+  summary: () => apiClient.get<{ pendingQuotations: number; overdueInvoices: number; collectedToday: number }>('sales', '/dashboard/sales-summary'),
 };
 
 export const deliveryChallanApi = {
-  list: (params?: Record<string, string>) =>
-    apiClient.get('sales', `/delivery-challans${params ? `?${new URLSearchParams(params)}` : ''}`),
+  list: (params?: { page?: number; pageSize?: number; customerId?: number | undefined; status?: string | undefined }) => {
+    const qs = new URLSearchParams();
+    if (params?.page !== undefined) qs.set('page', String(params.page));
+    if (params?.pageSize !== undefined) qs.set('pageSize', String(params.pageSize));
+    if (params?.customerId) qs.set('customerId', String(params.customerId));
+    if (params?.status) qs.set('status', params.status);
+    return apiClient.get<{ content: unknown[]; totalElements: number; page: number; pageSize: number }>('sales', `/delivery-challans?${qs}`);
+  },
   getById: (id: number) => apiClient.get('sales', `/delivery-challans/${id}`),
   create: (data: Record<string, unknown>) => apiClient.post('sales', '/delivery-challans', data),
   dispatch: (id: number) => apiClient.post('sales', `/delivery-challans/${id}/dispatch`, {}),
@@ -366,8 +521,14 @@ export const loyaltyApi = {
 
 // ── Phase 5 — Purchase ────────────────────────────────────────────────────────
 export const purchaseOrderApi = {
-  list: (params?: Record<string, string>) =>
-    apiClient.get('purchase', `/purchase-orders${params ? `?${new URLSearchParams(params)}` : ''}`),
+  list: (params?: { page?: number; pageSize?: number; search?: string | undefined; status?: string | undefined }) => {
+    const qs = new URLSearchParams();
+    if (params?.page !== undefined) qs.set('page', String(params.page));
+    if (params?.pageSize !== undefined) qs.set('pageSize', String(params.pageSize));
+    if (params?.search) qs.set('search', params.search);
+    if (params?.status) qs.set('status', params.status);
+    return apiClient.get<{ content: unknown[]; totalElements: number; page: number; pageSize: number }>('purchase', `/purchase-orders?${qs}`);
+  },
   getById: (id: number) => apiClient.get('purchase', `/purchase-orders/${id}`),
   pendingDelivery: () => apiClient.get('purchase', '/purchase-orders/pending-delivery'),
   create: (data: Record<string, unknown>) => apiClient.post('purchase', '/purchase-orders', data),
@@ -380,8 +541,14 @@ export const purchaseOrderApi = {
 };
 
 export const grnApi = {
-  list: (params?: Record<string, string>) =>
-    apiClient.get('purchase', `/grns${params ? `?${new URLSearchParams(params)}` : ''}`),
+  list: (params?: { page?: number; pageSize?: number; status?: string | undefined; search?: string | undefined }) => {
+    const qs = new URLSearchParams();
+    if (params?.page !== undefined) qs.set('page', String(params.page));
+    if (params?.pageSize !== undefined) qs.set('pageSize', String(params.pageSize));
+    if (params?.status) qs.set('status', params.status);
+    if (params?.search) qs.set('search', params.search);
+    return apiClient.get<{ content: unknown[]; totalElements: number; page: number; pageSize: number }>('purchase', `/grns?${qs}`);
+  },
   getById: (id: number) => apiClient.get('purchase', `/grns/${id}`),
   create: (data: Record<string, unknown>) => apiClient.post('purchase', '/grns', data),
   approve: (id: number, data: { grnNumber: string }) => apiClient.post('purchase', `/grns/${id}/approve`, data),
@@ -392,8 +559,14 @@ export const grnApi = {
 };
 
 export const supplierPaymentApi = {
-  list: (params?: Record<string, string>) =>
-    apiClient.get('purchase', `/supplier-payments${params ? `?${new URLSearchParams(params)}` : ''}`),
+  list: (params?: { page?: number; pageSize?: number; supplierId?: number | undefined; status?: string | undefined }) => {
+    const qs = new URLSearchParams();
+    if (params?.page !== undefined) qs.set('page', String(params.page));
+    if (params?.pageSize !== undefined) qs.set('pageSize', String(params.pageSize));
+    if (params?.supplierId) qs.set('supplierId', String(params.supplierId));
+    if (params?.status) qs.set('status', params.status);
+    return apiClient.get<{ content: unknown[]; totalElements: number; page: number; pageSize: number }>('purchase', `/supplier-payments?${qs}`);
+  },
   getById: (id: number) => apiClient.get('purchase', `/supplier-payments/${id}`),
   create: (data: Record<string, unknown>) => apiClient.post('purchase', '/supplier-payments', data),
   allocate: (id: number, data: Record<string, unknown>) => apiClient.post('purchase', `/supplier-payments/${id}/allocate`, data),
@@ -403,18 +576,36 @@ export const supplierPaymentApi = {
 };
 
 export const purchaseReturnApi = {
-  list: (params?: Record<string, string>) =>
-    apiClient.get('purchase', `/purchase-returns${params ? `?${new URLSearchParams(params)}` : ''}`),
+  list: (params?: { page?: number; pageSize?: number; supplierId?: number | undefined; status?: string | undefined }) => {
+    const qs = new URLSearchParams();
+    if (params?.page !== undefined) qs.set('page', String(params.page));
+    if (params?.pageSize !== undefined) qs.set('pageSize', String(params.pageSize));
+    if (params?.supplierId) qs.set('supplierId', String(params.supplierId));
+    if (params?.status) qs.set('status', params.status);
+    return apiClient.get<{ content: unknown[]; totalElements: number; page: number; pageSize: number }>('purchase', `/purchase-returns?${qs}`);
+  },
   getById: (id: number) => apiClient.get('purchase', `/purchase-returns/${id}`),
   create: (data: Record<string, unknown>) => apiClient.post('purchase', '/purchase-returns', data),
   approve: (id: number) => apiClient.post('purchase', `/purchase-returns/${id}/approve`, {}),
-  debitNotes: (params?: Record<string, string>) =>
-    apiClient.get('purchase', `/debit-notes${params ? `?${new URLSearchParams(params)}` : ''}`),
+  debitNotes: (params?: { page?: number; pageSize?: number; supplierId?: number | undefined; status?: string | undefined }) => {
+    const qs = new URLSearchParams();
+    if (params?.page !== undefined) qs.set('page', String(params.page));
+    if (params?.pageSize !== undefined) qs.set('pageSize', String(params.pageSize));
+    if (params?.supplierId) qs.set('supplierId', String(params.supplierId));
+    if (params?.status) qs.set('status', params.status);
+    return apiClient.get<{ content: unknown[]; totalElements: number; page: number; pageSize: number }>('purchase', `/debit-notes?${qs}`);
+  },
 };
 
 export const expenseApi = {
-  list: (params?: Record<string, string>) =>
-    apiClient.get('purchase', `/expenses${params ? `?${new URLSearchParams(params)}` : ''}`),
+  list: (params?: { page?: number; pageSize?: number; status?: string | undefined; expenseType?: string | undefined }) => {
+    const qs = new URLSearchParams();
+    if (params?.page !== undefined) qs.set('page', String(params.page));
+    if (params?.pageSize !== undefined) qs.set('pageSize', String(params.pageSize));
+    if (params?.status) qs.set('status', params.status);
+    if (params?.expenseType) qs.set('expenseType', params.expenseType);
+    return apiClient.get<{ content: unknown[]; totalElements: number; page: number; pageSize: number }>('purchase', `/expenses?${qs}`);
+  },
   getById: (id: number) => apiClient.get('purchase', `/expenses/${id}`),
   create: (data: Record<string, unknown>) => apiClient.post('purchase', '/expenses', data),
   update: (id: number, data: Record<string, unknown>) => apiClient.put('purchase', `/expenses/${id}`, data),
@@ -523,18 +714,52 @@ export const designationApi = {
 
 // ── Phase 8: HR — Employees ────────────────────────────────────────────────────
 export const employeeApi = {
-  list: (params?: { search?: string | undefined; departmentId?: number | undefined; employmentType?: string | undefined; status?: string | undefined }) => {
+  list: (params?: { page?: number; size?: number; search?: string | undefined; departmentId?: number | undefined; employmentType?: string | undefined; status?: string | undefined }) => {
     const qs = new URLSearchParams();
+    if (params?.page !== undefined) qs.set('page', String(params.page));
+    if (params?.size !== undefined) qs.set('size', String(params.size));
     if (params?.search) qs.set('search', params.search);
     if (params?.departmentId) qs.set('departmentId', String(params.departmentId));
     if (params?.employmentType) qs.set('employmentType', params.employmentType);
     if (params?.status) qs.set('status', params.status);
-    return apiClient.get<{ content: unknown[] }>('hr', `/employees?${qs.toString()}`);
+    return apiClient.get<{ content: unknown[]; totalElements: number; page: number; size: number }>('hr', `/employees?${qs.toString()}`);
   },
   getById: (id: number) => apiClient.get('hr', `/employees/${id}`),
   create: (data: Record<string, unknown>) => apiClient.post('hr', '/employees', data),
   update: (id: number, data: Record<string, unknown>) => apiClient.put('hr', `/employees/${id}`, data),
   exit: (id: number, data: { exitDate: string; exitReason: string }) => apiClient.post('hr', `/employees/${id}/exit`, data),
+};
+
+// ── PG-042 — Employee Photo/Document Upload ─────────────────────────────────────
+export interface EmployeeDocument {
+  id: number;
+  entityType: string;
+  entityId: number;
+  fileName: string;
+  fileSize: number;
+  mimeType: string;
+  uploadedBy: number;
+  createdAt: string;
+}
+
+export const employeeFilesApi = {
+  uploadPhoto: (employeeId: number, file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return apiClient.upload<{ employeeId: number; photoUrl: string }>('hr', `/employees/${employeeId}/photo/upload`, formData);
+  },
+  photoBlob: (employeeId: number) => apiClient.getBlob('hr', `/employees/${employeeId}/photo`),
+  documents: (employeeId: number) => apiClient.get<EmployeeDocument[]>('hr', `/employees/${employeeId}/documents`),
+  uploadDocument: (employeeId: number, documentType: string, file: File) => {
+    const formData = new FormData();
+    formData.append('documentType', documentType);
+    formData.append('file', file);
+    return apiClient.upload<EmployeeDocument>('hr', `/employees/${employeeId}/documents/upload`, formData);
+  },
+  downloadDocument: (employeeId: number, attachmentId: number) =>
+    apiClient.getBlob('hr', `/employees/${employeeId}/documents/${attachmentId}/download`),
+  deleteDocument: (employeeId: number, attachmentId: number) =>
+    apiClient.delete('hr', `/employees/${employeeId}/documents/${attachmentId}`),
 };
 
 // ── Phase 8: HR — Attendance ───────────────────────────────────────────────────
@@ -583,7 +808,17 @@ export const payrollApi = {
   disburse: (id: number) => apiClient.post('hr', `/payroll-runs/${id}/disburse`, {}),
   bulkSend: (id: number) => apiClient.post('hr', `/payroll-runs/${id}/bulk-send`, {}),
   getSlip: (id: number) => apiClient.get<Record<string, unknown>>('hr', `/payroll-slips/${id}`),
-  slipPdf: (id: number) => apiClient.get('hr', `/payroll-slips/${id}/pdf`),
+  slipPdf: (id: number) => apiClient.getBlob('hr', `/payroll-slips/${id}/pdf`),
+};
+
+export const statutoryApi = {
+  pfChallan: (month: number, year: number) => apiClient.get<Record<string, unknown>>('hr', `/pf-challans?month=${month}&year=${year}`),
+  pfChallanExport: (month: number, year: number) => apiClient.getBlob('hr', `/pf-challans/export?month=${month}&year=${year}`),
+  markPfFiled: (month: number, year: number) => apiClient.post('hr', '/pf-challans/mark-filed', { month, year }),
+  esiChallan: (month: number, year: number) => apiClient.get<Record<string, unknown>>('hr', `/esi-challans?month=${month}&year=${year}`),
+  esiChallanExport: (month: number, year: number) => apiClient.getBlob('hr', `/esi-challans/export?month=${month}&year=${year}`),
+  markEsiFiled: (month: number, year: number) => apiClient.post('hr', '/esi-challans/mark-filed', { month, year }),
+  form16: (employeeId: number, year: string) => apiClient.get<Record<string, unknown>>('hr', `/employees/${employeeId}/form16?year=${year}`),
 };
 
 export const holidayApi = {
@@ -626,7 +861,7 @@ export const productionApi = {
   listJobWorkOrders: (params?: { status?: string }) => {
     const qs = new URLSearchParams();
     if (params?.status) qs.set('status', params.status);
-    return apiClient.get<{ data: unknown[] }>('production', `/api/v2/job-work-orders?${qs}`);
+    return apiClient.get<unknown[]>('production', `/api/v2/job-work-orders?${qs}`);
   },
   getJobWorkOrder: (id: number) =>
     apiClient.get('production', `/api/v2/job-work-orders/${id}`),
@@ -717,10 +952,12 @@ export const crmApi = {
   },
   getCampaign: (id: number) => apiClient.get('sales', `/crm/campaigns/${id}`),
   createCampaign: (data: Record<string, unknown>) => apiClient.post('sales', '/crm/campaigns', data),
+  previewCampaign: (data: Record<string, unknown>) => apiClient.post('sales', '/crm/campaigns/preview', data),
   sendCampaign: (id: number) => apiClient.post('sales', `/crm/campaigns/${id}/send`, {}),
   scheduleCampaign: (id: number, data: { scheduledAt: string }) => apiClient.post('sales', `/crm/campaigns/${id}/schedule`, data),
   cancelCampaign: (id: number) => apiClient.post('sales', `/crm/campaigns/${id}/cancel`, {}),
   campaignStats: (id: number) => apiClient.get('sales', `/crm/campaigns/${id}/stats`),
+  campaignRecipients: (id: number) => apiClient.get('sales', `/crm/campaigns/${id}/recipients`),
   birthdayStats: () => apiClient.get('sales', '/crm/campaigns/birthday-stats'),
 
   // Seasons
@@ -738,14 +975,133 @@ export const crmApi = {
   },
 };
 
+// ── Global Search (search-service) ────────────────────────────────────────────
+export interface SearchHit {
+  id: string;
+  entity: string;
+  score: number;
+  highlight?: Record<string, string[]>;
+  source: Record<string, unknown>;
+}
+
+export interface SearchResult {
+  hits: SearchHit[];
+  total: number;
+  took: number;
+  query: string;
+}
+
+export interface SearchAdvancedFilters {
+  status?: string;
+  branchId?: number;
+  warehouseId?: number;
+  customerId?: number;
+  supplierId?: number;
+  dateField?: string;
+  dateFrom?: string;
+  dateTo?: string;
+}
+
+export const searchApi = {
+  search: (params: { q: string; entity?: string; size?: number; from?: number } & SearchAdvancedFilters) => {
+    const qs = new URLSearchParams({ q: params.q });
+    if (params.entity) qs.set('entity', params.entity);
+    if (params.size !== undefined) qs.set('size', String(params.size));
+    if (params.from !== undefined) qs.set('from', String(params.from));
+    if (params.status) qs.set('status', params.status);
+    if (params.branchId !== undefined) qs.set('branchId', String(params.branchId));
+    if (params.warehouseId !== undefined) qs.set('warehouseId', String(params.warehouseId));
+    if (params.customerId !== undefined) qs.set('customerId', String(params.customerId));
+    if (params.supplierId !== undefined) qs.set('supplierId', String(params.supplierId));
+    if (params.dateField) qs.set('dateField', params.dateField);
+    if (params.dateFrom) qs.set('dateFrom', params.dateFrom);
+    if (params.dateTo) qs.set('dateTo', params.dateTo);
+    return apiClient.get<SearchResult>('search', `/search?${qs.toString()}`);
+  },
+};
+
+// ── Saved Searches (Phase 6) ───────────────────────────────────────────────────
+export interface SavedSearch {
+  id: number;
+  tenantId: number;
+  userId: number;
+  name: string;
+  query: string;
+  entity: string | null;
+  filters: Record<string, unknown>;
+  createdAt: string;
+}
+
+export const savedSearchApi = {
+  list: () => apiClient.get<{ content: SavedSearch[]; totalElements: number }>('search', '/saved-searches'),
+  create: (data: { name: string; query: string; entity?: string; filters?: Record<string, unknown> }) =>
+    apiClient.post<SavedSearch>('search', '/saved-searches', data),
+  delete: (id: number) => apiClient.delete('search', `/saved-searches/${id}`),
+};
+
+// ── Search Analytics + Dead-Letter Health (Phase 8) ────────────────────────────
+export interface SearchAnalyticsSummary {
+  days: number;
+  totalSearches: number;
+  noResultCount: number;
+  clickedCount: number;
+  avgLatencyMs: number;
+  popularQueries: Array<{ query: string; count: number }>;
+  noResultQueries: Array<{ query: string; count: number }>;
+}
+
+export interface SearchDeadLetterItem {
+  id: number;
+  topic: string;
+  payload: Record<string, unknown>;
+  errorMessage: string;
+  retryCount: number;
+  status: 'PENDING' | 'REPLAYED' | 'DISCARDED';
+  createdAt: string;
+  lastRetriedAt: string | null;
+}
+
+export const searchAnalyticsApi = {
+  summary: (days = 7) => apiClient.get<SearchAnalyticsSummary>('search', `/admin/search/analytics/summary?days=${days}`),
+  trackClick: (data: { query: string; resultId: string; resultEntity: string }) =>
+    apiClient.post('search', '/search/analytics/click', data),
+};
+
+export const searchDeadLettersApi = {
+  list: (status = 'PENDING') =>
+    apiClient.get<{ content: SearchDeadLetterItem[]; totalElements: number }>('search', `/admin/search/dead-letters?status=${status}`),
+  retry: (id: number) => apiClient.post('search', `/admin/search/dead-letters/${id}/retry`),
+  discard: (id: number) => apiClient.post('search', `/admin/search/dead-letters/${id}/discard`),
+};
+
 // ── Phase 11 — Reports Engine ─────────────────────────────────────────────────
+export interface ReportRunPending {
+  runId: number;
+  status: 'PENDING';
+  message: string;
+}
+
+export interface ReportRunRecord {
+  id: number;
+  status: 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED';
+  errorMessage?: string | null;
+  rowCount?: number | null;
+  durationMs?: number | null;
+  resultData?: {
+    rows: Record<string, string | number | null>[];
+    totalRows: number;
+    generatedAt: string;
+    totals: Record<string, number>;
+  } | null;
+}
+
 export const reportsEngineApi = {
   list: () => apiClient.get<{ grouped: Record<string, unknown[]>; total: number }>('report', '/api/v2/reports'),
   getDefinition: (slug: string) => apiClient.get<unknown>('report', `/api/v2/reports/${slug}`),
   run: (slug: string, params: Record<string, string | number>, format: 'JSON' | 'CSV' | 'EXCEL' = 'JSON', async = false) =>
     apiClient.post<unknown>('report', `/api/v2/reports/${slug}/run`, { params, format, async }),
   runHistory: () => apiClient.get<unknown[]>('report', '/api/v2/reports/run-history'),
-  runStatus: (runId: number) => apiClient.get<unknown>('report', `/api/v2/reports/run-history/${runId}`),
+  runStatus: (runId: number) => apiClient.get<ReportRunRecord>('report', `/api/v2/reports/run-history/${runId}`),
 };
 
 // ── ES-05 — AR / AP Aging Reports ────────────────────────────────────────────
@@ -760,16 +1116,11 @@ export interface AgingRow {
   totalOutstanding: number;
 }
 
-export interface AgingResponse {
-  data: AgingRow[];
-  meta: { total: number; generatedAt: string };
-}
-
 export const arAgingApi = {
   get: (asOf: string, branchId?: string) => {
     const qs = new URLSearchParams({ asOf });
     if (branchId) qs.set('branchId', branchId);
-    return apiClient.get<AgingResponse>('report', `/api/v1/reports/ar-aging?${qs}`);
+    return apiClient.get<AgingRow[]>('report', `/api/v1/reports/ar-aging?${qs}`);
   },
 };
 
@@ -777,7 +1128,7 @@ export const apAgingApi = {
   get: (asOf: string, supplierId?: string) => {
     const qs = new URLSearchParams({ asOf });
     if (supplierId) qs.set('supplierId', supplierId);
-    return apiClient.get<AgingResponse>('report', `/api/v1/reports/ap-aging?${qs}`);
+    return apiClient.get<AgingRow[]>('report', `/api/v1/reports/ap-aging?${qs}`);
   },
 };
 
@@ -865,4 +1216,79 @@ export const projectionAdminApi = {
 export const performanceAdminApi = {
   baselines: () => apiClient.get<unknown[]>('event', '/api/v2/admin/performance/baselines'),
   targets: () => apiClient.get<unknown[]>('event', '/api/v2/admin/performance/targets'),
+};
+
+// ── ES-20 — Document Attachments ────────────────────────────────────────────────
+export interface Attachment {
+  id: number;
+  entityType: string;
+  entityId: number;
+  fileName: string;
+  fileSize: number;
+  mimeType: string;
+  uploadedBy: number;
+  createdAt: string;
+}
+
+export const attachmentApi = (service: 'sales' | 'purchase') => ({
+  list: (entityType: string, entityId: number) =>
+    apiClient.get<Attachment[]>(service, `/attachments?entityType=${entityType}&entityId=${entityId}`),
+  upload: (entityType: string, entityId: number, file: File) => {
+    const formData = new FormData();
+    formData.append('entityType', entityType);
+    formData.append('entityId', String(entityId));
+    formData.append('file', file);
+    return apiClient.upload<Attachment>(service, '/attachments', formData);
+  },
+  download: (id: number) => apiClient.getBlob(service, `/attachments/${id}/download`),
+  delete: (id: number) => apiClient.delete(service, `/attachments/${id}`),
+});
+
+// ── ES-20 — Audit Log Viewer ─────────────────────────────────────────────────────
+export const auditLogApi = {
+  list: (params?: { entity?: string; from?: string; to?: string; page?: number; limit?: number }) => {
+    const qs = new URLSearchParams();
+    if (params?.entity) qs.set('entity', params.entity);
+    if (params?.from) qs.set('from', params.from);
+    if (params?.to) qs.set('to', params.to);
+    if (params?.page !== undefined) qs.set('page', String(params.page));
+    if (params?.limit !== undefined) qs.set('limit', String(params.limit));
+    return apiClient.get<{ content: unknown[]; page: number; limit: number; totalElements: number }>(
+      'auth',
+      `/admin/audit-logs?${qs}`
+    );
+  },
+};
+
+// ── ES-20 — Feature Flags ────────────────────────────────────────────────────────
+export interface FeatureFlag {
+  flagKey: string;
+  enabled: boolean;
+  config: unknown;
+  isOverride: boolean;
+}
+
+export const featureFlagApi = {
+  list: () => apiClient.get<FeatureFlag[]>('auth', '/admin/feature-flags'),
+  update: (flagKey: string, enabled: boolean) =>
+    apiClient.put('auth', `/admin/feature-flags/${flagKey}`, { enabled }),
+};
+
+// ── ES-28 — In-app Notifications (bell) ──────────────────────────────────────────
+export interface InAppNotification {
+  id: number;
+  subject: string | null;
+  body: string;
+  createdAt: string;
+  readAt: string | null;
+}
+
+export const notificationsApi = {
+  list: (params?: { page?: number; size?: number }) =>
+    apiClient.get<{ content: InAppNotification[]; unreadCount: number; page: number; size: number }>(
+      'notification',
+      `/notifications?page=${params?.page ?? 0}&size=${params?.size ?? 10}`
+    ),
+  unreadCount: () => apiClient.get<{ count: number }>('notification', '/notifications/unread-count'),
+  markRead: (id: number) => apiClient.post('notification', `/notifications/${id}/read`),
 };

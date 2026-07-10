@@ -1,0 +1,14 @@
+{{- $global := .Values.global }}
+{{- range $name, $svc := .Values.services }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ $name }}-pdb
+  namespace: {{ $global.namespace }}
+spec:
+  minAvailable: {{ ($svc.pdb).minAvailable | default $global.pdb.minAvailable }}
+  selector:
+    matchLabels:
+      app: {{ $name }}
+---
+{{- end }}

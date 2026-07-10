@@ -1,8 +1,14 @@
-/* 1. Design tokens (CSS custom properties only — no @layer here) */
-@import "./styles/tokens.css";
-
-/* 2. Tailwind v4 — must come before any @utility or @layer utilities */
+/* 1. Tailwind v4 — its @theme block defines default values for names our own tokens also
+      use (--font-sans, --radius-*, etc.). Our tokens.css MUST load after this, not before:
+      two same-specificity :root declarations resolve by source order, and until this was
+      fixed, tokens.css loading first meant Tailwind's defaults silently won for every
+      colliding name — the whole app was rendering in Tailwind's default font stack, not
+      Inter, and every rounded-* utility was using Tailwind's stock radius scale, not ours.
+      Must still come before any @utility or @layer utilities (section 4). */
 @import "tailwindcss";
+
+/* 2. Design tokens (CSS custom properties only — no @layer here) */
+@import "./styles/tokens.css";
 
 /* 3. Dark-mode variant — class-based (.dark on <html>) */
 @custom-variant dark (&:where(.dark, .dark *));
@@ -39,6 +45,12 @@
   .bg-brand-hover     { background-color: var(--brand-primary-hover); }
   .text-primary-fg    { color: var(--brand-primary-foreground); }
   .text-brand         { color: var(--brand-primary); }
+  /* Both names are in real use across the app (border-primary and border-brand) for the
+     same "brand-colored border" intent — neither was ever defined, so every consumer
+     (including ERPInput/ERPSelect's own active-border state) has silently rendered with
+     no border color change until now. Defining both closes the gap without a 12-file rename. */
+  .border-primary     { border-color: var(--brand-primary); }
+  .border-brand       { border-color: var(--brand-primary); }
 
   /* ── Semantic — Success ─────────────────────────────────────────────────── */
   .text-success       { color: var(--color-success); }
@@ -87,6 +99,7 @@
   /* ── Focus ring ─────────────────────────────────────────────────────────── */
   .ring-brand         { --tw-ring-color: var(--brand-primary); }
   .ring-focus         { --tw-ring-color: var(--brand-primary); }
+  .ring-danger        { --tw-ring-color: var(--color-danger); }
 }
 
 /* 5. Animations */

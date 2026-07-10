@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
@@ -6,6 +6,8 @@ import { payrollApi, employeeApi } from '../../api/endpoints.js';
 import { useAuthStore } from '../../store/auth.store.js';
 import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
+import { ERPTableSkeleton } from '../../components/erp/ERPSkeleton.js';
+import ERPEmptyState from '../../components/erp/ERPEmptyState.js';
 import Button from '../../components/ui/Button.js';
 import Select from '../../components/ui/Select.js';
 import Input from '../../components/ui/Input.js';
@@ -58,7 +60,7 @@ export default function PayrollPage() {
   const { data, isLoading } = useQuery({ queryKey: ['payroll-runs'], queryFn: () => payrollApi.runs() });
   const runs: PayrollRun[] = ((data as Record<string, unknown>)?.content as PayrollRun[]) ?? [];
 
-  const { data: empData } = useQuery({ queryKey: ['employees-all'], queryFn: () => employeeApi.list() });
+  const { data: empData } = useQuery({ queryKey: ['employees-all'], queryFn: () => employeeApi.list(), enabled: hasPermission(PERMISSIONS.EMPLOYEE_VIEW) });
   const employees: Employee[] = ((empData as Record<string, unknown>)?.content as Employee[]) ?? [];
 
   const { data: runDetailData } = useQuery({
@@ -125,9 +127,16 @@ export default function PayrollPage() {
       />
 
       {isLoading ? (
-        <p className="text-secondary text-sm">Loading…</p>
+        <ERPTableSkeleton rows={6} cols={6} />
       ) : runs.length === 0 ? (
-        <p className="text-disabled text-sm">No payroll runs yet.</p>
+        <ERPEmptyState
+          type="no-data"
+          title="No payroll runs yet"
+          description="Create your first payroll run to get started."
+          {...(hasPermission(PERMISSIONS.PAYROLL_PROCESS)
+            ? { action: { label: '+ New Payroll Run', onClick: () => setCreateOpen(true) } }
+            : {})}
+        />
       ) : (
         <table className="w-full text-sm bg-surface-card rounded-xl border border-default overflow-hidden">
           <thead className="bg-surface-subtle">
@@ -142,7 +151,8 @@ export default function PayrollPage() {
           </thead>
           <tbody className="divide-y divide-default">
             {runs.map((run) => (
-              <tr key={run.id}>
+              <Fragment key={run.id}>
+              <tr>
                 <td className="px-4 py-3 font-medium">{run.periodMonth}/{run.periodYear}</td>
                 <td className="px-4 py-3"><Badge variant={STATUS_VARIANT[run.status] ?? 'default'}>{run.status}</Badge></td>
                 <td className="px-4 py-3 text-right">{run.totalEmployees}</td>
@@ -189,6 +199,7 @@ export default function PayrollPage() {
                   </td>
                 </tr>
               )}
+              </Fragment>
             ))}
           </tbody>
         </table>

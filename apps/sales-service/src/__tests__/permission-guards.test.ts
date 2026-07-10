@@ -112,8 +112,8 @@ describe('CREDIT_LIMIT_OVERRIDE guard on POST /invoices', () => {
     });
 
     expect(res.statusCode).toBe(403);
-    const body = JSON.parse(res.body) as { error: string };
-    expect(body.error).toMatch(/CREDIT_LIMIT_OVERRIDE/);
+    const body = JSON.parse(res.body) as { error: { code: string; message: string } };
+    expect(body.error.message).toMatch(/CREDIT_LIMIT_OVERRIDE/);
   });
 
   it('does not return 403 when user has CREDIT_LIMIT_OVERRIDE and sends overrideCreditLimit:true', async () => {
@@ -155,8 +155,8 @@ describe('PRICE_FLOOR_OVERRIDE guard on POST /invoices', () => {
     });
 
     expect(res.statusCode).toBe(403);
-    const body = JSON.parse(res.body) as { error: string };
-    expect(body.error).toMatch(/PRICE_FLOOR_OVERRIDE/);
+    const body = JSON.parse(res.body) as { error: { code: string; message: string } };
+    expect(body.error.message).toMatch(/PRICE_FLOOR_OVERRIDE/);
   });
 
   it('does not return 403 when user has PRICE_FLOOR_OVERRIDE and sends overridePriceFloor:true', async () => {
@@ -197,8 +197,8 @@ describe('EXPORT_CUSTOMER_DATA guard on GET /customers/export', () => {
     });
 
     expect(res.statusCode).toBe(403);
-    const body = JSON.parse(res.body) as { error: string };
-    expect(body.error).toMatch(/EXPORT_CUSTOMER_DATA/);
+    const body = JSON.parse(res.body) as { error: { code: string; message: string } };
+    expect(body.error.message).toMatch(/EXPORT_CUSTOMER_DATA/);
   });
 
   it('returns 202 when user has EXPORT_CUSTOMER_DATA', async () => {

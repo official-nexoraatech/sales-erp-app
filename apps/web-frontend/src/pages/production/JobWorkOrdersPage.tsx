@@ -6,6 +6,8 @@ import { productionApi } from '../../api/endpoints.js';
 import { useAuthStore } from '../../store/auth.store.js';
 import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
+import { ERPTableSkeleton } from '../../components/erp/ERPSkeleton.js';
+import ERPEmptyState from '../../components/erp/ERPEmptyState.js';
 import Button from '../../components/ui/Button.js';
 import Badge from '../../components/ui/Badge.js';
 import Select from '../../components/ui/Select.js';
@@ -44,13 +46,13 @@ export default function JobWorkOrdersPage() {
     queryKey: ['job-work-orders', statusFilter],
     queryFn: () => statusFilter ? productionApi.listJobWorkOrders({ status: statusFilter }) : productionApi.listJobWorkOrders(),
   });
-  const orders: JobWorkOrder[] = ((data as Record<string, unknown>)?.data as JobWorkOrder[]) ?? [];
+  const orders: JobWorkOrder[] = (data as JobWorkOrder[]) ?? [];
 
   const { data: dashData } = useQuery({
     queryKey: ['job-work-dashboard'],
     queryFn: () => productionApi.getJobWorkDashboard(),
   });
-  const dash = (dashData as Record<string, unknown>)?.data as Record<string, number> | undefined;
+  const dash = (dashData as Record<string, number> | undefined);
 
   const cancelMutation = useMutation({
     mutationFn: ({ id, reason }: { id: number; reason: string }) =>
@@ -101,9 +103,16 @@ export default function JobWorkOrdersPage() {
       </div>
 
       {isLoading ? (
-        <p className="text-secondary text-sm">Loading…</p>
+        <ERPTableSkeleton rows={6} cols={8} />
       ) : orders.length === 0 ? (
-        <p className="text-disabled text-sm">No job work orders found.</p>
+        <ERPEmptyState
+          type="no-data"
+          title="No job work orders found"
+          description="Outsourced stitching and processing orders will appear here."
+          {...(hasPermission(PERMISSIONS.JOB_WORK_CREATE)
+            ? { action: { label: '+ New Job Work Order', onClick: () => navigate('/production/job-work/new') } }
+            : {})}
+        />
       ) : (
         <table className="w-full text-sm bg-surface-card rounded-xl border border-default overflow-hidden">
           <thead className="bg-surface-subtle">

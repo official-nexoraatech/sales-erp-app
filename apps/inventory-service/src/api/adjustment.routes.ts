@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { eq, desc } from 'drizzle-orm';
+import { eq, and, desc, sql } from 'drizzle-orm';
 import { stockAdjustments, stockAdjustmentLines } from '@erp/db';
 import { PERMISSIONS } from '@erp/types';
 import type { PlatformContextFactory } from '@erp/sdk';
@@ -58,19 +58,24 @@ export async function adjustmentRoutes(
       };
       const offset = ((page as number) - 1) * (limit as number);
 
-      let q = ctx.db.raw
+      const whereClause = status
+        ? and(eq(stockAdjustments.tenantId, request.auth.tenantId), eq(stockAdjustments.status, status as typeof stockAdjustments.$inferSelect['status']))
+        : eq(stockAdjustments.tenantId, request.auth.tenantId);
+
+      const rows = await ctx.db.raw
         .select()
         .from(stockAdjustments)
-        .where(eq(stockAdjustments.tenantId, request.auth.tenantId))
+        .where(whereClause)
         .orderBy(desc(stockAdjustments.createdAt))
-        .$dynamic();
+        .limit(limit as number)
+        .offset(offset);
 
-      if (status) {
-        q = q.where(eq(stockAdjustments.status, status as typeof stockAdjustments.$inferSelect['status'])) as typeof q;
-      }
+      const [countRow] = await ctx.db.raw
+        .select({ count: sql<number>`count(*)::int` })
+        .from(stockAdjustments)
+        .where(whereClause);
 
-      const rows = await q.limit(limit as number).offset(offset);
-      return reply.code(200).send({ data: rows, meta: { page, limit } });
+      return reply.code(200).send({ data: { content: rows, totalElements: countRow?.count ?? 0, page, limit } });
     }
   );
 
@@ -108,6 +113,7 @@ export async function adjustmentRoutes(
         entityId: adj.id,
         after: adj,
       });
+      await ctx.events.publish('stock_adjustment', adj.id, 'STOCK_ADJUSTMENT_CREATED', adj as unknown as Record<string, unknown>);
 
       return reply.code(201).send({ data: adj });
     }
@@ -164,6 +170,7 @@ export async function adjustmentRoutes(
       const { id } = request.params as { id: string };
       const svc = new StockAdjustmentService(ctx.db.raw);
       const adj = await svc.approve(parseInt(id, 10), request.auth.tenantId, request.auth.userId);
+      await ctx.events.publish('stock_adjustment', adj.id, 'STOCK_ADJUSTMENT_UPDATED', adj as unknown as Record<string, unknown>);
       return reply.code(200).send({ data: adj });
     }
   );
@@ -182,6 +189,7 @@ export async function adjustmentRoutes(
       const { reason } = CancelSchema.parse((request.body as { data?: unknown })?.data ?? request.body);
       const svc = new StockAdjustmentService(ctx.db.raw);
       const adj = await svc.cancel(parseInt(id, 10), request.auth.tenantId, request.auth.userId, reason);
+      await ctx.events.publish('stock_adjustment', adj.id, 'STOCK_ADJUSTMENT_UPDATED', adj as unknown as Record<string, unknown>);
       return reply.code(200).send({ data: adj });
     }
   );

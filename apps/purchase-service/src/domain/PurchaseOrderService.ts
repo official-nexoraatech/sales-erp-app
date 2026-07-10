@@ -3,10 +3,13 @@ import {
   purchaseOrders,
   purchaseOrderLines,
   purchaseOrderHistory,
+  purchaseOrderAmendments,
+  suppliers,
+  projectionSupplierBalance,
   outboxEvents,
 } from '@erp/db';
 import type { ErpDatabase } from '@erp/db';
-import { BusinessError, NotFoundError } from '@erp/types';
+import { BusinessError, NotFoundError, VendorCreditLimitExceededError } from '@erp/types';
 import { GSTCalculator } from './GSTCalculator.js';
 import { ulid } from 'ulid';
 
@@ -159,7 +162,13 @@ export class PurchaseOrderService {
     });
   }
 
-  async approve(id: number, tenantId: number, userId: number, poNumber: string): Promise<void> {
+  async approve(
+    id: number,
+    tenantId: number,
+    userId: number,
+    poNumber: string,
+    overrideCreditLimit = false
+  ): Promise<void> {
     await this.db.transaction(async (trx) => {
       const [po] = await trx
         .select()
@@ -168,6 +177,33 @@ export class PurchaseOrderService {
       if (!po) throw new NotFoundError('PurchaseOrder', id);
       if (!['SUBMITTED', 'PENDING_APPROVAL'].includes(po.status))
         throw new BusinessError('INVALID_STATUS', `Cannot approve PO in status ${po.status}`);
+
+      if (!overrideCreditLimit) {
+        const [supplier] = await trx
+          .select({ creditLimit: suppliers.creditLimit, creditLimitEnabled: suppliers.creditLimitEnabled })
+          .from(suppliers)
+          .where(and(eq(suppliers.id, po.supplierId), eq(suppliers.tenantId, tenantId)));
+
+        if (supplier?.creditLimitEnabled) {
+          const [balance] = await trx
+            .select({ currentBalance: projectionSupplierBalance.currentBalance })
+            .from(projectionSupplierBalance)
+            .where(
+              and(
+                eq(projectionSupplierBalance.tenantId, tenantId),
+                eq(projectionSupplierBalance.supplierId, po.supplierId)
+              )
+            );
+
+          const limit = parseFloat(String(supplier.creditLimit));
+          const currentBalance = parseFloat(String(balance?.currentBalance ?? 0));
+          const newBalance = currentBalance + parseFloat(String(po.grandTotal));
+
+          if (limit > 0 && newBalance > limit) {
+            throw new VendorCreditLimitExceededError(po.supplierId, limit, newBalance);
+          }
+        }
+      }
 
       await trx
         .update(purchaseOrders)
@@ -198,6 +234,57 @@ export class PurchaseOrderService {
         aggregateId: id,
         tenantId,
         payload: { poId: id, poNumber, supplierId: po.supplierId, grandTotal: po.grandTotal },
+        published: false,
+      });
+    });
+  }
+
+  async amend(
+    id: number,
+    tenantId: number,
+    userId: number,
+    amendments: Record<string, unknown>,
+    reason: string
+  ): Promise<void> {
+    await this.db.transaction(async (trx) => {
+      const [po] = await trx
+        .select()
+        .from(purchaseOrders)
+        .where(and(eq(purchaseOrders.id, id), eq(purchaseOrders.tenantId, tenantId)));
+      if (!po) throw new NotFoundError('PurchaseOrder', id);
+      if (po.status !== 'APPROVED')
+        throw new BusinessError('INVALID_STATUS', `Cannot amend PO in status ${po.status}`);
+
+      await trx.insert(purchaseOrderAmendments).values({
+        purchaseOrderId: id,
+        tenantId,
+        amendments,
+        reason,
+        performedBy: userId,
+      });
+
+      await trx
+        .update(purchaseOrders)
+        .set({ updatedBy: userId, updatedAt: new Date(), version: sql`${purchaseOrders.version} + 1` })
+        .where(and(eq(purchaseOrders.id, id), eq(purchaseOrders.tenantId, tenantId)));
+
+      await trx.insert(purchaseOrderHistory).values({
+        purchaseOrderId: id,
+        tenantId,
+        action: 'PO_AMENDED',
+        fromStatus: 'APPROVED',
+        toStatus: 'APPROVED',
+        performedBy: userId,
+        notes: reason,
+      });
+
+      await trx.insert(outboxEvents).values({
+        eventId: ulid(),
+        eventType: 'PO_AMENDED',
+        aggregateType: 'PurchaseOrder',
+        aggregateId: id,
+        tenantId,
+        payload: { poId: id, amendments, reason },
         published: false,
       });
     });

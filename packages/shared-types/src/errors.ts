@@ -44,10 +44,31 @@ export class InsufficientStockError extends BusinessError {
   }
 }
 
+export class StockInsufficientForCostingError extends BusinessError {
+  constructor(itemId: number, warehouseId: number, requested: number, availableInLayers: number) {
+    super('STOCK_INSUFFICIENT', 'FIFO cost layers do not cover the requested quantity', {
+      itemId,
+      warehouseId,
+      requested,
+      availableInLayers,
+    });
+  }
+}
+
 export class CreditLimitExceededError extends BusinessError {
   constructor(customerId: number, creditLimit: number, newBalance: number) {
     super('CREDIT_LIMIT_EXCEEDED', 'Credit limit exceeded', {
       customerId,
+      creditLimit,
+      newBalance,
+    });
+  }
+}
+
+export class VendorCreditLimitExceededError extends BusinessError {
+  constructor(supplierId: number, creditLimit: number, newBalance: number) {
+    super('VENDOR_CREDIT_LIMIT_EXCEEDED', 'Purchase order would exceed vendor credit limit', {
+      supplierId,
       creditLimit,
       newBalance,
     });
@@ -90,6 +111,12 @@ export class TenantSuspendedError extends ERPError {
   }
 }
 
+export class TenantClosedError extends ERPError {
+  constructor(tenantId: number) {
+    super('TENANT_CLOSED', `Tenant ${tenantId} is closed`, 410, { tenantId });
+  }
+}
+
 export class WorkflowApprovalRequiredError extends BusinessError {
   constructor(workflowType: string, entityId: number) {
     super('WORKFLOW_APPROVAL_REQUIRED', `Approval required for ${workflowType}`, {
@@ -104,5 +131,11 @@ export class IdempotencyConflictError extends ERPError {
     super('IDEMPOTENCY_CONFLICT', `Idempotency key already used: ${idempotencyKey}`, 409, {
       idempotencyKey,
     });
+  }
+}
+
+export class ServiceUnavailableError extends ERPError {
+  constructor(code: string, message: string) {
+    super(code, message, 503);
   }
 }

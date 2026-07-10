@@ -14,7 +14,9 @@
   "scripts": {
     "build": "tsc",
     "type-check": "tsc --noEmit",
-    "lint": "eslint src/"
+    "lint": "eslint src/",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "@erp/config": "workspace:*",
@@ -24,6 +26,8 @@
   },
   "devDependencies": {
     "@types/node": "^20.17.0",
-    "typescript": "^5.7.3"
+    "@vitest/coverage-v8": "^3.2.6",
+    "typescript": "^5.7.3",
+    "vitest": "^3.2.6"
   }
 }

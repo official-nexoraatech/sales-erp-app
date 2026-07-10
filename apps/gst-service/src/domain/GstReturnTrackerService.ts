@@ -3,6 +3,7 @@ import type { TenantScopedDatabase } from '@erp/sdk';
 import { gstReturnFilings } from '@erp/db';
 import { createLogger } from '@erp/logger';
 import { NotFoundError } from '@erp/types';
+import type { Gstr3bDischargeData, Gstr3bManualAdjustments } from './Gstr3bService.js';
 
 const logger = createLogger({ serviceName: 'gst-service' });
 
@@ -89,7 +90,11 @@ export class GstReturnTrackerService {
     userId: number,
     returnType: ReturnType,
     period: string,
-    referenceNumber?: string
+    referenceNumber?: string,
+    // PG-040 — real cash/ITC discharge figures for GSTR3B, locked in at filing time so a
+    // later ledger change can't silently retroactively alter what was actually paid. Only
+    // meaningful for GSTR3B; omitted for GSTR1/GSTR9/GSTR9C, which leave filingData untouched.
+    dischargeData?: Gstr3bDischargeData
   ): Promise<void> {
     const [filing] = await db.raw
       .select()
@@ -107,6 +112,11 @@ export class GstReturnTrackerService {
     const today = new Date().toISOString().substring(0, 10);
     const isLate = today > String(filing.dueDate);
 
+    const filingData =
+      returnType === 'GSTR3B' && dischargeData
+        ? { ...dischargeData, filedAt: new Date().toISOString() }
+        : undefined;
+
     await db.raw
       .update(gstReturnFilings)
       .set({
@@ -115,6 +125,7 @@ export class GstReturnTrackerService {
         filedBy: userId,
         referenceNumber: referenceNumber ?? null,
         updatedAt: new Date(),
+        ...(filingData ? { filingData } : {}),
       })
       .where(
         and(
@@ -174,6 +185,59 @@ export class GstReturnTrackerService {
       filedThisMonth: filedThisMonth.length,
       nextDue,
     };
+  }
+
+  // PG-039 — read back a previously saved GSTR-3B manual adjustment, if any, for this period.
+  static async getGstr3bManualAdjustments(
+    db: TenantScopedDatabase,
+    tenantId: number,
+    period: string
+  ): Promise<Gstr3bManualAdjustments | null> {
+    const [filing] = await db.raw
+      .select({ manualAdjustments: gstReturnFilings.manualAdjustments })
+      .from(gstReturnFilings)
+      .where(
+        and(
+          eq(gstReturnFilings.tenantId, tenantId),
+          eq(gstReturnFilings.returnType, 'GSTR3B'),
+          eq(gstReturnFilings.period, period)
+        )
+      );
+    return (filing?.manualAdjustments as Gstr3bManualAdjustments | undefined) ?? null;
+  }
+
+  // PG-039 — persist a manual import-of-goods/import-of-services IGST override before filing.
+  // Upserts the gst_return_filings row (creating it with a PENDING status if it doesn't exist
+  // yet, since getCalendar() may not have been called for this period).
+  static async saveGstr3bManualAdjustments(
+    db: TenantScopedDatabase,
+    tenantId: number,
+    userId: number,
+    period: string,
+    adjustments: Gstr3bManualAdjustments
+  ): Promise<void> {
+    const manualAdjustments = {
+      ...adjustments,
+      enteredBy: userId,
+      enteredAt: new Date().toISOString(),
+    };
+
+    await db.raw
+      .insert(gstReturnFilings)
+      .values({
+        tenantId,
+        returnType: 'GSTR3B',
+        period,
+        dueDate: GstReturnTrackerService.getDueDate('GSTR3B', period),
+        status: 'PENDING',
+        manualAdjustments,
+      })
+      .onConflictDoUpdate({
+        target: [gstReturnFilings.tenantId, gstReturnFilings.returnType, gstReturnFilings.period],
+        set: { manualAdjustments, updatedAt: new Date() },
+      });
+
+    logger.info({ tenantId, period, adjustments }, 'GSTR-3B manual adjustments saved');
   }
 
   // GSTR-1 due: 11th of the following month

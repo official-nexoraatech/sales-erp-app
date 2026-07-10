@@ -4,6 +4,8 @@ import { projectionAdminApi } from '../../../api/endpoints.js';
 import { useAuthStore } from '../../../store/auth.store.js';
 import { PERMISSIONS } from '../../../constants/permissions.js';
 import ERPPageHeader from '../../../components/erp/ERPPageHeader.js';
+import { ERPCardSkeleton } from '../../../components/erp/ERPSkeleton.js';
+import ERPEmptyState from '../../../components/erp/ERPEmptyState.js';
 import Button from '../../../components/ui/Button.js';
 import Badge from '../../../components/ui/Badge.js';
 import { formatDate } from '../../../lib/format.js';
@@ -82,7 +84,11 @@ export default function ProjectionsPage() {
 
       {/* Projections list */}
       {isLoading ? (
-        <div className="card p-8 text-center text-secondary">Loading projections…</div>
+        <div className="space-y-3">
+          <ERPCardSkeleton lines={4} />
+          <ERPCardSkeleton lines={4} />
+          <ERPCardSkeleton lines={4} />
+        </div>
       ) : (
         <div className="space-y-3">
           {projections.map((proj) => (
@@ -130,7 +136,9 @@ export default function ProjectionsPage() {
             </div>
           ))}
           {projections.length === 0 && (
-            <div className="card p-8 text-center text-secondary">No projections found</div>
+            <div className="card">
+              <ERPEmptyState type="no-data" title="No projections found" description="Registered CQRS read model projections will appear here." />
+            </div>
           )}
         </div>
       )}

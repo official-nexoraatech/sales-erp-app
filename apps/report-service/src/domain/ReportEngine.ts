@@ -1,5 +1,7 @@
 ﻿import { sql } from 'drizzle-orm';
-import type { ErpDatabase } from '@erp/db';
+import type { ErpDatabase, ReplicaRouter } from '@erp/db';
+import type Redis from 'ioredis';
+import { TenantScopedCache } from '@erp/sdk';
 
 export interface ReportParams {
   fromDate?: string;
@@ -49,8 +51,26 @@ function snakeToCamel(s: string): string {
   return s.replace(/_([a-z0-9])/g, (_, c: string) => c.toUpperCase());
 }
 
+// Trailing 12-month window start date, used when a trend report gets no explicit fromDate.
+function defaultTrendFromDate(): string {
+  const d = new Date();
+  d.setUTCMonth(d.getUTCMonth() - 11);
+  d.setUTCDate(1);
+  return d.toISOString().slice(0, 10);
+}
+
+// GST-payable is queried on every GST filing/dashboard view but changes only when new
+// invoices/GRNs post — a short cache absorbs repeat views without serving stale data for long.
+const GST_PAYABLE_CACHE_TTL_SECONDS = 180;
+
 export class ReportEngine {
-  constructor(private readonly db: DbClient) {}
+  constructor(
+    private readonly db: DbClient,
+    private readonly redis?: Redis,
+    // PG-005: report definitions are pure SELECT — route through the read replica
+    // (with lag-aware fallback to this.db) when the caller supplies a router.
+    private readonly replicaRouter?: ReplicaRouter
+  ) {}
 
   async generate(slug: string, tenantId: number, params: ReportParams): Promise<ReportResult> {
     const rawRows = await this.runQuery(slug, tenantId, params);
@@ -70,6 +90,7 @@ export class ReportEngine {
   }
 
   private async runQuery(slug: string, tenantId: number, params: ReportParams): Promise<ReportRow[]> {
+    const db = this.replicaRouter ? await this.replicaRouter.forRead() : this.db;
     const tid = tenantId;
     const from = params.fromDate ?? params.date ?? params.asOfDate ?? '2000-01-01';
     const to = params.toDate ?? params.date ?? params.asOfDate ?? '2099-12-31';
@@ -78,7 +99,7 @@ export class ReportEngine {
       // â”€â”€ SALES REPORTS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       case 'sales-register': {
         // ✓ tenant_id filtered — ES-05 audit
-        const res = await this.db.execute(sql`
+        const res = await db.execute(sql`
           SELECT
             i.invoice_number,
             i.invoice_date::date AS invoice_date,
@@ -105,7 +126,7 @@ export class ReportEngine {
 
       case 'sales-by-customer': {
         // ✓ tenant_id filtered — ES-05 audit
-        const res = await this.db.execute(sql`
+        const res = await db.execute(sql`
           SELECT
             COALESCE(c.display_name, 'Walk-in') AS customer_name,
             c.phone,
@@ -127,7 +148,7 @@ export class ReportEngine {
 
       case 'sales-by-item': {
         // ✓ tenant_id filtered — ES-05 audit
-        const res = await this.db.execute(sql`
+        const res = await db.execute(sql`
           SELECT
             it.item_code,
             it.name AS item_name,
@@ -158,7 +179,7 @@ export class ReportEngine {
 
       case 'sales-by-category': {
         // ✓ tenant_id filtered — ES-05 audit
-        const res = await this.db.execute(sql`
+        const res = await db.execute(sql`
           WITH totals AS (
             SELECT SUM(il.line_total) AS grand_total
             FROM invoice_lines il
@@ -188,7 +209,7 @@ export class ReportEngine {
 
       case 'sales-by-salesperson': {
         // ✓ tenant_id filtered — ES-05 audit
-        const res = await this.db.execute(sql`
+        const res = await db.execute(sql`
           SELECT
             CONCAT(u.first_name, ' ', u.last_name) AS salesperson,
             COUNT(i.id)::int AS invoice_count,
@@ -208,7 +229,7 @@ export class ReportEngine {
       case 'outstanding-receivables': {
         const asOf = params.asOfDate ?? new Date().toISOString().slice(0, 10);
         // ✓ tenant_id filtered — ES-05 audit
-        const res = await this.db.execute(sql`
+        const res = await db.execute(sql`
           SELECT
             COALESCE(c.display_name, 'Walk-in') AS customer_name,
             i.invoice_number,
@@ -238,7 +259,7 @@ export class ReportEngine {
 
       case 'customer-ledger': {
         // ✓ tenant_id filtered — ES-05 audit
-        const res = await this.db.execute(sql`
+        const res = await db.execute(sql`
           SELECT date, type, reference, debit, credit,
             SUM(debit - credit) OVER (ORDER BY date, id) AS balance
           FROM (
@@ -267,7 +288,7 @@ export class ReportEngine {
 
       case 'payment-collection-report': {
         // ✓ tenant_id filtered — ES-05 audit
-        const res = await this.db.execute(sql`
+        const res = await db.execute(sql`
           SELECT
             p.payment_date::date AS payment_date,
             p.receipt_number,
@@ -287,7 +308,7 @@ export class ReportEngine {
 
       case 'credit-note-report': {
         // ✓ tenant_id filtered — ES-05 audit
-        const res = await this.db.execute(sql`
+        const res = await db.execute(sql`
           SELECT
             cn.credit_note_number,
             cn.issued_date::date AS date,
@@ -306,7 +327,7 @@ export class ReportEngine {
 
       case 'sales-return-report': {
         // ✓ tenant_id filtered — ES-05 audit
-        const res = await this.db.execute(sql`
+        const res = await db.execute(sql`
           SELECT
             sr.return_number,
             sr.return_date::date AS date,
@@ -326,7 +347,7 @@ export class ReportEngine {
 
       case 'delivery-challan-report': {
         // ✓ tenant_id filtered — ES-05 audit
-        const res = await this.db.execute(sql`
+        const res = await db.execute(sql`
           SELECT
             dc.challan_number,
             dc.challan_date::date AS date,
@@ -347,7 +368,7 @@ export class ReportEngine {
 
       case 'quotation-conversion-report': {
         // ✓ tenant_id filtered — ES-05 audit
-        const res = await this.db.execute(sql`
+        const res = await db.execute(sql`
           SELECT
             q.quotation_number,
             q.created_at::date AS date,
@@ -368,7 +389,7 @@ export class ReportEngine {
 
       case 'pos-summary-report': {
         // ✓ tenant_id filtered — ES-05 audit
-        const res = await this.db.execute(sql`
+        const res = await db.execute(sql`
           SELECT
             i.invoice_date::date AS date,
             CONCAT(u.first_name, ' ', u.last_name) AS cashier,
@@ -395,7 +416,7 @@ export class ReportEngine {
         const lim = Number(p(params.limit, 20));
         const sortCol = params.sortBy === 'quantity' ? 'quantity_sold' : 'revenue';
         // ✓ tenant_id filtered — ES-05 audit
-        const res = await this.db.execute(sql`
+        const res = await db.execute(sql`
           SELECT
             ROW_NUMBER() OVER (ORDER BY SUM(il.line_total) DESC) AS rank,
             it.name AS item_name,
@@ -419,7 +440,7 @@ export class ReportEngine {
       case 'slow-moving-items': {
         const maxQty = Number(p(params.maxSalesQty, 5));
         // ✓ tenant_id filtered — ES-05 audit
-        const res = await this.db.execute(sql`
+        const res = await db.execute(sql`
           SELECT
             it.item_code,
             it.name AS item_name,
@@ -450,7 +471,7 @@ export class ReportEngine {
 
       case 'customer-statement': {
         // ✓ tenant_id filtered — ES-05 audit
-        const res = await this.db.execute(sql`
+        const res = await db.execute(sql`
           SELECT date, description, debit, credit,
             SUM(debit - credit) OVER (ORDER BY date, id) AS balance
           FROM (
@@ -473,7 +494,7 @@ export class ReportEngine {
 
       case 'loyalty-points-report': {
         // ✓ tenant_id filtered — ES-05 audit
-        const res = await this.db.execute(sql`
+        const res = await db.execute(sql`
           SELECT
             c.display_name AS customer_name,
             c.phone,
@@ -491,7 +512,7 @@ export class ReportEngine {
 
       case 'discount-report': {
         // ✓ tenant_id filtered — ES-05 audit
-        const res = await this.db.execute(sql`
+        const res = await db.execute(sql`
           SELECT
             i.invoice_number,
             i.invoice_date::date AS date,
@@ -515,7 +536,7 @@ export class ReportEngine {
 
       case 'sales-target-vs-actual': {
         // ✓ tenant_id filtered — ES-05 audit
-        const res = await this.db.execute(sql`
+        const res = await db.execute(sql`
           SELECT
             b.name AS branch,
             0 AS target,
@@ -536,7 +557,7 @@ export class ReportEngine {
       // â”€â”€ PURCHASE REPORTS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       case 'purchase-register': {
         // ✓ tenant_id filtered — ES-05 audit
-        const res = await this.db.execute(sql`
+        const res = await db.execute(sql`
           SELECT
             g.grn_number,
             g.grn_date::date AS grn_date,
@@ -560,7 +581,7 @@ export class ReportEngine {
 
       case 'purchase-by-supplier': {
         // ✓ tenant_id filtered — ES-05 audit
-        const res = await this.db.execute(sql`
+        const res = await db.execute(sql`
           SELECT
             s.display_name AS supplier_name,
             COUNT(g.id)::int AS grn_count,
@@ -581,7 +602,7 @@ export class ReportEngine {
 
       case 'purchase-by-item': {
         // ✓ tenant_id filtered — ES-05 audit
-        const res = await this.db.execute(sql`
+        const res = await db.execute(sql`
           SELECT
             it.item_code,
             it.name AS item_name,
@@ -604,7 +625,7 @@ export class ReportEngine {
       case 'outstanding-payables': {
         const asOf = params.asOfDate ?? new Date().toISOString().slice(0, 10);
         // ✓ tenant_id filtered — ES-05 audit
-        const res = await this.db.execute(sql`
+        const res = await db.execute(sql`
           SELECT
             s.display_name AS supplier_name,
             g.grn_number,
@@ -634,7 +655,7 @@ export class ReportEngine {
 
       case 'supplier-ledger': {
         // ✓ tenant_id filtered — ES-05 audit
-        const res = await this.db.execute(sql`
+        const res = await db.execute(sql`
           SELECT date, type, reference, debit, credit,
             SUM(credit - debit) OVER (ORDER BY date, id) AS balance
           FROM (
@@ -657,7 +678,7 @@ export class ReportEngine {
 
       case 'purchase-order-status': {
         // ✓ tenant_id filtered — ES-05 audit
-        const res = await this.db.execute(sql`
+        const res = await db.execute(sql`
           SELECT
             po.po_number,
             po.po_date::date AS po_date,
@@ -681,7 +702,7 @@ export class ReportEngine {
 
       case 'purchase-return-report': {
         // ✓ tenant_id filtered — ES-05 audit
-        const res = await this.db.execute(sql`
+        const res = await db.execute(sql`
           SELECT
             pr.return_number,
             pr.return_date::date AS date,
@@ -701,7 +722,7 @@ export class ReportEngine {
 
       case 'grn-report': {
         // ✓ tenant_id filtered — ES-05 audit
-        const res = await this.db.execute(sql`
+        const res = await db.execute(sql`
           SELECT
             g.grn_number,
             g.grn_date::date AS grn_date,
@@ -726,7 +747,7 @@ export class ReportEngine {
 
       case 'expense-report': {
         // ✓ tenant_id filtered — ES-05 audit
-        const res = await this.db.execute(sql`
+        const res = await db.execute(sql`
           SELECT
             e.expense_date::date AS date,
             e.expense_number,
@@ -745,7 +766,7 @@ export class ReportEngine {
 
       case 'landed-cost-report': {
         // ✓ tenant_id filtered — ES-05 audit
-        const res = await this.db.execute(sql`
+        const res = await db.execute(sql`
           SELECT
             g.grn_number,
             g.grn_date::date AS grn_date,
@@ -765,7 +786,7 @@ export class ReportEngine {
 
       case 'supplier-payment-report': {
         // ✓ tenant_id filtered — ES-05 audit
-        const res = await this.db.execute(sql`
+        const res = await db.execute(sql`
           SELECT
             sp.payment_date::date AS payment_date,
             sp.payment_number,
@@ -785,7 +806,7 @@ export class ReportEngine {
 
       case 'price-trend': {
         // ✓ tenant_id filtered — ES-05 audit
-        const res = await this.db.execute(sql`
+        const res = await db.execute(sql`
           SELECT
             g.grn_date::date AS date,
             g.grn_number,
@@ -806,7 +827,7 @@ export class ReportEngine {
       // â”€â”€ INVENTORY REPORTS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       case 'stock-summary': {
         // ✓ tenant_id filtered — ES-05 audit
-        const res = await this.db.execute(sql`
+        const res = await db.execute(sql`
           SELECT
             it.item_code,
             it.name AS item_name,
@@ -831,7 +852,7 @@ export class ReportEngine {
 
       case 'stock-movement': {
         // ✓ tenant_id filtered — ES-05 audit
-        const res = await this.db.execute(sql`
+        const res = await db.execute(sql`
           SELECT
             it.name AS item_name,
             w.name AS warehouse,
@@ -863,7 +884,7 @@ export class ReportEngine {
       case 'inventory-valuation': {
         const asOf = params.asOfDate ?? new Date().toISOString().slice(0, 10);
         // ✓ tenant_id filtered — ES-05 audit
-        const res = await this.db.execute(sql`
+        const res = await db.execute(sql`
           SELECT
             it.item_code,
             it.name AS item_name,
@@ -884,7 +905,7 @@ export class ReportEngine {
 
       case 'reorder-report': {
         // ✓ tenant_id filtered — ES-05 audit
-        const res = await this.db.execute(sql`
+        const res = await db.execute(sql`
           SELECT
             it.item_code,
             it.name AS item_name,
@@ -908,7 +929,7 @@ export class ReportEngine {
       case 'stock-ageing': {
         const asOf = params.asOfDate ?? new Date().toISOString().slice(0, 10);
         // ✓ tenant_id filtered — ES-05 audit
-        const res = await this.db.execute(sql`
+        const res = await db.execute(sql`
           SELECT
             it.name AS item_name,
             cat.name AS category,
@@ -933,7 +954,7 @@ export class ReportEngine {
 
       case 'physical-verification-report': {
         // ✓ tenant_id filtered — ES-05 audit
-        const res = await this.db.execute(sql`
+        const res = await db.execute(sql`
           SELECT
             pv.verification_number,
             pv.verification_date::date AS date,
@@ -957,7 +978,7 @@ export class ReportEngine {
 
       case 'stock-transfer-report': {
         // ✓ tenant_id filtered — ES-05 audit
-        const res = await this.db.execute(sql`
+        const res = await db.execute(sql`
           SELECT
             st.transfer_number,
             st.transfer_date::date AS transfer_date,
@@ -981,7 +1002,7 @@ export class ReportEngine {
 
       case 'fabric-roll-report': {
         // ✓ tenant_id filtered — ES-05 audit
-        const res = await this.db.execute(sql`
+        const res = await db.execute(sql`
           SELECT
             fr.roll_number,
             it.name AS item_name,
@@ -1002,7 +1023,7 @@ export class ReportEngine {
 
       case 'warehouse-wise-stock': {
         // ✓ tenant_id filtered — ES-05 audit
-        const res = await this.db.execute(sql`
+        const res = await db.execute(sql`
           SELECT
             w.name AS warehouse,
             it.item_code,
@@ -1023,7 +1044,7 @@ export class ReportEngine {
 
       case 'stock-ledger': {
         // ✓ tenant_id filtered — ES-05 audit
-        const res = await this.db.execute(sql`
+        const res = await db.execute(sql`
           SELECT
             il.transaction_date::date AS date,
             il.transaction_type,
@@ -1051,7 +1072,7 @@ export class ReportEngine {
         const days = Number(p(params.daysSinceMovement, 180));
         const asOf = params.asOfDate ?? new Date().toISOString().slice(0, 10);
         // ✓ tenant_id filtered — ES-05 audit
-        const res = await this.db.execute(sql`
+        const res = await db.execute(sql`
           SELECT
             it.item_code,
             it.name AS item_name,
@@ -1076,7 +1097,7 @@ export class ReportEngine {
 
       case 'adjustment-report': {
         // ✓ tenant_id filtered — ES-05 audit
-        const res = await this.db.execute(sql`
+        const res = await db.execute(sql`
           SELECT
             sa.adjustment_number,
             sa.adjustment_date::date AS date,
@@ -1100,7 +1121,7 @@ export class ReportEngine {
       case 'reservation-report': {
         const asOf = params.asOfDate ?? new Date().toISOString().slice(0, 10);
         // ✓ tenant_id filtered — ES-05 audit
-        const res = await this.db.execute(sql`
+        const res = await db.execute(sql`
           SELECT
             it.name AS item_name,
             w.name AS warehouse,
@@ -1123,141 +1144,232 @@ export class ReportEngine {
 
       // â”€â”€ FINANCIAL REPORTS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       case 'day-book': {
-        // ✓ tenant_id filtered — ES-05 audit
-        const res = await this.db.execute(sql`
+        // ✓ tenant_id filtered — ES-26 (fixed: real columns are debit_amount/credit_amount/created_at;
+        // there is no entry_type/debit_credit/amount/entry_date column on financial_entries)
+        const res = await db.execute(sql`
           SELECT
-            fe.entry_date::time AS time,
-            fe.entry_type AS type,
+            fe.created_at::time AS time,
+            CASE WHEN fe.debit_amount > 0 THEN 'DEBIT' ELSE 'CREDIT' END AS type,
             j.journal_number AS reference,
             fe.description,
-            CASE WHEN fe.debit_credit = 'DEBIT' THEN fe.amount ELSE 0 END AS debit,
-            CASE WHEN fe.debit_credit = 'CREDIT' THEN fe.amount ELSE 0 END AS credit
+            fe.debit_amount AS debit,
+            fe.credit_amount AS credit
           FROM financial_entries fe
           JOIN journals j ON j.id = fe.journal_id AND j.tenant_id = ${tid}
           WHERE fe.tenant_id = ${tid}
-            AND fe.entry_date::date = ${from}::date
-          ORDER BY fe.entry_date
+            AND fe.created_at::date = ${from}::date
+          ORDER BY fe.created_at
         `);
         return res as unknown as ReportRow[];
       }
 
       case 'account-ledger': {
-        // ✓ tenant_id filtered — ES-05 audit
-        const res = await this.db.execute(sql`
+        // ✓ tenant_id filtered — ES-26 (fixed: real columns are debit_amount/credit_amount/created_at,
+        // not amount/debit_credit/entry_date)
+        const res = await db.execute(sql`
           SELECT
-            fe.entry_date::date AS date,
+            fe.created_at::date AS date,
             j.journal_number,
             fe.description,
-            CASE WHEN fe.debit_credit = 'DEBIT' THEN fe.amount ELSE 0 END AS debit,
-            CASE WHEN fe.debit_credit = 'CREDIT' THEN fe.amount ELSE 0 END AS credit,
-            SUM(CASE WHEN fe.debit_credit = 'DEBIT' THEN fe.amount ELSE -fe.amount END)
-              OVER (ORDER BY fe.entry_date, fe.id) AS balance
+            fe.debit_amount AS debit,
+            fe.credit_amount AS credit,
+            SUM(fe.debit_amount - fe.credit_amount)
+              OVER (ORDER BY fe.created_at, fe.id) AS balance
           FROM financial_entries fe
           JOIN journals j ON j.id = fe.journal_id AND j.tenant_id = ${tid}
           WHERE fe.tenant_id = ${tid}
             AND fe.account_id = ${params.accountId ?? 0}::int
-            AND fe.entry_date BETWEEN ${from}::date AND ${to}::date
-          ORDER BY fe.entry_date, fe.id
+            AND fe.created_at >= ${from}::date AND fe.created_at < (${to}::date + INTERVAL '1 day')
+          ORDER BY fe.created_at, fe.id
         `);
         return res as unknown as ReportRow[];
       }
 
       case 'trial-balance-report': {
-        // ✓ tenant_id filtered — ES-05 audit
-        const res = await this.db.execute(sql`
+        const asOf = params.toDate ?? params.asOfDate ?? to;
+        // ✓ tenant_id filtered — ES-17 (fixed: real columns are debit_amount/credit_amount/created_at,
+        // not amount/debit_credit/entry_date; opening balance now comes from accounts.opening_balance)
+        const rows = (await db.execute(sql`
           SELECT
             a.account_code,
             a.name AS account_name,
-            SUM(CASE WHEN fe.entry_date < ${from}::date AND fe.debit_credit = 'DEBIT' THEN fe.amount ELSE 0 END) AS opening_debit,
-            SUM(CASE WHEN fe.entry_date < ${from}::date AND fe.debit_credit = 'CREDIT' THEN fe.amount ELSE 0 END) AS opening_credit,
-            SUM(CASE WHEN fe.entry_date BETWEEN ${from}::date AND ${to}::date AND fe.debit_credit = 'DEBIT' THEN fe.amount ELSE 0 END) AS period_debit,
-            SUM(CASE WHEN fe.entry_date BETWEEN ${from}::date AND ${to}::date AND fe.debit_credit = 'CREDIT' THEN fe.amount ELSE 0 END) AS period_credit,
-            SUM(CASE WHEN fe.entry_date <= ${to}::date AND fe.debit_credit = 'DEBIT' THEN fe.amount ELSE 0 END) AS closing_debit,
-            SUM(CASE WHEN fe.entry_date <= ${to}::date AND fe.debit_credit = 'CREDIT' THEN fe.amount ELSE 0 END) AS closing_credit
+            a.opening_balance,
+            a.opening_balance_type,
+            COALESCE(SUM(CASE WHEN fe.created_at < ${from}::date THEN fe.debit_amount ELSE 0 END), 0) AS pre_debit,
+            COALESCE(SUM(CASE WHEN fe.created_at < ${from}::date THEN fe.credit_amount ELSE 0 END), 0) AS pre_credit,
+            COALESCE(SUM(CASE WHEN fe.created_at >= ${from}::date AND fe.created_at < (${asOf}::date + INTERVAL '1 day') THEN fe.debit_amount ELSE 0 END), 0) AS period_debit,
+            COALESCE(SUM(CASE WHEN fe.created_at >= ${from}::date AND fe.created_at < (${asOf}::date + INTERVAL '1 day') THEN fe.credit_amount ELSE 0 END), 0) AS period_credit
           FROM accounts a
           LEFT JOIN financial_entries fe ON fe.account_id = a.id AND fe.tenant_id = ${tid}
           WHERE a.tenant_id = ${tid}
-          GROUP BY a.id, a.account_code, a.name, a.account_type
-          HAVING SUM(fe.amount) > 0
+            AND a.deleted_at IS NULL
+            AND a.is_active = true
+          GROUP BY a.id, a.account_code, a.name, a.opening_balance, a.opening_balance_type
           ORDER BY a.account_code
-        `);
-        return res as unknown as ReportRow[];
+        `)) as unknown as Array<{
+          account_code: string;
+          account_name: string;
+          opening_balance: string;
+          opening_balance_type: string;
+          pre_debit: string;
+          pre_credit: string;
+          period_debit: string;
+          period_credit: string;
+        }>;
+
+        return rows
+          .map((r): ReportRow => {
+            const openingBalance = Number(r.opening_balance);
+            const openingDr = (r.opening_balance_type === 'DEBIT' ? openingBalance : 0) + Number(r.pre_debit);
+            const openingCr = (r.opening_balance_type === 'CREDIT' ? openingBalance : 0) + Number(r.pre_credit);
+            const periodDebit = Number(r.period_debit);
+            const periodCredit = Number(r.period_credit);
+            const closingDr = openingDr + periodDebit;
+            const closingCr = openingCr + periodCredit;
+            return {
+              account_code: r.account_code,
+              account_name: r.account_name,
+              opening_debit: openingDr > openingCr ? openingDr - openingCr : 0,
+              opening_credit: openingCr > openingDr ? openingCr - openingDr : 0,
+              period_debit: periodDebit,
+              period_credit: periodCredit,
+              closing_debit: closingDr > closingCr ? closingDr - closingCr : 0,
+              closing_credit: closingCr > closingDr ? closingCr - closingDr : 0,
+            };
+          })
+          .filter((r) =>
+            r['opening_debit'] || r['opening_credit'] || r['period_debit'] || r['period_credit'] || r['closing_debit'] || r['closing_credit']
+          );
       }
 
       case 'profit-loss-report': {
-        // ✓ tenant_id filtered — ES-05 audit
-        const res = await this.db.execute(sql`
+        // ✓ tenant_id filtered — ES-17 (fixed: account_type is INCOME/EXPENSE/CONTRA, not REVENUE/COGS;
+        // real columns are debit_amount/credit_amount/created_at)
+        const res = await db.execute(sql`
           SELECT
-            a.account_type AS category,
+            CASE
+              WHEN a.account_type = 'INCOME' AND a.account_sub_type = 'SALES_REVENUE' THEN 'REVENUE'
+              WHEN a.account_type = 'INCOME' THEN 'OTHER_INCOME'
+              WHEN a.account_sub_type = 'COST_OF_GOODS' THEN 'COGS'
+              WHEN a.account_type = 'CONTRA' THEN 'CONTRA_REVENUE'
+              WHEN a.account_sub_type = 'OPERATING_EXPENSE' THEN 'OPERATING_EXPENSE'
+              WHEN a.account_sub_type = 'TAX_EXPENSE' THEN 'TAX_EXPENSE'
+              WHEN a.account_type = 'EXPENSE' THEN 'OTHER_EXPENSE'
+              ELSE 'OTHER'
+            END AS category,
+            a.account_code,
             a.name AS account_name,
-            SUM(CASE WHEN fe.debit_credit = 'DEBIT' THEN fe.amount ELSE -fe.amount END) AS amount
-          FROM financial_entries fe
-          JOIN accounts a ON a.id = fe.account_id AND a.tenant_id = ${tid}
-          WHERE fe.tenant_id = ${tid}
-            AND a.account_type IN ('REVENUE', 'EXPENSE', 'COGS')
-            AND fe.entry_date BETWEEN ${from}::date AND ${to}::date
-          GROUP BY a.id, a.account_type, a.name
-          ORDER BY a.account_type, a.name
+            CASE WHEN a.account_type = 'INCOME'
+              THEN SUM(fe.credit_amount) - SUM(fe.debit_amount)
+              ELSE SUM(fe.debit_amount) - SUM(fe.credit_amount)
+            END AS amount
+          FROM accounts a
+          JOIN financial_entries fe ON fe.account_id = a.id AND fe.tenant_id = ${tid}
+            AND fe.created_at >= ${from}::date AND fe.created_at < (${to}::date + INTERVAL '1 day')
+          WHERE a.tenant_id = ${tid}
+            AND a.account_type IN ('INCOME', 'EXPENSE', 'CONTRA')
+            AND a.deleted_at IS NULL
+          GROUP BY a.id, a.account_code, a.name, a.account_type, a.account_sub_type
+          HAVING SUM(fe.debit_amount) <> 0 OR SUM(fe.credit_amount) <> 0
+          ORDER BY category, a.account_code
         `);
         return res as unknown as ReportRow[];
       }
 
       case 'balance-sheet-report': {
-        const asOf = params.asOfDate ?? new Date().toISOString().slice(0, 10);
-        // ✓ tenant_id filtered — ES-05 audit
-        const res = await this.db.execute(sql`
+        const asOf = params.asOfDate ?? to;
+        // ✓ tenant_id filtered — ES-17 (fixed: account_type is ASSET/LIABILITY/EQUITY with normal_balance
+        // + opening_balance driving the sign, not a naive debit_credit sum)
+        const res = await db.execute(sql`
           SELECT
             a.account_type AS section,
+            a.account_code,
             a.name AS account_name,
-            SUM(CASE WHEN fe.debit_credit = 'DEBIT' THEN fe.amount ELSE -fe.amount END) AS amount
-          FROM financial_entries fe
-          JOIN accounts a ON a.id = fe.account_id AND a.tenant_id = ${tid}
-          WHERE fe.tenant_id = ${tid}
+            CASE WHEN a.normal_balance = 'DEBIT' THEN
+              (CASE WHEN a.opening_balance_type = 'DEBIT' THEN a.opening_balance ELSE -a.opening_balance END
+                + COALESCE(SUM(fe.debit_amount), 0) - COALESCE(SUM(fe.credit_amount), 0))
+            ELSE
+              (CASE WHEN a.opening_balance_type = 'CREDIT' THEN a.opening_balance ELSE -a.opening_balance END
+                + COALESCE(SUM(fe.credit_amount), 0) - COALESCE(SUM(fe.debit_amount), 0))
+            END AS amount
+          FROM accounts a
+          LEFT JOIN financial_entries fe ON fe.account_id = a.id AND fe.tenant_id = ${tid}
+            AND fe.created_at < (${asOf}::date + INTERVAL '1 day')
+          WHERE a.tenant_id = ${tid}
             AND a.account_type IN ('ASSET', 'LIABILITY', 'EQUITY')
-            AND fe.entry_date <= ${asOf}::date
-          GROUP BY a.id, a.account_type, a.name
-          ORDER BY a.account_type, a.name
+            AND a.deleted_at IS NULL
+            AND a.is_active = true
+          GROUP BY a.id, a.account_code, a.name, a.account_type, a.normal_balance, a.opening_balance, a.opening_balance_type
+          ORDER BY a.account_type, a.account_code
         `);
         return res as unknown as ReportRow[];
       }
 
       case 'cash-flow-report': {
-        // ✓ tenant_id filtered — ES-05 audit
-        const res = await this.db.execute(sql`
+        // ✓ tenant_id filtered — ES-17 (fixed: derives cash movement from CASH_AND_BANK accounts using
+        // real debit_amount/credit_amount/created_at columns, not the nonexistent amount/entry_date)
+        const cashRows = (await db.execute(sql`
           SELECT
-            CASE
-              WHEN a.account_type IN ('ASSET','LIABILITY','EQUITY') THEN 'Operating'
-              ELSE 'Other'
-            END AS section,
-            a.name AS description,
-            SUM(CASE WHEN fe.debit_credit = 'DEBIT' THEN fe.amount ELSE -fe.amount END) AS amount
-          FROM financial_entries fe
-          JOIN accounts a ON a.id = fe.account_id AND a.tenant_id = ${tid}
-          WHERE fe.tenant_id = ${tid}
-            AND fe.entry_date BETWEEN ${from}::date AND ${to}::date
-          GROUP BY a.account_type, a.name
-          ORDER BY section, a.name
-        `);
-        return res as unknown as ReportRow[];
+            COALESCE(SUM(fe.debit_amount), 0) AS total_in,
+            COALESCE(SUM(fe.credit_amount), 0) AS total_out
+          FROM accounts a
+          JOIN financial_entries fe ON fe.account_id = a.id AND fe.tenant_id = ${tid}
+            AND fe.created_at >= ${from}::date AND fe.created_at < (${to}::date + INTERVAL '1 day')
+          WHERE a.tenant_id = ${tid}
+            AND a.account_sub_type = 'CASH_AND_BANK'
+            AND a.deleted_at IS NULL
+        `)) as unknown as Array<{ total_in: string; total_out: string }>;
+
+        const openingRows = (await db.execute(sql`
+          WITH per_account AS (
+            SELECT
+              a.id,
+              CASE WHEN a.opening_balance_type = 'DEBIT' THEN a.opening_balance ELSE -a.opening_balance END AS ob_signed,
+              COALESCE(SUM(fe.debit_amount), 0) - COALESCE(SUM(fe.credit_amount), 0) AS pre_movement
+            FROM accounts a
+            LEFT JOIN financial_entries fe ON fe.account_id = a.id AND fe.tenant_id = ${tid}
+              AND fe.created_at < ${from}::date
+            WHERE a.tenant_id = ${tid}
+              AND a.account_sub_type = 'CASH_AND_BANK'
+              AND a.deleted_at IS NULL
+            GROUP BY a.id, a.opening_balance, a.opening_balance_type
+          )
+          SELECT COALESCE(SUM(ob_signed + pre_movement), 0) AS balance FROM per_account
+        `)) as unknown as Array<{ balance: string }>;
+
+        const totalIn = Number(cashRows[0]?.total_in ?? 0);
+        const totalOut = Number(cashRows[0]?.total_out ?? 0);
+        const openingCash = Number(openingRows[0]?.balance ?? 0);
+        const netMovement = totalIn - totalOut;
+        const closingCash = openingCash + netMovement;
+
+        const rows: ReportRow[] = [
+          { section: 'Operating Activities', description: 'Cash received from customers & others', amount: totalIn },
+          { section: 'Operating Activities', description: 'Cash paid to suppliers & expenses', amount: -totalOut },
+          { section: 'Summary', description: 'Net Cash Movement', amount: netMovement },
+          { section: 'Summary', description: 'Opening Cash & Bank Balance', amount: openingCash },
+          { section: 'Summary', description: 'Closing Cash & Bank Balance', amount: closingCash },
+        ];
+        return rows;
       }
 
       case 'expense-analysis': {
-        // ✓ tenant_id filtered — ES-05 audit
-        const res = await this.db.execute(sql`
-          WITH totals AS (SELECT SUM(fe.amount) AS total FROM financial_entries fe
+        // ✓ tenant_id filtered — ES-26 (fixed: real columns are debit_amount/credit_amount/created_at,
+        // not amount/debit_credit/entry_date)
+        const res = await db.execute(sql`
+          WITH totals AS (SELECT SUM(fe.debit_amount) AS total FROM financial_entries fe
             JOIN accounts a ON a.id = fe.account_id AND a.tenant_id = ${tid}
             WHERE fe.tenant_id = ${tid} AND a.account_type = 'EXPENSE'
-              AND fe.entry_date BETWEEN ${from}::date AND ${to}::date AND fe.debit_credit = 'DEBIT')
+              AND fe.created_at >= ${from}::date AND fe.created_at < (${to}::date + INTERVAL '1 day'))
           SELECT
             a.name AS category,
-            SUM(fe.amount) AS amount,
-            ROUND((SUM(fe.amount) / NULLIF((SELECT total FROM totals), 0) * 100)::numeric, 2) AS share
+            SUM(fe.debit_amount) AS amount,
+            ROUND((SUM(fe.debit_amount) / NULLIF((SELECT total FROM totals), 0) * 100)::numeric, 2) AS share
           FROM financial_entries fe
           JOIN accounts a ON a.id = fe.account_id AND a.tenant_id = ${tid}
           WHERE fe.tenant_id = ${tid}
             AND a.account_type = 'EXPENSE'
-            AND fe.entry_date BETWEEN ${from}::date AND ${to}::date
-            AND fe.debit_credit = 'DEBIT'
+            AND fe.created_at >= ${from}::date AND fe.created_at < (${to}::date + INTERVAL '1 day')
           GROUP BY a.id, a.name
           ORDER BY amount DESC
         `);
@@ -1265,30 +1377,31 @@ export class ReportEngine {
       }
 
       case 'bank-book': {
-        // ✓ tenant_id filtered — ES-05 audit
-        const res = await this.db.execute(sql`
+        // ✓ tenant_id filtered — ES-26 (fixed: real columns are debit_amount/credit_amount/created_at,
+        // not amount/debit_credit/entry_date)
+        const res = await db.execute(sql`
           SELECT
-            fe.entry_date::date AS date,
+            fe.created_at::date AS date,
             fe.description,
             j.journal_number AS reference,
-            CASE WHEN fe.debit_credit = 'DEBIT' THEN fe.amount ELSE 0 END AS debit,
-            CASE WHEN fe.debit_credit = 'CREDIT' THEN fe.amount ELSE 0 END AS credit,
-            SUM(CASE WHEN fe.debit_credit = 'DEBIT' THEN fe.amount ELSE -fe.amount END)
-              OVER (ORDER BY fe.entry_date, fe.id) AS balance
+            fe.debit_amount AS debit,
+            fe.credit_amount AS credit,
+            SUM(fe.debit_amount - fe.credit_amount)
+              OVER (ORDER BY fe.created_at, fe.id) AS balance
           FROM financial_entries fe
           JOIN journals j ON j.id = fe.journal_id AND j.tenant_id = ${tid}
           JOIN bank_accounts ba ON ba.account_id = fe.account_id AND ba.tenant_id = ${tid}
           WHERE fe.tenant_id = ${tid}
             AND ba.id = ${params.bankAccountId ?? 0}::int
-            AND fe.entry_date BETWEEN ${from}::date AND ${to}::date
-          ORDER BY fe.entry_date, fe.id
+            AND fe.created_at >= ${from}::date AND fe.created_at < (${to}::date + INTERVAL '1 day')
+          ORDER BY fe.created_at, fe.id
         `);
         return res as unknown as ReportRow[];
       }
 
       case 'tds-report': {
         // ✓ tenant_id filtered — ES-05 audit
-        const res = await this.db.execute(sql`
+        const res = await db.execute(sql`
           SELECT
             te.deductee_type,
             te.pan_number,
@@ -1307,7 +1420,7 @@ export class ReportEngine {
 
       case 'depreciation-schedule': {
         // ✓ tenant_id filtered — ES-05 audit
-        const res = await this.db.execute(sql`
+        const res = await db.execute(sql`
           SELECT
             fa.asset_name,
             fa.asset_category,
@@ -1327,7 +1440,7 @@ export class ReportEngine {
 
       case 'journal-report': {
         // ✓ tenant_id filtered — ES-05 audit
-        const res = await this.db.execute(sql`
+        const res = await db.execute(sql`
           SELECT
             j.journal_date::date AS journal_date,
             j.journal_number,
@@ -1344,7 +1457,7 @@ export class ReportEngine {
 
       case 'profit-center-report': {
         // ✓ tenant_id filtered — ES-05 audit
-        const res = await this.db.execute(sql`
+        const res = await db.execute(sql`
           SELECT
             b.name AS branch,
             COALESCE(SUM(CASE WHEN i.status != 'CANCELLED' THEN i.grand_total END), 0) AS total_sales,
@@ -1364,21 +1477,22 @@ export class ReportEngine {
       }
 
       case 'fund-flow': {
-        // ✓ tenant_id filtered — ES-05 audit
-        const res = await this.db.execute(sql`
+        // ✓ tenant_id filtered — ES-26 (fixed: real columns are debit_amount/credit_amount/created_at,
+        // not amount/debit_credit/entry_date)
+        const res = await db.execute(sql`
           SELECT
             CASE WHEN a.account_type IN ('ASSET') THEN 'Use of Funds'
               ELSE 'Source of Funds' END AS section,
             a.name AS description,
-            CASE WHEN a.account_type NOT IN ('ASSET') THEN ABS(SUM(CASE WHEN fe.debit_credit = 'CREDIT' THEN fe.amount ELSE -fe.amount END)) ELSE 0 END AS source_of_fund,
-            CASE WHEN a.account_type IN ('ASSET') THEN ABS(SUM(CASE WHEN fe.debit_credit = 'DEBIT' THEN fe.amount ELSE -fe.amount END)) ELSE 0 END AS use_of_fund
+            CASE WHEN a.account_type NOT IN ('ASSET') THEN ABS(SUM(fe.credit_amount - fe.debit_amount)) ELSE 0 END AS source_of_fund,
+            CASE WHEN a.account_type IN ('ASSET') THEN ABS(SUM(fe.debit_amount - fe.credit_amount)) ELSE 0 END AS use_of_fund
           FROM financial_entries fe
           JOIN accounts a ON a.id = fe.account_id AND a.tenant_id = ${tid}
           WHERE fe.tenant_id = ${tid}
-            AND fe.entry_date BETWEEN ${from}::date AND ${to}::date
+            AND fe.created_at >= ${from}::date AND fe.created_at < (${to}::date + INTERVAL '1 day')
             AND a.account_type IN ('ASSET', 'LIABILITY', 'EQUITY')
           GROUP BY a.account_type, a.name
-          HAVING ABS(SUM(CASE WHEN fe.debit_credit = 'DEBIT' THEN fe.amount ELSE -fe.amount END)) > 0
+          HAVING ABS(SUM(fe.debit_amount - fe.credit_amount)) > 0
           ORDER BY section, description
         `);
         return res as unknown as ReportRow[];
@@ -1388,7 +1502,7 @@ export class ReportEngine {
       case 'payroll-report': {
         const [year, month] = (params.month ?? '2024-01').split('-');
         // ✓ tenant_id filtered — ES-05 audit
-        const res = await this.db.execute(sql`
+        const res = await db.execute(sql`
           SELECT
             e.employee_code,
             CONCAT(e.first_name, ' ', e.last_name) AS employee_name,
@@ -1411,7 +1525,7 @@ export class ReportEngine {
 
       case 'attendance-report': {
         // ✓ tenant_id filtered — ES-05 audit
-        const res = await this.db.execute(sql`
+        const res = await db.execute(sql`
           SELECT
             e.employee_code,
             CONCAT(e.first_name, ' ', e.last_name) AS employee_name,
@@ -1433,7 +1547,7 @@ export class ReportEngine {
 
       case 'leave-report': {
         // ✓ tenant_id filtered — ES-05 audit
-        const res = await this.db.execute(sql`
+        const res = await db.execute(sql`
           SELECT
             CONCAT(e.first_name, ' ', e.last_name) AS employee_name,
             la.leave_type,
@@ -1453,7 +1567,7 @@ export class ReportEngine {
 
       case 'employee-master-report': {
         // ✓ tenant_id filtered — ES-05 audit
-        const res = await this.db.execute(sql`
+        const res = await db.execute(sql`
           SELECT
             e.employee_code,
             CONCAT(e.first_name, ' ', e.last_name) AS employee_name,
@@ -1472,7 +1586,7 @@ export class ReportEngine {
 
       case 'alteration-report': {
         // ✓ tenant_id filtered — ES-05 audit
-        const res = await this.db.execute(sql`
+        const res = await db.execute(sql`
           SELECT
             ao.alteration_number,
             ao.order_date::date AS date,
@@ -1494,7 +1608,7 @@ export class ReportEngine {
 
       case 'tailor-work-log-report': {
         // ✓ tenant_id filtered — ES-05 audit
-        const res = await this.db.execute(sql`
+        const res = await db.execute(sql`
           SELECT
             CONCAT(e.first_name, ' ', e.last_name) AS tailor_name,
             SUM(twl.units) AS work_units,
@@ -1514,7 +1628,7 @@ export class ReportEngine {
       // â”€â”€ GST REPORTS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       case 'gst-register': {
         // ✓ tenant_id filtered — ES-05 audit
-        const res = await this.db.execute(sql`
+        const res = await db.execute(sql`
           SELECT date, document_type, document_number, party_name, gstin,
             taxable_value, cgst, sgst, igst, cgst + sgst + igst AS total_gst
           FROM (
@@ -1542,7 +1656,7 @@ export class ReportEngine {
 
       case 'gstr1-report': {
         // ✓ tenant_id filtered — ES-05 audit
-        const res = await this.db.execute(sql`
+        const res = await db.execute(sql`
           SELECT
             i.invoice_date::date AS invoice_date,
             i.invoice_number,
@@ -1565,7 +1679,7 @@ export class ReportEngine {
 
       case 'gstr3b-report': {
         // ✓ tenant_id filtered — ES-05 audit
-        const res = await this.db.execute(sql`
+        const res = await db.execute(sql`
           SELECT
             'Outward supplies' AS section,
             'Total taxable outward supplies' AS description,
@@ -1594,7 +1708,7 @@ export class ReportEngine {
 
       case 'itc-register': {
         // ✓ tenant_id filtered — ES-05 audit
-        const res = await this.db.execute(sql`
+        const res = await db.execute(sql`
           SELECT
             g.grn_date::date AS grn_date,
             g.grn_number,
@@ -1616,7 +1730,15 @@ export class ReportEngine {
 
       case 'gst-payable-report': {
         // ✓ tenant_id filtered — ES-05 audit
-        const res = await this.db.execute(sql`
+        // Cached 3 minutes (ES-26 / M7) — report-service has no other Redis-backed cache today.
+        const cacheKey = `gst-payable-report:${from}:${to}`;
+        const cache = this.redis ? new TenantScopedCache(this.redis, tid) : undefined;
+        if (cache) {
+          // Cache is best-effort — an unreachable Redis must fall back to Postgres, not 500 the report.
+          const cached = await cache.getJson<ReportRow[]>(cacheKey).catch(() => null);
+          if (cached) return cached;
+        }
+        const res = await db.execute(sql`
           SELECT
             'CGST' AS gst_type,
             COALESCE(SUM(i.cgst_amount), 0) AS output_tax,
@@ -1647,12 +1769,14 @@ export class ReportEngine {
           FROM invoices i WHERE i.tenant_id = ${tid}
             AND i.invoice_date BETWEEN ${from}::date AND ${to}::date AND i.status != 'CANCELLED'
         `);
-        return res as unknown as ReportRow[];
+        const rows = res as unknown as ReportRow[];
+        if (cache) await cache.setJson(cacheKey, rows, GST_PAYABLE_CACHE_TTL_SECONDS).catch(() => undefined);
+        return rows;
       }
 
       case 'reverse-charge-report': {
         // ✓ tenant_id filtered — ES-05 audit
-        const res = await this.db.execute(sql`
+        const res = await db.execute(sql`
           SELECT
             g.grn_date::date AS date,
             g.grn_number AS document_number,
@@ -1674,7 +1798,7 @@ export class ReportEngine {
       case 'ar-aging': {
         const asOf = params.asOfDate ?? new Date().toISOString().slice(0, 10);
         // ✓ tenant_id filtered — ES-05 audit
-        const res = await this.db.execute(sql`
+        const res = await db.execute(sql`
           SELECT
             COALESCE(c.display_name, 'Walk-in') AS customer_name,
             SUM(CASE WHEN (${asOf}::date - i.invoice_date::date) BETWEEN 0 AND 30
@@ -1702,7 +1826,7 @@ export class ReportEngine {
       case 'ap-aging': {
         const asOf = params.asOfDate ?? new Date().toISOString().slice(0, 10);
         // ✓ tenant_id filtered — ES-05 audit
-        const res = await this.db.execute(sql`
+        const res = await db.execute(sql`
           SELECT
             s.display_name AS supplier_name,
             SUM(CASE WHEN (${asOf}::date - g.grn_date::date) BETWEEN 0 AND 30
@@ -1723,6 +1847,150 @@ export class ReportEngine {
             AND (${params.supplierId ?? null}::int IS NULL OR g.supplier_id = ${params.supplierId ?? null}::int)
           GROUP BY s.id, s.display_name
           ORDER BY total_outstanding DESC
+        `);
+        return res as unknown as ReportRow[];
+      }
+
+      // ── ANALYTICS REPORTS (ES-17) ───────────────────────────────────────────────
+      case 'sales-revenue-trend': {
+        const toDate = params.toDate ?? new Date().toISOString().slice(0, 10);
+        const fromDate = params.fromDate ?? defaultTrendFromDate();
+        // ✓ tenant_id filtered — ES-17
+        const res = await db.execute(sql`
+          SELECT
+            TO_CHAR(DATE_TRUNC('month', i.invoice_date), 'YYYY-MM') AS month,
+            COUNT(i.id)::int AS invoice_count,
+            SUM(i.grand_total) AS revenue
+          FROM invoices i
+          WHERE i.tenant_id = ${tid}
+            AND i.invoice_date BETWEEN ${fromDate}::date AND ${toDate}::date
+            AND i.status != 'CANCELLED'
+          GROUP BY DATE_TRUNC('month', i.invoice_date)
+          ORDER BY DATE_TRUNC('month', i.invoice_date)
+        `);
+        return res as unknown as ReportRow[];
+      }
+
+      case 'inventory-analytics': {
+        const fastThreshold = Number(p(params.fastMoverThreshold, 10));
+        // ✓ tenant_id filtered — ES-17
+        const res = await db.execute(sql`
+          WITH consumption AS (
+            SELECT item_id, SUM(quantity) AS qty_30d
+            FROM inventory_ledger
+            WHERE tenant_id = ${tid} AND movement_type = 'STOCK_OUT'
+              AND created_at >= (CURRENT_DATE - INTERVAL '30 days')
+            GROUP BY item_id
+          ),
+          last_sale AS (
+            SELECT item_id, MAX(created_at)::date AS last_sale_date
+            FROM inventory_ledger
+            WHERE tenant_id = ${tid} AND movement_type = 'STOCK_OUT'
+            GROUP BY item_id
+          ),
+          stock AS (
+            SELECT item_id, SUM(available_qty) AS qty
+            FROM projection_stock_level
+            WHERE tenant_id = ${tid}
+            GROUP BY item_id
+          )
+          SELECT
+            it.item_code,
+            it.name AS item_name,
+            cat.name AS category,
+            COALESCE(stock.qty, 0) AS current_stock,
+            CASE WHEN COALESCE(c.qty_30d, 0) > 0
+              THEN ROUND((COALESCE(stock.qty, 0) / (c.qty_30d / 30.0))::numeric, 1)
+              ELSE NULL
+            END AS days_of_supply,
+            ls.last_sale_date,
+            CASE
+              WHEN COALESCE(stock.qty, 0) <= 0 THEN 'STOCKOUT'
+              WHEN COALESCE(c.qty_30d, 0) >= ${fastThreshold} THEN 'FAST'
+              ELSE 'SLOW'
+            END AS status
+          FROM items it
+          LEFT JOIN categories cat ON cat.id = it.category_id
+          LEFT JOIN stock ON stock.item_id = it.id
+          LEFT JOIN consumption c ON c.item_id = it.id
+          LEFT JOIN last_sale ls ON ls.item_id = it.id
+          WHERE it.tenant_id = ${tid}
+          ORDER BY status, item_name
+        `);
+        return res as unknown as ReportRow[];
+      }
+
+      case 'hr-headcount-by-department': {
+        // ✓ tenant_id filtered — ES-17
+        const res = await db.execute(sql`
+          SELECT
+            COALESCE(d.name, 'Unassigned') AS department,
+            COUNT(e.id)::int AS headcount
+          FROM employees e
+          LEFT JOIN departments d ON d.id = e.department_id AND d.tenant_id = ${tid}
+          WHERE e.tenant_id = ${tid}
+            AND e.status = 'ACTIVE'
+          GROUP BY d.id, d.name
+          ORDER BY headcount DESC
+        `);
+        return res as unknown as ReportRow[];
+      }
+
+      case 'hr-salary-cost-trend': {
+        const fromYm = params.fromDate ?? from;
+        const toYm = params.toDate ?? to;
+        // ✓ tenant_id filtered — ES-17 (sums plaintext salary components — grossSalary/netSalary are
+        // AES-256-GCM encrypted and must not be summed in SQL)
+        const res = await db.execute(sql`
+          SELECT
+            pr.period_year::text || '-' || LPAD(pr.period_month::text, 2, '0') AS month,
+            COUNT(DISTINCT ps.employee_id)::int AS employee_count,
+            SUM(ps.basic_salary + ps.hra_amount + ps.da_amount + ps.other_allowances + ps.piece_rate_amount) AS gross_salary_cost,
+            SUM(ps.total_deductions) AS total_deductions
+          FROM payroll_slips ps
+          JOIN payroll_runs pr ON pr.id = ps.payroll_run_id AND pr.tenant_id = ${tid}
+          WHERE pr.tenant_id = ${tid}
+            AND (pr.period_year * 100 + pr.period_month)
+              BETWEEN (EXTRACT(YEAR FROM ${fromYm}::date)::int * 100 + EXTRACT(MONTH FROM ${fromYm}::date)::int)
+              AND (EXTRACT(YEAR FROM ${toYm}::date)::int * 100 + EXTRACT(MONTH FROM ${toYm}::date)::int)
+          GROUP BY pr.period_year, pr.period_month
+          ORDER BY pr.period_year, pr.period_month
+        `);
+        return res as unknown as ReportRow[];
+      }
+
+      case 'hr-hires-vs-exits': {
+        const fromYm = params.fromDate ?? from;
+        const toYm = params.toDate ?? to;
+        // ✓ tenant_id filtered — ES-17
+        const res = await db.execute(sql`
+          WITH months AS (
+            SELECT generate_series(DATE_TRUNC('month', ${fromYm}::date), DATE_TRUNC('month', ${toYm}::date), INTERVAL '1 month') AS month
+          )
+          SELECT
+            TO_CHAR(m.month, 'YYYY-MM') AS month,
+            COUNT(DISTINCT CASE WHEN DATE_TRUNC('month', e.joining_date) = m.month THEN e.id END)::int AS new_hires,
+            COUNT(DISTINCT CASE WHEN DATE_TRUNC('month', e.exit_date) = m.month THEN e.id END)::int AS exits
+          FROM months m
+          LEFT JOIN employees e ON e.tenant_id = ${tid}
+            AND (DATE_TRUNC('month', e.joining_date) = m.month OR DATE_TRUNC('month', e.exit_date) = m.month)
+          GROUP BY m.month
+          ORDER BY m.month
+        `);
+        return res as unknown as ReportRow[];
+      }
+
+      case 'hr-gender-diversity': {
+        // ✓ tenant_id filtered — ES-17
+        const res = await db.execute(sql`
+          SELECT
+            COALESCE(e.gender, 'UNSPECIFIED') AS gender,
+            COUNT(e.id)::int AS headcount
+          FROM employees e
+          WHERE e.tenant_id = ${tid}
+            AND e.status = 'ACTIVE'
+          GROUP BY e.gender
+          ORDER BY headcount DESC
         `);
         return res as unknown as ReportRow[];
       }

@@ -190,6 +190,27 @@ services:
       start_period: 10s
     restart: unless-stopped
 
+  # ─── Loki (Centralized Log Aggregation) ────────────────────────────────────
+  # No Promtail sidecar — every service pushes structured logs directly via
+  # @erp/logger's LokiTransport (see packages/logger/src/loki-transport.ts),
+  # so a log-file-tailing scraper would be redundant here.
+  loki:
+    image: grafana/loki:3.3.2
+    container_name: erp-loki
+    command: -config.file=/etc/loki/loki-config.yaml
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./infrastructure/docker/loki/loki-config.yaml:/etc/loki/loki-config.yaml:ro
+      - loki_data:/loki
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3100/ready || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
   # ─── Prometheus ───────────────────────────────────────────────────────────
   prometheus:
     image: prom/prometheus:v3.1.0
@@ -213,6 +234,30 @@ services:
       start_period: 10s
     restart: unless-stopped
 
+  # ─── Alertmanager ──────────────────────────────────────────────────────────
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: erp-alertmanager
+    command:
+      - "--config.file=/etc/alertmanager/alertmanager.yml"
+      - "--storage.path=/alertmanager"
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./infrastructure/docker/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager_data:/alertmanager
+    secrets:
+      - pagerduty_service_key
+      - slack_infra_webhook_url
+      - slack_engineering_webhook_url
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9093/-/ready || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
   # ─── Grafana ──────────────────────────────────────────────────────────────
   grafana:
     image: grafana/grafana:11.4.0
@@ -229,6 +274,8 @@ services:
       - ./infrastructure/docker/grafana/provisioning:/etc/grafana/provisioning:ro
     depends_on:
       prometheus:
+        condition: service_healthy
+      loki:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/health || exit 1"]
@@ -340,6 +387,68 @@ services:
       start_period: 10s
     restart: unless-stopped
 
+  # ─── Pushgateway (PG-024 — batch-job metrics) ──────────────────────────────
+  # The `backup` job below is a cron/batch process, not a long-running scrape
+  # target — it pushes erp_backup_last_success_timestamp/duration/size here
+  # after every run, and Prometheus scrapes Pushgateway itself (see
+  # infrastructure/docker/prometheus/prometheus.yml `pushgateway` job).
+  pushgateway:
+    image: prom/pushgateway:v1.9.0
+    container_name: erp-pushgateway
+    ports:
+      - "9091:9091"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9091/-/healthy || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  # ─── Automated Backup (M13) ────────────────────────────────────────────────
+  # Automates the manual steps proven correct in ERP-PLANNING/phase-completions/
+  # dr-drill-report.md: pg_dump -Fc, Redis SAVE, MinIO mirror — on a daily cron.
+  # PG-024 adds an encrypted offsite copy + Pushgateway metrics on top.
+  backup:
+    build:
+      context: ./infrastructure/docker/backup
+    container_name: erp-backup
+    environment:
+      PGHOST: postgres-primary
+      PGPORT: 5432
+      PGUSER: erp
+      PGPASSWORD: erp_password
+      PGDATABASE: erp
+      REDIS_HOST: redis-1
+      REDIS_PORT: 6379
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin123
+      MINIO_BUCKET: erp-local
+      BACKUP_INTERVAL_SECONDS: "86400"
+      # PG-024 — offsite copy + encryption + metrics. Empty by default in local
+      # dev (offsite copy/encryption are skipped when unset — see backup.sh);
+      # set real values in .env for staging/production.
+      OFFSITE_MINIO_ENDPOINT: "${OFFSITE_MINIO_ENDPOINT:-}"
+      OFFSITE_MINIO_ACCESS_KEY: "${OFFSITE_MINIO_ACCESS_KEY:-}"
+      OFFSITE_MINIO_SECRET_KEY: "${OFFSITE_MINIO_SECRET_KEY:-}"
+      OFFSITE_MINIO_BUCKET: "${OFFSITE_MINIO_BUCKET:-erp-backups-offsite}"
+      BACKUP_ENCRYPTION_PUBLIC_KEY: "${BACKUP_ENCRYPTION_PUBLIC_KEY:-}"
+      PUSHGATEWAY_URL: "http://pushgateway:9091"
+    volumes:
+      - backups_data:/backups
+      - redis_1_data:/redis-data:ro
+    depends_on:
+      postgres-primary:
+        condition: service_healthy
+      redis-1:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      pushgateway:
+        condition: service_healthy
+    restart: unless-stopped
+
 volumes:
   postgres_primary_data:
   postgres_replica_data:
@@ -349,9 +458,20 @@ volumes:
   minio_data:
   elasticsearch_data:
   prometheus_data:
+  loki_data:
   grafana_data:
+  alertmanager_data:
+  backups_data:
 
 networks:
   default:
     name: erp-network
     driver: bridge
+
+secrets:
+  pagerduty_service_key:
+    environment: PAGERDUTY_SERVICE_KEY
+  slack_infra_webhook_url:
+    environment: SLACK_INFRA_WEBHOOK_URL
+  slack_engineering_webhook_url:
+    environment: SLACK_ENGINEERING_WEBHOOK_URL

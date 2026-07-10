@@ -209,6 +209,108 @@ describe.skipIf(!DB_URL)('Item integration', () => {
     });
   });
 
+  describe('ES-23 [L2] — item/warehouse delete ledger-history guard', () => {
+    it('the delete guard query finds ledger history for an item with movements', async () => {
+      const [item] = await db
+        .insert(items)
+        .values({
+          tenantId: TEST_TENANT,
+          name: 'Delete Guard Item (has history)',
+          itemCode: `DGI-${Date.now()}`,
+          salePrice: '100.00',
+          purchasePrice: '80.00',
+          gstRate: '5.00',
+          unitId: 1,
+          hsnCode: '5208',
+          availableQty: '10',
+          createdBy: 1,
+        })
+        .returning();
+      const itemId = item!.id;
+
+      await new InventoryLedgerService(db).addStock({
+        tenantId: TEST_TENANT,
+        itemId,
+        warehouseId,
+        quantity: 10,
+        referenceType: 'TEST',
+        referenceId: 1,
+        createdBy: 1,
+      });
+
+      // Mirrors item.routes.ts DELETE /:id's guard query exactly.
+      const [ledgerEntry] = await db
+        .select({ id: inventoryLedger.id })
+        .from(inventoryLedger)
+        .where(and(eq(inventoryLedger.itemId, itemId), eq(inventoryLedger.tenantId, TEST_TENANT)))
+        .limit(1);
+
+      expect(ledgerEntry).toBeDefined();
+    });
+
+    it('the delete guard query finds nothing for an item with no ledger movements', async () => {
+      const [item] = await db
+        .insert(items)
+        .values({
+          tenantId: TEST_TENANT,
+          name: 'Delete Guard Item (no history)',
+          itemCode: `DGI2-${Date.now()}`,
+          salePrice: '100.00',
+          purchasePrice: '80.00',
+          gstRate: '5.00',
+          unitId: 1,
+          hsnCode: '5208',
+          createdBy: 1,
+        })
+        .returning();
+      const itemId = item!.id;
+
+      const [ledgerEntry] = await db
+        .select({ id: inventoryLedger.id })
+        .from(inventoryLedger)
+        .where(and(eq(inventoryLedger.itemId, itemId), eq(inventoryLedger.tenantId, TEST_TENANT)))
+        .limit(1);
+
+      expect(ledgerEntry).toBeUndefined();
+    });
+
+    it('the warehouse delete guard query finds ledger history for a warehouse with movements', async () => {
+      const [item] = await db
+        .insert(items)
+        .values({
+          tenantId: TEST_TENANT,
+          name: 'Delete Guard Warehouse Item',
+          itemCode: `DGWI-${Date.now()}`,
+          salePrice: '100.00',
+          purchasePrice: '80.00',
+          gstRate: '5.00',
+          unitId: 1,
+          hsnCode: '5208',
+          availableQty: '10',
+          createdBy: 1,
+        })
+        .returning();
+
+      await new InventoryLedgerService(db).addStock({
+        tenantId: TEST_TENANT,
+        itemId: item!.id,
+        warehouseId,
+        quantity: 10,
+        referenceType: 'TEST',
+        referenceId: 1,
+        createdBy: 1,
+      });
+
+      const [ledgerEntry] = await db
+        .select({ id: inventoryLedger.id })
+        .from(inventoryLedger)
+        .where(and(eq(inventoryLedger.warehouseId, warehouseId), eq(inventoryLedger.tenantId, TEST_TENANT)))
+        .limit(1);
+
+      expect(ledgerEntry).toBeDefined();
+    });
+  });
+
   it('prevents items from leaking across tenants', async () => {
     await db.insert(items).values({
       tenantId: TEST_TENANT,

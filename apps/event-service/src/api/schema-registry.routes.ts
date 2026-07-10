@@ -27,7 +27,7 @@ export async function schemaRegistryRoutes(
 
   // GET /schema-registry/catalog — full event catalog
   fastify.get('/schema-registry/catalog', {
-    preHandler: requirePermission(PERMISSIONS.AUDIT_LOG_VIEW),
+    preHandler: requirePermission(PERMISSIONS.SCHEMA_REGISTRY_VIEW),
     handler: async (request, reply) => {
       const ctx = ctxFactory.create({ tenantId: request.auth.tenantId, userId: request.auth.userId, correlationId: (request.headers['x-correlation-id'] as string) ?? 'system' });
       const registry = new SchemaRegistry(ctx.db);
@@ -38,7 +38,7 @@ export async function schemaRegistryRoutes(
 
   // GET /schema-registry/schemas/:type — get latest schema
   fastify.get<{ Params: { type: string } }>('/schema-registry/schemas/:type', {
-    preHandler: requirePermission(PERMISSIONS.AUDIT_LOG_VIEW),
+    preHandler: requirePermission(PERMISSIONS.SCHEMA_REGISTRY_VIEW),
     handler: async (request, reply) => {
       const ctx = ctxFactory.create({ tenantId: request.auth.tenantId, userId: request.auth.userId, correlationId: (request.headers['x-correlation-id'] as string) ?? 'system' });
       const registry = new SchemaRegistry(ctx.db);
@@ -53,7 +53,7 @@ export async function schemaRegistryRoutes(
 
   // GET /schema-registry/schemas/:type/:version — get specific version
   fastify.get<{ Params: { type: string; version: string } }>('/schema-registry/schemas/:type/:version', {
-    preHandler: requirePermission(PERMISSIONS.AUDIT_LOG_VIEW),
+    preHandler: requirePermission(PERMISSIONS.SCHEMA_REGISTRY_VIEW),
     handler: async (request, reply) => {
       const version = parseInt(request.params.version, 10);
       if (isNaN(version)) {
@@ -73,7 +73,7 @@ export async function schemaRegistryRoutes(
 
   // POST /schema-registry/schemas — register schema
   fastify.post('/schema-registry/schemas', {
-    preHandler: requirePermission(PERMISSIONS.AUDIT_LOG_VIEW),
+    preHandler: requirePermission(PERMISSIONS.SCHEMA_REGISTRY_MANAGE),
     handler: async (request, reply) => {
       const parsed = RegisterSchemaBody.safeParse(request.body);
       if (!parsed.success) {
@@ -107,7 +107,7 @@ export async function schemaRegistryRoutes(
 
   // POST /schema-registry/schemas/:type/check — compatibility check
   fastify.post<{ Params: { type: string } }>('/schema-registry/schemas/:type/check', {
-    preHandler: requirePermission(PERMISSIONS.AUDIT_LOG_VIEW),
+    preHandler: requirePermission(PERMISSIONS.SCHEMA_REGISTRY_MANAGE),
     handler: async (request, reply) => {
       const parsed = CheckCompatibilityBody.safeParse(request.body);
       if (!parsed.success) {

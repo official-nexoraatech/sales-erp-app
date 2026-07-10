@@ -29,7 +29,7 @@ export async function performanceRoutes(
 
   // GET /admin/performance/baselines — list all recorded baselines
   fastify.get('/admin/performance/baselines', {
-    preHandler: requirePermission(PERMISSIONS.AUDIT_LOG_VIEW),
+    preHandler: requirePermission(PERMISSIONS.PERFORMANCE_VIEW),
     handler: async (request, reply) => {
       const ctx = ctxFactory.create({ tenantId: request.auth.tenantId, userId: request.auth.userId, correlationId: (request.headers['x-correlation-id'] as string) ?? 'system' });
       const db = ctx.db.raw;
@@ -69,7 +69,7 @@ export async function performanceRoutes(
 
   // GET /admin/performance/targets — list targets for key endpoints
   fastify.get('/admin/performance/targets', {
-    preHandler: requirePermission(PERMISSIONS.AUDIT_LOG_VIEW),
+    preHandler: requirePermission(PERMISSIONS.PERFORMANCE_VIEW),
     handler: async (_request, reply) => {
       const targets = Object.entries(TARGETS).map(([endpoint, targetP95Ms]) => {
         const [method, ...pathParts] = endpoint.split(' ');
@@ -81,7 +81,7 @@ export async function performanceRoutes(
 
   // POST /admin/performance/samples — record a latency sample (called by services)
   fastify.post('/admin/performance/samples', {
-    preHandler: requirePermission(PERMISSIONS.AUDIT_LOG_VIEW),
+    preHandler: requirePermission(PERMISSIONS.PERFORMANCE_VIEW),
     handler: async (request, reply) => {
       const parsed = RecordSampleBody.safeParse(request.body);
       if (!parsed.success) {

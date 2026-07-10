@@ -3,6 +3,9 @@ import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { BarChart3, Search, ChevronRight } from 'lucide-react';
 import { reportsEngineApi } from '../../api/endpoints.js';
+import { useDebounce } from '../../hooks/useDebounce.js';
+import { ERPCardSkeleton } from '../../components/erp/ERPSkeleton.js';
+import ERPEmptyState from '../../components/erp/ERPEmptyState.js';
 
 interface ReportDef {
   slug: string;
@@ -19,13 +22,21 @@ const CATEGORY_COLORS: Record<string, string> = {
   FINANCIAL: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300',
   HR: 'bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-300',
   GST: 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300',
+  ANALYTICS: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300',
 };
 
-const CATEGORIES = ['ALL', 'SALES', 'PURCHASE', 'INVENTORY', 'FINANCIAL', 'HR', 'GST'];
+const CATEGORIES = ['ALL', 'SALES', 'PURCHASE', 'INVENTORY', 'FINANCIAL', 'HR', 'GST', 'ANALYTICS'];
+
+const ANALYTICS_DASHBOARDS = [
+  { path: '/reports/sales-analytics', name: 'Sales Analytics', description: 'Revenue trend, top customers, category and salesperson performance' },
+  { path: '/reports/inventory-analytics', name: 'Inventory Analytics', description: 'Stock levels, days of supply, fast/slow movers and stockout alerts' },
+  { path: '/reports/hr-analytics', name: 'HR Analytics', description: 'Headcount, salary cost trend, hiring activity and diversity' },
+];
 
 export default function ReportsPage() {
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
+  const debouncedSearch = useDebounce(search, 250);
   const [activeCategory, setActiveCategory] = useState('ALL');
 
   const { data, isLoading } = useQuery({
@@ -38,9 +49,9 @@ export default function ReportsPage() {
     : [];
 
   const filtered = allReports.filter((r) => {
-    const matchesSearch = !search
-      || r.name.toLowerCase().includes(search.toLowerCase())
-      || r.description.toLowerCase().includes(search.toLowerCase());
+    const matchesSearch = !debouncedSearch
+      || r.name.toLowerCase().includes(debouncedSearch.toLowerCase())
+      || r.description.toLowerCase().includes(debouncedSearch.toLowerCase());
     const matchesCat = activeCategory === 'ALL' || r.category === activeCategory;
     return matchesSearch && matchesCat;
   });
@@ -59,8 +70,37 @@ export default function ReportsPage() {
             <BarChart3 size={22} className="text-brand" /> Reports Browser
           </h1>
           <p className="text-sm text-secondary mt-0.5">
-            {data?.total ?? 0} reports across 6 categories
+            {data?.total ?? 0} reports across 7 categories
           </p>
+        </div>
+      </div>
+
+      {/* Analytics dashboards */}
+      <div>
+        <div className="flex items-center gap-2 mb-3">
+          <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${CATEGORY_COLORS['ANALYTICS']}`}>
+            DASHBOARDS
+          </span>
+          <span className="text-xs text-secondary">Charts &amp; visual analytics</span>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+          {ANALYTICS_DASHBOARDS.map((dashboard) => (
+            <button
+              key={dashboard.path}
+              onClick={() => navigate(dashboard.path)}
+              className="text-left bg-surface-card border border-default rounded-xl p-4 hover:border-primary/50 hover:shadow-sm transition-all group"
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-primary group-hover:text-brand transition-colors">
+                    {dashboard.name}
+                  </p>
+                  <p className="text-xs text-secondary mt-0.5 line-clamp-2">{dashboard.description}</p>
+                </div>
+                <ChevronRight size={14} className="text-secondary group-hover:text-primary transition-colors shrink-0 mt-0.5" />
+              </div>
+            </button>
+          ))}
         </div>
       </div>
 
@@ -94,7 +134,9 @@ export default function ReportsPage() {
       </div>
 
       {isLoading && (
-        <div className="text-secondary text-sm">Loading reports...</div>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+          {Array.from({ length: 6 }).map((_, i) => <ERPCardSkeleton key={i} lines={2} />)}
+        </div>
       )}
 
       {/* Report groups */}
@@ -129,10 +171,11 @@ export default function ReportsPage() {
       ))}
 
       {!isLoading && filtered.length === 0 && (
-        <div className="text-center py-16 text-secondary">
-          <BarChart3 size={32} className="mx-auto mb-3 opacity-30" />
-          <p className="text-sm">No reports match your search</p>
-        </div>
+        <ERPEmptyState
+          type="no-results"
+          title="No reports match your search"
+          description="Try adjusting your search term or category filter."
+        />
       )}
     </div>
   );

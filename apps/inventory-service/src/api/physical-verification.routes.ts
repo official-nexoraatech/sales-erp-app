@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { eq, desc } from 'drizzle-orm';
+import { eq, desc, sql } from 'drizzle-orm';
 import { physicalVerifications } from '@erp/db';
 import { PERMISSIONS } from '@erp/types';
 import type { PlatformContextFactory } from '@erp/sdk';
@@ -45,7 +45,11 @@ export async function physicalVerificationRoutes(
         .orderBy(desc(physicalVerifications.createdAt))
         .limit(limit as number)
         .offset(offset);
-      return reply.code(200).send({ data: rows, meta: { page, limit } });
+      const [countRow] = await ctx.db.raw
+        .select({ count: sql<number>`count(*)::int` })
+        .from(physicalVerifications)
+        .where(eq(physicalVerifications.tenantId, request.auth.tenantId));
+      return reply.code(200).send({ data: { content: rows, totalElements: countRow?.count ?? 0, page, limit } });
     }
   );
 

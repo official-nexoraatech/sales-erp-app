@@ -1,0 +1,141 @@
+# Automated backup (M13) — Kubernetes/production equivalent of the docker-compose
+# `backup` service (infrastructure/docker/backup/). Runs the same script: pg_dump -Fc
+# against the primary, Redis SAVE, MinIO/S3 mirror. Daily at 02:00.
+# PG-024 adds: an age-encrypted copy pushed to a geographically-separate S3-compatible
+# bucket (erp-backup-offsite Secret), and success/duration/size metrics pushed to the
+# pushgateway Service (see pushgateway.yaml) for the BackupStale alert.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: erp-backup
+  namespace: erp-system
+spec:
+  schedule: "0 2 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 7
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            app: erp-backup
+        spec:
+          restartPolicy: OnFailure
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1001
+            fsGroup: 1001
+          containers:
+            - name: backup
+              image: ghcr.io/nexoraatech/erp/backup:latest
+              command: ["/app/backup.sh"]
+              env:
+                - name: PGHOST
+                  value: "postgres-primary.erp-infra.svc.cluster.local"
+                - name: PGPORT
+                  value: "5432"
+                - name: PGUSER
+                  value: "erp"
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: erp-postgres-secret
+                      key: password
+                - name: PGDATABASE
+                  value: "erp"
+                - name: REDIS_HOST
+                  value: "redis.erp-infra.svc.cluster.local"
+                - name: REDIS_PORT
+                  value: "6379"
+                - name: MINIO_ENDPOINT
+                  value: "http://minio.erp-infra.svc.cluster.local:9000"
+                - name: MINIO_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: erp-minio-secret
+                      key: access-key
+                - name: MINIO_SECRET_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: erp-minio-secret
+                      key: secret-key
+                - name: MINIO_BUCKET
+                  value: "erp-production"
+                - name: HOME
+                  value: "/tmp"
+                # ─── PG-024: offsite copy + encryption + metrics ──────────────
+                - name: OFFSITE_MINIO_ENDPOINT
+                  valueFrom:
+                    secretKeyRef:
+                      name: erp-backup-offsite-secret
+                      key: endpoint
+                      optional: true
+                - name: OFFSITE_MINIO_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: erp-backup-offsite-secret
+                      key: access-key
+                      optional: true
+                - name: OFFSITE_MINIO_SECRET_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: erp-backup-offsite-secret
+                      key: secret-key
+                      optional: true
+                - name: OFFSITE_MINIO_BUCKET
+                  valueFrom:
+                    secretKeyRef:
+                      name: erp-backup-offsite-secret
+                      key: bucket
+                      optional: true
+                - name: BACKUP_ENCRYPTION_PUBLIC_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: erp-backup-offsite-secret
+                      key: encryption-public-key
+                      optional: true
+                - name: PUSHGATEWAY_URL
+                  value: "http://pushgateway.erp-system.svc.cluster.local:9091"
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 256Mi
+                limits:
+                  cpu: 500m
+                  memory: 512Mi
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              volumeMounts:
+                - name: backups
+                  mountPath: /backups
+                - name: redis-data
+                  mountPath: /redis-data
+                  readOnly: true
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: backups
+              persistentVolumeClaim:
+                claimName: erp-backups-pvc
+            - name: redis-data
+              persistentVolumeClaim:
+                claimName: erp-redis-data-pvc
+            - name: tmp
+              emptyDir: {}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: erp-backups-pvc
+  namespace: erp-system
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi

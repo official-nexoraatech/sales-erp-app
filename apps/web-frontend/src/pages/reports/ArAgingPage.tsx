@@ -64,7 +64,7 @@ export default function ArAgingPage() {
     queryFn: () => arAgingApi.get(asOf, branchId || undefined),
   });
 
-  const rows = data?.data ?? [];
+  const rows = data ?? [];
   const t = totals(rows);
 
   const footer = (

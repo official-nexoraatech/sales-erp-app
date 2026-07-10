@@ -5,6 +5,7 @@ import { eq, and, desc } from 'drizzle-orm';
 import { NotFoundError, BusinessError } from '@erp/types';
 import { PERMISSIONS } from '@erp/types';
 import type { JobRegistry } from '../JobRegistry.js';
+import { authenticate } from '../middleware/authenticate.js';
 
 type AuthedRequest = { auth: { tenantId: number; userId?: number; permissions: string[] } };
 
@@ -18,7 +19,7 @@ export async function schedulerRoutes(
   registry: JobRegistry
 ): Promise<void> {
   // ── GET /jobs — List all registered jobs with status ─────────────────────
-  fastify.get('/jobs', async (request, reply) => {
+  fastify.get('/jobs', { preHandler: authenticate }, async (request, reply) => {
     if (!hasPermission(request, PERMISSIONS.JOB_VIEW)) {
       return reply.code(403).send({ error: { code: 'PERMISSION_DENIED', message: 'Missing permission: JOB_VIEW' } });
     }
@@ -66,7 +67,7 @@ export async function schedulerRoutes(
   });
 
   // ── POST /jobs/:name/trigger — Manually trigger a job ────────────────────
-  fastify.post<{ Params: { name: string } }>('/jobs/:name/trigger', async (request, reply) => {
+  fastify.post<{ Params: { name: string } }>('/jobs/:name/trigger', { preHandler: authenticate }, async (request, reply) => {
     if (!hasPermission(request, PERMISSIONS.JOB_TRIGGER)) {
       return reply.code(403).send({ error: { code: 'PERMISSION_DENIED', message: 'Missing permission: JOB_TRIGGER' } });
     }
@@ -96,7 +97,7 @@ export async function schedulerRoutes(
   });
 
   // ── PATCH /jobs/:name/pause ───────────────────────────────────────────────
-  fastify.patch<{ Params: { name: string } }>('/jobs/:name/pause', async (request, reply) => {
+  fastify.patch<{ Params: { name: string } }>('/jobs/:name/pause', { preHandler: authenticate }, async (request, reply) => {
     if (!hasPermission(request, PERMISSIONS.JOB_PAUSE)) {
       return reply.code(403).send({ error: { code: 'PERMISSION_DENIED', message: 'Missing permission: JOB_PAUSE' } });
     }
@@ -110,7 +111,7 @@ export async function schedulerRoutes(
   });
 
   // ── PATCH /jobs/:name/resume ──────────────────────────────────────────────
-  fastify.patch<{ Params: { name: string } }>('/jobs/:name/resume', async (request, reply) => {
+  fastify.patch<{ Params: { name: string } }>('/jobs/:name/resume', { preHandler: authenticate }, async (request, reply) => {
     if (!hasPermission(request, PERMISSIONS.JOB_PAUSE)) {
       return reply.code(403).send({ error: { code: 'PERMISSION_DENIED', message: 'Missing permission: JOB_PAUSE' } });
     }
@@ -124,7 +125,7 @@ export async function schedulerRoutes(
   });
 
   // ── GET /jobs/:name/history — Last 30 runs ───────────────────────────────
-  fastify.get<{ Params: { name: string } }>('/jobs/:name/history', async (request, reply) => {
+  fastify.get<{ Params: { name: string } }>('/jobs/:name/history', { preHandler: authenticate }, async (request, reply) => {
     if (!hasPermission(request, PERMISSIONS.JOB_VIEW)) {
       return reply.code(403).send({ error: { code: 'PERMISSION_DENIED', message: 'Missing permission: JOB_VIEW' } });
     }

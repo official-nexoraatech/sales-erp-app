@@ -33,10 +33,13 @@ export const DEFAULT_ACCOUNTS: DefaultAccount[] = [
   { accountCode: '1321', name: 'CGST Input Credit', accountType: 'ASSET', accountSubType: 'OTHER_CURRENT_ASSET', normalBalance: 'DEBIT', parentCode: '1320' },
   { accountCode: '1322', name: 'SGST Input Credit', accountType: 'ASSET', accountSubType: 'OTHER_CURRENT_ASSET', normalBalance: 'DEBIT', parentCode: '1320' },
   { accountCode: '1323', name: 'IGST Input Credit', accountType: 'ASSET', accountSubType: 'OTHER_CURRENT_ASSET', normalBalance: 'DEBIT', parentCode: '1320' },
+  { accountCode: '1330', name: 'RCM Tax Input Credit', accountType: 'ASSET', accountSubType: 'OTHER_CURRENT_ASSET', normalBalance: 'DEBIT', parentCode: '1300' },
+  { accountCode: '1340', name: 'Employee Loans Receivable', accountType: 'ASSET', accountSubType: 'OTHER_CURRENT_ASSET', normalBalance: 'DEBIT', parentCode: '1300' },
   { accountCode: '1500', name: 'Fixed Assets', accountType: 'ASSET', accountSubType: 'FIXED_ASSET', normalBalance: 'DEBIT' },
   { accountCode: '1510', name: 'Furniture and Fixtures', accountType: 'ASSET', accountSubType: 'FIXED_ASSET', normalBalance: 'DEBIT', parentCode: '1500' },
   { accountCode: '1520', name: 'Computer Equipment', accountType: 'ASSET', accountSubType: 'FIXED_ASSET', normalBalance: 'DEBIT', parentCode: '1500' },
   { accountCode: '1530', name: 'Shop Interiors / Leasehold Improvements', accountType: 'ASSET', accountSubType: 'FIXED_ASSET', normalBalance: 'DEBIT', parentCode: '1500' },
+  { accountCode: '1590', name: 'Accumulated Depreciation', accountType: 'CONTRA', accountSubType: 'ACCUMULATED_DEPRECIATION', normalBalance: 'CREDIT', parentCode: '1500' },
 
   // ── LIABILITIES ──────────────────────────────────────────────────────────
   { accountCode: '2000', name: 'Current Liabilities', accountType: 'LIABILITY', accountSubType: 'OTHER_CURRENT_LIABILITY', normalBalance: 'CREDIT', isSystem: true },
@@ -49,6 +52,7 @@ export const DEFAULT_ACCOUNTS: DefaultAccount[] = [
   { accountCode: '2300', name: 'Other Current Liabilities', accountType: 'LIABILITY', accountSubType: 'OTHER_CURRENT_LIABILITY', normalBalance: 'CREDIT', parentCode: '2000' },
   { accountCode: '2310', name: 'Salary Payable', accountType: 'LIABILITY', accountSubType: 'OTHER_CURRENT_LIABILITY', normalBalance: 'CREDIT', parentCode: '2300' },
   { accountCode: '2320', name: 'Advance from Customers', accountType: 'LIABILITY', accountSubType: 'OTHER_CURRENT_LIABILITY', normalBalance: 'CREDIT', parentCode: '2300' },
+  { accountCode: '2330', name: 'RCM Tax Payable', accountType: 'LIABILITY', accountSubType: 'OTHER_CURRENT_LIABILITY', normalBalance: 'CREDIT', parentCode: '2300' },
   { accountCode: '2500', name: 'Long-term Liabilities', accountType: 'LIABILITY', accountSubType: 'LONG_TERM_LIABILITY', normalBalance: 'CREDIT' },
   { accountCode: '2510', name: 'Bank Loan', accountType: 'LIABILITY', accountSubType: 'LONG_TERM_LIABILITY', normalBalance: 'CREDIT', parentCode: '2500' },
 
@@ -57,6 +61,8 @@ export const DEFAULT_ACCOUNTS: DefaultAccount[] = [
   { accountCode: '3010', name: "Owner's Capital", accountType: 'EQUITY', accountSubType: 'EQUITY', normalBalance: 'CREDIT', parentCode: '3000' },
   { accountCode: '3020', name: 'Retained Earnings', accountType: 'EQUITY', accountSubType: 'RETAINED_EARNINGS', normalBalance: 'CREDIT', parentCode: '3000' },
   { accountCode: '3030', name: 'Owner Drawings', accountType: 'EQUITY', accountSubType: 'EQUITY', normalBalance: 'DEBIT', parentCode: '3000' },
+  // Classified EQUITY (not INCOME) since its balance is temporary and always rolls into Retained Earnings (also EQUITY) at year-end close.
+  { accountCode: '3900', name: 'Income Summary', accountType: 'EQUITY', accountSubType: 'INCOME_SUMMARY', normalBalance: 'CREDIT', isSystem: true, parentCode: '3000' },
 
   // ── INCOME ────────────────────────────────────────────────────────────────
   { accountCode: '4000', name: 'Sales Revenue', accountType: 'INCOME', accountSubType: 'SALES_REVENUE', normalBalance: 'CREDIT', isSystem: true },

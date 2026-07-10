@@ -2,9 +2,13 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import toast from 'react-hot-toast';
+import { Pencil, Trash2 } from 'lucide-react';
 import { brandApi } from '../../api/endpoints.js';
+import { useAuthStore } from '../../store/auth.store.js';
+import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
-import DataTable from '../../components/ui/DataTable.js';
+import ERPDataGrid, { type ERPColumnDef } from '../../components/erp/ERPDataGrid.js';
+import ERPDropdownMenu, { type ERPMenuItem } from '../../components/erp/ERPDropdownMenu.js';
 import Button from '../../components/ui/Button.js';
 import Modal from '../../components/ui/Modal.js';
 import Input from '../../components/ui/Input.js';
@@ -13,9 +17,12 @@ interface Brand { id: number; name: string; code?: string; description?: string;
 
 export default function BrandsPage() {
   const qc = useQueryClient();
+  const hasPermission = useAuthStore((s) => s.hasPermission);
+  const canCreateBrand = hasPermission(PERMISSIONS.BRAND_CREATE);
+  const canUpdateBrand = hasPermission(PERMISSIONS.BRAND_UPDATE);
   const [modal, setModal] = useState<{ open: boolean; brand?: Brand }>({ open: false });
   const { data, isLoading } = useQuery({ queryKey: ['brands'], queryFn: () => brandApi.list() });
-  const brands: Brand[] = (data as { data?: { content?: Brand[] } })?.data?.content ?? [];
+  const brands: Brand[] = (data as { content?: Brand[] })?.content ?? [];
 
   const { register, handleSubmit, reset, formState: { errors, isSubmitting } } = useForm<Partial<Brand>>();
 
@@ -35,25 +42,25 @@ export default function BrandsPage() {
     onError: (err: Error) => toast.error(err.message),
   });
 
-  const columns = [
-    { key: 'code', header: 'Code', className: 'font-mono text-xs' },
-    { key: 'name', header: 'Name' },
+  const columns: ERPColumnDef<Brand>[] = [
+    { key: 'code', header: 'Code', mono: true, sortable: true },
+    { key: 'name', header: 'Name', sortable: true },
     { key: 'description', header: 'Description' },
     {
-      key: 'actions', header: '',
-      render: (r: Brand) => (
-        <div className="flex gap-2">
-          <Button size="sm" variant="ghost" onClick={() => openEdit(r)}>Edit</Button>
-          <Button size="sm" variant="danger" onClick={() => deleteMutation.mutate(r.id)}>Delete</Button>
-        </div>
-      ),
+      key: 'actions', header: '', align: 'right',
+      render: (r) => {
+        const items: ERPMenuItem[] = [];
+        if (canUpdateBrand) items.push({ label: 'Edit', icon: Pencil, onClick: () => openEdit(r) });
+        if (canUpdateBrand) items.push({ label: 'Delete', icon: Trash2, variant: 'danger', onClick: () => deleteMutation.mutate(r.id) });
+        return items.length > 0 ? <ERPDropdownMenu items={items} /> : null;
+      },
     },
   ];
 
   return (
     <div>
-      <ERPPageHeader variant="list" title="Brands" actions={<Button onClick={openNew}>+ New Brand</Button>} />
-      <DataTable columns={columns} data={brands} loading={isLoading} emptyMessage="No brands." />
+      <ERPPageHeader variant="list" title="Brands" actions={canCreateBrand ? <Button onClick={openNew}>+ New Brand</Button> : undefined} />
+      <ERPDataGrid columns={columns} data={brands} isLoading={isLoading} rowKey="id" />
 
       <Modal open={modal.open} onClose={() => setModal({ open: false })} title={modal.brand ? 'Edit Brand' : 'New Brand'} size="sm">
         <form onSubmit={handleSubmit((d) => saveMutation.mutate(d as Record<string, unknown>))} className="space-y-4">

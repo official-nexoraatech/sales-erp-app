@@ -1,13 +1,21 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
+import { Send, CheckCircle2, PackageCheck, Paperclip, Copy, Ban } from 'lucide-react';
 import { purchaseOrderApi } from '../../api/endpoints.js';
+import { useDebounce } from '../../hooks/useDebounce.js';
+import { useAuthStore } from '../../store/auth.store.js';
+import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
-import DataTable from '../../components/ui/DataTable.js';
+import ERPDataGrid, { type ERPColumnDef } from '../../components/erp/ERPDataGrid.js';
+import ERPDropdownMenu, { type ERPMenuItem } from '../../components/erp/ERPDropdownMenu.js';
+import ERPDrawer from '../../components/erp/ERPDrawer.js';
+import AttachmentSection from '../../components/erp/AttachmentSection.js';
 import Button from '../../components/ui/Button.js';
 import Badge from '../../components/ui/Badge.js';
 import Input from '../../components/ui/Input.js';
+import Select from '../../components/ui/Select.js';
 import Modal from '../../components/ui/Modal.js';
 import { formatDate, formatCurrency } from '../../lib/format.js';
 
@@ -33,19 +41,32 @@ const STATUS_COLORS: Record<string, 'default' | 'success' | 'warning' | 'danger'
 export default function PurchaseOrdersPage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const hasPermission = useAuthStore((s) => s.hasPermission);
+  const canCreatePO = hasPermission(PERMISSIONS.PO_CREATE);
+  const canApprovePO = hasPermission(PERMISSIONS.PO_APPROVE);
+  const canCancelPO = hasPermission(PERMISSIONS.PO_CANCEL);
+  const canCreateGRN = hasPermission(PERMISSIONS.GRN_CREATE);
+  const [search, setSearch] = useState('');
+  const debouncedSearch = useDebounce(search, 250);
   const [status, setStatus] = useState('');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
   const [approveId, setApproveId] = useState<number | null>(null);
   const [poNumber, setPoNumber] = useState('');
   const [cancelId, setCancelId] = useState<number | null>(null);
   const [cancelReason, setCancelReason] = useState('');
+  const [attachmentsForId, setAttachmentsForId] = useState<number | null>(null);
+
+  useEffect(() => { setPage(1); }, [debouncedSearch, status]);
 
   const { data, isLoading } = useQuery({
-    queryKey: ['purchase-orders', status],
-    queryFn: () => purchaseOrderApi.list(status ? { status } : {}),
+    queryKey: ['purchase-orders', debouncedSearch, status, page, pageSize],
+    queryFn: () => purchaseOrderApi.list({ search: debouncedSearch || undefined, status: status || undefined, page, pageSize }),
     staleTime: 30_000,
   });
 
-  const rows: PurchaseOrder[] = (data as { data?: PurchaseOrder[] })?.data ?? [];
+  const rows: PurchaseOrder[] = (data as Record<string, unknown>)?.content as PurchaseOrder[] ?? [];
+  const totalElements = (data as Record<string, unknown>)?.totalElements as number ?? 0;
 
   const submitMutation = useMutation({
     mutationFn: (id: number) => purchaseOrderApi.submit(id),
@@ -86,81 +107,83 @@ export default function PurchaseOrdersPage() {
     onError: (e: Error) => toast.error(e.message),
   });
 
-  const columns = [
+  const columns: ERPColumnDef<PurchaseOrder>[] = [
     {
       key: 'poNumber',
       header: 'PO #',
-      render: (r: PurchaseOrder) => r.poNumber
+      mono: true,
+      render: (r) => r.poNumber
         ? <span className="font-mono text-sm">{r.poNumber}</span>
         : <span className="text-secondary italic text-sm">Draft</span>,
     },
     { key: 'supplierId', header: 'Supplier' },
-    { key: 'grandTotal', header: 'Amount', render: (r: PurchaseOrder) => formatCurrency(parseFloat(r.grandTotal)) },
-    { key: 'poDate', header: 'Order Date', render: (r: PurchaseOrder) => formatDate(r.poDate) },
+    { key: 'grandTotal', header: 'Amount', align: 'right', sortable: true, render: (r) => formatCurrency(parseFloat(r.grandTotal)) },
+    { key: 'poDate', header: 'Order Date', sortable: true, render: (r) => formatDate(r.poDate) },
     {
       key: 'expectedDeliveryDate',
       header: 'Expected Delivery',
-      render: (r: PurchaseOrder) => r.expectedDeliveryDate ? formatDate(r.expectedDeliveryDate) : '—',
+      render: (r) => r.expectedDeliveryDate ? formatDate(r.expectedDeliveryDate) : '—',
     },
     {
       key: 'status',
       header: 'Status',
-      render: (r: PurchaseOrder) => <Badge variant={STATUS_COLORS[r.status] ?? 'default'}>{r.status}</Badge>,
+      sortable: true,
+      render: (r) => <Badge variant={STATUS_COLORS[r.status] ?? 'default'}>{r.status}</Badge>,
     },
     {
       key: 'actions',
       header: '',
-      render: (r: PurchaseOrder) => (
-        <div className="flex gap-1 flex-wrap">
-          {r.status === 'DRAFT' && (
-            <Button size="sm" onClick={() => submitMutation.mutate(r.id)}>Submit</Button>
-          )}
-          {r.status === 'SUBMITTED' && (
-            <Button size="sm" variant="primary" onClick={() => { setApproveId(r.id); setPoNumber(''); }}>
-              Approve
-            </Button>
-          )}
-          {['APPROVED', 'PARTIALLY_RECEIVED'].includes(r.status) && (
-            <Button size="sm" variant="ghost" onClick={() => navigate(`/purchase/grns/new?poId=${r.id}`)}>
-              Receive
-            </Button>
-          )}
-          <Button size="sm" variant="ghost" onClick={() => duplicateMutation.mutate(r.id)}>Copy</Button>
-          {['DRAFT', 'SUBMITTED'].includes(r.status) && (
-            <Button size="sm" variant="danger" onClick={() => { setCancelId(r.id); setCancelReason(''); }}>
-              Cancel
-            </Button>
-          )}
-        </div>
-      ),
+      align: 'right',
+      render: (r) => {
+        const items: ERPMenuItem[] = [];
+        if (canCreatePO && r.status === 'DRAFT') items.push({ label: 'Submit', icon: Send, onClick: () => submitMutation.mutate(r.id) });
+        if (canApprovePO && r.status === 'SUBMITTED') items.push({ label: 'Approve', icon: CheckCircle2, onClick: () => { setApproveId(r.id); setPoNumber(''); } });
+        if (canCreateGRN && ['APPROVED', 'PARTIALLY_RECEIVED'].includes(r.status)) {
+          items.push({ label: 'Receive', icon: PackageCheck, onClick: () => navigate(`/purchase/grns/new?poId=${r.id}`) });
+        }
+        items.push({ label: 'Attachments', icon: Paperclip, onClick: () => setAttachmentsForId(r.id) });
+        if (canCreatePO) items.push({ label: 'Duplicate', icon: Copy, onClick: () => duplicateMutation.mutate(r.id) });
+        if (canCancelPO && ['DRAFT', 'SUBMITTED'].includes(r.status)) {
+          items.push({ label: 'Cancel', icon: Ban, variant: 'danger', onClick: () => { setCancelId(r.id); setCancelReason(''); } });
+        }
+        return <ERPDropdownMenu items={items} />;
+      },
     },
   ];
 
   return (
     <div>
       <ERPPageHeader variant="list" title="Purchase Orders" subtitle="Manage supplier purchase orders">
-        <Button onClick={() => navigate('/purchase/orders/new')}>+ New PO</Button>
+        {canCreatePO && <Button onClick={() => navigate('/purchase/orders/new')}>+ New PO</Button>}
       </ERPPageHeader>
 
       <div className="flex gap-4 mb-4">
-        <select
-          value={status}
-          onChange={(e) => setStatus(e.target.value)}
-          className="rounded-lg border border-default bg-surface-card text-primary text-sm px-3 py-2"
-        >
+        <div className="flex-1 max-w-sm">
+          <Input placeholder="Search by PO number..." value={search} onChange={(e) => setSearch(e.target.value)} />
+        </div>
+        <Select value={status} onChange={(e) => setStatus(e.target.value)} className="w-48">
           <option value="">All Statuses</option>
           {['DRAFT', 'SUBMITTED', 'APPROVED', 'PARTIALLY_RECEIVED', 'RECEIVED', 'CANCELLED'].map((s) => (
             <option key={s} value={s}>{s}</option>
           ))}
-        </select>
+        </Select>
       </div>
 
-      <DataTable columns={columns} data={rows} isLoading={isLoading} emptyMessage="No purchase orders found" />
+      <ERPDataGrid
+        columns={columns}
+        data={rows}
+        isLoading={isLoading}
+        rowKey="id"
+        pagination={{ page, pageSize, total: totalElements }}
+        onPageChange={setPage}
+        onPageSizeChange={(size) => { setPageSize(size); setPage(1); }}
+      />
 
       <Modal isOpen={approveId !== null} onClose={() => setApproveId(null)} title="Approve Purchase Order">
         <div className="space-y-4">
           <Input
-            label="PO Number *"
+            label="PO Number"
+            required
             placeholder="e.g. PO-2025-001"
             value={poNumber}
             onChange={(e) => setPoNumber(e.target.value)}
@@ -181,7 +204,8 @@ export default function PurchaseOrdersPage() {
       <Modal isOpen={cancelId !== null} onClose={() => setCancelId(null)} title="Cancel Purchase Order">
         <div className="space-y-4">
           <Input
-            label="Reason *"
+            label="Reason"
+            required
             placeholder="Reason for cancellation"
             value={cancelReason}
             onChange={(e) => setCancelReason(e.target.value)}
@@ -199,6 +223,17 @@ export default function PurchaseOrdersPage() {
           </div>
         </div>
       </Modal>
+
+      <ERPDrawer
+        open={attachmentsForId !== null}
+        onClose={() => setAttachmentsForId(null)}
+        title="Purchase Order Attachments"
+        size="lg"
+      >
+        {attachmentsForId !== null && (
+          <AttachmentSection service="purchase" entityType="PURCHASE_ORDER" entityId={attachmentsForId} />
+        )}
+      </ERPDrawer>
     </div>
   );
 }

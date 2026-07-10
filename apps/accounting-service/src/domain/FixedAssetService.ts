@@ -1,7 +1,7 @@
-import { eq, and } from 'drizzle-orm';
+import { eq, and, sql } from 'drizzle-orm';
 import { fixedAssets, assetDepreciationSchedule } from '@erp/db';
 import type { TenantScopedDatabase } from '@erp/sdk';
-import { BusinessError, NotFoundError } from '@erp/types';
+import { BusinessError, NotFoundError, OptimisticLockError } from '@erp/types';
 import { createLogger } from '@erp/logger';
 import { JournalEngine } from './JournalEngine.js';
 
@@ -141,8 +141,6 @@ export class FixedAssetService {
     periodMonth: number,
     periodYear: number
   ): Promise<{ journalId: string; depreciationAmount: number } | null> {
-    const asset = await FixedAssetService.getById(db, tenantId, assetId);
-
     const [existing] = await db.raw
       .select()
       .from(assetDepreciationSchedule)
@@ -157,17 +155,24 @@ export class FixedAssetService {
       return null;
     }
 
-    const depreciationAmount = FixedAssetService.computeMonthlyDepreciation(asset);
-    if (depreciationAmount <= 0.005) {
-      logger.info({ assetId }, 'No depreciation to post (fully depreciated or disposed)');
-      return null;
-    }
-
-    if (!asset.depreciationExpenseAccountId || !asset.accumulatedDepreciationAccountId) {
-      throw new BusinessError('MISSING_DEP_ACCOUNTS', `Asset ${assetId} is missing depreciation account configuration`);
-    }
-
     return db.transaction(async (trx) => {
+      // ES-23 [M22]: read the asset fresh inside this same transaction (not before it,
+      // and not reused from an outer read) so currentValue/version reflect the latest
+      // committed state, then guard the write below on that version — closing the
+      // lost-update race where two concurrent depreciation postings for the same asset
+      // would otherwise both compute newValue from the same stale currentValue.
+      const asset = await FixedAssetService.getById(trx, tenantId, assetId);
+
+      const depreciationAmount = FixedAssetService.computeMonthlyDepreciation(asset);
+      if (depreciationAmount <= 0.005) {
+        logger.info({ assetId }, 'No depreciation to post (fully depreciated or disposed)');
+        return null;
+      }
+
+      if (!asset.depreciationExpenseAccountId || !asset.accumulatedDepreciationAccountId) {
+        throw new BusinessError('MISSING_DEP_ACCOUNTS', `Asset ${assetId} is missing depreciation account configuration`);
+      }
+
       const newValue = Number(asset.currentValue) - depreciationAmount;
 
       const { journalId } = await JournalEngine.post(trx, tenantId, userId, {
@@ -202,10 +207,21 @@ export class FixedAssetService {
         postedAt: new Date(),
       } as typeof assetDepreciationSchedule.$inferInsert);
 
-      await trx.raw
+      const [updated] = await trx.raw
         .update(fixedAssets)
-        .set({ currentValue: String(newValue), updatedAt: new Date() })
-        .where(and(eq(fixedAssets.id, assetId), eq(fixedAssets.tenantId, tenantId)));
+        .set({
+          currentValue: String(newValue),
+          version: sql`${fixedAssets.version} + 1`,
+          updatedAt: new Date(),
+        })
+        .where(and(
+          eq(fixedAssets.id, assetId),
+          eq(fixedAssets.tenantId, tenantId),
+          eq(fixedAssets.version, asset.version)
+        ))
+        .returning();
+
+      if (!updated) throw new OptimisticLockError('FixedAsset');
 
       return { journalId, depreciationAmount };
     });

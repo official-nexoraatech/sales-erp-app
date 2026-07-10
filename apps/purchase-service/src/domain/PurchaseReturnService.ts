@@ -8,6 +8,7 @@ import {
   items,
   projectionSupplierBalance,
   outboxEvents,
+  inventoryLedger,
 } from '@erp/db';
 import type { ErpDatabase } from '@erp/db';
 import { BusinessError, NotFoundError } from '@erp/types';
@@ -47,6 +48,39 @@ export class PurchaseReturnService {
       if (!grn) throw new NotFoundError('GRN', params.grnId);
       if (grn.status !== 'APPROVED')
         throw new BusinessError('INVALID_GRN_STATUS', 'Can only return against APPROVED GRNs');
+
+      // ES-23 [H8]: previously there was no quantity validation at all — a return
+      // could be created for any returnQty regardless of what the GRN line actually
+      // received. Validate against receivedQty minus prior APPROVED returns on the
+      // same grnLineId, mirroring SaleReturnService's equivalent guard.
+      for (const l of params.lines) {
+        const [grnLine] = await trx
+          .select({ receivedQty: grnLines.receivedQty })
+          .from(grnLines)
+          .where(and(eq(grnLines.id, l.grnLineId), eq(grnLines.tenantId, params.tenantId)));
+        if (!grnLine) throw new NotFoundError('GRNLine', l.grnLineId);
+        const receivedQty = parseFloat(String(grnLine.receivedQty));
+
+        const [priorReturns] = await trx
+          .select({ alreadyReturned: sql<string>`COALESCE(SUM(${purchaseReturnLines.returnQty}), 0)` })
+          .from(purchaseReturnLines)
+          .innerJoin(purchaseReturns, eq(purchaseReturnLines.purchaseReturnId, purchaseReturns.id))
+          .where(
+            and(
+              eq(purchaseReturnLines.grnLineId, l.grnLineId),
+              eq(purchaseReturns.tenantId, params.tenantId),
+              eq(purchaseReturns.status, 'APPROVED')
+            )
+          );
+        const alreadyReturnedQty = parseFloat(String(priorReturns?.alreadyReturned ?? '0'));
+
+        if (l.returnQty + alreadyReturnedQty > receivedQty + 0.001) {
+          throw new BusinessError(
+            'RETURN_QTY_EXCEEDED',
+            `Return qty ${l.returnQty} (+ ${alreadyReturnedQty} already returned) exceeds received qty ${receivedQty} for GRN line ${l.grnLineId}`
+          );
+        }
+      }
 
       const computedLines = params.lines.map((l, i) => {
         const taxableAmount = Math.round(l.unitPrice * l.returnQty * 100) / 100;
@@ -123,7 +157,9 @@ export class PurchaseReturnService {
         .from(purchaseReturnLines)
         .where(eq(purchaseReturnLines.purchaseReturnId, id));
 
-      // Deduct stock from warehouse
+      // Deduct stock from warehouse — goods are physically leaving to go back to the
+      // supplier, so this is a STOCK_OUT movement (not STOCK_IN — a purchase return
+      // reduces our inventory; STOCK_IN is for goods arriving, e.g. GRN or sales returns).
       for (const line of lines) {
         const qty = parseFloat(String(line.returnQty));
         const result = await trx
@@ -139,11 +175,29 @@ export class PurchaseReturnService {
               sql`${items.availableQty} >= ${qty}`
             )
           )
-          .returning({ id: items.id });
+          .returning({ id: items.id, availableQty: items.availableQty });
 
         if (result.length === 0) {
           throw new BusinessError('INSUFFICIENT_STOCK', `Insufficient stock for item ${line.itemId} to process return`);
         }
+
+        const afterQty = parseFloat(String(result[0]!.availableQty ?? '0'));
+        const beforeQty = afterQty + qty;
+        await trx.insert(inventoryLedger).values({
+          tenantId,
+          itemId: line.itemId,
+          variantId: line.variantId ?? undefined,
+          warehouseId: ret.warehouseId,
+          movementType: 'STOCK_OUT',
+          quantity: String(qty),
+          quantityBefore: String(beforeQty),
+          quantityAfter: String(afterQty),
+          referenceType: 'PURCHASE_RETURN',
+          referenceId: id,
+          referenceLineId: line.id,
+          unitCost: String(line.unitPrice ?? '0'),
+          createdBy: userId,
+        });
       }
 
       // Auto-generate debit note

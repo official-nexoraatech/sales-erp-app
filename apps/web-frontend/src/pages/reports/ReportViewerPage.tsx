@@ -1,8 +1,11 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation } from '@tanstack/react-query';
+import toast from 'react-hot-toast';
 import { ArrowLeft, Download, RefreshCw, ChevronDown } from 'lucide-react';
-import { reportsEngineApi } from '../../api/endpoints.js';
+import { reportsEngineApi, type ReportRunPending } from '../../api/endpoints.js';
+import { ERPDetailSkeleton } from '../../components/erp/ERPSkeleton.js';
+import ERPEmptyState from '../../components/erp/ERPEmptyState.js';
 
 interface ParamDef {
   key: string;
@@ -64,7 +67,7 @@ export default function ReportViewerPage() {
   const { slug } = useParams<{ slug: string }>();
   const navigate = useNavigate();
 
-  const { data: definitionRaw } = useQuery({
+  const { data: definitionRaw, isLoading: isDefinitionLoading } = useQuery({
     queryKey: ['report-def', slug],
     queryFn: () => reportsEngineApi.getDefinition(slug!),
     enabled: !!slug,
@@ -90,15 +93,53 @@ export default function ReportViewerPage() {
   const [format, setFormat] = useState<'JSON' | 'CSV' | 'EXCEL'>('JSON');
   const [result, setResult] = useState<ReportResult | null>(null);
   const [page, setPage] = useState(0);
+  const [pendingRunId, setPendingRunId] = useState<number | null>(null);
   const PAGE_SIZE = 100;
 
   const runMutation = useMutation({
     mutationFn: () => reportsEngineApi.run(slug!, paramValues, 'JSON'),
     onSuccess: (data) => {
-      setResult(data as ReportResult);
-      setPage(0);
+      // Reports flagged supportsAsync on the backend always queue the job and return
+      // {runId, status: PENDING} instead of the report rows, regardless of the async
+      // param sent — poll run-history until the job finishes to get the real result.
+      if (data && typeof data === 'object' && 'status' in data && (data as ReportRunPending).status === 'PENDING') {
+        setResult(null);
+        setPendingRunId((data as ReportRunPending).runId);
+      } else {
+        setResult(data as ReportResult);
+        setPage(0);
+      }
     },
   });
+
+  const { data: runStatus } = useQuery({
+    queryKey: ['report-run-status', pendingRunId],
+    queryFn: () => reportsEngineApi.runStatus(pendingRunId!),
+    enabled: pendingRunId !== null,
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      return status === 'COMPLETED' || status === 'FAILED' ? false : 1500;
+    },
+  });
+
+  useEffect(() => {
+    if (!runStatus || pendingRunId === null) return;
+    if (runStatus.status === 'COMPLETED' && runStatus.resultData) {
+      setResult({
+        rows: runStatus.resultData.rows,
+        totalRows: runStatus.resultData.totalRows,
+        generatedAt: runStatus.resultData.generatedAt,
+        totals: runStatus.resultData.totals,
+        durationMs: runStatus.durationMs ?? 0,
+        definition: definition!,
+      });
+      setPage(0);
+      setPendingRunId(null);
+    } else if (runStatus.status === 'FAILED') {
+      toast.error(runStatus.errorMessage ?? 'Report generation failed');
+      setPendingRunId(null);
+    }
+  }, [runStatus, pendingRunId, definition]);
 
   const downloadMutation = useMutation({
     mutationFn: async (fmt: 'CSV' | 'EXCEL') => {
@@ -117,15 +158,16 @@ export default function ReportViewerPage() {
       a.click();
       URL.revokeObjectURL(url);
     },
+    onSuccess: (_data, fmt) => toast.success(`${fmt} file downloaded`),
+    onError: (err: Error) => toast.error(err.message ?? 'Download failed'),
   });
 
-  const pageRows = result?.rows.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE) ?? [];
+  const isRunning = runMutation.isPending || pendingRunId !== null;
+  const pageRows = result?.rows?.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE) ?? [];
   const totalPages = result ? Math.ceil(result.totalRows / PAGE_SIZE) : 0;
 
-  if (!definition) {
-    return (
-      <div className="text-secondary text-sm p-6">Loading report definition...</div>
-    );
+  if (isDefinitionLoading || !definition) {
+    return <ERPDetailSkeleton />;
   }
 
   return (
@@ -158,11 +200,11 @@ export default function ReportViewerPage() {
           </button>
           <button
             onClick={() => runMutation.mutate()}
-            disabled={runMutation.isPending}
+            disabled={isRunning}
             className="flex items-center gap-1.5 px-4 py-1.5 text-sm font-medium bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-60"
           >
-            <RefreshCw size={13} className={runMutation.isPending ? 'animate-spin' : ''} />
-            {runMutation.isPending ? 'Running...' : 'Run Report'}
+            <RefreshCw size={13} className={isRunning ? 'animate-spin' : ''} />
+            {isRunning ? 'Running...' : 'Run Report'}
           </button>
         </div>
       </div>
@@ -273,8 +315,8 @@ export default function ReportViewerPage() {
                 ))}
                 {pageRows.length === 0 && (
                   <tr>
-                    <td colSpan={definition.columns.length} className="px-3 py-8 text-center text-secondary text-sm">
-                      No data found
+                    <td colSpan={definition.columns.length}>
+                      <ERPEmptyState type="no-results" title="No data found" description="Try adjusting the parameters and running the report again." />
                     </td>
                   </tr>
                 )}
@@ -301,7 +343,14 @@ export default function ReportViewerPage() {
         </div>
       )}
 
-      {!result && !runMutation.isPending && (
+      {!result && pendingRunId !== null && (
+        <div className="text-center py-16 text-secondary">
+          <RefreshCw size={28} className="mx-auto mb-3 opacity-30 animate-spin" />
+          <p className="text-sm">This report runs in the background — generating your data...</p>
+        </div>
+      )}
+
+      {!result && !isRunning && (
         <div className="text-center py-16 text-secondary">
           <RefreshCw size={28} className="mx-auto mb-3 opacity-30" />
           <p className="text-sm">Set parameters and click <strong>Run Report</strong> to see results</p>

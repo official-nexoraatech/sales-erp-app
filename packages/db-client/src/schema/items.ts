@@ -201,6 +201,13 @@ export const items = pgTable(
     // Live stock counters (updated atomically via UPDATE WHERE available_qty >= qty)
     availableQty: decimal('available_qty', { precision: 15, scale: 3 }).notNull().default('0'),
     reservedQty: decimal('reserved_qty', { precision: 15, scale: 3 }).notNull().default('0'),
+    // ES-13: inventory valuation (FIFO / WACC costing)
+    costingMethod: varchar('costing_method', { length: 10 })
+      .notNull()
+      .default('WACC')
+      .$type<'FIFO' | 'WACC'>(),
+    waccCost: decimal('wacc_cost', { precision: 15, scale: 2 }).notNull().default('0'),
+    currentStockValue: decimal('current_stock_value', { precision: 15, scale: 2 }).notNull().default('0'),
     tags: jsonb('tags').$type<string[]>().default([]),
     customFields: jsonb('custom_fields').$type<Record<string, unknown>>().default({}),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),

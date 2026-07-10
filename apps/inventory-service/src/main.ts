@@ -1,10 +1,11 @@
-import Fastify from 'fastify';
+import Fastify, { type FastifyError } from 'fastify';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
-import { PlatformContextFactory, HELMET_OPTIONS, PERMISSIONS_POLICY } from '@erp/sdk';
-import { createLogger } from '@erp/logger';
+import rateLimit from '@fastify/rate-limit';
+import { PlatformContextFactory, HELMET_OPTIONS, PERMISSIONS_POLICY, registerHealthRoute, tenantOrIpKeyGenerator, initializeTelemetry, initTenantStatusEnforcement } from '@erp/sdk';
+import { createLogger, createMetricsHandler, createHttpMetricsHook, createCorrelationIdHook } from '@erp/logger';
 import { ERPError } from '@erp/types';
-import { requireEnv } from '@erp/config';
+import { loadConfigWithSecrets } from '@erp/config';
 import { warehouseRoutes } from './api/warehouse.routes.js';
 import { categoryRoutes } from './api/category.routes.js';
 import { brandRoutes } from './api/brand.routes.js';
@@ -16,21 +17,35 @@ import { transferRoutes } from './api/transfer.routes.js';
 import { adjustmentRoutes } from './api/adjustment.routes.js';
 import { physicalVerificationRoutes } from './api/physical-verification.routes.js';
 import { fabricRollRoutes } from './api/fabric-roll.routes.js';
+import { internalRoutes } from './api/internal.routes.js';
+import { valuationRoutes } from './api/valuation.routes.js';
+import { searchSyncInternalRoutes } from './api/search-sync.internal.routes.js';
+import { syncRoutes } from './api/sync.routes.js';
+
+initializeTelemetry({ serviceName: 'inventory-service' });
 
 async function bootstrap(): Promise<void> {
   const port = parseInt(process.env['INVENTORY_SERVICE_PORT'] ?? '3012', 10);
-  const logger = createLogger({ serviceName: 'inventory-service', level: 'info' });
+  const lokiUrl = process.env['LOKI_URL'];
+  const logger = createLogger({ serviceName: 'inventory-service', level: 'info', ...(lokiUrl ? { lokiUrl } : {}) });
 
+  const config = await loadConfigWithSecrets('inventory-service');
   const ctxFactory = new PlatformContextFactory({
-    databaseUrl: requireEnv('DATABASE_URL'),
+    databaseUrl: config.databaseUrl,
     redisUrl: process.env['REDIS_URL'] ?? 'redis://localhost:6379',
     kafkaBrokers: (process.env['KAFKA_BROKERS'] ?? 'localhost:29092').split(','),
     kafkaClientId: 'inventory-service',
     serviceName: 'inventory-service',
   });
   await ctxFactory.connect();
+  ctxFactory.subscribeFeatureFlagInvalidations();
+  initTenantStatusEnforcement(ctxFactory.rawDb);
+
+  const metricsHandler = await createMetricsHandler('inventory-service');
 
   const fastify = Fastify({ logger: false, trustProxy: true });
+
+  fastify.addHook('onRequest', createCorrelationIdHook());
 
   await fastify.register(helmet, HELMET_OPTIONS);
   fastify.addHook('onSend', async (_request, reply) => {
@@ -40,13 +55,23 @@ async function bootstrap(): Promise<void> {
     origin: process.env['ALLOWED_ORIGINS']?.split(',') ?? ['http://localhost:3000'],
     credentials: true,
   });
+  await fastify.register(rateLimit, {
+    global: true,
+    max: 200,
+    timeWindow: '1 minute',
+    redis: ctxFactory.getRedis(),
+    keyGenerator: tenantOrIpKeyGenerator,
+  });
+  fastify.addHook('onResponse', createHttpMetricsHook('inventory-service'));
 
-  fastify.get('/health', async (_req, reply) => {
-    return reply.code(200).send({ status: 'ok', service: 'inventory-service' });
+  registerHealthRoute(fastify, 'inventory-service', {
+    db: () => ctxFactory.checkDb(),
+    redis: () => ctxFactory.checkRedis(),
   });
 
   fastify.get('/metrics', async (_req, reply) => {
-    return reply.code(200).send('# inventory-service metrics\n');
+    const body = await metricsHandler.handler();
+    return reply.code(200).header('Content-Type', metricsHandler.contentType).send(body);
   });
 
   await fastify.register(async (sub) => {
@@ -61,15 +86,19 @@ async function bootstrap(): Promise<void> {
     await adjustmentRoutes(sub, ctxFactory);
     await physicalVerificationRoutes(sub, ctxFactory);
     await fabricRollRoutes(sub, ctxFactory);
+    await internalRoutes(sub, ctxFactory);
+    await valuationRoutes(sub, ctxFactory);
+    await searchSyncInternalRoutes(sub, ctxFactory);
+    await syncRoutes(sub, ctxFactory);
   }, { prefix: '/api/v2' });
 
-  fastify.setErrorHandler((error, request, reply) => {
+  fastify.setErrorHandler<FastifyError>((error, request, reply) => {
     if (error instanceof ERPError) {
       return reply.code(error.statusCode).send({
         error: { code: error.code, message: error.message, details: error.details },
       });
     }
-    logger.error({ err: error.message, url: request.url }, 'Unhandled error in inventory-service');
+    logger.error({ err: error.message, url: request.url, correlationId: (request as { correlationId?: string }).correlationId }, 'Unhandled error in inventory-service');
     return reply.code(500).send({ error: { code: 'INTERNAL_ERROR', message: 'An unexpected error occurred' } });
   });
 

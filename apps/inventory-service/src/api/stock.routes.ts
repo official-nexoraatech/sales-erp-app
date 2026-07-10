@@ -4,6 +4,7 @@ import { eq, and, gte, sql, desc, lt } from 'drizzle-orm';
 import { items, warehouses, inventoryLedger, projectionStockLevel } from '@erp/db';
 import { PERMISSIONS } from '@erp/types';
 import type { PlatformContextFactory } from '@erp/sdk';
+import { timingSafeEqual } from 'node:crypto';
 import { authenticate } from '../middleware/authenticate.js';
 import { requirePermission } from '../middleware/authorize.js';
 import { createDatabaseClient } from '@erp/db';
@@ -24,7 +25,10 @@ export async function stockRoutes(
   fastify.post('/inventory/reconcile', async (request, reply) => {
     const apiKey = (request.headers['x-internal-key'] as string | undefined) ?? '';
     const expected = process.env['INTERNAL_API_KEY'] ?? '';
-    if (!expected || apiKey !== expected) {
+    const keyBuffer = Buffer.from(apiKey);
+    const expectedBuffer = Buffer.from(expected);
+    const matches = !!expected && keyBuffer.length === expectedBuffer.length && timingSafeEqual(keyBuffer, expectedBuffer);
+    if (!matches) {
       return reply.code(401).send({ error: { code: 'UNAUTHORIZED', message: 'Invalid internal API key' } });
     }
     const dbUrl = process.env['DATABASE_URL'];
@@ -79,7 +83,24 @@ export async function stockRoutes(
 
       const rows = await baseQuery.limit(limit).offset(offset);
 
-      return reply.code(200).send({ data: rows, meta: { page, limit } });
+      let countQuery = ctx.db.raw
+        .select({ count: sql<number>`count(*)::int` })
+        .from(projectionStockLevel)
+        .innerJoin(items, and(eq(items.id, projectionStockLevel.itemId), eq(items.tenantId, projectionStockLevel.tenantId)))
+        .innerJoin(warehouses, eq(warehouses.id, projectionStockLevel.warehouseId))
+        .where(eq(projectionStockLevel.tenantId, request.auth.tenantId))
+        .$dynamic();
+
+      if (query.warehouseId) {
+        countQuery = countQuery.where(eq(projectionStockLevel.warehouseId, query.warehouseId)) as typeof countQuery;
+      }
+      if (query.belowReorder) {
+        countQuery = countQuery.where(sql`${projectionStockLevel.availableQty} <= ${items.reorderLevel}`) as typeof countQuery;
+      }
+
+      const [countRow] = await countQuery;
+
+      return reply.code(200).send({ data: { content: rows, totalElements: countRow?.count ?? 0, page, limit } });
     }
   );
 

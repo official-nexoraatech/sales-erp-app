@@ -5,6 +5,8 @@ import { productionApi, supplierApi } from '../../api/endpoints.js';
 import { useAuthStore } from '../../store/auth.store.js';
 import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
+import { ERPTableSkeleton } from '../../components/erp/ERPSkeleton.js';
+import ERPEmptyState from '../../components/erp/ERPEmptyState.js';
 import Button from '../../components/ui/Button.js';
 import Badge from '../../components/ui/Badge.js';
 import Input from '../../components/ui/Input.js';
@@ -38,6 +40,7 @@ export default function ConsignmentSettlementsPage() {
   const { data: suppliersData } = useQuery({
     queryKey: ['suppliers-list'],
     queryFn: () => supplierApi.list(),
+    enabled: hasPermission(PERMISSIONS.SUPPLIER_VIEW),
   });
   const suppliers = ((suppliersData as Record<string, unknown>)?.content as { id: number; name: string }[]) ?? [];
 
@@ -48,7 +51,7 @@ export default function ConsignmentSettlementsPage() {
         ? productionApi.listConsignmentSettlements({ supplierId: parseInt(supplierFilter, 10) })
         : productionApi.listConsignmentSettlements(),
   });
-  const settlements: Settlement[] = ((data as Record<string, unknown>)?.data as Settlement[]) ?? [];
+  const settlements: Settlement[] = (data as Settlement[]) ?? [];
 
   // Create settlement form
   const [cSupplierId, setCSupplierId] = useState('');
@@ -103,21 +106,12 @@ export default function ConsignmentSettlementsPage() {
         <div className="bg-surface-card rounded-xl border border-default p-6 mb-6">
           <h3 className="font-semibold text-primary mb-4">Create Settlement</h3>
           <form onSubmit={handleCreate} className="grid grid-cols-3 gap-4">
-            <div>
-              <label className="block text-xs font-medium text-secondary mb-1">Supplier *</label>
-              <Select value={cSupplierId} onChange={(e) => setCSupplierId(e.target.value)} required>
-                <option value="">Select supplier</option>
-                {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-              </Select>
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-secondary mb-1">Period From *</label>
-              <Input type="date" value={cPeriodFrom} onChange={(e) => setCPeriodFrom(e.target.value)} required />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-secondary mb-1">Period To *</label>
-              <Input type="date" value={cPeriodTo} onChange={(e) => setCPeriodTo(e.target.value)} required />
-            </div>
+            <Select label="Supplier" required value={cSupplierId} onChange={(e) => setCSupplierId(e.target.value)}>
+              <option value="">Select supplier</option>
+              {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </Select>
+            <Input label="Period From" required type="date" value={cPeriodFrom} onChange={(e) => setCPeriodFrom(e.target.value)} />
+            <Input label="Period To" required type="date" value={cPeriodTo} onChange={(e) => setCPeriodTo(e.target.value)} />
             <div className="col-span-3 flex gap-3">
               <Button type="submit" disabled={createMutation.isPending}>
                 {createMutation.isPending ? 'Creating…' : 'Create Settlement'}
@@ -135,9 +129,16 @@ export default function ConsignmentSettlementsPage() {
       </div>
 
       {isLoading ? (
-        <p className="text-secondary text-sm">Loading…</p>
+        <ERPTableSkeleton rows={6} cols={8} />
       ) : settlements.length === 0 ? (
-        <p className="text-disabled text-sm">No settlements found.</p>
+        <ERPEmptyState
+          type="no-data"
+          title="No settlements found"
+          description="Monthly settlements of consigned goods sold to customers will appear here."
+          {...(hasPermission(PERMISSIONS.CONSIGNMENT_SETTLE)
+            ? { action: { label: '+ Create Settlement', onClick: () => setShowCreateForm(true) } }
+            : {})}
+        />
       ) : (
         <table className="w-full text-sm bg-surface-card rounded-xl border border-default overflow-hidden">
           <thead className="bg-surface-subtle">

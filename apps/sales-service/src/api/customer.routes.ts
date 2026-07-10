@@ -1,14 +1,14 @@
 import type { FastifyInstance } from 'fastify';
+import { createHash } from 'crypto';
 import type { PlatformContextFactory } from '@erp/sdk';
 import { customers, customersHistory } from '@erp/db';
-import { and, eq, isNull, or, ilike } from 'drizzle-orm';
+import { and, eq, isNull, or, ilike, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { BusinessError, NotFoundError, OptimisticLockError, ValidationError } from '@erp/types';
-import { PERMISSIONS } from '@erp/types';
+import { PERMISSIONS, OptionalGSTINSchema, OptionalPANSchema } from '@erp/types';
 import { authenticate } from '../middleware/authenticate.js';
 import { requirePermission } from '../middleware/authorize.js';
-
-const GSTIN_REGEX = /^\d{2}[A-Z]{5}\d{4}[A-Z]{1}[A-Z\d]{1}[Z]{1}[A-Z\d]{1}$/;
+import { CustomerCacheService } from '../domain/CustomerCacheService.js';
 
 const CustomerSchema = z.object({
   displayName: z.string().min(2).max(200),
@@ -16,16 +16,8 @@ const CustomerSchema = z.object({
   lastName: z.string().max(100).optional(),
   companyName: z.string().max(300).optional(),
   customerType: z.enum(['RETAIL', 'WHOLESALE', 'B2B', 'GOVERNMENT', 'EXPORT']).default('RETAIL'),
-  gstin: z
-    .string()
-    .regex(GSTIN_REGEX, 'Invalid GSTIN format')
-    .optional()
-    .or(z.literal('')),
-  pan: z
-    .string()
-    .regex(/^[A-Z]{5}\d{4}[A-Z]{1}$/, 'Invalid PAN format')
-    .optional()
-    .or(z.literal('')),
+  gstin: OptionalGSTINSchema,
+  pan: OptionalPANSchema,
   phone: z.string().min(10).max(20),
   altPhone: z.string().max(20).optional(),
   email: z.string().email().max(255).optional().or(z.literal('')),
@@ -64,24 +56,47 @@ const CustomerSchema = z.object({
   notes: z.string().max(5000).optional(),
   tags: z.array(z.string()).default([]),
   customFields: z.record(z.unknown()).default({}),
+  // OFFLINE-05: client-generated idempotency key, attached at offline-queue time — optional
+  // so every other (non-offline) caller is unaffected, same convention as
+  // POSSaleSchema.operationId in pos.routes.ts.
+  operationId: z.string().uuid().optional(),
 });
 
 const CustomerUpdateSchema = CustomerSchema.extend({
   version: z.number().int().min(0),
 });
 
-type AuthedRequest = { auth: { tenantId: number; userId: number } };
+const OptOutSchema = z.object({
+  optOutSms: z.boolean().optional(),
+  optOutWhatsapp: z.boolean().optional(),
+  optOutEmail: z.boolean().optional(),
+});
+
+type AuthedRequest = { auth: { tenantId: number; userId: number; email: string }; ip: string };
 
 function simpleHash(value: string): string {
   // HMAC-like hash for search — in prod use ctx.encryption.searchHash()
-  const crypto = require('crypto') as typeof import('crypto');
-  return crypto.createHash('sha256').update(value.toUpperCase()).digest('hex').substring(0, 64);
+  return createHash('sha256').update(value.toUpperCase()).digest('hex').substring(0, 64);
+}
+
+// OFFLINE-05: mirrors InvoiceService.ts's isUniqueViolation — without this translation, a
+// retried offline-customer-sync's unique-constraint hit surfaces as an opaque 500 instead
+// of being recognized as "already synced, return the existing record."
+function isUniqueViolation(err: unknown, constraintName: string): boolean {
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    (err as { code?: unknown }).code === '23505' &&
+    (err as { constraint_name?: unknown }).constraint_name === constraintName
+  );
 }
 
 export async function customerRoutes(
   fastify: FastifyInstance,
   ctxFactory: PlatformContextFactory
 ): Promise<void> {
+  const customerCache = new CustomerCacheService();
+
   // ── GET /customers ─────────────────────────────────────────────────────────
   fastify.get('/customers', { preHandler: [authenticate, requirePermission(PERMISSIONS.CUSTOMER_VIEW)] }, async (request, reply) => {
     const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
@@ -128,8 +143,13 @@ export async function customerRoutes(
       .limit(size)
       .offset(page * size);
 
+    const [countRow] = await ctx.db.raw
+      .select({ count: sql<number>`count(*)::int` })
+      .from(customers)
+      .where(whereClause);
+
     return reply.code(200).send({
-      data: { content: rows, totalElements: rows.length, page, size },
+      data: { content: rows, totalElements: countRow?.count ?? 0, page, size },
     });
   });
 
@@ -143,12 +163,17 @@ export async function customerRoutes(
     });
     const id = parseInt(request.params.id, 10);
 
-    const [customer] = await ctx.db.raw
-      .select()
-      .from(customers)
-      .where(and(eq(customers.id, id), eq(customers.tenantId, tenantId), isNull(customers.deletedAt)));
+    let customer = await customerCache.getCustomer(ctx.cache, id);
+    if (!customer) {
+      const [row] = await ctx.db.raw
+        .select()
+        .from(customers)
+        .where(and(eq(customers.id, id), eq(customers.tenantId, tenantId), isNull(customers.deletedAt)));
 
-    if (!customer) throw new NotFoundError('Customer', id);
+      if (!row) throw new NotFoundError('Customer', id);
+      customer = row;
+      await customerCache.setCustomer(ctx.cache, customer);
+    }
     return reply.code(200).send({ data: customer });
   });
 
@@ -267,21 +292,37 @@ export async function customerRoutes(
     // Auto-generate customer code
     const customerCode = `CUST${Date.now()}`;
 
-    const [created] = await ctx.db.raw
-      .insert(customers)
-      .values({
-        tenantId,
-        createdBy: userId,
-        customerCode,
-        ...body.data,
-        gstin: body.data.gstin || null,
-        gstinHash,
-        pan: body.data.pan || null,
-        panHash,
-        creditLimit: String(body.data.creditLimit),
-        openingBalance: String(body.data.openingBalance),
-      } as unknown as typeof customers.$inferInsert)
-      .returning();
+    let created: typeof customers.$inferSelect | undefined;
+    try {
+      [created] = await ctx.db.raw
+        .insert(customers)
+        .values({
+          tenantId,
+          createdBy: userId,
+          customerCode,
+          ...body.data,
+          gstin: body.data.gstin || null,
+          gstinHash,
+          pan: body.data.pan || null,
+          panHash,
+          creditLimit: String(body.data.creditLimit),
+          openingBalance: String(body.data.openingBalance),
+          clientOperationId: body.data.operationId,
+        } as unknown as typeof customers.$inferInsert)
+        .returning();
+    } catch (err) {
+      // OFFLINE-05: this operationId was already claimed by a prior (or concurrent) sync
+      // of the same offline-queued customer — return the already-committed original
+      // record instead of creating a duplicate.
+      if (isUniqueViolation(err, 'customers_tenant_client_operation_id') && body.data.operationId) {
+        const [existing] = await ctx.db.raw
+          .select()
+          .from(customers)
+          .where(and(eq(customers.tenantId, tenantId), eq(customers.clientOperationId, body.data.operationId)));
+        if (existing) return reply.code(200).send({ data: existing, warnings: [] });
+      }
+      throw err;
+    }
 
     if (!created) throw new Error('Customer creation failed unexpectedly');
     await ctx.events.publish('customer', created.id, 'CUSTOMER_CREATED', created as unknown as Record<string, unknown>);
@@ -348,8 +389,64 @@ export async function customerRoutes(
       updated = row;
     });
 
+    await customerCache.invalidateCustomer(ctx.cache, id);
     await ctx.events.publish('customer', id, 'CUSTOMER_UPDATED', updated as unknown as Record<string, unknown>);
-    await ctx.audit.log({ action: 'UPDATE', entityType: 'customer', entityId: id, before: existing as unknown as Record<string, unknown>, after: updated as unknown as Record<string, unknown> });
+    const changedFields = Object.keys(body.data).filter(
+      (key) => (existing as Record<string, unknown>)[key] !== (body.data as Record<string, unknown>)[key]
+    );
+    await ctx.audit.log({
+      action: 'UPDATE',
+      entityType: 'customer',
+      entityId: id,
+      before: existing as unknown as Record<string, unknown>,
+      after: updated as unknown as Record<string, unknown>,
+      changedFields,
+      actorEmail: (request as unknown as AuthedRequest).auth.email,
+      ipAddress: (request as unknown as AuthedRequest).ip,
+    });
+
+    return reply.code(200).send({ data: updated });
+  });
+
+  // ── PATCH /customers/:id/opt-out — Communication channel opt-out (ES-18) ─
+  fastify.patch<{ Params: { id: string } }>('/customers/:id/opt-out', { preHandler: [authenticate, requirePermission(PERMISSIONS.CUSTOMER_EDIT)] }, async (request, reply) => {
+    const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
+    const ctx = ctxFactory.create({
+      tenantId,
+      userId,
+      correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
+    });
+    const id = parseInt(request.params.id, 10);
+
+    const body = OptOutSchema.safeParse(request.body);
+    if (!body.success) throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
+
+    const [existing] = await ctx.db.raw
+      .select()
+      .from(customers)
+      .where(and(eq(customers.id, id), eq(customers.tenantId, tenantId), isNull(customers.deletedAt)));
+    if (!existing) throw new NotFoundError('Customer', id);
+
+    const [updated] = await ctx.db.raw
+      .update(customers)
+      .set({
+        ...(body.data.optOutSms !== undefined ? { optOutSms: body.data.optOutSms } : {}),
+        ...(body.data.optOutWhatsapp !== undefined ? { optOutWhatsapp: body.data.optOutWhatsapp } : {}),
+        ...(body.data.optOutEmail !== undefined ? { optOutEmail: body.data.optOutEmail } : {}),
+        updatedAt: new Date(),
+      })
+      .where(and(eq(customers.id, id), eq(customers.tenantId, tenantId)))
+      .returning();
+    if (!updated) throw new Error('Opt-out update failed unexpectedly');
+
+    await customerCache.invalidateCustomer(ctx.cache, id);
+    await ctx.audit.log({
+      action: 'UPDATE',
+      entityType: 'customer',
+      entityId: id,
+      before: { optOutSms: existing.optOutSms, optOutWhatsapp: existing.optOutWhatsapp, optOutEmail: existing.optOutEmail },
+      after: { optOutSms: updated.optOutSms, optOutWhatsapp: updated.optOutWhatsapp, optOutEmail: updated.optOutEmail },
+    });
 
     return reply.code(200).send({ data: updated });
   });
@@ -377,6 +474,7 @@ export async function customerRoutes(
       .set({ deletedAt: new Date(), deletedBy: userId, status: 'INACTIVE' })
       .where(eq(customers.id, id));
 
+    await customerCache.invalidateCustomer(ctx.cache, id);
     await ctx.events.publish('customer', id, 'CUSTOMER_DELETED', { id });
     await ctx.audit.log({ action: 'DELETE', entityType: 'customer', entityId: id, before: existing });
 
@@ -436,6 +534,8 @@ export async function customerRoutes(
       before: source,
       metadata: { mergedIntoId: body.data.targetId },
     });
+
+    await customerCache.invalidateCustomer(ctx.cache, body.data.sourceId);
 
     return reply.code(200).send({
       data: { message: 'Customers merged', sourceId: body.data.sourceId, targetId: body.data.targetId },

@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, type ReactNode, type LegacyRef } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { MoreHorizontal } from 'lucide-react';
 
 export interface ERPMenuItem {
@@ -14,33 +15,69 @@ interface Props {
   items: ERPMenuItem[];
   trigger?: ReactNode;
   align?: 'left' | 'right';
+  /** Defaults to "More actions" (the row-actions convention) — override whenever a custom
+   * `trigger` makes that label wrong, e.g. a "Columns" or filter-menu trigger, so two
+   * dropdowns on the same page never collide on accessible name. */
+  ariaLabel?: string;
 }
 
-export default function ERPDropdownMenu({ items, trigger, align = 'right' }: Props) {
+export default function ERPDropdownMenu({ items, trigger, align = 'right', ariaLabel = 'More actions' }: Props) {
   const [open, setOpen] = useState(false);
-  const containerRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [style, setStyle] = useState<CSSProperties>({ visibility: 'hidden' });
+
+  // Recompute the fixed-position coordinates from the trigger button each time the menu
+  // opens (or its item count changes), flipping upward if it would overflow the viewport.
+  // Runs before paint so there's no visible jump from the initial hidden position.
+  useLayoutEffect(() => {
+    if (!open || !buttonRef.current) return;
+    const rect = buttonRef.current.getBoundingClientRect();
+    const menuHeight = menuRef.current?.offsetHeight ?? 0;
+    const openUp = rect.bottom + menuHeight > window.innerHeight;
+    const next: CSSProperties = {
+      position: 'fixed',
+      top: openUp ? rect.top - menuHeight - 4 : rect.bottom + 4,
+    };
+    if (align === 'right') {
+      next.right = window.innerWidth - rect.right;
+    } else {
+      next.left = rect.left;
+    }
+    setStyle(next);
+  }, [open, align, items.length]);
 
   useEffect(() => {
     if (!open) return;
     function handler(e: MouseEvent) {
-      if (!containerRef.current?.contains(e.target as Node)) setOpen(false);
+      const target = e.target as Node;
+      if (buttonRef.current?.contains(target) || menuRef.current?.contains(target)) return;
+      setOpen(false);
     }
     function onKey(e: KeyboardEvent) {
       if (e.key === 'Escape') setOpen(false);
     }
+    function onScrollOrResize() {
+      setOpen(false);
+    }
     document.addEventListener('mousedown', handler);
     document.addEventListener('keydown', onKey);
+    window.addEventListener('scroll', onScrollOrResize, true);
+    window.addEventListener('resize', onScrollOrResize);
     return () => {
       document.removeEventListener('mousedown', handler);
       document.removeEventListener('keydown', onKey);
+      window.removeEventListener('scroll', onScrollOrResize, true);
+      window.removeEventListener('resize', onScrollOrResize);
     };
   }, [open]);
 
   return (
-    <div ref={containerRef} className="relative inline-block">
+    <>
       <button
+        ref={buttonRef}
         onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }}
-        aria-label="More actions"
+        aria-label={ariaLabel}
         aria-haspopup="true"
         aria-expanded={open}
         className="p-1.5 rounded-md text-secondary hover:bg-surface-raised transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
@@ -48,12 +85,12 @@ export default function ERPDropdownMenu({ items, trigger, align = 'right' }: Pro
         {trigger ?? <MoreHorizontal size={16} />}
       </button>
 
-      {open && (
+      {open && createPortal(
         <div
+          ref={menuRef}
           role="menu"
-          className={`absolute z-[--z-dropdown] top-full mt-1 min-w-[160px] bg-surface-overlay border border-default rounded-xl shadow-token-lg py-1 ${
-            align === 'right' ? 'right-0' : 'left-0'
-          }`}
+          style={style}
+          className="z-[var(--z-popover)] min-w-[160px] bg-surface-overlay border border-default rounded-xl shadow-token-lg py-1"
         >
           {items.map((item, i) => {
             const Icon = item.icon;
@@ -78,8 +115,9 @@ export default function ERPDropdownMenu({ items, trigger, align = 'right' }: Pro
               </button>
             );
           })}
-        </div>
+        </div>,
+        document.body
       )}
-    </div>
+    </>
   );
 }

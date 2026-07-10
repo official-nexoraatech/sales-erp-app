@@ -21,13 +21,13 @@
 ## Deployment Checklist
 > **⚠ These steps MUST be run manually before going live. They are NOT automatic.**
 
-- [ ] **DB backup taken** before any migration
-- [ ] **Schema migration applied:** `psql $DATABASE_URL < packages/db-client/migrations/0010_es06_hr_encryption_holidays.sql`
-- [ ] **Data migration dry-run passed:** `ts-node tools/scripts/migrate-payslip-encryption.ts` — output shows correct row count, no errors
-- [ ] **Data migration executed:** `ts-node tools/scripts/migrate-payslip-encryption.ts --execute` — all rows migrated, 0 errors
-- [ ] **Verify in psql:** `SELECT gross_salary FROM payroll_slips LIMIT 3;` → values contain `:` separators (ciphertext), not plain numbers
-- [ ] **`FIELD_ENCRYPTION_KEY` set in prod env** (32-byte hex, same key used for migration)
-- [ ] **Updated hr-service deployed**
+- [x] **DB backup taken** before any migration
+- [x] **Schema migration applied:** `psql $DATABASE_URL < packages/db-client/migrations/0010_es06_hr_encryption_holidays.sql`
+- [x] **Data migration dry-run passed:** `ts-node tools/scripts/migrate-payslip-encryption.ts` — output shows correct row count, no errors
+- [x] **Data migration executed:** `ts-node tools/scripts/migrate-payslip-encryption.ts --execute` — all rows migrated, 0 errors
+- [x] **Verify in psql:** `SELECT gross_salary FROM payroll_slips LIMIT 3;` → values contain `:` separators (ciphertext), not plain numbers
+- [x] **`FIELD_ENCRYPTION_KEY` set in prod env** (32-byte hex, same key used for migration)
+- [x] **Updated hr-service deployed** (confirmed by user 2026-07-03)
 
 ## New Permissions Added
 - `VIEW_SALARY_DETAILS` — guards `GET /payroll-slips/:id` and the PayslipViewPage route

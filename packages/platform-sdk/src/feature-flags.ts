@@ -12,21 +12,32 @@ const L1_TTL_MS = 30_000;       // 30 seconds in-memory
 const L2_TTL_SECONDS = 300;     // 5 minutes in Redis
 const FLAGS_INVALIDATE_CHANNEL = 'erp:feature-flags:invalidate';
 
-// ─── L1 (in-memory per service instance) ─────────────────────────────────
+// ─── L1 (in-memory, shared across all tenants/requests within a service process) ──
 interface L1Entry {
   value: FeatureFlagValue;
   expiresAt: number;
 }
 
+// Keys are tenant-namespaced (`${tenantId}:${flagKey}`), so one Map is safe to
+// share across every per-request PlatformFeatureFlags instance in a process.
+export type FeatureFlagL1Cache = Map<string, L1Entry>;
+
+export function createFeatureFlagL1Cache(): FeatureFlagL1Cache {
+  return new Map();
+}
+
 // PlatformFeatureFlags — L1 (in-memory) + L2 (Redis) cache, hot-reloadable
 export class PlatformFeatureFlags {
-  private readonly l1: Map<string, L1Entry> = new Map();
+  private readonly l1: FeatureFlagL1Cache;
 
   constructor(
     private readonly db: TenantScopedDatabase,
     private readonly cache: TenantScopedCache,
-    private readonly tenantId: number
-  ) {}
+    private readonly tenantId: number,
+    sharedL1Cache?: FeatureFlagL1Cache
+  ) {
+    this.l1 = sharedL1Cache ?? new Map();
+  }
 
   async isEnabled(flagKey: string): Promise<boolean> {
     const flag = await this.getValue(flagKey);
@@ -105,20 +116,16 @@ export class PlatformFeatureFlags {
     await this.cache.publishInvalidation(FLAGS_INVALIDATE_CHANNEL, flagKey);
   }
 
-  // Set up hot-reload listener (call once per service instance)
+  // Set up hot-reload listener (call once per service process bootstrap)
   static subscribeToInvalidations(
     redis: import('ioredis').default,
-    instances: PlatformFeatureFlags[]
+    l1Cache: FeatureFlagL1Cache
   ): void {
     const subscriber = redis.duplicate();
     void subscriber.subscribe(FLAGS_INVALIDATE_CHANNEL);
     subscriber.on('message', (_channel, message: string) => {
-      const { flagKey } = JSON.parse(message) as { tenantId: number; key: string; flagKey?: string };
-      if (flagKey) {
-        for (const instance of instances) {
-          instance.invalidateLocal(flagKey);
-        }
-      }
+      const { tenantId, key } = JSON.parse(message) as { tenantId: number; key: string };
+      l1Cache.delete(`${tenantId}:${key}`);
     });
   }
 }

@@ -1,5 +1,5 @@
 # ES-07 — RBAC & Permission Hardening
-## STATUS: 🔴 PENDING
+## STATUS: ✅ COMPLETED
 ## Sprint: 2 | Effort: 2–3 days | Risk: Medium
 ## Depends on: None (independent)
 ## Unlocks: ES-09, ES-18, ES-19, ES-20

@@ -1,34 +1,33 @@
-﻿import { useEffect } from 'react';
+import { useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { supplierApi } from '../../api/endpoints.js';
+import { supplierApi, branchApi } from '../../api/endpoints.js';
+import { useAuthStore } from '../../store/auth.store.js';
+import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
+import ERPFormSection from '../../components/erp/ERPFormSection.js';
 import Input from '../../components/ui/Input.js';
 import Select from '../../components/ui/Select.js';
 import Button from '../../components/ui/Button.js';
+import { supplierFormSchema, SUPPLIER_TYPES, type SupplierFormData } from '../../schemas/supplier.schema.js';
+import { useDirtyFormGuard } from '../../hooks/useDirtyFormGuard.js';
 
-const GSTIN_RE = /^\d{2}[A-Z]{5}\d{4}[A-Z]{1}[A-Z\d]{1}[Z]{1}[A-Z\d]{1}$/;
-
-interface FormData {
-  displayName: string;
-  supplierType?: string;
-  phone?: string;
-  email?: string;
-  gstin?: string;
-  pan?: string;
-  bankName?: string;
-  bankAccountNo?: string;
-  bankIfsc?: string;
-  creditDays?: number;
-  openingBalance?: number;
-}
+const SUPPLIER_TYPE_LABELS: Record<(typeof SUPPLIER_TYPES)[number], string> = {
+  DOMESTIC: 'Domestic',
+  IMPORT: 'Import',
+  MANUFACTURER: 'Manufacturer',
+  AGENT: 'Agent',
+};
 
 export default function SupplierFormPage() {
   const { id } = useParams<{ id?: string }>();
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const hasPermission = useAuthStore((s) => s.hasPermission);
+  const userBranchIds = useAuthStore((s) => s.user?.branchIds) ?? [];
   const isEdit = !!id;
 
   const { data: supplierData } = useQuery({
@@ -36,13 +35,23 @@ export default function SupplierFormPage() {
     queryFn: () => supplierApi.getById(Number(id)),
     enabled: isEdit,
   });
-  const supplier = (supplierData as Record<string, unknown>)?.data as Record<string, unknown> | undefined;
+  const supplier = (supplierData as Record<string, unknown> | undefined);
 
-  const { register, handleSubmit, reset, formState: { errors, isSubmitting } } = useForm<FormData>();
+  const { data: branchData } = useQuery({ queryKey: ['branches'], queryFn: () => branchApi.list(), enabled: hasPermission(PERMISSIONS.BRANCH_VIEW) });
+  const branches = (branchData as { content?: unknown[] })?.content ?? [];
+
+  const { register, handleSubmit, reset, setValue, formState: { errors, isSubmitting, isDirty } } = useForm<SupplierFormData>({
+    resolver: zodResolver(supplierFormSchema),
+  });
+  useDirtyFormGuard(isDirty);
 
   useEffect(() => {
-    if (supplier) reset(supplier as unknown as FormData);
+    if (supplier) reset(supplier as unknown as SupplierFormData);
   }, [supplier, reset]);
+
+  useEffect(() => {
+    if (!isEdit && userBranchIds.length === 1) setValue('branchId', userBranchIds[0] as number);
+  }, [isEdit, userBranchIds, setValue]);
 
   const mutation = useMutation({
     mutationFn: (d: Record<string, unknown>) =>
@@ -59,47 +68,35 @@ export default function SupplierFormPage() {
     <div>
       <ERPPageHeader variant="list" title={isEdit ? 'Edit Supplier' : 'New Supplier'} />
 
-      <form onSubmit={handleSubmit((d) => mutation.mutate(d as unknown as Record<string, unknown>))} className="max-w-2xl space-y-5">
-        <div className="grid grid-cols-2 gap-4">
-          <Input label="Display Name" required {...register('displayName', { required: 'Required' })} error={errors.displayName?.message} />
-          <Select label="Supplier Type" {...register('supplierType')}>
+      <form onSubmit={handleSubmit((d) => mutation.mutate(d as unknown as Record<string, unknown>))} className="space-y-6" noValidate>
+        <ERPFormSection title="Supplier Details" columns={2}>
+          <Input label="Display Name" required {...register('displayName')} error={errors.displayName?.message} />
+          <Select label="Supplier Type" {...register('supplierType')} error={errors.supplierType?.message}>
             <option value="">Select…</option>
-            <option value="MANUFACTURER">Manufacturer</option>
-            <option value="TRADER">Trader</option>
-            <option value="SERVICE">Service Provider</option>
+            {SUPPLIER_TYPES.map((t) => <option key={t} value={t}>{SUPPLIER_TYPE_LABELS[t]}</option>)}
           </Select>
-        </div>
+          <Select label="Branch" required {...register('branchId')} error={errors.branchId?.message}>
+            <option value="">Select branch…</option>
+            {(branches as Record<string, unknown>[]).map((b) => <option key={b.id as number} value={b.id as number}>{b.name as string}</option>)}
+          </Select>
+          <Input label="Phone" required {...register('phone')} error={errors.phone?.message} />
+          <Input label="Email" type="email" {...register('email')} error={errors.email?.message} />
+          <Input label="GSTIN" placeholder="27AAPFU0939F1ZV" {...register('gstin')} error={errors.gstin?.message} />
+          <Input label="PAN" {...register('pan')} error={errors.pan?.message} />
+        </ERPFormSection>
 
-        <div className="grid grid-cols-2 gap-4">
-          <Input label="Phone" {...register('phone')} />
-          <Input label="Email" type="email" {...register('email')} />
-        </div>
+        <ERPFormSection title="Bank Details" columns={2}>
+          <Input label="Bank Name" {...register('bankName')} error={errors.bankName?.message} />
+          <Input label="IFSC Code" {...register('bankIfsc')} error={errors.bankIfsc?.message} />
+          <Input label="Account Number" type="password" {...register('bankAccountNo')} error={errors.bankAccountNo?.message} hint="Stored encrypted" />
+        </ERPFormSection>
 
-        <div className="grid grid-cols-2 gap-4">
-          <Input
-            label="GSTIN"
-            placeholder="27AAPFU0939F1ZV"
-            {...register('gstin', { pattern: { value: GSTIN_RE, message: 'Invalid GSTIN' } })}
-            error={errors.gstin?.message}
-          />
-          <Input label="PAN" {...register('pan')} />
-        </div>
+        <ERPFormSection title="Credit Terms" columns={2}>
+          <Input label="Credit Days" type="number" {...register('creditDays')} error={errors.creditDays?.message} />
+          <Input label="Opening Balance (₹)" type="number" step="0.01" {...register('openingBalance')} error={errors.openingBalance?.message} />
+        </ERPFormSection>
 
-        <fieldset className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 space-y-4">
-          <legend className="text-xs font-semibold text-gray-500 dark:text-gray-400 px-1">Bank Details</legend>
-          <div className="grid grid-cols-2 gap-4">
-            <Input label="Bank Name" {...register('bankName')} />
-            <Input label="IFSC Code" {...register('bankIfsc')} />
-          </div>
-          <Input label="Account Number" type="password" {...register('bankAccountNo')} hint="Stored encrypted" />
-        </fieldset>
-
-        <div className="grid grid-cols-2 gap-4">
-          <Input label="Credit Days" type="number" {...register('creditDays')} />
-          <Input label="Opening Balance (₹)" type="number" step="0.01" {...register('openingBalance')} />
-        </div>
-
-        <div className="flex gap-3 pt-2">
+        <div className="flex gap-3">
           <Button type="submit" loading={isSubmitting || mutation.isPending}>{isEdit ? 'Update' : 'Create'} Supplier</Button>
           <Button variant="secondary" type="button" onClick={() => navigate('/suppliers')}>Cancel</Button>
         </div>

@@ -79,7 +79,9 @@
 ```
 /
 ├── apps/
-│   ├── api-gateway/          # Kong / custom Fastify gateway
+│   ├── api-gateway/          # Kong / custom Fastify gateway — descoped as of ES-27 (stub only,
+│   │                         # see ERP-PLANNING/phase-completions/ES-27_COMPLETION.md); services
+│   │                         # are reached directly until "ES-28 — API Gateway Implementation"
 │   ├── sales-service/        # Sales, Invoices, Quotations, POS
 │   ├── inventory-service/    # Stock, Reservations, Transfers
 │   ├── accounting-service/   # Double-entry, Ledger, Reports
@@ -140,7 +142,13 @@ await kafka.produce('topic', msg);   // NO — bypasses schema validation
 
 ### 4.2 Tenant Isolation (CRITICAL)
 - Every database table has `tenant_id INTEGER NOT NULL`
-- PostgreSQL Row-Level Security enabled on all tables
+- Tenant isolation is enforced at the **application layer** via hand-written
+  `WHERE tenant_id = ...` predicates in `TenantScopedDatabase` (`packages/platform-sdk/src/database.ts`)
+  and route-level query filters — **no PostgreSQL Row-Level Security policies exist** in any
+  migration (verified ES-25, M14: zero `CREATE POLICY`/`ENABLE ROW LEVEL SECURITY` statements
+  repo-wide). `TenantScopedDatabase.transaction()` sets the `app.current_tenant_id` session GUC,
+  but it is currently inert — no RLS policy reads it. Adding real RLS policies as defense-in-depth
+  is deferred to a dedicated security-hardening phase, not this hygiene pass.
 - Every Redis key prefixed: `tenant:{tenantId}:{key}`
 - Every Elasticsearch index scoped: `erp_{tenantId}_{entity}`
 - Every file storage path prefixed: `/tenants/{tenantId}/`
@@ -233,6 +241,47 @@ Applied to: `inventory_ledger`, `financial_entries` (append-only, never update/d
 These tables are the authoritative history. Current quantities are derived by summation.
 Snapshots taken every 50–100 events per aggregate for performance.
 
+### 4.10 Distributed Consistency — Decision Guide (PG-011)
+
+This system has **no 2PC/XA distributed transaction coordinator, and never should have one**.
+For Kafka + a shared Postgres, a 2PC coordinator adds an availability-reducing single point
+of failure to solve a problem the three mechanisms below already solve without it. This is a
+deliberate architectural stance, not an oversight — do not introduce one without re-reading
+this section first.
+
+The three sanctioned pillars, and when to reach for each:
+
+| Need | Pillar | Where |
+|---|---|---|
+| "I made a local write and must reliably tell other services about it" (no synchronous wait on their reaction) | **Outbox pattern** (§4.4) | `event-service`'s `OutboxRelayWorker` |
+| "I must call out to 2+ systems in sequence within one logical operation, and a later step failing should compensate earlier ones" | **Saga orchestration** (§4.6) | `@erp/sdk`'s `SagaOrchestrator` |
+| "The same logical operation might arrive more than once (client retry, offline-queue replay, at-least-once Kafka redelivery, DLQ replay) and must not be double-applied" | **Idempotency keys** (this section) | `@erp/sdk`'s `idempotency.ts` |
+
+**Idempotency keys — two distinct strategies, kept separate on purpose:**
+
+- **Hard uniqueness** — the operation must never be double-applied, ever. Backed by a
+  Postgres unique constraint (`tenantId` is always the first column, e.g.
+  `invoices_tenant_client_operation_id`), translated from a raw `23505` into a typed
+  `409 DUPLICATE_OPERATION` instead of an opaque `500`. Use `@erp/sdk`'s
+  `isUniqueConstraintViolation()` / `withIdempotentInsert()` / `DuplicateOperationError`.
+  This is the correct choice for financial-record creation (invoices, customers, POS sales)
+  — the reference implementation these were extracted from is
+  `apps/sales-service/src/domain/InvoiceService.ts`.
+- **Soft, time-windowed dedup** — re-sending after the bucket expires is acceptable (e.g.
+  notification sends, where resending after 5 minutes is not a correctness bug). Use
+  `@erp/sdk`'s `deriveTimeBucketedDedupKey()`, generalized from
+  `apps/notification-service/src/domain/NotificationEngine.ts`'s `deriveIdempotencyKey`.
+  A hard unique constraint is the wrong tool here; a hash-based dedup key is the wrong tool
+  for financial-record creation. Pick based on which failure mode is unacceptable, not habit.
+
+This is distinct from the **Inbox pattern** (§4.5), which is consumer-side dedup for
+Kafka event processing (keyed by `eventId` + `consumerService`) — idempotency keys (this
+section) are for API-level writes that might be retried by a client or an offline queue,
+not for event consumption.
+
+Every idempotency key or unique constraint must include `tenantId` as its first component —
+a global, non-tenant-scoped key is a cross-tenant collision risk.
+
 ---
 
 ## 5. DATABASE CONVENTIONS
@@ -311,6 +360,7 @@ PATCH  /api/v2/{resource}/:id          Partial update
 DELETE /api/v2/{resource}/:id          Soft delete
 POST   /api/v2/{resource}/:id/{action} State change (confirm, cancel, approve)
 ```
+Versioning convention for breaking changes (new prefix alongside old, retire only after both frontends migrate): see `ERP-PLANNING/API_VERSIONING.md` (PG-010).
 
 ### 6.2 Response Envelope
 ```typescript
@@ -462,17 +512,9 @@ class PlatformContext {
   // Feature flags (L1+L2 cached, hot-reload)
   features: PlatformFeatureFlags
   
-  // File storage (tenant-scoped, virus-scanned)
-  files: PlatformFileStorage
-  
-  // OpenTelemetry metrics
-  metrics: PlatformMetrics
-  
-  // Notifications (SMS, WhatsApp, Email, In-App)
-  notifications: PlatformNotificationService
-  
-  // Elasticsearch (tenant-scoped indices)
-  search: PlatformSearchEngine
+  // File storage (tenant-scoped) — present only when the service configures
+  // `storage` in PlatformContextFactory; undefined otherwise
+  files?: PlatformAttachments
   
   // Approval workflow engine
   workflows: PlatformWorkflowEngine
@@ -484,6 +526,18 @@ class PlatformContext {
   trace<T>(spanName: string, fn: () => Promise<T>): Promise<T>
 }
 ```
+
+**Not implemented on `PlatformContext`** (resolved ES-25 H9 — access these directly instead of
+through the context):
+- **Metrics** — no `ctx.metrics`. Services use `packages/logger`'s `createMetricsHandler` /
+  `createHttpMetricsHook` to expose Prometheus metrics on `/metrics` directly.
+- **Notifications** — no `ctx.notifications`. Services call notification-service's HTTP API
+  directly.
+- **Search** — no `ctx.search`. Services call search-service's HTTP API directly.
+
+These three were never built as SDK sub-clients; each has a working equivalent elsewhere. This is
+a documentation correction, not a functional gap — see `ES-25_COMPLETION.md` for the decision
+record.
 
 ---
 

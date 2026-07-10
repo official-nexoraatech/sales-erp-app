@@ -1,6 +1,8 @@
+/* global process */
 import type { FastifyInstance } from 'fastify';
 import type { PlatformContextFactory } from '@erp/sdk';
 import { z } from 'zod';
+import { timingSafeEqual } from 'node:crypto';
 import { ValidationError } from '@erp/types';
 import { PERMISSIONS } from '@erp/types';
 import { authenticate } from '../middleware/authenticate.js';
@@ -9,6 +11,25 @@ import { Gstr2aService, type Gstr2aRow } from '../domain/Gstr2aService.js';
 
 type AuthedRequest = { auth: { tenantId: number; userId: number } };
 const PERIOD_REGEX = /^\d{4}-\d{2}$/;
+
+function requireInternalKey(req: { headers: Record<string, string | string[] | undefined> }, reply: { code: (n: number) => { send: (b: unknown) => void } }): boolean {
+  const key = req.headers['x-internal-key'];
+  const expected = process.env['INTERNAL_API_KEY'];
+  const keyBuffer = Buffer.from(typeof key === 'string' ? key : '');
+  const expectedBuffer = Buffer.from(expected ?? '');
+  const matches = !!expected && keyBuffer.length === expectedBuffer.length && timingSafeEqual(keyBuffer, expectedBuffer);
+  if (!matches) {
+    reply.code(401).send({ error: 'Unauthorized' });
+    return false;
+  }
+  return true;
+}
+
+function previousPeriod(): string {
+  const now = new Date();
+  const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1));
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+}
 
 const Gstr2aRowSchema = z.object({
   supplierGstin: z.string().length(15),
@@ -88,5 +109,32 @@ export async function gstr2aRoutes(
         },
       },
     });
+  });
+
+  // POST /gst/gstr2a/reconcile-run?tenantId=... — PG-026, scheduler-triggered.
+  // Actually runs Gstr2aService.reconcile() (matching against whatever GSTR-2A data
+  // has already been imported for the period) rather than just reading the last
+  // reconciliation's summary — re-running is idempotent and picks up GRNs/entries
+  // added since the last run.
+  fastify.post('/gst/gstr2a/reconcile-run', {
+    handler: async (request, reply) => {
+      if (!requireInternalKey(request as never, reply as never)) return;
+      const tenantId = parseInt((request.query as { tenantId?: string }).tenantId ?? '', 10);
+      if (!tenantId) return reply.code(400).send({ error: { code: 'MISSING_TENANT_ID', message: 'tenantId query param required' } });
+
+      const ctx = ctxFactory.create({ tenantId, userId: 0, correlationId: crypto.randomUUID() });
+      const period = previousPeriod();
+      await Gstr2aService.reconcile(ctx.db, tenantId, period);
+      const result = await Gstr2aService.getReconciliation(ctx.db, tenantId, period);
+
+      await ctx.audit.log({
+        action: 'GSTR2A_RECONCILED',
+        entityType: 'GSTR2A',
+        entityId: tenantId,
+        after: { period, summary: result.summary } as unknown as Record<string, unknown>,
+      });
+
+      return reply.code(200).send({ data: { period, summary: result.summary } });
+    },
   });
 }

@@ -5,6 +5,7 @@ import { productionApi, warehouseApi } from '../../api/endpoints.js';
 import { useAuthStore } from '../../store/auth.store.js';
 import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
+import { ERPTableSkeleton } from '../../components/erp/ERPSkeleton.js';
 import Button from '../../components/ui/Button.js';
 import Select from '../../components/ui/Select.js';
 
@@ -29,6 +30,7 @@ export default function ReorderReportPage() {
   const { data: warehousesData } = useQuery({
     queryKey: ['warehouses-list'],
     queryFn: () => warehouseApi.list(),
+    enabled: hasPermission(PERMISSIONS.WAREHOUSE_VIEW),
   });
   const warehouses =
     ((warehousesData as Record<string, unknown>)?.content as { id: number; name: string }[]) ?? [];
@@ -40,12 +42,12 @@ export default function ReorderReportPage() {
         ? productionApi.getReorderRequired({ warehouseId: parseInt(warehouseId, 10) })
         : productionApi.getReorderRequired(),
   });
-  const items: ReorderItem[] = ((data as Record<string, unknown>)?.data as ReorderItem[]) ?? [];
+  const items: ReorderItem[] = (data as ReorderItem[]) ?? [];
 
   const createPOMutation = useMutation({
     mutationFn: (payload: Record<string, unknown>) => productionApi.createReorderPOs(payload),
     onSuccess: (res) => {
-      const result = (res as Record<string, unknown>)?.data as { poIds?: number[] } | undefined;
+      const result = (res as { poIds?: number[] } | undefined);
       toast.success(`${result?.poIds?.length ?? 0} purchase order(s) created`);
       setSelected(new Set());
       qc.invalidateQueries({ queryKey: ['purchase-orders'] });
@@ -123,7 +125,7 @@ export default function ReorderReportPage() {
       </div>
 
       {isLoading ? (
-        <p className="text-secondary text-sm">Loading…</p>
+        <ERPTableSkeleton rows={6} cols={8} />
       ) : items.length === 0 ? (
         <div className="bg-surface-card rounded-xl border border-default p-8 text-center">
           <p className="text-success font-medium">All items are above reorder levels.</p>

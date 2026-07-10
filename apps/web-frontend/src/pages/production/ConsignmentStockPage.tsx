@@ -5,6 +5,8 @@ import { productionApi, supplierApi, itemApi, warehouseApi } from '../../api/end
 import { useAuthStore } from '../../store/auth.store.js';
 import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
+import { ERPTableSkeleton } from '../../components/erp/ERPSkeleton.js';
+import ERPEmptyState from '../../components/erp/ERPEmptyState.js';
 import Button from '../../components/ui/Button.js';
 import Badge from '../../components/ui/Badge.js';
 import Input from '../../components/ui/Input.js';
@@ -42,18 +44,21 @@ export default function ConsignmentStockPage() {
   const { data: suppliersData } = useQuery({
     queryKey: ['suppliers-list'],
     queryFn: () => supplierApi.list(),
+    enabled: hasPermission(PERMISSIONS.SUPPLIER_VIEW),
   });
   const suppliers = ((suppliersData as Record<string, unknown>)?.content as { id: number; name: string }[]) ?? [];
 
   const { data: itemsData } = useQuery({
     queryKey: ['items-list'],
     queryFn: () => itemApi.list(),
+    enabled: hasPermission(PERMISSIONS.ITEM_VIEW),
   });
   const items = ((itemsData as Record<string, unknown>)?.content as { id: number; name: string }[]) ?? [];
 
   const { data: warehousesData } = useQuery({
     queryKey: ['warehouses-list'],
     queryFn: () => warehouseApi.list(),
+    enabled: hasPermission(PERMISSIONS.WAREHOUSE_VIEW),
   });
   const warehouses = ((warehousesData as Record<string, unknown>)?.content as { id: number; name: string }[]) ?? [];
 
@@ -61,7 +66,7 @@ export default function ConsignmentStockPage() {
     queryKey: ['consignment-stock', supplierFilter],
     queryFn: () => supplierFilter ? productionApi.listConsignmentStock({ supplierId: parseInt(supplierFilter, 10) }) : productionApi.listConsignmentStock(),
   });
-  const stocks: ConsignmentStock[] = ((data as Record<string, unknown>)?.data as ConsignmentStock[]) ?? [];
+  const stocks: ConsignmentStock[] = (data as ConsignmentStock[]) ?? [];
 
   // Receive form state
   const [rSupplierId, setRSupplierId] = useState('');
@@ -124,43 +129,22 @@ export default function ConsignmentStockPage() {
         <div className="bg-surface-card rounded-xl border border-default p-6 mb-6">
           <h3 className="font-semibold text-primary mb-4">Receive Consignment Stock</h3>
           <form onSubmit={handleReceive} className="grid grid-cols-3 gap-4">
-            <div>
-              <label className="block text-xs font-medium text-secondary mb-1">Supplier *</label>
-              <Select value={rSupplierId} onChange={(e) => setRSupplierId(e.target.value)} required>
-                <option value="">Select supplier</option>
-                {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-              </Select>
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-secondary mb-1">Item *</label>
-              <Select value={rItemId} onChange={(e) => setRItemId(e.target.value)} required>
-                <option value="">Select item</option>
-                {items.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
-              </Select>
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-secondary mb-1">Warehouse *</label>
-              <Select value={rWarehouseId} onChange={(e) => setRWarehouseId(e.target.value)} required>
-                <option value="">Select warehouse</option>
-                {warehouses.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
-              </Select>
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-secondary mb-1">Received Qty *</label>
-              <Input type="number" min="0.01" step="0.01" value={rQty} onChange={(e) => setRQty(e.target.value)} required />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-secondary mb-1">Agreed Rate *</label>
-              <Input type="number" min="0" step="0.01" value={rRate} onChange={(e) => setRRate(e.target.value)} required />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-secondary mb-1">Received Date *</label>
-              <Input type="date" value={rDate} onChange={(e) => setRDate(e.target.value)} required />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-secondary mb-1">Reference #</label>
-              <Input value={rRef} onChange={(e) => setRRef(e.target.value)} placeholder="Supplier delivery note" />
-            </div>
+            <Select label="Supplier" required value={rSupplierId} onChange={(e) => setRSupplierId(e.target.value)}>
+              <option value="">Select supplier</option>
+              {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </Select>
+            <Select label="Item" required value={rItemId} onChange={(e) => setRItemId(e.target.value)}>
+              <option value="">Select item</option>
+              {items.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
+            </Select>
+            <Select label="Warehouse" required value={rWarehouseId} onChange={(e) => setRWarehouseId(e.target.value)}>
+              <option value="">Select warehouse</option>
+              {warehouses.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
+            </Select>
+            <Input label="Received Qty" required type="number" min="0.01" step="0.01" value={rQty} onChange={(e) => setRQty(e.target.value)} />
+            <Input label="Agreed Rate" required type="number" min="0" step="0.01" value={rRate} onChange={(e) => setRRate(e.target.value)} />
+            <Input label="Received Date" required type="date" value={rDate} onChange={(e) => setRDate(e.target.value)} />
+            <Input label="Reference #" value={rRef} onChange={(e) => setRRef(e.target.value)} placeholder="Supplier delivery note" />
             <div className="col-span-2 flex items-end gap-3">
               <Button type="submit" disabled={receiveMutation.isPending}>
                 {receiveMutation.isPending ? 'Receiving…' : 'Receive Stock'}
@@ -178,9 +162,16 @@ export default function ConsignmentStockPage() {
       </div>
 
       {isLoading ? (
-        <p className="text-secondary text-sm">Loading…</p>
+        <ERPTableSkeleton rows={6} cols={10} />
       ) : stocks.length === 0 ? (
-        <p className="text-disabled text-sm">No consignment stock on file.</p>
+        <ERPEmptyState
+          type="no-data"
+          title="No consignment stock on file"
+          description="Goods received on consignment from suppliers will appear here."
+          {...(hasPermission(PERMISSIONS.CONSIGNMENT_RECEIVE)
+            ? { action: { label: '+ Receive Consignment', onClick: () => setShowReceiveForm(true) } }
+            : {})}
+        />
       ) : (
         <table className="w-full text-sm bg-surface-card rounded-xl border border-default overflow-hidden">
           <thead className="bg-surface-subtle">

@@ -1,16 +1,18 @@
 export const PERMISSIONS = {
   // ── Organization ─────────────────────────────────────────────────────────
+  // PG-014: ORGANIZATION_UPDATE/ORGANIZATION_SETTINGS_VIEW/ORGANIZATION_SETTINGS_UPDATE
+  // retired — duplicates of ORGANIZATION_VIEW/ORG_SETTINGS_EDIT that were never actually
+  // checked anywhere; those two are the real, enforced constants for this resource.
   ORGANIZATION_VIEW: 'ORGANIZATION_VIEW',
-  ORGANIZATION_UPDATE: 'ORGANIZATION_UPDATE',
-  ORGANIZATION_SETTINGS_VIEW: 'ORGANIZATION_SETTINGS_VIEW',
-  ORGANIZATION_SETTINGS_UPDATE: 'ORGANIZATION_SETTINGS_UPDATE',
 
   // ── Branch ───────────────────────────────────────────────────────────────
+  // PG-014: BRANCH_CREATE/BRANCH_UPDATE/BRANCH_DELETE/BRANCH_ASSIGN_USER retired — no
+  // route ever checked them; real enforcement is the single coarse BRANCH_MANAGE below.
   BRANCH_VIEW: 'BRANCH_VIEW',
-  BRANCH_CREATE: 'BRANCH_CREATE',
-  BRANCH_UPDATE: 'BRANCH_UPDATE',
-  BRANCH_DELETE: 'BRANCH_DELETE',
-  BRANCH_ASSIGN_USER: 'BRANCH_ASSIGN_USER',
+  // ES-31: record-level branch scoping bypass — sees all branches' data in the tenant
+  // instead of only the branches assigned to the user. Not about managing branch master
+  // records (that's BRANCH_MANAGE) — this is the transactional-data-visibility dimension.
+  BRANCH_SCOPE_BYPASS: 'BRANCH_SCOPE_BYPASS',
 
   // ── Warehouse ─────────────────────────────────────────────────────────────
   WAREHOUSE_VIEW: 'WAREHOUSE_VIEW',
@@ -23,9 +25,8 @@ export const PERMISSIONS = {
   USER_CREATE: 'USER_CREATE',
   USER_UPDATE: 'USER_UPDATE',
   USER_DELETE: 'USER_DELETE',
-  USER_RESET_PASSWORD: 'USER_RESET_PASSWORD',
-  USER_ACTIVATE: 'USER_ACTIVATE',
-  USER_DEACTIVATE: 'USER_DEACTIVATE',
+  // PG-014: USER_RESET_PASSWORD/USER_ACTIVATE/USER_DEACTIVATE retired — no route ever
+  // checked them; real enforcement is the single coarse USER_MANAGE below.
 
   // ── Roles ─────────────────────────────────────────────────────────────────
   ROLE_VIEW: 'ROLE_VIEW',
@@ -129,6 +130,7 @@ export const PERMISSIONS = {
   PO_CREATE: 'PO_CREATE',
   PO_UPDATE: 'PO_UPDATE',
   PO_APPROVE: 'PO_APPROVE',
+  PO_AMEND: 'PO_AMEND',
   PO_CANCEL: 'PO_CANCEL',
   PO_PRINT: 'PO_PRINT',
   PO_EMAIL: 'PO_EMAIL',
@@ -136,6 +138,7 @@ export const PERMISSIONS = {
   // ── GRN (Goods Receipt Note) ──────────────────────────────────────────────
   GRN_VIEW: 'GRN_VIEW',
   GRN_CREATE: 'GRN_CREATE',
+  GRN_UPDATE: 'GRN_UPDATE',
   GRN_APPROVE: 'GRN_APPROVE',
   GRN_CANCEL: 'GRN_CANCEL',
 
@@ -188,6 +191,8 @@ export const PERMISSIONS = {
   GSTR1_FILE: 'GSTR1_FILE',
   GSTR3B_VIEW: 'GSTR3B_VIEW',
   GSTR3B_FILE: 'GSTR3B_FILE',
+  GSTR9_VIEW: 'GSTR9_VIEW',
+  GSTR9_FILE: 'GSTR9_FILE',
   GSTR2A_RECONCILE: 'GSTR2A_RECONCILE',
 
   // ── Inventory / Stock ─────────────────────────────────────────────────────
@@ -223,6 +228,8 @@ export const PERMISSIONS = {
   PAYROLL_APPROVE: 'PAYROLL_APPROVE',
   SALARY_VIEW: 'SALARY_VIEW',
   SALARY_SLIP_PRINT: 'SALARY_SLIP_PRINT',
+  HR_STATUTORY: 'HR_STATUTORY',
+  EMPLOYEE_LOAN_MANAGE: 'EMPLOYEE_LOAN_MANAGE',
   ALTERATION_VIEW: 'ALTERATION_VIEW',
   ALTERATION_CREATE: 'ALTERATION_CREATE',
   ALTERATION_UPDATE: 'ALTERATION_UPDATE',
@@ -246,11 +253,16 @@ export const PERMISSIONS = {
   REPORT_SCHEDULE: 'REPORT_SCHEDULE',
   REPORT_SHARE: 'REPORT_SHARE',
 
+  // ── Dashboard ─────────────────────────────────────────────────────────────
+  DASHBOARD_VIEW: 'DASHBOARD_VIEW',
+
   // ── Approvals / Workflows ────────────────────────────────────────────────
-  APPROVAL_VIEW: 'APPROVAL_VIEW',
-  APPROVAL_APPROVE: 'APPROVAL_APPROVE',
-  APPROVAL_REJECT: 'APPROVAL_REJECT',
-  WORKFLOW_CONFIG: 'WORKFLOW_CONFIG',
+  // PG-014: APPROVAL_VIEW/APPROVAL_APPROVE/APPROVAL_REJECT/WORKFLOW_CONFIG retired.
+  // Approvals are intentionally scoped by `approverId = caller` in tenant-service's
+  // approval.routes.ts, not by a permission grant — an approver only ever sees and can
+  // act on their own pending items, which can't be misconfigured by role setup the way a
+  // permission-gated model could. This is the permanent design, not a gap. WORKFLOW_CONFIG
+  // had zero implementation surface (no route manages workflow definitions today).
 
   // ── Notifications ─────────────────────────────────────────────────────────
   NOTIFICATION_VIEW: 'NOTIFICATION_VIEW',
@@ -295,15 +307,20 @@ export const PERMISSIONS = {
   CANCEL_POSTED_JOURNAL: 'CANCEL_POSTED_JOURNAL',    // POST /journals/:id/reverse
   EXPORT_CUSTOMER_DATA: 'EXPORT_CUSTOMER_DATA',      // GET /customers/export
   VIEW_AUDIT_LOG: 'VIEW_AUDIT_LOG',                  // GET /admin/audit-logs (not yet implemented — ES-20)
-  IMPERSONATE_USER: 'IMPERSONATE_USER',              // POST /auth/impersonate (not yet implemented — ES-19)
+  IMPERSONATE_USER: 'IMPERSONATE_USER',              // POST /admin/impersonate (auth-service)
 
   // ── Config / Audit ────────────────────────────────────────────────────────
-  CONFIG_VIEW: 'CONFIG_VIEW',
-  CONFIG_UPDATE: 'CONFIG_UPDATE',
+  // PG-014: generic CONFIG_VIEW/CONFIG_UPDATE retired — no route ever checked them;
+  // superseded by the specific config surfaces below (NUMBER_SERIES_CONFIG, FEATURE_FLAG_*).
   NUMBER_SERIES_CONFIG: 'NUMBER_SERIES_CONFIG',
   FEATURE_FLAG_VIEW: 'FEATURE_FLAG_VIEW',
   FEATURE_FLAG_UPDATE: 'FEATURE_FLAG_UPDATE',
   AUDIT_LOG_VIEW: 'AUDIT_LOG_VIEW',
+  // PG-020: single coarse permission covering view/create/update/delete of the tenant's
+  // SSO config — an admin-only config surface, not high-volume transactional data, so it
+  // follows the BRANCH_MANAGE/USER_MANAGE/WAREHOUSE_MANAGE precedent rather than splitting
+  // into four CRUD constants.
+  SSO_CONFIG_MANAGE: 'SSO_CONFIG_MANAGE',
 
   // ── Phase 2 additions (FA.2) ──────────────────────────────────────────────
   WAREHOUSE_MANAGE: 'WAREHOUSE_MANAGE',
@@ -370,6 +387,11 @@ export const PERMISSIONS = {
   SCHEMA_REGISTRY_MANAGE: 'SCHEMA_REGISTRY_MANAGE',
   PROJECTION_VIEW: 'PROJECTION_VIEW',
   PROJECTION_MANAGE: 'PROJECTION_MANAGE',
+  PERFORMANCE_VIEW: 'PERFORMANCE_VIEW',
+
+  // ── Platform-level permissions — cross-tenant, not scoped to request.auth.tenantId. ──
+  // Only assignable to a platform-operator role, never a tenant's own Owner/Admin role.
+  PLATFORM_TENANT_MANAGE: 'PLATFORM_TENANT_MANAGE',
 } as const;
 
 export type Permission = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];

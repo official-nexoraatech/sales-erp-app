@@ -1,10 +1,16 @@
-﻿import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
+import { Pencil, Trash2 } from 'lucide-react';
 import { supplierApi } from '../../api/endpoints.js';
+import { useDebounce } from '../../hooks/useDebounce.js';
+import { useAuthStore } from '../../store/auth.store.js';
+import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
-import DataTable from '../../components/ui/DataTable.js';
+import ERPEmptyState from '../../components/erp/ERPEmptyState.js';
+import ERPDataGrid, { type ERPColumnDef } from '../../components/erp/ERPDataGrid.js';
+import ERPDropdownMenu, { type ERPMenuItem } from '../../components/erp/ERPDropdownMenu.js';
 import Button from '../../components/ui/Button.js';
 import Badge from '../../components/ui/Badge.js';
 import Input from '../../components/ui/Input.js';
@@ -14,13 +20,23 @@ interface Supplier { id: number; supplierCode: string; displayName: string; phon
 export default function SuppliersPage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const hasPermission = useAuthStore((s) => s.hasPermission);
+  const canCreateSupplier = hasPermission(PERMISSIONS.SUPPLIER_CREATE);
+  const canEditSupplier = hasPermission(PERMISSIONS.SUPPLIER_EDIT);
+  const canDeleteSupplier = hasPermission(PERMISSIONS.SUPPLIER_DELETE);
   const [search, setSearch] = useState('');
+  const debouncedSearch = useDebounce(search, 250);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
 
-  const { data, isLoading } = useQuery({
-    queryKey: ['suppliers', search],
-    queryFn: () => supplierApi.list({ search: search || undefined, page: 0, size: 50 }),
+  useEffect(() => { setPage(1); }, [debouncedSearch]);
+
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ['suppliers', debouncedSearch, page, pageSize],
+    queryFn: () => supplierApi.list({ search: debouncedSearch || undefined, page: page - 1, size: pageSize }),
   });
-  const suppliers: Supplier[] = ((data as Record<string, unknown>)?.data as Record<string, unknown>)?.content as Supplier[] ?? [];
+  const suppliers: Supplier[] = (data as Record<string, unknown>)?.content as Supplier[] ?? [];
+  const totalElements = (data as Record<string, unknown>)?.totalElements as number ?? 0;
 
   const deleteMutation = useMutation({
     mutationFn: (id: number) => supplierApi.delete(id),
@@ -28,30 +44,32 @@ export default function SuppliersPage() {
     onError: (err: Error) => toast.error(err.message),
   });
 
-  const columns = [
-    { key: 'supplierCode', header: 'Code', className: 'font-mono text-xs' },
+  const columns: ERPColumnDef<Supplier>[] = [
+    { key: 'supplierCode', header: 'Code', mono: true, sortable: true },
     {
-      key: 'displayName', header: 'Name',
-      render: (r: Supplier) => (
+      key: 'displayName', header: 'Name', sortable: true,
+      render: (r) => (
         <div>
-          <p className="font-medium">{r.displayName}</p>
-          {r.phone && <p className="text-xs text-gray-400">{r.phone}</p>}
+          <button onClick={() => navigate(`/suppliers/${r.id}/edit`)} className="font-medium text-link hover:underline text-left">
+            {r.displayName}
+          </button>
+          {r.phone && <p className="text-xs text-secondary">{r.phone}</p>}
         </div>
       ),
     },
-    { key: 'gstin', header: 'GSTIN', className: 'font-mono text-xs' },
+    { key: 'gstin', header: 'GSTIN', mono: true },
     {
-      key: 'status', header: 'Status',
-      render: (r: Supplier) => <Badge label={r.status} color={r.status === 'ACTIVE' ? 'green' : 'gray'} />,
+      key: 'status', header: 'Status', sortable: true,
+      render: (r) => <Badge variant={r.status === 'ACTIVE' ? 'success' : 'default'}>{r.status}</Badge>,
     },
     {
-      key: 'actions', header: '',
-      render: (r: Supplier) => (
-        <div className="flex gap-2">
-          <Button size="sm" variant="ghost" onClick={() => navigate(`/suppliers/${r.id}/edit`)}>Edit</Button>
-          <Button size="sm" variant="danger" onClick={() => deleteMutation.mutate(r.id)}>Delete</Button>
-        </div>
-      ),
+      key: 'actions', header: '', align: 'right',
+      render: (r) => {
+        const items: ERPMenuItem[] = [];
+        if (canEditSupplier) items.push({ label: 'Edit', icon: Pencil, onClick: () => navigate(`/suppliers/${r.id}/edit`) });
+        if (canDeleteSupplier) items.push({ label: 'Delete', icon: Trash2, variant: 'danger', onClick: () => deleteMutation.mutate(r.id) });
+        return items.length > 0 ? <ERPDropdownMenu items={items} /> : null;
+      },
     },
   ];
 
@@ -60,12 +78,24 @@ export default function SuppliersPage() {
       <ERPPageHeader variant="list"
         title="Suppliers"
         subtitle="Manage your supplier / vendor database."
-        actions={<Button onClick={() => navigate('/suppliers/new')}>+ New Supplier</Button>}
+        actions={canCreateSupplier ? <Button onClick={() => navigate('/suppliers/new')}>+ New Supplier</Button> : undefined}
       />
       <div className="mb-4">
         <Input placeholder="Search suppliers…" value={search} onChange={(e) => setSearch(e.target.value)} className="max-w-xs" />
       </div>
-      <DataTable columns={columns} data={suppliers} loading={isLoading} emptyMessage="No suppliers found." />
+      {isError ? (
+        <ERPEmptyState type="error" />
+      ) : (
+        <ERPDataGrid
+          columns={columns}
+          data={suppliers}
+          isLoading={isLoading}
+          rowKey="id"
+          pagination={{ page, pageSize, total: totalElements }}
+          onPageChange={setPage}
+          onPageSizeChange={(size) => { setPageSize(size); setPage(1); }}
+        />
+      )}
     </div>
   );
 }

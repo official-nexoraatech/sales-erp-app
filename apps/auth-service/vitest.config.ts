@@ -9,9 +9,7 @@ export default defineConfig({
       '@erp/logger': path.resolve(__dirname, '../../packages/logger/src/index.ts'),
       '@erp/config': path.resolve(__dirname, '../../packages/config/src/index.ts'),
       '@erp/sdk': path.resolve(__dirname, '../../packages/platform-sdk/src/index.ts'),
-      '@erp/cache': path.resolve(__dirname, '../../packages/cache-client/src/index.ts'),
       '@erp/utils': path.resolve(__dirname, '../../packages/shared-utils/src/index.ts'),
-      '@erp/events': path.resolve(__dirname, '../../packages/event-bus-client/src/index.ts'),
     },
   },
   test: {

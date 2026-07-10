@@ -3,7 +3,10 @@ import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { stockAdjustmentApi, warehouseApi, itemApi } from '../../api/endpoints.js';
+import { useAuthStore } from '../../store/auth.store.js';
+import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
+import ERPFormSection from '../../components/erp/ERPFormSection.js';
 import Button from '../../components/ui/Button.js';
 import Input from '../../components/ui/Input.js';
 import Select from '../../components/ui/Select.js';
@@ -16,21 +19,22 @@ const ADJ_TYPES = ['DAMAGE', 'EXPIRY', 'THEFT', 'SHORTAGE', 'EXCESS', 'QUALITY_I
 
 export default function StockAdjustmentFormPage() {
   const navigate = useNavigate();
+  const hasPermission = useAuthStore((s) => s.hasPermission);
   const [warehouseId, setWarehouseId] = useState('');
   const [adjustmentType, setAdjustmentType] = useState('DAMAGE');
   const [notes, setNotes] = useState('');
   const [lines, setLines] = useState<AdjLine[]>([]);
   const [itemSearch, setItemSearch] = useState('');
 
-  const { data: whData } = useQuery({ queryKey: ['warehouses'], queryFn: () => warehouseApi.list() });
+  const { data: whData } = useQuery({ queryKey: ['warehouses'], queryFn: () => warehouseApi.list(), enabled: hasPermission(PERMISSIONS.WAREHOUSE_VIEW) });
   const { data: itemData } = useQuery({
     queryKey: ['items', itemSearch],
     queryFn: () => itemApi.list({ search: itemSearch }),
-    enabled: itemSearch.length > 1,
+    enabled: itemSearch.length > 1 && hasPermission(PERMISSIONS.ITEM_VIEW),
   });
 
-  const warehouses: Warehouse[] = (whData as { data?: Warehouse[] })?.data ?? [];
-  const itemResults: Item[] = (itemData as { data?: Item[] })?.data ?? [];
+  const warehouses: Warehouse[] = (whData as { content?: Warehouse[] })?.content ?? [];
+  const itemResults: Item[] = (itemData as { content?: Item[] })?.content ?? [];
 
   const createMutation = useMutation({
     mutationFn: (payload: Record<string, unknown>) => stockAdjustmentApi.create(payload),
@@ -71,16 +75,16 @@ export default function StockAdjustmentFormPage() {
   return (
     <div>
       <ERPPageHeader variant="list" title="New Stock Adjustment" subtitle="Record stock gain or loss" />
-      <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-6 space-y-6">
-        <div className="grid grid-cols-2 gap-4">
-          <Select label="Warehouse" value={warehouseId} onChange={(e) => setWarehouseId(e.target.value)}
+      <div className="space-y-6">
+        <ERPFormSection title="Adjustment Details" columns={2}>
+          <Select label="Warehouse" required value={warehouseId} onChange={(e) => setWarehouseId(e.target.value)}
             options={[{ value: '', label: 'Select warehouse...' }, ...warehouses.map((w) => ({ value: String(w.id), label: w.name }))]} />
-          <Select label="Adjustment Type" value={adjustmentType} onChange={(e) => setAdjustmentType(e.target.value)}
+          <Select label="Adjustment Type" required value={adjustmentType} onChange={(e) => setAdjustmentType(e.target.value)}
             options={ADJ_TYPES.map((t) => ({ value: t, label: t.replace('_', ' ') }))} />
-        </div>
-        <Input label="Notes" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Optional notes" />
+          <Input label="Notes" wrapperClassName="sm:col-span-2" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Optional notes" />
+        </ERPFormSection>
 
-        <div>
+        <div className="bg-surface-card rounded-xl border border-default p-4">
           <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Items</h3>
           <Input label="Search item" value={itemSearch} onChange={(e) => setItemSearch(e.target.value)} placeholder="Type item name…" />
           {itemResults.length > 0 && (
@@ -131,7 +135,7 @@ export default function StockAdjustmentFormPage() {
                       className="w-24 rounded border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm px-2 py-1" />
                   </td>
                   <td className="py-2">
-                    <button onClick={() => setLines((p) => p.filter((_, i) => i !== idx))} className="text-red-500 hover:text-red-700">✕</button>
+                    <button onClick={() => setLines((p) => p.filter((_, i) => i !== idx))} className="text-danger hover:text-danger">✕</button>
                   </td>
                 </tr>
               ))}

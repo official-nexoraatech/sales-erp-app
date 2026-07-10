@@ -2,7 +2,8 @@ import winston from 'winston';
 import { LokiTransport } from './loki-transport.js';
 
 export { LokiTransport };
-export { createMetricsHandler } from './metrics.js';
+export { createMetricsHandler, createHttpMetricsHook } from './metrics.js';
+export type { MetricsHookRequest, MetricsHookReply } from './metrics.js';
 export { createCorrelationIdHook, generateCorrelationId, CORRELATION_ID_HEADER } from './correlation.js';
 export {
   initializeErpMetrics,
@@ -18,8 +19,12 @@ export {
   erpStockNegativeTotal,
   erpAuthLoginTotal,
   erpAuthBruteForceTotal,
+  erpTenantBlockedRequestsTotal,
   erpHttpRequestTotal,
   erpHttpErrorTotal,
+  erpHttpRequestDuration,
+  erpOutboxRelayTotal,
+  erpReplicaFallbackTotal,
 } from './erp-metrics.js';
 
 export interface StructuredLogger {

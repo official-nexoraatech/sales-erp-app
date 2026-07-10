@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { PlatformContextFactory } from '@erp/sdk';
-import { warehouses } from '@erp/db';
-import { and, eq, isNull } from 'drizzle-orm';
+import { warehouses, inventoryLedger } from '@erp/db';
+import { and, eq, isNull, or, ilike, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { BusinessError, NotFoundError, OptimisticLockError, ValidationError } from '@erp/types';
 import { PERMISSIONS } from '@erp/types';
@@ -38,6 +38,9 @@ export async function warehouseRoutes(
   ctxFactory: PlatformContextFactory
 ): Promise<void> {
   // ── GET /warehouses ───────────────────────────────────────────────────────
+  // page/size/search are optional and only paginate when passed — several other
+  // pages (invoice/PO/stock forms etc.) call this unpaginated to populate warehouse
+  // dropdowns and expect the full list back.
   fastify.get('/warehouses', { preHandler: [authenticate, requirePermission(PERMISSIONS.WAREHOUSE_VIEW)] }, async (request, reply) => {
     const { tenantId } = (request as unknown as AuthedRequest).auth;
     const ctx = ctxFactory.create({
@@ -45,12 +48,28 @@ export async function warehouseRoutes(
       userId: (request as unknown as AuthedRequest).auth.userId,
       correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
     });
-    const query = request.query as { branchId?: string };
+    const query = request.query as { branchId?: string; page?: string; size?: string; search?: string };
 
     let whereClause = and(eq(warehouses.tenantId, tenantId), isNull(warehouses.deletedAt));
     if (query.branchId) {
       const bId = parseInt(query.branchId, 10);
       whereClause = and(whereClause, eq(warehouses.branchId, bId));
+    }
+    if (query.search) {
+      whereClause = and(
+        whereClause,
+        or(ilike(warehouses.name, `%${query.search}%`), ilike(warehouses.code, `%${query.search}%`))
+      );
+    }
+
+    if (query.page !== undefined || query.size !== undefined) {
+      const page = Math.max(0, parseInt(query.page ?? '0', 10));
+      const size = Math.min(100, parseInt(query.size ?? '20', 10));
+
+      const rows = await ctx.db.raw.select().from(warehouses).where(whereClause).limit(size).offset(page * size);
+      const [countRow] = await ctx.db.raw.select({ count: sql<number>`count(*)::int` }).from(warehouses).where(whereClause);
+
+      return reply.code(200).send({ data: { content: rows, totalElements: countRow?.count ?? 0, page, size } });
     }
 
     const rows = await ctx.db.raw.select().from(warehouses).where(whereClause);
@@ -140,7 +159,7 @@ export async function warehouseRoutes(
 
     const result = await ctx.db.raw
       .update(warehouses)
-      .set({ ...body.data, updatedAt: new Date(), version: existing.version + 1 } as unknown as Partial<typeof warehouses.$inferInsert>)
+      .set({ ...body.data, updatedAt: new Date(), updatedBy: userId, version: existing.version + 1 } as unknown as Partial<typeof warehouses.$inferInsert>)
       .where(and(
         eq(warehouses.id, id),
         eq(warehouses.tenantId, tenantId),
@@ -182,14 +201,22 @@ export async function warehouseRoutes(
       throw new BusinessError('CANNOT_DELETE_DEFAULT_WAREHOUSE', 'Cannot delete the default warehouse');
     }
 
-    // TODO Phase 4: check inventory_ledger for stock in this warehouse
+    const [ledgerEntry] = await ctx.db.raw
+      .select({ id: inventoryLedger.id })
+      .from(inventoryLedger)
+      .where(and(eq(inventoryLedger.warehouseId, id), eq(inventoryLedger.tenantId, tenantId)))
+      .limit(1);
+    if (ledgerEntry) {
+      throw new BusinessError('WAREHOUSE_HAS_STOCK_HISTORY', 'Cannot delete a warehouse with inventory ledger history');
+    }
 
     await ctx.db.raw
       .update(warehouses)
       .set({ deletedAt: new Date(), deletedBy: userId, isActive: false })
-      .where(eq(warehouses.id, id));
+      .where(and(eq(warehouses.id, id), eq(warehouses.tenantId, tenantId)));
 
     await ctx.audit.log({ action: 'DELETE', entityType: 'warehouse', entityId: id, before: existing });
+    await ctx.events.publish('warehouse', id, 'WAREHOUSE_DELETED', { id });
 
     return reply.code(200).send({ data: { message: 'Warehouse deleted', id } });
   });

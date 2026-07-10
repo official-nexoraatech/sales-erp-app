@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: [main, develop, 'ERP-*']
+    tags: ['v*']
   pull_request:
     branches: [main, develop]
 
@@ -39,6 +40,28 @@ jobs:
 
       - name: Check Prettier formatting
         run: pnpm format:check
+
+      - name: Guard against compiled artifacts committed under packages/*/src
+        run: |
+          MATCHES=$(git ls-files 'packages/*/src' | grep -E '\.(js|d\.ts|js\.map|d\.ts\.map)$' || true)
+          if [ -n "$MATCHES" ]; then
+            echo "Compiled output must go to dist/, not src/. Found tracked build artifacts:"
+            echo "$MATCHES"
+            exit 1
+          fi
+
+      - name: Validate Prometheus alert rules (promtool)
+        run: |
+          docker run --rm -v "$PWD/infrastructure/docker/prometheus:/prometheus:ro" \
+            --entrypoint promtool prom/prometheus:v3.1.0 check rules /prometheus/alert-rules.yml
+
+      - name: Validate Alertmanager config (amtool)
+        run: |
+          docker run --rm -v "$PWD/infrastructure/docker/alertmanager:/alertmanager:ro" \
+            --entrypoint amtool prom/alertmanager:v0.27.0 check-config /alertmanager/alertmanager.yml
+
+      - name: Validate Kubernetes manifests (kustomize build)
+        run: kubectl kustomize infrastructure/k8s/ > /dev/null
 
   # ─── Type Check (runs in parallel) ────────────────────────────────────────
   type-check:
@@ -114,6 +137,14 @@ jobs:
       - name: Run tests with coverage
         run: pnpm test:coverage
 
+      # pos-frontend/web-frontend's vitest suites aren't covered by pnpm test:coverage above
+      # (neither defines a test:coverage script — see OFFLINE-10_COMPLETION.md for why),
+      # so run their plain `test` script directly to make sure they execute in CI at all.
+      - name: Run frontend unit tests (pos-frontend, web-frontend)
+        run: |
+          pnpm --filter @erp/pos-frontend test
+          pnpm --filter @erp/web-frontend test
+
       - name: Upload coverage reports
         uses: codecov/codecov-action@v5
         if: always()
@@ -121,17 +152,58 @@ jobs:
           files: '**/coverage/lcov.info'
           fail_ci_if_error: false
 
+  # ─── E2E Smoke (Global Search) ─────────────────────────────────────────────
+  # Mocks the auth/search HTTP boundary (page.route) rather than standing up the full
+  # Postgres/Elasticsearch/Kafka stack — see GLOBAL-SEARCH_COMPLETION.md. A full-stack E2E
+  # pipeline is a separate future addition, not this smoke suite.
+  e2e:
+    name: E2E Smoke (web-frontend)
+    runs-on: ubuntu-latest
+    needs: [lint, type-check]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright browsers
+        working-directory: apps/web-frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Playwright E2E smoke suite
+        working-directory: apps/web-frontend
+        run: pnpm test:e2e
+
+      - name: Upload Playwright report
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: apps/web-frontend/playwright-report/
+          retention-days: 7
+
   # ─── Build Docker Images ───────────────────────────────────────────────────
   build:
     name: Build (${{ matrix.service }})
     runs-on: ubuntu-latest
     needs: [lint, type-check, test]
+    permissions:
+      contents: read
+      packages: write
     strategy:
       fail-fast: false
       matrix:
         service:
           - auth-service
-          - api-gateway
           - sales-service
           - inventory-service
           - accounting-service
@@ -143,24 +215,28 @@ jobs:
           - search-service
           - report-service
           - tenant-service
+          - event-service
+          - production-service
+          - api-gateway
     steps:
       - uses: actions/checkout@v4
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Log in to Docker Hub
+      - name: Log in to GHCR
         if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_TOKEN }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Extract metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: nexoraatech/erp-${{ matrix.service }}
+          images: ghcr.io/nexoraatech/erp/${{ matrix.service }}
           tags: |
             type=ref,event=branch
             type=ref,event=pr
@@ -173,7 +249,7 @@ jobs:
         with:
           context: .
           file: ./apps/${{ matrix.service }}/Dockerfile
-          push: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
+          push: ${{ github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
@@ -239,12 +315,15 @@ jobs:
     runs-on: ubuntu-latest
     needs: [build]
     if: github.event_name != 'pull_request'
+    permissions:
+      contents: read
+      packages: read
+      security-events: write
     strategy:
       fail-fast: false
       matrix:
         service:
           - auth-service
-          - api-gateway
           - sales-service
           - inventory-service
           - tenant-service
@@ -254,13 +333,29 @@ jobs:
           - scheduler-service
           - search-service
           - report-service
+          - purchase-service
+          - hr-service
+          - event-service
+          - production-service
+          - api-gateway
     steps:
       - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute short SHA tag
+        id: sha
+        run: echo "tag=sha-${GITHUB_SHA:0:7}" >> "$GITHUB_OUTPUT"
 
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: 'nexoraatech/erp-${{ matrix.service }}:${{ github.sha }}'
+          image-ref: 'ghcr.io/nexoraatech/erp/${{ matrix.service }}:${{ steps.sha.outputs.tag }}'
           format: 'sarif'
           output: 'trivy-${{ matrix.service }}.sarif'
           severity: 'CRITICAL,HIGH'
@@ -319,6 +414,10 @@ jobs:
           args: --severity-threshold=high --all-projects
 
   # ─── Deploy to Staging (on git tag) ──────────────────────────────────────
+  # NOTE: infrastructure/k8s/*.yaml manifests are namespaced to `erp-system` (see
+  # namespace.yaml) — there is no separate `erp-staging` namespace anywhere in this repo,
+  # so this job deploys into erp-system on whatever cluster KUBECONFIG_STAGING points to,
+  # rather than a namespace literally named erp-staging.
   deploy-staging:
     name: Deploy to Staging
     runs-on: ubuntu-latest
@@ -327,20 +426,94 @@ jobs:
     environment:
       name: staging
       url: https://erp-staging.nexoraatech.com
+    env:
+      NAMESPACE: erp-system
     steps:
       - uses: actions/checkout@v4
 
       - name: Extract tag version
         id: version
-        run: echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+        run: echo "version=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
 
-      - name: Deploy to Kubernetes staging
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: 'v1.30.0'
+
+      - name: Configure staging kubeconfig
         run: |
-          echo "Deploying version ${{ steps.version.outputs.version }} to staging"
-          # kubectl set image deployment/auth-service auth-service=nexoraatech/erp-auth-service:${{ steps.version.outputs.version }} -n erp-staging
-          # helm upgrade --install erp-staging ./infrastructure/helm/erp \
-          #   --namespace erp-staging \
-          #   --set global.imageTag=${{ steps.version.outputs.version }} \
-          #   --wait --timeout 5m
-        env:
-          KUBECONFIG: ${{ secrets.KUBECONFIG_STAGING }}
+          KUBECONFIG_PATH="${RUNNER_TEMP}/kubeconfig-staging.yaml"
+          echo "${{ secrets.KUBECONFIG_STAGING }}" | base64 -d > "${KUBECONFIG_PATH}"
+          chmod 600 "${KUBECONFIG_PATH}"
+          echo "KUBECONFIG=${KUBECONFIG_PATH}" >> "$GITHUB_ENV"
+
+      - name: Verify cluster access
+        run: kubectl cluster-info
+
+      # Namespace must exist before the pull secret is created into it — applied here
+      # ahead of the full manifest set (which re-applies it idempotently later).
+      - name: Ensure namespace exists
+        run: kubectl apply -f infrastructure/k8s/namespace.yaml
+
+      # ─── Registry pull credential ──────────────────────────────────────────
+      # GHCR images are private by default. Kept separate from KUBECONFIG_STAGING so a
+      # leaked kubeconfig doesn't also leak registry credentials (see Security section of
+      # PG-021). GHCR_PULL_USERNAME/GHCR_PULL_TOKEN must be provisioned as repo secrets
+      # (a machine account PAT with read:packages scope) before this step will succeed.
+      - name: Provision GHCR pull secret
+        run: |
+          kubectl create secret docker-registry ghcr-pull-secret \
+            --namespace "${NAMESPACE}" \
+            --docker-server=ghcr.io \
+            --docker-username="${{ secrets.GHCR_PULL_USERNAME }}" \
+            --docker-password="${{ secrets.GHCR_PULL_TOKEN }}" \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      # ─── Pin the release image tag ──────────────────────────────────────────
+      # docker/metadata-action's semver tag strips the leading "v", so a `v1.2.3` git tag
+      # is published as `ghcr.io/nexoraatech/erp/<service>:1.2.3` by the build job.
+      - name: Pin image tags for this release
+        working-directory: infrastructure/k8s
+        run: |
+          sed -i "s/newTag: latest/newTag: ${{ steps.version.outputs.version }}/" kustomization.yaml
+
+      - name: Apply Kubernetes manifests
+        run: kubectl apply -k infrastructure/k8s/
+
+      # ─── Rollout gate ────────────────────────────────────────────────────────
+      # Backgrounded + waited so 14 sequential 180s timeouts can't serialize into 42 min.
+      - name: Wait for rollouts
+        id: rollout
+        run: |
+          services=(auth-service sales-service inventory-service accounting-service purchase-service hr-service gst-service notification-service scheduler-service search-service report-service tenant-service event-service production-service)
+          pids=()
+          for svc in "${services[@]}"; do
+            kubectl rollout status "deployment/${svc}" -n "${NAMESPACE}" --timeout=180s &
+            pids+=($!)
+          done
+          failed=0
+          for i in "${!pids[@]}"; do
+            if ! wait "${pids[$i]}"; then
+              echo "::error::Rollout failed: ${services[$i]}"
+              failed=1
+            fi
+          done
+          exit $failed
+
+      # ─── Smoke gate ──────────────────────────────────────────────────────────
+      - name: Post-deploy smoke test
+        id: smoke
+        run: bash scripts/ci/staging-smoke-test.sh "${NAMESPACE}"
+
+      # ─── Rollback ────────────────────────────────────────────────────────────
+      # Runs if either the rollout gate or the smoke gate failed; fails the job loudly
+      # rather than silently rolling back and reporting green.
+      - name: Rollback on failure
+        if: failure()
+        run: |
+          services=(auth-service sales-service inventory-service accounting-service purchase-service hr-service gst-service notification-service scheduler-service search-service report-service tenant-service event-service production-service)
+          for svc in "${services[@]}"; do
+            kubectl rollout undo "deployment/${svc}" -n "${NAMESPACE}" || true
+          done
+          echo "::error::Deploy of ${{ steps.version.outputs.version }} failed — all 14 services rolled back to the previous revision."
+          exit 1

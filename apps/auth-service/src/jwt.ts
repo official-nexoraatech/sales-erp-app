@@ -7,6 +7,9 @@ export interface AccessTokenPayload {
   email: string;
   roles: string[];
   permissions: string[];
+  branchIds: number[];
+  impersonatedBy?: number;
+  isImpersonation?: boolean;
 }
 
 export interface JwtConfig {
@@ -26,7 +29,7 @@ export async function initializeJwt(config: JwtConfig): Promise<void> {
   _config = config;
 }
 
-export async function signAccessToken(payload: AccessTokenPayload): Promise<string> {
+export async function signAccessToken(payload: AccessTokenPayload, ttlSecondsOverride?: number): Promise<string> {
   if (!_privateKey || !_config) throw new Error('JWT not initialized');
 
   return new SignJWT({
@@ -34,12 +37,15 @@ export async function signAccessToken(payload: AccessTokenPayload): Promise<stri
     email: payload.email,
     roles: payload.roles,
     permissions: payload.permissions,
+    branchIds: payload.branchIds,
+    ...(payload.impersonatedBy !== undefined ? { impersonatedBy: payload.impersonatedBy } : {}),
+    ...(payload.isImpersonation !== undefined ? { isImpersonation: payload.isImpersonation } : {}),
   })
     .setProtectedHeader({ alg: 'RS256' })
     .setSubject(payload.sub)
     .setIssuedAt()
     .setIssuer(_config.issuer)
-    .setExpirationTime(`${_config.accessTokenTtlSeconds}s`)
+    .setExpirationTime(`${ttlSecondsOverride ?? _config.accessTokenTtlSeconds}s`)
     .sign(_privateKey);
 }
 
@@ -57,6 +63,9 @@ export async function verifyAccessToken(token: string): Promise<AccessTokenPaylo
     email: payload['email'] as string,
     roles: payload['roles'] as string[],
     permissions: payload['permissions'] as string[],
+    branchIds: (payload['branchIds'] as number[]) ?? [],
+    ...(payload['impersonatedBy'] !== undefined ? { impersonatedBy: payload['impersonatedBy'] as number } : {}),
+    ...(payload['isImpersonation'] !== undefined ? { isImpersonation: payload['isImpersonation'] as boolean } : {}),
     iat: payload.iat as number,
     exp: payload.exp as number,
   };

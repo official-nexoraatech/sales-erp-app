@@ -2,9 +2,12 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { bankReconciliationApi } from '../../api/endpoints.js';
+import { useAuthStore } from '../../store/auth.store.js';
+import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
 import Button from '../../components/ui/Button.js';
 import Badge from '../../components/ui/Badge.js';
+import ERPEmptyState from '../../components/erp/ERPEmptyState.js';
 import { ERPTableSkeleton } from '../../components/erp/ERPSkeleton.js';
 import { formatCurrency, formatDate } from '../../lib/format.js';
 
@@ -31,8 +34,15 @@ interface Summary {
 
 const BANK_ACCOUNT_ID = 1; // Demo — in production, use a dropdown to select bank account
 
+const STAT_COLOR_CLASSES: Record<string, string> = {
+  blue: 'text-info',
+  green: 'text-success',
+  red: 'text-danger',
+};
+
 export default function BankReconciliationPage() {
   const qc = useQueryClient();
+  const canReconcile = useAuthStore((s) => s.hasPermission(PERMISSIONS.BANK_RECONCILIATION_DO));
   const [selectedItem, setSelectedItem] = useState<number | null>(null);
 
   const { data: itemsData, isLoading } = useQuery({
@@ -45,8 +55,8 @@ export default function BankReconciliationPage() {
     queryFn: () => bankReconciliationApi.getSummary(BANK_ACCOUNT_ID),
   });
 
-  const items: ReconciliationItem[] = (itemsData as { data?: { content?: ReconciliationItem[] } })?.data?.content ?? [];
-  const summary: Summary | undefined = (summaryData as { data?: Summary })?.data;
+  const items: ReconciliationItem[] = (itemsData as { content?: ReconciliationItem[] })?.content ?? [];
+  const summary: Summary | undefined = (summaryData as Summary);
 
   const matchMutation = useMutation({
     mutationFn: ({ itemId, matchedItemId }: { itemId: number; matchedItemId: number }) =>
@@ -82,17 +92,17 @@ export default function BankReconciliationPage() {
             { label: 'Matched', value: summary.matchedItems, color: 'green' },
             { label: 'Unmatched', value: summary.unmatchedBankItems + summary.unmatchedBookItems, color: 'red' },
           ].map((s) => (
-            <div key={s.label} className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4 text-center">
-              <div className={`text-2xl font-bold text-${s.color}-600 dark:text-${s.color}-400`}>{s.value}</div>
+            <div key={s.label} className="bg-surface-card rounded-xl border border-default p-4 text-center">
+              <div className={`text-2xl font-bold ${STAT_COLOR_CLASSES[s.color] ?? 'text-primary'}`}>{s.value}</div>
               <div className="text-sm text-secondary mt-1">{s.label}</div>
             </div>
           ))}
         </div>
       )}
 
-      {summary?.isReconciled && (
-        <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 rounded-xl px-4 py-3 flex justify-between items-center">
-          <span className="text-green-700 dark:text-green-300 font-medium">✓ All items matched — ready to finalize</span>
+      {canReconcile && summary?.isReconciled && (
+        <div className="bg-success-bg border border-success rounded-xl px-4 py-3 flex justify-between items-center">
+          <span className="text-success font-medium">✓ All items matched — ready to finalize</span>
           <Button variant="primary" onClick={() => finalizeMutation.mutate(1)} disabled={finalizeMutation.isPending}>
             Finalize Reconciliation
           </Button>
@@ -101,16 +111,16 @@ export default function BankReconciliationPage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Bank Side */}
-        <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
-          <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700 font-semibold text-blue-700 dark:text-blue-400 text-sm">Bank Statement Items</div>
+        <div className="bg-surface-card rounded-xl border border-default">
+          <div className="px-4 py-3 border-b border-default font-semibold text-info text-sm">Bank Statement Items</div>
           {isLoading ? <ERPTableSkeleton rows={5} /> : (
-            <div className="divide-y divide-gray-100 dark:divide-gray-700">
+            <div className="divide-y divide-default">
               {bankItems.map((item) => (
                 <div
                   key={item.id}
-                  className={`px-4 py-3 cursor-pointer ${selectedItem === item.id ? 'bg-blue-50 dark:bg-blue-900/20' : 'hover:bg-gray-50 dark:hover:bg-gray-750'}`}
+                  className={`px-4 py-3 ${canReconcile ? 'cursor-pointer' : ''} ${selectedItem === item.id ? 'bg-info-bg' : 'hover:bg-surface-raised'}`}
                   onClick={() => {
-                    if (item.status !== 'UNMATCHED') return;
+                    if (!canReconcile || item.status !== 'UNMATCHED') return;
                     setSelectedItem(selectedItem === item.id ? null : item.id);
                   }}
                 >
@@ -120,27 +130,27 @@ export default function BankReconciliationPage() {
                       <div className="text-xs text-secondary">{formatDate(item.transactionDate)} {item.referenceNumber && `· Ref: ${item.referenceNumber}`}</div>
                     </div>
                     <div className="text-right">
-                      {Number(item.debitAmount) > 0 && <div className="text-sm font-mono text-green-600">{formatCurrency(Number(item.debitAmount))}</div>}
-                      {Number(item.creditAmount) > 0 && <div className="text-sm font-mono text-red-500">{formatCurrency(Number(item.creditAmount))}</div>}
+                      {Number(item.debitAmount) > 0 && <div className="text-sm font-mono text-success">{formatCurrency(Number(item.debitAmount))}</div>}
+                      {Number(item.creditAmount) > 0 && <div className="text-sm font-mono text-danger">{formatCurrency(Number(item.creditAmount))}</div>}
                       <Badge label={item.status} color={item.status === 'MATCHED' ? 'green' : 'yellow'} />
                     </div>
                   </div>
                 </div>
               ))}
-              {bankItems.length === 0 && <div className="px-4 py-8 text-center text-secondary text-sm">No bank items</div>}
+              {bankItems.length === 0 && <ERPEmptyState type="no-data" title="No bank items" description="Bank statement items will appear here once imported." />}
             </div>
           )}
         </div>
 
         {/* Book Side */}
-        <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
-          <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700 font-semibold text-purple-700 dark:text-purple-400 text-sm">Book Entries</div>
+        <div className="bg-surface-card rounded-xl border border-default">
+          <div className="px-4 py-3 border-b border-default font-semibold text-brand text-sm">Book Entries</div>
           {isLoading ? <ERPTableSkeleton rows={5} /> : (
-            <div className="divide-y divide-gray-100 dark:divide-gray-700">
+            <div className="divide-y divide-default">
               {bookItems.map((item) => (
                 <div
                   key={item.id}
-                  className={`px-4 py-3 ${selectedItem && item.status === 'UNMATCHED' ? 'cursor-pointer hover:bg-purple-50 dark:hover:bg-purple-900/10' : ''}`}
+                  className={`px-4 py-3 ${selectedItem && item.status === 'UNMATCHED' ? 'cursor-pointer hover:bg-primary-subtle' : ''}`}
                   onClick={() => {
                     if (selectedItem && item.status === 'UNMATCHED') {
                       matchMutation.mutate({ itemId: selectedItem, matchedItemId: item.id });
@@ -153,21 +163,21 @@ export default function BankReconciliationPage() {
                       <div className="text-xs text-secondary">{formatDate(item.transactionDate)}</div>
                     </div>
                     <div className="text-right">
-                      {Number(item.debitAmount) > 0 && <div className="text-sm font-mono text-green-600">{formatCurrency(Number(item.debitAmount))}</div>}
-                      {Number(item.creditAmount) > 0 && <div className="text-sm font-mono text-red-500">{formatCurrency(Number(item.creditAmount))}</div>}
+                      {Number(item.debitAmount) > 0 && <div className="text-sm font-mono text-success">{formatCurrency(Number(item.debitAmount))}</div>}
+                      {Number(item.creditAmount) > 0 && <div className="text-sm font-mono text-danger">{formatCurrency(Number(item.creditAmount))}</div>}
                       <Badge label={item.status} color={item.status === 'MATCHED' ? 'green' : 'yellow'} />
                     </div>
                   </div>
                 </div>
               ))}
-              {bookItems.length === 0 && <div className="px-4 py-8 text-center text-secondary text-sm">No book items</div>}
+              {bookItems.length === 0 && <ERPEmptyState type="no-data" title="No book items" description="Book entries will appear here once posted." />}
             </div>
           )}
         </div>
       </div>
 
       {selectedItem && (
-        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 bg-blue-600 text-white px-6 py-3 rounded-xl shadow-lg text-sm font-medium">
+        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 bg-primary text-primary-fg px-6 py-3 rounded-xl shadow-lg text-sm font-medium">
           Item #{selectedItem} selected — click a book entry to match it
           <button className="ml-4 underline" onClick={() => setSelectedItem(null)}>Cancel</button>
         </div>

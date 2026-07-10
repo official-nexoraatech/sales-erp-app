@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { PlatformContextFactory } from '@erp/sdk';
-import { purchaseReturns, debitNotes } from '@erp/db';
-import { and, desc, eq } from 'drizzle-orm';
+import { purchaseReturns, debitNotes, suppliers } from '@erp/db';
+import { and, desc, eq, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { PERMISSIONS } from '@erp/types';
 import { authenticate } from '../middleware/authenticate.js';
@@ -59,7 +59,12 @@ export async function purchaseReturnRoutes(
         .limit(pageSize)
         .offset(offset);
 
-      return reply.send({ data: rows, page, pageSize });
+      const [countRow] = await ctx.db.raw
+        .select({ count: sql<number>`count(*)::int` })
+        .from(purchaseReturns)
+        .where(and(...conditions));
+
+      return reply.send({ data: { content: rows, totalElements: countRow?.count ?? 0, page, pageSize } });
     },
   });
 
@@ -84,6 +89,26 @@ export async function purchaseReturnRoutes(
         returnNotes: body.returnNotes,
         lines: body.lines,
         createdBy: req.auth.userId,
+      });
+      // returnNumber is generated inside svc.create() (not returned — its contract is just
+      // the numeric id) so it's re-read here rather than duplicated/guessed at this layer.
+      const [createdReturn] = await ctx.db.raw
+        .select({ returnNumber: purchaseReturns.returnNumber })
+        .from(purchaseReturns)
+        .where(eq(purchaseReturns.id, id));
+      const [supplier] = await ctx.db.raw
+        .select({ displayName: suppliers.displayName })
+        .from(suppliers)
+        .where(and(eq(suppliers.id, body.supplierId), eq(suppliers.tenantId, req.auth.tenantId)));
+      await ctx.events.publish('purchase_return', id, 'PURCHASE_RETURN_CREATED', {
+        returnId: id,
+        returnNumber: createdReturn?.returnNumber,
+        supplierId: body.supplierId,
+        supplierName: supplier?.displayName,
+        grnId: body.grnId,
+        branchId: body.branchId,
+        returnDate: body.returnDate,
+        status: 'DRAFT',
       });
       return reply.code(201).send({ data: { id } });
     },
@@ -129,7 +154,12 @@ export async function purchaseReturnRoutes(
         .limit(pageSize)
         .offset(offset);
 
-      return reply.send({ data: rows, page, pageSize });
+      const [countRow] = await ctx.db.raw
+        .select({ count: sql<number>`count(*)::int` })
+        .from(debitNotes)
+        .where(and(...conditions));
+
+      return reply.send({ data: { content: rows, totalElements: countRow?.count ?? 0, page, pageSize } });
     },
   });
 }

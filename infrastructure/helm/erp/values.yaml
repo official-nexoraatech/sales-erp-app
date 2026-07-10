@@ -1,0 +1,152 @@
+# Default values for the erp chart.
+# Mirrors the settings already present across all 14 infrastructure/k8s/*.yaml manifests
+# 1:1 — this file should not change the deployed shape, only remove the 14-file duplication.
+#
+# namespace.yaml, network-policy.yaml, cert-manager.yaml, vault-config.yaml and
+# backup-cronjob.yaml are NOT templated here (see infrastructure/helm/erp/README.md) — they
+# stay as the existing raw manifests in infrastructure/k8s/ and are applied alongside this
+# chart, per PG-022's "Existing Code Analysis" (reuse as-is, don't redesign).
+
+global:
+  namespace: erp-system
+
+  imageRegistry: ghcr.io/nexoraatech/erp
+  imageTag: latest
+  imagePullSecret: ghcr-pull-secret
+
+  nodeEnv: production
+
+  redisSecretName: erp-redis-secret
+  redisSecretKey: url
+
+  lokiUrl: http://loki.erp-infra.svc.cluster.local:3100
+  otelExporterEndpoint: http://jaeger-collector.erp-infra.svc.cluster.local:4318
+
+  replicaCount: 2
+
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1001
+    fsGroup: 1001
+
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: ["ALL"]
+
+  resources:
+    default:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+
+  probes:
+    liveness:
+      initialDelaySeconds: 15
+      periodSeconds: 20
+      failureThreshold: 3
+    readiness:
+      initialDelaySeconds: 5
+      periodSeconds: 10
+      failureThreshold: 3
+
+  hpa:
+    minReplicas: 2
+    maxReplicas: 10
+    cpuUtilization: 70
+    memoryUtilization: 80
+
+  pdb:
+    minAvailable: 1
+
+# One entry per backend service. `port` / `portEnvName` / `vaultRole` are required; every
+# other field (resources, replicaCount, hpa, pdb) falls back to the `global` defaults above
+# and only needs to be set here when a service genuinely differs (e.g. report-service's
+# larger Puppeteer-driven resource footprint).
+#
+# api-gateway is intentionally excluded — it's a stub (see ES-27_COMPLETION.md) and is
+# already excluded from the CI build matrix and Prometheus scrape config.
+services:
+  auth-service:
+    port: 3010
+    portEnvName: AUTH_SERVICE_PORT
+    vaultRole: auth-service
+    vaultJwtKeys: both # writes both JWT_PRIVATE_KEY and JWT_PUBLIC_KEY
+
+  tenant-service:
+    port: 3011
+    portEnvName: TENANT_SERVICE_PORT
+    vaultRole: tenant-service
+
+  inventory-service:
+    port: 3012
+    portEnvName: INVENTORY_SERVICE_PORT
+    vaultRole: inventory-service
+
+  sales-service:
+    port: 3013
+    portEnvName: SALES_SERVICE_PORT
+    vaultRole: sales-service
+
+  notification-service:
+    port: 3014
+    portEnvName: NOTIFICATION_SERVICE_PORT
+    vaultRole: notification-service
+
+  report-service:
+    port: 3015
+    portEnvName: REPORT_SERVICE_PORT
+    vaultRole: report-service
+    # Heavier than the other 13 services — Puppeteer-driven PDF rendering (see
+    # apps/report-service). Matches the existing infrastructure/k8s/report-service.yaml.
+    resources:
+      requests:
+        cpu: 250m
+        memory: 512Mi
+      limits:
+        cpu: 1000m
+        memory: 1536Mi
+
+  scheduler-service:
+    port: 3016
+    portEnvName: SCHEDULER_SERVICE_PORT
+    vaultRole: scheduler-service
+
+  search-service:
+    port: 3017
+    portEnvName: SEARCH_SERVICE_PORT
+    vaultRole: search-service
+
+  gst-service:
+    port: 3018
+    portEnvName: GST_SERVICE_PORT
+    vaultRole: gst-service
+
+  accounting-service:
+    port: 3019
+    portEnvName: ACCOUNTING_SERVICE_PORT
+    vaultRole: accounting-service
+
+  purchase-service:
+    port: 3020
+    portEnvName: PURCHASE_SERVICE_PORT
+    vaultRole: purchase-service
+
+  hr-service:
+    port: 3021
+    portEnvName: HR_SERVICE_PORT
+    vaultRole: hr-service
+
+  production-service:
+    port: 3022
+    portEnvName: PRODUCTION_SERVICE_PORT
+    vaultRole: production-service
+
+  event-service:
+    port: 3023
+    portEnvName: EVENT_SERVICE_PORT
+    vaultRole: event-service

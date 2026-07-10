@@ -5,25 +5,32 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
 } from 'recharts';
 import {
-  TrendingUp, TrendingDown, ShoppingCart, Wallet, Package, AlertTriangle,
+  TrendingUp, ShoppingCart, Wallet, Package, AlertTriangle,
   Clock, Users, IndianRupee, BarChart3, RefreshCw,
 } from 'lucide-react';
 import { dashboardApi, salesDashboardApi } from '../api/endpoints.js';
 import { Link } from 'react-router-dom';
 import { useAuthStore } from '../store/auth.store.js';
+import { ERPCardSkeleton } from '../components/erp/ERPSkeleton.js';
+import ERPStatCard from '../components/erp/ERPStatCard.js';
+import ChartCard from '../components/erp/ChartCard.js';
 
 const COLORS = ['#6366f1', '#22c55e', '#f59e0b', '#ef4444', '#06b6d4', '#a855f7', '#ec4899', '#14b8a6'];
 
-function fmt(n: number | undefined | null): string {
+function fmt(n: number | string | undefined | null): string {
   if (n === null || n === undefined) return '–';
-  if (n >= 1_00_000) return `₹${(n / 1_00_000).toFixed(2)}L`;
-  if (n >= 1000) return `₹${(n / 1000).toFixed(1)}K`;
-  return `₹${n.toFixed(0)}`;
+  const num = Number(n);
+  if (Number.isNaN(num)) return '–';
+  if (num >= 1_00_000) return `₹${(num / 1_00_000).toFixed(2)}L`;
+  if (num >= 1000) return `₹${(num / 1000).toFixed(1)}K`;
+  return `₹${num.toFixed(0)}`;
 }
 
-function fmtNum(n: number | undefined | null): string {
+function fmtNum(n: number | string | undefined | null): string {
   if (n === null || n === undefined) return '–';
-  return n.toLocaleString('en-IN');
+  const num = Number(n);
+  if (Number.isNaN(num)) return '–';
+  return num.toLocaleString('en-IN');
 }
 
 interface KpiData {
@@ -56,30 +63,6 @@ interface ChartData {
   purchaseTrend: { date: string; total_purchases: number }[];
 }
 
-interface KpiCardProps {
-  label: string;
-  value: string;
-  sub?: string;
-  trend?: 'up' | 'down' | 'neutral';
-  color?: string;
-}
-
-function KpiCard({ label, value, sub, trend, color = 'text-primary' }: KpiCardProps) {
-  return (
-    <div className="bg-surface-card rounded-xl border border-default p-4">
-      <p className="text-xs text-secondary uppercase tracking-wide mb-1">{label}</p>
-      <p className={`text-2xl font-bold ${color}`}>{value}</p>
-      {sub && (
-        <p className={`text-xs mt-1 flex items-center gap-1 ${trend === 'up' ? 'text-success' : trend === 'down' ? 'text-error' : 'text-secondary'}`}>
-          {trend === 'up' && <TrendingUp size={12} />}
-          {trend === 'down' && <TrendingDown size={12} />}
-          {sub}
-        </p>
-      )}
-    </div>
-  );
-}
-
 function AlertWidget({ icon: Icon, label, count, amount, color }: {
   icon: React.ComponentType<{ size?: number; className?: string }>;
   label: string;
@@ -100,6 +83,22 @@ function AlertWidget({ icon: Icon, label, count, amount, color }: {
   );
 }
 
+// Postgres NUMERIC/DECIMAL aggregates (SUM, COALESCE(SUM(...), 0), etc.) come back
+// as strings over the wire to avoid float precision loss — Recharts scales and the
+// fmt()/fmtNum() helpers below all need real numbers, so coerce at the fetch boundary.
+function coerceNumericStrings<T>(value: T): T {
+  if (Array.isArray(value)) return value.map(coerceNumericStrings) as unknown as T;
+  if (value !== null && typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) out[k] = coerceNumericStrings(v);
+    return out as T;
+  }
+  if (typeof value === 'string' && value.trim() !== '' && !Number.isNaN(Number(value))) {
+    return Number(value) as unknown as T;
+  }
+  return value;
+}
+
 const STALE_THRESHOLD_MS = 30_000;
 
 function useDataStaleness(dataUpdatedAt: number): boolean {
@@ -118,30 +117,30 @@ function useDataStaleness(dataUpdatedAt: number): boolean {
 export default function DashboardPage() {
   const user = useAuthStore((s) => s.user);
 
-  const { data: kpisRaw, dataUpdatedAt: kpisUpdatedAt } = useQuery({
+  const { data: kpisRaw, dataUpdatedAt: kpisUpdatedAt, isLoading: isKpisLoading } = useQuery({
     queryKey: ['dashboard-kpis'],
-    queryFn: dashboardApi.kpis,
+    queryFn: async () => coerceNumericStrings(await dashboardApi.kpis()),
     refetchInterval: 30_000,
   });
 
   const { data: chartsRaw } = useQuery({
     queryKey: ['dashboard-charts'],
-    queryFn: dashboardApi.charts,
+    queryFn: async () => coerceNumericStrings(await dashboardApi.charts()),
     staleTime: 60_000,
   });
 
   const { data: alertsRaw } = useQuery({
     queryKey: ['dashboard-alerts'],
-    queryFn: dashboardApi.alerts,
+    queryFn: async () => coerceNumericStrings(await dashboardApi.alerts()),
     refetchInterval: 60_000,
   });
 
   const { data: salesSummaryRaw } = useQuery({
     queryKey: ['dashboard-sales-summary'],
-    queryFn: salesDashboardApi.summary,
+    queryFn: async () => coerceNumericStrings(await salesDashboardApi.summary()),
     refetchInterval: 60_000,
   });
-  const salesSummary = (salesSummaryRaw as { data?: { pendingQuotations: number; overdueInvoices: number; collectedToday: number } })?.data;
+  const salesSummary = (salesSummaryRaw as { pendingQuotations: number; overdueInvoices: number; collectedToday: number });
 
   const isStale = useDataStaleness(kpisUpdatedAt);
 
@@ -150,6 +149,16 @@ export default function DashboardPage() {
   const balances = kpis?.balances;
   const charts = chartsRaw as ChartData | undefined;
   const alerts = alertsRaw as AlertData | undefined;
+
+  if (isKpisLoading) {
+    return (
+      <div className="space-y-6">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {Array.from({ length: 8 }).map((_, i) => <ERPCardSkeleton key={i} lines={2} />)}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -175,18 +184,18 @@ export default function DashboardPage() {
 
       {/* Today KPIs */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <KpiCard label="Today's Sales" value={fmt(today?.today_sales)} color="text-brand" />
-        <KpiCard label="Today's Collection" value={fmt(today?.today_collection)} color="text-success" />
-        <KpiCard label="Today's Purchase" value={fmt(today?.today_purchase)} color="text-warning" />
-        <KpiCard label="Today's Expense" value={fmt(today?.today_expense)} color="text-error" />
+        <ERPStatCard label="Today's Sales" value={fmt(today?.today_sales)} color="text-brand" />
+        <ERPStatCard label="Today's Collection" value={fmt(today?.today_collection)} color="text-success" />
+        <ERPStatCard label="Today's Purchase" value={fmt(today?.today_purchase)} color="text-warning" />
+        <ERPStatCard label="Today's Expense" value={fmt(today?.today_expense)} color="text-error" />
       </div>
 
       {/* Month KPIs */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <KpiCard label="Month Sales" value={fmt(today?.month_sales)} sub="current month" trend="up" />
-        <KpiCard label="Month Collection" value={fmt(today?.month_collection)} />
-        <KpiCard label="Month Profit" value={fmt(today?.month_profit)} color="text-success" />
-        <KpiCard label="Month Invoices" value={fmtNum(today?.month_invoices)} />
+        <ERPStatCard label="Month Sales" value={fmt(today?.month_sales)} sub="current month" trend="up" />
+        <ERPStatCard label="Month Collection" value={fmt(today?.month_collection)} />
+        <ERPStatCard label="Month Profit" value={fmt(today?.month_profit)} color="text-success" />
+        <ERPStatCard label="Month Invoices" value={fmtNum(today?.month_invoices)} />
       </div>
 
       {/* Outstanding balances */}
@@ -213,10 +222,7 @@ export default function DashboardPage() {
 
       {/* Charts row 1: Sales trend + Category pie */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <div className="lg:col-span-2 bg-surface-card border border-default rounded-xl p-4">
-          <h3 className="text-sm font-semibold text-primary mb-3 flex items-center gap-2">
-            <TrendingUp size={15} className="text-brand" /> Sales Trend (Last 30 Days)
-          </h3>
+        <ChartCard title="Sales Trend (Last 30 Days)" icon={TrendingUp} wide>
           <ResponsiveContainer width="100%" height={200}>
             <AreaChart data={charts?.salesTrend ?? []} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
@@ -228,12 +234,9 @@ export default function DashboardPage() {
               <Area type="monotone" dataKey="gross_profit" name="Profit" stroke="#22c55e" fill="#22c55e22" strokeWidth={2} />
             </AreaChart>
           </ResponsiveContainer>
-        </div>
+        </ChartCard>
 
-        <div className="bg-surface-card border border-default rounded-xl p-4">
-          <h3 className="text-sm font-semibold text-primary mb-3 flex items-center gap-2">
-            <BarChart3 size={15} className="text-brand" /> Sales by Category
-          </h3>
+        <ChartCard title="Sales by Category" icon={BarChart3}>
           <ResponsiveContainer width="100%" height={200}>
             <PieChart>
               <Pie data={charts?.salesByCategory ?? []} dataKey="revenue" nameKey="category" cx="50%" cy="50%" outerRadius={70} label={({ name, percent }) => `${name} ${((percent ?? 0) * 100).toFixed(0)}%`} labelLine={false} style={{ fontSize: 10 }}>
@@ -244,15 +247,12 @@ export default function DashboardPage() {
               <Tooltip formatter={(v: number) => fmt(v)} />
             </PieChart>
           </ResponsiveContainer>
-        </div>
+        </ChartCard>
       </div>
 
       {/* Charts row 2: Ageing + Payment modes + Top customers */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="bg-surface-card border border-default rounded-xl p-4">
-          <h3 className="text-sm font-semibold text-primary mb-3 flex items-center gap-2">
-            <AlertTriangle size={15} className="text-warning" /> Receivables Ageing
-          </h3>
+        <ChartCard title="Receivables Ageing" icon={AlertTriangle} iconClassName="text-warning">
           <ResponsiveContainer width="100%" height={160}>
             <BarChart data={charts?.receivablesAgeing ?? []} margin={{ top: 0, right: 8, left: 0, bottom: 0 }}>
               <XAxis dataKey="bucket" tick={{ fontSize: 10 }} />
@@ -261,12 +261,9 @@ export default function DashboardPage() {
               <Bar dataKey="amount" fill="#ef4444" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
-        </div>
+        </ChartCard>
 
-        <div className="bg-surface-card border border-default rounded-xl p-4">
-          <h3 className="text-sm font-semibold text-primary mb-3 flex items-center gap-2">
-            <Wallet size={15} className="text-brand" /> Payment Modes
-          </h3>
+        <ChartCard title="Payment Modes" icon={Wallet}>
           <ResponsiveContainer width="100%" height={160}>
             <PieChart>
               <Pie data={charts?.paymentModes ?? []} dataKey="total" nameKey="mode" cx="50%" cy="50%" outerRadius={60} label={({ name }) => name}>
@@ -277,12 +274,9 @@ export default function DashboardPage() {
               <Tooltip formatter={(v: number) => fmt(v)} />
             </PieChart>
           </ResponsiveContainer>
-        </div>
+        </ChartCard>
 
-        <div className="bg-surface-card border border-default rounded-xl p-4">
-          <h3 className="text-sm font-semibold text-primary mb-3 flex items-center gap-2">
-            <Users size={15} className="text-brand" /> Top Customers
-          </h3>
+        <ChartCard title="Top Customers" icon={Users}>
           <div className="space-y-2">
             {(charts?.topCustomers ?? []).map((c, i) => (
               <div key={i} className="flex items-center justify-between text-sm">
@@ -294,15 +288,12 @@ export default function DashboardPage() {
               <p className="text-secondary text-sm">No data yet</p>
             )}
           </div>
-        </div>
+        </ChartCard>
       </div>
 
       {/* Charts row 3: Purchase trend + Stock by category */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div className="bg-surface-card border border-default rounded-xl p-4">
-          <h3 className="text-sm font-semibold text-primary mb-3 flex items-center gap-2">
-            <ShoppingCart size={15} className="text-warning" /> Purchase Trend (Last 30 Days)
-          </h3>
+        <ChartCard title="Purchase Trend (Last 30 Days)" icon={ShoppingCart} iconClassName="text-warning">
           <ResponsiveContainer width="100%" height={160}>
             <AreaChart data={charts?.purchaseTrend ?? []} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
@@ -312,12 +303,9 @@ export default function DashboardPage() {
               <Area type="monotone" dataKey="total_purchases" name="Purchases" stroke="#f59e0b" fill="#f59e0b22" strokeWidth={2} />
             </AreaChart>
           </ResponsiveContainer>
-        </div>
+        </ChartCard>
 
-        <div className="bg-surface-card border border-default rounded-xl p-4">
-          <h3 className="text-sm font-semibold text-primary mb-3 flex items-center gap-2">
-            <Package size={15} className="text-brand" /> Stock Value by Category
-          </h3>
+        <ChartCard title="Stock Value by Category" icon={Package}>
           <ResponsiveContainer width="100%" height={160}>
             <BarChart data={charts?.stockByCategory ?? []} layout="vertical" margin={{ top: 0, right: 8, left: 60, bottom: 0 }}>
               <XAxis type="number" tick={{ fontSize: 10 }} tickFormatter={(v) => `₹${(v / 1000).toFixed(0)}K`} />
@@ -326,7 +314,7 @@ export default function DashboardPage() {
               <Bar dataKey="value" fill="#6366f1" radius={[0, 4, 4, 0]} />
             </BarChart>
           </ResponsiveContainer>
-        </div>
+        </ChartCard>
       </div>
 
       {/* Sales Workflow Summary */}
@@ -367,7 +355,7 @@ export default function DashboardPage() {
           )}
           {(alerts?.overduePayables.count ?? 0) > 0 && (
             <AlertWidget icon={AlertTriangle} label="overdue payables" count={alerts!.overduePayables.count}
-              amount={alerts!.overduePayables.total_amount} color="border-orange-400 bg-orange-50 text-orange-600 dark:bg-orange-900/20 dark:text-orange-400" />
+              amount={alerts!.overduePayables.total_amount} color="border-orange-400 dark:border-orange-700 bg-orange-50 text-orange-600 dark:bg-orange-900/20 dark:text-orange-400" />
           )}
           {(alerts?.pendingPurchaseOrders.count ?? 0) > 0 && (
             <AlertWidget icon={ShoppingCart} label="pending purchase orders" count={alerts!.pendingPurchaseOrders.count}

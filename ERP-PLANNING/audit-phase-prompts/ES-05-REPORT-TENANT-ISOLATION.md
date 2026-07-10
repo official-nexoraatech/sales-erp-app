@@ -1,5 +1,5 @@
 # ES-05 — Report Tenant Isolation & Core Financial Reports
-## STATUS: 🔴 PENDING
+## STATUS: ✅ COMPLETED
 ## Sprint: 2 | Effort: 4–5 days | Risk: High
 ## Depends on: ES-02 (financial_entries must have real data)
 ## Unlocks: ES-17

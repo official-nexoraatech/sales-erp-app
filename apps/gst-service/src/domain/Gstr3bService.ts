@@ -67,11 +67,29 @@ export interface Gstr3bResult {
   itcSetoff: ItcSetoff;
 }
 
+// PG-040 — the real per-period cash/ITC discharge figures, persisted into
+// gst_return_filings.filingData when a GSTR-3B period is marked filed (see
+// GstReturnTrackerService.markFiled), so GSTR-9 Table 9 can later report actual tax
+// paid instead of mirroring Table 4's liability figure.
+export interface Gstr3bDischargeData {
+  cashRequired: { igst: number; cgst: number; sgst: number };
+  itcUtilized: { igst: number; cgst: number; sgst: number };
+}
+
+// Manual entry — NOT computed from ledger data. No schema field distinguishes import
+// purchases from domestic ones (no country/isImport/customs field anywhere), so these two
+// GSTR-3B sub-buckets stay at zero unless a user enters the real figure before filing (PG-039).
+export interface Gstr3bManualAdjustments {
+  importOfGoodsIgst?: number | undefined;
+  importOfServicesIgst?: number | undefined;
+}
+
 export class Gstr3bService {
   static async compute(
     db: TenantScopedDatabase,
     tenantId: number,
-    period: string
+    period: string,
+    manualAdjustments?: Gstr3bManualAdjustments
   ): Promise<Gstr3bResult> {
     logger.info({ tenantId, period }, 'Computing GSTR-3B');
 
@@ -93,7 +111,15 @@ export class Gstr3bService {
       },
       outwardZeroRated: { igst: 0, taxableValue: 0 },
       outwardOther: { taxableValue: 0 },
-      inwardRcm: { igst: 0, cgst: 0, sgst: 0, cess: 0, taxableValue: 0 },
+      // Self-assessed output tax on RCM purchases (buyer stands in for the unregistered
+      // supplier) — the same amount is claimed back as ITC below in table4.itcAvailable.rcm.
+      inwardRcm: {
+        igst: summary.rcm.igst,
+        cgst: summary.rcm.cgst,
+        sgst: summary.rcm.sgst,
+        cess: summary.rcm.cess,
+        taxableValue: summary.rcm.taxable,
+      },
       outwardNonGst: { taxableValue: 0 },
     };
 
@@ -103,40 +129,83 @@ export class Gstr3bService {
     const netItcSgst = summary.purchases.sgst - summary.purchaseReturns.sgst;
     const netItcIgst = summary.purchases.igst - summary.purchaseReturns.igst;
 
+    const inwardSupplies = {
+      igst: Math.max(0, netItcIgst),
+      cgst: Math.max(0, netItcCgst),
+      sgst: Math.max(0, netItcSgst),
+      cess: 0,
+    };
+    // Import-of-goods/services stay zero unless a manual adjustment was entered for this
+    // period — see Gstr3bManualAdjustments. Imports attract IGST only.
+    const importOfGoods = { igst: manualAdjustments?.importOfGoodsIgst ?? 0, cgst: 0, sgst: 0, cess: 0 };
+    const importOfServices = { igst: manualAdjustments?.importOfServicesIgst ?? 0 };
+    const rcm = { igst: summary.rcm.igst, cgst: summary.rcm.cgst, sgst: summary.rcm.sgst, cess: summary.rcm.cess };
+
+    const itcAvailableTotal = {
+      igst: inwardSupplies.igst + importOfGoods.igst + importOfServices.igst + rcm.igst,
+      cgst: inwardSupplies.cgst + importOfGoods.cgst + rcm.cgst,
+      sgst: inwardSupplies.sgst + importOfGoods.sgst + rcm.sgst,
+      cess: inwardSupplies.cess + importOfGoods.cess + rcm.cess,
+    };
+
+    // Blocked-credit component only (entryType='PURCHASE' AND itcEligible=false) — mirrors
+    // GSTR9Engine.ts Table 7's ineligible-purchase definition for cross-return consistency.
+    // Rule 42/43's proportional exempt-ratio reversal is NOT computed here — this system has
+    // no exempt-vs-taxable turnover-ratio engine. See PG-039 for the full scoping rationale.
+    const itcReversed = {
+      rule42_43: {
+        igst: summary.ineligiblePurchases.igst,
+        cgst: summary.ineligiblePurchases.cgst,
+        sgst: summary.ineligiblePurchases.sgst,
+        cess: summary.ineligiblePurchases.cess,
+      },
+    };
+
     const table4: Gstr3bTable4 = {
       itcAvailable: {
-        importOfGoods: { igst: 0, cgst: 0, sgst: 0, cess: 0 },
-        importOfServices: { igst: 0 },
-        inwardSupplies: {
-          igst: Math.max(0, netItcIgst),
-          cgst: Math.max(0, netItcCgst),
-          sgst: Math.max(0, netItcSgst),
-          cess: 0,
-        },
-        rcm: { igst: 0, cgst: 0, sgst: 0, cess: 0 },
-        total: {
-          igst: Math.max(0, netItcIgst),
-          cgst: Math.max(0, netItcCgst),
-          sgst: Math.max(0, netItcSgst),
-          cess: 0,
-        },
+        importOfGoods,
+        importOfServices,
+        inwardSupplies,
+        rcm,
+        total: itcAvailableTotal,
       },
-      itcReversed: { rule42_43: { igst: 0, cgst: 0, sgst: 0, cess: 0 } },
+      itcReversed,
       netItcAvailable: {
-        igst: Math.max(0, netItcIgst),
-        cgst: Math.max(0, netItcCgst),
-        sgst: Math.max(0, netItcSgst),
-        cess: 0,
+        igst: Math.max(0, itcAvailableTotal.igst - itcReversed.rule42_43.igst),
+        cgst: Math.max(0, itcAvailableTotal.cgst - itcReversed.rule42_43.cgst),
+        sgst: Math.max(0, itcAvailableTotal.sgst - itcReversed.rule42_43.sgst),
+        cess: Math.max(0, itcAvailableTotal.cess - itcReversed.rule42_43.cess),
       },
     };
 
     // ── ITC Set-off (strict GST rule order) ───────────────────────────────────
+    // RCM liability feeds set-off alongside ordinary outward supply — a display-only fix
+    // that didn't reach cashRequired would leave the cash-liability figure silently wrong.
     const itcSetoff = Gstr3bService.computeItcSetoff(
-      { igst: table31.outwardTaxable.igst, cgst: table31.outwardTaxable.cgst, sgst: table31.outwardTaxable.sgst },
+      {
+        igst: table31.outwardTaxable.igst + table31.inwardRcm.igst,
+        cgst: table31.outwardTaxable.cgst + table31.inwardRcm.cgst,
+        sgst: table31.outwardTaxable.sgst + table31.inwardRcm.sgst,
+      },
       { igst: table4.netItcAvailable.igst, cgst: table4.netItcAvailable.cgst, sgst: table4.netItcAvailable.sgst }
     );
 
     return { period, table31, table4, itcSetoff };
+  }
+
+  // PG-040 — derive the real "tax paid" figures from a computed set-off. itcUtilized sums
+  // setoff by ITC source (not by liability head) — e.g. total IGST ITC utilized is however
+  // much of the IGST ITC pool got drawn down, whether it paid IGST, CGST, or SGST liability.
+  static deriveDischargeData(itcSetoff: ItcSetoff): Gstr3bDischargeData {
+    const { setoff, cashRequired } = itcSetoff;
+    return {
+      cashRequired,
+      itcUtilized: {
+        igst: round2(setoff.igstFromIgst + setoff.cgstFromIgst + setoff.sgstFromIgst),
+        cgst: round2(setoff.igstFromCgst + setoff.cgstFromCgst),
+        sgst: round2(setoff.igstFromSgst + setoff.sgstFromSgst),
+      },
+    };
   }
 
   /**

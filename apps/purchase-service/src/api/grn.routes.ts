@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { PlatformContextFactory } from '@erp/sdk';
-import { grns } from '@erp/db';
-import { and, desc, eq } from 'drizzle-orm';
+import { grns, suppliers } from '@erp/db';
+import { and, desc, eq, ilike, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { PERMISSIONS } from '@erp/types';
 import { authenticate } from '../middleware/authenticate.js';
@@ -17,6 +17,7 @@ const GRNLineSchema = z.object({
   unitId: z.number().int().positive().optional(),
   grnRate: z.number().nonnegative(),
   gstRate: z.number().min(0).max(100),
+  cessRate: z.number().min(0).max(100).default(0),
   hsnCode: z.string().max(20).optional(),
   warehouseId: z.number().int().positive().optional(),
 });
@@ -55,7 +56,7 @@ export async function grnRoutes(
         userId: req.auth.userId,
         correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
       });
-      const q = req.query as { status?: string; supplierId?: string; poId?: string; page?: string; pageSize?: string };
+      const q = req.query as { status?: string; supplierId?: string; poId?: string; search?: string; page?: string; pageSize?: string };
       const page = Math.max(1, parseInt(q.page ?? '1', 10));
       const pageSize = Math.min(100, parseInt(q.pageSize ?? '20', 10));
       const offset = (page - 1) * pageSize;
@@ -64,6 +65,7 @@ export async function grnRoutes(
       if (q.status) conditions.push(eq(grns.status, q.status as never));
       if (q.supplierId) conditions.push(eq(grns.supplierId, parseInt(q.supplierId, 10)));
       if (q.poId) conditions.push(eq(grns.purchaseOrderId, parseInt(q.poId, 10)));
+      if (q.search) conditions.push(ilike(grns.grnNumber, `%${q.search}%`));
 
       const rows = await ctx.db.raw
         .select()
@@ -73,7 +75,12 @@ export async function grnRoutes(
         .limit(pageSize)
         .offset(offset);
 
-      return reply.send({ data: rows, page, pageSize });
+      const [countRow] = await ctx.db.raw
+        .select({ count: sql<number>`count(*)::int` })
+        .from(grns)
+        .where(and(...conditions));
+
+      return reply.send({ data: { content: rows, totalElements: countRow?.count ?? 0, page, pageSize } });
     },
   });
 
@@ -99,6 +106,23 @@ export async function grnRoutes(
         lines: body.lines,
         notes: body.notes,
         createdBy: req.auth.userId,
+      });
+      // grnNumber genuinely doesn't exist yet — it's assigned at approval (see grn.routes.ts
+      // ApproveGRNSchema / GRNService.approve), not a bug to fix here. supplierName/grnDate
+      // are denormalized now so the DRAFT-window search result at least shows the supplier
+      // and date instead of a bare fallback string (see searchEntityConfig.ts's title fallback).
+      const [supplier] = await ctx.db.raw
+        .select({ displayName: suppliers.displayName })
+        .from(suppliers)
+        .where(and(eq(suppliers.id, body.supplierId), eq(suppliers.tenantId, req.auth.tenantId)));
+      await ctx.events.publish('grn', id, 'GRN_CREATED', {
+        grnId: id,
+        supplierId: body.supplierId,
+        supplierName: supplier?.displayName,
+        purchaseOrderId: body.purchaseOrderId,
+        branchId: body.branchId,
+        grnDate: body.grnDate,
+        status: 'DRAFT',
       });
       return reply.code(201).send({ data: { id } });
     },

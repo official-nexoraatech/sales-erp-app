@@ -1,12 +1,13 @@
 import type { FastifyInstance } from 'fastify';
 import type { PlatformContextFactory } from '@erp/sdk';
 import { payments } from '@erp/db';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { PERMISSIONS } from '@erp/types';
 import { authenticate } from '../middleware/authenticate.js';
 import { requirePermission } from '../middleware/authorize.js';
 import { PaymentService } from '../domain/PaymentService.js';
+import { sendError } from './http-errors.js';
 
 const CreatePaymentSchema = z.object({
   customerId: z.number().int().positive(),
@@ -58,7 +59,12 @@ export async function paymentRoutes(
         .limit(pageSize)
         .offset((page - 1) * pageSize);
 
-      return reply.send({ data: rows, page, pageSize });
+      const [countRow] = await ctx.db.raw
+        .select({ count: sql<number>`count(*)::int` })
+        .from(payments)
+        .where(and(...conditions));
+
+      return reply.send({ data: { content: rows, totalElements: countRow?.count ?? 0, page, pageSize } });
     },
   });
 
@@ -99,7 +105,7 @@ export async function paymentRoutes(
         .select()
         .from(payments)
         .where(and(eq(payments.id, parseInt(id, 10)), eq(payments.tenantId, req.auth.tenantId)));
-      if (!row) return reply.code(404).send({ error: 'Payment not found' });
+      if (!row) return sendError(reply, 404, 'NOT_FOUND', 'Payment not found');
       return reply.send({ data: row });
     },
   });

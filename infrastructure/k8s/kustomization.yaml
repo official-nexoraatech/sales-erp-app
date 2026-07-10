@@ -1,0 +1,57 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# NOTE: resources already declare `namespace: erp-system` (see namespace.yaml). There is no
+# separate `erp-staging` namespace manifest anywhere in this repo, so we deploy into the
+# existing erp-system namespace rather than overriding to a namespace that doesn't exist.
+resources:
+  - namespace.yaml
+  - network-policy.yaml
+  - pushgateway.yaml
+  - backup-cronjob.yaml
+  - loki.yaml
+  - auth-service.yaml
+  - sales-service.yaml
+  - inventory-service.yaml
+  - accounting-service.yaml
+  - purchase-service.yaml
+  - hr-service.yaml
+  - gst-service.yaml
+  - notification-service.yaml
+  - scheduler-service.yaml
+  - search-service.yaml
+  - report-service.yaml
+  - tenant-service.yaml
+  - event-service.yaml
+  - production-service.yaml
+
+# CI overrides these tags per-deploy via `kustomize edit set image` before `kubectl apply -k`.
+images:
+  - name: ghcr.io/nexoraatech/erp/auth-service
+    newTag: latest
+  - name: ghcr.io/nexoraatech/erp/sales-service
+    newTag: latest
+  - name: ghcr.io/nexoraatech/erp/inventory-service
+    newTag: latest
+  - name: ghcr.io/nexoraatech/erp/accounting-service
+    newTag: latest
+  - name: ghcr.io/nexoraatech/erp/purchase-service
+    newTag: latest
+  - name: ghcr.io/nexoraatech/erp/hr-service
+    newTag: latest
+  - name: ghcr.io/nexoraatech/erp/gst-service
+    newTag: latest
+  - name: ghcr.io/nexoraatech/erp/notification-service
+    newTag: latest
+  - name: ghcr.io/nexoraatech/erp/scheduler-service
+    newTag: latest
+  - name: ghcr.io/nexoraatech/erp/search-service
+    newTag: latest
+  - name: ghcr.io/nexoraatech/erp/report-service
+    newTag: latest
+  - name: ghcr.io/nexoraatech/erp/tenant-service
+    newTag: latest
+  - name: ghcr.io/nexoraatech/erp/event-service
+    newTag: latest
+  - name: ghcr.io/nexoraatech/erp/production-service
+    newTag: latest

@@ -551,6 +551,12 @@ packages:
 ### Reverse Proxy / API Gateway
 - **`@erp/api-gateway`** — Fastify-based, uses `@fastify/http-proxy` to forward to microservices — **not yet fully implemented**
 - No Nginx configured
+- **ES-27 decision (2026-07-04): explicitly descoped, not built.** `api-gateway` remains a 4-line
+  stub (`export {}`). It has been removed from the CI build/security-scan matrices, the
+  `network-policy.yaml` NetworkPolicy podSelector reference, and the Prometheus scrape config —
+  previously these referenced it as if it were live, which was the H2 audit finding. Until it's
+  built, every backend service is reached directly and independently enforces its own auth (see
+  ES-21 RBAC hardening). Follow-up phase: "ES-28 — API Gateway Implementation."
 
 ---
 
@@ -891,7 +897,7 @@ d:\NEXORAA\sales-erp-app\
 ### Potentially Redundant
 | Situation | Details |
 |-----------|---------|
-| `@erp/events` (event-bus-client) vs `@erp/sdk` (platform-sdk) | Both import `kafkajs`. The SDK's `PlatformEventBus`/`PlatformEventConsumer` is the standard path. `event-bus-client` may be a legacy package — verify if any service uses `@erp/events` directly |
+| ~~`@erp/events` (event-bus-client) vs `@erp/sdk` (platform-sdk)~~ | **RESOLVED (ES-25, M11):** confirmed dead — `createEventProducer`/`createEventConsumer` unconditionally threw, zero real importers (only a dead vitest-config alias in `apps/auth-service`). Package deleted; the SDK's `PlatformEventBus`/`PlatformEventConsumer` is the only event-bus path. See `ES-25_COMPLETION.md` |
 | `@erp/cache` (cache-client) vs `ioredis` in SDK | Cache-client wraps ioredis; SDK also uses ioredis directly. Consistent usage: always go through `@erp/sdk` `TenantScopedCache` |
 
 ### Deprecated / Watch List
@@ -1000,6 +1006,7 @@ Production deployment infrastructure exists under `infrastructure/` — these ma
 |------|----------------|
 | `namespace.yaml` | Namespace `erp-system` |
 | `auth-service.yaml` | Deployment (2 replicas), Service, HPA — with Vault agent sidecar injection |
+| `<service>.yaml` (13 more, added ES-27) | Same pattern as `auth-service.yaml` for sales, inventory, accounting, purchase, hr, gst, notification, scheduler, search, report, tenant, event, production-service — all 14 backend services now have a manifest. `api-gateway` intentionally excluded (descoped, see §Reverse Proxy / API Gateway). |
 | `network-policy.yaml` | Firewall rules restricting inter-service traffic |
 | `cert-manager.yaml` | ACME TLS certificate provisioning |
 | `vault-config.yaml` | Vault secret paths and role bindings for each service |
@@ -1015,6 +1022,12 @@ Production deployment infrastructure exists under `infrastructure/` — these ma
 
 > Istio is a planned production dependency, not running locally. When Phase 5+ services are deployed, all inter-service calls will be encrypted via mTLS automatically.
 
+**ES-27 confirmation (2026-07-04):** the two files above remain intentionally scaffolding-only —
+policy definitions for a mesh that isn't installed. No Istio control plane, sidecar injection, or
+`istioctl` bootstrap exists anywhere in this repo or its CI. Do not mistake these two YAML files
+for a working service mesh in a future session; they're a target-state reference for when Istio is
+actually installed in a real cluster.
+
 ### GitLab Mirror
 
 **File:** `.github/workflows/gitlab-sync.yml`
@@ -1022,6 +1035,12 @@ Production deployment infrastructure exists under `infrastructure/` — these ma
 - Mirrors `main` branch to `gitlab.com/nexoraa-tech-official/sales-erp-app` on every push
 - Force push via `GITLAB_TOKEN` secret
 - Reason: GitLab may be used as backup SCM or for GitLab CI in parallel
+- **ES-27 resolution (2026-07-04):** `.gitlab-ci.yml` (repo root) has been deleted — it was dead
+  code from the project's pre-migration Spring Boot layout (`sale-erp-backend`/`sale-erp-froentend`,
+  EC2 SSH deploy script) and had never been updated for the current pnpm/TypeScript microservices
+  monorepo; it would fail immediately if GitLab CI ever ran it. GitHub Actions (`.github/workflows/ci.yml`)
+  is the sole authoritative CI/CD pipeline. This mirror workflow is unaffected — it only pushes
+  commits to GitLab for backup, it doesn't invoke GitLab CI.
 
 ### Prometheus Scrape Config
 

@@ -1,5 +1,5 @@
 # ES-13 — Inventory Valuation: FIFO & WACC
-## STATUS: 🔴 PENDING
+## STATUS: ✅ COMPLETED (adapted — see ES-13_COMPLETION.md for architecture deviation on where valuation logic runs)
 ## Sprint: 3 | Effort: 4–5 days | Risk: High
 ## Depends on: ES-03 (ledger integrity), ES-08 (sales), ES-09 (purchase GRNI)
 ## Unlocks: ES-16, ES-17

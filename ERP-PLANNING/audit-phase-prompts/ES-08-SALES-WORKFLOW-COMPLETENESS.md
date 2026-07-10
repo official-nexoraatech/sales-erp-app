@@ -1,5 +1,5 @@
 # ES-08 — Sales Workflow Completeness
-## STATUS: 🔴 PENDING
+## STATUS: 🟢 COMPLETE
 ## Sprint: 2 | Effort: 4–5 days | Risk: High
 ## Depends on: ES-03 (inventory ledger), ES-07 (RBAC permissions)
 ## Unlocks: ES-13, ES-14, ES-17

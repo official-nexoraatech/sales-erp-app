@@ -3,6 +3,9 @@ import { useQuery, useMutation } from '@tanstack/react-query';
 import { FileText, CheckCircle, AlertTriangle, Download, ChevronDown, ChevronRight } from 'lucide-react';
 import { gstApi } from '../../api/endpoints.js';
 import toast from 'react-hot-toast';
+import { useAuthStore } from '../../store/auth.store.js';
+import { PERMISSIONS } from '../../constants/permissions.js';
+import { ERPCardSkeleton } from '../../components/erp/ERPSkeleton.js';
 
 function getCurrentPeriod(): string {
   const now = new Date();
@@ -39,7 +42,7 @@ function SectionCard({ title, subtitle, count, amount, children }: SectionCardPr
         </div>
         <div className="flex items-center gap-4">
           <span className="text-sm font-medium text-gray-700 dark:text-gray-300">{formatCurrency(amount)}</span>
-          {open ? <ChevronDown className="w-4 h-4 text-gray-400" /> : <ChevronRight className="w-4 h-4 text-gray-400" />}
+          {open ? <ChevronDown className="w-4 h-4 text-gray-400 dark:text-gray-500" /> : <ChevronRight className="w-4 h-4 text-gray-400 dark:text-gray-500" />}
         </div>
       </button>
       {open && <div className="border-t border-gray-100 dark:border-gray-700 px-5 py-4">{children}</div>}
@@ -48,6 +51,7 @@ function SectionCard({ title, subtitle, count, amount, children }: SectionCardPr
 }
 
 export function Gstr1Page() {
+  const canFileGstr1 = useAuthStore((s) => s.hasPermission(PERMISSIONS.GSTR1_FILE));
   const [period, setPeriod] = useState(getCurrentPeriod());
   const [gstin, setGstin] = useState('');
 
@@ -96,14 +100,16 @@ export function Gstr1Page() {
           </div>
         </div>
         <div className="flex gap-2">
-          <button
-            onClick={() => exportMutation.mutate('JSON')}
-            disabled={!gstr1Data?.isExportReady || exportMutation.isPending}
-            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <Download className="w-4 h-4" />
-            Export JSON (NIC)
-          </button>
+          {canFileGstr1 && (
+            <button
+              onClick={() => exportMutation.mutate('JSON')}
+              disabled={!gstr1Data?.isExportReady || exportMutation.isPending}
+              className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <Download className="w-4 h-4" />
+              Export JSON (NIC)
+            </button>
+          )}
         </div>
       </div>
 
@@ -160,7 +166,12 @@ export function Gstr1Page() {
       )}
 
       {isLoading ? (
-        <div className="py-12 text-center text-sm text-gray-400">Loading GSTR-1 data...</div>
+        <div className="space-y-3">
+          <ERPCardSkeleton lines={2} />
+          <ERPCardSkeleton lines={2} />
+          <ERPCardSkeleton lines={2} />
+          <ERPCardSkeleton lines={2} />
+        </div>
       ) : (
         <div className="space-y-3">
           <SectionCard
@@ -170,7 +181,7 @@ export function Gstr1Page() {
             amount={b2bEntries.reduce((acc: number, e) => acc + Number((e as Record<string, unknown>).totalGst ?? 0), 0)}
           >
             {b2bEntries.length === 0 ? (
-              <p className="text-sm text-gray-400">No B2B invoices</p>
+              <p className="text-sm text-gray-400 dark:text-gray-500">No B2B invoices</p>
             ) : (
               <div className="overflow-x-auto">
                 <table className="min-w-full text-xs">
@@ -207,7 +218,7 @@ export function Gstr1Page() {
             amount={b2csEntries.reduce((acc: number, e) => acc + Number((e as Record<string, unknown>).totalGst ?? 0), 0)}
           >
             {b2csEntries.length === 0
-              ? <p className="text-sm text-gray-400">No B2CS entries</p>
+              ? <p className="text-sm text-gray-400 dark:text-gray-500">No B2CS entries</p>
               : <pre className="text-xs text-gray-600 dark:text-gray-400 overflow-x-auto">{JSON.stringify(b2csEntries, null, 2)}</pre>
             }
           </SectionCard>
@@ -219,7 +230,7 @@ export function Gstr1Page() {
             amount={cdnrEntries.reduce((acc: number, e) => acc + Number((e as Record<string, unknown>).totalGst ?? 0), 0)}
           >
             {cdnrEntries.length === 0
-              ? <p className="text-sm text-gray-400">No credit/debit notes</p>
+              ? <p className="text-sm text-gray-400 dark:text-gray-500">No credit/debit notes</p>
               : <pre className="text-xs text-gray-600 dark:text-gray-400 overflow-x-auto">{JSON.stringify(cdnrEntries, null, 2)}</pre>
             }
           </SectionCard>
@@ -231,7 +242,7 @@ export function Gstr1Page() {
             amount={0}
           >
             {hsnData.length === 0
-              ? <p className="text-sm text-gray-400">No HSN data</p>
+              ? <p className="text-sm text-gray-400 dark:text-gray-500">No HSN data</p>
               : <pre className="text-xs text-gray-600 dark:text-gray-400 overflow-x-auto">{JSON.stringify(hsnData, null, 2)}</pre>
             }
           </SectionCard>

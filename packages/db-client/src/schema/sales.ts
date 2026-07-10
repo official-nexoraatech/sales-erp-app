@@ -114,6 +114,7 @@ export const invoices = pgTable(
     cgstAmount: decimal('cgst_amount', { precision: 15, scale: 2 }).notNull().default('0'),
     sgstAmount: decimal('sgst_amount', { precision: 15, scale: 2 }).notNull().default('0'),
     igstAmount: decimal('igst_amount', { precision: 15, scale: 2 }).notNull().default('0'),
+    cessAmount: decimal('cess_amount', { precision: 15, scale: 2 }).notNull().default('0'),
     grandTotal: decimal('grand_total', { precision: 15, scale: 2 }).notNull().default('0'),
     paidAmount: decimal('paid_amount', { precision: 15, scale: 2 }).notNull().default('0'),
     balanceDue: decimal('balance_due', { precision: 15, scale: 2 }).notNull().default('0'),
@@ -136,9 +137,15 @@ export const invoices = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
     version: integer('version').notNull().default(0),
+    // OFFLINE-02: client-generated UUID attached at offline-queue time, carried through
+    // every retry of the same queued POS sale. NULL for non-POS-originated invoices, which
+    // never collide under a standard Postgres unique constraint (mirrors
+    // notification_log.idempotency_key's convention).
+    clientOperationId: varchar('client_operation_id', { length: 100 }),
   },
   (t) => [
     unique('invoices_tenant_number').on(t.tenantId, t.invoiceNumber),
+    unique('invoices_tenant_client_operation_id').on(t.tenantId, t.clientOperationId),
     index('idx_invoices_tenant_status').on(t.tenantId, t.status, t.invoiceDate),
     index('idx_invoices_customer').on(t.customerId, t.tenantId),
     index('idx_invoices_due_date').on(t.dueDate, t.status, t.tenantId),
@@ -173,6 +180,8 @@ export const invoiceLines = pgTable(
     cgstAmount: decimal('cgst_amount', { precision: 15, scale: 2 }).notNull().default('0'),
     sgstAmount: decimal('sgst_amount', { precision: 15, scale: 2 }).notNull().default('0'),
     igstAmount: decimal('igst_amount', { precision: 15, scale: 2 }).notNull().default('0'),
+    cessRate: decimal('cess_rate', { precision: 5, scale: 2 }).notNull().default('0'),
+    cessAmount: decimal('cess_amount', { precision: 15, scale: 2 }).notNull().default('0'),
     lineTotal: decimal('line_total', { precision: 15, scale: 2 }).notNull(),
     hsnCode: varchar('hsn_code', { length: 20 }),
     warehouseId: integer('warehouse_id'),
@@ -235,6 +244,24 @@ export const posSessions = pgTable(
   ]
 );
 
+// ─── POS Held Sales (park/resume a cart) ───────────────────────────────────────
+export const posHeldSales = pgTable(
+  'pos_held_sales',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    tenantId: integer('tenant_id').notNull(),
+    sessionId: integer('session_id').notNull(),
+    customerId: integer('customer_id'),
+    label: varchar('label', { length: 100 }),
+    cart: jsonb('cart').notNull(),
+    createdBy: integer('created_by').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    index('idx_pos_held_sales_tenant_session').on(t.tenantId, t.sessionId),
+  ]
+);
+
 // ─── Payments ─────────────────────────────────────────────────────────────────
 export const payments = pgTable(
   'payments',
@@ -247,7 +274,7 @@ export const payments = pgTable(
     paymentDate: timestamp('payment_date', { withTimezone: true }).notNull(),
     paymentMode: varchar('payment_mode', { length: 30 })
       .notNull()
-      .$type<'CASH' | 'CARD' | 'UPI' | 'CHEQUE' | 'NEFT' | 'RTGS' | 'CREDIT_NOTE' | 'ADVANCE'>(),
+      .$type<'CASH' | 'CARD' | 'UPI' | 'CHEQUE' | 'NEFT' | 'RTGS' | 'CREDIT_NOTE' | 'ADVANCE' | 'LOYALTY'>(),
     amount: decimal('amount', { precision: 15, scale: 2 }).notNull(),
     allocatedAmount: decimal('allocated_amount', { precision: 15, scale: 2 }).notNull().default('0'),
     unallocatedAmount: decimal('unallocated_amount', { precision: 15, scale: 2 }).notNull().default('0'),

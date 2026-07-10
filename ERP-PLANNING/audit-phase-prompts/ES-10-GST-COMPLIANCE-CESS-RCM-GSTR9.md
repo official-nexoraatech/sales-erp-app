@@ -1,5 +1,5 @@
 # ES-10 — GST Compliance: Cess, RCM & GSTR-9
-## STATUS: 🔴 PENDING
+## STATUS: ✅ COMPLETED (adapted — see ES-10_COMPLETION.md for architecture deviations)
 ## Sprint: 3 | Effort: 5–6 days | Risk: High
 ## Depends on: ES-08 (sales), ES-09 (purchase)
 ## Unlocks: ES-11, ES-17

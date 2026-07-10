@@ -120,6 +120,20 @@ export const purchaseOrderHistory = pgTable(
   (t) => [index('idx_po_history_po').on(t.purchaseOrderId, t.tenantId)]
 );
 
+export const purchaseOrderAmendments = pgTable(
+  'purchase_order_amendments',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    purchaseOrderId: integer('purchase_order_id').notNull(),
+    tenantId: integer('tenant_id').notNull(),
+    amendments: jsonb('amendments').notNull(),
+    reason: text('reason').notNull(),
+    performedBy: integer('performed_by').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index('idx_po_amendments_po').on(t.purchaseOrderId, t.tenantId)]
+);
+
 // ─── Goods Receipt Notes (GRN) ────────────────────────────────────────────────
 export const grns = pgTable(
   'grns',
@@ -143,10 +157,13 @@ export const grns = pgTable(
     cgstAmount: decimal('cgst_amount', { precision: 15, scale: 2 }).notNull().default('0'),
     sgstAmount: decimal('sgst_amount', { precision: 15, scale: 2 }).notNull().default('0'),
     igstAmount: decimal('igst_amount', { precision: 15, scale: 2 }).notNull().default('0'),
+    cessAmount: decimal('cess_amount', { precision: 15, scale: 2 }).notNull().default('0'),
     grandTotal: decimal('grand_total', { precision: 15, scale: 2 }).notNull().default('0'),
     landedCostTotal: decimal('landed_cost_total', { precision: 15, scale: 2 }).notNull().default('0'),
     effectiveCostTotal: decimal('effective_cost_total', { precision: 15, scale: 2 }).notNull().default('0'),
     hasPriceVariance: boolean('has_price_variance').notNull().default(false),
+    // RCM: true when supplier is unregistered — buyer self-assesses GST (ES-10)
+    rcmApplicable: boolean('rcm_applicable').notNull().default(false),
     varianceApprovedBy: integer('variance_approved_by'),
     varianceApprovedAt: timestamp('variance_approved_at', { withTimezone: true }),
     notes: text('notes'),
@@ -192,6 +209,8 @@ export const grnLines = pgTable(
     cgstAmount: decimal('cgst_amount', { precision: 15, scale: 2 }).notNull().default('0'),
     sgstAmount: decimal('sgst_amount', { precision: 15, scale: 2 }).notNull().default('0'),
     igstAmount: decimal('igst_amount', { precision: 15, scale: 2 }).notNull().default('0'),
+    cessRate: decimal('cess_rate', { precision: 5, scale: 2 }).notNull().default('0'),
+    cessAmount: decimal('cess_amount', { precision: 15, scale: 2 }).notNull().default('0'),
     lineTotal: decimal('line_total', { precision: 15, scale: 2 }).notNull(),
     allocatedLandedCost: decimal('allocated_landed_cost', { precision: 15, scale: 2 }).notNull().default('0'),
     effectiveUnitCost: decimal('effective_unit_cost', { precision: 15, scale: 4 }).notNull().default('0'),
@@ -481,6 +500,7 @@ export const projectionSupplierBalance = pgTable(
 // ─── Type exports ─────────────────────────────────────────────────────────────
 export type PurchaseOrder = typeof purchaseOrders.$inferSelect;
 export type PurchaseOrderLine = typeof purchaseOrderLines.$inferSelect;
+export type PurchaseOrderAmendment = typeof purchaseOrderAmendments.$inferSelect;
 export type GRN = typeof grns.$inferSelect;
 export type GRNLine = typeof grnLines.$inferSelect;
 export type LandedCost = typeof landedCosts.$inferSelect;

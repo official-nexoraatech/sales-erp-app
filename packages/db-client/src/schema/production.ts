@@ -140,7 +140,7 @@ export const barcodeBatches = pgTable(
     printFormat: varchar('print_format', { length: 30 })
       .notNull()
       .default('LABEL_40x25')
-      .$type<'A4_SHEET' | 'LABEL_40x25' | 'LABEL_60x40'>(),
+      .$type<'A4_SHEET' | 'LABEL_40x25' | 'LABEL_60x40' | 'LABEL_50x25' | 'LABEL_100x50'>(),
     printUrl: text('print_url'),
     createdBy: integer('created_by').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),

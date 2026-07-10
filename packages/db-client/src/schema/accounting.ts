@@ -45,6 +45,7 @@ export const accounts = pgTable(
         | 'TAX_EXPENSE'
         | 'OTHER_EXPENSE'
         | 'CONTRA_REVENUE'
+        | 'INCOME_SUMMARY'
       >(),
     normalBalance: varchar('normal_balance', { length: 10 })
       .notNull()
@@ -471,6 +472,25 @@ export const tdsCertificates = pgTable(
   ]
 );
 
+// ─── Trial Balance Snapshots (PG-026 — daily persisted snapshot) ──────────
+export const trialBalanceSnapshots = pgTable(
+  'trial_balance_snapshots',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    tenantId: integer('tenant_id').notNull(),
+    asOfDate: date('as_of_date').notNull(),
+    totalDebit: decimal('total_debit', { precision: 15, scale: 2 }).notNull(),
+    totalCredit: decimal('total_credit', { precision: 15, scale: 2 }).notNull(),
+    isBalanced: boolean('is_balanced').notNull(),
+    accountCount: integer('account_count').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    unique('trial_balance_snapshots_tenant_date').on(t.tenantId, t.asOfDate),
+    index('idx_trial_balance_snapshots_tenant').on(t.tenantId, t.asOfDate),
+  ]
+);
+
 // ─── Type Exports ──────────────────────────────────────────────────────────
 export type Account = typeof accounts.$inferSelect;
 export type NewAccount = typeof accounts.$inferInsert;
@@ -491,3 +511,4 @@ export type FixedAsset = typeof fixedAssets.$inferSelect;
 export type AssetDepreciationSchedule = typeof assetDepreciationSchedule.$inferSelect;
 export type TDSEntry = typeof tdsEntries.$inferSelect;
 export type TDSCertificate = typeof tdsCertificates.$inferSelect;
+export type TrialBalanceSnapshot = typeof trialBalanceSnapshots.$inferSelect;

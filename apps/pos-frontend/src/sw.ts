@@ -1,6 +1,16 @@
 /// <reference lib="webworker" />
 declare const self: ServiceWorkerGlobalScope;
 
+import { runBackgroundSync } from './swSync.js';
+
+// OFFLINE-06: minimal Background Sync event shape — not in TypeScript's shipped webworker
+// lib. This file is excluded from the tsc project (see tsconfig.json) since its global
+// scope conflicts with the rest of the app's DOM lib, so this is documentation more than
+// a type-check gate; esbuild (Vite's bundler for this entry) strips types without checking.
+interface SyncEvent extends ExtendableEvent {
+  readonly tag: string;
+}
+
 const CACHE_NAME = 'pos-v1';
 const CATALOG_CACHE = 'pos-catalog-v1';
 const STATIC_ASSETS = ['/', '/index.html'];
@@ -50,16 +60,21 @@ self.addEventListener('fetch', (event) => {
   }
 });
 
-self.addEventListener('message', (event) => {
-  if ((event.data as { type?: string })?.type === 'SYNC_PENDING') {
-    event.waitUntil(syncPendingTransactions());
-  }
-});
+// OFFLINE-06: real Background Sync handler, replacing the old SYNC_PENDING/DO_SYNC
+// message-passing scaffold (confirmed dead — nothing ever posted SYNC_PENDING to the SW).
+// Fires even if the tab that queued the sale has since closed, as long as the browser
+// supports Background Sync (Chromium/Android; no Safari/iOS) — POSScreen.tsx's tab-open
+// triggers (window.online, manual "Sync now") remain the fallback everywhere else.
+self.addEventListener('sync', (event) => {
+  const syncEvent = event as SyncEvent;
+  if (syncEvent.tag !== 'sync-pending-sales') return;
 
-async function syncPendingTransactions(): Promise<void> {
-  // Signal to main thread that sync is requested — actual sync runs in POSScreen
-  const clients = await self.clients.matchAll();
-  clients.forEach((client) => {
-    client.postMessage({ type: 'DO_SYNC' });
-  });
-}
+  syncEvent.waitUntil(
+    runBackgroundSync().then(async (result) => {
+      const clients = await self.clients.matchAll();
+      clients.forEach((client) => {
+        client.postMessage({ type: 'BACKGROUND_SYNC_DONE', ...result });
+      });
+    })
+  );
+});

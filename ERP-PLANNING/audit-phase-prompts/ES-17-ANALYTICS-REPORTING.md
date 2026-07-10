@@ -1,5 +1,5 @@
 # ES-17 — Analytics & Reporting
-## STATUS: 🔴 PENDING
+## STATUS: ✅ COMPLETED 
 ## Sprint: 4 | Effort: 5–6 days | Risk: Medium
 ## Depends on: ES-05 (report tenant isolation), ES-10 (GST), ES-13 (COGS), ES-16 (performance)
 ## Unlocks: ES-20

@@ -1,5 +1,5 @@
 # ES-15 — Frontend UX Polish & Fixed Asset Depreciation
-## STATUS: 🔴 PENDING
+## STATUS: ✅ COMPLETED 
 ## Sprint: 3 | Effort: 4–5 days | Risk: Low
 ## Depends on: ES-06 (HR frontend), ES-08 (sales frontend), ES-14 (validation)
 ## Unlocks: ES-17

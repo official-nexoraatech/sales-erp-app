@@ -2,9 +2,12 @@
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { journalApi } from '../../api/endpoints.js';
+import { useAuthStore } from '../../store/auth.store.js';
+import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
 import Button from '../../components/ui/Button.js';
 import Badge from '../../components/ui/Badge.js';
+import ERPEmptyState from '../../components/erp/ERPEmptyState.js';
 import { ERPTableSkeleton } from '../../components/erp/ERPSkeleton.js';
 import { formatDatetime, formatCurrency } from '../../lib/format.js';
 
@@ -28,6 +31,7 @@ const STATUS_COLORS: Record<string, 'green' | 'gray' | 'red' | 'yellow'> = {
 
 export default function JournalsPage() {
   const navigate = useNavigate();
+  const canCreateJournal = useAuthStore((s) => s.hasPermission(PERMISSIONS.JOURNAL_CREATE));
   const [page, setPage] = useState(0);
 
   const { data, isLoading } = useQuery({
@@ -35,8 +39,8 @@ export default function JournalsPage() {
     queryFn: () => journalApi.list({ page: String(page), size: '20' }),
   });
 
-  const journals: Journal[] = (data as { data?: { content?: Journal[] } })?.data?.content ?? [];
-  const total: number = (data as { data?: { totalElements?: number } })?.data?.totalElements ?? 0;
+  const journals: Journal[] = (data as { content?: Journal[] })?.content ?? [];
+  const total: number = (data as { totalElements?: number })?.totalElements ?? 0;
 
   return (
     <div className="space-y-6">
@@ -44,22 +48,23 @@ export default function JournalsPage() {
         variant="list"
         title="Journal Entries"
         subtitle={`${total} journal(s) total`}
-        actions={
+        actions={canCreateJournal ? (
           <Button variant="primary" onClick={() => navigate('/accounting/journals/new')}>
             + Manual Journal
           </Button>
-        }
+        ) : undefined}
       />
 
       <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
         {isLoading ? (
           <ERPTableSkeleton rows={8} />
         ) : journals.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16 text-center">
-            <div className="text-4xl mb-3">📒</div>
-            <p className="text-primary font-medium">No journal entries yet</p>
-            <p className="text-secondary text-sm mt-1">Journal entries are posted automatically from business events</p>
-          </div>
+          <ERPEmptyState
+            type="no-data"
+            title="No journal entries yet"
+            description="Journal entries are posted automatically from business events. You can also add one manually."
+            {...(canCreateJournal ? { action: { label: '+ Manual Journal', onClick: () => navigate('/accounting/journals/new') } } : {})}
+          />
         ) : (
           <table className="w-full text-sm">
             <thead className="bg-gray-50 dark:bg-gray-900/40 border-b border-gray-200 dark:border-gray-700">
