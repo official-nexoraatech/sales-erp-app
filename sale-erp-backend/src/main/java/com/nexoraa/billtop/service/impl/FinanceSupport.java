@@ -16,7 +16,6 @@ import com.nexoraa.billtop.entity.SalesReturn;
 import com.nexoraa.billtop.exception.ResourceNotFoundException;
 import com.nexoraa.billtop.repository.BankAccountRepository;
 import com.nexoraa.billtop.repository.BankTransactionRepository;
-import com.nexoraa.billtop.repository.CashAccountRepository;
 import com.nexoraa.billtop.repository.CashTransactionRepository;
 import com.nexoraa.billtop.repository.PaymentRepository;
 import com.nexoraa.billtop.repository.PurchaseRepository;
@@ -41,7 +40,6 @@ class FinanceSupport {
 
     private final BankAccountRepository bankAccountRepository;
     private final BankTransactionRepository bankTransactionRepository;
-    private final CashAccountRepository cashAccountRepository;
     private final CashTransactionRepository cashTransactionRepository;
     private final SaleRepository saleRepository;
     private final SalesReturnRepository salesReturnRepository;
@@ -50,11 +48,11 @@ class FinanceSupport {
     private final PaymentRepository paymentRepository;
     private final TransactionSupport support;
     private final CurrentOrganizationService currentOrganizationService;
+    private final AccountProvisioningService accountProvisioningService;
 
     FinanceSupport(
             BankAccountRepository bankAccountRepository,
             BankTransactionRepository bankTransactionRepository,
-            CashAccountRepository cashAccountRepository,
             CashTransactionRepository cashTransactionRepository,
             SaleRepository saleRepository,
             SalesReturnRepository salesReturnRepository,
@@ -62,11 +60,11 @@ class FinanceSupport {
             PurchaseReturnRepository purchaseReturnRepository,
             PaymentRepository paymentRepository,
             TransactionSupport support,
-            CurrentOrganizationService currentOrganizationService
+            CurrentOrganizationService currentOrganizationService,
+            AccountProvisioningService accountProvisioningService
     ) {
         this.bankAccountRepository = bankAccountRepository;
         this.bankTransactionRepository = bankTransactionRepository;
-        this.cashAccountRepository = cashAccountRepository;
         this.cashTransactionRepository = cashTransactionRepository;
         this.saleRepository = saleRepository;
         this.salesReturnRepository = salesReturnRepository;
@@ -75,6 +73,7 @@ class FinanceSupport {
         this.paymentRepository = paymentRepository;
         this.support = support;
         this.currentOrganizationService = currentOrganizationService;
+        this.accountProvisioningService = accountProvisioningService;
     }
 
     void saveMoneyMovement(Payment payment, String transactionType) {
@@ -95,7 +94,7 @@ class FinanceSupport {
 
         bankTransactionRepository.save(BankTransaction.builder()
                 .organization(organization)
-                .bankAccount(getDefaultBankAccount(organization.getId()))
+                .bankAccount(getDefaultBankAccount(organization))
                 .payment(payment)
                 .transactionType(transactionType)
                 .amount(support.money(payment.getAmount()))
@@ -242,27 +241,12 @@ class FinanceSupport {
         return name.contains("cash");
     }
 
-    private BankAccount getDefaultBankAccount(Long organizationId) {
-        return bankAccountRepository.findFirstByOrganizationIdAndStatusOrderByIdAsc(
-                        organizationId,
-                com.nexoraa.billtop.enums.Status.ACTIVE)
-                .orElseGet(() -> bankAccountRepository.save(BankAccount.builder()
-                        .organization(currentOrganizationService.getOrganizationReference())
-                        .bankName("Default Bank")
-                        .accountName("Default Bank Account")
-                        .openingBalance(TransactionSupport.ZERO)
-                        .status(com.nexoraa.billtop.enums.Status.ACTIVE)
-                        .build()));
+    private BankAccount getDefaultBankAccount(Organization organization) {
+        return accountProvisioningService.getDefaultBankAccount(organization);
     }
 
     private CashAccount getOrCreateCashAccount(Organization organization) {
-        return cashAccountRepository.findFirstByOrganizationIdAndStatusOrderByIdAsc(organization.getId(), com.nexoraa.billtop.enums.Status.ACTIVE)
-                .orElseGet(() -> cashAccountRepository.save(CashAccount.builder()
-                        .organization(organization)
-                        .accountName("Cash In Hand")
-                        .openingBalance(TransactionSupport.ZERO)
-                        .status(com.nexoraa.billtop.enums.Status.ACTIVE)
-                        .build()));
+        return accountProvisioningService.getOrCreateCashAccount(organization);
     }
 }
 
