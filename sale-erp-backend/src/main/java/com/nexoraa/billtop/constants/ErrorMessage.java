@@ -116,5 +116,7 @@ public class ErrorMessage {
     public static final String VALIDATION_FAILED = "Validation failed";
     public static final String RESOURCE_NOT_FOUND = "Resource not found";
     public static final String OPERATION_FAILED = "Operation failed";
+    public static final String DATA_INTEGRITY_VIOLATION = "Request could not be completed because it conflicts with existing data";
+    public static final String DATABASE_ERROR = "A database error occurred while processing the request";
 }
 

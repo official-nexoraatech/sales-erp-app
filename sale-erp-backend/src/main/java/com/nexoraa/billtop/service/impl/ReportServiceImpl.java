@@ -243,21 +243,34 @@ public class ReportServiceImpl implements ReportService {
 
     @Override
     @Transactional(readOnly = true)
-    public GstReportResponseDto getGstReport(LocalDate fromDate, LocalDate toDate) {
-        BigDecimal taxableAmount = TransactionSupport.ZERO;
-        BigDecimal totalTax = TransactionSupport.ZERO;
-        for (Sale sale : salesBetween(fromDate, toDate)) {
-            taxableAmount = taxableAmount.add(support.defaultZero(sale.getSubTotal()))
-                    .subtract(support.defaultZero(sale.getDiscountAmount()));
-            totalTax = totalTax.add(support.defaultZero(sale.getTaxAmount()));
-        }
+    public List<GstReportResponseDto> getGstReport(LocalDate fromDate, LocalDate toDate) {
+        return salesBetween(fromDate, toDate).stream()
+                .map(this::toGstReportEntry)
+                .sorted(Comparator.comparing(GstReportResponseDto::getDate, Comparator.nullsLast(Comparator.naturalOrder())))
+                .toList();
+    }
+
+    private GstReportResponseDto toGstReportEntry(Sale sale) {
+        BigDecimal taxableAmount = support.defaultZero(sale.getSubTotal()).subtract(support.defaultZero(sale.getDiscountAmount()));
+        BigDecimal totalTax = support.defaultZero(sale.getTaxAmount());
         BigDecimal halfTax = totalTax.divide(BigDecimal.valueOf(2), 2, RoundingMode.HALF_UP);
+        BigDecimal taxRate = taxableAmount.compareTo(TransactionSupport.ZERO) > 0
+                ? totalTax.multiply(BigDecimal.valueOf(100)).divide(taxableAmount, 2, RoundingMode.HALF_UP)
+                : TransactionSupport.ZERO;
+        Contact customer = sale.getCustomer();
         return GstReportResponseDto.builder()
+                .date(sale.getInvoiceDate())
+                .invoiceNo(sale.getInvoiceNo())
+                .partyName(support.contactDisplayName(customer))
+                .gstin(customer == null ? null : customer.getGstNumber())
+                .transactionType("SALE")
                 .taxableAmount(support.money(taxableAmount))
+                .taxRate(taxRate)
                 .cgst(halfTax)
                 .sgst(halfTax)
                 .igst(TransactionSupport.ZERO)
-                .totalTax(support.money(totalTax))
+                .taxAmount(support.money(totalTax))
+                .grandTotal(support.money(sale.getGrandTotal()))
                 .build();
     }
 

@@ -120,7 +120,7 @@ public class GlobalExceptionHandler {
         HttpStatus status = HttpStatus.BAD_REQUEST;
         logException(ex, status, "DATA_INTEGRITY_VIOLATION", request);
         return ResponseEntity.status(status)
-                .body(ErrorResponseDto.error(resolveExceptionMessage(ex), "DATA_INTEGRITY_VIOLATION"));
+                .body(ErrorResponseDto.error(ErrorMessage.DATA_INTEGRITY_VIOLATION, "DATA_INTEGRITY_VIOLATION"));
     }
 
     @ExceptionHandler(org.hibernate.exception.ConstraintViolationException.class)
@@ -131,7 +131,7 @@ public class GlobalExceptionHandler {
         HttpStatus status = HttpStatus.BAD_REQUEST;
         logException(ex, status, "DATA_INTEGRITY_VIOLATION", request);
         return ResponseEntity.status(status)
-                .body(ErrorResponseDto.error(resolveExceptionMessage(ex), "DATA_INTEGRITY_VIOLATION"));
+                .body(ErrorResponseDto.error(ErrorMessage.DATA_INTEGRITY_VIOLATION, "DATA_INTEGRITY_VIOLATION"));
     }
 
     @ExceptionHandler({DataAccessException.class, PersistenceException.class})
@@ -139,7 +139,7 @@ public class GlobalExceptionHandler {
         HttpStatus status = HttpStatus.INTERNAL_SERVER_ERROR;
         logException(ex, status, "DATABASE_ERROR", request);
         return ResponseEntity.status(status)
-                .body(ErrorResponseDto.error(resolveExceptionMessage(ex), "DATABASE_ERROR"));
+                .body(ErrorResponseDto.error(ErrorMessage.DATABASE_ERROR, "DATABASE_ERROR"));
     }
 
     @ExceptionHandler(Exception.class)
