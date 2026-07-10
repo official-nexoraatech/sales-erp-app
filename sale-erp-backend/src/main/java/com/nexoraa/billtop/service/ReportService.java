@@ -35,7 +35,7 @@ public interface ReportService {
 
     ProfitLossReportResponseDto getProfitLoss(LocalDate fromDate, LocalDate toDate);
 
-    GstReportResponseDto getGstReport(LocalDate fromDate, LocalDate toDate);
+    List<GstReportResponseDto> getGstReport(LocalDate fromDate, LocalDate toDate);
 
     InventoryValuationResponseDto getInventoryValuation();
 

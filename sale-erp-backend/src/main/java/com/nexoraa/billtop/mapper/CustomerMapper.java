@@ -19,6 +19,7 @@ public interface CustomerMapper {
     @Mapping(target = "organization", ignore = true)
     @Mapping(target = "contactType", constant = "CUSTOMER")
     @Mapping(target = "status", constant = "ACTIVE")
+    @Mapping(target = "isWholesale", source = "isWholesale", defaultValue = "false")
     @Mapping(target = "createdAt", ignore = true)
     @Mapping(target = "updatedAt", ignore = true)
     Contact toEntity(CustomerRequestDto request);
@@ -27,6 +28,7 @@ public interface CustomerMapper {
     @Mapping(target = "organization", ignore = true)
     @Mapping(target = "contactType", ignore = true)
     @Mapping(target = "status", ignore = true)
+    @Mapping(target = "isWholesale", source = "isWholesale", defaultValue = "false")
     @Mapping(target = "createdAt", ignore = true)
     @Mapping(target = "updatedAt", ignore = true)
     void updateEntity(CustomerRequestDto request, @MappingTarget Contact contact);

@@ -8,6 +8,16 @@ const inputClass = 'h-10 w-full rounded border border-gray-300 bg-white px-3 tex
 
 const formatDateForApi = (value: string) => value;
 
+const toIsoDate = (date: Date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+const today = new Date();
+const defaultFromDate = toIsoDate(new Date(today.getFullYear(), today.getMonth(), 1));
+const defaultToDate = toIsoDate(today);
+
 const numberValue = (data: any, keys: string[], fallback = 0) => {
   for (const key of keys) {
     const value = Number(data?.[key]);
@@ -19,7 +29,7 @@ const numberValue = (data: any, keys: string[], fallback = 0) => {
 const amount = (value: number) => value.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 export const ProfitLossReportPage: React.FC = () => {
-  const [filters, setFilters] = useState({ fromDate: '2026-05-01', toDate: '2026-05-30', warehouse: '' });
+  const [filters, setFilters] = useState({ fromDate: defaultFromDate, toDate: defaultToDate, warehouse: '' });
   const [submitted, setSubmitted] = useState<typeof filters | null>(null);
   const report = useQuery({
     queryKey: ['report', 'profit-loss', submitted],

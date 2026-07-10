@@ -6,6 +6,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 
 @Data
 @NoArgsConstructor
@@ -13,9 +14,16 @@ import java.math.BigDecimal;
 @Builder
 public class GstReportResponseDto {
 
+    private LocalDate date;
+    private String invoiceNo;
+    private String partyName;
+    private String gstin;
+    private String transactionType;
     private BigDecimal taxableAmount;
+    private BigDecimal taxRate;
     private BigDecimal cgst;
     private BigDecimal sgst;
     private BigDecimal igst;
-    private BigDecimal totalTax;
+    private BigDecimal taxAmount;
+    private BigDecimal grandTotal;
 }

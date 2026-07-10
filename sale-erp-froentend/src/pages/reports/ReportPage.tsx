@@ -76,14 +76,23 @@ export type ReportKey =
   | 'reorderItem';
 
 const inputClass = 'h-10 w-full rounded border border-gray-300 bg-white px-3 text-sm text-gray-900 outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-gray-50';
-const defaultFrom = '2026-05-30';
-const defaultTo = '2026-05-30';
+
+const toIsoDate = (date: Date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+const today = new Date();
+const defaultFrom = toIsoDate(new Date(today.getFullYear(), today.getMonth(), 1));
+const defaultTo = toIsoDate(today);
 
 const formatDateForApi = (value: string) => value;
 
 const unwrapRows = (response: any) => {
   const data = response?.data ?? response;
   if (Array.isArray(data)) return data;
+  if (Array.isArray(data?.records)) return data.records;
   if (Array.isArray(data?.content)) return data.content;
   if (Array.isArray(data?.items)) return data.items;
   if (Array.isArray(data?.transactions)) return data.transactions;
@@ -142,6 +151,7 @@ const valueByColumn = (row: any, column: string) => {
     depositamount: ['depositAmount', 'credit'],
     description: ['description', 'note', 'notes'],
     gstinuin: ['gstin', 'gstNumber', 'gstinUin'],
+    taxableamount: ['taxableAmount', 'taxableValue'],
     transactiontype: ['transactionType', 'type'],
     invoiceno: ['invoiceNo', 'purchaseNo', 'saleNo'],
     invoicevalue: ['invoiceValue', 'grandTotal', 'totalAmount'],

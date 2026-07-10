@@ -87,7 +87,7 @@ public class ReportController {
     }
 
     @GetMapping("/gst")
-    public ResponseEntity<ApiResponseDto<GstReportResponseDto>> getGstReport(
+    public ResponseEntity<ApiResponseDto<List<GstReportResponseDto>>> getGstReport(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fromDate,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate toDate
     ) {
