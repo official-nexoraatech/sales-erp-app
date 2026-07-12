@@ -4,6 +4,8 @@ export const getOrganizationId = (organization: Organization) => Number((organiz
 
 export const getOrganizationStatus = (status: Organization['status']) => (status === true || status === 'ACTIVE' ? 'ACTIVE' : 'INACTIVE');
 
+export const getOrganizationSubscribed = (isSubscribed: Organization['isSubscribed']) => isSubscribed !== false;
+
 export const emptyOrganizationAddress: OrganizationAddress = {
   addressLine1: '',
   addressLine2: '',
@@ -20,6 +22,7 @@ export const emptyOrganizationForm: UpdateOrganizationRequest = {
   gstNumber: '',
   address: emptyOrganizationAddress,
   status: 'ACTIVE',
+  isSubscribed: true,
 };
 
 export const normalizeOrganizationAddress = (address: Organization['address']): OrganizationAddress => {
@@ -70,6 +73,7 @@ export const toUpdateOrganizationRequest = (organization: Organization, logoUrl:
   gstNumber: organization.gstNumber || '',
   address: toOrganizationAddressRequest(normalizeOrganizationAddress(organization.address)),
   status: getOrganizationStatus(organization.status),
+  isSubscribed: getOrganizationSubscribed(organization.isSubscribed),
 });
 
 const extractLogoUrl = (value: unknown): string => {

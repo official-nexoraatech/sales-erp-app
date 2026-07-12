@@ -51,6 +51,10 @@ public class Organization extends BaseEntity {
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     private Status status = Status.ACTIVE;
+
+    @Builder.Default
+    @Column(name = "is_subscribed", nullable = false)
+    private Boolean isSubscribed = true;
 }
 
 

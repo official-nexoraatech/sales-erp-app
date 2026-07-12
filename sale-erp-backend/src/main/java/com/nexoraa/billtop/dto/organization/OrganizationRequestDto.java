@@ -37,5 +37,7 @@ public class OrganizationRequestDto {
     private OrganizationAddressRequestDto address;
 
     private Status status;
+
+    private Boolean isSubscribed;
 }
 

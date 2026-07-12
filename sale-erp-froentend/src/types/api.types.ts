@@ -35,6 +35,7 @@ export interface Organization {
   gstNumber?: string;
   address?: OrganizationAddress | string | null;
   status: OrganizationStatus | string | boolean;
+  isSubscribed?: boolean;
   createdAt?: string;
   createdBy?: string;
 }
@@ -46,6 +47,7 @@ export interface OrganizationRequest {
   gstNumber?: string;
   address: OrganizationAddress;
   status: OrganizationStatus;
+  isSubscribed?: boolean;
 }
 
 export interface UpdateOrganizationRequest extends OrganizationRequest {

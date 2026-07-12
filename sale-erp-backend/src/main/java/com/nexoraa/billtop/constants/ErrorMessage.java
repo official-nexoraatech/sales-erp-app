@@ -21,6 +21,7 @@ public class ErrorMessage {
     // Organization Errors
     public static final String ORGANIZATION_NOT_FOUND = "Organization not found";
     public static final String ORGANIZATION_ALREADY_EXISTS = "Organization already exists";
+    public static final String ORGANIZATION_NOT_SUBSCRIBED = "You are not subscribed user please contact to application owner";
 
     // Item Errors
     public static final String ITEM_NOT_FOUND = "Item not found";
