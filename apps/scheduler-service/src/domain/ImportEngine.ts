@@ -1,11 +1,28 @@
 import type { ErpDatabase } from '@erp/db';
-import { importJobs, customers, suppliers, items, units, branches, employees, departments, designations, attendance } from '@erp/db';
+import {
+  importJobs,
+  customers,
+  suppliers,
+  items,
+  units,
+  branches,
+  employees,
+  departments,
+  designations,
+  attendance,
+} from '@erp/db';
 import { eq, and, sql } from 'drizzle-orm';
-import { ulid } from 'ulid';
 import { createLogger } from '@erp/logger';
-import { BusinessError, NotFoundError, PermissionError, PERMISSIONS, OptionalPANSchema, OptionalBankAccountSchema } from '@erp/types';
+import {
+  BusinessError,
+  NotFoundError,
+  PermissionError,
+  PERMISSIONS,
+  OptionalPANSchema,
+  OptionalBankAccountSchema,
+} from '@erp/types';
 import { requireEnv } from '@erp/config';
-import { encryptField } from '@erp/utils';
+import { encryptField } from '@erp/utils/server';
 import { createHmac } from 'node:crypto';
 import { z } from 'zod';
 
@@ -24,7 +41,8 @@ export interface ValidationError {
   value: unknown;
 }
 
-export type ImportEntity = 'customer' | 'supplier' | 'item' | 'employee' | 'opening-stock' | 'attendance';
+export type ImportEntity =
+  'customer' | 'supplier' | 'item' | 'employee' | 'opening-stock' | 'attendance';
 
 // ── Per-entity column definitions ─────────────────────────────────────────────
 const ENTITY_SCHEMAS: Record<ImportEntity, z.ZodObject<z.ZodRawShape>> = {
@@ -32,7 +50,10 @@ const ENTITY_SCHEMAS: Record<ImportEntity, z.ZodObject<z.ZodRawShape>> = {
     name: z.string().min(2).max(200),
     phone: z.string().regex(/^\d{10}$/),
     email: z.string().email().optional(),
-    gstin: z.string().regex(/^\d{2}[A-Z]{5}\d{4}[A-Z]{1}[A-Z\d]{1}[Z]{1}[A-Z\d]{1}$/).optional(),
+    gstin: z
+      .string()
+      .regex(/^\d{2}[A-Z]{5}\d{4}[A-Z]{1}[A-Z\d]{1}[Z]{1}[A-Z\d]{1}$/)
+      .optional(),
     creditLimit: z.coerce.number().min(0).optional(),
     openingBalance: z.coerce.number().optional(),
   }),
@@ -40,7 +61,10 @@ const ENTITY_SCHEMAS: Record<ImportEntity, z.ZodObject<z.ZodRawShape>> = {
     name: z.string().min(2).max(200),
     phone: z.string().regex(/^\d{10}$/),
     email: z.string().email().optional(),
-    gstin: z.string().regex(/^\d{2}[A-Z]{5}\d{4}[A-Z]{1}[A-Z\d]{1}[Z]{1}[A-Z\d]{1}$/).optional(),
+    gstin: z
+      .string()
+      .regex(/^\d{2}[A-Z]{5}\d{4}[A-Z]{1}[A-Z\d]{1}[Z]{1}[A-Z\d]{1}$/)
+      .optional(),
     openingBalance: z.coerce.number().optional(),
   }),
   item: z.object({
@@ -73,7 +97,9 @@ const ENTITY_SCHEMAS: Record<ImportEntity, z.ZodObject<z.ZodRawShape>> = {
   attendance: z.object({
     employeeCode: z.string().min(1),
     attendanceDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-    status: z.enum(['PRESENT', 'ABSENT', 'HALF_DAY', 'LATE', 'HOLIDAY', 'WEEKLY_OFF']).default('PRESENT'),
+    status: z
+      .enum(['PRESENT', 'ABSENT', 'HALF_DAY', 'LATE', 'HOLIDAY', 'WEEKLY_OFF'])
+      .default('PRESENT'),
     checkInTime: z.string().optional(),
     checkOutTime: z.string().optional(),
     source: z.enum(['MANUAL', 'BIOMETRIC']).default('MANUAL'),
@@ -94,15 +120,20 @@ function parseCsv(raw: string): Array<Record<string, string>> {
 // ── Transform raw value ────────────────────────────────────────────────────────
 function applyTransform(value: string, transform?: ColumnMapping['transform']): string {
   switch (transform) {
-    case 'TRIM': return value.trim();
-    case 'UPPERCASE': return value.toUpperCase().trim();
-    case 'LOWERCASE': return value.toLowerCase().trim();
+    case 'TRIM':
+      return value.trim();
+    case 'UPPERCASE':
+      return value.toUpperCase().trim();
+    case 'LOWERCASE':
+      return value.toLowerCase().trim();
     case 'DATE_ISO': {
       const d = new Date(value);
       return isNaN(d.getTime()) ? value : d.toISOString().slice(0, 10);
     }
-    case 'NUMBER': return String(parseFloat(value.replace(/,/g, '')));
-    default: return value.trim();
+    case 'NUMBER':
+      return String(parseFloat(value.replace(/,/g, '')));
+    default:
+      return value.trim();
   }
 }
 
@@ -118,19 +149,23 @@ export class ImportEngine {
   ): Promise<string> {
     const rows = parseCsv(rawCsv);
     if (rows.length === 0) throw new BusinessError('IMPORT_EMPTY', 'CSV file has no data rows');
-    if (rows.length > 10_000) throw new BusinessError('IMPORT_TOO_LARGE', 'Max 10,000 rows per import');
+    if (rows.length > 10_000)
+      throw new BusinessError('IMPORT_TOO_LARGE', 'Max 10,000 rows per import');
 
-    const [newJob] = await this.db.insert(importJobs).values({
-      tenantId,
-      entityType,
-      originalFileName: fileName,
-      s3Key: fileName,
-      totalRows: rows.length,
-      status: 'UPLOADED',
-      rollbackData: rows as unknown as Record<string, string>[],
-      requestedBy: userId,
-      createdBy: userId,
-    } as unknown as typeof importJobs.$inferInsert).returning({ id: importJobs.id });
+    const [newJob] = await this.db
+      .insert(importJobs)
+      .values({
+        tenantId,
+        entityType,
+        originalFileName: fileName,
+        s3Key: fileName,
+        totalRows: rows.length,
+        status: 'UPLOADED',
+        rollbackData: rows as unknown as Record<string, string>[],
+        requestedBy: userId,
+        createdBy: userId,
+      } as unknown as typeof importJobs.$inferInsert)
+      .returning({ id: importJobs.id });
     if (!newJob) throw new Error('Import job creation failed');
     const jobId = String(newJob.id);
 
@@ -138,11 +173,7 @@ export class ImportEngine {
     return jobId;
   }
 
-  async mapColumns(
-    tenantId: number,
-    jobId: string,
-    mappings: ColumnMapping[]
-  ): Promise<void> {
+  async mapColumns(tenantId: number, jobId: string, mappings: ColumnMapping[]): Promise<void> {
     const [job] = await this.db
       .select()
       .from(importJobs)
@@ -156,11 +187,17 @@ export class ImportEngine {
 
     await this.db
       .update(importJobs)
-      .set({ status: 'MAPPED', columnMapping: Object.fromEntries(mappings.map((m) => [m.sourceColumn, m.targetField])) })
+      .set({
+        status: 'MAPPED',
+        columnMapping: Object.fromEntries(mappings.map((m) => [m.sourceColumn, m.targetField])),
+      })
       .where(eq(importJobs.id, Number(jobId)));
   }
 
-  async validate(tenantId: number, jobId: string): Promise<{ errors: ValidationError[]; validRows: number }> {
+  async validate(
+    tenantId: number,
+    jobId: string
+  ): Promise<{ errors: ValidationError[]; validRows: number }> {
     const [job] = await this.db
       .select()
       .from(importJobs)
@@ -172,7 +209,10 @@ export class ImportEngine {
       throw new BusinessError('IMPORT_INVALID_STATE', `Cannot validate in state: ${job.status}`);
     }
 
-    await this.db.update(importJobs).set({ status: 'VALIDATING' }).where(eq(importJobs.id, Number(jobId)));
+    await this.db
+      .update(importJobs)
+      .set({ status: 'VALIDATING' })
+      .where(eq(importJobs.id, Number(jobId)));
 
     const rawRows = (job.rollbackData ?? []) as Array<Record<string, string>>;
     const mappings = job.columnMapping as unknown as ColumnMapping[];
@@ -207,7 +247,15 @@ export class ImportEngine {
     const newStatus = errors.length === 0 ? 'VALIDATED' : 'MAPPED';
     await this.db
       .update(importJobs)
-      .set({ status: newStatus, validationErrors: errors.map((e) => ({ row: e.row, column: e.field, value: e.value, message: e.message })) })
+      .set({
+        status: newStatus,
+        validationErrors: errors.map((e) => ({
+          row: e.row,
+          column: e.field,
+          value: e.value,
+          message: e.message,
+        })),
+      })
       .where(eq(importJobs.id, Number(jobId)));
 
     return { errors, validRows };
@@ -239,7 +287,13 @@ export class ImportEngine {
     const [claimed] = await this.db
       .update(importJobs)
       .set({ status: 'EXECUTING', startedAt: new Date() })
-      .where(and(eq(importJobs.id, Number(jobId)), eq(importJobs.tenantId, tenantId), eq(importJobs.status, 'VALIDATED')))
+      .where(
+        and(
+          eq(importJobs.id, Number(jobId)),
+          eq(importJobs.tenantId, tenantId),
+          eq(importJobs.status, 'VALIDATED')
+        )
+      )
       .returning({ id: importJobs.id });
 
     if (!claimed) {
@@ -342,7 +396,14 @@ export class ImportEngine {
             .insert(customers)
             .values(
               parsedBatch.map((row) => {
-                const r = row as { name: string; phone: string; email?: string; gstin?: string; creditLimit?: number; openingBalance?: number };
+                const r = row as {
+                  name: string;
+                  phone: string;
+                  email?: string;
+                  gstin?: string;
+                  creditLimit?: number;
+                  openingBalance?: number;
+                };
                 return {
                   tenantId,
                   branchId: defaultBranchId,
@@ -363,7 +424,13 @@ export class ImportEngine {
             .insert(suppliers)
             .values(
               parsedBatch.map((row) => {
-                const r = row as { name: string; phone: string; email?: string; gstin?: string; openingBalance?: number };
+                const r = row as {
+                  name: string;
+                  phone: string;
+                  email?: string;
+                  gstin?: string;
+                  openingBalance?: number;
+                };
                 return {
                   tenantId,
                   branchId: defaultBranchId,
@@ -383,7 +450,14 @@ export class ImportEngine {
             .insert(items)
             .values(
               parsedBatch.map((row) => {
-                const r = row as { name: string; sku: string; salePrice: number; purchasePrice: number; taxRate: number; unit: string };
+                const r = row as {
+                  name: string;
+                  sku: string;
+                  salePrice: number;
+                  purchasePrice: number;
+                  taxRate: number;
+                  unit: string;
+                };
                 const unitId = unitNameToId.get(r.unit.toLowerCase()) ?? 1;
                 return {
                   tenantId,
@@ -403,14 +477,25 @@ export class ImportEngine {
         } else if (entityType === 'employee') {
           const rowsToInsert = parsedBatch.map((row) => {
             const r = row as {
-              name: string; phone: string; designation: string; basicSalary: number; joiningDate: string;
-              employeeCode?: string; gender?: 'MALE' | 'FEMALE' | 'OTHER'; department?: string; pan?: string; bankAccountNo?: string;
+              name: string;
+              phone: string;
+              designation: string;
+              basicSalary: number;
+              joiningDate: string;
+              employeeCode?: string;
+              gender?: 'MALE' | 'FEMALE' | 'OTHER';
+              department?: string;
+              pan?: string;
+              bankAccountNo?: string;
             };
-            const employeeCode = r.employeeCode || `EMP-${String(nextEmployeeCodeSeq++).padStart(5, '0')}`;
+            const employeeCode =
+              r.employeeCode || `EMP-${String(nextEmployeeCodeSeq++).padStart(5, '0')}`;
             const [firstName, ...rest] = r.name.trim().split(/\s+/);
             const lastName = rest.length > 0 ? rest.join(' ') : firstName!;
             const designationId = designationNameToId.get(r.designation.toLowerCase());
-            const departmentId = r.department ? departmentNameToId.get(r.department.toLowerCase()) : undefined;
+            const departmentId = r.department
+              ? departmentNameToId.get(r.department.toLowerCase())
+              : undefined;
 
             let panEncrypted: string | undefined;
             let panHash: string | undefined;
@@ -422,7 +507,9 @@ export class ImportEngine {
             let bankAccountNoHash: string | undefined;
             if (r.bankAccountNo) {
               bankAccountNoEncrypted = encryptField(r.bankAccountNo, encKey);
-              bankAccountNoHash = createHmac('sha256', encKey).update(r.bankAccountNo).digest('hex');
+              bankAccountNoHash = createHmac('sha256', encKey)
+                .update(r.bankAccountNo)
+                .digest('hex');
             }
 
             // basicSalary is validated but intentionally not persisted here — employees has
@@ -459,7 +546,14 @@ export class ImportEngine {
           const resolvedRows: Array<Record<string, unknown>> = [];
           let unresolvedCount = 0;
           for (const row of parsedBatch) {
-            const r = row as { employeeCode: string; attendanceDate: string; status: string; checkInTime?: string; checkOutTime?: string; source: string };
+            const r = row as {
+              employeeCode: string;
+              attendanceDate: string;
+              status: string;
+              checkInTime?: string;
+              checkOutTime?: string;
+              source: string;
+            };
             const employeeId = employeeCodeToId.get(r.employeeCode);
             if (!employeeId) {
               unresolvedCount++;
@@ -498,7 +592,10 @@ export class ImportEngine {
           // opening-stock: no insert branch exists yet (separate inventory-module concern,
           // not fixed by this pass) — rows are counted as "imported" without ever being
           // written anywhere, matching this entity type's pre-existing (unfixed) behavior.
-          logger.warn({ tenantId, jobId, entityType }, 'opening-stock import is not implemented — rows counted but not persisted');
+          logger.warn(
+            { tenantId, jobId, entityType },
+            'opening-stock import is not implemented — rows counted but not persisted'
+          );
           imported += parsedBatch.length;
         }
       } catch (err) {
@@ -559,7 +656,8 @@ export class ImportEngine {
       customer: 'name,phone,email,gstin,creditLimit,openingBalance',
       supplier: 'name,phone,email,gstin,openingBalance',
       item: 'name,sku,salePrice,purchasePrice,taxRate,unit,category',
-      employee: 'name,phone,designation,basicSalary,joiningDate,employeeCode,gender,department,pan,bankAccountNo',
+      employee:
+        'name,phone,designation,basicSalary,joiningDate,employeeCode,gender,department,pan,bankAccountNo',
       'opening-stock': 'sku,warehouseCode,quantity,costPrice',
       attendance: 'employeeCode,attendanceDate,status,checkInTime,checkOutTime,source',
     };

@@ -1,0 +1,424 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ERP Docs — Sales &amp; Invoicing Module</title>
+<link rel="stylesheet" href="/shared/docs-shell.css">
+</head>
+<body data-module="Sales &amp; Invoicing">
+
+<header class="topbar">
+  <button class="icon-btn navtoggle" id="navToggle" aria-label="Toggle navigation">☰</button>
+  <a class="brand" href="/"><span class="mark">N</span> Nexoraa ERP Docs</a>
+  <div class="searchwrap">
+    <input type="text" class="searchbox" id="searchInput" placeholder="Search Sales &amp; Invoicing documentation…" autocomplete="off">
+    <div class="search-results" id="searchResults"></div>
+  </div>
+  <div class="topbar-actions">
+    <button class="icon-btn" id="themeToggle" aria-label="Toggle dark mode" title="Toggle dark mode">◐</button>
+    <button class="icon-btn" id="printBtn" aria-label="Print this page" title="Print this page">⎙</button>
+  </div>
+</header>
+
+<div class="shell">
+  <nav class="sidebar" id="sidebar">
+    <div class="sb-group">
+      <div class="sb-group-title">Modules</div>
+      <div class="sb-module active-module">
+        <div class="sb-module-head active-module">Sales &amp; Invoicing <span class="status">v1</span></div>
+        <div class="sb-track">
+          <div class="sb-track-title">Client</div>
+          <a class="sb-link" data-page="sales-client-overview" href="#sales/client/overview">Overview</a>
+          <a class="sb-link" data-page="sales-client-invoices" href="#sales/client/invoices">Creating &amp; Confirming an Invoice</a>
+          <a class="sb-link" data-page="sales-client-returns" href="#sales/client/returns">Sale Returns &amp; Credit Notes</a>
+          <a class="sb-link" data-page="sales-client-payments" href="#sales/client/payments">Recording Payments</a>
+          <a class="sb-link" data-page="sales-client-faq" href="#sales/client/faq">Troubleshooting &amp; FAQ</a>
+        </div>
+        <div class="sb-track">
+          <div class="sb-track-title">Super Admin</div>
+          <a class="sb-link" data-page="sales-admin-access" href="#sales/admin/access-roles">Access &amp; Roles</a>
+          <a class="sb-link" data-page="sales-admin-compliance" href="#sales/admin/compliance">Invoice Numbering &amp; GST Compliance</a>
+          <a class="sb-link" data-page="sales-admin-limits" href="#sales/admin/limitations">Limitations to Know</a>
+        </div>
+        <div class="sb-track">
+          <div class="sb-track-title">Developer</div>
+          <a class="sb-link" data-page="sales-dev-architecture" href="#sales/dev/architecture">Architecture</a>
+          <a class="sb-link" data-page="sales-dev-api" href="#sales/dev/api-reference">API Reference</a>
+          <a class="sb-link" data-page="sales-dev-data" href="#sales/dev/data-model">Data Model</a>
+        </div>
+        <div class="sb-track">
+          <div class="sb-track-title">Audit</div>
+          <a class="sb-link" data-page="sales-issues" href="#sales/audit/known-issues">Known Issues &amp; Needs Review</a>
+        </div>
+      </div>
+    </div>
+    <div class="sb-group">
+      <div class="sb-group-title">Other modules</div>
+      <a class="sb-module-head" href="/pos/index.html">POS <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/inventory/index.html">Inventory <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/purchase/index.html">Purchase <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/products/index.html">Products &amp; Variants <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/customers/index.html">Customers &amp; Suppliers <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/accounting/index.html">Accounting &amp; GST <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/hr/index.html">HR &amp; Payroll <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/reports/index.html">Reports <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/tenants/index.html">Super Admin / Tenants <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/platform/index.html">Developer Platform <span class="status">Open →</span></a>
+    </div>
+  </nav>
+
+  <main class="content" id="content">
+    <div class="breadcrumb" id="breadcrumb"></div>
+
+    <!-- ============ CLIENT: OVERVIEW ============ -->
+    <article class="page" id="page-sales-client-overview" data-track="client" data-title="Sales & Invoicing Overview">
+      <span class="track-pill client">Client documentation</span>
+      <h1>Sales &amp; Invoicing Overview</h1>
+      <div class="pilot-banner">This module covers the desktop ERP's <strong>Sales</strong> area — manual invoices, sale returns, and payments — as opposed to the <a href="/pos/index.html">POS Terminal</a>, which is a separate app for fast counter billing. Built from a direct code audit; several workflows described in <code>docs/training/CASHIER_GUIDE.md</code> for this area turned out <strong>not to work as written</strong> — those are called out explicitly rather than glossed over.</div>
+
+      <p>Use this module for anything POS doesn't cover well: wholesale/B2B invoices, GST-heavy billing, quotations that convert into invoices, and the paperwork side of returns and receivables.</p>
+
+      <div class="callout bug"><div class="callout-title">Before you rely on this module — read this first</div><p>Two workflows here are currently broken in ways that affect real business outcomes, not just convenience: <strong>Sale Returns cannot be saved from the screen at all</strong>, and <strong>every approved sale return posts to the accounting ledger as ₹0</strong> regardless of its real value. Full detail on both is in <a href="#sales/client/returns">Sale Returns &amp; Credit Notes</a> and <a href="#sales/audit/known-issues">Known Issues</a>.</p></div>
+
+      <h2 id="who">Who uses it</h2>
+      <p>Anyone with <code>INVOICE_VIEW</code>/<code>INVOICE_CREATE</code> for invoices, <code>PAYMENT_VIEW</code>/<code>PAYMENT_CREATE</code> for payments. Sale returns are gated by <code>INVOICE_CANCEL</code> specifically (not a dedicated "returns" permission) — see <a href="#sales/admin/access-roles">Access &amp; Roles</a> for why that matters.</p>
+
+      <h2 id="areas">What's here</h2>
+      <ul>
+        <li><strong>Invoices</strong> — create as a draft, confirm to finalize and deduct stock, cancel if needed. No editing after creation, at any stage.</li>
+        <li><strong>Quotations &amp; Delivery Challans</strong> — can be converted into an invoice, prefilling its line items.</li>
+        <li><strong>Sale Returns</strong> — intended to restore stock and issue a credit note. Currently broken end-to-end from the UI.</li>
+        <li><strong>Payments</strong> — record money received against a customer; allocating it to specific invoices is a separate step that is also currently broken from the UI.</li>
+      </ul>
+
+      <div class="pager">
+        <span></span>
+        <a class="next" href="#sales/client/invoices"><div class="pg-label">Next</div><div class="pg-title">Creating &amp; Confirming an Invoice →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ CLIENT: INVOICES ============ -->
+    <article class="page" id="page-sales-client-invoices" data-track="client" data-title="Creating & Confirming an Invoice">
+      <span class="track-pill client">Client documentation</span>
+      <h1>Creating &amp; Confirming an Invoice</h1>
+
+      <h2 id="create">Creating a draft</h2>
+      <ol class="steps">
+        <li><h4>Start a new invoice</h4><strong>Sales → Invoices → New Invoice</strong>, or convert an existing Quotation or Delivery Challan (its items carry over automatically).</li>
+        <li><h4>Fill the header</h4>Customer, Branch, Warehouse, Invoice Date, Due Date, and Place of Supply.</li>
+        <li><h4>Add line items</h4>Search each item, then enter quantity, rate, discount %, and GST % yourself.
+          <div class="callout review"><div class="callout-title">Rate does not auto-fill</div><p>Unlike the price-list feature used elsewhere in the app, a new line here always starts at ₹0 — you need to type the rate manually even if a price list exists for the item.</p></div>
+        </li>
+        <li><h4>Save as Draft</h4>This is the only save option on this screen — there's no combined "confirm and take payment" action here. A draft holds no stock and reserves nothing.</li>
+      </ol>
+
+      <h2 id="confirm">Confirming the invoice</h2>
+      <p>Open the saved draft and click <strong>Confirm Invoice</strong>. You'll be asked to type the invoice number yourself.</p>
+      <div class="callout review"><div class="callout-title">Invoice numbers are typed, not generated</div><p>The system only checks that the number you type is unique for your tenant — it does not generate one for you and does not enforce any sequence. Two different users could type numbers out of order. If your business needs strictly sequential invoice numbers for GST audit purposes, that has to be enforced by your own process today, not the software. See <a href="#sales/admin/compliance">Invoice Numbering &amp; GST Compliance</a>.</p></div>
+      <p>Confirming is what actually deducts stock and locks in the invoice number — a draft does neither.</p>
+
+      <h2 id="period">Invoice dates and closed accounting periods</h2>
+      <p>If the invoice date falls in a month your accountant has already closed, <strong>confirming</strong> the invoice fails with a clear error. You can still <em>save it as a draft</em> with that date — the check only runs at confirm time, so you won't find out until then.</p>
+
+      <h2 id="edit">You cannot edit an invoice, ever</h2>
+      <div class="callout bug"><div class="callout-title">No edit exists at any status</div><p>This is stronger than "you can't edit a confirmed invoice" — there is no edit action for a draft invoice either, once it's saved. If you need to change something, cancel it and create a new one. For a confirmed invoice, use a Sale Return instead of trying to correct the original.</p></div>
+
+      <div class="pager">
+        <a href="#sales/client/overview"><div class="pg-label">Back</div><div class="pg-title">← Overview</div></a>
+        <a class="next" href="#sales/client/returns"><div class="pg-label">Next</div><div class="pg-title">Sale Returns &amp; Credit Notes →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ CLIENT: RETURNS ============ -->
+    <article class="page" id="page-sales-client-returns" data-track="client" data-title="Sale Returns & Credit Notes">
+      <span class="track-pill client">Client documentation</span>
+      <h1>Sale Returns &amp; Credit Notes</h1>
+
+      <div class="callout bug"><div class="callout-title">The "New Return" form cannot currently be saved</div><p>This is a real, confirmed defect, not a training gap: the return form doesn't have a way to pick which items are being returned, and always submits an empty item list — which the server always rejects, because a return must have at least one item. Every attempt to save a new sale return fails. There is no workaround from this screen today; it needs a development fix (see <a href="#sales/audit/known-issues">Known Issues</a>). If you need to process a return right now, do it as a manual adjustment through your accountant rather than via this screen.</p></div>
+
+      <h2 id="intended">How this is meant to work</h2>
+      <p>Documenting the intended flow so it's ready to use the moment it's fixed:</p>
+      <div class="flow">
+        <div class="flow-step"><div class="fs-label">1</div>Find the original invoice, select returned items and quantity</div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step"><div class="fs-label">2</div>Confirm the return</div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step terminal"><div class="fs-label">3</div>Stock restored (if physical) + a Credit Note issued automatically</div>
+      </div>
+      <p>A returned quantity can't exceed what's left after any earlier approved returns on the same invoice line — the system tracks that cumulatively, not just against the original sale.</p>
+
+      <h2 id="credit-notes">Applying a Credit Note</h2>
+      <div class="callout bug"><div class="callout-title">No "Apply Credit Note" button exists</div><p>Even for a credit note that already exists, there is currently no place in the app to apply it against a new invoice — despite this being a real, working capability on the server. Applying a credit note today requires a developer to call the API directly; there is no supported way to do it as a normal user.</p></div>
+
+      <h2 id="access">Who can do this</h2>
+      <p>Creating a sale return requires the same permission as cancelling an invoice, not a separate "create return" permission. Check with your admin if you don't see the option — see <a href="#sales/admin/access-roles">Access &amp; Roles</a> for why a Cashier-type account often won't.</p>
+
+      <div class="pager">
+        <a href="#sales/client/invoices"><div class="pg-label">Back</div><div class="pg-title">← Creating &amp; Confirming an Invoice</div></a>
+        <a class="next" href="#sales/client/payments"><div class="pg-label">Next</div><div class="pg-title">Recording Payments →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ CLIENT: PAYMENTS ============ -->
+    <article class="page" id="page-sales-client-payments" data-track="client" data-title="Recording Payments">
+      <span class="track-pill client">Client documentation</span>
+      <h1>Recording Payments</h1>
+
+      <h2 id="record">Recording a payment</h2>
+      <ol class="steps">
+        <li><h4>Sales → Payments → Receive Payment</h4>Search for the customer.</li>
+        <li><h4>Enter the amount and mode</h4>Cash, Card, UPI, Cheque, NEFT, or RTGS. For a cheque, enter the cheque number and bank name.</li>
+        <li><h4>Save</h4>The payment is recorded against the customer.</li>
+      </ol>
+      <div class="callout bug"><div class="callout-title">This does not link the payment to any invoice</div><p>Recording a payment here does not show or select which of the customer's invoices it's for — it's just logged against the customer. Linking it to specific invoice(s) is a separate step called "allocating," and that screen is currently broken: it leads to a page that doesn't exist. Right now there is no way to mark a specific invoice as paid via this flow.</p></div>
+
+      <h2 id="cheque">Cheque payments</h2>
+      <div class="callout review"><div class="callout-title">No "Pending Deposit" tracking</div><p>Recording a bounced cheque works and correctly reverses the payment. But there is no "Pending Deposit" or "Deposited" status anywhere in the system — every payment mode, including cheque, starts the same way as cash or card. If your process depends on tracking which cheques are still sitting undeposited, that isn't tracked here today.</p></div>
+
+      <h2 id="oldest">"Oldest invoice first"</h2>
+      <p>There's no automatic ordering logic in the system — allocating a payment (once that screen works) is a fully manual choice of which invoice(s) to apply it to, in whatever order you choose.</p>
+
+      <div class="pager">
+        <a href="#sales/client/returns"><div class="pg-label">Back</div><div class="pg-title">← Sale Returns &amp; Credit Notes</div></a>
+        <a class="next" href="#sales/client/faq"><div class="pg-label">Next</div><div class="pg-title">Troubleshooting &amp; FAQ →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ CLIENT: FAQ ============ -->
+    <article class="page" id="page-sales-client-faq" data-track="client" data-title="Troubleshooting & FAQ">
+      <span class="track-pill client">Client documentation</span>
+      <h1>Troubleshooting &amp; FAQ</h1>
+      <div class="tablewrap"><table>
+        <tr><th>Issue</th><th>What's actually going on</th></tr>
+        <tr><td>"New Return" won't save / gives an error</td><td>Confirmed defect — the form can never submit successfully today. Not something you're doing wrong.</td></tr>
+        <tr><td>Can't find "Apply Credit Note" anywhere</td><td>It doesn't exist yet as a button, even though credit notes themselves are created correctly.</td></tr>
+        <tr><td>Recorded a payment but the invoice still shows unpaid</td><td>Expected currently — payments aren't linked to invoices at recording time, and the allocation screen is broken. See <a href="#sales/client/payments">Recording Payments</a>.</td></tr>
+        <tr><td>Can't edit a saved invoice, even a draft</td><td>Correct, expected behavior — there is no edit capability at any invoice status. Cancel and recreate instead.</td></tr>
+        <tr><td>Item rate shows ₹0 on a new invoice line</td><td>Expected — rates aren't auto-filled from a price list here; type it manually.</td></tr>
+        <tr><td>Confirming an invoice fails with a period-closed error</td><td>Your accountant has closed that month. Check the invoice date, or ask them to reopen the period if this was a genuine mistake.</td></tr>
+      </table></div>
+
+      <div class="callout review"><div class="callout-title">Comparing this to docs/training/CASHIER_GUIDE.md</div><p>Unlike the POS module (where the printed guide now matches the app closely), this area's "Invoice Creation," "Sale Returns," and "Recording Payments" sections describe several things that don't exist in the running app: a combined "Confirm Invoice + Receive Payment" button, an item picker on the return form, an "Apply Credit Note" button, invoices showing up automatically when recording a payment, and a "Pending Deposit → Deposited" cheque status. Treat this documentation, not the guide, as the source of truth for this module until the guide is revised.</p></div>
+
+      <div class="pager">
+        <a href="#sales/client/payments"><div class="pg-label">Back</div><div class="pg-title">← Recording Payments</div></a>
+        <span></span>
+      </div>
+    </article>
+
+    <!-- ============ ADMIN: ACCESS ============ -->
+    <article class="page" id="page-sales-admin-access" data-track="admin" data-title="Access & Roles">
+      <span class="track-pill admin">Super Admin documentation</span>
+      <h1>Access &amp; Roles</h1>
+
+      <div class="tablewrap"><table>
+        <tr><th>Action</th><th>Permission actually checked</th><th>Notes</th></tr>
+        <tr><td>View invoices</td><td><span class="badge perm">INVOICE_VIEW</span></td><td></td></tr>
+        <tr><td>Create / confirm / duplicate invoice</td><td><span class="badge perm">INVOICE_CREATE</span></td><td></td></tr>
+        <tr><td>Cancel invoice</td><td><span class="badge perm">INVOICE_CANCEL</span></td><td></td></tr>
+        <tr><td>Create sale return</td><td><span class="badge perm">INVOICE_CANCEL</span></td><td>Reuses the cancel permission, not a dedicated return permission</td></tr>
+        <tr><td>Apply / refund credit note</td><td><span class="badge perm">PAYMENT_CREATE</span></td><td>Reuses the payment permission</td></tr>
+        <tr><td>View / create / allocate / bounce payment</td><td><span class="badge perm">PAYMENT_VIEW</span> / <span class="badge perm">PAYMENT_CREATE</span></td><td></td></tr>
+      </table></div>
+
+      <div class="callout review"><div class="callout-title">Dedicated return/credit-note permissions exist but are never checked</div><p>The permission system defines <code>SALE_RETURN_VIEW/CREATE/APPROVE/CANCEL</code> and <code>CREDIT_NOTE_VIEW/CREATE/CANCEL/ADJUST</code>, and grants some of them to Sales Manager and Cashier roles by default — but no route in the code actually checks any of them. The real gate is <code>INVOICE_CANCEL</code> (for returns) and <code>PAYMENT_CREATE</code> (for credit notes), as shown above. Practical effect: a default <strong>Cashier</strong> role does <em>not</em> have <code>INVOICE_CANCEL</code>, so a cashier cannot create a sale return today even though they're separately granted the (unused) <code>SALE_RETURN_CREATE</code> permission. If cashiers are expected to process returns, this needs a role-default fix, not just a training note.</p></div>
+
+      <div class="callout review"><div class="callout-title">Converting a quotation is Owner/Admin-only by default</div><p><code>QUOTATION_CONVERT</code> isn't explicitly listed in the Sales Manager or Cashier permission sets — only Owner/Admin roles get it (via their all-permissions grant). Confirm whether Sales Manager should also be able to convert a quotation to an invoice; if so, this is a role-default gap.</p></div>
+
+      <div class="pager">
+        <span></span>
+        <a class="next" href="#sales/admin/compliance"><div class="pg-label">Next</div><div class="pg-title">Invoice Numbering &amp; GST Compliance →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ ADMIN: COMPLIANCE ============ -->
+    <article class="page" id="page-sales-admin-compliance" data-track="admin" data-title="Invoice Numbering & GST Compliance">
+      <span class="track-pill admin">Super Admin documentation</span>
+      <h1>Invoice Numbering &amp; GST Compliance</h1>
+
+      <div class="callout bug"><div class="callout-title">Manual invoice numbers are free text, not enforced-sequential</div><p>When a user confirms an invoice from this module, they type the invoice number themselves. The system only guarantees it's unique per tenant — nothing enforces that numbers are sequential or gapless. Indian GST rules generally expect invoice numbering to be sequential and traceable. If this tenant needs to demonstrate compliant sequential numbering, that discipline currently depends entirely on staff typing numbers in order, with no system enforcement or warning if they don't.</p></div>
+
+      <p>This is a different (and weaker) guarantee than the POS terminal, which auto-generates its own invoice numbers from a timestamp — not sequential either, but at least not user-editable. Neither path currently produces a true gapless sequence; treat both as a compliance item to resolve before relying on either for statutory reporting, and see the equivalent note on the POS side.</p>
+
+      <div class="callout bug"><div class="callout-title">Every sale return posts ₹0 to the general ledger</div><p>Independently of invoice numbering: a data-mismatch bug means the accounting entry generated for every approved sale return is booked at ₹0, regardless of the return's real value (see <a href="#sales/audit/known-issues">Known Issues</a> for the technical detail). Combined with the fact that Sale Returns can't currently be saved at all, this hasn't yet caused real financial data to be posted incorrectly in practice — but it will the moment the save-form bug above is fixed, unless this is fixed at the same time.</p></div>
+
+      <div class="pager">
+        <a href="#sales/admin/access-roles"><div class="pg-label">Back</div><div class="pg-title">← Access &amp; Roles</div></a>
+        <a class="next" href="#sales/admin/limitations"><div class="pg-label">Next</div><div class="pg-title">Limitations to Know →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ ADMIN: LIMITATIONS ============ -->
+    <article class="page" id="page-sales-admin-limits" data-track="admin" data-title="Limitations to Know">
+      <span class="track-pill admin">Super Admin documentation</span>
+      <h1>Limitations to Know</h1>
+      <p>Ranked by how much they should worry you before depending on this module for real operations. Technical detail on all of these is in <a href="#sales/audit/known-issues">Known Issues</a>.</p>
+      <ol>
+        <li><strong>Sale Returns cannot be saved at all</strong> — the "New Return" screen always fails. This is a launch-blocker if returns are part of your workflow, not a cosmetic gap.</li>
+        <li><strong>Sale-return accounting entries post at ₹0</strong> — currently masked by #1 (nothing gets that far), but must be fixed before #1 is fixed, or every future return will silently understate your books.</li>
+        <li><strong>Payments can't be linked to invoices from the UI</strong> — the allocation screen is a dead link. Receivables tracking by invoice isn't currently usable end-to-end.</li>
+        <li><strong>Credit notes can't be applied from the UI</strong> — they're created correctly but have no "use this credit" button anywhere.</li>
+        <li><strong>Invoice numbering has no sequence enforcement</strong> — a GST-compliance question your accountant should weigh in on.</li>
+        <li><strong>Sales Manager may be unable to convert quotations</strong> — confirm this is intended.</li>
+      </ol>
+      <div class="pager">
+        <a href="#sales/admin/compliance"><div class="pg-label">Back</div><div class="pg-title">← Invoice Numbering &amp; GST Compliance</div></a>
+        <span></span>
+      </div>
+    </article>
+
+    <!-- ============ DEV: ARCHITECTURE ============ -->
+    <article class="page" id="page-sales-dev-architecture" data-track="dev" data-title="Architecture">
+      <span class="track-pill dev">Developer documentation</span>
+      <h1>Architecture</h1>
+      <p>Frontend: <code>apps/web-frontend</code>, routes defined in <code>src/App.tsx</code>. Backend: <code>apps/sales-service</code> (<code>invoice.routes.ts</code>, <code>sale-return.routes.ts</code>, <code>payment.routes.ts</code>).</p>
+
+      <h2 id="routes">Routes</h2>
+      <div class="tablewrap"><table>
+        <tr><th>Path</th><th>Component</th><th>Permission</th></tr>
+        <tr><td><code>sales/quotations</code></td><td>QuotationsPage</td><td class="badge perm">INVOICE_VIEW</td></tr>
+        <tr><td><code>sales/quotations/new</code></td><td>InvoiceFormPage (shared)</td><td class="badge perm">INVOICE_CREATE</td></tr>
+        <tr><td><code>sales/invoices</code></td><td>InvoicesPage</td><td class="badge perm">INVOICE_VIEW</td></tr>
+        <tr><td><code>sales/invoices/new</code></td><td>InvoiceFormPage</td><td class="badge perm">INVOICE_CREATE</td></tr>
+        <tr><td><code>sales/invoices/:id</code></td><td>InvoiceDetailPage</td><td class="badge perm">INVOICE_VIEW</td></tr>
+        <tr><td><code>sales/payments</code></td><td>PaymentsPage</td><td class="badge perm">PAYMENT_VIEW</td></tr>
+        <tr><td><code>sales/payments/new</code></td><td>PaymentsPage (modal)</td><td class="badge perm">PAYMENT_CREATE</td></tr>
+        <tr><td><code>sales/returns</code></td><td>SaleReturnsPage</td><td class="badge perm">INVOICE_VIEW</td></tr>
+      </table></div>
+      <p class="src">apps/web-frontend/src/App.tsx:75-84,291-302</p>
+
+      <div class="callout bug"><div class="callout-title">Dead route: payment allocation</div><p><code>PaymentsPage</code> links to <code>/sales/payments/:id/allocate</code>, but no such route is registered anywhere in <code>App.tsx</code> — it falls through to the catch-all <code>NotFoundPage</code>. No page component matching an "allocate" pattern exists under <code>src/pages/sales/</code> at all. <span class="src">apps/web-frontend/src/pages/sales/PaymentsPage.tsx:110</span>, <span class="src">apps/web-frontend/src/App.tsx:297-298,391</span></p></div>
+
+      <h2 id="components">Key components</h2>
+      <ul>
+        <li><strong>InvoiceFormPage.tsx</strong> — single-file form, no price-list query despite <code>PriceListsPage.tsx</code> existing elsewhere; new lines default <code>unitPrice: 0</code>. Only action is "Save as Draft" (no confirm-on-create). Can prefill from <code>?quotationId=</code> or <code>?challanId=</code>. <span class="src">InvoiceFormPage.tsx:35-47,75-155,179-190,380</span></li>
+        <li><strong>InvoiceDetailPage.tsx</strong> — status-conditional actions (Confirm only if DRAFT + <code>INVOICE_CREATE</code>; Record Payment only if CONFIRMED/PARTIALLY_PAID + <code>PAYMENT_CREATE</code>; Cancel if DRAFT/CONFIRMED + <code>INVOICE_CANCEL</code>). Confirm modal is a free-text invoice-number input. No edit action; no "Apply Credit Note" button despite the API existing. <span class="src">InvoiceDetailPage.tsx:108-121,202-218</span></li>
+        <li><strong>SaleReturnsPage.tsx</strong> — "New Return" modal takes raw numeric Invoice ID and Customer ID (no search picker), Return Date, Reason, and a Physical Return switch — but no line-item picker at all; the create call always submits <code>lines: []</code>. <span class="src">SaleReturnsPage.tsx:31,79,130</span></li>
+      </ul>
+
+      <div class="pager">
+        <span></span>
+        <a class="next" href="#sales/dev/api-reference"><div class="pg-label">Next</div><div class="pg-title">API Reference →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ DEV: API ============ -->
+    <article class="page" id="page-sales-dev-api" data-track="dev" data-title="API Reference">
+      <span class="track-pill dev">Developer documentation</span>
+      <h1>API Reference</h1>
+      <p>All routes below live in <code>apps/sales-service/src/api</code>, permission-checked via <code>requirePermission()</code>.</p>
+
+      <h2 id="invoices">Invoices (invoice.routes.ts)</h2>
+      <div class="tablewrap"><table>
+        <tr><th>Method</th><th>Path</th><th>Permission</th><th>Notes</th></tr>
+        <tr><td>GET</td><td><code>/invoices</code></td><td class="badge perm">INVOICE_VIEW</td><td>branch-scoped</td></tr>
+        <tr><td>POST</td><td><code>/invoices</code></td><td class="badge perm">INVOICE_CREATE</td><td>creates DRAFT; checks <code>CREDIT_LIMIT_OVERRIDE</code>/<code>PRICE_FLOOR_OVERRIDE</code> if those flags are set</td></tr>
+        <tr><td>GET</td><td><code>/invoices/:id</code></td><td class="badge perm">INVOICE_VIEW</td><td></td></tr>
+        <tr><td>POST</td><td><code>/invoices/:id/confirm</code></td><td class="badge perm">INVOICE_CREATE</td><td>DRAFT→CONFIRMED, deducts stock, requires client-supplied <code>invoiceNumber</code> (unique per tenant, min 1 / max 50 chars)</td></tr>
+        <tr><td>POST</td><td><code>/invoices/:id/cancel</code></td><td class="badge perm">INVOICE_CANCEL</td><td>DRAFT or CONFIRMED → CANCELLED; restores stock only if it was CONFIRMED</td></tr>
+        <tr><td>GET</td><td><code>/invoices/:id/pdf</code></td><td class="badge perm">INVOICE_VIEW</td><td></td></tr>
+        <tr><td>POST</td><td><code>/invoices/:id/duplicate</code></td><td class="badge perm">INVOICE_CREATE</td><td>new draft, own timestamp-based placeholder number</td></tr>
+        <tr><td>GET</td><td><code>/invoices/:id/activity</code></td><td class="badge perm">INVOICE_VIEW</td><td></td></tr>
+      </table></div>
+      <div class="callout note"><div class="callout-title">No PUT/PATCH route exists</div><p>Confirmed by grep — there is no update endpoint for an invoice at any status. <span class="src">apps/sales-service/src/api/invoice.routes.ts</span></p></div>
+
+      <h2 id="returns">Sale Returns &amp; Credit Notes (sale-return.routes.ts)</h2>
+      <div class="tablewrap"><table>
+        <tr><th>Method</th><th>Path</th><th>Permission</th><th>Notes</th></tr>
+        <tr><td>GET</td><td><code>/sale-returns</code></td><td class="badge perm">INVOICE_VIEW</td><td></td></tr>
+        <tr><td>POST</td><td><code>/sale-returns</code></td><td class="badge perm">INVOICE_CANCEL</td><td>Zod requires <code>lines.min(1)</code> — the frontend never satisfies this (see Architecture)</td></tr>
+        <tr><td>GET</td><td><code>/sale-returns/:id</code></td><td class="badge perm">INVOICE_VIEW</td><td></td></tr>
+        <tr><td>POST</td><td><code>/credit-notes/:id/apply</code></td><td class="badge perm">PAYMENT_CREATE</td><td>locks the invoice row FOR UPDATE to avoid racing payment allocation; applies <code>min(remaining, balanceDue)</code></td></tr>
+        <tr><td>POST</td><td><code>/credit-notes/:id/refund</code></td><td class="badge perm">PAYMENT_CREATE</td><td>marks credit note REFUNDED</td></tr>
+      </table></div>
+      <p class="src">apps/sales-service/src/api/sale-return.routes.ts:20-145; apps/sales-service/src/domain/SaleReturnService.ts:76-96,125-145,198-312</p>
+
+      <h2 id="payments">Payments (payment.routes.ts)</h2>
+      <div class="tablewrap"><table>
+        <tr><th>Method</th><th>Path</th><th>Permission</th><th>Notes</th></tr>
+        <tr><td>GET</td><td><code>/payments</code></td><td class="badge perm">PAYMENT_VIEW</td><td></td></tr>
+        <tr><td>POST</td><td><code>/payments</code></td><td class="badge perm">PAYMENT_CREATE</td><td>modes: CASH, CARD, UPI, CHEQUE, NEFT, RTGS, CREDIT_NOTE, ADVANCE — does not accept/link an invoiceId</td></tr>
+        <tr><td>GET</td><td><code>/payments/:id</code></td><td class="badge perm">PAYMENT_VIEW</td><td></td></tr>
+        <tr><td>POST</td><td><code>/payments/:id/allocate</code></td><td class="badge perm">PAYMENT_CREATE</td><td>takes explicit <code>allocations: [{invoiceId, amount}]</code> — no automatic ordering; unreachable from the current UI</td></tr>
+        <tr><td>POST</td><td><code>/payments/:id/bounce</code></td><td class="badge perm">PAYMENT_CREATE</td><td>only for <code>paymentMode === 'CHEQUE'</code>; RECEIVED → BOUNCED</td></tr>
+      </table></div>
+      <p class="src">apps/sales-service/src/api/payment.routes.ts:12-137; apps/sales-service/src/domain/PaymentService.ts:27-204</p>
+
+      <div class="pager">
+        <a href="#sales/dev/architecture"><div class="pg-label">Back</div><div class="pg-title">← Architecture</div></a>
+        <a class="next" href="#sales/dev/data-model"><div class="pg-label">Next</div><div class="pg-title">Data Model →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ DEV: DATA MODEL ============ -->
+    <article class="page" id="page-sales-dev-data" data-track="dev" data-title="Data Model">
+      <span class="track-pill dev">Developer documentation</span>
+      <h1>Data Model</h1>
+      <p><code>packages/db-client/src/schema/sales.ts</code>. Invoices/invoice_lines share the same table as POS (see the POS module's Data Model page) — differences noted below.</p>
+
+      <h2 id="invoices">invoices (Sales-specific columns)</h2>
+      <p><code>quotation_id</code>, <code>delivery_challan_id</code> — links unique to this flow, not present on POS-created invoices. <code>invoice_number</code> is nullable and unique per tenant (<code>invoices_tenant_number</code>), but populated from free-text user input rather than generated. <code>client_operation_id</code> is a POS-only concept, unused on this path.</p>
+      <p class="src">packages/db-client/src/schema/sales.ts:92-158</p>
+
+      <h2 id="payments">payments</h2>
+      <p><code>payment_mode</code>: <code>CASH|CARD|UPI|CHEQUE|NEFT|RTGS|CREDIT_NOTE|ADVANCE|LOYALTY</code>. <code>status</code>: <code>RECEIVED|PARTIALLY_ALLOCATED|FULLY_ALLOCATED|BOUNCED|REFUNDED</code> — no <code>PENDING_DEPOSIT</code>/<code>DEPOSITED</code> values exist. Cheque columns: <code>cheque_number</code>, <code>cheque_bank_name</code>, <code>cheque_date</code>, <code>bounced_at</code>, <code>bounce_reason</code>.</p>
+      <p class="src">packages/db-client/src/schema/sales.ts:266-306</p>
+
+      <h2 id="allocations">payment_allocations</h2>
+      <p><code>payment_id</code>, <code>invoice_id</code>, <code>amount</code>, <code>allocated_by</code> — a plain many-to-many join. No "oldest first" or any automatic-ordering concept anywhere in the schema.</p>
+      <p class="src">packages/db-client/src/schema/sales.ts:308-323</p>
+
+      <h2 id="returns">sale_returns / sale_return_lines / credit_notes</h2>
+      <p><code>sale_returns.status</code>: <code>DRAFT|APPROVED|CANCELLED</code> — in practice always set straight to <code>APPROVED</code> in the same transaction as creation, so <code>DRAFT</code> is a theoretical state not exercised by current code. <code>credit_notes.status</code>: <code>OPEN|PARTIALLY_USED|FULLY_USED|REFUNDED</code>, with <code>used_amount</code>/<code>remaining_amount</code>, and FKs to both the originating <code>sale_return_id</code> and <code>original_invoice_id</code>.</p>
+      <p class="src">packages/db-client/src/schema/sales.ts:326-416</p>
+
+      <div class="pager">
+        <a href="#sales/dev/api-reference"><div class="pg-label">Back</div><div class="pg-title">← API Reference</div></a>
+        <a class="next" href="#sales/audit/known-issues"><div class="pg-label">Next</div><div class="pg-title">Known Issues →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ AUDIT: KNOWN ISSUES ============ -->
+    <article class="page" id="page-sales-issues" data-track="dev" data-title="Known Issues & Needs Review">
+      <span class="track-pill dev">Cross-cutting · Health audit</span>
+      <h1>Known Issues &amp; Needs Review</h1>
+      <p>Ranked by real-world impact. Everything below is a confirmed code-reading finding, not a guess.</p>
+
+      <div class="callout bug"><div class="callout-title">Every sale-return accounting entry posts at ₹0</div><p><code>SaleReturnService.create</code> publishes the <code>SALE_RETURN_APPROVED</code> event with a field named <code>totalAmount</code>, but <code>SaleReturnAccountingConsumer.handleSaleReturnApproved</code> reads a field named <code>grandTotal</code> — which is never sent. The consumer's <code>Number(p.grandTotal ?? 0)</code> therefore always evaluates to <code>0</code>, so <strong>every sale-return journal entry is booked at ₹0</strong>, silently understating the ledger impact of every return. No accounting-service test covers this consumer. <span class="src">apps/sales-service/src/domain/SaleReturnService.ts:236-244</span>, <span class="src">apps/accounting-service/src/consumers/SaleReturnAccountingConsumer.ts:9-21</span></p></div>
+
+      <div class="callout bug"><div class="callout-title">"New Return" can never be saved</div><p><code>SaleReturnsPage.tsx</code> always submits <code>lines: []</code>; the backend's Zod schema requires <code>lines.min(1)</code>. Every submission of this form fails with a 400. The UI's own hint text ("add line items by editing the return record") describes a workflow with no corresponding edit endpoint. <span class="src">apps/web-frontend/src/pages/sales/SaleReturnsPage.tsx:130</span>, <span class="src">apps/sales-service/src/api/sale-return.routes.ts:20-25</span></p></div>
+
+      <div class="callout bug"><div class="callout-title">Payment allocation is a dead route</div><p><code>PaymentsPage.tsx</code> links to <code>/sales/payments/:id/allocate</code>; no such route is registered in <code>App.tsx</code>, and no matching page component exists. Falls through to <code>NotFoundPage</code>. The backend endpoint (<code>POST /payments/:id/allocate</code>) works and is tested — it's simply unreachable from the UI. <span class="src">apps/web-frontend/src/pages/sales/PaymentsPage.tsx:110</span>, <span class="src">apps/web-frontend/src/App.tsx:297-298,391</span></p></div>
+
+      <div class="callout review"><div class="callout-title">Permission model mismatch</div><p>Dedicated <code>SALE_RETURN_*</code>/<code>CREDIT_NOTE_*</code> permissions are defined and granted by role defaults but never checked by any route — actual gating reuses <code>INVOICE_CANCEL</code>/<code>PAYMENT_CREATE</code>. Net effect: default Cashier lacks <code>INVOICE_CANCEL</code> and so cannot create a sale return, despite separately holding the (unused) <code>SALE_RETURN_CREATE</code> permission. <span class="src">packages/shared-types/src/permissions.ts:109-118</span>, <span class="src">apps/tenant-service/src/rbac/role-defaults.ts:37-41,59-74</span></p></div>
+
+      <div class="callout review"><div class="callout-title">No sequential invoice numbering on the manual path</div><p>The confirm step accepts any unique free-text string as the invoice number — no auto-generation, no gap/sequence check. A GST-compliance question, not just a UX one. <span class="src">apps/sales-service/src/api/invoice.routes.ts:54-56</span>, <span class="src">InvoiceService.ts:346-356</span></p></div>
+
+      <div class="callout review"><div class="callout-title">QUOTATION_CONVERT not granted to Sales Manager</div><p>Only Owner/Admin (via their all-permissions wildcard) can convert a quotation to an invoice by default. May be intentional; confirm with product. <span class="src">apps/sales-service/src/api/quotation.routes.ts:130-131</span>, <span class="src">role-defaults.ts:14-23,25-74</span></p></div>
+
+      <div class="callout note"><div class="callout-title">Unconsumed event</div><p><code>CREDIT_NOTE_CREATED</code> is published on every sale return but is never subscribed to by any consumer — its only accounting effect flows through the (buggy, ₹0) <code>SALE_RETURN_APPROVED</code> handler instead. <span class="src">apps/sales-service/src/domain/SaleReturnService.ts:246-254</span></p></div>
+
+      <div class="callout note"><div class="callout-title">Dead client API surface</div><p><code>saleReturnApi.applyCreditNote</code>/<code>refundCreditNote</code> exist in the frontend API client but are called from nowhere in any component. <span class="src">apps/web-frontend/src/api/endpoints.ts:503-504</span></p></div>
+
+      <div class="callout note"><div class="callout-title">Test coverage gaps</div><p>Good coverage exists for period-closure, credit-limit/price-floor, cancel+stock-restore, and return-quantity-exceeded checks. Zero test coverage found for <code>SaleReturnService.applyCreditNote</code>, <code>PaymentService.bounceCheque</code>, or the credit-note refund endpoint — consistent with these being the least-exercised parts of the flow. No TODO/FIXME comments exist in any reviewed file; none of the gaps above are flagged in-code.</p></div>
+
+      <div class="callout ok"><div class="callout-title">Confirmed solid, once reachable</div><p>The underlying service logic for sale returns and credit notes is functionally correct at the code level — cumulative return-quantity validation, conditional stock restoration for physical returns, automatic credit-note creation, and race-safe credit-note application (row-locked against concurrent payment allocation) all check out. The defects above are UI-reachability and event-payload bugs sitting on top of a reasonable domain layer, not a fundamentally broken design.</p></div>
+
+      <div class="pager">
+        <a href="#sales/dev/data-model"><div class="pg-label">Back</div><div class="pg-title">← Data Model</div></a>
+        <span></span>
+      </div>
+    </article>
+
+  </main>
+
+  <aside class="toc">
+    <div class="toc-title">On this page</div>
+    <nav id="tocNav"></nav>
+  </aside>
+</div>
+
+<script src="/shared/docs-shell.js"></script>
+</body>
+</html>

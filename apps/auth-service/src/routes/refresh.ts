@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { eq, and, isNull } from 'drizzle-orm';
 import { users, refreshTokens } from '@erp/db';
 import type { ErpDatabase } from '@erp/db';
+import { assertTenantActive } from '@erp/sdk';
 import { signAccessToken } from '../jwt.js';
 import { generateSecureToken, sha256Hex } from '../crypto.js';
 import type { AuthConfig } from '../config.js';
@@ -13,7 +14,11 @@ const RefreshBody = z.object({
   refreshToken: z.string().min(1),
 });
 
-export async function refreshRoute(fastify: FastifyInstance, db: ErpDatabase, config: AuthConfig): Promise<void> {
+export async function refreshRoute(
+  fastify: FastifyInstance,
+  db: ErpDatabase,
+  config: AuthConfig
+): Promise<void> {
   fastify.post('/auth/refresh', {
     handler: async (request, reply) => {
       const body = RefreshBody.safeParse(request.body);
@@ -27,14 +32,17 @@ export async function refreshRoute(fastify: FastifyInstance, db: ErpDatabase, co
       const [tokenRow] = await db
         .select()
         .from(refreshTokens)
-        .where(
-          and(eq(refreshTokens.tokenHash, tokenHash), isNull(refreshTokens.revokedAt))
-        )
+        .where(and(eq(refreshTokens.tokenHash, tokenHash), isNull(refreshTokens.revokedAt)))
         .limit(1);
 
       if (!tokenRow || tokenRow.expiresAt < now) {
         return reply.code(401).send({ error: 'Invalid or expired refresh token' });
       }
+
+      // A tenant suspended/closed after this refresh token was issued must stop being able
+      // to mint fresh access tokens immediately, not just get blocked on its next business
+      // API call. Thrown ERPError is caught by the shared error handler.
+      await assertTenantActive(tokenRow.tenantId, []);
 
       const [user] = await db
         .select()
@@ -53,7 +61,11 @@ export async function refreshRoute(fastify: FastifyInstance, db: ErpDatabase, co
         .where(eq(refreshTokens.id, tokenRow.id));
 
       // Reload roles and permissions
-      const { roleNames, permissions, branchIds } = await loadUserRolesAndPermissions(db, user.id, tokenRow.tenantId);
+      const { roleNames, permissions, branchIds } = await loadUserRolesAndPermissions(
+        db,
+        user.id,
+        tokenRow.tenantId
+      );
 
       const accessToken = await signAccessToken({
         sub: String(user.id),

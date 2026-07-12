@@ -1,11 +1,27 @@
-import Fastify, { type FastifyError, type FastifyInstance } from 'fastify';
+import Fastify, { type FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 import Redis from 'ioredis';
-import { HELMET_OPTIONS, PERMISSIONS_POLICY, registerHealthRoute, tenantOrIpKeyGenerator, checkDatabase, initializeTelemetry, initTenantStatusEnforcement, PlatformContextFactory } from '@erp/sdk';
+import {
+  HELMET_OPTIONS,
+  PERMISSIONS_POLICY,
+  registerHealthRoute,
+  tenantOrIpKeyGenerator,
+  checkDatabase,
+  initializeTelemetry,
+  initTenantStatusEnforcement,
+  subscribeToTenantStatusInvalidations,
+  PlatformContextFactory,
+  registerErrorHandler,
+} from '@erp/sdk';
 import { createDatabaseClient } from '@erp/db';
-import { createLogger, createMetricsHandler, createHttpMetricsHook, createCorrelationIdHook } from '@erp/logger';
+import {
+  createLogger,
+  createMetricsHandler,
+  createHttpMetricsHook,
+  createCorrelationIdHook,
+} from '@erp/logger';
 import { loadAuthConfig } from './config.js';
 import { initializeJwt } from './jwt.js';
 import { loginRoute } from './routes/login.js';
@@ -19,6 +35,7 @@ import { rulesRoutes } from './routes/rules.js';
 import { userRoutes } from './routes/users.js';
 import { mfaVerifyRoute, mfaManagementRoutes } from './routes/mfa.routes.js';
 import { impersonateRoutes } from './routes/impersonate.routes.js';
+import { adminUsersRoutes } from './routes/admin-users.routes.js';
 import { sessionsRoutes } from './routes/sessions.routes.js';
 import { securityAuditLogRoutes } from './routes/security-audit-log.routes.js';
 import { auditLogRoutes } from './routes/audit-log.routes.js';
@@ -31,7 +48,11 @@ initializeTelemetry({ serviceName: 'auth-service' });
 async function bootstrap(): Promise<void> {
   const config = await loadAuthConfig();
   const lokiUrl = process.env['LOKI_URL'];
-  const logger = createLogger({ serviceName: 'auth-service', level: 'info', ...(lokiUrl ? { lokiUrl } : {}) });
+  const logger = createLogger({
+    serviceName: 'auth-service',
+    level: 'info',
+    ...(lokiUrl ? { lokiUrl } : {}),
+  });
 
   if (!config.jwtPrivateKey || !config.jwtPublicKey) {
     logger.error({}, 'JWT_PRIVATE_KEY and JWT_PUBLIC_KEY environment variables are required');
@@ -39,7 +60,10 @@ async function bootstrap(): Promise<void> {
   }
 
   if (!config.fieldEncryptionKey) {
-    logger.error({}, 'FIELD_ENCRYPTION_KEY environment variable is required for TOTP secret encryption');
+    logger.error(
+      {},
+      'FIELD_ENCRYPTION_KEY environment variable is required for TOTP secret encryption'
+    );
     process.exit(1);
   }
 
@@ -58,6 +82,7 @@ async function bootstrap(): Promise<void> {
   redis.on('error', (err: Error) => {
     logger.error({ err: err.message }, 'Redis connection error in auth-service');
   });
+  subscribeToTenantStatusInvalidations(redis);
 
   // Search-service sync (Phase 2): user/role routes need outbox event publishing, which
   // only PlatformContextFactory provides. Every other route in this file still gets the
@@ -135,6 +160,7 @@ async function bootstrap(): Promise<void> {
       await userRoutes(scope, ctxFactory);
       await mfaManagementRoutes(scope, db, config);
       await impersonateRoutes(scope, db);
+      await adminUsersRoutes(scope, db);
       await sessionsRoutes(scope, db);
       await securityAuditLogRoutes(scope, db);
       await auditLogRoutes(scope, db);
@@ -145,15 +171,7 @@ async function bootstrap(): Promise<void> {
   await registerAuthRoutes(fastify);
   await fastify.register(registerAuthRoutes, { prefix: '/api/v2' });
 
-  // Error handler — sanitize errors before sending to client
-  fastify.setErrorHandler<FastifyError>((error, request, reply) => {
-    logger.error({ err: error.message ?? String(error), correlationId: (request as { correlationId?: string }).correlationId }, 'Unhandled route error');
-    if (error.statusCode) {
-      void reply.code(error.statusCode).send({ error: error.message });
-    } else {
-      void reply.code(500).send({ error: 'Internal server error' });
-    }
-  });
+  registerErrorHandler(fastify, 'auth-service', logger);
 
   const address = await fastify.listen({ port: config.port, host: '0.0.0.0' });
   logger.info({ address }, 'Auth service started');

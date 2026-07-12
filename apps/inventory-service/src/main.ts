@@ -1,10 +1,23 @@
-import Fastify, { type FastifyError } from 'fastify';
+import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
-import { PlatformContextFactory, HELMET_OPTIONS, PERMISSIONS_POLICY, registerHealthRoute, tenantOrIpKeyGenerator, initializeTelemetry, initTenantStatusEnforcement } from '@erp/sdk';
-import { createLogger, createMetricsHandler, createHttpMetricsHook, createCorrelationIdHook } from '@erp/logger';
-import { ERPError } from '@erp/types';
+import {
+  PlatformContextFactory,
+  HELMET_OPTIONS,
+  PERMISSIONS_POLICY,
+  registerHealthRoute,
+  tenantOrIpKeyGenerator,
+  initializeTelemetry,
+  initTenantStatusEnforcement,
+  registerErrorHandler,
+} from '@erp/sdk';
+import {
+  createLogger,
+  createMetricsHandler,
+  createHttpMetricsHook,
+  createCorrelationIdHook,
+} from '@erp/logger';
 import { loadConfigWithSecrets } from '@erp/config';
 import { warehouseRoutes } from './api/warehouse.routes.js';
 import { categoryRoutes } from './api/category.routes.js';
@@ -27,7 +40,11 @@ initializeTelemetry({ serviceName: 'inventory-service' });
 async function bootstrap(): Promise<void> {
   const port = parseInt(process.env['INVENTORY_SERVICE_PORT'] ?? '3012', 10);
   const lokiUrl = process.env['LOKI_URL'];
-  const logger = createLogger({ serviceName: 'inventory-service', level: 'info', ...(lokiUrl ? { lokiUrl } : {}) });
+  const logger = createLogger({
+    serviceName: 'inventory-service',
+    level: 'info',
+    ...(lokiUrl ? { lokiUrl } : {}),
+  });
 
   const config = await loadConfigWithSecrets('inventory-service');
   const ctxFactory = new PlatformContextFactory({
@@ -39,6 +56,7 @@ async function bootstrap(): Promise<void> {
   });
   await ctxFactory.connect();
   ctxFactory.subscribeFeatureFlagInvalidations();
+  ctxFactory.subscribeTenantStatusInvalidations();
   initTenantStatusEnforcement(ctxFactory.rawDb);
 
   const metricsHandler = await createMetricsHandler('inventory-service');
@@ -74,33 +92,28 @@ async function bootstrap(): Promise<void> {
     return reply.code(200).header('Content-Type', metricsHandler.contentType).send(body);
   });
 
-  await fastify.register(async (sub) => {
-    await warehouseRoutes(sub, ctxFactory);
-    await categoryRoutes(sub, ctxFactory);
-    await brandRoutes(sub, ctxFactory);
-    await unitRoutes(sub, ctxFactory);
-    await itemRoutes(sub, ctxFactory);
-    await stockRoutes(sub, ctxFactory);
-    await reservationRoutes(sub, ctxFactory);
-    await transferRoutes(sub, ctxFactory);
-    await adjustmentRoutes(sub, ctxFactory);
-    await physicalVerificationRoutes(sub, ctxFactory);
-    await fabricRollRoutes(sub, ctxFactory);
-    await internalRoutes(sub, ctxFactory);
-    await valuationRoutes(sub, ctxFactory);
-    await searchSyncInternalRoutes(sub, ctxFactory);
-    await syncRoutes(sub, ctxFactory);
-  }, { prefix: '/api/v2' });
+  await fastify.register(
+    async (sub) => {
+      await warehouseRoutes(sub, ctxFactory);
+      await categoryRoutes(sub, ctxFactory);
+      await brandRoutes(sub, ctxFactory);
+      await unitRoutes(sub, ctxFactory);
+      await itemRoutes(sub, ctxFactory);
+      await stockRoutes(sub, ctxFactory);
+      await reservationRoutes(sub, ctxFactory);
+      await transferRoutes(sub, ctxFactory);
+      await adjustmentRoutes(sub, ctxFactory);
+      await physicalVerificationRoutes(sub, ctxFactory);
+      await fabricRollRoutes(sub, ctxFactory);
+      await internalRoutes(sub, ctxFactory);
+      await valuationRoutes(sub, ctxFactory);
+      await searchSyncInternalRoutes(sub, ctxFactory);
+      await syncRoutes(sub, ctxFactory);
+    },
+    { prefix: '/api/v2' }
+  );
 
-  fastify.setErrorHandler<FastifyError>((error, request, reply) => {
-    if (error instanceof ERPError) {
-      return reply.code(error.statusCode).send({
-        error: { code: error.code, message: error.message, details: error.details },
-      });
-    }
-    logger.error({ err: error.message, url: request.url, correlationId: (request as { correlationId?: string }).correlationId }, 'Unhandled error in inventory-service');
-    return reply.code(500).send({ error: { code: 'INTERNAL_ERROR', message: 'An unexpected error occurred' } });
-  });
+  registerErrorHandler(fastify, 'inventory-service', logger);
 
   const address = await fastify.listen({ port, host: '0.0.0.0' });
   logger.info({ address }, 'Inventory service started');

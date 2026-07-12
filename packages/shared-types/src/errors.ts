@@ -18,7 +18,15 @@ export class ValidationError extends ERPError {
 
 export class NotFoundError extends ERPError {
   constructor(entity: string, id?: number | string) {
-    super('NOT_FOUND', `${entity} not found${id !== undefined ? ` (id: ${id})` : ''}`, 404);
+    // The raw id used to be baked into the message text itself (e.g. "Customer not
+    // found (id: 482)") — every one of this class's hundreds of call sites across the
+    // monorepo inherited that raw-ID leak. Keeping id only in `details` lets frontends
+    // build a friendly message (or just drop it) without parsing a numeric PK out of prose.
+    // Also guards the common call-site pattern of passing an already-suffixed entity
+    // (`new NotFoundError('Customer not found')`), which used to double up into
+    // "Customer not found not found".
+    const label = /not found$/i.test(entity) ? entity : `${entity} not found`;
+    super('NOT_FOUND', label, 404, id !== undefined ? { entity, id } : { entity });
   }
 }
 
@@ -99,21 +107,35 @@ export class SecurityError extends ERPError {
 
 export class DuplicateInvoiceError extends BusinessError {
   constructor(invoiceNumber: string) {
-    super('DUPLICATE_INVOICE_NUMBER', `Invoice number ${invoiceNumber} already exists for this tenant`, {
-      invoiceNumber,
-    });
+    super(
+      'DUPLICATE_INVOICE_NUMBER',
+      `Invoice number ${invoiceNumber} already exists for this tenant`,
+      {
+        invoiceNumber,
+      }
+    );
   }
 }
 
 export class TenantSuspendedError extends ERPError {
   constructor(tenantId: number) {
-    super('TENANT_SUSPENDED', `Tenant ${tenantId} is suspended`, 403, { tenantId });
+    super(
+      'TENANT_SUSPENDED',
+      "Your organization's account has been suspended. Contact your administrator for details.",
+      403,
+      { tenantId }
+    );
   }
 }
 
 export class TenantClosedError extends ERPError {
   constructor(tenantId: number) {
-    super('TENANT_CLOSED', `Tenant ${tenantId} is closed`, 410, { tenantId });
+    super(
+      'TENANT_CLOSED',
+      "Your organization's account has been closed and is no longer accessible. Contact your administrator for details.",
+      410,
+      { tenantId }
+    );
   }
 }
 

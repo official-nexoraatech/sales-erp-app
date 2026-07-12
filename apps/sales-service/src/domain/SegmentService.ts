@@ -49,7 +49,11 @@ export class SegmentService {
   }
 
   /** Builds the WHERE clause for one of the 6 pre-built read-only segment filters. */
-  static prebuiltWhere(code: PrebuiltSegmentCode, tenantId: number, highValueThreshold = 5000): SQL {
+  static prebuiltWhere(
+    code: PrebuiltSegmentCode,
+    tenantId: number,
+    highValueThreshold = 5000
+  ): SQL {
     const base = and(eq(customers.tenantId, tenantId), sql`${customers.deletedAt} IS NULL`) as SQL;
 
     switch (code) {
@@ -57,7 +61,7 @@ export class SegmentService {
         const cutoff = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000);
         return and(
           base,
-          sql`NOT EXISTS (SELECT 1 FROM invoices i WHERE i.customer_id = ${customers.id} AND i.tenant_id = ${tenantId} AND i.invoice_date >= ${cutoff} AND i.status NOT IN ('DRAFT','CANCELLED'))`
+          sql`NOT EXISTS (SELECT 1 FROM invoices i WHERE i.customer_id = ${customers.id} AND i.tenant_id = ${tenantId} AND i.invoice_date >= ${cutoff.toISOString()} AND i.status NOT IN ('DRAFT','CANCELLED'))`
         ) as SQL;
       }
       case 'gold-tier':
@@ -71,7 +75,7 @@ export class SegmentService {
         const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
         return and(
           base,
-          sql`EXISTS (SELECT 1 FROM invoices i WHERE i.customer_id = ${customers.id} AND i.tenant_id = ${tenantId} AND i.status = 'OVERDUE' AND i.due_date < ${cutoff})`
+          sql`EXISTS (SELECT 1 FROM invoices i WHERE i.customer_id = ${customers.id} AND i.tenant_id = ${tenantId} AND i.status = 'OVERDUE' AND i.due_date < ${cutoff.toISOString()})`
         ) as SQL;
       }
       case 'birthdays-this-month':
@@ -80,7 +84,10 @@ export class SegmentService {
           sql`${customers.dateOfBirth} IS NOT NULL AND SUBSTRING(${customers.dateOfBirth} FROM 6 FOR 2) = TO_CHAR(CURRENT_DATE, 'MM')`
         ) as SQL;
       case 'new-customers-this-month':
-        return and(base, sql`DATE_TRUNC('month', ${customers.createdAt}) = DATE_TRUNC('month', CURRENT_DATE)`) as SQL;
+        return and(
+          base,
+          sql`DATE_TRUNC('month', ${customers.createdAt}) = DATE_TRUNC('month', CURRENT_DATE)`
+        ) as SQL;
     }
   }
 
@@ -119,7 +126,10 @@ export class SegmentService {
   }
 
   static async countMatching(db: ErpDatabase, where: SQL): Promise<number> {
-    const [row] = await db.select({ count: sql<number>`count(*)::int` }).from(customers).where(where);
+    const [row] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(customers)
+      .where(where);
     return row?.count ?? 0;
   }
 
@@ -130,7 +140,12 @@ export class SegmentService {
     size: number
   ): Promise<{ rows: Array<typeof customers.$inferSelect>; total: number }> {
     const [rows, total] = await Promise.all([
-      db.select().from(customers).where(where).limit(size).offset(page * size),
+      db
+        .select()
+        .from(customers)
+        .where(where)
+        .limit(size)
+        .offset(page * size),
       SegmentService.countMatching(db, where),
     ]);
     return { rows, total };
@@ -145,7 +160,8 @@ export class SegmentService {
     if (segment.isSystem && SegmentService.isPrebuilt(segment.code)) {
       return SegmentService.prebuiltWhere(segment.code, tenantId);
     }
-    if (!segment.filterDefinition) throw new NotFoundError('Segment filter definition', segment.code);
+    if (!segment.filterDefinition)
+      throw new NotFoundError('Segment filter definition', segment.code);
     return SegmentService.customWhere(tenantId, segment.filterDefinition);
   }
 }

@@ -8,7 +8,6 @@ import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
 import { ERPDetailSkeleton } from '../../components/erp/ERPSkeleton.js';
 import Button from '../../components/ui/Button.js';
-import Badge from '../../components/ui/Badge.js';
 import Select from '../../components/ui/Select.js';
 import Input from '../../components/ui/Input.js';
 import Modal from '../../components/ui/Modal.js';
@@ -29,7 +28,10 @@ interface AlterationOrder {
   status: string;
 }
 
-interface Employee { id: number; displayName: string; }
+interface Employee {
+  id: number;
+  displayName: string;
+}
 
 const NEXT_STATUS: Record<string, string[]> = {
   RECEIVED: ['CANCELLED'],
@@ -40,8 +42,13 @@ const NEXT_STATUS: Record<string, string[]> = {
 };
 
 const STATUS_VARIANT: Record<string, 'default' | 'info' | 'warning' | 'success' | 'danger'> = {
-  RECEIVED: 'default', ASSIGNED: 'info', IN_PROGRESS: 'warning', QUALITY_CHECK: 'warning',
-  READY: 'success', DELIVERED: 'success', CANCELLED: 'danger',
+  RECEIVED: 'default',
+  ASSIGNED: 'info',
+  IN_PROGRESS: 'warning',
+  QUALITY_CHECK: 'warning',
+  READY: 'success',
+  DELIVERED: 'success',
+  CANCELLED: 'danger',
 };
 
 export default function AlterationDetailPage() {
@@ -52,27 +59,46 @@ export default function AlterationDetailPage() {
   const [deliverOpen, setDeliverOpen] = useState(false);
   const [paymentAmount, setPaymentAmount] = useState(0);
 
-  const { data, isLoading } = useQuery({ queryKey: ['alterations', id], queryFn: () => alterationApi.getById(Number(id)) });
-  const order = ((data as Record<string, unknown>)?.data as AlterationOrder) ?? (data as unknown as AlterationOrder);
+  const { data, isLoading } = useQuery({
+    queryKey: ['alterations', id],
+    queryFn: () => alterationApi.getById(Number(id)),
+  });
+  const order =
+    ((data as Record<string, unknown>)?.data as AlterationOrder) ??
+    (data as unknown as AlterationOrder);
 
-  const { data: empData } = useQuery({ queryKey: ['employees-all'], queryFn: () => employeeApi.list(), enabled: hasPermission(PERMISSIONS.EMPLOYEE_VIEW) });
+  const { data: empData } = useQuery({
+    queryKey: ['employees-all'],
+    queryFn: () => employeeApi.list(),
+    enabled: hasPermission(PERMISSIONS.EMPLOYEE_VIEW),
+  });
   const employees: Employee[] = ((empData as Record<string, unknown>)?.content as Employee[]) ?? [];
 
   const assignMutation = useMutation({
     mutationFn: () => alterationApi.assign(Number(id), { tailorId: Number(tailorId) }),
-    onSuccess: () => { toast.success('Assigned to tailor'); qc.invalidateQueries({ queryKey: ['alterations', id] }); },
+    onSuccess: () => {
+      toast.success('Assigned to tailor');
+      qc.invalidateQueries({ queryKey: ['alterations', id] });
+    },
     onError: (e: Error) => toast.error(e.message),
   });
 
   const statusMutation = useMutation({
     mutationFn: (status: string) => alterationApi.updateStatus(Number(id), { status }),
-    onSuccess: () => { toast.success('Status updated'); qc.invalidateQueries({ queryKey: ['alterations', id] }); },
+    onSuccess: () => {
+      toast.success('Status updated');
+      qc.invalidateQueries({ queryKey: ['alterations', id] });
+    },
     onError: (e: Error) => toast.error(e.message),
   });
 
   const deliverMutation = useMutation({
     mutationFn: () => alterationApi.deliver(Number(id), { paymentAmount }),
-    onSuccess: () => { toast.success('Order delivered'); qc.invalidateQueries({ queryKey: ['alterations', id] }); setDeliverOpen(false); },
+    onSuccess: () => {
+      toast.success('Order delivered');
+      qc.invalidateQueries({ queryKey: ['alterations', id] });
+      setDeliverOpen(false);
+    },
     onError: (e: Error) => toast.error(e.message),
   });
 
@@ -91,15 +117,30 @@ export default function AlterationDetailPage() {
         statusVariant={STATUS_VARIANT[order.status] ?? 'default'}
       />
 
-      <div className="grid grid-cols-2 gap-6 mt-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
         <div className="bg-surface-card rounded-xl border border-default p-5">
           <h3 className="font-semibold text-primary mb-4">Order Details</h3>
           <dl className="space-y-2 text-sm">
-            <div className="flex justify-between"><dt className="text-secondary">Customer</dt><dd>{order.customerName}</dd></div>
-            <div className="flex justify-between"><dt className="text-secondary">Phone</dt><dd>{order.customerPhone}</dd></div>
-            <div className="flex justify-between"><dt className="text-secondary">Received</dt><dd>{formatDate(order.receivedDate)}</dd></div>
-            <div className="flex justify-between"><dt className="text-secondary">Promised</dt><dd>{formatDate(order.promisedDate)}</dd></div>
-            <div className="flex justify-between"><dt className="text-secondary">Assigned Tailor</dt><dd>{tailorName ?? '–'}</dd></div>
+            <div className="flex justify-between">
+              <dt className="text-secondary">Customer</dt>
+              <dd>{order.customerName}</dd>
+            </div>
+            <div className="flex justify-between">
+              <dt className="text-secondary">Phone</dt>
+              <dd>{order.customerPhone}</dd>
+            </div>
+            <div className="flex justify-between">
+              <dt className="text-secondary">Received</dt>
+              <dd>{formatDate(order.receivedDate)}</dd>
+            </div>
+            <div className="flex justify-between">
+              <dt className="text-secondary">Promised</dt>
+              <dd>{formatDate(order.promisedDate)}</dd>
+            </div>
+            <div className="flex justify-between">
+              <dt className="text-secondary">Assigned Tailor</dt>
+              <dd>{tailorName ?? '–'}</dd>
+            </div>
           </dl>
 
           <h4 className="font-medium text-primary mt-4 mb-2">Items</h4>
@@ -108,7 +149,9 @@ export default function AlterationDetailPage() {
               {order.items.map((item, idx) => (
                 <tr key={idx}>
                   <td className="py-1.5">{item.description}</td>
-                  <td className="py-1.5 text-right">{item.quantity} × {formatCurrency(item.rate)}</td>
+                  <td className="py-1.5 text-right">
+                    {item.quantity} × {formatCurrency(item.rate)}
+                  </td>
                   <td className="py-1.5 text-right font-mono">{formatCurrency(item.amount)}</td>
                 </tr>
               ))}
@@ -116,9 +159,18 @@ export default function AlterationDetailPage() {
           </table>
 
           <dl className="mt-3 space-y-1 text-sm border-t border-default pt-3">
-            <div className="flex justify-between"><dt className="text-secondary">Total</dt><dd className="font-mono">{formatCurrency(Number(order.totalAmount))}</dd></div>
-            <div className="flex justify-between"><dt className="text-secondary">Advance</dt><dd className="font-mono">{formatCurrency(Number(order.advanceAmount))}</dd></div>
-            <div className="flex justify-between font-semibold"><dt>Balance Due</dt><dd className="font-mono">{formatCurrency(Number(order.balanceDue))}</dd></div>
+            <div className="flex justify-between">
+              <dt className="text-secondary">Total</dt>
+              <dd className="font-mono">{formatCurrency(Number(order.totalAmount))}</dd>
+            </div>
+            <div className="flex justify-between">
+              <dt className="text-secondary">Advance</dt>
+              <dd className="font-mono">{formatCurrency(Number(order.advanceAmount))}</dd>
+            </div>
+            <div className="flex justify-between font-semibold">
+              <dt>Balance Due</dt>
+              <dd className="font-mono">{formatCurrency(Number(order.balanceDue))}</dd>
+            </div>
           </dl>
         </div>
 
@@ -126,49 +178,90 @@ export default function AlterationDetailPage() {
           {hasPermission(PERMISSIONS.ALTERATION_UPDATE) && order.status === 'RECEIVED' && (
             <div className="bg-surface-card rounded-xl border border-default p-5">
               <h3 className="font-semibold text-primary mb-3">Assign Tailor</h3>
-              <Select value={tailorId} onChange={(e) => setTailorId(e.target.value)} className="mb-3">
+              <Select
+                value={tailorId}
+                onChange={(e) => setTailorId(e.target.value)}
+                className="mb-3"
+              >
                 <option value="">Select tailor…</option>
-                {employees.map((e) => <option key={e.id} value={e.id}>{e.displayName}</option>)}
+                {employees.map((e) => (
+                  <option key={e.id} value={e.id}>
+                    {e.displayName}
+                  </option>
+                ))}
               </Select>
-              <Button onClick={() => assignMutation.mutate()} loading={assignMutation.isPending} disabled={!tailorId}>Assign</Button>
+              <Button
+                onClick={() => assignMutation.mutate()}
+                loading={assignMutation.isPending}
+                disabled={!tailorId}
+              >
+                Assign
+              </Button>
             </div>
           )}
 
-          {hasPermission(PERMISSIONS.ALTERATION_UPDATE) && (NEXT_STATUS[order.status]?.length ?? 0) > 0 && (
-            <div className="bg-surface-card rounded-xl border border-default p-5">
-              <h3 className="font-semibold text-primary mb-3">Update Status</h3>
-              <div className="flex gap-2 flex-wrap">
-                {NEXT_STATUS[order.status]?.map((s) => (
-                  <Button
-                    key={s}
-                    size="sm"
-                    variant={s === 'CANCELLED' ? 'danger-outline' : 'secondary'}
-                    onClick={() => statusMutation.mutate(s)}
-                    loading={statusMutation.isPending}
-                  >
-                    {s.replace('_', ' ')}
-                  </Button>
-                ))}
+          {hasPermission(PERMISSIONS.ALTERATION_UPDATE) &&
+            (NEXT_STATUS[order.status]?.length ?? 0) > 0 && (
+              <div className="bg-surface-card rounded-xl border border-default p-5">
+                <h3 className="font-semibold text-primary mb-3">Update Status</h3>
+                <div className="flex gap-2 flex-wrap">
+                  {NEXT_STATUS[order.status]?.map((s) => (
+                    <Button
+                      key={s}
+                      size="sm"
+                      variant={s === 'CANCELLED' ? 'danger-outline' : 'secondary'}
+                      onClick={() => statusMutation.mutate(s)}
+                      loading={statusMutation.isPending}
+                    >
+                      {s.replace('_', ' ')}
+                    </Button>
+                  ))}
+                </div>
               </div>
-            </div>
-          )}
+            )}
 
           {hasPermission(PERMISSIONS.ALTERATION_UPDATE) && order.status === 'READY' && (
             <div className="bg-surface-card rounded-xl border border-default p-5">
               <h3 className="font-semibold text-primary mb-3">Delivery</h3>
-              <p className="text-sm text-secondary mb-3">Balance due: <span className="font-mono font-semibold">{formatCurrency(Number(order.balanceDue))}</span></p>
-              <Button onClick={() => { setPaymentAmount(Number(order.balanceDue)); setDeliverOpen(true); }}>Collect Payment & Deliver</Button>
+              <p className="text-sm text-secondary mb-3">
+                Balance due:{' '}
+                <span className="font-mono font-semibold">
+                  {formatCurrency(Number(order.balanceDue))}
+                </span>
+              </p>
+              <Button
+                onClick={() => {
+                  setPaymentAmount(Number(order.balanceDue));
+                  setDeliverOpen(true);
+                }}
+              >
+                Collect Payment & Deliver
+              </Button>
             </div>
           )}
         </div>
       </div>
 
-      <Modal open={deliverOpen} onClose={() => setDeliverOpen(false)} title="Collect Payment" size="sm">
+      <Modal
+        open={deliverOpen}
+        onClose={() => setDeliverOpen(false)}
+        title="Collect Payment"
+        size="sm"
+      >
         <div className="space-y-4">
-          <Input label="Payment Amount (₹)" type="number" value={paymentAmount} onChange={(e) => setPaymentAmount(Number(e.target.value))} />
+          <Input
+            label="Payment Amount (₹)"
+            type="number"
+            value={paymentAmount}
+            onChange={(e) => setPaymentAmount(Number(e.target.value))}
+          />
           <div className="flex justify-end gap-3 pt-2">
-            <Button variant="secondary" onClick={() => setDeliverOpen(false)}>Cancel</Button>
-            <Button onClick={() => deliverMutation.mutate()} loading={deliverMutation.isPending}>Confirm Delivery</Button>
+            <Button variant="secondary" onClick={() => setDeliverOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={() => deliverMutation.mutate()} loading={deliverMutation.isPending}>
+              Confirm Delivery
+            </Button>
           </div>
         </div>
       </Modal>

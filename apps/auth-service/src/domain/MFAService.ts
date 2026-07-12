@@ -4,7 +4,7 @@ import { randomBytes } from 'crypto';
 import { eq } from 'drizzle-orm';
 import { users } from '@erp/db';
 import type { ErpDatabase } from '@erp/db';
-import { encryptField, decryptField } from '@erp/utils';
+import { encryptField, decryptField } from '@erp/utils/server';
 import { NotFoundError, ValidationError, SecurityError } from '@erp/types';
 import { sha256Hex } from '../crypto.js';
 

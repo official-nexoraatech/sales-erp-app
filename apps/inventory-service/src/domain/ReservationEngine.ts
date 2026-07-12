@@ -21,7 +21,7 @@ export class ReservationEngine {
 
   async reserve(params: ReserveParams, trx?: ErpDatabase): Promise<number> {
     const db = trx ?? this.db;
-    const { tenantId, itemId, warehouseId, quantity } = params;
+    const { tenantId, itemId, quantity } = params;
 
     // Atomic: deduct available, add to reserved
     const result = await db
@@ -46,7 +46,7 @@ export class ReservationEngine {
         .select({ availableQty: items.availableQty })
         .from(items)
         .where(and(eq(items.id, itemId), eq(items.tenantId, tenantId)));
-      throw new InsufficientStockError(parseFloat(current?.availableQty ?? '0'));
+      throw new InsufficientStockError(parseFloat(current?.availableQty ?? '0'), itemId, quantity);
     }
 
     const [reservation] = await db
@@ -66,7 +66,15 @@ export class ReservationEngine {
       .returning({ id: stockReservations.id });
 
     // Update projection
-    await this.shiftProjection(db, params.tenantId, params.itemId, params.variantId, params.warehouseId, -quantity, quantity);
+    await this.shiftProjection(
+      db,
+      params.tenantId,
+      params.itemId,
+      params.variantId,
+      params.warehouseId,
+      -quantity,
+      quantity
+    );
 
     return reservation!.id;
   }
@@ -77,7 +85,9 @@ export class ReservationEngine {
     const [reservation] = await db
       .select()
       .from(stockReservations)
-      .where(and(eq(stockReservations.id, reservationId), eq(stockReservations.tenantId, tenantId)));
+      .where(
+        and(eq(stockReservations.id, reservationId), eq(stockReservations.tenantId, tenantId))
+      );
 
     if (!reservation) throw new ERPError('RESERVATION_NOT_FOUND', 'Reservation not found', 404);
     if (reservation.status !== 'ACTIVE') {
@@ -100,7 +110,15 @@ export class ReservationEngine {
       .set({ status: 'FULFILLED', fulfilledAt: new Date(), updatedAt: new Date() })
       .where(eq(stockReservations.id, reservationId));
 
-    await this.shiftProjection(db, tenantId, reservation.itemId, reservation.variantId ?? undefined, reservation.warehouseId, 0, -qty);
+    await this.shiftProjection(
+      db,
+      tenantId,
+      reservation.itemId,
+      reservation.variantId ?? undefined,
+      reservation.warehouseId,
+      0,
+      -qty
+    );
   }
 
   async release(
@@ -114,7 +132,9 @@ export class ReservationEngine {
     const [reservation] = await db
       .select()
       .from(stockReservations)
-      .where(and(eq(stockReservations.id, reservationId), eq(stockReservations.tenantId, tenantId)));
+      .where(
+        and(eq(stockReservations.id, reservationId), eq(stockReservations.tenantId, tenantId))
+      );
 
     if (!reservation) throw new ERPError('RESERVATION_NOT_FOUND', 'Reservation not found', 404);
     if (reservation.status !== 'ACTIVE') {
@@ -144,7 +164,15 @@ export class ReservationEngine {
       })
       .where(eq(stockReservations.id, reservationId));
 
-    await this.shiftProjection(db, tenantId, reservation.itemId, reservation.variantId ?? undefined, reservation.warehouseId, qty, -qty);
+    await this.shiftProjection(
+      db,
+      tenantId,
+      reservation.itemId,
+      reservation.variantId ?? undefined,
+      reservation.warehouseId,
+      qty,
+      -qty
+    );
   }
 
   async expireStale(db: ErpDatabase): Promise<number> {
@@ -152,12 +180,7 @@ export class ReservationEngine {
     const expiredReservations = await db
       .select()
       .from(stockReservations)
-      .where(
-        and(
-          eq(stockReservations.status, 'ACTIVE'),
-          lt(stockReservations.expiresAt, now)
-        )
-      );
+      .where(and(eq(stockReservations.status, 'ACTIVE'), lt(stockReservations.expiresAt, now)));
 
     for (const r of expiredReservations) {
       await this.release(r.id, r.tenantId, 'EXPIRED', db);

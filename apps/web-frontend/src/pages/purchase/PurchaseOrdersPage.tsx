@@ -57,20 +57,32 @@ export default function PurchaseOrdersPage() {
   const [cancelReason, setCancelReason] = useState('');
   const [attachmentsForId, setAttachmentsForId] = useState<number | null>(null);
 
-  useEffect(() => { setPage(1); }, [debouncedSearch, status]);
+  useEffect(() => {
+    setPage(1);
+  }, [debouncedSearch, status]);
 
   const { data, isLoading } = useQuery({
     queryKey: ['purchase-orders', debouncedSearch, status, page, pageSize],
-    queryFn: () => purchaseOrderApi.list({ search: debouncedSearch || undefined, status: status || undefined, page, pageSize }),
+    queryFn: () =>
+      purchaseOrderApi.list({
+        search: debouncedSearch || undefined,
+        status: status || undefined,
+        page,
+        pageSize,
+      }),
     staleTime: 30_000,
   });
 
-  const rows: PurchaseOrder[] = (data as Record<string, unknown>)?.content as PurchaseOrder[] ?? [];
-  const totalElements = (data as Record<string, unknown>)?.totalElements as number ?? 0;
+  const rows: PurchaseOrder[] =
+    ((data as Record<string, unknown>)?.content as PurchaseOrder[]) ?? [];
+  const totalElements = ((data as Record<string, unknown>)?.totalElements as number) ?? 0;
 
   const submitMutation = useMutation({
     mutationFn: (id: number) => purchaseOrderApi.submit(id),
-    onSuccess: () => { toast.success('PO submitted for approval'); qc.invalidateQueries({ queryKey: ['purchase-orders'] }); },
+    onSuccess: () => {
+      toast.success('PO submitted for approval');
+      qc.invalidateQueries({ queryKey: ['purchase-orders'] });
+    },
     onError: (e: Error) => toast.error(e.message),
   });
 
@@ -112,17 +124,26 @@ export default function PurchaseOrdersPage() {
       key: 'poNumber',
       header: 'PO #',
       mono: true,
-      render: (r) => r.poNumber
-        ? <span className="font-mono text-sm">{r.poNumber}</span>
-        : <span className="text-secondary italic text-sm">Draft</span>,
+      render: (r) =>
+        r.poNumber ? (
+          <span className="font-mono text-sm">{r.poNumber}</span>
+        ) : (
+          <span className="text-secondary italic text-sm">Draft</span>
+        ),
     },
     { key: 'supplierId', header: 'Supplier' },
-    { key: 'grandTotal', header: 'Amount', align: 'right', sortable: true, render: (r) => formatCurrency(parseFloat(r.grandTotal)) },
+    {
+      key: 'grandTotal',
+      header: 'Amount',
+      align: 'right',
+      sortable: true,
+      render: (r) => formatCurrency(parseFloat(r.grandTotal)),
+    },
     { key: 'poDate', header: 'Order Date', sortable: true, render: (r) => formatDate(r.poDate) },
     {
       key: 'expectedDeliveryDate',
       header: 'Expected Delivery',
-      render: (r) => r.expectedDeliveryDate ? formatDate(r.expectedDeliveryDate) : '—',
+      render: (r) => (r.expectedDeliveryDate ? formatDate(r.expectedDeliveryDate) : '—'),
     },
     {
       key: 'status',
@@ -136,15 +157,45 @@ export default function PurchaseOrdersPage() {
       align: 'right',
       render: (r) => {
         const items: ERPMenuItem[] = [];
-        if (canCreatePO && r.status === 'DRAFT') items.push({ label: 'Submit', icon: Send, onClick: () => submitMutation.mutate(r.id) });
-        if (canApprovePO && r.status === 'SUBMITTED') items.push({ label: 'Approve', icon: CheckCircle2, onClick: () => { setApproveId(r.id); setPoNumber(''); } });
+        if (canCreatePO && r.status === 'DRAFT')
+          items.push({ label: 'Submit', icon: Send, onClick: () => submitMutation.mutate(r.id) });
+        if (canApprovePO && r.status === 'SUBMITTED')
+          items.push({
+            label: 'Approve',
+            icon: CheckCircle2,
+            onClick: () => {
+              setApproveId(r.id);
+              setPoNumber('');
+            },
+          });
         if (canCreateGRN && ['APPROVED', 'PARTIALLY_RECEIVED'].includes(r.status)) {
-          items.push({ label: 'Receive', icon: PackageCheck, onClick: () => navigate(`/purchase/grns/new?poId=${r.id}`) });
+          items.push({
+            label: 'Receive',
+            icon: PackageCheck,
+            onClick: () => navigate(`/purchase/grns/new?poId=${r.id}`),
+          });
         }
-        items.push({ label: 'Attachments', icon: Paperclip, onClick: () => setAttachmentsForId(r.id) });
-        if (canCreatePO) items.push({ label: 'Duplicate', icon: Copy, onClick: () => duplicateMutation.mutate(r.id) });
+        items.push({
+          label: 'Attachments',
+          icon: Paperclip,
+          onClick: () => setAttachmentsForId(r.id),
+        });
+        if (canCreatePO)
+          items.push({
+            label: 'Duplicate',
+            icon: Copy,
+            onClick: () => duplicateMutation.mutate(r.id),
+          });
         if (canCancelPO && ['DRAFT', 'SUBMITTED'].includes(r.status)) {
-          items.push({ label: 'Cancel', icon: Ban, variant: 'danger', onClick: () => { setCancelId(r.id); setCancelReason(''); } });
+          items.push({
+            label: 'Cancel',
+            icon: Ban,
+            variant: 'danger',
+            onClick: () => {
+              setCancelId(r.id);
+              setCancelReason('');
+            },
+          });
         }
         return <ERPDropdownMenu items={items} />;
       },
@@ -153,19 +204,31 @@ export default function PurchaseOrdersPage() {
 
   return (
     <div>
-      <ERPPageHeader variant="list" title="Purchase Orders" subtitle="Manage supplier purchase orders">
+      <ERPPageHeader
+        variant="list"
+        title="Purchase Orders"
+        subtitle="Manage supplier purchase orders"
+      >
         {canCreatePO && <Button onClick={() => navigate('/purchase/orders/new')}>+ New PO</Button>}
       </ERPPageHeader>
 
-      <div className="flex gap-4 mb-4">
+      <div className="flex flex-wrap gap-4 mb-4">
         <div className="flex-1 max-w-sm">
-          <Input placeholder="Search by PO number..." value={search} onChange={(e) => setSearch(e.target.value)} />
+          <Input
+            placeholder="Search by PO number..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
         </div>
         <Select value={status} onChange={(e) => setStatus(e.target.value)} className="w-48">
           <option value="">All Statuses</option>
-          {['DRAFT', 'SUBMITTED', 'APPROVED', 'PARTIALLY_RECEIVED', 'RECEIVED', 'CANCELLED'].map((s) => (
-            <option key={s} value={s}>{s}</option>
-          ))}
+          {['DRAFT', 'SUBMITTED', 'APPROVED', 'PARTIALLY_RECEIVED', 'RECEIVED', 'CANCELLED'].map(
+            (s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            )
+          )}
         </Select>
       </div>
 
@@ -176,10 +239,17 @@ export default function PurchaseOrdersPage() {
         rowKey="id"
         pagination={{ page, pageSize, total: totalElements }}
         onPageChange={setPage}
-        onPageSizeChange={(size) => { setPageSize(size); setPage(1); }}
+        onPageSizeChange={(size) => {
+          setPageSize(size);
+          setPage(1);
+        }}
       />
 
-      <Modal isOpen={approveId !== null} onClose={() => setApproveId(null)} title="Approve Purchase Order">
+      <Modal
+        isOpen={approveId !== null}
+        onClose={() => setApproveId(null)}
+        title="Approve Purchase Order"
+      >
         <div className="space-y-4">
           <Input
             label="PO Number"
@@ -189,11 +259,15 @@ export default function PurchaseOrdersPage() {
             onChange={(e) => setPoNumber(e.target.value)}
           />
           <div className="flex justify-end gap-2">
-            <Button variant="ghost" onClick={() => setApproveId(null)}>Cancel</Button>
+            <Button variant="ghost" onClick={() => setApproveId(null)}>
+              Cancel
+            </Button>
             <Button
               isLoading={approveMutation.isPending}
               disabled={!poNumber.trim()}
-              onClick={() => approveId !== null && approveMutation.mutate({ id: approveId, poNumber })}
+              onClick={() =>
+                approveId !== null && approveMutation.mutate({ id: approveId, poNumber })
+              }
             >
               Approve
             </Button>
@@ -201,7 +275,11 @@ export default function PurchaseOrdersPage() {
         </div>
       </Modal>
 
-      <Modal isOpen={cancelId !== null} onClose={() => setCancelId(null)} title="Cancel Purchase Order">
+      <Modal
+        isOpen={cancelId !== null}
+        onClose={() => setCancelId(null)}
+        title="Cancel Purchase Order"
+      >
         <div className="space-y-4">
           <Input
             label="Reason"
@@ -211,12 +289,16 @@ export default function PurchaseOrdersPage() {
             onChange={(e) => setCancelReason(e.target.value)}
           />
           <div className="flex justify-end gap-2">
-            <Button variant="ghost" onClick={() => setCancelId(null)}>Back</Button>
+            <Button variant="ghost" onClick={() => setCancelId(null)}>
+              Back
+            </Button>
             <Button
               variant="danger"
               isLoading={cancelMutation.isPending}
               disabled={!cancelReason.trim()}
-              onClick={() => cancelId !== null && cancelMutation.mutate({ id: cancelId, reason: cancelReason })}
+              onClick={() =>
+                cancelId !== null && cancelMutation.mutate({ id: cancelId, reason: cancelReason })
+              }
             >
               Cancel PO
             </Button>
@@ -231,7 +313,11 @@ export default function PurchaseOrdersPage() {
         size="lg"
       >
         {attachmentsForId !== null && (
-          <AttachmentSection service="purchase" entityType="PURCHASE_ORDER" entityId={attachmentsForId} />
+          <AttachmentSection
+            service="purchase"
+            entityType="PURCHASE_ORDER"
+            entityId={attachmentsForId}
+          />
         )}
       </ERPDrawer>
     </div>

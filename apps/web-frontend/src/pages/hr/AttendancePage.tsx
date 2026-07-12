@@ -13,8 +13,19 @@ import Input from '../../components/ui/Input.js';
 import Badge from '../../components/ui/Badge.js';
 import { formatDate } from '../../lib/format.js';
 
-interface Employee { id: number; displayName: string; employeeCode: string; }
-interface AttendanceRecord { id: number; employeeId: number; attendanceDate: string; status: string; workHours: string; isLate: boolean; }
+interface Employee {
+  id: number;
+  displayName: string;
+  employeeCode: string;
+}
+interface AttendanceRecord {
+  id: number;
+  employeeId: number;
+  attendanceDate: string;
+  status: string;
+  workHours: string;
+  isLate: boolean;
+}
 
 const STATUS_VARIANT: Record<string, 'success' | 'danger' | 'warning' | 'info' | 'default'> = {
   PRESENT: 'success',
@@ -36,8 +47,8 @@ export default function AttendancePage() {
   const hasPermission = useAuthStore((s) => s.hasPermission);
   const canMark = hasPermission(PERMISSIONS.ATTENDANCE_MARK);
   const canViewReport = hasPermission(PERMISSIONS.ATTENDANCE_REPORT);
-  const availableTabs = (['mark', 'calendar', 'summary'] as const).filter(
-    (t) => (t === 'mark' ? canMark : t === 'summary' ? canViewReport : true)
+  const availableTabs = (['mark', 'calendar', 'summary'] as const).filter((t) =>
+    t === 'mark' ? canMark : t === 'summary' ? canViewReport : true
   );
   const [tab, setTab] = useState<'mark' | 'calendar' | 'summary'>(canMark ? 'mark' : 'calendar');
   const [selectedEmployeeId, setSelectedEmployeeId] = useState('');
@@ -45,12 +56,20 @@ export default function AttendancePage() {
   const [status, setStatus] = useState('PRESENT');
   const [month, setMonth] = useState(currentMonth());
 
-  const { data: empData } = useQuery({ queryKey: ['employees-all'], queryFn: () => employeeApi.list(), enabled: hasPermission(PERMISSIONS.EMPLOYEE_VIEW) });
+  const { data: empData } = useQuery({
+    queryKey: ['employees-all'],
+    queryFn: () => employeeApi.list(),
+    enabled: hasPermission(PERMISSIONS.EMPLOYEE_VIEW),
+  });
   const employees: Employee[] = ((empData as Record<string, unknown>)?.content as Employee[]) ?? [];
 
   const markMutation = useMutation({
-    mutationFn: () => attendanceApi.mark({ employeeId: Number(selectedEmployeeId), attendanceDate: date, status }),
-    onSuccess: () => { toast.success('Attendance marked'); qc.invalidateQueries({ queryKey: ['attendance'] }); },
+    mutationFn: () =>
+      attendanceApi.mark({ employeeId: Number(selectedEmployeeId), attendanceDate: date, status }),
+    onSuccess: () => {
+      toast.success('Attendance marked');
+      qc.invalidateQueries({ queryKey: ['attendance'] });
+    },
     onError: (e: Error) => toast.error(e.message),
   });
 
@@ -59,19 +78,27 @@ export default function AttendancePage() {
     queryFn: () => attendanceApi.getForEmployee(Number(selectedEmployeeId), month),
     enabled: tab === 'calendar' && !!selectedEmployeeId,
   });
-  const records: AttendanceRecord[] = ((calData as Record<string, unknown>)?.content as AttendanceRecord[]) ?? [];
+  const records: AttendanceRecord[] =
+    ((calData as Record<string, unknown>)?.content as AttendanceRecord[]) ?? [];
 
   const { data: summaryData, isLoading: summaryLoading } = useQuery({
     queryKey: ['attendance-summary', month],
     queryFn: () => attendanceApi.teamSummary(month),
     enabled: tab === 'summary' && canViewReport,
   });
-  const summary = (summaryData as Record<string, unknown>)?.summary as
-    Record<string, { presentDays: number; absentDays: number; lopDays: number; lateDays: number }> ?? {};
+  const summary =
+    ((summaryData as Record<string, unknown>)?.summary as Record<
+      string,
+      { presentDays: number; absentDays: number; lopDays: number; lateDays: number }
+    >) ?? {};
 
   return (
     <div>
-      <ERPPageHeader variant="list" title="Attendance" subtitle="Mark attendance, view calendars, and team summaries." />
+      <ERPPageHeader
+        variant="list"
+        title="Attendance"
+        subtitle="Mark attendance, view calendars, and team summaries."
+      />
 
       <ERPTabs
         className="mb-5"
@@ -82,12 +109,25 @@ export default function AttendancePage() {
 
       {tab === 'mark' && (
         <div className="max-w-xl space-y-4 bg-surface-card rounded-xl border border-default p-5">
-          <Select label="Employee" value={selectedEmployeeId} onChange={(e) => setSelectedEmployeeId(e.target.value)}>
+          <Select
+            label="Employee"
+            value={selectedEmployeeId}
+            onChange={(e) => setSelectedEmployeeId(e.target.value)}
+          >
             <option value="">Select employee…</option>
-            {employees.map((e) => <option key={e.id} value={e.id}>{e.displayName} ({e.employeeCode})</option>)}
+            {employees.map((e) => (
+              <option key={e.id} value={e.id}>
+                {e.displayName} ({e.employeeCode})
+              </option>
+            ))}
           </Select>
-          <div className="grid grid-cols-2 gap-4">
-            <Input label="Date" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <Input
+              label="Date"
+              type="date"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+            />
             <Select label="Status" value={status} onChange={(e) => setStatus(e.target.value)}>
               <option value="PRESENT">Present</option>
               <option value="ABSENT">Absent</option>
@@ -97,7 +137,11 @@ export default function AttendancePage() {
               <option value="WEEKLY_OFF">Weekly Off</option>
             </Select>
           </div>
-          <Button onClick={() => markMutation.mutate()} loading={markMutation.isPending} disabled={!selectedEmployeeId}>
+          <Button
+            onClick={() => markMutation.mutate()}
+            loading={markMutation.isPending}
+            disabled={!selectedEmployeeId}
+          >
             Mark Attendance
           </Button>
         </div>
@@ -105,19 +149,34 @@ export default function AttendancePage() {
 
       {tab === 'calendar' && (
         <div className="space-y-4">
-          <div className="flex gap-3">
-            <Select value={selectedEmployeeId} onChange={(e) => setSelectedEmployeeId(e.target.value)} className="max-w-xs">
+          <div className="flex gap-3 flex-wrap">
+            <Select
+              value={selectedEmployeeId}
+              onChange={(e) => setSelectedEmployeeId(e.target.value)}
+              className="max-w-xs"
+            >
               <option value="">Select employee…</option>
-              {employees.map((e) => <option key={e.id} value={e.id}>{e.displayName}</option>)}
+              {employees.map((e) => (
+                <option key={e.id} value={e.id}>
+                  {e.displayName}
+                </option>
+              ))}
             </Select>
-            <Input type="month" value={month} onChange={(e) => setMonth(e.target.value)} className="max-w-[160px]" />
+            <Input
+              type="month"
+              value={month}
+              onChange={(e) => setMonth(e.target.value)}
+              className="max-w-[160px]"
+            />
           </div>
           {!selectedEmployeeId ? (
-            <p className="text-secondary text-sm">Select an employee to view their attendance calendar.</p>
+            <p className="text-secondary text-sm">
+              Select an employee to view their attendance calendar.
+            </p>
           ) : calLoading ? (
             <p className="text-secondary text-sm">Loading…</p>
           ) : (
-            <div className="grid grid-cols-7 gap-2">
+            <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-7 gap-2">
               {records.map((r) => (
                 <div key={r.id} className="border border-default rounded-lg p-2 text-xs">
                   <p className="text-secondary">{formatDate(r.attendanceDate)}</p>
@@ -125,7 +184,11 @@ export default function AttendancePage() {
                   <p className="text-disabled mt-1">{r.workHours}h</p>
                 </div>
               ))}
-              {records.length === 0 && <p className="col-span-7 text-disabled text-sm">No attendance records for this month.</p>}
+              {records.length === 0 && (
+                <p className="col-span-2 sm:col-span-4 md:col-span-7 text-disabled text-sm">
+                  No attendance records for this month.
+                </p>
+              )}
             </div>
           )}
         </div>
@@ -133,38 +196,49 @@ export default function AttendancePage() {
 
       {tab === 'summary' && (
         <div className="space-y-4">
-          <Input type="month" value={month} onChange={(e) => setMonth(e.target.value)} className="max-w-[160px]" />
+          <Input
+            type="month"
+            value={month}
+            onChange={(e) => setMonth(e.target.value)}
+            className="max-w-[160px]"
+          />
           {summaryLoading ? (
             <ERPTableSkeleton rows={5} cols={5} />
           ) : (
-            <table className="w-full text-sm bg-surface-card rounded-xl border border-default overflow-hidden">
-              <thead className="bg-surface-subtle">
-                <tr className="text-left text-xs uppercase text-secondary">
-                  <th className="px-4 py-3">Employee</th>
-                  <th className="px-4 py-3 text-right">Present Days</th>
-                  <th className="px-4 py-3 text-right">Absent Days</th>
-                  <th className="px-4 py-3 text-right">LOP Days</th>
-                  <th className="px-4 py-3 text-right">Late Days</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-default">
-                {Object.entries(summary).map(([empId, s]) => {
-                  const emp = employees.find((e) => e.id === Number(empId));
-                  return (
-                    <tr key={empId}>
-                      <td className="px-4 py-3">{emp?.displayName ?? `Employee #${empId}`}</td>
-                      <td className="px-4 py-3 text-right">{s.presentDays}</td>
-                      <td className="px-4 py-3 text-right">{s.absentDays}</td>
-                      <td className="px-4 py-3 text-right">{s.lopDays}</td>
-                      <td className="px-4 py-3 text-right">{s.lateDays}</td>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm bg-surface-card rounded-xl border border-default overflow-hidden">
+                <thead className="bg-surface-subtle">
+                  <tr className="text-left text-xs uppercase text-secondary">
+                    <th className="px-4 py-3">Employee</th>
+                    <th className="px-4 py-3 text-right">Present Days</th>
+                    <th className="px-4 py-3 text-right">Absent Days</th>
+                    <th className="px-4 py-3 text-right">LOP Days</th>
+                    <th className="px-4 py-3 text-right">Late Days</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-default">
+                  {Object.entries(summary).map(([empId, s]) => {
+                    const emp = employees.find((e) => e.id === Number(empId));
+                    return (
+                      <tr key={empId}>
+                        <td className="px-4 py-3">{emp?.displayName ?? `Employee #${empId}`}</td>
+                        <td className="px-4 py-3 text-right">{s.presentDays}</td>
+                        <td className="px-4 py-3 text-right">{s.absentDays}</td>
+                        <td className="px-4 py-3 text-right">{s.lopDays}</td>
+                        <td className="px-4 py-3 text-right">{s.lateDays}</td>
+                      </tr>
+                    );
+                  })}
+                  {Object.keys(summary).length === 0 && (
+                    <tr>
+                      <td colSpan={5} className="px-4 py-8 text-center text-disabled">
+                        No attendance data for this month.
+                      </td>
                     </tr>
-                  );
-                })}
-                {Object.keys(summary).length === 0 && (
-                  <tr><td colSpan={5} className="px-4 py-8 text-center text-disabled">No attendance data for this month.</td></tr>
-                )}
-              </tbody>
-            </table>
+                  )}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
       )}

@@ -1,11 +1,24 @@
-import Fastify, { type FastifyError } from 'fastify';
+import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import multipart from '@fastify/multipart';
 import rateLimit from '@fastify/rate-limit';
-import { PlatformContextFactory, HELMET_OPTIONS, PERMISSIONS_POLICY, registerHealthRoute, tenantOrIpKeyGenerator, initializeTelemetry, initTenantStatusEnforcement } from '@erp/sdk';
-import { createLogger, createMetricsHandler, createHttpMetricsHook, createCorrelationIdHook } from '@erp/logger';
-import { ERPError } from '@erp/types';
+import {
+  PlatformContextFactory,
+  HELMET_OPTIONS,
+  PERMISSIONS_POLICY,
+  registerHealthRoute,
+  tenantOrIpKeyGenerator,
+  initializeTelemetry,
+  initTenantStatusEnforcement,
+  registerErrorHandler,
+} from '@erp/sdk';
+import {
+  createLogger,
+  createMetricsHandler,
+  createHttpMetricsHook,
+  createCorrelationIdHook,
+} from '@erp/logger';
 import { loadConfigWithSecrets } from '@erp/config';
 import { purchaseOrderRoutes } from './api/purchase-order.routes.js';
 import { grnRoutes } from './api/grn.routes.js';
@@ -22,7 +35,11 @@ initializeTelemetry({ serviceName: 'purchase-service' });
 async function bootstrap(): Promise<void> {
   const port = parseInt(process.env['PURCHASE_SERVICE_PORT'] ?? '3020', 10);
   const lokiUrl = process.env['LOKI_URL'];
-  const logger = createLogger({ serviceName: 'purchase-service', level: 'info', ...(lokiUrl ? { lokiUrl } : {}) });
+  const logger = createLogger({
+    serviceName: 'purchase-service',
+    level: 'info',
+    ...(lokiUrl ? { lokiUrl } : {}),
+  });
 
   const config = await loadConfigWithSecrets('purchase-service');
   const ctxFactory = new PlatformContextFactory({
@@ -41,6 +58,7 @@ async function bootstrap(): Promise<void> {
   });
   await ctxFactory.connect();
   ctxFactory.subscribeFeatureFlagInvalidations();
+  ctxFactory.subscribeTenantStatusInvalidations();
   initTenantStatusEnforcement(ctxFactory.rawDb);
 
   const metricsHandler = await createMetricsHandler('purchase-service');
@@ -77,32 +95,22 @@ async function bootstrap(): Promise<void> {
     return reply.code(200).header('Content-Type', metricsHandler.contentType).send(body);
   });
 
-  await fastify.register(async (sub) => {
-    await purchaseOrderRoutes(sub, ctxFactory);
-    await grnRoutes(sub, ctxFactory);
-    await landedCostRoutes(sub, ctxFactory);
-    await supplierPaymentRoutes(sub, ctxFactory);
-    await purchaseReturnRoutes(sub, ctxFactory);
-    await expenseRoutes(sub, ctxFactory);
-    await internalRoutes(sub, ctxFactory);
-    await attachmentRoutes(sub, ctxFactory);
-    await searchSyncInternalRoutes(sub, ctxFactory);
-  }, { prefix: '/api/v2' });
+  await fastify.register(
+    async (sub) => {
+      await purchaseOrderRoutes(sub, ctxFactory);
+      await grnRoutes(sub, ctxFactory);
+      await landedCostRoutes(sub, ctxFactory);
+      await supplierPaymentRoutes(sub, ctxFactory);
+      await purchaseReturnRoutes(sub, ctxFactory);
+      await expenseRoutes(sub, ctxFactory);
+      await internalRoutes(sub, ctxFactory);
+      await attachmentRoutes(sub, ctxFactory);
+      await searchSyncInternalRoutes(sub, ctxFactory);
+    },
+    { prefix: '/api/v2' }
+  );
 
-  fastify.setErrorHandler<FastifyError>((error, request, reply) => {
-    if (error instanceof ERPError) {
-      return reply.code(error.statusCode).send({
-        error: { code: error.code, message: error.message, details: error.details },
-      });
-    }
-    if (error.validation) {
-      return reply.code(400).send({
-        error: { code: 'VALIDATION_ERROR', message: 'Invalid request body', details: error.validation },
-      });
-    }
-    logger.error({ err: error.message, url: request.url, correlationId: (request as { correlationId?: string }).correlationId }, 'Unhandled error in purchase-service');
-    return reply.code(500).send({ error: { code: 'INTERNAL_ERROR', message: 'An unexpected error occurred' } });
-  });
+  registerErrorHandler(fastify, 'purchase-service', logger);
 
   const address = await fastify.listen({ port, host: '0.0.0.0' });
   logger.info({ address }, 'Purchase service started');

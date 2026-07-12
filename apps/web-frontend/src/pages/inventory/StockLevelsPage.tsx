@@ -20,7 +20,10 @@ interface StockRow {
   lastMovementAt?: string;
 }
 
-interface Warehouse { id: number; name: string; }
+interface Warehouse {
+  id: number;
+  name: string;
+}
 
 export default function StockLevelsPage() {
   const hasPermission = useAuthStore((s) => s.hasPermission);
@@ -29,16 +32,19 @@ export default function StockLevelsPage() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
 
-  useEffect(() => { setPage(1); }, [warehouseId, belowReorder]);
+  useEffect(() => {
+    setPage(1);
+  }, [warehouseId, belowReorder]);
 
   const { data, isLoading } = useQuery({
     queryKey: ['stock-levels', warehouseId, belowReorder, page, pageSize],
-    queryFn: () => stockApi.list({
-      warehouseId: warehouseId ? Number(warehouseId) : undefined,
-      belowReorder: belowReorder || undefined,
-      page,
-      limit: pageSize,
-    }),
+    queryFn: () =>
+      stockApi.list({
+        warehouseId: warehouseId ? Number(warehouseId) : undefined,
+        belowReorder: belowReorder || undefined,
+        page,
+        limit: pageSize,
+      }),
   });
 
   const { data: whData } = useQuery({
@@ -47,8 +53,8 @@ export default function StockLevelsPage() {
     enabled: hasPermission(PERMISSIONS.WAREHOUSE_VIEW),
   });
 
-  const rows: StockRow[] = (data as Record<string, unknown>)?.content as StockRow[] ?? [];
-  const totalElements = (data as Record<string, unknown>)?.totalElements as number ?? 0;
+  const rows: StockRow[] = ((data as Record<string, unknown>)?.content as StockRow[]) ?? [];
+  const totalElements = ((data as Record<string, unknown>)?.totalElements as number) ?? 0;
   const warehouses: Warehouse[] = (whData as { content?: Warehouse[] })?.content ?? [];
 
   const columns: ERPColumnDef<StockRow>[] = [
@@ -64,7 +70,11 @@ export default function StockLevelsPage() {
         const qty = parseFloat(r.availableQty);
         const reorder = parseFloat(r.reorderLevel);
         const isBelowReorder = qty <= reorder;
-        return <span className={`font-semibold ${isBelowReorder ? 'text-danger' : 'text-primary'}`}>{qty.toFixed(2)}</span>;
+        return (
+          <span className={`font-semibold ${isBelowReorder ? 'text-danger' : 'text-primary'}`}>
+            {qty.toFixed(2)}
+          </span>
+        );
       },
     },
     {
@@ -73,25 +83,36 @@ export default function StockLevelsPage() {
       align: 'right',
       render: (r) => <span className="text-warning">{parseFloat(r.reservedQty).toFixed(2)}</span>,
     },
-    { key: 'reorderLevel', header: 'Reorder Level', align: 'right', render: (r) => parseFloat(r.reorderLevel).toFixed(2) },
+    {
+      key: 'reorderLevel',
+      header: 'Reorder Level',
+      align: 'right',
+      render: (r) => parseFloat(r.reorderLevel).toFixed(2),
+    },
     {
       key: 'status',
       header: 'Status',
       render: (r) => {
         const qty = parseFloat(r.availableQty);
         const reorder = parseFloat(r.reorderLevel);
-        return qty <= reorder
-          ? <Badge variant="danger">Low Stock</Badge>
-          : <Badge variant="success">OK</Badge>;
+        return qty <= reorder ? (
+          <Badge variant="danger">Low Stock</Badge>
+        ) : (
+          <Badge variant="success">OK</Badge>
+        );
       },
     },
   ];
 
   return (
     <div>
-      <ERPPageHeader variant="list" title="Stock Levels" subtitle="Real-time stock across all warehouses" />
+      <ERPPageHeader
+        variant="list"
+        title="Stock Levels"
+        subtitle="Real-time stock across all warehouses"
+      />
 
-      <div className="mb-4 flex gap-4 items-center">
+      <div className="mb-4 flex flex-wrap gap-4 items-center">
         <div className="w-64">
           <Select
             label="Filter by Warehouse"
@@ -121,7 +142,10 @@ export default function StockLevelsPage() {
         rowKey={(r) => `${r.itemId}-${r.warehouseId}`}
         pagination={{ page, pageSize, total: totalElements }}
         onPageChange={setPage}
-        onPageSizeChange={(size) => { setPageSize(size); setPage(1); }}
+        onPageSizeChange={(size) => {
+          setPageSize(size);
+          setPage(1);
+        }}
       />
     </div>
   );

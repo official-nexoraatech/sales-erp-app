@@ -1,13 +1,18 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 vi.mock('@erp/db', () => {
-  const mockTable = new Proxy({}, {
-    get: (_t, prop) => ({ columnName: String(prop) }),
-  });
+  const makeTable = () =>
+    new Proxy(
+      {},
+      {
+        get: (_t, prop) => ({ columnName: String(prop) }),
+      }
+    );
   return {
-    notificationLog: mockTable,
-    notificationTemplates: mockTable,
-    notificationPreferences: mockTable,
+    notificationLog: makeTable(),
+    notificationTemplates: makeTable(),
+    notificationPreferences: makeTable(),
+    featureFlags: makeTable(),
     createDatabaseClient: vi.fn(),
   };
 });
@@ -26,6 +31,7 @@ vi.mock('handlebars', () => ({
 }));
 
 import { NotificationEngine } from '../domain/NotificationEngine.js';
+import { notificationPreferences, notificationTemplates, featureFlags } from '@erp/db';
 
 const MOCK_CONFIG = {
   msg91AuthKey: 'test-key',
@@ -43,23 +49,31 @@ function makeWhereResult(rows: unknown[]) {
   });
 }
 
-// Returns a mock DB where each select().from().where() call returns rows in sequence
-function makeDb(prefs: unknown[] = [], template: unknown[] = [], logReturn: unknown[] = [{ id: 'log-1' }]) {
-  let selectCallCount = 0;
+// Returns a mock DB where each select().from(table).where() call returns rows keyed by which
+// table was queried (rather than call order, since PG-047 added a featureFlags lookup between
+// the existing prefs and template lookups).
+function makeDb(
+  prefs: unknown[] = [],
+  template: unknown[] = [],
+  logReturn: unknown[] = [{ id: 'log-1' }],
+  flag: unknown[] = []
+) {
   return {
     select: vi.fn().mockImplementation(() => ({
-      from: vi.fn().mockReturnValue({
+      from: vi.fn().mockImplementation((table: unknown) => ({
         where: vi.fn().mockImplementation(() => {
-          selectCallCount++;
-          if (selectCallCount === 1) return makeWhereResult(prefs);
-          if (selectCallCount === 2) return makeWhereResult(template);
+          if (table === notificationPreferences) return makeWhereResult(prefs);
+          if (table === notificationTemplates) return makeWhereResult(template);
+          if (table === featureFlags) return makeWhereResult(flag);
           return makeWhereResult([{ count: '3' }]);
         }),
-      }),
+      })),
     })),
     insert: vi.fn().mockReturnValue({
       values: vi.fn().mockReturnValue({
-        onConflictDoNothing: vi.fn().mockReturnValue({ returning: vi.fn().mockResolvedValue(logReturn) }),
+        onConflictDoNothing: vi
+          .fn()
+          .mockReturnValue({ returning: vi.fn().mockResolvedValue(logReturn) }),
       }),
     }),
     update: vi.fn().mockReturnValue({
@@ -69,8 +83,12 @@ function makeDb(prefs: unknown[] = [], template: unknown[] = [], logReturn: unkn
 }
 
 describe('NotificationEngine — quiet hours behavior via send()', () => {
-  beforeEach(() => { vi.useFakeTimers(); });
-  afterEach(() => { vi.useRealTimers(); });
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
 
   it('skips SMS at 22:00 IST (quiet hours start)', async () => {
     // 22:00 IST = 16:30 UTC
@@ -106,7 +124,9 @@ describe('NotificationEngine — quiet hours behavior via send()', () => {
     // 10:00 IST = 04:30 UTC — business hours
     vi.setSystemTime(new Date('2026-01-01T04:30:00Z'));
     // Pass recipientUserId=1 so prefs are queried first → template is 2nd select call
-    const template = [{ id: 't1', channel: 'SMS', bodyTemplate: 'Hi {{name}}', isActive: true, subject: null }];
+    const template = [
+      { id: 't1', channel: 'SMS', bodyTemplate: 'Hi {{name}}', isActive: true, subject: null },
+    ];
     const engine = new NotificationEngine(makeDb([], template) as never, MOCK_CONFIG);
     const results = await engine.send({
       tenantId: 1,
@@ -122,6 +142,73 @@ describe('NotificationEngine — quiet hours behavior via send()', () => {
     // We only assert it did NOT skip due to quiet hours logic (status could be FAILED due to test environment)
     // The fact that it got past quiet hours check means isQuietHours() returned false ✓
     expect(smsResult).toBeDefined();
+  });
+
+  // PG-047: tenant-level custom window via the feature_flags table
+  it('honors a tenant-configured quiet-hours window (23:00-06:00) instead of the default', async () => {
+    const flag = [{ enabled: true, config: { startHour: 23, endHour: 6 } }];
+    const template = [
+      { id: 't1', channel: 'SMS', bodyTemplate: 'Hi', isActive: true, subject: null },
+    ];
+
+    // 22:30 IST — within the old default window, but NOT within the tenant's custom 23:00-06:00 window
+    vi.setSystemTime(new Date('2026-01-01T17:00:00Z'));
+    const notSuppressed = await new NotificationEngine(
+      makeDb([], template, undefined, flag) as never,
+      MOCK_CONFIG
+    ).send({
+      tenantId: 1,
+      eventType: 'TEST_EVENT',
+      recipientPhone: '9876543210',
+      templateData: {},
+      channels: ['SMS'],
+    });
+    expect(notSuppressed.find((r) => r.channel === 'SMS')?.status).not.toBe('SKIPPED');
+
+    // 23:30 IST — within the tenant's custom window
+    vi.setSystemTime(new Date('2026-01-01T18:00:00Z'));
+    const suppressed = await new NotificationEngine(
+      makeDb([], template, undefined, flag) as never,
+      MOCK_CONFIG
+    ).send({
+      tenantId: 1,
+      eventType: 'TEST_EVENT',
+      recipientPhone: '9876543210',
+      templateData: {},
+      channels: ['SMS'],
+    });
+    expect(suppressed.find((r) => r.channel === 'SMS')?.status).toBe('SKIPPED');
+  });
+
+  // PG-047: fixes the dead-column bug — notificationPreferences.quietHoursEnabled was written
+  // by the API but never read by NotificationEngine, so it had zero effect on SMS suppression.
+  it('bypasses quiet-hours suppression at 02:00 IST when the user has quietHoursEnabled: false', async () => {
+    // 02:00 IST = 20:30 UTC (prev day) — inside the default quiet-hours window
+    vi.setSystemTime(new Date('2026-01-01T20:30:00Z'));
+    const prefs = [
+      {
+        smsEnabled: true,
+        emailEnabled: true,
+        whatsappEnabled: false,
+        inAppEnabled: true,
+        quietHoursEnabled: false,
+      },
+    ];
+    const template = [
+      { id: 't1', channel: 'SMS', bodyTemplate: 'Hi {{name}}', isActive: true, subject: null },
+    ];
+    const engine = new NotificationEngine(makeDb(prefs, template) as never, MOCK_CONFIG);
+    const results = await engine.send({
+      tenantId: 1,
+      eventType: 'TEST_EVENT',
+      recipientUserId: 1,
+      recipientPhone: '9876543210',
+      templateData: { name: 'Raj' },
+      channels: ['SMS'],
+    });
+    const smsResult = results.find((r) => r.channel === 'SMS');
+    // Previously this column was write-only/dead-read — SMS would have been SKIPPED regardless.
+    expect(smsResult?.status).not.toBe('SKIPPED');
   });
 });
 
@@ -157,7 +244,9 @@ function makeIdempotentDb(template: unknown[], insertedKeys: Set<string> = new S
 describe('NotificationEngine.send — idempotency key dedup (M8)', () => {
   // IN_APP delivers synchronously with no network call and no quiet-hours gate, so these tests
   // aren't sensitive to real wall-clock time or retry/backoff timing.
-  const template = [{ id: 't1', channel: 'IN_APP', bodyTemplate: 'Hi {{name}}', isActive: true, subject: null }];
+  const template = [
+    { id: 't1', channel: 'IN_APP', bodyTemplate: 'Hi {{name}}', isActive: true, subject: null },
+  ];
 
   it('two rapid-fire sends with the same explicit idempotencyKey result in exactly one SENT and one SKIPPED', async () => {
     const insertedKeys = new Set<string>();

@@ -1,0 +1,407 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ERP Docs — Inventory Module</title>
+<link rel="stylesheet" href="/shared/docs-shell.css">
+</head>
+<body data-module="Inventory">
+
+<header class="topbar">
+  <button class="icon-btn navtoggle" id="navToggle" aria-label="Toggle navigation">☰</button>
+  <a class="brand" href="/"><span class="mark">N</span> Nexoraa ERP Docs</a>
+  <div class="searchwrap">
+    <input type="text" class="searchbox" id="searchInput" placeholder="Search Inventory documentation…" autocomplete="off">
+    <div class="search-results" id="searchResults"></div>
+  </div>
+  <div class="topbar-actions">
+    <button class="icon-btn" id="themeToggle" aria-label="Toggle dark mode" title="Toggle dark mode">◐</button>
+    <button class="icon-btn" id="printBtn" aria-label="Print this page" title="Print this page">⎙</button>
+  </div>
+</header>
+
+<div class="shell">
+  <nav class="sidebar" id="sidebar">
+    <div class="sb-group">
+      <div class="sb-group-title">Modules</div>
+      <div class="sb-module active-module">
+        <div class="sb-module-head active-module">Inventory <span class="status">v1</span></div>
+        <div class="sb-track">
+          <div class="sb-track-title">Client</div>
+          <a class="sb-link" data-page="inventory-client-overview" href="#inventory/client/overview">Overview</a>
+          <a class="sb-link" data-page="inventory-client-stock" href="#inventory/client/stock">Stock Levels &amp; Warehouses</a>
+          <a class="sb-link" data-page="inventory-client-transfers" href="#inventory/client/transfers">Stock Transfers</a>
+          <a class="sb-link" data-page="inventory-client-adjustments" href="#inventory/client/adjustments">Adjustments &amp; Physical Verification</a>
+          <a class="sb-link" data-page="inventory-client-valuation" href="#inventory/client/valuation">Stock Valuation Report</a>
+          <a class="sb-link" data-page="inventory-client-faq" href="#inventory/client/faq">Troubleshooting &amp; FAQ</a>
+        </div>
+        <div class="sb-track">
+          <div class="sb-track-title">Super Admin</div>
+          <a class="sb-link" data-page="inventory-admin-access" href="#inventory/admin/access-roles">Access &amp; Roles</a>
+          <a class="sb-link" data-page="inventory-admin-accuracy" href="#inventory/admin/accuracy">Stock Accuracy &amp; Reconciliation</a>
+          <a class="sb-link" data-page="inventory-admin-limits" href="#inventory/admin/limitations">Limitations to Know</a>
+        </div>
+        <div class="sb-track">
+          <div class="sb-track-title">Developer</div>
+          <a class="sb-link" data-page="inventory-dev-architecture" href="#inventory/dev/architecture">Architecture</a>
+          <a class="sb-link" data-page="inventory-dev-api" href="#inventory/dev/api-reference">API Reference</a>
+          <a class="sb-link" data-page="inventory-dev-data" href="#inventory/dev/data-model">Data Model</a>
+        </div>
+        <div class="sb-track">
+          <div class="sb-track-title">Audit</div>
+          <a class="sb-link" data-page="inventory-issues" href="#inventory/audit/known-issues">Known Issues &amp; Needs Review</a>
+        </div>
+      </div>
+    </div>
+    <div class="sb-group">
+      <div class="sb-group-title">Other modules</div>
+      <a class="sb-module-head" href="/pos/index.html">POS <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/sales/index.html">Sales &amp; Invoicing <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/purchase/index.html">Purchase <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/products/index.html">Products &amp; Variants <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/customers/index.html">Customers &amp; Suppliers <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/accounting/index.html">Accounting &amp; GST <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/hr/index.html">HR &amp; Payroll <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/reports/index.html">Reports <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/tenants/index.html">Super Admin / Tenants <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/platform/index.html">Developer Platform <span class="status">Open →</span></a>
+    </div>
+  </nav>
+
+  <main class="content" id="content">
+    <div class="breadcrumb" id="breadcrumb"></div>
+
+    <!-- ============ CLIENT: OVERVIEW ============ -->
+    <article class="page" id="page-inventory-client-overview" data-track="client" data-title="Inventory Overview">
+      <span class="track-pill client">Client documentation</span>
+      <h1>Inventory Overview</h1>
+      <div class="pilot-banner">Third module documented from a direct code audit. Covers stock levels, warehouses, transfers between warehouses, stock adjustments, physical verification, and the stock valuation report.</div>
+
+      <p>This is where stock actually lives across your warehouses — separate from POS and Sales &amp; Invoicing, which both deduct stock as a side effect of selling, not as their main job.</p>
+
+      <h2 id="areas">What's here</h2>
+      <ul>
+        <li><strong>Stock Levels</strong> — current quantity per item per warehouse, with a low-stock flag.</li>
+        <li><strong>Warehouses</strong> — the physical locations stock is tracked against.</li>
+        <li><strong>Stock Transfers</strong> — moving stock from one warehouse to another.</li>
+        <li><strong>Stock Adjustments</strong> — correcting quantity for damage, theft, shortage, and similar.</li>
+        <li><strong>Physical Verification</strong> — counting actual stock and reconciling variances.</li>
+        <li><strong>Stock Valuation</strong> — the ₹ value of what you're holding, by costing method.</li>
+      </ul>
+      <div class="callout note"><div class="callout-title">No reservation screen</div><p>The system has a real "hold this stock for an order" mechanism internally, but nothing in the app — not POS, not Sales, not this module — currently uses it to reserve stock ahead of a sale. You won't find a reservations screen anywhere; it isn't missing from the UI by accident, it's simply not wired into any workflow yet.</p></div>
+
+      <div class="pager">
+        <span></span>
+        <a class="next" href="#inventory/client/stock"><div class="pg-label">Next</div><div class="pg-title">Stock Levels &amp; Warehouses →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ CLIENT: STOCK & WAREHOUSES ============ -->
+    <article class="page" id="page-inventory-client-stock" data-track="client" data-title="Stock Levels & Warehouses">
+      <span class="track-pill client">Client documentation</span>
+      <h1>Stock Levels &amp; Warehouses</h1>
+
+      <h2 id="levels">Viewing stock</h2>
+      <p>The Stock Levels screen shows available quantity, reserved quantity, and your configured reorder level per item and warehouse, filterable by warehouse and by a "below reorder level" checkbox. Anything at or under its reorder level is flagged.</p>
+      <div class="callout note"><div class="callout-title">Can lag briefly after a sale or purchase receipt</div><p>This screen reads from a separate summary table that's kept up to date by inventory's own background processes, not instantly by the sale or purchase itself. In normal operation it catches up quickly; if a number here looks off right after a large sale or a goods receipt, give it a moment or see <a href="#inventory/admin/accuracy">Stock Accuracy &amp; Reconciliation</a>.</p></div>
+
+      <h2 id="warehouses">Warehouses</h2>
+      <p>Create and manage warehouses under Settings → Warehouses: Name, Code, which Branch it belongs to, and whether it's the branch's default warehouse.</p>
+      <div class="callout review"><div class="callout-title">No address fields in this screen</div><p>The system can store a full address (street, city, state, pincode) for a warehouse, but the create/edit form here doesn't expose those fields — there's currently no way to enter a warehouse's address from the UI.</p></div>
+
+      <div class="pager">
+        <a href="#inventory/client/overview"><div class="pg-label">Back</div><div class="pg-title">← Overview</div></a>
+        <a class="next" href="#inventory/client/transfers"><div class="pg-label">Next</div><div class="pg-title">Stock Transfers →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ CLIENT: TRANSFERS ============ -->
+    <article class="page" id="page-inventory-client-transfers" data-track="client" data-title="Stock Transfers">
+      <span class="track-pill client">Client documentation</span>
+      <h1>Stock Transfers</h1>
+
+      <h2 id="lifecycle">How a transfer moves</h2>
+      <div class="flow">
+        <div class="flow-step"><div class="fs-label">1</div>Draft — created, nothing moved yet</div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step branch"><div class="fs-label">2</div>Submitted → Approved</div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step"><div class="fs-label">3</div>Dispatched — stock leaves the source warehouse now</div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step terminal"><div class="fs-label">4</div>Received — stock arrives at the destination</div>
+      </div>
+      <p>Stock is deducted from the source warehouse the moment it's <strong>dispatched</strong> — not when it's received. Between dispatch and receipt, that stock is genuinely in transit: no longer available at the source, not yet available at the destination.</p>
+
+      <div class="callout bug"><div class="callout-title">A new transfer can get stuck in Draft</div><p>Creating a transfer via "New Transfer" saves it as a Draft, but there is currently no button anywhere to move a Draft transfer to Submitted. If your transfer isn't showing up for approval, this is almost certainly why — ask your developer/vendor to move it forward for you until this is fixed, or check whether a newer version has resolved it.</p></div>
+      <div class="callout review"><div class="callout-title">Cancelling after dispatch doesn't put stock back</div><p>A transfer can still be cancelled after it's been dispatched — but doing so does not restore the stock that already left the source warehouse. Avoid cancelling a transfer once it shows Dispatched; if one needs to be undone at that stage, treat it as a stock adjustment instead until this is fixed.</p></div>
+      <div class="callout note"><div class="callout-title">The transfer detail page is minimal</div><p>Opening a transfer from the list shows only its number, status, and warehouses — no line items and no action buttons. Approve/Dispatch/Receive are only available from the "⋯" menu on the Stock Transfers list, not from inside the transfer itself.</p></div>
+
+      <div class="pager">
+        <a href="#inventory/client/stock"><div class="pg-label">Back</div><div class="pg-title">← Stock Levels &amp; Warehouses</div></a>
+        <a class="next" href="#inventory/client/adjustments"><div class="pg-label">Next</div><div class="pg-title">Adjustments &amp; Physical Verification →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ CLIENT: ADJUSTMENTS ============ -->
+    <article class="page" id="page-inventory-client-adjustments" data-track="client" data-title="Adjustments & Physical Verification">
+      <span class="track-pill client">Client documentation</span>
+      <h1>Adjustments &amp; Physical Verification</h1>
+
+      <h2 id="adjustments">Stock Adjustments</h2>
+      <p>Use this to correct quantity for a reason other than a sale, purchase, or transfer: Damage, Expiry, Theft, Shortage, Excess, Quality Issue, Sample Issued, or Return to Vendor.</p>
+      <div class="callout note"><div class="callout-title">Large adjustments need approval</div><p>An adjustment worth more than ₹50,000 requires a separate approval step before it takes effect — it isn't applied the moment it's submitted.</p></div>
+      <div class="callout review"><div class="callout-title">No way to cancel a submitted adjustment</div><p>Once submitted, there's no Cancel option visible in the list — only Submit (while still a draft) and Approve (once submitted). If you created one in error, you'll need an approver to reject it through whatever process your team has agreed on, since there's no self-service cancel button today.</p></div>
+
+      <h2 id="verification">Physical Verification</h2>
+      <p>Count actual stock in a warehouse, and the system shows the variance against what it expected — count, review variances, then approve.</p>
+
+      <div class="pager">
+        <a href="#inventory/client/transfers"><div class="pg-label">Back</div><div class="pg-title">← Stock Transfers</div></a>
+        <a class="next" href="#inventory/client/valuation"><div class="pg-label">Next</div><div class="pg-title">Stock Valuation Report →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ CLIENT: VALUATION ============ -->
+    <article class="page" id="page-inventory-client-valuation" data-track="client" data-title="Stock Valuation Report">
+      <span class="track-pill client">Client documentation</span>
+      <h1>Stock Valuation Report</h1>
+      <p>Shows the ₹ value of stock on hand, per item and warehouse, using whichever costing method that item is set to: <strong>WACC</strong> (weighted average cost) or <strong>FIFO</strong> (first-in-first-out). The costing method is set per item, not per tenant — different items can use different methods side by side.</p>
+
+      <h2 id="estimated">The "Estimated" badge</h2>
+      <p>When there's no recorded stock movement yet for an item in a specific warehouse, the report falls back to a tenant-wide estimate and marks that row "Estimated" rather than showing a precise per-warehouse figure. This is expected behavior for a warehouse an item hasn't moved through yet, not an error.</p>
+
+      <div class="callout review"><div class="callout-title">The "As of Date" picker doesn't change the numbers</div><p>You can pick a date on this report, but the underlying figures are running totals, not a historical snapshot by date — changing the date currently has no effect on what's shown. Treat this report as always showing today's value, regardless of the date selected.</p></div>
+
+      <div class="pager">
+        <a href="#inventory/client/adjustments"><div class="pg-label">Back</div><div class="pg-title">← Adjustments &amp; Physical Verification</div></a>
+        <a class="next" href="#inventory/client/faq"><div class="pg-label">Next</div><div class="pg-title">Troubleshooting &amp; FAQ →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ CLIENT: FAQ ============ -->
+    <article class="page" id="page-inventory-client-faq" data-track="client" data-title="Troubleshooting & FAQ">
+      <span class="track-pill client">Client documentation</span>
+      <h1>Troubleshooting &amp; FAQ</h1>
+      <div class="tablewrap"><table>
+        <tr><th>Issue</th><th>What's actually going on</th></tr>
+        <tr><td>New transfer isn't showing up for approval</td><td>It's stuck in Draft — there's currently no UI action to submit it. See <a href="#inventory/client/transfers">Stock Transfers</a>.</td></tr>
+        <tr><td>Cancelled a dispatched transfer, stock seems missing</td><td>Expected currently — cancelling after dispatch doesn't restore the deducted stock. Avoid doing this until it's fixed.</td></tr>
+        <tr><td>Stock Levels number looks wrong right after a big sale</td><td>Usually catches up shortly; if it persists, flag it to your admin — see <a href="#inventory/admin/accuracy">Stock Accuracy &amp; Reconciliation</a>.</td></tr>
+        <tr><td>Changed the "As of Date" on the valuation report, nothing changed</td><td>Expected — that field isn't wired up yet; the report always shows today's value.</td></tr>
+        <tr><td>My INVENTORY_MANAGER account gets "permission denied" on transfers/adjustments/warehouses</td><td>A real role-configuration gap, not user error — see <a href="#inventory/admin/access-roles">Access &amp; Roles</a>.</td></tr>
+      </table></div>
+      <div class="pager">
+        <a href="#inventory/client/valuation"><div class="pg-label">Back</div><div class="pg-title">← Stock Valuation Report</div></a>
+        <span></span>
+      </div>
+    </article>
+
+    <!-- ============ ADMIN: ACCESS ============ -->
+    <article class="page" id="page-inventory-admin-access" data-track="admin" data-title="Access & Roles">
+      <span class="track-pill admin">Super Admin documentation</span>
+      <h1>Access &amp; Roles</h1>
+
+      <div class="callout bug"><div class="callout-title">The Inventory Manager role cannot actually manage inventory</div><p>Every write action in this module — creating or approving a stock transfer, creating or approving a stock adjustment, running physical verification, and creating/editing/deleting a warehouse — is gated by a single permission the code checks directly. The seeded <strong>Inventory Manager</strong> role is <em>not</em> granted that permission; it only has view-level and reservation-level access. In practice, today, <strong>only Owner and Admin accounts can perform any of these actions</strong> — an Inventory Manager account will get "permission denied" on all of them. If you've assigned this role expecting it to run day-to-day inventory operations, it currently can't, and needs a role-configuration fix (or a temporary Admin-level account) until resolved.</p></div>
+
+      <div class="tablewrap"><table>
+        <tr><th>Action</th><th>Permission actually checked</th><th>Who has it by default</th></tr>
+        <tr><td>View stock levels / ledger</td><td><span class="badge perm">ITEM_VIEW</span></td><td>Most roles</td></tr>
+        <tr><td>Create / release a reservation</td><td><span class="badge perm">ITEM_EDIT</span></td><td>Inventory Manager and above</td></tr>
+        <tr><td>View warehouses</td><td><span class="badge perm">WAREHOUSE_VIEW</span></td><td>Most roles</td></tr>
+        <tr><td>Create / edit / delete warehouse, transfers, adjustments, physical verification (all writes)</td><td><span class="badge perm">WAREHOUSE_MANAGE</span></td><td><strong>Owner / Admin only</strong></td></tr>
+        <tr><td>View valuation report</td><td><span class="badge perm">REPORT_VIEW</span></td><td>Most roles</td></tr>
+      </table></div>
+
+      <div class="pager">
+        <span></span>
+        <a class="next" href="#inventory/admin/accuracy"><div class="pg-label">Next</div><div class="pg-title">Stock Accuracy &amp; Reconciliation →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ ADMIN: ACCURACY ============ -->
+    <article class="page" id="page-inventory-admin-accuracy" data-track="admin" data-title="Stock Accuracy & Reconciliation">
+      <span class="track-pill admin">Super Admin documentation</span>
+      <h1>Stock Accuracy &amp; Reconciliation</h1>
+
+      <h2 id="how">How stock stays correct across modules</h2>
+      <p>POS and Sales &amp; Invoicing don't call this module over the network to deduct stock — by deliberate design, each service writes stock changes directly to the same underlying database tables inside its own transaction, so a sale and its stock deduction always succeed or fail together. This is working as intended: the core running totals (what the valuation report and audit trail rely on) stay accurate.</p>
+
+      <div class="callout review"><div class="callout-title">The per-warehouse Stock Levels screen is the one place that can drift</div><p>A separate summary table specifically built for fast per-warehouse lookup (what the Stock Levels page reads) is only updated by this module's own background processes — not directly by a sale or a purchase receipt happening in another module. A nightly job compares the two and logs any mismatch, and a manual full-recompute is available, but there is no automatic real-time correction today. If Stock Levels ever looks persistently wrong for a specific warehouse (not just briefly after a transaction), running the manual recompute is the fix, not waiting.</p></div>
+
+      <div class="pager">
+        <a href="#inventory/admin/access-roles"><div class="pg-label">Back</div><div class="pg-title">← Access &amp; Roles</div></a>
+        <a class="next" href="#inventory/admin/limitations"><div class="pg-label">Next</div><div class="pg-title">Limitations to Know →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ ADMIN: LIMITATIONS ============ -->
+    <article class="page" id="page-inventory-admin-limits" data-track="admin" data-title="Limitations to Know">
+      <span class="track-pill admin">Super Admin documentation</span>
+      <h1>Limitations to Know</h1>
+      <p>Full technical detail on all of these is in <a href="#inventory/audit/known-issues">Known Issues</a>.</p>
+      <ol>
+        <li><strong>Inventory Manager role can't perform inventory writes</strong> — see Access &amp; Roles. Likely your highest-priority fix if you rely on this role.</li>
+        <li><strong>New stock transfers can get stuck in Draft</strong> — no UI action to submit them.</li>
+        <li><strong>Cancelling a dispatched transfer doesn't restore stock</strong> — avoid doing this today.</li>
+        <li><strong>Cancelling a confirmed invoice doesn't restore the original cost basis</strong> (FIFO layer / WACC dilution) — quantity comes back, but the ₹ cost history doesn't reverse cleanly. A known, still-open gap from an earlier phase.</li>
+        <li><strong>Purchase returns and consignment sales don't update stock valuation</strong> — quantity is correct, but the ₹ value shown for affected items will drift over time if your business uses either of these flows.</li>
+        <li><strong>Stock adjustments have no self-service cancel</strong> once submitted.</li>
+      </ol>
+      <div class="pager">
+        <a href="#inventory/admin/accuracy"><div class="pg-label">Back</div><div class="pg-title">← Stock Accuracy &amp; Reconciliation</div></a>
+        <span></span>
+      </div>
+    </article>
+
+    <!-- ============ DEV: ARCHITECTURE ============ -->
+    <article class="page" id="page-inventory-dev-architecture" data-track="dev" data-title="Architecture">
+      <span class="track-pill dev">Developer documentation</span>
+      <h1>Architecture</h1>
+      <p>Frontend: <code>apps/web-frontend/src/pages/inventory/</code> (warehouses under <code>settings/</code>). Backend: <code>apps/inventory-service</code>, mounted at <code>/api/v2</code>. web-frontend calls this directly (<code>http://localhost:3012/api/v2</code>) — no API gateway in front, same pattern already noted for POS/Sales. <span class="src">apps/web-frontend/src/api/client.ts:14</span>, <span class="src">apps/inventory-service/src/main.ts:76-92</span></p>
+
+      <h2 id="routes">Routes</h2>
+      <div class="tablewrap"><table>
+        <tr><th>Path</th><th>Component</th><th>Permission</th></tr>
+        <tr><td><code>settings/warehouses</code></td><td>WarehousesPage</td><td class="badge perm">WAREHOUSE_VIEW</td></tr>
+        <tr><td><code>inventory/stock</code></td><td>StockLevelsPage</td><td class="badge perm">ITEM_VIEW</td></tr>
+        <tr><td><code>inventory/transfers</code>, <code>/new</code>, <code>/:id</code>, <code>/:id/receive</code></td><td>StockTransfers* pages</td><td class="badge perm">WAREHOUSE_MANAGE</td></tr>
+        <tr><td><code>inventory/adjustments</code>, <code>/new</code></td><td>StockAdjustments* pages</td><td class="badge perm">WAREHOUSE_MANAGE</td></tr>
+        <tr><td><code>inventory/physical-verifications</code>, <code>/:id</code></td><td>PhysicalVerification* pages</td><td class="badge perm">WAREHOUSE_MANAGE</td></tr>
+        <tr><td><code>inventory/fabric-rolls</code></td><td>FabricRollsPage</td><td class="badge perm">ITEM_VIEW</td></tr>
+        <tr><td><code>inventory/valuation</code></td><td>StockValuationPage</td><td class="badge perm">REPORT_VIEW</td></tr>
+      </table></div>
+      <p class="src">apps/web-frontend/src/App.tsx:233,314-324</p>
+
+      <div class="callout note"><div class="callout-title">No reservations UI or client</div><p>Zero references to "reservation" anywhere in <code>apps/web-frontend/src</code>; no <code>reservationApi</code> in <code>endpoints.ts</code>. The only caller of the reservation endpoints besides tests is the scheduler's expire-stale cron.</p></div>
+
+      <h2 id="components">Key component notes</h2>
+      <ul>
+        <li><strong>StockTransfersPage.tsx</strong> — row actions are status-conditional (Approve if SUBMITTED, Dispatch if APPROVED, Receive if DISPATCHED/IN_TRANSIT); <strong>no Submit or Cancel action rendered</strong> despite both existing in the API client and backend. <span class="src">StockTransfersPage.tsx:85-89</span></li>
+        <li><strong>StockTransferDetailPage.tsx</strong> — near-stub: transfer number, status, warehouse IDs as plain text; no line items, no action buttons. <span class="src">StockTransferDetailPage.tsx:1-36</span></li>
+        <li><strong>StockAdjustmentsPage.tsx</strong> — Submit shown only if DRAFT, Approve only if SUBMITTED/PENDING_APPROVAL; no Cancel rendered despite <code>stockAdjustmentApi.cancel()</code> existing. <span class="src">StockAdjustmentsPage.tsx:74-75</span>, <span class="src">endpoints.ts:411-412</span></li>
+        <li><strong>WarehousesPage.tsx</strong> — modal only has Name/Code/Branch/Default; no address fields despite the backend schema accepting an optional address object. <span class="src">WarehousesPage.tsx:117-128</span>, <span class="src">warehouse.routes.ts:11-26</span></li>
+        <li><strong>StockValuationPage.tsx</strong> — sends an <code>asOf</code> date param the backend never applies (figures are running totals, not date-versioned). <span class="src">StockValuationPage.tsx:126-132</span>, <span class="src">valuation.routes.ts:10-16</span></li>
+      </ul>
+
+      <div class="pager">
+        <span></span>
+        <a class="next" href="#inventory/dev/api-reference"><div class="pg-label">Next</div><div class="pg-title">API Reference →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ DEV: API ============ -->
+    <article class="page" id="page-inventory-dev-api" data-track="dev" data-title="API Reference">
+      <span class="track-pill dev">Developer documentation</span>
+      <h1>API Reference</h1>
+      <p>All under <code>/api/v2</code>, <code>apps/inventory-service/src/api/</code>.</p>
+
+      <div class="tablewrap"><table>
+        <tr><th>Method &amp; Path</th><th>Permission</th><th>Notes</th></tr>
+        <tr><td>GET <code>/inventory/stock</code>, <code>/inventory/stock/:itemId</code></td><td class="badge perm">ITEM_VIEW</td><td>reads <code>projection_stock_level</code></td></tr>
+        <tr><td>GET <code>/inventory/ledger/:itemId</code></td><td class="badge perm">ITEM_VIEW</td><td></td></tr>
+        <tr><td>GET/POST/PUT/DELETE <code>/warehouses...</code></td><td class="badge perm">WAREHOUSE_VIEW</td> / <span class="badge perm">WAREHOUSE_MANAGE</span><td>DELETE blocked if default warehouse or has ledger history</td></tr>
+        <tr><td>GET/POST/PUT <code>/stock-transfers...</code></td><td class="badge perm">WAREHOUSE_MANAGE</td><td>PUT only while DRAFT</td></tr>
+        <tr><td>POST <code>/stock-transfers/:id/submit</code>|<code>approve</code>|<code>dispatch</code>|<code>receive</code>|<code>cancel</code></td><td class="badge perm">WAREHOUSE_MANAGE</td><td>see lifecycle notes below</td></tr>
+        <tr><td>GET/POST <code>/stock-adjustments...</code>, <code>/submit</code>, <code>/approve</code>, <code>/cancel</code></td><td class="badge perm">WAREHOUSE_MANAGE</td><td>₹50,000 approval threshold enforced in service code, not schema</td></tr>
+        <tr><td>GET/POST <code>/physical-verifications...</code></td><td class="badge perm">WAREHOUSE_MANAGE</td><td>create → start-counting → counts → variances → approve</td></tr>
+        <tr><td>POST/GET/DELETE <code>/inventory/reservations...</code></td><td class="badge perm">ITEM_EDIT</td> / <span class="badge perm">ITEM_VIEW</span><td>real mechanism, currently uncalled by any business flow</td></tr>
+        <tr><td>GET <code>/inventory/valuation</code></td><td class="badge perm">REPORT_VIEW</td><td><code>asOf</code> param accepted, not applied</td></tr>
+        <tr><td>POST <code>/internal/ledger</code>, <code>/internal/inventory/*</code></td><td>internal key only</td><td>service-to-service, not JWT-gated</td></tr>
+      </table></div>
+
+      <h2 id="transfer-lifecycle">Stock transfer lifecycle (service layer)</h2>
+      <p><code>DRAFT → SUBMITTED → APPROVED → DISPATCHED → RECEIVED</code>, with <code>CANCELLED</code> reachable from any state except RECEIVED/CANCELLED itself. <code>dispatch()</code> deducts source-warehouse stock and writes a <code>STOCK_OUT</code> ledger row immediately; <code>receive()</code> is a separate transaction that adds stock at the destination.</p>
+      <div class="callout bug"><div class="callout-title">cancel() doesn't reverse a dispatch</div><p><code>cancel()</code> permits cancelling a DISPATCHED transfer but never calls the ledger to restore the deducted stock — a concrete correctness bug, not a hypothetical. <span class="src">StockTransferService.ts:216-235</span></p></div>
+      <div class="callout review"><div class="callout-title">IN_TRANSIT is defined but never set</div><p><code>receive()</code>'s guard accepts DISPATCHED or IN_TRANSIT, but nothing in the codebase ever transitions a transfer to IN_TRANSIT — <code>dispatch()</code> only ever sets DISPATCHED. Dead schema value or incomplete feature. <span class="src">StockTransferService.ts:112-158,167</span></p></div>
+
+      <h2 id="cross-service">Cross-service stock writes</h2>
+      <p>By deliberate architecture decision (documented in ES-13's completion notes as an explicit "Architecture Deviation"), <code>InvoiceService.confirm()</code> (sales-service), <code>GRNService.approve()</code> and <code>PurchaseReturnService.approve()</code> (purchase-service), and <code>ConsignmentService.recordSale()</code> all write directly to the shared <code>items</code> and <code>inventory_ledger</code> tables inside their own transaction, rather than calling inventory-service's HTTP API — an HTTP call "cannot be undone if this transaction later aborts," which would break atomicity. Each of these services carries its **own copy** of a `ValuationService` for this reason (three near-identical copies exist: inventory-service, purchase-service, sales-service). <span class="src">apps/sales-service/src/domain/InvoiceService.ts:382-390,395-449</span></p>
+      <div class="callout bug"><div class="callout-title">projection_stock_level is not touched by these direct writes</div><p>Only inventory-service's own domain code updates <code>projection_stock_level</code> (the table the Stock Levels page reads). Grep across <code>apps/sales-service/src</code> and <code>apps/purchase-service/src</code> for <code>projectionStockLevel</code> returns zero matches. A nightly reconciliation job (<code>reconciliation.job.ts:60-116</code>) detects and logs drift; a manual full-recompute job exists (<code>projectionRebuildJobs.ts:54-135</code>, cron <code>'manual-only'</code>) whose own comments confirm this gap is expected, not accidental.</p></div>
+
+      <div class="pager">
+        <a href="#inventory/dev/architecture"><div class="pg-label">Back</div><div class="pg-title">← Architecture</div></a>
+        <a class="next" href="#inventory/dev/data-model"><div class="pg-label">Next</div><div class="pg-title">Data Model →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ DEV: DATA MODEL ============ -->
+    <article class="page" id="page-inventory-dev-data" data-track="dev" data-title="Data Model">
+      <span class="track-pill dev">Developer documentation</span>
+      <h1>Data Model</h1>
+      <p><code>packages/db-client/src/schema/inventory.ts</code> and <code>items.ts</code>.</p>
+
+      <h2 id="items">items (relevant columns)</h2>
+      <p><code>availableQty</code>, <code>reservedQty</code>, <code>costingMethod</code> (<code>FIFO|WACC</code>, default WACC, set per item — not per tenant), <code>waccCost</code>, <code>currentStockValue</code>, <code>reorderLevel</code>/<code>reorderQty</code>. These counters are tenant-wide, not per-warehouse.</p>
+      <p class="src">packages/db-client/src/schema/items.ts:158-230</p>
+
+      <h2 id="ledger">inventory_ledger</h2>
+      <p>Append-only. <code>movementType</code>: <code>STOCK_IN|STOCK_OUT|ADJUSTMENT|TRANSFER_IN|TRANSFER_OUT|OPENING|RESERVATION|RESERVATION_RELEASE</code>. Carries <code>warehouseId</code>, <code>quantityBefore</code>/<code>quantityAfter</code>, <code>unitCost</code>, <code>cogsPerUnit</code>, <code>referenceType</code>/<code>referenceId</code>.</p>
+      <p class="src">packages/db-client/src/schema/inventory.ts:20-59</p>
+
+      <h2 id="valuation-tables">Per-warehouse valuation</h2>
+      <p><strong>FIFO</strong>: <code>inventory_fifo_layers</code> — one row per stock-in, warehouse-scoped since its creation, consumed oldest-received-first. <strong>WACC</strong>: <code>inventory_warehouse_valuation</code> (added later) — one row per (tenant, item, variant, warehouse), holding a true per-warehouse WACC alongside the tenant-wide figure on <code>items</code>.</p>
+      <div class="callout note"><div class="callout-title">FIFO was never missing per-warehouse tracking</div><p>FIFO's per-warehouse cost is computed live from the already warehouse-scoped <code>inventory_fifo_layers</code> table and never reads <code>inventory_warehouse_valuation</code> at all. The later per-warehouse valuation work was entirely about closing a WACC-specific gap — not a FIFO one, despite some older internal notes implying otherwise.</p></div>
+      <p class="src">packages/db-client/src/schema/inventory.ts:62-108</p>
+
+      <h2 id="other-tables">Other tables</h2>
+      <ul>
+        <li><strong>stock_reservations</strong> — <code>ACTIVE|FULFILLED|RELEASED|EXPIRED</code>, <code>expiresAt</code>. <span class="src">inventory.ts:111-139</span></li>
+        <li><strong>stock_transfers / stock_transfer_lines</strong> — 8-state status enum; lines track requested/dispatched/received qty separately (supports partial receive). <span class="src">inventory.ts:142-209</span></li>
+        <li><strong>stock_adjustments / stock_adjustment_lines</strong> — 8 adjustment types; ₹50,000 approval threshold is code, not schema. <span class="src">inventory.ts:212-278</span></li>
+        <li><strong>physical_verifications / physical_verification_lines</strong> — count → variance → approve. <span class="src">inventory.ts:281-333</span></li>
+        <li><strong>projection_stock_level</strong> — the genuine per-warehouse CQRS read model; what the Stock Levels page and <code>GET /inventory/stock</code> actually query. <span class="src">items.ts:390-410</span></li>
+        <li><strong>reconciliation_errors</strong> — nightly-job output comparing ledger sums to this projection. <span class="src">items.ts:413-431</span></li>
+        <li><strong>stock_valuation_snapshots</strong> — daily persisted total-value snapshot, separate from the live report. <span class="src">items.ts:434-448</span></li>
+      </ul>
+
+      <div class="pager">
+        <a href="#inventory/dev/api-reference"><div class="pg-label">Back</div><div class="pg-title">← API Reference</div></a>
+        <a class="next" href="#inventory/audit/known-issues"><div class="pg-label">Next</div><div class="pg-title">Known Issues →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ AUDIT: KNOWN ISSUES ============ -->
+    <article class="page" id="page-inventory-issues" data-track="dev" data-title="Known Issues & Needs Review">
+      <span class="track-pill dev">Cross-cutting · Health audit</span>
+      <h1>Known Issues &amp; Needs Review</h1>
+      <p>Ranked by real-world impact. Everything below is a confirmed code-reading finding.</p>
+
+      <div class="callout bug"><div class="callout-title">INVENTORY_MANAGER role lacks the permission nearly every write action here requires</div><p><code>WAREHOUSE_MANAGE</code> gates almost all state-changing endpoints in this module (transfers, adjustments, physical verification, warehouse CRUD), but the seeded Inventory Manager role is never granted it — only Owner/Admin have it via their all-permissions wildcard. Inventory Manager does have <code>STOCK_VIEW</code>-adjacent and reservation permissions, none of which any route actually checks. <span class="src">apps/tenant-service/src/rbac/role-defaults.ts:139-164</span> vs. every <code>requirePermission(PERMISSIONS.WAREHOUSE_MANAGE)</code> call across <code>adjustment.routes.ts</code>, <code>transfer.routes.ts</code>, <code>physical-verification.routes.ts</code>, <code>warehouse.routes.ts</code>.</p></div>
+
+      <div class="callout bug"><div class="callout-title">Cancelling a dispatched transfer doesn't reverse the stock deduction</div><p><code>StockTransferService.cancel()</code> permits cancelling a DISPATCHED transfer without any ledger-reversal call, stranding deducted stock. <span class="src">StockTransferService.ts:216-235</span></p></div>
+
+      <div class="callout review"><div class="callout-title">projection_stock_level (Stock Levels page) isn't updated by sales/purchase writes</div><p>Only inventory-service's own domain code updates this table; sales-service and purchase-service update <code>items</code>/<code>inventory_ledger</code> directly but never this projection. A nightly reconciliation job and a manual full-rebuild job both exist specifically because of this — their own code comments confirm the gap is known, not hidden.</p></div>
+
+      <div class="callout review"><div class="callout-title">IN_TRANSIT transfer status is dead or incomplete</div><p>Checked as a valid pre-receive state but never set by any code path — <code>dispatch()</code> only ever sets DISPATCHED.</p></div>
+
+      <div class="callout note"><div class="callout-title">No cost-basis reversal on invoice cancellation</div><p>Self-documented, unresolved: cancelling a confirmed invoice restores quantity via a plain stock-in but doesn't restore the original FIFO layer or reverse WACC dilution.</p></div>
+
+      <div class="callout note"><div class="callout-title">Purchase returns and consignment sales never update valuation</div><p>Self-documented, unresolved: <code>PurchaseReturnService.approve()</code> and <code>ConsignmentService.recordSale()</code> deduct stock correctly but aren't wired into <code>ValuationService</code> — the ₹ value shown will drift from true remaining value over time for tenants using either flow.</p></div>
+
+      <div class="callout note"><div class="callout-title">Unreachable UI actions</div><p><code>stockTransferApi.submit()</code>/<code>.cancel()</code> and <code>stockAdjustmentApi.cancel()</code> exist and work server-side but are never called from any component. A new transfer has no UI path out of Draft.</p></div>
+
+      <div class="callout note"><div class="callout-title">Unused permission constants</div><p><code>STOCK_VIEW</code>, <code>STOCK_ADJUST</code>, <code>STOCK_ADJUST_APPROVE</code>, <code>STOCK_TRANSFER</code>, <code>STOCK_TRANSFER_APPROVE</code>, <code>STOCK_PHYSICAL_VERIFY</code>, <code>STOCK_RESERVE</code>, <code>STOCK_REPORT_VIEW</code>, <code>WAREHOUSE_CREATE/UPDATE/DELETE</code>, and others are defined but never checked by any inventory-service route — the coarser <code>ITEM_VIEW</code>/<code>ITEM_EDIT</code>/<code>WAREHOUSE_VIEW</code>/<code>WAREHOUSE_MANAGE</code>/<code>REPORT_VIEW</code> are used instead.</p></div>
+
+      <div class="callout note"><div class="callout-title">Test coverage gap</div><p>Ledger/valuation logic is well tested (7 test files). Zero test files reference <code>StockTransferService</code>, <code>ReservationEngine</code>, <code>StockAdjustmentService</code>, <code>PhysicalVerificationService</code>, or any of the warehouse/transfer/reservation/adjustment/physical-verification route files.</p></div>
+
+      <div class="callout ok"><div class="callout-title">Confirmed solid: cross-service stock consistency (core tables)</div><p>Despite sales-service and purchase-service writing to <code>items</code>/<code>inventory_ledger</code> directly rather than through inventory-service's API, this is a deliberate, documented architecture choice to preserve transactional atomicity — and it works: the core running totals and audit trail stay correct. The gap is narrower than "two disconnected pictures of stock" — it's specifically the per-warehouse read-model projection, not the ledger or item counters themselves.</p></div>
+      <div class="callout ok"><div class="callout-title">Confirmed solid: per-warehouse valuation for both costing methods</div><p>FIFO has been genuinely per-warehouse since its introduction; WACC was closed to the same standard by later work. Both are real, working, and distinct from the "Estimated" fallback used only when a warehouse genuinely has no movement history for an item yet.</p></div>
+
+      <div class="pager">
+        <a href="#inventory/dev/data-model"><div class="pg-label">Back</div><div class="pg-title">← Data Model</div></a>
+        <span></span>
+      </div>
+    </article>
+
+  </main>
+
+  <aside class="toc">
+    <div class="toc-title">On this page</div>
+    <nav id="tocNav"></nav>
+  </aside>
+</div>
+
+<script src="/shared/docs-shell.js"></script>
+</body>
+</html>

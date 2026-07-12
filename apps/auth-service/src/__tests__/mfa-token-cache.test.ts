@@ -9,9 +9,8 @@
 import { describe, it, expect, vi, beforeAll } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { generateKeyPairSync } from 'node:crypto';
-import { importPKCS8, type KeyLike } from 'jose';
 import { authenticator } from 'otplib';
-import { decryptField } from '@erp/utils';
+import { decryptField } from '@erp/utils/server';
 import type * as ErpTypes from '@erp/types';
 
 const { mockArgon2Verify, mockArgon2Hash } = vi.hoisted(() => ({
@@ -53,7 +52,11 @@ vi.mock('@erp/types', async (importOriginal) => {
   const actual = await importOriginal<typeof ErpTypes>();
   return {
     ...actual,
-    PERMISSIONS: { ...actual.PERMISSIONS, IMPERSONATE_USER: 'IMPERSONATE_USER', VIEW_AUDIT_LOG: 'VIEW_AUDIT_LOG' },
+    PERMISSIONS: {
+      ...actual.PERMISSIONS,
+      IMPERSONATE_USER: 'IMPERSONATE_USER',
+      VIEW_AUDIT_LOG: 'VIEW_AUDIT_LOG',
+    },
   };
 });
 
@@ -140,15 +143,12 @@ function makeRedis() {
   };
 }
 
-let testPrivateKey: KeyLike;
-
 beforeAll(async () => {
   const { privateKey, publicKey } = generateKeyPairSync('rsa', {
     modulusLength: 2048,
     publicKeyEncoding: { type: 'spki', format: 'pem' },
     privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
   });
-  testPrivateKey = await importPKCS8(privateKey, 'RS256');
   await initializeJwt({
     privateKeyPem: privateKey,
     publicKeyPem: publicKey,
@@ -185,7 +185,10 @@ async function buildAppWithMfaEnabledUser(tenantId: number): Promise<{
 
   store.users.push(baseUser({ tenantId }));
   await mfaService.enrollTOTP(1, tenantId);
-  const rawSecret = decryptField((store.users[0] as { totpSecret: string }).totpSecret, ENCRYPTION_KEY);
+  const rawSecret = decryptField(
+    (store.users[0] as { totpSecret: string }).totpSecret,
+    ENCRYPTION_KEY
+  );
   await mfaService.confirmEnrollment(1, authenticator.generate(rawSecret));
 
   const redis = makeRedis();

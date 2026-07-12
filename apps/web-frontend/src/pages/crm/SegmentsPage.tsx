@@ -38,7 +38,15 @@ const PREBUILT_CODES = [
   { code: 'new-customers-this-month', label: 'New Customers This Month' },
 ];
 
-const SEGMENT_FIELDS = ['customerType', 'status', 'creditLimit', 'loyaltyPoints', 'openingBalance', 'healthSegment', 'healthScore'];
+const SEGMENT_FIELDS = [
+  'customerType',
+  'status',
+  'creditLimit',
+  'loyaltyPoints',
+  'openingBalance',
+  'healthSegment',
+  'healthScore',
+];
 const OPERATORS = ['eq', 'neq', 'gt', 'gte', 'lt', 'lte', 'contains'];
 
 export default function SegmentsPage() {
@@ -49,24 +57,39 @@ export default function SegmentsPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [previewCode, setPreviewCode] = useState<string | null>(null);
   const [previewCount, setPreviewCount] = useState<number | null>(null);
-  const [form, setForm] = useState({ name: '', description: '', field: 'status', operator: 'eq', value: '' });
+  const [form, setForm] = useState({
+    name: '',
+    description: '',
+    field: 'status',
+    operator: 'eq',
+    value: '',
+  });
 
-  const { data: segData, isLoading: segmentsLoading } = useQuery({ queryKey: ['crm-segments'], queryFn: () => crmApi.listSegments() });
+  const { data: segData, isLoading: segmentsLoading } = useQuery({
+    queryKey: ['crm-segments'],
+    queryFn: () => crmApi.listSegments(),
+  });
   const segments: Segment[] = (segData as { content?: Segment[] })?.content ?? [];
 
-  const { data: healthData } = useQuery({ queryKey: ['crm-health'], queryFn: () => crmApi.healthSegments() });
-  const health = (healthData as HealthCounts | undefined);
+  const { data: healthData } = useQuery({
+    queryKey: ['crm-health'],
+    queryFn: () => crmApi.healthSegments(),
+  });
+  const health = healthData as HealthCounts | undefined;
 
   const previewMut = useMutation({
     mutationFn: (code: string) =>
       crmApi.previewSegment(
         PREBUILT_CODES.some((p) => p.code === code)
           ? { segmentCode: code }
-          : { rules: [{ field: form.field, operator: form.operator, value: form.value }], logic: 'AND' }
+          : {
+              rules: [{ field: form.field, operator: form.operator, value: form.value }],
+              logic: 'AND',
+            }
       ),
     onSuccess: (res, code) => {
-      const d = (res as Record<string, unknown>);
-      setPreviewCount(d?.matchingCount as number ?? 0);
+      const d = res as Record<string, unknown>;
+      setPreviewCount((d?.matchingCount as number) ?? 0);
       setPreviewCode(code);
     },
   });
@@ -106,9 +129,7 @@ export default function SegmentsPage() {
         title="Customer Segments"
         subtitle="Pre-built and custom segments for targeted campaigns"
         actions={
-          canCreate ? (
-            <Button onClick={() => setCreateOpen(true)}>+ New Segment</Button>
-          ) : undefined
+          canCreate ? <Button onClick={() => setCreateOpen(true)}>+ New Segment</Button> : undefined
         }
       />
 
@@ -116,11 +137,31 @@ export default function SegmentsPage() {
       {health && (
         <div className="mb-6 grid grid-cols-2 sm:grid-cols-5 gap-3">
           {[
-            { label: 'Champion', count: health.champion, color: 'text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-900/20' },
-            { label: 'Loyal', count: health.loyal, color: 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20' },
-            { label: 'At Risk', count: health.atRisk, color: 'text-yellow-600 dark:text-yellow-400 bg-yellow-50 dark:bg-yellow-900/20' },
-            { label: 'Lost', count: health.lost, color: 'text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20' },
-            { label: 'Unscored', count: health.unscored, color: 'text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-800' },
+            {
+              label: 'Champion',
+              count: health.champion,
+              color: 'text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-900/20',
+            },
+            {
+              label: 'Loyal',
+              count: health.loyal,
+              color: 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20',
+            },
+            {
+              label: 'At Risk',
+              count: health.atRisk,
+              color: 'text-yellow-600 dark:text-yellow-400 bg-yellow-50 dark:bg-yellow-900/20',
+            },
+            {
+              label: 'Lost',
+              count: health.lost,
+              color: 'text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20',
+            },
+            {
+              label: 'Unscored',
+              count: health.unscored,
+              color: 'text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-800',
+            },
           ].map((s) => (
             <div key={s.label} className={`rounded-xl p-4 text-center ${s.color}`}>
               <p className="text-2xl font-bold">{s.count}</p>
@@ -137,7 +178,10 @@ export default function SegmentsPage() {
         </div>
         <div className="divide-y divide-default">
           {PREBUILT_CODES.map((p) => (
-            <div key={p.code} className="flex items-center justify-between px-5 py-3">
+            <div
+              key={p.code}
+              className="flex items-center justify-between px-5 py-3 flex-wrap gap-2"
+            >
               <div className="flex items-center gap-3">
                 <Badge label="SYSTEM" color={segBadgeColor(p.code)} />
                 <span className="text-sm text-primary">{p.label}</span>
@@ -173,53 +217,75 @@ export default function SegmentsPage() {
             type="no-data"
             title="No custom segments yet"
             description="Custom filter-based segments you create will appear here."
-            {...(canCreate ? { action: { label: '+ New Segment', onClick: () => setCreateOpen(true) } } : {})}
+            {...(canCreate
+              ? { action: { label: '+ New Segment', onClick: () => setCreateOpen(true) } }
+              : {})}
           />
         ) : (
           <div className="divide-y divide-default">
-            {segments.filter((s) => !s.isSystem).map((seg) => (
-              <div key={seg.id} className="flex items-center justify-between px-5 py-3">
-                <div>
-                  <p className="text-sm font-medium text-primary">{seg.name}</p>
-                  {seg.description && <p className="text-xs text-secondary">{seg.description}</p>}
-                  <span className="text-xs font-mono text-secondary">{seg.code}</span>
+            {segments
+              .filter((s) => !s.isSystem)
+              .map((seg) => (
+                <div
+                  key={seg.id}
+                  className="flex items-center justify-between px-5 py-3 flex-wrap gap-2"
+                >
+                  <div>
+                    <p className="text-sm font-medium text-primary">{seg.name}</p>
+                    {seg.description && <p className="text-xs text-secondary">{seg.description}</p>}
+                    <span className="text-xs font-mono text-secondary">{seg.code}</span>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button variant="secondary" size="sm" onClick={() => exportSegment(seg.id)}>
+                      Export CSV
+                    </Button>
+                  </div>
                 </div>
-                <div className="flex gap-2">
-                  <Button variant="secondary" size="sm" onClick={() => exportSegment(seg.id)}>
-                    Export CSV
-                  </Button>
-                </div>
-              </div>
-            ))}
+              ))}
           </div>
         )}
       </div>
 
       {/* Create Segment Modal */}
-      <Modal
-        open={createOpen}
-        onClose={() => setCreateOpen(false)}
-        title="New Custom Segment"
-      >
+      <Modal open={createOpen} onClose={() => setCreateOpen(false)} title="New Custom Segment">
         <div className="space-y-4">
-          <Input label="Segment Name" required value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
-          <Input label="Description (optional)" value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} />
+          <Input
+            label="Segment Name"
+            required
+            value={form.name}
+            onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+          />
+          <Input
+            label="Description (optional)"
+            value={form.description}
+            onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
+          />
           <div>
-            <p className="text-xs font-semibold text-secondary mb-2 uppercase tracking-wide">Filter Rule</p>
-            <div className="flex gap-2">
+            <p className="text-xs font-semibold text-secondary mb-2 uppercase tracking-wide">
+              Filter Rule
+            </p>
+            <div className="flex gap-2 flex-wrap">
               <select
                 value={form.field}
                 onChange={(e) => setForm((f) => ({ ...f, field: e.target.value }))}
                 className="flex-1 rounded-lg border border-default bg-surface-card text-primary text-sm px-3 py-2"
               >
-                {SEGMENT_FIELDS.map((f) => <option key={f} value={f}>{f}</option>)}
+                {SEGMENT_FIELDS.map((f) => (
+                  <option key={f} value={f}>
+                    {f}
+                  </option>
+                ))}
               </select>
               <select
                 value={form.operator}
                 onChange={(e) => setForm((f) => ({ ...f, operator: e.target.value }))}
                 className="w-28 rounded-lg border border-default bg-surface-card text-primary text-sm px-3 py-2"
               >
-                {OPERATORS.map((o) => <option key={o} value={o}>{o}</option>)}
+                {OPERATORS.map((o) => (
+                  <option key={o} value={o}>
+                    {o}
+                  </option>
+                ))}
               </select>
               <Input
                 placeholder="Value"
@@ -229,8 +295,13 @@ export default function SegmentsPage() {
             </div>
           </div>
           <div className="flex gap-2 justify-end pt-2">
-            <Button variant="ghost" onClick={() => setCreateOpen(false)}>Cancel</Button>
-            <Button onClick={() => createMut.mutate()} disabled={createMut.isPending || !form.name || !form.value}>
+            <Button variant="ghost" onClick={() => setCreateOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => createMut.mutate()}
+              disabled={createMut.isPending || !form.name || !form.value}
+            >
               {createMut.isPending ? 'Creating…' : 'Create'}
             </Button>
           </div>

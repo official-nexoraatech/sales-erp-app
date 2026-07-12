@@ -66,6 +66,7 @@ export default function QuotationDetailPage() {
   const canCreateQuotation = hasPermission(PERMISSIONS.INVOICE_CREATE);
   const canConvertQuotation = hasPermission(PERMISSIONS.QUOTATION_CONVERT);
   const [showConvertConfirm, setShowConvertConfirm] = useState(false);
+  const [showRejectConfirm, setShowRejectConfirm] = useState(false);
 
   const { data, isLoading } = useQuery({
     queryKey: ['quotation', id],
@@ -73,7 +74,7 @@ export default function QuotationDetailPage() {
     enabled: !!id,
   });
 
-  const q = (data as QuotationDetail);
+  const q = data as QuotationDetail;
 
   const sendMutation = useMutation({
     mutationFn: () => quotationApi.send(Number(id)),
@@ -98,6 +99,30 @@ export default function QuotationDetailPage() {
     },
   });
 
+  const acceptMutation = useMutation({
+    mutationFn: () => quotationApi.accept(Number(id)),
+    onSuccess: () => {
+      toast.success('Quotation accepted');
+      void qc.invalidateQueries({ queryKey: ['quotation', id] });
+      void qc.invalidateQueries({ queryKey: ['quotations'] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const rejectMutation = useMutation({
+    mutationFn: () => quotationApi.reject(Number(id)),
+    onSuccess: () => {
+      toast.success('Quotation rejected');
+      void qc.invalidateQueries({ queryKey: ['quotation', id] });
+      void qc.invalidateQueries({ queryKey: ['quotations'] });
+      setShowRejectConfirm(false);
+    },
+    onError: (e: Error) => {
+      toast.error(e.message);
+      setShowRejectConfirm(false);
+    },
+  });
+
   if (isLoading) return <ERPDetailSkeleton />;
   if (!q) return <ERPEmptyState type="no-data" title="Quotation not found" />;
 
@@ -111,22 +136,36 @@ export default function QuotationDetailPage() {
         status={q.status}
         backTo="/sales/quotations"
       >
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <Badge variant={STATUS_COLORS[q.status] ?? 'default'}>{q.status}</Badge>
           {canCreateQuotation && q.status === 'DRAFT' && (
-            <Button variant="ghost" isLoading={sendMutation.isPending} onClick={() => sendMutation.mutate()}>
+            <Button
+              variant="ghost"
+              isLoading={sendMutation.isPending}
+              onClick={() => sendMutation.mutate()}
+            >
               Send
             </Button>
           )}
+          {canConvertQuotation && ['SENT', 'VIEWED'].includes(q.status) && (
+            <>
+              <Button onClick={() => acceptMutation.mutate()} isLoading={acceptMutation.isPending}>
+                Accept
+              </Button>
+              <Button variant="ghost" onClick={() => setShowRejectConfirm(true)}>
+                Reject
+              </Button>
+            </>
+          )}
           {canConvertQuotation && q.status === 'ACCEPTED' && (
-            <Button onClick={() => setShowConvertConfirm(true)}>
-              Convert to Order
-            </Button>
+            <Button onClick={() => setShowConvertConfirm(true)}>Convert to Order</Button>
           )}
           {canCreateQuotation && ['ACCEPTED', 'CONVERTED'].includes(q.status) && (
             <Button
               variant="ghost"
-              onClick={() => navigate(`/sales/invoices/new?quotationId=${q.id}&customerId=${q.customerId}`)}
+              onClick={() =>
+                navigate(`/sales/invoices/new?quotationId=${q.id}&customerId=${q.customerId}`)
+              }
             >
               Create Invoice
             </Button>
@@ -135,7 +174,7 @@ export default function QuotationDetailPage() {
       </ERPPageHeader>
 
       {/* Summary cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         {[
           { label: 'Customer', value: `ID: ${q.customerId}` },
           { label: 'Valid Until', value: formatDate(q.validUntil) },
@@ -152,38 +191,42 @@ export default function QuotationDetailPage() {
       {/* Line items */}
       <div className="bg-surface-card border border-default rounded-xl p-4 mb-4">
         <h3 className="font-semibold mb-3 text-sm">Line Items</h3>
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-left text-secondary border-b border-default">
-              <th className="pb-2">Item</th>
-              <th className="pb-2">HSN</th>
-              <th className="pb-2">GST%</th>
-              <th className="pb-2">Qty</th>
-              <th className="pb-2">Unit Price</th>
-              <th className="pb-2">Taxable</th>
-              <th className="pb-2">CGST</th>
-              <th className="pb-2">SGST</th>
-              <th className="pb-2">IGST</th>
-              <th className="pb-2 text-right">Total</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-default">
-            {q.lines.map((l) => (
-              <tr key={l.id}>
-                <td className="py-2">{l.description ?? `Item ${l.itemId}`}</td>
-                <td className="py-2 text-secondary">{l.hsnCode ?? '—'}</td>
-                <td className="py-2">{parseFloat(l.gstRate).toFixed(0)}%</td>
-                <td className="py-2">{parseFloat(l.quantity).toFixed(3)}</td>
-                <td className="py-2">{formatCurrency(parseFloat(l.unitPrice))}</td>
-                <td className="py-2">{formatCurrency(parseFloat(l.taxableAmount))}</td>
-                <td className="py-2">{formatCurrency(parseFloat(l.cgstAmount))}</td>
-                <td className="py-2">{formatCurrency(parseFloat(l.sgstAmount))}</td>
-                <td className="py-2">{formatCurrency(parseFloat(l.igstAmount))}</td>
-                <td className="py-2 text-right font-semibold">{formatCurrency(parseFloat(l.lineTotal))}</td>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-secondary border-b border-default">
+                <th className="pb-2">Item</th>
+                <th className="pb-2">HSN</th>
+                <th className="pb-2">GST%</th>
+                <th className="pb-2">Qty</th>
+                <th className="pb-2">Unit Price</th>
+                <th className="pb-2">Taxable</th>
+                <th className="pb-2">CGST</th>
+                <th className="pb-2">SGST</th>
+                <th className="pb-2">IGST</th>
+                <th className="pb-2 text-right">Total</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody className="divide-y divide-default">
+              {q.lines.map((l) => (
+                <tr key={l.id}>
+                  <td className="py-2">{l.description ?? `Item ${l.itemId}`}</td>
+                  <td className="py-2 text-secondary">{l.hsnCode ?? '—'}</td>
+                  <td className="py-2">{parseFloat(l.gstRate).toFixed(0)}%</td>
+                  <td className="py-2">{parseFloat(l.quantity).toFixed(3)}</td>
+                  <td className="py-2">{formatCurrency(parseFloat(l.unitPrice))}</td>
+                  <td className="py-2">{formatCurrency(parseFloat(l.taxableAmount))}</td>
+                  <td className="py-2">{formatCurrency(parseFloat(l.cgstAmount))}</td>
+                  <td className="py-2">{formatCurrency(parseFloat(l.sgstAmount))}</td>
+                  <td className="py-2">{formatCurrency(parseFloat(l.igstAmount))}</td>
+                  <td className="py-2 text-right font-semibold">
+                    {formatCurrency(parseFloat(l.lineTotal))}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
 
         <div className="mt-4 pt-4 border-t border-default flex justify-end">
           <div className="w-64 space-y-1 text-sm">
@@ -250,6 +293,17 @@ export default function QuotationDetailPage() {
         confirmLabel="Convert to Order"
         variant="warning"
         isLoading={convertMutation.isPending}
+      />
+
+      <ERPConfirmModal
+        open={showRejectConfirm}
+        onClose={() => setShowRejectConfirm(false)}
+        onConfirm={() => rejectMutation.mutate()}
+        title="Reject Quotation"
+        description="This will mark the quotation as REJECTED. It can no longer be accepted or converted. This action cannot be undone."
+        confirmLabel="Reject"
+        variant="danger"
+        isLoading={rejectMutation.isPending}
       />
     </div>
   );

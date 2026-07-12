@@ -18,7 +18,7 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import { generateKeyPairSync } from 'node:crypto';
 import { SignJWT, importPKCS8, type KeyLike } from 'jose';
 import { authenticator } from 'otplib';
-import { decryptField } from '@erp/utils';
+import { decryptField } from '@erp/utils/server';
 import { PERMISSIONS } from '@erp/types';
 import type * as ErpTypes from '@erp/types';
 
@@ -73,7 +73,16 @@ vi.mock('@erp/types', async (importOriginal) => {
   };
 });
 
-import { users, userRoles, rolePermissions, roles, refreshTokens, activeSessions, blockedIps, securityAuditLog } from '@erp/db';
+import {
+  users,
+  userRoles,
+  rolePermissions,
+  roles,
+  refreshTokens,
+  activeSessions,
+  blockedIps,
+  securityAuditLog,
+} from '@erp/db';
 import { initializeJwt } from '../jwt.js';
 import { loginRoute } from '../routes/login.js';
 import { mfaVerifyRoute, mfaManagementRoutes } from '../routes/mfa.routes.js';
@@ -261,7 +270,11 @@ describe('ES-19 — 2FA & Advanced Auth', () => {
     expect(result.backupCodes).toHaveLength(10);
     expect(result.qrCodeDataUrl).toMatch(/^data:image\/png;base64,/);
 
-    const storedUser = store.users[0] as { totpSecret: string; totpEnabled: boolean; backupCodes: string[] };
+    const storedUser = store.users[0] as {
+      totpSecret: string;
+      totpEnabled: boolean;
+      backupCodes: string[];
+    };
     expect(storedUser.totpSecret).not.toBe(rawSecret);
     expect(decryptField(storedUser.totpSecret, ENCRYPTION_KEY)).toBe(rawSecret);
     expect(storedUser.totpEnabled).toBe(false); // not enabled until confirmed
@@ -310,7 +323,10 @@ describe('ES-19 — 2FA & Advanced Auth', () => {
 
     store.users.push(baseUser());
     await mfaService.enrollTOTP(1, 1);
-    const rawSecret = decryptField((store.users[0] as { totpSecret: string }).totpSecret, ENCRYPTION_KEY);
+    const rawSecret = decryptField(
+      (store.users[0] as { totpSecret: string }).totpSecret,
+      ENCRYPTION_KEY
+    );
     const validCode = authenticator.generate(rawSecret);
     await mfaService.confirmEnrollment(1, validCode);
 
@@ -397,10 +413,18 @@ describe('ES-19 — 2FA & Advanced Auth', () => {
     const { mfaToken } = (JSON.parse(loginRes.body) as { data: { mfaToken: string } }).data;
     const code = authenticator.generate(rawSecret);
 
-    const firstAttempt = await app.inject({ method: 'POST', url: '/auth/mfa/verify', payload: { mfaToken, code } });
+    const firstAttempt = await app.inject({
+      method: 'POST',
+      url: '/auth/mfa/verify',
+      payload: { mfaToken, code },
+    });
     expect(firstAttempt.statusCode).toBe(200);
 
-    const secondAttempt = await app.inject({ method: 'POST', url: '/auth/mfa/verify', payload: { mfaToken, code } });
+    const secondAttempt = await app.inject({
+      method: 'POST',
+      url: '/auth/mfa/verify',
+      payload: { mfaToken, code },
+    });
     expect(secondAttempt.statusCode).toBe(401);
 
     await app.close();
@@ -459,7 +483,11 @@ describe('ES-19 — 2FA & Advanced Auth', () => {
     expect(body.data.accessToken).toBeTruthy();
 
     expect(store.securityAuditLog).toHaveLength(1);
-    const auditRow = store.securityAuditLog[0] as { action: string; targetUserId: number; actorId: number };
+    const auditRow = store.securityAuditLog[0] as {
+      action: string;
+      targetUserId: number;
+      actorId: number;
+    };
     expect(auditRow.action).toBe('IMPERSONATION_START');
     expect(auditRow.targetUserId).toBe(2);
     expect(auditRow.actorId).toBe(10);
@@ -510,7 +538,10 @@ describe('ES-19 — 2FA & Advanced Auth', () => {
       store.users.push(baseUser());
       const mfaService = new MFAService(db as never, ENCRYPTION_KEY);
       await mfaService.enrollTOTP(1, 1);
-      const rawSecret = decryptField((store.users[0] as { totpSecret: string }).totpSecret, ENCRYPTION_KEY);
+      const rawSecret = decryptField(
+        (store.users[0] as { totpSecret: string }).totpSecret,
+        ENCRYPTION_KEY
+      );
       await mfaService.confirmEnrollment(1, authenticator.generate(rawSecret));
 
       const app = Fastify({ logger: false });
@@ -518,7 +549,12 @@ describe('ES-19 — 2FA & Advanced Auth', () => {
       await mfaManagementRoutes(app, db as never, TEST_CONFIG as never);
 
       const nowSec = Math.floor(Date.now() / 1000);
-      const token = await new SignJWT({ tenantId: 1, email: 'mfa-user@testco.com', roles: [], permissions: [] })
+      const token = await new SignJWT({
+        tenantId: 1,
+        email: 'mfa-user@testco.com',
+        roles: [],
+        permissions: [],
+      })
         .setProtectedHeader({ alg: 'RS256' })
         .setSubject('1')
         .setIssuer(TEST_ISSUER)
@@ -590,7 +626,11 @@ describe('ES-19 — 2FA & Advanced Auth', () => {
       const { mfaToken } = (JSON.parse(loginRes.body) as { data: { mfaToken: string } }).data;
 
       for (let i = 0; i < 5; i++) {
-        const res = await app.inject({ method: 'POST', url: '/auth/mfa/verify', payload: { mfaToken, code: '000000' } });
+        const res = await app.inject({
+          method: 'POST',
+          url: '/auth/mfa/verify',
+          payload: { mfaToken, code: '000000' },
+        });
         expect(res.statusCode).toBe(401);
       }
 
@@ -616,7 +656,11 @@ describe('ES-19 — 2FA & Advanced Auth', () => {
       });
       const { mfaToken } = (JSON.parse(loginRes.body) as { data: { mfaToken: string } }).data;
 
-      const wrongRes = await app.inject({ method: 'POST', url: '/auth/mfa/verify', payload: { mfaToken, code: '000000' } });
+      const wrongRes = await app.inject({
+        method: 'POST',
+        url: '/auth/mfa/verify',
+        payload: { mfaToken, code: '000000' },
+      });
       expect(wrongRes.statusCode).toBe(401);
 
       const rightRes = await app.inject({

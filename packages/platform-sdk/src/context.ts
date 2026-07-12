@@ -1,5 +1,4 @@
 import Redis from 'ioredis';
-import { Kafka } from 'kafkajs';
 import { sql } from 'drizzle-orm';
 import { type ErpDatabase, createDatabaseClient } from '@erp/db';
 import { createLogger, type StructuredLogger } from '@erp/logger';
@@ -9,7 +8,15 @@ import { TenantScopedCache } from './cache.js';
 import { DistributedLockManager } from './locks.js';
 import { PlatformAuditLogger } from './audit.js';
 import { PlatformEventBus } from './events.js';
-import { PlatformFeatureFlags, createFeatureFlagL1Cache, type FeatureFlagL1Cache } from './feature-flags.js';
+import {
+  PlatformFeatureFlags,
+  createFeatureFlagL1Cache,
+  type FeatureFlagL1Cache,
+} from './feature-flags.js';
+import {
+  subscribeToTenantStatusInvalidations,
+  publishTenantStatusInvalidation,
+} from './tenantStatus.js';
 import { WorkflowEngine } from './workflow.js';
 import { RuleEngine } from './rule-engine.js';
 import { trace, type SpanOptions } from './telemetry.js';
@@ -74,10 +81,25 @@ class PlatformContextImpl implements PlatformContext {
 
     this.db = new TenantScopedDatabase(tenant.tenantId, drizzleDb);
     this.cache = new TenantScopedCache(redis, tenant.tenantId);
-    this.events = new PlatformEventBus(this.db, tenant.tenantId, tenant.userId, tenant.correlationId);
+    this.events = new PlatformEventBus(
+      this.db,
+      tenant.tenantId,
+      tenant.userId,
+      tenant.correlationId
+    );
     this.audit = new PlatformAuditLogger(this.db, tenant.userId);
-    this.features = new PlatformFeatureFlags(this.db, this.cache, tenant.tenantId, featureFlagsL1Cache);
-    this.workflow = new WorkflowEngine(drizzleDb, tenant.tenantId, tenant.userId, tenant.correlationId);
+    this.features = new PlatformFeatureFlags(
+      this.db,
+      this.cache,
+      tenant.tenantId,
+      featureFlagsL1Cache
+    );
+    this.workflow = new WorkflowEngine(
+      drizzleDb,
+      tenant.tenantId,
+      tenant.userId,
+      tenant.correlationId
+    );
     this.rules = new RuleEngine(drizzleDb);
     this.logger = createLogger({
       serviceName: 'erp-service',
@@ -146,6 +168,19 @@ export class PlatformContextFactory {
   // service instance drop the L1 entry here too. Call once at service bootstrap.
   subscribeFeatureFlagInvalidations(): void {
     PlatformFeatureFlags.subscribeToInvalidations(this.redis, this.featureFlagsL1Cache);
+  }
+
+  // Wires the Redis pub/sub path so a tenant suspend/close/activate in tenant-service's
+  // process invalidates this process's in-memory tenantStatusCache immediately instead
+  // of waiting out its TTL. Call once at service bootstrap.
+  subscribeTenantStatusInvalidations(): void {
+    subscribeToTenantStatusInvalidations(this.redis);
+  }
+
+  // Called by tenant-service's suspend/close/activate handlers to notify every other
+  // running service process.
+  async publishTenantStatusInvalidation(tenantId: number): Promise<void> {
+    await publishTenantStatusInvalidation(this.redis, tenantId);
   }
 
   async connect(): Promise<void> {

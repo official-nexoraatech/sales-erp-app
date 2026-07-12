@@ -23,29 +23,57 @@ interface CFData {
   closingCash: number;
 }
 
-function ActivitySection({ title, activities, net, color }: { title: string; activities: CashActivity[]; net: number; color: string }) {
+function ActivitySection({
+  title,
+  activities,
+  net,
+  color,
+}: {
+  title: string;
+  activities: CashActivity[];
+  net: number;
+  color: string;
+}) {
   return (
     <div className="border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
-      <div className={`px-4 py-3 border-b border-gray-200 dark:border-gray-700 font-semibold text-sm ${color}`}>{title}</div>
-      <table className="w-full text-sm">
-        <tbody>
-          {activities.map((a, i) => (
-            <tr key={i} className="border-b border-gray-100 dark:border-gray-700">
-              <td className="px-4 py-2 pl-6 text-secondary">{a.description}</td>
-              <td className={`px-4 py-2 text-right font-mono ${a.amount < 0 ? 'text-red-500 dark:text-red-400' : 'text-green-600 dark:text-green-400'}`}>{formatCurrency(a.amount)}</td>
+      <div
+        className={`px-4 py-3 border-b border-gray-200 dark:border-gray-700 font-semibold text-sm ${color}`}
+      >
+        {title}
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <tbody>
+            {activities.map((a, i) => (
+              <tr key={i} className="border-b border-gray-100 dark:border-gray-700">
+                <td className="px-4 py-2 pl-6 text-secondary">{a.description}</td>
+                <td
+                  className={`px-4 py-2 text-right font-mono ${a.amount < 0 ? 'text-red-500 dark:text-red-400' : 'text-green-600 dark:text-green-400'}`}
+                >
+                  {formatCurrency(a.amount)}
+                </td>
+              </tr>
+            ))}
+            {activities.length === 0 && (
+              <tr>
+                <td colSpan={2} className="px-4 py-3 text-secondary text-center text-xs">
+                  No activities
+                </td>
+              </tr>
+            )}
+          </tbody>
+          <tfoot className="bg-gray-50 dark:bg-gray-900/30">
+            <tr>
+              <td className="px-4 py-2.5 font-semibold text-primary">Net {title.split(' ')[0]}</td>
+              <td
+                className={`px-4 py-2.5 text-right font-mono font-semibold ${net < 0 ? 'text-red-500 dark:text-red-400' : 'text-green-600 dark:text-green-400'}`}
+              >
+                {formatCurrency(net)}
+              </td>
             </tr>
-          ))}
-          {activities.length === 0 && (
-            <tr><td colSpan={2} className="px-4 py-3 text-secondary text-center text-xs">No activities</td></tr>
-          )}
-        </tbody>
-        <tfoot className="bg-gray-50 dark:bg-gray-900/30">
-          <tr>
-            <td className="px-4 py-2.5 font-semibold text-primary">Net {title.split(' ')[0]}</td>
-            <td className={`px-4 py-2.5 text-right font-mono font-semibold ${net < 0 ? 'text-red-500 dark:text-red-400' : 'text-green-600 dark:text-green-400'}`}>{formatCurrency(net)}</td>
-          </tr>
-        </tfoot>
-      </table>
+          </tfoot>
+        </table>
+      </div>
     </div>
   );
 }
@@ -64,7 +92,7 @@ export default function CashFlowPage() {
     enabled: !!fromDate && !!toDate,
   });
 
-  const cf: CFData | undefined = (data as CFData);
+  const cf: CFData | undefined = data as CFData;
 
   return (
     <div className="space-y-6">
@@ -74,9 +102,19 @@ export default function CashFlowPage() {
         subtitle="Direct method — operating, investing, financing"
         actions={
           <div className="flex flex-wrap items-center gap-3">
-            <input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} className="border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-1.5 text-sm bg-white dark:bg-gray-800 text-primary" />
+            <input
+              type="date"
+              value={fromDate}
+              onChange={(e) => setFromDate(e.target.value)}
+              className="border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-1.5 text-sm bg-white dark:bg-gray-800 text-primary"
+            />
             <span className="text-secondary text-sm">to</span>
-            <input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} className="border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-1.5 text-sm bg-white dark:bg-gray-800 text-primary" />
+            <input
+              type="date"
+              value={toDate}
+              onChange={(e) => setToDate(e.target.value)}
+              className="border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-1.5 text-sm bg-white dark:bg-gray-800 text-primary"
+            />
           </div>
         }
       />
@@ -91,7 +129,9 @@ export default function CashFlowPage() {
         <div className="space-y-4">
           <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 px-4 py-3 flex justify-between items-center text-sm">
             <span className="font-semibold text-primary">Opening Cash Balance</span>
-            <span className="font-mono font-semibold text-primary">{formatCurrency(cf.openingCash)}</span>
+            <span className="font-mono font-semibold text-primary">
+              {formatCurrency(cf.openingCash)}
+            </span>
           </div>
 
           <ActivitySection
@@ -115,7 +155,11 @@ export default function CashFlowPage() {
 
           <div className="bg-gray-900 dark:bg-gray-950 rounded-xl px-4 py-4 flex justify-between items-center">
             <span className="font-semibold text-white">Closing Cash Balance</span>
-            <span className={`font-mono text-xl font-bold ${cf.closingCash >= 0 ? 'text-green-400' : 'text-red-400'}`}>{formatCurrency(cf.closingCash)}</span>
+            <span
+              className={`font-mono text-xl font-bold ${cf.closingCash >= 0 ? 'text-green-400' : 'text-red-400'}`}
+            >
+              {formatCurrency(cf.closingCash)}
+            </span>
           </div>
         </div>
       )}

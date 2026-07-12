@@ -51,7 +51,7 @@ export default function LedgerPage() {
     enabled: !!id,
   });
 
-  const ledger: LedgerData | undefined = (data as LedgerData);
+  const ledger: LedgerData | undefined = data as LedgerData;
 
   return (
     <div className="space-y-6">
@@ -67,7 +67,10 @@ export default function LedgerPage() {
           <input
             type="date"
             value={fromDate}
-            onChange={(e) => { setFromDate(e.target.value); setPage(0); }}
+            onChange={(e) => {
+              setFromDate(e.target.value);
+              setPage(0);
+            }}
             className="border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-1.5 text-sm bg-white dark:bg-gray-800 text-primary"
           />
         </div>
@@ -76,7 +79,10 @@ export default function LedgerPage() {
           <input
             type="date"
             value={toDate}
-            onChange={(e) => { setToDate(e.target.value); setPage(0); }}
+            onChange={(e) => {
+              setToDate(e.target.value);
+              setPage(0);
+            }}
             className="border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-1.5 text-sm bg-white dark:bg-gray-800 text-primary"
           />
         </div>
@@ -91,39 +97,67 @@ export default function LedgerPage() {
         {isLoading ? (
           <ERPTableSkeleton rows={10} />
         ) : !ledger || ledger.transactions.length === 0 ? (
-          <ERPEmptyState type="no-results" title="No transactions in this period" description="Try adjusting the date range above." />
+          <ERPEmptyState
+            type="no-results"
+            title="No transactions in this period"
+            description="Try adjusting the date range above."
+          />
         ) : (
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50 dark:bg-gray-900/40 border-b border-gray-200 dark:border-gray-700">
-              <tr>
-                <th className="px-4 py-3 text-left font-medium text-secondary">Date</th>
-                <th className="px-4 py-3 text-left font-medium text-secondary">Journal</th>
-                <th className="px-4 py-3 text-left font-medium text-secondary">Description</th>
-                <th className="px-4 py-3 text-right font-medium text-secondary">Debit</th>
-                <th className="px-4 py-3 text-right font-medium text-secondary">Credit</th>
-                <th className="px-4 py-3 text-right font-medium text-secondary">Balance</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
-              {ledger.transactions.map((tx) => (
-                <tr key={tx.id} className="hover:bg-gray-50 dark:hover:bg-gray-750">
-                  <td className="px-4 py-2.5 text-secondary text-xs">{formatDatetime(tx.transactionDate)}</td>
-                  <td className="px-4 py-2.5 font-mono text-xs text-blue-600 dark:text-blue-400">{tx.journalId.slice(0, 16)}…</td>
-                  <td className="px-4 py-2.5 text-primary max-w-xs truncate">{tx.description}</td>
-                  <td className="px-4 py-2.5 text-right font-mono text-green-600 dark:text-green-400">{Number(tx.debitAmount) > 0 ? formatCurrency(Number(tx.debitAmount)) : '—'}</td>
-                  <td className="px-4 py-2.5 text-right font-mono text-red-500 dark:text-red-400">{Number(tx.creditAmount) > 0 ? formatCurrency(Number(tx.creditAmount)) : '—'}</td>
-                  <td className="px-4 py-2.5 text-right font-mono font-semibold text-primary">{formatCurrency(Number(tx.runningBalance))}</td>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 dark:bg-gray-900/40 border-b border-gray-200 dark:border-gray-700">
+                <tr>
+                  <th className="px-4 py-3 text-left font-medium text-secondary">Date</th>
+                  <th className="px-4 py-3 text-left font-medium text-secondary">Journal</th>
+                  <th className="px-4 py-3 text-left font-medium text-secondary">Description</th>
+                  <th className="px-4 py-3 text-right font-medium text-secondary">Debit</th>
+                  <th className="px-4 py-3 text-right font-medium text-secondary">Credit</th>
+                  <th className="px-4 py-3 text-right font-medium text-secondary">Balance</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
+                {ledger.transactions.map((tx) => (
+                  <tr key={tx.id} className="hover:bg-gray-50 dark:hover:bg-gray-750">
+                    <td className="px-4 py-2.5 text-secondary text-xs">
+                      {formatDatetime(tx.transactionDate)}
+                    </td>
+                    <td className="px-4 py-2.5 font-mono text-xs text-blue-600 dark:text-blue-400">
+                      {tx.journalId.slice(0, 16)}…
+                    </td>
+                    <td className="px-4 py-2.5 text-primary max-w-xs truncate">{tx.description}</td>
+                    <td className="px-4 py-2.5 text-right font-mono text-green-600 dark:text-green-400">
+                      {Number(tx.debitAmount) > 0 ? formatCurrency(Number(tx.debitAmount)) : '—'}
+                    </td>
+                    <td className="px-4 py-2.5 text-right font-mono text-red-500 dark:text-red-400">
+                      {Number(tx.creditAmount) > 0 ? formatCurrency(Number(tx.creditAmount)) : '—'}
+                    </td>
+                    <td className="px-4 py-2.5 text-right font-mono font-semibold text-primary">
+                      {formatCurrency(Number(tx.runningBalance))}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
         {(ledger?.totalElements ?? 0) > 50 && (
           <div className="flex items-center justify-between px-4 py-3 border-t border-gray-200 dark:border-gray-700">
             <span className="text-sm text-secondary">Page {page + 1}</span>
             <div className="flex gap-2">
-              <button disabled={page === 0} onClick={() => setPage((p) => p - 1)} className="px-3 py-1 text-sm rounded border border-gray-300 dark:border-gray-600 disabled:opacity-40">Prev</button>
-              <button disabled={(page + 1) * 50 >= (ledger?.totalElements ?? 0)} onClick={() => setPage((p) => p + 1)} className="px-3 py-1 text-sm rounded border border-gray-300 dark:border-gray-600 disabled:opacity-40">Next</button>
+              <button
+                disabled={page === 0}
+                onClick={() => setPage((p) => p - 1)}
+                className="px-3 py-1 text-sm rounded border border-gray-300 dark:border-gray-600 disabled:opacity-40"
+              >
+                Prev
+              </button>
+              <button
+                disabled={(page + 1) * 50 >= (ledger?.totalElements ?? 0)}
+                onClick={() => setPage((p) => p + 1)}
+                className="px-3 py-1 text-sm rounded border border-gray-300 dark:border-gray-600 disabled:opacity-40"
+              >
+                Next
+              </button>
             </div>
           </div>
         )}

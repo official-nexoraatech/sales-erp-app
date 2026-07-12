@@ -5,7 +5,7 @@ import { and, desc, eq, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { PERMISSIONS } from '@erp/types';
 import { authenticate } from '../middleware/authenticate.js';
-import { requirePermission } from '../middleware/authorize.js';
+import { requirePermission, requireAnyPermission } from '../middleware/authorize.js';
 import { PaymentService } from '../domain/PaymentService.js';
 import { sendError } from './http-errors.js';
 
@@ -23,10 +23,14 @@ const CreatePaymentSchema = z.object({
 });
 
 const AllocateSchema = z.object({
-  allocations: z.array(z.object({
-    invoiceId: z.number().int().positive(),
-    amount: z.number().positive(),
-  })).min(1),
+  allocations: z
+    .array(
+      z.object({
+        invoiceId: z.number().int().positive(),
+        amount: z.number().positive(),
+      })
+    )
+    .min(1),
 });
 
 const BounceSchema = z.object({
@@ -40,10 +44,20 @@ export async function paymentRoutes(
   fastify.addHook('preHandler', authenticate);
 
   fastify.get('/payments', {
-    preHandler: requirePermission(PERMISSIONS.PAYMENT_VIEW),
+    preHandler: requireAnyPermission([PERMISSIONS.PAYMENT_VIEW, PERMISSIONS.PAYMENT_IN_VIEW]),
     handler: async (req, reply) => {
-      const ctx = ctxFactory.create({ tenantId: req.auth.tenantId, userId: req.auth.userId, correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID() });
-      const q = req.query as { customerId?: string; status?: string; page?: string; pageSize?: string };
+      const ctx = ctxFactory.create({
+        tenantId: req.auth.tenantId,
+        userId: req.auth.userId,
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+      });
+      const q = req.query as {
+        customerId?: string;
+        status?: string;
+        page?: string;
+        pageSize?: string;
+      };
       const page = Math.max(1, parseInt(q.page ?? '1', 10));
       const pageSize = Math.min(100, parseInt(q.pageSize ?? '20', 10));
 
@@ -64,7 +78,9 @@ export async function paymentRoutes(
         .from(payments)
         .where(and(...conditions));
 
-      return reply.send({ data: { content: rows, totalElements: countRow?.count ?? 0, page, pageSize } });
+      return reply.send({
+        data: { content: rows, totalElements: countRow?.count ?? 0, page, pageSize },
+      });
     },
   });
 
@@ -72,7 +88,12 @@ export async function paymentRoutes(
     preHandler: requirePermission(PERMISSIONS.PAYMENT_CREATE),
     handler: async (req, reply) => {
       const body = CreatePaymentSchema.parse(req.body);
-      const ctx = ctxFactory.create({ tenantId: req.auth.tenantId, userId: req.auth.userId, correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID() });
+      const ctx = ctxFactory.create({
+        tenantId: req.auth.tenantId,
+        userId: req.auth.userId,
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+      });
       const svc = new PaymentService(ctx.db.raw);
       const paymentNumber = `PAY-${req.auth.tenantId}-${Date.now()}`;
 
@@ -97,10 +118,15 @@ export async function paymentRoutes(
   });
 
   fastify.get('/payments/:id', {
-    preHandler: requirePermission(PERMISSIONS.PAYMENT_VIEW),
+    preHandler: requireAnyPermission([PERMISSIONS.PAYMENT_VIEW, PERMISSIONS.PAYMENT_IN_VIEW]),
     handler: async (req, reply) => {
       const { id } = req.params as { id: string };
-      const ctx = ctxFactory.create({ tenantId: req.auth.tenantId, userId: req.auth.userId, correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID() });
+      const ctx = ctxFactory.create({
+        tenantId: req.auth.tenantId,
+        userId: req.auth.userId,
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+      });
       const [row] = await ctx.db.raw
         .select()
         .from(payments)
@@ -115,7 +141,12 @@ export async function paymentRoutes(
     handler: async (req, reply) => {
       const { id } = req.params as { id: string };
       const body = AllocateSchema.parse(req.body);
-      const ctx = ctxFactory.create({ tenantId: req.auth.tenantId, userId: req.auth.userId, correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID() });
+      const ctx = ctxFactory.create({
+        tenantId: req.auth.tenantId,
+        userId: req.auth.userId,
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+      });
       const svc = new PaymentService(ctx.db.raw);
       await svc.allocate(parseInt(id, 10), req.auth.tenantId, body.allocations, req.auth.userId);
       return reply.send({ success: true });
@@ -127,11 +158,15 @@ export async function paymentRoutes(
     handler: async (req, reply) => {
       const { id } = req.params as { id: string };
       const body = BounceSchema.parse(req.body);
-      const ctx = ctxFactory.create({ tenantId: req.auth.tenantId, userId: req.auth.userId, correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID() });
+      const ctx = ctxFactory.create({
+        tenantId: req.auth.tenantId,
+        userId: req.auth.userId,
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+      });
       const svc = new PaymentService(ctx.db.raw);
       await svc.bounceCheque(parseInt(id, 10), req.auth.tenantId, body.reason);
       return reply.send({ success: true });
     },
   });
-
 }

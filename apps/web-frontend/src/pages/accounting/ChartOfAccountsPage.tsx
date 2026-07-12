@@ -10,7 +10,7 @@ import { ERPTableSkeleton } from '../../components/erp/ERPSkeleton.js';
 import ERPEmptyState from '../../components/erp/ERPEmptyState.js';
 import Button from '../../components/ui/Button.js';
 import Badge from '../../components/ui/Badge.js';
-import { formatDate, formatDatetime, formatCurrency } from '../../lib/format.js';
+import { formatCurrency } from '../../lib/format.js';
 
 interface Account {
   id: number;
@@ -48,7 +48,10 @@ function AccountRow({ account, depth = 0 }: { account: Account; depth?: number }
         <td className="px-4 py-2.5">
           <div className="flex items-center" style={{ paddingLeft: `${depth * 16}px` }}>
             {hasChildren && (
-              <button onClick={() => setExpanded((e) => !e)} className="mr-1.5 text-disabled hover:text-secondary text-xs w-4">
+              <button
+                onClick={() => setExpanded((e) => !e)}
+                className="mr-1.5 text-disabled hover:text-secondary text-xs w-4"
+              >
                 {expanded ? '▼' : '▶'}
               </button>
             )}
@@ -70,13 +73,21 @@ function AccountRow({ account, depth = 0 }: { account: Account; depth?: number }
         </td>
         <td className="px-4 py-2.5">
           {canEditAccount && !account.isSystem && (
-            <Button size="sm" variant="ghost" onClick={() => navigate(`/accounting/accounts/${account.id}/edit`)}>Edit</Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => navigate(`/accounting/accounts/${account.id}/edit`)}
+            >
+              Edit
+            </Button>
           )}
         </td>
       </tr>
-      {expanded && hasChildren && account.children!.map((child) => (
-        <AccountRow key={child.id} account={child} depth={depth + 1} />
-      ))}
+      {expanded &&
+        hasChildren &&
+        account.children!.map((child) => (
+          <AccountRow key={child.id} account={child} depth={depth + 1} />
+        ))}
     </>
   );
 }
@@ -85,60 +96,94 @@ export default function ChartOfAccountsPage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const canCreateAccount = useAuthStore((s) => s.hasPermission(PERMISSIONS.ACCOUNT_CREATE));
-  const { data, isLoading } = useQuery({ queryKey: ['accounts-tree'], queryFn: () => accountApi.tree() });
+  const { data, isLoading } = useQuery({
+    queryKey: ['accounts-tree'],
+    queryFn: () => accountApi.tree(),
+  });
   const tree = (data as Account[]) ?? [];
 
   const seedMutation = useMutation({
     mutationFn: () => accountApi.seed(),
-    onSuccess: () => { toast.success('Default accounts seeded'); qc.invalidateQueries({ queryKey: ['accounts-tree'] }); },
+    onSuccess: () => {
+      toast.success('Default accounts seeded');
+      qc.invalidateQueries({ queryKey: ['accounts-tree'] });
+    },
     onError: () => toast.error('Seed failed'),
   });
 
   return (
     <div>
-      <ERPPageHeader variant="list"
+      <ERPPageHeader
+        variant="list"
         title="Chart of Accounts"
         subtitle="Manage your accounting structure."
-        actions={canCreateAccount ? (
-          <div className="flex gap-2">
-            <Button variant="secondary" onClick={() => seedMutation.mutate()} loading={seedMutation.isPending}>
-              Seed Default CoA
-            </Button>
-            <Button onClick={() => navigate('/accounting/accounts/new')}>+ New Account</Button>
-          </div>
-        ) : undefined}
+        actions={
+          canCreateAccount ? (
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant="secondary"
+                onClick={() => seedMutation.mutate()}
+                loading={seedMutation.isPending}
+              >
+                Seed Default CoA
+              </Button>
+              <Button onClick={() => navigate('/accounting/accounts/new')}>+ New Account</Button>
+            </div>
+          ) : undefined
+        }
       />
 
       <div className="rounded-xl border border-default overflow-hidden">
         {isLoading ? (
           <ERPTableSkeleton rows={6} cols={6} />
         ) : (
-          <table className="w-full text-sm">
-            <thead className="bg-surface-subtle border-b border-default">
-              <tr>
-                <th className="px-4 py-3 text-xs font-semibold text-secondary uppercase tracking-wide text-left w-28">Code</th>
-                <th className="px-4 py-3 text-xs font-semibold text-secondary uppercase tracking-wide text-left">Account Name</th>
-                <th className="px-4 py-3 text-xs font-semibold text-secondary uppercase tracking-wide text-left">Type</th>
-                <th className="px-4 py-3 text-xs font-semibold text-secondary uppercase tracking-wide text-left">Balance</th>
-                <th className="px-4 py-3 text-xs font-semibold text-secondary uppercase tracking-wide text-right">Opening Bal.</th>
-                <th className="px-4 py-3" />
-              </tr>
-            </thead>
-            <tbody>
-              {tree.length === 0 ? (
-                <tr><td colSpan={6}>
-                  <ERPEmptyState
-                    type="no-data"
-                    title="No accounts yet"
-                    description='Click "Seed Default CoA" to get started.'
-                    {...(canCreateAccount ? { action: { label: 'Seed Default CoA', onClick: () => seedMutation.mutate() } } : {})}
-                  />
-                </td></tr>
-              ) : (
-                tree.map((account) => <AccountRow key={account.id} account={account} />)
-              )}
-            </tbody>
-          </table>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-surface-subtle border-b border-default">
+                <tr>
+                  <th className="px-4 py-3 text-xs font-semibold text-secondary uppercase tracking-wide text-left w-28">
+                    Code
+                  </th>
+                  <th className="px-4 py-3 text-xs font-semibold text-secondary uppercase tracking-wide text-left">
+                    Account Name
+                  </th>
+                  <th className="px-4 py-3 text-xs font-semibold text-secondary uppercase tracking-wide text-left">
+                    Type
+                  </th>
+                  <th className="px-4 py-3 text-xs font-semibold text-secondary uppercase tracking-wide text-left">
+                    Balance
+                  </th>
+                  <th className="px-4 py-3 text-xs font-semibold text-secondary uppercase tracking-wide text-right">
+                    Opening Bal.
+                  </th>
+                  <th className="px-4 py-3" />
+                </tr>
+              </thead>
+              <tbody>
+                {tree.length === 0 ? (
+                  <tr>
+                    <td colSpan={6}>
+                      <ERPEmptyState
+                        type="no-data"
+                        title="No accounts yet"
+                        description='Click "Seed Default CoA" to get started.'
+                        {...(canCreateAccount
+                          ? {
+                              action: {
+                                label: 'Seed Default CoA',
+                                onClick: () => seedMutation.mutate(),
+                              },
+                            }
+                          : {})}
+                      />
+                    </td>
+                  </tr>
+                ) : (
+                  tree.map((account) => <AccountRow key={account.id} account={account} />)
+                )}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
     </div>

@@ -3,11 +3,29 @@ import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 import { Kafka } from 'kafkajs';
+import Redis from 'ioredis';
 import { createDatabaseClient, dlqItems } from '@erp/db';
-import { createLogger, createMetricsHandler, createHttpMetricsHook, createCorrelationIdHook } from '@erp/logger';
+import {
+  createLogger,
+  createMetricsHandler,
+  createHttpMetricsHook,
+  createCorrelationIdHook,
+} from '@erp/logger';
 import { loadConfigWithSecrets } from '@erp/config';
-import { ERPError, type ERPEventPayload } from '@erp/types';
-import { HELMET_OPTIONS, PERMISSIONS_POLICY, registerHealthRoute, tenantOrIpKeyGenerator, initializeTelemetry, initTenantStatusEnforcement, PlatformEventConsumer, TenantScopedDatabase, checkKafka } from '@erp/sdk';
+import type { ERPEventPayload } from '@erp/types';
+import {
+  HELMET_OPTIONS,
+  PERMISSIONS_POLICY,
+  registerHealthRoute,
+  tenantOrIpKeyGenerator,
+  initializeTelemetry,
+  initTenantStatusEnforcement,
+  subscribeToTenantStatusInvalidations,
+  PlatformEventConsumer,
+  TenantScopedDatabase,
+  checkKafka,
+  registerErrorHandler,
+} from '@erp/sdk';
 import { SearchEngine } from './domain/SearchEngine.js';
 import { searchRoutes } from './api/search.routes.js';
 import { internalRoutes } from './api/internal.routes.js';
@@ -26,9 +44,16 @@ async function bootstrap(): Promise<void> {
   const apiKey = process.env['ELASTICSEARCH_API_KEY'];
 
   const lokiUrl = process.env['LOKI_URL'];
-  const logger = createLogger({ serviceName: 'search-service', level: 'info', ...(lokiUrl ? { lokiUrl } : {}) });
+  const logger = createLogger({
+    serviceName: 'search-service',
+    level: 'info',
+    ...(lokiUrl ? { lokiUrl } : {}),
+  });
 
-  const searchEngine = new SearchEngine({ elasticsearchUrl, ...(apiKey !== undefined ? { apiKey } : {}) });
+  const searchEngine = new SearchEngine({
+    elasticsearchUrl,
+    ...(apiKey !== undefined ? { apiKey } : {}),
+  });
   const metricsHandler = await createMetricsHandler('search-service');
 
   // ── Kafka consumer — keeps Elasticsearch in sync with every other service's writes ──
@@ -41,12 +66,26 @@ async function bootstrap(): Promise<void> {
   const consumerDb = createDatabaseClient({ url: databaseUrl, maxConnections: 3 });
   initTenantStatusEnforcement(consumerDb);
 
+  // Dedicated to tenant-status pub/sub invalidation only — this service otherwise has no
+  // Redis-backed caching or rate-limiting.
+  const tenantStatusRedis = new Redis(config.redisUrl, {
+    maxRetriesPerRequest: null,
+    enableReadyCheck: false,
+  });
+  tenantStatusRedis.on('error', (err: Error) => {
+    logger.error({ err: err.message }, 'Redis connection error in search-service');
+  });
+  subscribeToTenantStatusInvalidations(tenantStatusRedis);
+
   const eventDispatcher = async (event: ERPEventPayload): Promise<void> => {
     try {
       await syncSearchIndex(event, searchEngine);
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
-      logger.error({ err: errMsg, eventType: event.eventType, aggregateId: event.aggregateId }, 'Failed to sync search index — writing to dead-letter queue');
+      logger.error(
+        { err: errMsg, eventType: event.eventType, aggregateId: event.aggregateId },
+        'Failed to sync search index — writing to dead-letter queue'
+      );
       await consumerDb.insert(dlqItems).values({
         topic: topicForEventType(event.eventType),
         partition: 0,
@@ -55,7 +94,11 @@ async function bootstrap(): Promise<void> {
         // 'consumer' marker: dlq_items is a shared table (OutboxPublisher also writes to it,
         // for cross-service Kafka publish failures) — this is what the Phase 8 dead-letter
         // admin view filters on to show only search-service's own consume-side failures.
-        headers: { eventType: event.eventType, tenantId: String(event.tenantId), consumer: 'search-service' },
+        headers: {
+          eventType: event.eventType,
+          tenantId: String(event.tenantId),
+          consumer: 'search-service',
+        },
         errorMessage: errMsg,
         retryCount: 0,
         status: 'PENDING',
@@ -83,7 +126,8 @@ async function bootstrap(): Promise<void> {
     origin: process.env['ALLOWED_ORIGINS']?.split(',') ?? ['http://localhost:3000'],
     credentials: true,
   });
-  // No Redis connection in this service — in-memory rate-limit store (same fallback auth-service uses).
+  // In-memory rate-limit store (same fallback auth-service uses) — the Redis connection
+  // above is dedicated to tenant-status invalidation, not wired up as the rate-limit store.
   await fastify.register(rateLimit, {
     global: true,
     max: 200,
@@ -122,18 +166,14 @@ async function bootstrap(): Promise<void> {
   await registerSearchRoutes(fastify);
   await fastify.register(registerSearchRoutes, { prefix: '/api/v2' });
 
-  fastify.setErrorHandler((error, request, reply) => {
-    if (error instanceof ERPError) {
-      return reply.code(error.statusCode).send({
-        error: { code: error.code, message: error.message, details: error.details },
-      });
-    }
-    logger.error({ err: error instanceof Error ? error.message : String(error), url: request.url, correlationId: (request as { correlationId?: string }).correlationId }, 'Unhandled error');
-    return reply.code(500).send({ error: { code: 'INTERNAL_ERROR', message: 'Internal error' } });
-  });
+  registerErrorHandler(fastify, 'search-service', logger);
 
-  process.on('SIGTERM', () => { fastify.close(() => process.exit(0)); });
-  process.on('SIGINT', () => { fastify.close(() => process.exit(0)); });
+  process.on('SIGTERM', () => {
+    fastify.close(() => process.exit(0));
+  });
+  process.on('SIGINT', () => {
+    fastify.close(() => process.exit(0));
+  });
 
   const address = await fastify.listen({ port, host: '0.0.0.0' });
   logger.info({ address }, 'Search service started');

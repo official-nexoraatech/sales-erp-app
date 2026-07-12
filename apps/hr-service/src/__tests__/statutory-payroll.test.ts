@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { encryptField } from '@erp/utils';
+import { encryptField } from '@erp/utils/server';
 
 const MOCK_ENC_KEY = 'a'.repeat(64);
 
@@ -13,12 +13,32 @@ vi.mock('@erp/config', () => ({
 vi.mock('@erp/db', () => ({
   payrollRuns: { id: {}, tenantId: {}, periodMonth: {}, periodYear: {} },
   payrollSlips: {
-    id: {}, tenantId: {}, payrollRunId: {}, employeeId: {},
-    basicSalary: {}, hraAmount: {}, daAmount: {}, otherAllowances: {}, pieceRateAmount: {},
-    pfEmployee: {}, pfEmployer: {}, epsAmount: {}, esiEmployee: {}, esiEmployer: {},
-    grossSalary: {}, tdsDeduction: {},
+    id: {},
+    tenantId: {},
+    payrollRunId: {},
+    employeeId: {},
+    basicSalary: {},
+    hraAmount: {},
+    daAmount: {},
+    otherAllowances: {},
+    pieceRateAmount: {},
+    pfEmployee: {},
+    pfEmployer: {},
+    epsAmount: {},
+    esiEmployee: {},
+    esiEmployer: {},
+    grossSalary: {},
+    tdsDeduction: {},
   },
-  employees: { id: {}, tenantId: {}, displayName: {}, uan: {}, esiNumber: {}, panEncrypted: {}, branchId: {} },
+  employees: {
+    id: {},
+    tenantId: {},
+    displayName: {},
+    uan: {},
+    esiNumber: {},
+    panEncrypted: {},
+    branchId: {},
+  },
   organizationSettings: { tenantId: {}, orgName: {}, legalName: {}, tan: {}, address: {} },
   branches: { id: {}, tenantId: {}, address: {} },
 }));
@@ -94,13 +114,13 @@ describe('Multi-state Professional Tax (PG-044)', () => {
       expect(PTSlabService.computePT(50000, MH_SLABS)).toBe(200);
     });
 
-    it('applies Karnataka slabs, not Maharashtra\'s, when given Karnataka slab data', async () => {
+    it("applies Karnataka slabs, not Maharashtra's, when given Karnataka slab data", async () => {
       const { PTSlabService } = await import('../domain/PTSlabService.js');
       expect(PTSlabService.computePT(20000, KA_SLABS)).toBe(0);
       expect(PTSlabService.computePT(30000, KA_SLABS)).toBe(200);
     });
 
-    it('returns 0 (not an error, not another state\'s rate) for a no-PT state with zero seeded slabs', async () => {
+    it("returns 0 (not an error, not another state's rate) for a no-PT state with zero seeded slabs", async () => {
       const { PTSlabService } = await import('../domain/PTSlabService.js');
       expect(PTSlabService.computePT(50000, [])).toBe(0);
     });
@@ -120,7 +140,7 @@ describe('Multi-state Professional Tax (PG-044)', () => {
   });
 
   describe('resolveEmployeeState', () => {
-    it('resolves via the employee\'s branch address when the branch has a state on file', async () => {
+    it("resolves via the employee's branch address when the branch has a state on file", async () => {
       const { resolveEmployeeState } = await import('../domain/PayrollEngine.js');
       const db = makeDb([[{ address: { state: 'Karnataka' } }]]);
       const state = await resolveEmployeeState(db, 1, 5);
@@ -159,7 +179,7 @@ describe('PFChallanService.generateChallan', () => {
 
     const db = makeDb([
       [{ id: 501 }], // payrollRuns lookup
-      slips,         // payrollSlips joined with employees
+      slips, // payrollSlips joined with employees
     ]);
 
     const result = await PFChallanService.generateChallan(db, 1, 7, 2026);

@@ -1,0 +1,394 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ERP Docs — Customers & Suppliers Module</title>
+<link rel="stylesheet" href="/shared/docs-shell.css">
+</head>
+<body data-module="Customers & Suppliers">
+
+<header class="topbar">
+  <button class="icon-btn navtoggle" id="navToggle" aria-label="Toggle navigation">☰</button>
+  <a class="brand" href="/"><span class="mark">N</span> Nexoraa ERP Docs</a>
+  <div class="searchwrap">
+    <input type="text" class="searchbox" id="searchInput" placeholder="Search Customers &amp; Suppliers documentation…" autocomplete="off">
+    <div class="search-results" id="searchResults"></div>
+  </div>
+  <div class="topbar-actions">
+    <button class="icon-btn" id="themeToggle" aria-label="Toggle dark mode" title="Toggle dark mode">◐</button>
+    <button class="icon-btn" id="printBtn" aria-label="Print this page" title="Print this page">⎙</button>
+  </div>
+</header>
+
+<div class="shell">
+  <nav class="sidebar" id="sidebar">
+    <div class="sb-group">
+      <div class="sb-group-title">Modules</div>
+      <div class="sb-module active-module">
+        <div class="sb-module-head active-module">Customers &amp; Suppliers <span class="status">v1</span></div>
+        <div class="sb-track">
+          <div class="sb-track-title">Client</div>
+          <a class="sb-link" data-page="customers-client-overview" href="#customers/client/overview">Overview</a>
+          <a class="sb-link" data-page="customers-client-customers" href="#customers/client/customers">Managing Customers</a>
+          <a class="sb-link" data-page="customers-client-suppliers" href="#customers/client/suppliers">Managing Suppliers</a>
+          <a class="sb-link" data-page="customers-client-credit" href="#customers/client/credit-loyalty">Credit Limits &amp; Loyalty</a>
+          <a class="sb-link" data-page="customers-client-crm" href="#customers/client/segments-crm">Segments &amp; Marketing Messages</a>
+          <a class="sb-link" data-page="customers-client-faq" href="#customers/client/faq">Troubleshooting &amp; FAQ</a>
+        </div>
+        <div class="sb-track">
+          <div class="sb-track-title">Super Admin</div>
+          <a class="sb-link" data-page="customers-admin-access" href="#customers/admin/access-roles">Access &amp; Roles</a>
+          <a class="sb-link" data-page="customers-admin-privacy" href="#customers/admin/data-privacy">Data Privacy &amp; Security</a>
+          <a class="sb-link" data-page="customers-admin-limits" href="#customers/admin/limitations">Limitations to Know</a>
+        </div>
+        <div class="sb-track">
+          <div class="sb-track-title">Developer</div>
+          <a class="sb-link" data-page="customers-dev-architecture" href="#customers/dev/architecture">Architecture</a>
+          <a class="sb-link" data-page="customers-dev-api" href="#customers/dev/api-reference">API Reference</a>
+          <a class="sb-link" data-page="customers-dev-data" href="#customers/dev/data-model">Data Model</a>
+        </div>
+        <div class="sb-track">
+          <div class="sb-track-title">Audit</div>
+          <a class="sb-link" data-page="customers-issues" href="#customers/audit/known-issues">Known Issues &amp; Needs Review</a>
+        </div>
+      </div>
+    </div>
+    <div class="sb-group">
+      <div class="sb-group-title">Other modules</div>
+      <a class="sb-module-head" href="/pos/index.html">POS <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/sales/index.html">Sales &amp; Invoicing <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/inventory/index.html">Inventory <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/purchase/index.html">Purchase <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/products/index.html">Products &amp; Variants <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/accounting/index.html">Accounting &amp; GST <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/hr/index.html">HR &amp; Payroll <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/reports/index.html">Reports <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/tenants/index.html">Super Admin / Tenants <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/platform/index.html">Developer Platform <span class="status">Open →</span></a>
+    </div>
+  </nav>
+
+  <main class="content" id="content">
+    <div class="breadcrumb" id="breadcrumb"></div>
+
+    <!-- ============ CLIENT: OVERVIEW ============ -->
+    <article class="page" id="page-customers-client-overview" data-track="client" data-title="Customers & Suppliers Overview">
+      <span class="track-pill client">Client documentation</span>
+      <h1>Customers &amp; Suppliers Overview</h1>
+      <div class="pilot-banner">Sixth module documented from a direct code audit. Covers customer records, supplier records, credit limits, loyalty, and customer segments/marketing messages.</div>
+
+      <p>This is the master-data module every other part of the app leans on — POS and Sales look up customers here, Purchase looks up suppliers here.</p>
+
+      <h2 id="areas">What's here</h2>
+      <ul>
+        <li><strong>Customers</strong> — contact info, billing address, credit terms, loyalty balance, communication preferences.</li>
+        <li><strong>Suppliers</strong> — contact info, bank details, credit terms. Simpler than the customer record in a few notable ways — see <a href="#customers/client/suppliers">Managing Suppliers</a>.</li>
+        <li><strong>Segments &amp; Campaigns</strong> — group customers by behavior and send SMS/WhatsApp/Email messages.</li>
+      </ul>
+
+      <div class="callout review"><div class="callout-title">Two known display/edit issues on customer records</div><p>A customer's billing address doesn't display correctly on their detail page, and users with the Sales Manager role may be blocked from opening the customer edit screen even though they can see the Edit button. Neither is something you're doing wrong — see <a href="#customers/client/customers">Managing Customers</a> and <a href="#customers/admin/access-roles">Access &amp; Roles</a>.</p></div>
+
+      <div class="pager">
+        <span></span>
+        <a class="next" href="#customers/client/customers"><div class="pg-label">Next</div><div class="pg-title">Managing Customers →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ CLIENT: CUSTOMERS ============ -->
+    <article class="page" id="page-customers-client-customers" data-track="client" data-title="Managing Customers">
+      <span class="track-pill client">Client documentation</span>
+      <h1>Managing Customers</h1>
+      <ol class="steps">
+        <li><h4>Customer Details</h4>Display Name, Customer Type (Retail/Wholesale/B2B/Government/Export), Branch, Phone, Email, GSTIN, PAN.</li>
+        <li><h4>Billing Address</h4>Address Line 1, City, State, PIN Code.</li>
+        <li><h4>Credit Terms</h4>Credit Limit, Credit Days, Opening Balance.</li>
+      </ol>
+
+      <div class="callout review"><div class="callout-title">Billing address may not display correctly</div><p>On a customer's detail page, the Address Line 1 and PIN Code fields can show blank even when they were entered — City and State display fine. This is a display-only issue in how that page reads the stored address; the underlying data itself may be fine. If you need to confirm a customer's exact billing address, verify carefully rather than trusting this screen at a glance.</p></div>
+      <div class="callout note"><div class="callout-title">Duplicate phone numbers are allowed</div><p>Creating a customer with a phone number that already exists gives a warning, not a block — you can still save it. Worth a quick check before creating a new customer if you're not sure whether they're already in the system.</p></div>
+
+      <h2 id="communication">Communication preferences</h2>
+      <p>Each customer has independent SMS/WhatsApp/Email opt-out checkboxes, honored on both marketing campaigns and automatic birthday greetings — a customer who's opted out of a channel genuinely won't receive messages on it.</p>
+
+      <h2 id="delete">Deleting a customer</h2>
+      <p>Deleting deactivates the customer rather than erasing them — their record and history remain, just marked inactive. There's currently no check that stops you from deactivating a customer who still has an outstanding balance, so double-check before doing so if that matters to your bookkeeping.</p>
+      <h2 id="merge">Merging duplicate customers</h2>
+      <p>Merging two customer records archives the duplicate — it does not currently move that customer's past invoices/payments over to the surviving record. Treat merge as "hide the duplicate," not "combine their full history," for now.</p>
+
+      <div class="pager">
+        <a href="#customers/client/overview"><div class="pg-label">Back</div><div class="pg-title">← Overview</div></a>
+        <a class="next" href="#customers/client/suppliers"><div class="pg-label">Next</div><div class="pg-title">Managing Suppliers →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ CLIENT: SUPPLIERS ============ -->
+    <article class="page" id="page-customers-client-suppliers" data-track="client" data-title="Managing Suppliers">
+      <span class="track-pill client">Client documentation</span>
+      <h1>Managing Suppliers</h1>
+      <ol class="steps">
+        <li><h4>Supplier Details</h4>Display Name, Supplier Type (Domestic/Import/Manufacturer/Agent), Branch, Phone, Email, GSTIN, PAN.</li>
+        <li><h4>Bank Details</h4>Bank Name, IFSC Code, Account Number (masked on screen).</li>
+        <li><h4>Credit Terms</h4>Credit Days, Opening Balance.</li>
+      </ol>
+
+      <div class="callout review"><div class="callout-title">No address, no credit limit, and no "registered/unregistered" toggle on this form</div><p>Three things you might expect aren't here: there's no address section for a supplier at all, no way to set a supplier's credit limit (even though the system can enforce one — see <a href="#customers/client/credit-loyalty">Credit Limits &amp; Loyalty</a>), and no way to mark a supplier as GST-unregistered (which matters for reverse-charge tax handling in Purchase). Every supplier is treated as GST-registered by default, with no way to change that from this screen.</p></div>
+      <div class="callout note"><div class="callout-title">"Stored encrypted" on the account number field</div><p>The bank account number field is masked like a password on screen, with a note that it's stored encrypted. Treat this as aspirational rather than a guarantee today — see <a href="#customers/admin/data-privacy">Data Privacy &amp; Security</a> for the precise, honest picture.</p></div>
+      <p>There's no supplier detail/statement page — a supplier's outstanding balance and transaction history currently aren't viewable in the app at all; you'll need to check with your accounts team directly.</p>
+
+      <div class="pager">
+        <a href="#customers/client/customers"><div class="pg-label">Back</div><div class="pg-title">← Managing Customers</div></a>
+        <a class="next" href="#customers/client/credit-loyalty"><div class="pg-label">Next</div><div class="pg-title">Credit Limits &amp; Loyalty →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ CLIENT: CREDIT & LOYALTY ============ -->
+    <article class="page" id="page-customers-client-credit" data-track="client" data-title="Credit Limits & Loyalty">
+      <span class="track-pill client">Client documentation</span>
+      <h1>Credit Limits &amp; Loyalty</h1>
+
+      <h2 id="credit">Credit limits</h2>
+      <p>For customers, the Credit Limit set on their record is genuinely enforced — an invoice that would push their balance over the limit is blocked unless the person creating it has override authority. For suppliers, the same enforcement exists in the system, but since there's no field to set a supplier's credit limit anywhere in the app (see Managing Suppliers), it never actually triggers for suppliers set up through the normal screens.</p>
+
+      <h2 id="loyalty">Loyalty points</h2>
+      <p>Where enabled, customers earn points on POS purchases at a fixed rate (₹100 spent = 1 point) and can redeem points at a fixed rate (1 point = ₹0.50). Both rates are the same for every tenant — there's no per-business configuration for them today.</p>
+      <div class="callout review"><div class="callout-title">The "loyalty multiplier" on a business season doesn't actually change anything</div><p>The Seasons screen lets you set a loyalty multiplier (e.g. "2.0× loyalty" during a festival season) and displays it prominently — but this number currently has no effect on how many points a customer actually earns. Don't rely on it as a real promotional lever yet.</p></div>
+      <p>Loyalty points are only earned through POS sales today — a regular (non-POS) invoice doesn't award loyalty points.</p>
+
+      <div class="pager">
+        <a href="#customers/client/suppliers"><div class="pg-label">Back</div><div class="pg-title">← Managing Suppliers</div></a>
+        <a class="next" href="#customers/client/segments-crm"><div class="pg-label">Next</div><div class="pg-title">Segments &amp; Marketing Messages →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ CLIENT: SEGMENTS/CRM ============ -->
+    <article class="page" id="page-customers-client-crm" data-track="client" data-title="Segments & Marketing Messages">
+      <span class="track-pill client">Client documentation</span>
+      <h1>Segments &amp; Marketing Messages</h1>
+      <p>There's no separate "customer group" concept — instead, <strong>Segments</strong> group customers either by a set of ready-made rules (no purchase in 60 days, gold tier, high value, 30+ days overdue, birthdays this month, new this month) or a custom rule you define yourself (by type, status, credit limit, loyalty points, balance, or health score).</p>
+      <p>Campaigns send an SMS/WhatsApp/Email message to a segment or a specific list of customers. Automatic birthday greetings also go out daily to customers whose birthday falls that day.</p>
+      <div class="callout ok"><div class="callout-title">Opt-outs are genuinely respected</div><p>A customer who's opted out of a channel is excluded from both campaign sends and birthday greetings on that channel — this is real, working protection, not just a checkbox that looks like it does something.</p></div>
+      <div class="pager">
+        <a href="#customers/client/credit-loyalty"><div class="pg-label">Back</div><div class="pg-title">← Credit Limits &amp; Loyalty</div></a>
+        <a class="next" href="#customers/client/faq"><div class="pg-label">Next</div><div class="pg-title">Troubleshooting &amp; FAQ →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ CLIENT: FAQ ============ -->
+    <article class="page" id="page-customers-client-faq" data-track="client" data-title="Troubleshooting & FAQ">
+      <span class="track-pill client">Client documentation</span>
+      <h1>Troubleshooting &amp; FAQ</h1>
+      <div class="tablewrap"><table>
+        <tr><th>Question</th><th>Answer</th></tr>
+        <tr><td>A customer's address shows blank on their detail page</td><td>Known display issue — City/State usually still show. See <a href="#customers/client/customers">Managing Customers</a>.</td></tr>
+        <tr><td>I have Sales Manager role and can't open a customer's edit screen</td><td>A confirmed role-permission bug, not something wrong with your account. See <a href="#customers/admin/access-roles">Access &amp; Roles</a>.</td></tr>
+        <tr><td>Where do I set a supplier's credit limit or mark them GST-unregistered?</td><td>Nowhere in the current UI — both are missing from the Supplier form.</td></tr>
+        <tr><td>Why didn't the loyalty multiplier during our festival season change points earned?</td><td>Expected currently — that setting isn't wired to actual point calculation yet.</td></tr>
+        <tr><td>Where can I see a supplier's outstanding balance?</td><td>Nowhere in the app yet — check with your accounts team directly.</td></tr>
+      </table></div>
+      <div class="pager">
+        <a href="#customers/client/segments-crm"><div class="pg-label">Back</div><div class="pg-title">← Segments &amp; Marketing Messages</div></a>
+        <span></span>
+      </div>
+    </article>
+
+    <!-- ============ ADMIN: ACCESS ============ -->
+    <article class="page" id="page-customers-admin-access" data-track="admin" data-title="Access & Roles">
+      <span class="track-pill admin">Super Admin documentation</span>
+      <h1>Access &amp; Roles</h1>
+
+      <div class="callout bug"><div class="callout-title">Sales Manager can see "Edit" on a customer but gets blocked from opening it</div><p>The customer edit screen is gated by a different permission than everything else that controls customer editing — the backend save endpoint and the Edit button's visibility both use one permission, but the page route itself checks a different one. No default role except Owner/Admin holds that second permission, so a Sales Manager (who legitimately has edit rights everywhere else) will see the Edit button, click it, and land on an Access Denied screen. The equivalent Supplier edit route does not have this bug. This needs a role-configuration or route fix — it isn't something a Sales Manager can work around on their own.</p></div>
+
+      <div class="tablewrap"><table>
+        <tr><th>Action</th><th>Permission checked</th><th>Notes</th></tr>
+        <tr><td>View / create customer</td><td><span class="badge perm">CUSTOMER_VIEW</span> / <span class="badge perm">CUSTOMER_CREATE</span></td><td>Cashier has both</td></tr>
+        <tr><td>Edit customer (save)</td><td><span class="badge perm">CUSTOMER_EDIT</span></td><td>Sales Manager has this</td></tr>
+        <tr><td>Open customer edit screen</td><td><span class="badge perm">CUSTOMER_UPDATE</span></td><td><strong>Only Owner/Admin have this</strong> — the mismatch above</td></tr>
+        <tr><td>Delete / merge customer</td><td><span class="badge perm">CUSTOMER_DELETE</span> / <span class="badge perm">CUSTOMER_MERGE</span></td><td></td></tr>
+        <tr><td>View / create / edit supplier</td><td><span class="badge perm">SUPPLIER_VIEW/CREATE/EDIT</span></td><td>consistent — no mismatch here</td></tr>
+      </table></div>
+
+      <div class="callout note"><div class="callout-title">Several defined permissions are never actually checked anywhere</div><p><code>CUSTOMER_BLOCK</code>, dedicated credit-limit-view/update permissions, a dedicated statement-view permission, and supplier equivalents for update/bank-view/import/export all exist as concepts in the permission system but aren't enforced by any real screen or endpoint. Don't rely on granting or withholding these to control access — the coarser <code>CUSTOMER_EDIT</code>/<code>SUPPLIER_EDIT</code>-style permissions are what actually gate things.</p></div>
+
+      <div class="pager">
+        <span></span>
+        <a class="next" href="#customers/admin/data-privacy"><div class="pg-label">Next</div><div class="pg-title">Data Privacy &amp; Security →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ ADMIN: PRIVACY ============ -->
+    <article class="page" id="page-customers-admin-privacy" data-track="admin" data-title="Data Privacy & Security">
+      <span class="track-pill admin">Super Admin documentation</span>
+      <h1>Data Privacy &amp; Security</h1>
+      <div class="callout bug"><div class="callout-title">Customer GSTIN/PAN and supplier bank details are not actually encrypted, despite what the code comments and UI say</div><p>A customer's GSTIN and PAN, and a supplier's bank account number, are currently stored as plain, readable text in the database — only a one-way hash is kept alongside them to support search. The database schema and the supplier form's own helper text both describe these fields as encrypted; that description does not match what the code actually does today. If encryption of this data is a compliance requirement for your business, treat it as not yet implemented for customers/suppliers specifically.</p></div>
+      <p>By contrast, the HR &amp; Payroll side of this system <em>does</em> genuinely encrypt equivalent fields (employee PAN, bank details, salary figures) using a real encryption utility — so the capability exists in the codebase, it just hasn't been applied here yet. This is a targeted, closeable gap, not a fundamental limitation.</p>
+      <div class="callout note"><div class="callout-title">Be cautious of one existing automated test in this area</div><p>There's a test that appears to verify GSTIN is stored encrypted, but it does so by encrypting the value itself before inserting it directly into the database — bypassing the real customer-creation process entirely. It doesn't prove the actual create screen encrypts anything, and shouldn't be read as evidence that this gap is already covered.</p></div>
+      <div class="pager">
+        <a href="#customers/admin/access-roles"><div class="pg-label">Back</div><div class="pg-title">← Access &amp; Roles</div></a>
+        <a class="next" href="#customers/admin/limitations"><div class="pg-label">Next</div><div class="pg-title">Limitations to Know →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ ADMIN: LIMITATIONS ============ -->
+    <article class="page" id="page-customers-admin-limits" data-track="admin" data-title="Limitations to Know">
+      <span class="track-pill admin">Super Admin documentation</span>
+      <h1>Limitations to Know</h1>
+      <p>Full technical detail is on <a href="#customers/audit/known-issues">Known Issues</a>.</p>
+      <ol>
+        <li><strong>Customer GSTIN/PAN and supplier bank details aren't encrypted</strong>, despite documentation and UI text implying otherwise — a real compliance gap if that matters to you.</li>
+        <li><strong>Sales Manager is blocked from the customer edit screen</strong> by a route-permission mismatch.</li>
+        <li><strong>Supplier records have no address, credit limit, or GST-registration-status fields</strong> — several supplier-side capabilities that exist in the backend are unreachable through the UI.</li>
+        <li><strong>No supplier statement or outstanding-balance view exists anywhere in the app</strong>, despite a working calculation existing internally.</li>
+        <li><strong>Customers/suppliers can be deactivated with an outstanding balance</strong> — no warning or block today.</li>
+        <li><strong>Merging customers doesn't move their transaction history</strong> to the surviving record.</li>
+      </ol>
+      <div class="pager">
+        <a href="#customers/admin/data-privacy"><div class="pg-label">Back</div><div class="pg-title">← Data Privacy &amp; Security</div></a>
+        <span></span>
+      </div>
+    </article>
+
+    <!-- ============ DEV: ARCHITECTURE ============ -->
+    <article class="page" id="page-customers-dev-architecture" data-track="dev" data-title="Architecture">
+      <span class="track-pill dev">Developer documentation</span>
+      <h1>Architecture</h1>
+      <p>Frontend: <code>apps/web-frontend/src/pages/{customers,suppliers,crm}/</code>. Backend: both customer and supplier CRUD live in <code>apps/sales-service/src/api/{customer,supplier}.routes.ts</code> — supplier records are <strong>not</strong> owned by purchase-service, matching what the Purchase module's audit already found from the other direction.</p>
+
+      <h2 id="routes">Routes</h2>
+      <div class="tablewrap"><table>
+        <tr><th>Path</th><th>Component</th><th>Permission</th></tr>
+        <tr><td><code>customers</code></td><td>CustomersPage</td><td class="badge perm">CUSTOMER_VIEW</td></tr>
+        <tr><td><code>customers/new</code></td><td>CustomerFormPage</td><td class="badge perm">CUSTOMER_CREATE</td></tr>
+        <tr><td><code>customers/:id</code></td><td>CustomerViewPage</td><td class="badge perm">CUSTOMER_VIEW</td></tr>
+        <tr><td><code>customers/:id/edit</code></td><td>CustomerFormPage</td><td class="badge perm">CUSTOMER_UPDATE</td></tr>
+        <tr><td><code>suppliers</code></td><td>SuppliersPage</td><td class="badge perm">SUPPLIER_VIEW</td></tr>
+        <tr><td><code>suppliers/new</code></td><td>SupplierFormPage</td><td class="badge perm">SUPPLIER_CREATE</td></tr>
+        <tr><td><code>suppliers/:id/edit</code></td><td>SupplierFormPage</td><td class="badge perm">SUPPLIER_EDIT</td></tr>
+      </table></div>
+      <p class="src">apps/web-frontend/src/App.tsx:240-249</p>
+      <div class="callout bug"><div class="callout-title">customers/:id/edit permission mismatch</div><p><code>App.tsx:244</code> guards this route with <code>CUSTOMER_UPDATE</code>, but the backend <code>PUT /customers/:id</code> and the Edit-button visibility on <code>CustomersPage.tsx</code> both use <code>CUSTOMER_EDIT</code> — a different permission string that no default role except Owner/Admin lacks. The equivalent supplier route correctly uses <code>SUPPLIER_EDIT</code> consistently. <span class="src">App.tsx:244</span>, <span class="src">customer.routes.ts:335</span>, <span class="src">CustomersPage.tsx:40,111</span></p></div>
+
+      <p><strong>No <code>suppliers/:id</code> detail route exists at all</strong> — confirmed by exhaustive grep of <code>App.tsx</code>. Suppliers have no detail page, statement view, or activity timeline.</p>
+      <p>CRM-adjacent screens live at <code>crm/segments</code>, <code>crm/campaigns</code>, <code>crm/campaigns/new</code>, <code>crm/seasons</code> — gated on <code>CRM_SEGMENT_VIEW</code>/<code>CRM_VIEW</code>/<code>CRM_CAMPAIGN_CREATE</code>/<code>CRM_SEASON_VIEW</code> respectively.</p>
+
+      <h2 id="form-bug">Customer form: a Needs-Review data-flow concern</h2>
+      <div class="callout review"><div class="callout-title">Address fields may not actually reach the save payload</div><p><code>CustomerFormPage.tsx</code> registers billing-address inputs as <code>billingAddress.addressLine1</code> etc., then tries to read them back off the submitted data as flat, literally-dotted keys (<code>d['billingAddress.addressLine1']</code>). React Hook Form's default behavior treats a dot in a field name as a nested path, not a literal key — if that's what's happening here, the flat-key reads would always be <code>undefined</code>, meaning the address the user types would never be included in the create/edit request at all. This wasn't confirmed by running the app, so it's flagged as Needs Review rather than a certain bug — but it's worth a runtime check before assuming customer addresses save correctly. <span class="src">CustomerFormPage.tsx:87-104,151-161</span></p></div>
+      <div class="callout bug"><div class="callout-title">Confirmed separately: the address display bug on CustomerViewPage</div><p>Regardless of the above, <code>CustomerViewPage.tsx</code> reads <code>billing.addressLine1</code>/<code>billing.pinCode</code>, but the actual stored object uses <code>line1</code>/<code>pincode</code> — plain property-name mismatch, confirmed by comparing the two files directly. Only City and State (whose names happen to match) will ever render. <span class="src">CustomerViewPage.tsx:216-221</span>, <span class="src">customer.routes.ts:27-37</span>, <span class="src">master.ts:78-86</span></p></div>
+
+      <div class="pager">
+        <span></span>
+        <a class="next" href="#customers/dev/api-reference"><div class="pg-label">Next</div><div class="pg-title">API Reference →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ DEV: API ============ -->
+    <article class="page" id="page-customers-dev-api" data-track="dev" data-title="API Reference">
+      <span class="track-pill dev">Developer documentation</span>
+      <h1>API Reference</h1>
+      <p>All in <code>apps/sales-service/src/api/</code> unless noted.</p>
+
+      <h2 id="customer-endpoints">Customers</h2>
+      <div class="tablewrap"><table>
+        <tr><th>Method &amp; Path</th><th>Permission</th><th>Notes</th></tr>
+        <tr><td>GET <code>/customers</code>, <code>/customers/:id</code></td><td class="badge perm">CUSTOMER_VIEW</td><td>detail is Redis-cached</td></tr>
+        <tr><td>GET <code>/customers/:id/statement</code>, <code>/outstanding</code></td><td class="badge perm">CUSTOMER_VIEW</td><td><strong>stub</strong> — returns empty transactions / echoes opening balance; comment says "Phase 5 will supply real data"; not called from any frontend page anyway</td></tr>
+        <tr><td>GET <code>/customers/:id/activity</code></td><td class="badge perm">CUSTOMER_VIEW</td><td>real 360° timeline — the closest thing to a working statement today</td></tr>
+        <tr><td>POST <code>/customers</code></td><td class="badge perm">CUSTOMER_CREATE</td><td>duplicate-phone warning only, not a block; offline idempotency via operationId</td></tr>
+        <tr><td>PUT <code>/customers/:id</code></td><td class="badge perm">CUSTOMER_EDIT</td><td>optimistic locking; writes customers_history</td></tr>
+        <tr><td>PATCH <code>/customers/:id/opt-out</code></td><td class="badge perm">CUSTOMER_EDIT</td><td></td></tr>
+        <tr><td>DELETE <code>/customers/:id</code></td><td class="badge perm">CUSTOMER_DELETE</td><td>soft delete; no outstanding-balance check (TODO comment, unimplemented)</td></tr>
+        <tr><td>POST <code>/customers/merge</code></td><td class="badge perm">CUSTOMER_MERGE</td><td>soft-deletes source only; does not re-point transactions</td></tr>
+      </table></div>
+
+      <h2 id="supplier-endpoints">Suppliers</h2>
+      <div class="tablewrap"><table>
+        <tr><th>Method &amp; Path</th><th>Permission</th><th>Notes</th></tr>
+        <tr><td>GET <code>/suppliers</code>, <code>/suppliers/:id</code></td><td class="badge perm">SUPPLIER_VIEW</td><td></td></tr>
+        <tr><td>GET <code>/suppliers/:id/statement</code>, <code>/outstanding</code> (sales-service)</td><td class="badge perm">SUPPLIER_VIEW</td><td><strong>stub</strong>, same pattern as customer's</td></tr>
+        <tr><td>GET <code>/suppliers/:id/statement</code>, <code>/outstanding</code> (purchase-service)</td><td class="badge perm">SUPPLIER_STATEMENT_VIEW</td><td><strong>real implementation</strong> — joins supplier-balance projection with recent GRNs/payments — but never called from any frontend page</td></tr>
+        <tr><td>POST <code>/suppliers</code></td><td class="badge perm">SUPPLIER_CREATE</td><td>no duplicate-phone check, unlike customers</td></tr>
+        <tr><td>PUT <code>/suppliers/:id</code></td><td class="badge perm">SUPPLIER_EDIT</td><td>optimistic locking; writes suppliers_history</td></tr>
+        <tr><td>DELETE <code>/suppliers/:id</code></td><td class="badge perm">SUPPLIER_DELETE</td><td>soft delete; no outstanding-balance check and no TODO comment about one</td></tr>
+      </table></div>
+      <div class="callout review"><div class="callout-title">Three code paths for "statement/outstanding," zero of them reachable from the UI</div><p>Customers have one stub implementation, unused. Suppliers have a stub <em>and</em> a real, working implementation in a different service — also unused. No frontend page calls any of the three.</p></div>
+
+      <h2 id="crm-endpoints">CRM</h2>
+      <p>Segments (<code>/crm/segments...</code>, <code>CRM_SEGMENT_VIEW/CREATE</code>), Campaigns (<code>/crm/campaigns...</code>, <code>CRM_VIEW/CRM_CAMPAIGN_CREATE/SEND</code>), Seasons (<code>/crm/seasons...</code>, <code>CRM_SEASON_VIEW/MANAGE</code>) — all in <code>crm.routes.ts</code>.</p>
+
+      <div class="pager">
+        <a href="#customers/dev/architecture"><div class="pg-label">Back</div><div class="pg-title">← Architecture</div></a>
+        <a class="next" href="#customers/dev/data-model"><div class="pg-label">Next</div><div class="pg-title">Data Model →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ DEV: DATA MODEL ============ -->
+    <article class="page" id="page-customers-dev-data" data-track="dev" data-title="Data Model">
+      <span class="track-pill dev">Developer documentation</span>
+      <h1>Data Model</h1>
+      <p><code>packages/db-client/src/schema/master.ts</code> (customers/suppliers), <code>crm.ts</code> (interactions/segments/campaigns/seasons).</p>
+
+      <h2 id="customers">customers</h2>
+      <p>Address fields (jsonb <code>billingAddress</code>/<code>shippingAddress</code>): <code>line1</code>, <code>line2?</code>, <code>city</code>, <code>state</code>, <code>stateCode</code>, <code>pincode</code>, <code>country</code>. Financial: <code>creditLimit</code>, <code>creditDays</code>, <code>creditLimitEnabled</code> (default false), <code>openingBalance</code>. Loyalty: <code>loyaltyPoints</code>, <code>loyaltyCardNumber</code>. Health: <code>healthScore</code>, <code>healthSegment</code>. Opt-out: <code>optOutSms</code>/<code>optOutWhatsapp</code>/<code>optOutEmail</code>. Status enum includes <code>BLOCKED</code> plus <code>blockedReason</code>/<code>blockedAt</code>/<code>blockedBy</code> columns — no code path currently sets any of these; <code>BLOCKED</code> is unreachable in practice. <code>gstin</code>/<code>gstinHash</code>/<code>pan</code>/<code>panHash</code> — comment describes these as encrypted; the write path stores plaintext + a search hash only (see Data Privacy &amp; Security).</p>
+      <p class="src">packages/db-client/src/schema/master.ts:51-171</p>
+
+      <h2 id="suppliers">suppliers</h2>
+      <p><code>isRegistered</code> (default true) drives reverse-charge GST detection in Purchase's GRN flow, but has no Zod field, route body, or UI control anywhere — always true through normal use. <code>bankAccountNo</code>/<code>bankAccountNoHash</code>/<code>bankName</code>/<code>bankIfsc</code> — same "described as encrypted, actually plaintext + hash" pattern as customer tax IDs. <code>creditLimit</code>/<code>creditDays</code>/<code>creditLimitEnabled</code> exist on the table but have no corresponding form fields. Status enum: <code>ACTIVE|INACTIVE|BLACKLISTED</code>.</p>
+      <p class="src">packages/db-client/src/schema/master.ts:174-260</p>
+
+      <h2 id="crm-tables">CRM tables</h2>
+      <p><code>customer_segments</code> — <code>isSystem</code> flag plus a jsonb <code>filterDefinition</code> (rules + logic). No <code>customer_groups</code> table exists anywhere. <code>campaigns</code>/<code>campaign_recipients</code> — channel-based (SMS/WhatsApp/Email/In-App), full send-status tracking. <code>business_seasons</code> — includes <code>loyaltyMultiplier</code>, which is stored and displayed but never read by the loyalty-calculation code.</p>
+      <p class="src">packages/db-client/src/schema/crm.ts:16-143</p>
+
+      <div class="pager">
+        <a href="#customers/dev/api-reference"><div class="pg-label">Back</div><div class="pg-title">← API Reference</div></a>
+        <a class="next" href="#customers/audit/known-issues"><div class="pg-label">Next</div><div class="pg-title">Known Issues →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ AUDIT: KNOWN ISSUES ============ -->
+    <article class="page" id="page-customers-issues" data-track="dev" data-title="Known Issues & Needs Review">
+      <span class="track-pill dev">Cross-cutting · Health audit</span>
+      <h1>Known Issues &amp; Needs Review</h1>
+      <p>Ranked by real-world impact. Everything below is a confirmed code-reading finding unless marked Needs Review.</p>
+
+      <div class="callout bug"><div class="callout-title">Customer PII and supplier bank details are not actually encrypted</div><p>Both schemas and the supplier form's own copy describe GSTIN/PAN/bank-account fields as encrypted, but the write path (<code>customer.routes.ts:288</code>, comment: "simplified: store plaintext here") persists plaintext with only a SHA-256 hash for search. Real field encryption (<code>encryptField</code>/<code>decryptField</code> from <code>@erp/utils/server</code>) already exists and is used for HR/payroll data elsewhere in the codebase — it simply isn't applied here. A misleading integration test encrypts the value manually before a direct DB insert, bypassing the real endpoint, and shouldn't be read as coverage of this gap.</p></div>
+
+      <div class="callout bug"><div class="callout-title">customers/:id/edit route/permission mismatch</div><p><code>CUSTOMER_UPDATE</code> gates the route; <code>CUSTOMER_EDIT</code> gates the button and the actual save endpoint. Only Owner/Admin hold <code>CUSTOMER_UPDATE</code> by default — Sales Manager (who has <code>CUSTOMER_EDIT</code>) sees the button and is denied on click. Supplier's equivalent route has no such mismatch.</p></div>
+
+      <div class="callout review"><div class="callout-title">Customer address may never reach the save payload (Needs Review — not runtime-confirmed)</div><p><code>CustomerFormPage.tsx</code> registers address fields with dotted names and reads them back as literal flat keys — a mismatch with React Hook Form's default nested-path behavior for dotted field names. If confirmed at runtime, this would mean a customer's typed address is silently dropped on every create/edit. Confirmed separately and independently: <code>CustomerViewPage.tsx</code> reads the wrong property names (<code>addressLine1</code>/<code>pinCode</code> vs the actual <code>line1</code>/<code>pincode</code>) when displaying a saved address — that part is a certain bug regardless of the form question.</p></div>
+
+      <div class="callout review"><div class="callout-title">Supplier credit limit and RCM registration status are enforced but unreachable via UI</div><p><code>PurchaseOrderService</code> checks <code>suppliers.creditLimit</code>/<code>creditLimitEnabled</code>; <code>GRNService</code> checks <code>suppliers.isRegistered</code> for reverse-charge tax. Neither field has a form control or a Zod schema field anywhere in the supplier create/edit path — both are permanently stuck at their DB defaults (credit limit disabled, registered=true) for any supplier created through the standard UI.</p></div>
+
+      <div class="callout note"><div class="callout-title">Loyalty multiplier per season has no effect</div><p><code>business_seasons.loyaltyMultiplier</code> is fully editable and displayed in the Seasons UI but is never read by <code>LoyaltyService</code>'s earn/redeem logic.</p></div>
+
+      <div class="callout note"><div class="callout-title">No outstanding-balance check on customer/supplier deactivation</div><p>Customer delete has an explicit, unimplemented TODO acknowledging this gap. Supplier delete has the identical gap with no acknowledging comment at all.</p></div>
+
+      <div class="callout note"><div class="callout-title">Customer merge doesn't re-point transactions</div><p>Only the source record is archived; its own code comment describes re-pointing transactions as a "Phase 5+" item, not yet done.</p></div>
+
+      <div class="callout note"><div class="callout-title">Three redundant, all-unused statement/outstanding implementations</div><p>One stub for customers, one stub plus one real implementation for suppliers (in a different service) — none called from any frontend page.</p></div>
+
+      <div class="callout note"><div class="callout-title">Dead permission constants</div><p><code>CUSTOMER_BLOCK</code>, dedicated credit-limit and statement-view permissions, <code>SUPPLIER_UPDATE</code>, <code>SUPPLIER_BANK_VIEW</code>, <code>SUPPLIER_IMPORT/EXPORT</code> are all defined but never checked by any route or guard. <code>customers.status = 'BLOCKED'</code> is schema-valid but no code path ever sets it.</p></div>
+
+      <div class="callout note"><div class="callout-title">Test coverage gap</div><p>No supplier integration test exists at all. No form-submission test exists for either <code>CustomerFormPage</code> or <code>SupplierFormPage</code> — meaning the address-field concern above is untested either way.</p></div>
+
+      <div class="callout ok"><div class="callout-title">Confirmed fixed since an earlier internal note: opt-out enforcement</div><p>An older note claimed opt-out flags weren't enforced on campaign sends or birthday greetings. Current code enforces both correctly — <code>CampaignService</code> filters recipients by the matching opt-out column before every send, and the birthday-greeting job checks per-channel opt-out before firing. If you're consulting older internal audit notes, treat this specific finding as resolved.</p></div>
+
+      <div class="callout ok"><div class="callout-title">Confirmed fixed since an earlier internal note: user.branchIds at runtime</div><p>An older note claimed a user's branch scope was always empty at runtime despite being present in the JWT. Current login code populates it correctly from a dedicated endpoint, and both the customer and supplier forms read and auto-apply it correctly for single-branch users.</p></div>
+
+      <div class="pager">
+        <a href="#customers/dev/data-model"><div class="pg-label">Back</div><div class="pg-title">← Data Model</div></a>
+        <span></span>
+      </div>
+    </article>
+
+  </main>
+
+  <aside class="toc">
+    <div class="toc-title">On this page</div>
+    <nav id="tocNav"></nav>
+  </aside>
+</div>
+
+<script src="/shared/docs-shell.js"></script>
+</body>
+</html>

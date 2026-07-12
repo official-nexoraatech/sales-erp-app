@@ -1,8 +1,16 @@
 /* global console */
 import { eq } from 'drizzle-orm';
+import type Redis from 'ioredis';
 import { tenants, type ErpDatabase } from '@erp/db';
 import { SecurityError, TenantSuspendedError, TenantClosedError } from '@erp/types';
 import { erpTenantBlockedRequestsTotal } from '@erp/logger';
+
+// Pub/sub channel for cross-process cache invalidation — mirrors the proven
+// erp:feature-flags:invalidate pattern (see feature-flags.ts). Without this, a
+// suspend/close in tenant-service only clears that one process's in-memory
+// tenantStatusCache; every other service process keeps serving a stale ACTIVE
+// status for up to CACHE_TTL_MS.
+const TENANT_STATUS_INVALIDATE_CHANNEL = 'erp:tenant-status:invalidate';
 
 // Tenant-lifecycle enforcement (PG-012). Every service's authenticate() calls
 // assertTenantActive() right after a token verifies successfully, so a
@@ -29,6 +37,30 @@ export function initTenantStatusEnforcement(db: ErpDatabase): void {
 
 export function invalidateTenantStatusCache(tenantId: number): void {
   tenantStatusCache.delete(tenantId);
+}
+
+// Call from the tenant-service suspend/close/activate handlers, right alongside the
+// local invalidateTenantStatusCache() call, so every OTHER running service process
+// drops its stale cache entry too instead of waiting out CACHE_TTL_MS.
+export async function publishTenantStatusInvalidation(
+  redis: Redis,
+  tenantId: number
+): Promise<void> {
+  await redis.publish(TENANT_STATUS_INVALIDATE_CHANNEL, String(tenantId));
+}
+
+// Call once per service process at bootstrap (mirrors PlatformFeatureFlags.subscribeToInvalidations).
+// Duplicates the connection because ioredis requires a dedicated connection once it
+// enters SUBSCRIBE mode — it can no longer issue normal commands on that connection.
+export function subscribeToTenantStatusInvalidations(redis: Redis): void {
+  const subscriber = redis.duplicate();
+  void subscriber.subscribe(TENANT_STATUS_INVALIDATE_CHANNEL);
+  subscriber.on('message', (_channel, message: string) => {
+    const tenantId = Number(message);
+    if (Number.isFinite(tenantId)) {
+      invalidateTenantStatusCache(tenantId);
+    }
+  });
 }
 
 // Every real service calls initTenantStatusEnforcement() once at bootstrap, before
@@ -62,7 +94,10 @@ export async function assertTenantActive(tenantId: number, permissions: string[]
     return;
   }
 
-  const [tenant] = await dbRef.select({ status: tenants.status }).from(tenants).where(eq(tenants.id, tenantId));
+  const [tenant] = await dbRef
+    .select({ status: tenants.status })
+    .from(tenants)
+    .where(eq(tenants.id, tenantId));
   if (!tenant) {
     throw new SecurityError(`Tenant ${tenantId} not found`);
   }

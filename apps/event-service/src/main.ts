@@ -1,12 +1,26 @@
 /* global process */
-import Fastify, { type FastifyError } from 'fastify';
+import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 import { Kafka } from 'kafkajs';
-import { PlatformContextFactory, HELMET_OPTIONS, PERMISSIONS_POLICY, registerHealthRoute, tenantOrIpKeyGenerator, checkKafka, initializeTelemetry, initTenantStatusEnforcement } from '@erp/sdk';
-import { createLogger, createMetricsHandler, createHttpMetricsHook, createCorrelationIdHook } from '@erp/logger';
-import { ERPError } from '@erp/types';
+import {
+  PlatformContextFactory,
+  HELMET_OPTIONS,
+  PERMISSIONS_POLICY,
+  registerHealthRoute,
+  tenantOrIpKeyGenerator,
+  checkKafka,
+  initializeTelemetry,
+  initTenantStatusEnforcement,
+  registerErrorHandler,
+} from '@erp/sdk';
+import {
+  createLogger,
+  createMetricsHandler,
+  createHttpMetricsHook,
+  createCorrelationIdHook,
+} from '@erp/logger';
 import { createDatabaseClient } from '@erp/db';
 import { loadConfigWithSecrets } from '@erp/config';
 import { eventStoreRoutes } from './api/event-store.routes.js';
@@ -24,7 +38,11 @@ initializeTelemetry({ serviceName: 'event-service' });
 async function bootstrap(): Promise<void> {
   const port = parseInt(process.env['EVENT_SERVICE_PORT'] ?? '3023', 10);
   const lokiUrl = process.env['LOKI_URL'];
-  const logger = createLogger({ serviceName: 'event-service', level: 'info', ...(lokiUrl ? { lokiUrl } : {}) });
+  const logger = createLogger({
+    serviceName: 'event-service',
+    level: 'info',
+    ...(lokiUrl ? { lokiUrl } : {}),
+  });
 
   const config = await loadConfigWithSecrets('event-service');
   const databaseUrl = config.databaseUrl;
@@ -39,6 +57,7 @@ async function bootstrap(): Promise<void> {
   });
   await ctxFactory.connect();
   ctxFactory.subscribeFeatureFlagInvalidations();
+  ctxFactory.subscribeTenantStatusInvalidations();
   initTenantStatusEnforcement(ctxFactory.rawDb);
 
   // Dedicated pool for the outbox relay worker — isolated from the HTTP handler
@@ -72,7 +91,10 @@ async function bootstrap(): Promise<void> {
     void reply.header('Permissions-Policy', PERMISSIONS_POLICY);
   });
   await fastify.register(cors, {
-    origin: process.env['ALLOWED_ORIGINS']?.split(',') ?? ['http://localhost:5173', 'http://localhost:5174'],
+    origin: process.env['ALLOWED_ORIGINS']?.split(',') ?? [
+      'http://localhost:5173',
+      'http://localhost:5174',
+    ],
     credentials: true,
   });
   await fastify.register(rateLimit, {
@@ -109,15 +131,7 @@ async function bootstrap(): Promise<void> {
     { prefix: '/api/v2' }
   );
 
-  fastify.setErrorHandler<FastifyError>((error, request, reply) => {
-    if (error instanceof ERPError) {
-      return reply.code(error.statusCode).send({
-        error: { code: error.code, message: error.message, details: error.details },
-      });
-    }
-    logger.error({ err: error.message, url: request.url, correlationId: (request as { correlationId?: string }).correlationId }, 'Unhandled error in event-service');
-    return reply.code(500).send({ error: { code: 'INTERNAL_ERROR', message: 'An unexpected error occurred' } });
-  });
+  registerErrorHandler(fastify, 'event-service', logger);
 
   const address = await fastify.listen({ port, host: '0.0.0.0' });
   logger.info({ address }, 'Event service started');
@@ -127,18 +141,22 @@ async function bootstrap(): Promise<void> {
 
   const gracefulShutdown = (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received — stopping OutboxRelayWorker');
-    worker.stop()
+    worker
+      .stop()
       .then(() => fastify.close())
       .then(() => ctxFactory.close())
       .then(() => process.exit(0))
       .catch((err: unknown) => {
-        logger.error({ err: err instanceof Error ? err.message : String(err) }, 'Error during graceful shutdown');
+        logger.error(
+          { err: err instanceof Error ? err.message : String(err) },
+          'Error during graceful shutdown'
+        );
         process.exit(1);
       });
   };
 
   process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
-  process.on('SIGINT',  () => gracefulShutdown('SIGINT'));
+  process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 }
 
 bootstrap().catch((error: unknown) => {

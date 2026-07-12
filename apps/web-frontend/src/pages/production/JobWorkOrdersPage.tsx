@@ -34,7 +34,14 @@ const STATUS_VARIANT: Record<string, 'default' | 'info' | 'warning' | 'success' 
   CANCELLED: 'danger',
 };
 
-const STATUSES = ['DRAFT', 'MATERIAL_ISSUED', 'IN_PROGRESS', 'QUALITY_CHECK', 'COMPLETED', 'CANCELLED'];
+const STATUSES = [
+  'DRAFT',
+  'MATERIAL_ISSUED',
+  'IN_PROGRESS',
+  'QUALITY_CHECK',
+  'COMPLETED',
+  'CANCELLED',
+];
 
 export default function JobWorkOrdersPage() {
   const navigate = useNavigate();
@@ -44,7 +51,10 @@ export default function JobWorkOrdersPage() {
 
   const { data, isLoading } = useQuery({
     queryKey: ['job-work-orders', statusFilter],
-    queryFn: () => statusFilter ? productionApi.listJobWorkOrders({ status: statusFilter }) : productionApi.listJobWorkOrders(),
+    queryFn: () =>
+      statusFilter
+        ? productionApi.listJobWorkOrders({ status: statusFilter })
+        : productionApi.listJobWorkOrders(),
   });
   const orders: JobWorkOrder[] = (data as JobWorkOrder[]) ?? [];
 
@@ -52,7 +62,7 @@ export default function JobWorkOrdersPage() {
     queryKey: ['job-work-dashboard'],
     queryFn: () => productionApi.getJobWorkDashboard(),
   });
-  const dash = (dashData as Record<string, number> | undefined);
+  const dash = dashData as Record<string, number> | undefined;
 
   const cancelMutation = useMutation({
     mutationFn: ({ id, reason }: { id: number; reason: string }) =>
@@ -73,13 +83,15 @@ export default function JobWorkOrdersPage() {
         subtitle="Manage outsourced stitching and processing orders."
         actions={
           hasPermission(PERMISSIONS.JOB_WORK_CREATE) ? (
-            <Button onClick={() => navigate('/production/job-work/new')}>+ New Job Work Order</Button>
+            <Button onClick={() => navigate('/production/job-work/new')}>
+              + New Job Work Order
+            </Button>
           ) : undefined
         }
       />
 
       {dash && (
-        <div className="grid grid-cols-3 gap-4 mb-6">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
           <div className="bg-surface-card rounded-xl border border-default p-4">
             <p className="text-xs text-secondary uppercase tracking-wide mb-1">Pending</p>
             <p className="text-2xl font-bold text-primary">{dash.pending ?? 0}</p>
@@ -96,9 +108,17 @@ export default function JobWorkOrdersPage() {
       )}
 
       <div className="mb-4">
-        <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="max-w-xs">
+        <Select
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value)}
+          className="max-w-xs"
+        >
           <option value="">All Statuses</option>
-          {STATUSES.map((s) => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}
+          {STATUSES.map((s) => (
+            <option key={s} value={s}>
+              {s.replace(/_/g, ' ')}
+            </option>
+          ))}
         </Select>
       </div>
 
@@ -110,58 +130,67 @@ export default function JobWorkOrdersPage() {
           title="No job work orders found"
           description="Outsourced stitching and processing orders will appear here."
           {...(hasPermission(PERMISSIONS.JOB_WORK_CREATE)
-            ? { action: { label: '+ New Job Work Order', onClick: () => navigate('/production/job-work/new') } }
+            ? {
+                action: {
+                  label: '+ New Job Work Order',
+                  onClick: () => navigate('/production/job-work/new'),
+                },
+              }
             : {})}
         />
       ) : (
-        <table className="w-full text-sm bg-surface-card rounded-xl border border-default overflow-hidden">
-          <thead className="bg-surface-subtle">
-            <tr className="text-left text-xs uppercase text-secondary">
-              <th className="px-4 py-3">Order #</th>
-              <th className="px-4 py-3">Supplier</th>
-              <th className="px-4 py-3">Item</th>
-              <th className="px-4 py-3 text-right">Ordered Qty</th>
-              <th className="px-4 py-3 text-right">Received Qty</th>
-              <th className="px-4 py-3">Expected Date</th>
-              <th className="px-4 py-3">Status</th>
-              <th className="px-4 py-3"></th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-default">
-            {orders.map((o) => (
-              <tr
-                key={o.id}
-                className="hover:bg-surface-subtle cursor-pointer"
-                onClick={() => navigate(`/production/job-work/${o.id}`)}
-              >
-                <td className="px-4 py-3 font-mono text-xs">{o.orderNumber}</td>
-                <td className="px-4 py-3">{o.supplierName ?? '—'}</td>
-                <td className="px-4 py-3">{o.outputItemName ?? '—'}</td>
-                <td className="px-4 py-3 text-right font-mono">{o.orderedQty}</td>
-                <td className="px-4 py-3 text-right font-mono">{o.receivedQty}</td>
-                <td className="px-4 py-3 text-xs">{formatDate(o.expectedDate)}</td>
-                <td className="px-4 py-3">
-                  <Badge variant={STATUS_VARIANT[o.status] ?? 'default'}>{o.status.replace(/_/g, ' ')}</Badge>
-                </td>
-                <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
-                  {hasPermission(PERMISSIONS.JOB_WORK_CANCEL) &&
-                    !['COMPLETED', 'CANCELLED'].includes(o.status) && (
-                      <Button
-                        size="sm"
-                        variant="danger-outline"
-                        onClick={() => {
-                          const reason = prompt('Cancellation reason:');
-                          if (reason) cancelMutation.mutate({ id: o.id, reason });
-                        }}
-                      >
-                        Cancel
-                      </Button>
-                    )}
-                </td>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm bg-surface-card rounded-xl border border-default overflow-hidden">
+            <thead className="bg-surface-subtle">
+              <tr className="text-left text-xs uppercase text-secondary">
+                <th className="px-4 py-3">Order #</th>
+                <th className="px-4 py-3">Supplier</th>
+                <th className="px-4 py-3">Item</th>
+                <th className="px-4 py-3 text-right">Ordered Qty</th>
+                <th className="px-4 py-3 text-right">Received Qty</th>
+                <th className="px-4 py-3">Expected Date</th>
+                <th className="px-4 py-3">Status</th>
+                <th className="px-4 py-3"></th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody className="divide-y divide-default">
+              {orders.map((o) => (
+                <tr
+                  key={o.id}
+                  className="hover:bg-surface-subtle cursor-pointer"
+                  onClick={() => navigate(`/production/job-work/${o.id}`)}
+                >
+                  <td className="px-4 py-3 font-mono text-xs">{o.orderNumber}</td>
+                  <td className="px-4 py-3">{o.supplierName ?? '—'}</td>
+                  <td className="px-4 py-3">{o.outputItemName ?? '—'}</td>
+                  <td className="px-4 py-3 text-right font-mono">{o.orderedQty}</td>
+                  <td className="px-4 py-3 text-right font-mono">{o.receivedQty}</td>
+                  <td className="px-4 py-3 text-xs">{formatDate(o.expectedDate)}</td>
+                  <td className="px-4 py-3">
+                    <Badge variant={STATUS_VARIANT[o.status] ?? 'default'}>
+                      {o.status.replace(/_/g, ' ')}
+                    </Badge>
+                  </td>
+                  <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
+                    {hasPermission(PERMISSIONS.JOB_WORK_CANCEL) &&
+                      !['COMPLETED', 'CANCELLED'].includes(o.status) && (
+                        <Button
+                          size="sm"
+                          variant="danger-outline"
+                          onClick={() => {
+                            const reason = prompt('Cancellation reason:');
+                            if (reason) cancelMutation.mutate({ id: o.id, reason });
+                          }}
+                        >
+                          Cancel
+                        </Button>
+                      )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );

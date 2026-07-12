@@ -1,4 +1,4 @@
-import { decryptField } from '@erp/utils';
+import { decryptField } from '@erp/utils/server';
 import { requireEnv } from '@erp/config';
 import type { TenantScopedDatabase } from '@erp/sdk';
 import { payrollRuns, payrollSlips, employees, organizationSettings } from '@erp/db';
@@ -31,7 +31,9 @@ const STANDARD_DEDUCTION = 75000;
 function parseFinancialYear(financialYear: string): { startYear: number; endYear: number } {
   const match = /^(\d{4})-(\d{2})$/.exec(financialYear);
   if (!match?.[1] || !match[2]) {
-    throw new ValidationError(`Invalid financial year format: ${financialYear}. Expected YYYY-YY, e.g. 2025-26`);
+    throw new ValidationError(
+      `Invalid financial year format: ${financialYear}. Expected YYYY-YY, e.g. 2025-26`
+    );
   }
   const startYear = parseInt(match[1], 10);
   const endYear = startYear + 1;
@@ -55,7 +57,11 @@ export class Form16Service {
     if (!emp) throw new NotFoundError('Employee', employeeId);
 
     const [org] = await db.raw
-      .select({ orgName: organizationSettings.orgName, legalName: organizationSettings.legalName, tan: organizationSettings.tan })
+      .select({
+        orgName: organizationSettings.orgName,
+        legalName: organizationSettings.legalName,
+        tan: organizationSettings.tan,
+      })
       .from(organizationSettings)
       .where(eq(organizationSettings.tenantId, tenantId));
 
@@ -70,14 +76,16 @@ export class Form16Service {
       })
       .from(payrollSlips)
       .innerJoin(payrollRuns, eq(payrollRuns.id, payrollSlips.payrollRunId))
-      .where(and(
-        eq(payrollSlips.tenantId, tenantId),
-        eq(payrollSlips.employeeId, employeeId),
-        or(
-          and(eq(payrollRuns.periodYear, startYear), gte(payrollRuns.periodMonth, 4)),
-          and(eq(payrollRuns.periodYear, endYear), lte(payrollRuns.periodMonth, 3)),
-        ),
-      ));
+      .where(
+        and(
+          eq(payrollSlips.tenantId, tenantId),
+          eq(payrollSlips.employeeId, employeeId),
+          or(
+            and(eq(payrollRuns.periodYear, startYear), gte(payrollRuns.periodMonth, 4)),
+            and(eq(payrollRuns.periodYear, endYear), lte(payrollRuns.periodMonth, 3))
+          )
+        )
+      );
 
     let grossSalary = 0;
     let totalTDSDeducted = 0;
@@ -98,7 +106,7 @@ export class Form16Service {
       });
     }
 
-    monthlyBreakdown.sort((a, b) => (a.periodYear - b.periodYear) || (a.periodMonth - b.periodMonth));
+    monthlyBreakdown.sort((a, b) => a.periodYear - b.periodYear || a.periodMonth - b.periodMonth);
 
     const taxableIncome = Math.max(0, grossSalary - STANDARD_DEDUCTION);
 

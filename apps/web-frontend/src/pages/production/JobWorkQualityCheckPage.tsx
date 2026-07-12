@@ -34,9 +34,11 @@ export default function JobWorkQualityCheckPage() {
     queryFn: () => productionApi.getJobWorkOrder(Number(id)),
     enabled: !!id,
   });
-  const order = (data as OrderDetail | undefined);
+  const order = data as OrderDetail | undefined;
 
-  const [entries, setEntries] = useState<QCEntry[]>([{ pieceNumber: 1, result: 'PASS', defectNotes: '' }]);
+  const [entries, setEntries] = useState<QCEntry[]>([
+    { pieceNumber: 1, result: 'PASS', defectNotes: '' },
+  ]);
   const [receivedQty, setReceivedQty] = useState('');
   const [rejectedQty, setRejectedQty] = useState('0');
   const [scrapQty, setScrapQty] = useState('0');
@@ -50,7 +52,9 @@ export default function JobWorkQualityCheckPage() {
 
   function updateEntry(idx: number, field: keyof QCEntry, value: string) {
     setEntries((prev) =>
-      prev.map((e, i) => (i === idx ? { ...e, [field]: field === 'pieceNumber' ? parseInt(value, 10) : value } : e))
+      prev.map((e, i) =>
+        i === idx ? { ...e, [field]: field === 'pieceNumber' ? parseInt(value, 10) : value } : e
+      )
     );
   }
 
@@ -92,7 +96,7 @@ export default function JobWorkQualityCheckPage() {
         backTo="/production/job-work"
       />
 
-      <div className="bg-surface-card rounded-xl border border-default p-4 mb-6 flex items-center gap-4">
+      <div className="bg-surface-card rounded-xl border border-default p-4 mb-6 flex flex-wrap items-center gap-4">
         <div>
           <p className="text-xs text-secondary">Status</p>
           <Badge variant="warning">{order.status.replace(/_/g, ' ')}</Badge>
@@ -106,11 +110,13 @@ export default function JobWorkQualityCheckPage() {
       <div className="bg-surface-card rounded-xl border border-default p-6 space-y-4 mb-6">
         <div className="flex items-center justify-between">
           <h3 className="font-semibold text-primary">Piece-by-Piece Inspection</h3>
-          <Button type="button" variant="outline" size="sm" onClick={addEntry}>+ Add Piece</Button>
+          <Button type="button" variant="outline" size="sm" onClick={addEntry}>
+            + Add Piece
+          </Button>
         </div>
         <div className="space-y-2">
           {entries.map((entry, idx) => (
-            <div key={idx} className="grid grid-cols-4 gap-3 items-end">
+            <div key={idx} className="grid grid-cols-1 sm:grid-cols-4 gap-3 items-end">
               <div>
                 <label className="block text-xs text-secondary mb-1">Piece #</label>
                 <Input
@@ -154,12 +160,34 @@ export default function JobWorkQualityCheckPage() {
 
       <div className="bg-surface-card rounded-xl border border-default p-6 space-y-4">
         <h3 className="font-semibold text-primary">Complete Order</h3>
-        <div className="grid grid-cols-3 gap-4">
-          <Input label="Received Qty" required type="number" min="0" step="0.01" value={receivedQty} onChange={(e) => setReceivedQty(e.target.value)} />
-          <Input label="Rejected Qty" type="number" min="0" step="0.01" value={rejectedQty} onChange={(e) => setRejectedQty(e.target.value)} />
-          <Input label="Scrap Qty" type="number" min="0" step="0.01" value={scrapQty} onChange={(e) => setScrapQty(e.target.value)} />
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <Input
+            label="Received Qty"
+            required
+            type="number"
+            min="0"
+            step="0.01"
+            value={receivedQty}
+            onChange={(e) => setReceivedQty(e.target.value)}
+          />
+          <Input
+            label="Rejected Qty"
+            type="number"
+            min="0"
+            step="0.01"
+            value={rejectedQty}
+            onChange={(e) => setRejectedQty(e.target.value)}
+          />
+          <Input
+            label="Scrap Qty"
+            type="number"
+            min="0"
+            step="0.01"
+            value={scrapQty}
+            onChange={(e) => setScrapQty(e.target.value)}
+          />
         </div>
-        <div className="flex gap-3">
+        <div className="flex flex-wrap gap-3">
           <Button
             type="button"
             disabled={!receivedQty || completeMutation.isPending}
@@ -167,7 +195,9 @@ export default function JobWorkQualityCheckPage() {
           >
             {completeMutation.isPending ? 'Completing…' : 'Mark as Completed'}
           </Button>
-          <Button type="button" variant="outline" onClick={() => navigate('/production/job-work')}>Back</Button>
+          <Button type="button" variant="outline" onClick={() => navigate('/production/job-work')}>
+            Back
+          </Button>
         </div>
       </div>
     </div>

@@ -10,16 +10,25 @@
 import http from 'k6/http';
 import { check, sleep } from 'k6';
 import { Trend, Rate } from 'k6/metrics';
-import { BASE_SALES, BASE_INVENTORY, authHeaders, buildInvoicePayload } from './k6-helpers.js';
+import {
+  BASE_AUTH,
+  BASE_SALES,
+  BASE_INVENTORY,
+  TEST_CREDENTIALS,
+  authHeaders,
+  buildInvoicePayload,
+  assertSafeEnvironment,
+  reportSamplesToEventService,
+} from './k6-helpers.js';
 
 const invoiceCreateDuration = new Trend('peak_invoice_create_duration', true);
 const errorRate = new Rate('peak_errors');
 
 export const options = {
   stages: [
-    { duration: '5m', target: 200 },  // ramp up to peak
+    { duration: '5m', target: 200 }, // ramp up to peak
     { duration: '110m', target: 200 }, // hold at peak (Diwali rush)
-    { duration: '5m', target: 0 },    // ramp down
+    { duration: '5m', target: 0 }, // ramp down
   ],
   thresholds: {
     http_req_duration: ['p(95)<2000'],
@@ -29,11 +38,10 @@ export const options = {
 };
 
 export function setup() {
-  const res = http.post(
-    'http://localhost:3010/auth/login',
-    JSON.stringify({ email: 'admin@testco.com', password: 'TestAdmin@2026!', tenantId: 1 }),
-    { headers: { 'Content-Type': 'application/json' } }
-  );
+  assertSafeEnvironment();
+  const res = http.post(`${BASE_AUTH}/auth/login`, JSON.stringify(TEST_CREDENTIALS), {
+    headers: { 'Content-Type': 'application/json' },
+  });
   return { token: JSON.parse(res.body)?.data?.accessToken ?? '' };
 }
 
@@ -58,6 +66,13 @@ export default function ({ token }) {
 }
 
 export function handleSummary(data) {
+  const p95 = data.metrics?.peak_invoice_create_duration?.values?.['p(95)'] ?? 0;
+  if (p95 > 0) {
+    reportSamplesToEventService([
+      { endpoint: '/api/v2/invoices', method: 'POST', durationMs: Math.round(p95) },
+    ]);
+  }
+
   return {
     'load-test-results/peak-load-summary.json': JSON.stringify(data, null, 2),
   };

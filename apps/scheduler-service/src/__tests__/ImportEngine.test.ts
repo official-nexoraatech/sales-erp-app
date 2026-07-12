@@ -1,9 +1,12 @@
 import { describe, it, expect, vi } from 'vitest';
 
 vi.mock('@erp/db', () => {
-  const mockTable = new Proxy({}, {
-    get: (_t, prop) => ({ columnName: String(prop) }),
-  });
+  const mockTable = new Proxy(
+    {},
+    {
+      get: (_t, prop) => ({ columnName: String(prop) }),
+    }
+  );
   return {
     importJobs: mockTable,
     exportJobs: mockTable,
@@ -24,7 +27,10 @@ vi.mock('drizzle-orm', () => ({
   eq: vi.fn((_a: unknown, _b: unknown) => '__eq__'),
   and: vi.fn((..._args: unknown[]) => '__and__'),
   desc: vi.fn((_a: unknown) => '__desc__'),
-  sql: Object.assign(vi.fn((strings: TemplateStringsArray) => `__sql__${strings.join('')}`), { raw: vi.fn() }),
+  sql: Object.assign(
+    vi.fn((strings: TemplateStringsArray) => `__sql__${strings.join('')}`),
+    { raw: vi.fn() }
+  ),
 }));
 
 const MOCK_ENC_KEY = 'a'.repeat(64);
@@ -36,7 +42,7 @@ vi.mock('@erp/config', () => ({
   },
 }));
 
-vi.mock('@erp/utils', () => ({
+vi.mock('@erp/utils/server', () => ({
   encryptField: (value: string) => `enc:${value}`,
 }));
 
@@ -92,14 +98,18 @@ describe('ImportEngine.getTemplate', () => {
 describe('ImportEngine.createJob', () => {
   it('throws when CSV has no data rows', async () => {
     const engine = new ImportEngine(makeDb() as never);
-    await expect(engine.createJob(1, 1, 'customer', 'name,phone\n', 'test.csv')).rejects.toThrow('no data rows');
+    await expect(engine.createJob(1, 1, 'customer', 'name,phone\n', 'test.csv')).rejects.toThrow(
+      'no data rows'
+    );
   });
 
   it('throws when CSV exceeds 10000 rows', async () => {
     const rows = Array.from({ length: 10_001 }, (_, i) => `Customer${i},9999999999`).join('\n');
     const csv = `name,phone\n${rows}`;
     const engine = new ImportEngine(makeDb() as never);
-    await expect(engine.createJob(1, 1, 'customer', csv, 'big.csv')).rejects.toThrow('Max 10,000 rows');
+    await expect(engine.createJob(1, 1, 'customer', csv, 'big.csv')).rejects.toThrow(
+      'Max 10,000 rows'
+    );
   });
 
   it('creates job and returns a ULID string', async () => {
@@ -116,10 +126,11 @@ describe('ImportEngine.createJob', () => {
 describe('ImportEngine.validate', () => {
   it('validates valid customer rows without errors', async () => {
     const job = {
-      id: 'job-1', tenantId: 1, entityType: 'customer', status: 'MAPPED',
-      rollbackData: [
-        { name: 'Raj Textiles', phone: '9876543210', creditLimit: '10000' },
-      ],
+      id: 'job-1',
+      tenantId: 1,
+      entityType: 'customer',
+      status: 'MAPPED',
+      rollbackData: [{ name: 'Raj Textiles', phone: '9876543210', creditLimit: '10000' }],
       columnMapping: [
         { sourceColumn: 'name', targetField: 'name' },
         { sourceColumn: 'phone', targetField: 'phone' },
@@ -134,10 +145,13 @@ describe('ImportEngine.validate', () => {
 
   it('catches invalid phone format and reports error', async () => {
     const job = {
-      id: 'job-1', tenantId: 1, entityType: 'customer', status: 'MAPPED',
+      id: 'job-1',
+      tenantId: 1,
+      entityType: 'customer',
+      status: 'MAPPED',
       rollbackData: [
-        { name: 'Raj Textiles', phone: '9876543210' },     // valid
-        { name: 'Bad Customer', phone: 'not-a-phone' },    // invalid phone
+        { name: 'Raj Textiles', phone: '9876543210' }, // valid
+        { name: 'Bad Customer', phone: 'not-a-phone' }, // invalid phone
       ],
       columnMapping: [
         { sourceColumn: 'name', targetField: 'name' },
@@ -155,15 +169,29 @@ describe('ImportEngine.validate', () => {
 
   it('validates item rows with proper types', async () => {
     const job = {
-      id: 'job-2', tenantId: 1, entityType: 'item', status: 'MAPPED',
+      id: 'job-2',
+      tenantId: 1,
+      entityType: 'item',
+      status: 'MAPPED',
       rollbackData: [
-        { name: 'Blue Fabric', sku: 'FAB-001', salePrice: '250', purchasePrice: '200', taxRate: '5', unit: 'Meter' },
+        {
+          name: 'Blue Fabric',
+          sku: 'FAB-001',
+          salePrice: '250',
+          purchasePrice: '200',
+          taxRate: '5',
+          unit: 'Meter',
+        },
       ],
       columnMapping: [
         { sourceColumn: 'name', targetField: 'name' },
         { sourceColumn: 'sku', targetField: 'sku' },
         { sourceColumn: 'salePrice', targetField: 'salePrice', transform: 'NUMBER' as const },
-        { sourceColumn: 'purchasePrice', targetField: 'purchasePrice', transform: 'NUMBER' as const },
+        {
+          sourceColumn: 'purchasePrice',
+          targetField: 'purchasePrice',
+          transform: 'NUMBER' as const,
+        },
         { sourceColumn: 'taxRate', targetField: 'taxRate', transform: 'NUMBER' as const },
         { sourceColumn: 'unit', targetField: 'unit' },
       ],
@@ -207,13 +235,23 @@ function makeExecuteDb(job: unknown, claimResults: unknown[][]) {
       }),
     }),
     insert: vi.fn().mockReturnValue({
-      values: vi.fn().mockReturnValue({ onConflictDoNothing: vi.fn().mockResolvedValue(undefined) }),
+      values: vi
+        .fn()
+        .mockReturnValue({ onConflictDoNothing: vi.fn().mockResolvedValue(undefined) }),
     }),
   };
 }
 
 describe('ImportEngine.execute — atomic status transition (M9)', () => {
-  const baseJob = { id: 5, tenantId: 1, entityType: 'customer', status: 'VALIDATED', rollbackData: [], columnMapping: [], createdBy: 1 };
+  const baseJob = {
+    id: 5,
+    tenantId: 1,
+    entityType: 'customer',
+    status: 'VALIDATED',
+    rollbackData: [],
+    columnMapping: [],
+    createdBy: 1,
+  };
 
   it('throws IMPORT_INVALID_STATE when the atomic claim update returns zero rows', async () => {
     const db = makeExecuteDb(baseJob, [[]]);
@@ -234,7 +272,10 @@ describe('ImportEngine.execute — atomic status transition (M9)', () => {
     const db = makeExecuteDb(baseJob, [[{ id: 5 }], []]);
     const engine = new ImportEngine(db as never);
 
-    const outcomes = await Promise.allSettled([engine.execute(1, '5', []), engine.execute(1, '5', [])]);
+    const outcomes = await Promise.allSettled([
+      engine.execute(1, '5', []),
+      engine.execute(1, '5', []),
+    ]);
 
     expect(outcomes.filter((o) => o.status === 'fulfilled')).toHaveLength(1);
     expect(outcomes.filter((o) => o.status === 'rejected')).toHaveLength(1);
@@ -252,7 +293,7 @@ function makeEntityDb(job: Record<string, unknown>, selectQueue: unknown[][]) {
     select: vi.fn().mockReturnValue({
       from: vi.fn().mockReturnValue({
         where: vi.fn().mockImplementation(() => {
-          const result = selectIdx === 0 ? [job] : selectQueue[selectIdx - 1] ?? [];
+          const result = selectIdx === 0 ? [job] : (selectQueue[selectIdx - 1] ?? []);
           selectIdx++;
           return makeWhereResult(result);
         }),
@@ -278,9 +319,21 @@ function makeEntityDb(job: Record<string, unknown>, selectQueue: unknown[][]) {
 
 describe('ImportEngine.execute — employee entity (PG-043)', () => {
   const employeeJob = {
-    id: 10, tenantId: 1, entityType: 'employee', status: 'VALIDATED', createdBy: 1,
+    id: 10,
+    tenantId: 1,
+    entityType: 'employee',
+    status: 'VALIDATED',
+    createdBy: 1,
     rollbackData: [
-      { name: 'Raj Kumar', phone: '9876543210', designation: 'Manager', basicSalary: '25000', joiningDate: '2024-01-15', department: 'Sales', pan: 'ABCDE1234F' },
+      {
+        name: 'Raj Kumar',
+        phone: '9876543210',
+        designation: 'Manager',
+        basicSalary: '25000',
+        joiningDate: '2024-01-15',
+        department: 'Sales',
+        pan: 'ABCDE1234F',
+      },
     ],
     columnMapping: [
       { sourceColumn: 'name', targetField: 'name' },
@@ -324,7 +377,11 @@ describe('ImportEngine.execute — employee entity (PG-043)', () => {
 describe('ImportEngine.execute — attendance entity (PG-043)', () => {
   it('inserts resolved rows and fails unresolved employeeCode rows instead of silently skipping them', async () => {
     const attendanceJob = {
-      id: 11, tenantId: 1, entityType: 'attendance', status: 'VALIDATED', createdBy: 1,
+      id: 11,
+      tenantId: 1,
+      entityType: 'attendance',
+      status: 'VALIDATED',
+      createdBy: 1,
       rollbackData: [
         { employeeCode: 'EMP-00010', attendanceDate: '2024-01-15', status: 'PRESENT' },
         { employeeCode: 'EMP-UNKNOWN', attendanceDate: '2024-01-15', status: 'PRESENT' },
@@ -353,7 +410,11 @@ describe('ImportEngine.execute — attendance entity (PG-043)', () => {
 describe('ImportEngine.execute — opening-stock (still unimplemented)', () => {
   it('counts rows as imported without ever inserting anything, and this stays true after the employee/attendance fix', async () => {
     const openingStockJob = {
-      id: 12, tenantId: 1, entityType: 'opening-stock', status: 'VALIDATED', createdBy: 1,
+      id: 12,
+      tenantId: 1,
+      entityType: 'opening-stock',
+      status: 'VALIDATED',
+      createdBy: 1,
       rollbackData: [{ sku: 'FAB-1', warehouseCode: 'WH1', quantity: '10', costPrice: '100' }],
       columnMapping: [
         { sourceColumn: 'sku', targetField: 'sku' },

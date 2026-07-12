@@ -1,4 +1,4 @@
-import Fastify, { type FastifyError, type FastifyInstance } from 'fastify';
+import Fastify, { type FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
@@ -9,6 +9,7 @@ import {
   registerHealthRoute,
   tenantOrIpKeyGenerator,
   RATE_LIMIT_DEFAULTS,
+  registerErrorHandler,
 } from '@erp/sdk';
 import type { HealthCheckFn } from '@erp/sdk';
 import { createMetricsHandler, createHttpMetricsHook, createCorrelationIdHook } from '@erp/logger';
@@ -35,7 +36,10 @@ async function checkUpstream(target: string): Promise<boolean> {
 // without calling listen() — kept separate from main.ts's bootstrap() so tests can
 // exercise routing/auth behavior via app.inject() against real local upstream
 // servers instead of binding real ports.
-export async function buildGateway(config: GatewayConfig, logger: StructuredLogger): Promise<FastifyInstance> {
+export async function buildGateway(
+  config: GatewayConfig,
+  logger: StructuredLogger
+): Promise<FastifyInstance> {
   const metricsHandler = await createMetricsHandler('api-gateway');
 
   const fastify = Fastify({ logger: false, trustProxy: true });
@@ -79,17 +83,17 @@ export async function buildGateway(config: GatewayConfig, logger: StructuredLogg
         onError: (reply, { error }) => {
           logger.error({ err: error.message, upstream: upstream.service }, 'Upstream proxy error');
           void reply.code(502).send({
-            error: { code: 'UPSTREAM_UNAVAILABLE', message: `${upstream.service}-service is unreachable` },
+            error: {
+              code: 'UPSTREAM_UNAVAILABLE',
+              message: `${upstream.service}-service is unreachable`,
+            },
           });
         },
       },
     });
   }
 
-  fastify.setErrorHandler<FastifyError>((error, request, reply) => {
-    logger.error({ err: error.message, url: request.url }, 'Unhandled error in api-gateway');
-    return reply.code(500).send({ error: { code: 'INTERNAL_ERROR', message: 'An unexpected error occurred' } });
-  });
+  registerErrorHandler(fastify, 'api-gateway', logger);
 
   return fastify;
 }

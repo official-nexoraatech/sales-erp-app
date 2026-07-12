@@ -177,6 +177,7 @@ export const securityAuditLog = pgTable(
         | 'MFA_DISABLED'
         | 'SESSION_TERMINATED'
         | 'SUSPICIOUS_LOGIN'
+        | 'ADMIN_PASSWORD_RESET'
       >(),
     ipAddress: inet('ip_address'),
     details: jsonb('details'),

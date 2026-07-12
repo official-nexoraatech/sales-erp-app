@@ -7,7 +7,7 @@ import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
 import { ERPDetailSkeleton } from '../../components/erp/ERPSkeleton.js';
 import Button from '../../components/ui/Button.js';
 import Badge from '../../components/ui/Badge.js';
-import { formatDate, formatDatetime, formatCurrency } from '../../lib/format.js';
+import { formatDatetime } from '../../lib/format.js';
 
 interface Verification {
   id: number;
@@ -43,19 +43,25 @@ export default function PhysicalVerificationDetailPage() {
     enabled: !!(id && (data as { status?: string })?.status === 'COUNTING'),
   });
 
-  const verif = (data as Verification);
+  const verif = data as Verification;
   const variances: VerifLine[] = (varianceData as VerifLine[]) ?? [];
 
   const startMutation = useMutation({
     mutationFn: () => physicalVerifApi.startCounting(Number(id)),
-    onSuccess: () => { toast.success('Counting started — snapshot taken'); qc.invalidateQueries({ queryKey: ['physical-verif', id] }); },
+    onSuccess: () => {
+      toast.success('Counting started — snapshot taken');
+      qc.invalidateQueries({ queryKey: ['physical-verif', id] });
+    },
     onError: (e: Error) => toast.error(e.message),
   });
 
   const saveMutation = useMutation({
     mutationFn: (countsArr: Array<{ lineId: number; physicalQty: number }>) =>
       physicalVerifApi.updateCounts(Number(id), countsArr),
-    onSuccess: () => { toast.success('Counts saved'); qc.invalidateQueries({ queryKey: ['physical-verif-variances', id] }); },
+    onSuccess: () => {
+      toast.success('Counts saved');
+      qc.invalidateQueries({ queryKey: ['physical-verif-variances', id] });
+    },
     onError: (e: Error) => toast.error(e.message),
   });
 
@@ -73,11 +79,20 @@ export default function PhysicalVerificationDetailPage() {
 
   return (
     <div>
-      <ERPPageHeader variant="list"
+      <ERPPageHeader
+        variant="list"
         title={`Physical Verification ${verif.verificationNumber}`}
         subtitle={`Warehouse ${verif.warehouseId} · ${verif.status}`}
       >
-        <Badge variant={verif.status === 'APPROVED' ? 'success' : verif.status === 'COUNTING' ? 'warning' : 'default'}>
+        <Badge
+          variant={
+            verif.status === 'APPROVED'
+              ? 'success'
+              : verif.status === 'COUNTING'
+                ? 'warning'
+                : 'default'
+          }
+        >
           {verif.status}
         </Badge>
       </ERPPageHeader>
@@ -92,45 +107,59 @@ export default function PhysicalVerificationDetailPage() {
         {verif.status === 'COUNTING' && (
           <>
             <p className="text-sm text-gray-500 dark:text-gray-400">
-              Snapshot taken {verif.snapshotTakenAt ? formatDatetime(verif.snapshotTakenAt) : ''}. Enter physical counts below.
+              Snapshot taken {verif.snapshotTakenAt ? formatDatetime(verif.snapshotTakenAt) : ''}.
+              Enter physical counts below.
             </p>
 
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left text-gray-500 dark:text-gray-400 border-b dark:border-gray-700">
-                  <th className="pb-2">Item ID</th>
-                  <th className="pb-2">System Qty</th>
-                  <th className="pb-2">Physical Qty</th>
-                  <th className="pb-2">Variance</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y dark:divide-gray-700">
-                {variances.map((line) => {
-                  const physical = counts[line.id] ?? (line.physicalQty ? parseFloat(line.physicalQty) : undefined);
-                  const systemQty = parseFloat(line.systemQty);
-                  const variance = physical !== undefined ? physical - systemQty : undefined;
-                  return (
-                    <tr key={line.id}>
-                      <td className="py-2">{line.itemId}</td>
-                      <td className="py-2">{systemQty.toFixed(3)}</td>
-                      <td className="py-2">
-                        <input
-                          type="number"
-                          min="0"
-                          step="0.001"
-                          value={physical ?? ''}
-                          onChange={(e) => setCounts((prev) => ({ ...prev, [line.id]: parseFloat(e.target.value) || 0 }))}
-                          className="w-28 rounded border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm px-2 py-1"
-                        />
-                      </td>
-                      <td className={`py-2 font-medium ${variance === undefined ? '' : variance >= 0 ? 'text-success' : 'text-danger'}`}>
-                        {variance !== undefined ? (variance >= 0 ? '+' : '') + variance.toFixed(3) : '–'}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-gray-500 dark:text-gray-400 border-b dark:border-gray-700">
+                    <th className="pb-2">Item ID</th>
+                    <th className="pb-2">System Qty</th>
+                    <th className="pb-2">Physical Qty</th>
+                    <th className="pb-2">Variance</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y dark:divide-gray-700">
+                  {variances.map((line) => {
+                    const physical =
+                      counts[line.id] ??
+                      (line.physicalQty ? parseFloat(line.physicalQty) : undefined);
+                    const systemQty = parseFloat(line.systemQty);
+                    const variance = physical !== undefined ? physical - systemQty : undefined;
+                    return (
+                      <tr key={line.id}>
+                        <td className="py-2">{line.itemId}</td>
+                        <td className="py-2">{systemQty.toFixed(3)}</td>
+                        <td className="py-2">
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.001"
+                            value={physical ?? ''}
+                            onChange={(e) =>
+                              setCounts((prev) => ({
+                                ...prev,
+                                [line.id]: parseFloat(e.target.value) || 0,
+                              }))
+                            }
+                            className="w-28 rounded border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm px-2 py-1"
+                          />
+                        </td>
+                        <td
+                          className={`py-2 font-medium ${variance === undefined ? '' : variance >= 0 ? 'text-success' : 'text-danger'}`}
+                        >
+                          {variance !== undefined
+                            ? (variance >= 0 ? '+' : '') + variance.toFixed(3)
+                            : '–'}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
 
             <div className="flex gap-3">
               <Button
@@ -146,7 +175,10 @@ export default function PhysicalVerificationDetailPage() {
               >
                 Save Counts
               </Button>
-              <Button onClick={() => approveMutation.mutate()} isLoading={approveMutation.isPending}>
+              <Button
+                onClick={() => approveMutation.mutate()}
+                isLoading={approveMutation.isPending}
+              >
                 Approve & Generate Adjustment
               </Button>
             </div>

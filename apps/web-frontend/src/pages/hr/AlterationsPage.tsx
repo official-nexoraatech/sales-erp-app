@@ -34,7 +34,15 @@ const STATUS_VARIANT: Record<string, 'default' | 'info' | 'warning' | 'success' 
   CANCELLED: 'danger',
 };
 
-const STATUSES = ['RECEIVED', 'ASSIGNED', 'IN_PROGRESS', 'QUALITY_CHECK', 'READY', 'DELIVERED', 'CANCELLED'];
+const STATUSES = [
+  'RECEIVED',
+  'ASSIGNED',
+  'IN_PROGRESS',
+  'QUALITY_CHECK',
+  'READY',
+  'DELIVERED',
+  'CANCELLED',
+];
 
 export default function AlterationsPage() {
   const navigate = useNavigate();
@@ -46,14 +54,22 @@ export default function AlterationsPage() {
     queryKey: ['alterations', statusFilter],
     queryFn: () => alterationApi.list({ status: statusFilter || undefined }),
   });
-  const orders: AlterationOrder[] = ((data as Record<string, unknown>)?.content as AlterationOrder[]) ?? [];
+  const orders: AlterationOrder[] =
+    ((data as Record<string, unknown>)?.content as AlterationOrder[]) ?? [];
 
-  const { data: overdueData } = useQuery({ queryKey: ['alterations-overdue'], queryFn: () => alterationApi.overdue() });
-  const overdueCount = ((overdueData as Record<string, unknown>)?.content as unknown[])?.length ?? 0;
+  const { data: overdueData } = useQuery({
+    queryKey: ['alterations-overdue'],
+    queryFn: () => alterationApi.overdue(),
+  });
+  const overdueCount =
+    ((overdueData as Record<string, unknown>)?.content as unknown[])?.length ?? 0;
 
   const cancelMutation = useMutation({
     mutationFn: (id: number) => alterationApi.updateStatus(id, { status: 'CANCELLED' }),
-    onSuccess: () => { toast.success('Order cancelled'); qc.invalidateQueries({ queryKey: ['alterations'] }); },
+    onSuccess: () => {
+      toast.success('Order cancelled');
+      qc.invalidateQueries({ queryKey: ['alterations'] });
+    },
     onError: (e: Error) => toast.error(e.message),
   });
 
@@ -62,7 +78,11 @@ export default function AlterationsPage() {
       <ERPPageHeader
         variant="list"
         title="Alteration Orders"
-        subtitle={overdueCount > 0 ? `${overdueCount} order(s) overdue` : 'Receive, assign, and track alteration work.'}
+        subtitle={
+          overdueCount > 0
+            ? `${overdueCount} order(s) overdue`
+            : 'Receive, assign, and track alteration work.'
+        }
         actions={
           hasPermission(PERMISSIONS.ALTERATION_CREATE) ? (
             <Button onClick={() => navigate('/hr/alterations/new')}>+ Receive Order</Button>
@@ -71,9 +91,17 @@ export default function AlterationsPage() {
       />
 
       <div className="mb-4">
-        <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="max-w-xs">
+        <Select
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value)}
+          className="max-w-xs"
+        >
           <option value="">All Statuses</option>
-          {STATUSES.map((s) => <option key={s} value={s}>{s.replace('_', ' ')}</option>)}
+          {STATUSES.map((s) => (
+            <option key={s} value={s}>
+              {s.replace('_', ' ')}
+            </option>
+          ))}
         </Select>
       </div>
 
@@ -85,43 +113,70 @@ export default function AlterationsPage() {
           title="No alteration orders yet"
           description="Receive your first alteration order to get started."
           {...(hasPermission(PERMISSIONS.ALTERATION_CREATE)
-            ? { action: { label: '+ Receive Order', onClick: () => navigate('/hr/alterations/new') } }
+            ? {
+                action: {
+                  label: '+ Receive Order',
+                  onClick: () => navigate('/hr/alterations/new'),
+                },
+              }
             : {})}
         />
       ) : (
-        <table className="w-full text-sm bg-surface-card rounded-xl border border-default overflow-hidden">
-          <thead className="bg-surface-subtle">
-            <tr className="text-left text-xs uppercase text-secondary">
-              <th className="px-4 py-3">Order #</th>
-              <th className="px-4 py-3">Customer</th>
-              <th className="px-4 py-3">Promised Date</th>
-              <th className="px-4 py-3 text-right">Total</th>
-              <th className="px-4 py-3 text-right">Balance Due</th>
-              <th className="px-4 py-3">Status</th>
-              <th className="px-4 py-3"></th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-default">
-            {orders.map((o) => (
-              <tr key={o.id} className="hover:bg-surface-subtle cursor-pointer" onClick={() => navigate(`/hr/alterations/${o.id}`)}>
-                <td className="px-4 py-3 font-mono text-xs">{o.orderNumber}</td>
-                <td className="px-4 py-3">
-                  <p className="font-medium">{o.customerName}</p>
-                  <p className="text-xs text-secondary">{o.customerPhone}</p>
-                </td>
-                <td className="px-4 py-3 text-xs">{formatDate(o.promisedDate)}</td>
-                <td className="px-4 py-3 text-right font-mono">{formatCurrency(Number(o.totalAmount))}</td>
-                <td className="px-4 py-3 text-right font-mono">{formatCurrency(Number(o.balanceDue))}</td>
-                <td className="px-4 py-3"><Badge variant={STATUS_VARIANT[o.status] ?? 'default'}>{o.status.replace('_', ' ')}</Badge></td>
-                <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
-                  {hasPermission(PERMISSIONS.ALTERATION_UPDATE) && o.status !== 'DELIVERED' && o.status !== 'CANCELLED' && (
-                    <Button size="sm" variant="danger-outline" onClick={() => cancelMutation.mutate(o.id)}>Cancel</Button>
-                  )}
-                </td>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm bg-surface-card rounded-xl border border-default overflow-hidden">
+            <thead className="bg-surface-subtle">
+              <tr className="text-left text-xs uppercase text-secondary">
+                <th className="px-4 py-3">Order #</th>
+                <th className="px-4 py-3">Customer</th>
+                <th className="px-4 py-3">Promised Date</th>
+                <th className="px-4 py-3 text-right">Total</th>
+                <th className="px-4 py-3 text-right">Balance Due</th>
+                <th className="px-4 py-3">Status</th>
+                <th className="px-4 py-3"></th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody className="divide-y divide-default">
+              {orders.map((o) => (
+                <tr
+                  key={o.id}
+                  className="hover:bg-surface-subtle cursor-pointer"
+                  onClick={() => navigate(`/hr/alterations/${o.id}`)}
+                >
+                  <td className="px-4 py-3 font-mono text-xs">{o.orderNumber}</td>
+                  <td className="px-4 py-3">
+                    <p className="font-medium">{o.customerName}</p>
+                    <p className="text-xs text-secondary">{o.customerPhone}</p>
+                  </td>
+                  <td className="px-4 py-3 text-xs">{formatDate(o.promisedDate)}</td>
+                  <td className="px-4 py-3 text-right font-mono">
+                    {formatCurrency(Number(o.totalAmount))}
+                  </td>
+                  <td className="px-4 py-3 text-right font-mono">
+                    {formatCurrency(Number(o.balanceDue))}
+                  </td>
+                  <td className="px-4 py-3">
+                    <Badge variant={STATUS_VARIANT[o.status] ?? 'default'}>
+                      {o.status.replace('_', ' ')}
+                    </Badge>
+                  </td>
+                  <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
+                    {hasPermission(PERMISSIONS.ALTERATION_UPDATE) &&
+                      o.status !== 'DELIVERED' &&
+                      o.status !== 'CANCELLED' && (
+                        <Button
+                          size="sm"
+                          variant="danger-outline"
+                          onClick={() => cancelMutation.mutate(o.id)}
+                        >
+                          Cancel
+                        </Button>
+                      )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );

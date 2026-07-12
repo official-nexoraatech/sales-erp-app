@@ -1,10 +1,23 @@
-import Fastify, { type FastifyError } from 'fastify';
+import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
-import { PlatformContextFactory, HELMET_OPTIONS, PERMISSIONS_POLICY, registerHealthRoute, tenantOrIpKeyGenerator, initializeTelemetry, initTenantStatusEnforcement } from '@erp/sdk';
-import { createLogger, createMetricsHandler, createHttpMetricsHook, createCorrelationIdHook } from '@erp/logger';
-import { ERPError } from '@erp/types';
+import {
+  PlatformContextFactory,
+  HELMET_OPTIONS,
+  PERMISSIONS_POLICY,
+  registerHealthRoute,
+  tenantOrIpKeyGenerator,
+  initializeTelemetry,
+  initTenantStatusEnforcement,
+  registerErrorHandler,
+} from '@erp/sdk';
+import {
+  createLogger,
+  createMetricsHandler,
+  createHttpMetricsHook,
+  createCorrelationIdHook,
+} from '@erp/logger';
 import { loadConfigWithSecrets } from '@erp/config';
 import { jobWorkRoutes } from './api/job-work.routes.js';
 import { barcodeRoutes } from './api/barcode.routes.js';
@@ -17,7 +30,11 @@ initializeTelemetry({ serviceName: 'production-service' });
 async function bootstrap(): Promise<void> {
   const port = parseInt(process.env['PRODUCTION_SERVICE_PORT'] ?? '3022', 10);
   const lokiUrl = process.env['LOKI_URL'];
-  const logger = createLogger({ serviceName: 'production-service', level: 'info', ...(lokiUrl ? { lokiUrl } : {}) });
+  const logger = createLogger({
+    serviceName: 'production-service',
+    level: 'info',
+    ...(lokiUrl ? { lokiUrl } : {}),
+  });
 
   const config = await loadConfigWithSecrets('production-service');
   const ctxFactory = new PlatformContextFactory({
@@ -29,6 +46,7 @@ async function bootstrap(): Promise<void> {
   });
   await ctxFactory.connect();
   ctxFactory.subscribeFeatureFlagInvalidations();
+  ctxFactory.subscribeTenantStatusInvalidations();
   initTenantStatusEnforcement(ctxFactory.rawDb);
 
   const metricsHandler = await createMetricsHandler('production-service');
@@ -64,28 +82,18 @@ async function bootstrap(): Promise<void> {
     return reply.code(200).header('Content-Type', metricsHandler.contentType).send(body);
   });
 
-  await fastify.register(async (sub) => {
-    await jobWorkRoutes(sub, ctxFactory);
-    await barcodeRoutes(sub, ctxFactory);
-    await consignmentRoutes(sub, ctxFactory);
-    await reorderRoutes(sub, ctxFactory);
-    await schedulerInternalRoutes(sub, ctxFactory);
-  }, { prefix: '/api/v2' });
+  await fastify.register(
+    async (sub) => {
+      await jobWorkRoutes(sub, ctxFactory);
+      await barcodeRoutes(sub, ctxFactory);
+      await consignmentRoutes(sub, ctxFactory);
+      await reorderRoutes(sub, ctxFactory);
+      await schedulerInternalRoutes(sub, ctxFactory);
+    },
+    { prefix: '/api/v2' }
+  );
 
-  fastify.setErrorHandler<FastifyError>((error, request, reply) => {
-    if (error instanceof ERPError) {
-      return reply.code(error.statusCode).send({
-        error: { code: error.code, message: error.message, details: error.details },
-      });
-    }
-    if (error.validation) {
-      return reply.code(400).send({
-        error: { code: 'VALIDATION_ERROR', message: 'Invalid request body', details: error.validation },
-      });
-    }
-    logger.error({ err: error.message, url: request.url, correlationId: (request as { correlationId?: string }).correlationId }, 'Unhandled error in production-service');
-    return reply.code(500).send({ error: { code: 'INTERNAL_ERROR', message: 'An unexpected error occurred' } });
-  });
+  registerErrorHandler(fastify, 'production-service', logger);
 
   const address = await fastify.listen({ port, host: '0.0.0.0' });
   logger.info({ address }, 'Production service started');

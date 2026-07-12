@@ -246,6 +246,125 @@
       "when": 1785530135804,
       "tag": "0034_organization_theme_config",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1785616535804,
+      "tag": "0035_einvoice_ewb_status",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1785702935804,
+      "tag": "0036_dlq_saga_permission_granularity_backfill",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1785789335804,
+      "tag": "0037_pg020_sso_config",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1785875735804,
+      "tag": "0038_pg020_sso_config_manage_permission_backfill",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1785962135804,
+      "tag": "0039_pg026_scheduled_report_snapshots",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1786048535804,
+      "tag": "0040_pg027_billing_entitlements",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1786134935804,
+      "tag": "0041_pg028_usage_tracking",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1786221335804,
+      "tag": "0042_pg039_gstr3b_manual_adjustments",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1786307735804,
+      "tag": "0043_pg033_income_summary_account",
+      "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1786394135804,
+      "tag": "0044_pg041_biometric_device_configs",
+      "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1786480535804,
+      "tag": "0045_pg044_pt_slabs",
+      "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1786566935804,
+      "tag": "0046_pg045_employee_loans",
+      "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1786653335804,
+      "tag": "0047_pg045_employee_loan_manage_permission_backfill",
+      "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1786739735804,
+      "tag": "0048_pg032_warehouse_valuation",
+      "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1786826135804,
+      "tag": "0049_pg037_cost_centers",
+      "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1786912535804,
+      "tag": "0050_pg037_cost_center_permission_backfill",
+      "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1786998935804,
+      "tag": "0051_qa_sales_manager_quotation_convert_backfill",
+      "breakpoints": true
     }
   ]
 }

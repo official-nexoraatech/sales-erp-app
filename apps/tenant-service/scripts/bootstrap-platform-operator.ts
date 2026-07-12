@@ -12,16 +12,26 @@
  * normal POST /users flow (auth-service) by an existing operator.
  */
 import process from 'node:process';
+import { pathToFileURL } from 'node:url';
 import type { ErpDatabase } from '@erp/db';
 import { createDatabaseClient, tenants, roles, users, userRoles } from '@erp/db';
 import { eq, and, sql } from 'drizzle-orm';
 import argon2 from 'argon2';
 
-export async function bootstrapPlatformOperator(db: ErpDatabase, email: string, password: string): Promise<number> {
+export async function bootstrapPlatformOperator(
+  db: ErpDatabase,
+  email: string,
+  password: string
+): Promise<number> {
   return db.transaction(async (trx) => {
-    const [tenant] = await trx.select().from(tenants).where(eq(tenants.slug, 'platform-operations'));
+    const [tenant] = await trx
+      .select()
+      .from(tenants)
+      .where(eq(tenants.slug, 'platform-operations'));
     if (!tenant) {
-      throw new Error('platform-operations tenant not found — run migration 0020_es21_platform_operator.sql first');
+      throw new Error(
+        'platform-operations tenant not found — run migration 0020_es21_platform_operator.sql first'
+      );
     }
 
     // Lock the role row so a concurrent bootstrap attempt can't race the count-then-insert
@@ -32,7 +42,9 @@ export async function bootstrapPlatformOperator(db: ErpDatabase, email: string, 
       .where(and(eq(roles.tenantId, tenant.id), eq(roles.name, 'PLATFORM_OPERATOR')))
       .for('update');
     if (!role) {
-      throw new Error('PLATFORM_OPERATOR role not found for platform-operations tenant — run migration 0020 first');
+      throw new Error(
+        'PLATFORM_OPERATOR role not found for platform-operations tenant — run migration 0020 first'
+      );
     }
 
     const [countRow] = await trx
@@ -92,7 +104,9 @@ async function main(): Promise<void> {
 
   const { email, password } = parseArgs(process.argv.slice(2));
   if (!email || !password) {
-    process.stderr.write('Usage: bootstrap-platform-operator.ts --email=<email> --password=<password>\n');
+    process.stderr.write(
+      'Usage: bootstrap-platform-operator.ts --email=<email> --password=<password>\n'
+    );
     process.exitCode = 1;
     return;
   }
@@ -108,7 +122,11 @@ async function main(): Promise<void> {
 }
 
 // Only auto-run when executed directly (tsx/node), not when imported by tests.
-if (import.meta.url === `file://${process.argv[1]}`) {
+// Compared as file:// URLs, not raw strings — on Windows process.argv[1] is a
+// backslash path ("C:\...") while import.meta.url is always a forward-slash,
+// percent-encoded URL ("file:///C:/..."), so a naive template-string comparison
+// never matches and this guard silently no-ops on Windows.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main().catch((err: unknown) => {
     const msg = err instanceof Error ? err.message : String(err);
     process.stderr.write(`Fatal: ${msg}\n`);

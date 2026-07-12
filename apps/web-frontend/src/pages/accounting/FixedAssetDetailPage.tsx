@@ -22,8 +22,18 @@ const STATUS_COLORS: Record<string, 'green' | 'red' | 'gray'> = {
 };
 
 const MONTHS = [
-  'January', 'February', 'March', 'April', 'May', 'June',
-  'July', 'August', 'September', 'October', 'November', 'December',
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
 ];
 
 interface FixedAsset {
@@ -75,7 +85,7 @@ export default function FixedAssetDetailPage() {
     queryKey: ['fixed-assets', id],
     queryFn: () => fixedAssetApi.getById(Number(id)),
   });
-  const asset = (data as FixedAsset);
+  const asset = data as FixedAsset;
 
   const { data: scheduleData, isLoading: scheduleLoading } = useQuery({
     queryKey: ['fixed-assets', id, 'depreciation-schedule'],
@@ -83,10 +93,20 @@ export default function FixedAssetDetailPage() {
   });
   const schedule: ScheduleRow[] = (scheduleData as { content?: ScheduleRow[] })?.content ?? [];
 
-  const { data: accData } = useQuery({ queryKey: ['accounts'], queryFn: () => accountApi.list(), enabled: hasPermission(PERMISSIONS.ACCOUNT_VIEW) });
-  const accounts = ((accData as Record<string, unknown>)?.content as AccountRow[] ?? []).filter((a) => !a.isSystem);
+  const { data: accData } = useQuery({
+    queryKey: ['accounts'],
+    queryFn: () => accountApi.list(),
+    enabled: hasPermission(PERMISSIONS.ACCOUNT_VIEW),
+  });
+  const accounts = (((accData as Record<string, unknown>)?.content as AccountRow[]) ?? []).filter(
+    (a) => !a.isSystem
+  );
 
-  const { register, handleSubmit, formState: { errors } } = useForm<DisposeForm>();
+  const {
+    register,
+    handleSubmit,
+    formState: { errors },
+  } = useForm<DisposeForm>();
 
   const disposeMutation = useMutation({
     mutationFn: (d: DisposeForm) =>
@@ -118,19 +138,28 @@ export default function FixedAssetDetailPage() {
         statusVariant={asset.status === 'ACTIVE' ? 'success' : 'default'}
         backTo="/accounting/fixed-assets"
         actions={
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             {canUpdateAsset && asset.status === 'ACTIVE' && (
-              <Button variant="secondary" onClick={() => navigate(`/accounting/fixed-assets/${id}/edit`)}>Edit</Button>
+              <Button
+                variant="secondary"
+                onClick={() => navigate(`/accounting/fixed-assets/${id}/edit`)}
+              >
+                Edit
+              </Button>
             )}
             {canDisposeAsset && asset.status === 'ACTIVE' && (
-              <Button variant="danger" onClick={() => setDisposeModalOpen(true)}>Dispose Asset</Button>
+              <Button variant="danger" onClick={() => setDisposeModalOpen(true)}>
+                Dispose Asset
+              </Button>
             )}
           </div>
         }
       />
 
       <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
-        <h2 className="text-sm font-semibold text-secondary mb-4 uppercase tracking-wide">Summary</h2>
+        <h2 className="text-sm font-semibold text-secondary mb-4 uppercase tracking-wide">
+          Summary
+        </h2>
         <dl className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {[
             { label: 'Asset Code', value: asset.assetCode },
@@ -140,8 +169,13 @@ export default function FixedAssetDetailPage() {
             { label: 'Salvage Value', value: formatCurrency(Number(asset.salvageValue)) },
             { label: 'Net Book Value', value: formatCurrency(Number(asset.currentValue)) },
             { label: 'Method', value: asset.depreciationMethod },
-            ...(asset.depreciationMethod === 'WDV' && asset.wdvRate ? [{ label: 'WDV Rate', value: `${asset.wdvRate}% p.a.` }] : []),
-            { label: 'Status', value: <Badge label={asset.status} color={STATUS_COLORS[asset.status] ?? 'gray'} /> },
+            ...(asset.depreciationMethod === 'WDV' && asset.wdvRate
+              ? [{ label: 'WDV Rate', value: `${asset.wdvRate}% p.a.` }]
+              : []),
+            {
+              label: 'Status',
+              value: <Badge label={asset.status} color={STATUS_COLORS[asset.status] ?? 'gray'} />,
+            },
           ].map(({ label, value }) => (
             <div key={label}>
               <dt className="text-xs text-secondary">{label}</dt>
@@ -153,12 +187,18 @@ export default function FixedAssetDetailPage() {
 
       <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
         <div className="px-5 py-4 border-b border-gray-200 dark:border-gray-700">
-          <h2 className="text-sm font-semibold text-secondary uppercase tracking-wide">Depreciation Schedule</h2>
+          <h2 className="text-sm font-semibold text-secondary uppercase tracking-wide">
+            Depreciation Schedule
+          </h2>
         </div>
         {scheduleLoading ? (
           <div className="p-8 text-center text-sm text-secondary">Loading…</div>
         ) : schedule.length === 0 ? (
-          <ERPEmptyState type="no-data" title="No depreciation posted yet" description="Depreciation entries will appear here once run from the Fixed Asset Register." />
+          <ERPEmptyState
+            type="no-data"
+            title="No depreciation posted yet"
+            description="Depreciation entries will appear here once run from the Fixed Asset Register."
+          />
         ) : (
           <table className="w-full text-sm">
             <thead className="bg-gray-50 dark:bg-gray-900/40 border-b border-gray-200 dark:border-gray-700">
@@ -172,10 +212,18 @@ export default function FixedAssetDetailPage() {
             <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
               {schedule.map((row) => (
                 <tr key={row.id}>
-                  <td className="px-4 py-3 text-secondary">{MONTHS[row.periodMonth - 1]} {row.periodYear}</td>
-                  <td className="px-4 py-3 text-right font-mono">{formatCurrency(Number(row.openingValue))}</td>
-                  <td className="px-4 py-3 text-right font-mono">{formatCurrency(Number(row.depreciationAmount))}</td>
-                  <td className="px-4 py-3 text-right font-mono font-semibold text-primary">{formatCurrency(Number(row.closingValue))}</td>
+                  <td className="px-4 py-3 text-secondary">
+                    {MONTHS[row.periodMonth - 1]} {row.periodYear}
+                  </td>
+                  <td className="px-4 py-3 text-right font-mono">
+                    {formatCurrency(Number(row.openingValue))}
+                  </td>
+                  <td className="px-4 py-3 text-right font-mono">
+                    {formatCurrency(Number(row.depreciationAmount))}
+                  </td>
+                  <td className="px-4 py-3 text-right font-mono font-semibold text-primary">
+                    {formatCurrency(Number(row.closingValue))}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -193,7 +241,9 @@ export default function FixedAssetDetailPage() {
         isLoading={disposeMutation.isPending}
         description={
           <div className="space-y-3 text-left">
-            <p>This will retire the asset and post a disposal journal entry. This cannot be undone.</p>
+            <p>
+              This will retire the asset and post a disposal journal entry. This cannot be undone.
+            </p>
             <Input
               label="Disposal Date"
               type="date"
@@ -216,7 +266,11 @@ export default function FixedAssetDetailPage() {
               error={errors.gainLossAccountId?.message}
             >
               <option value="">Select…</option>
-              {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+              {accounts.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name}
+                </option>
+              ))}
             </Select>
           </div>
         }

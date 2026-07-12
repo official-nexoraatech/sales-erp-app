@@ -1,12 +1,28 @@
-import Fastify, { type FastifyError } from 'fastify';
+import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 import { Kafka } from 'kafkajs';
-import { PlatformContextFactory, TenantScopedDatabase, type EventHandler, HELMET_OPTIONS, PERMISSIONS_POLICY, registerHealthRoute, tenantOrIpKeyGenerator, checkKafka, initializeTelemetry, initTenantStatusEnforcement } from '@erp/sdk';
+import {
+  PlatformContextFactory,
+  TenantScopedDatabase,
+  type EventHandler,
+  HELMET_OPTIONS,
+  PERMISSIONS_POLICY,
+  registerHealthRoute,
+  tenantOrIpKeyGenerator,
+  checkKafka,
+  initializeTelemetry,
+  initTenantStatusEnforcement,
+  registerErrorHandler,
+} from '@erp/sdk';
 import { createDatabaseClient } from '@erp/db';
-import { createLogger, createMetricsHandler, createHttpMetricsHook, createCorrelationIdHook } from '@erp/logger';
-import { ERPError } from '@erp/types';
+import {
+  createLogger,
+  createMetricsHandler,
+  createHttpMetricsHook,
+  createCorrelationIdHook,
+} from '@erp/logger';
 import { loadConfigWithSecrets } from '@erp/config';
 import { PlatformEventConsumer } from '@erp/sdk';
 import { accountRoutes } from './api/accounts.routes.js';
@@ -18,15 +34,26 @@ import { financialYearRoutes } from './api/financial-year.routes.js';
 import { fixedAssetsRoutes } from './api/fixed-assets.routes.js';
 import { tdsRoutes } from './api/tds.routes.js';
 import { postingMatrixRoutes } from './api/posting-matrix.routes.js';
+import { costCenterRoutes } from './api/cost-centers.routes.js';
 import { searchSyncInternalRoutes } from './api/search-sync.internal.routes.js';
 import { schedulerInternalRoutes } from './api/scheduler-internal.routes.js';
-import { handleInvoiceConfirmed, handleInvoiceCancelled } from './consumers/InvoiceAccountingConsumer.js';
+import {
+  handleInvoiceConfirmed,
+  handleInvoiceCancelled,
+} from './consumers/InvoiceAccountingConsumer.js';
 import { handleGRNApproved } from './consumers/GRNAccountingConsumer.js';
 import { handleCogsCalculated } from './consumers/CogsAccountingConsumer.js';
-import { handlePaymentReceived, handleSupplierPaymentMade, handleChequeBounced } from './consumers/PaymentAccountingConsumer.js';
+import {
+  handlePaymentReceived,
+  handleSupplierPaymentMade,
+  handleChequeBounced,
+} from './consumers/PaymentAccountingConsumer.js';
 import { handleSaleReturnApproved } from './consumers/SaleReturnAccountingConsumer.js';
 import { handleExpenseApproved, handleExpensePaid } from './consumers/ExpenseAccountingConsumer.js';
-import { handlePayrollRunApproved, handlePayrollRunDisbursed } from './consumers/PayrollAccountingConsumer.js';
+import {
+  handlePayrollRunApproved,
+  handlePayrollRunDisbursed,
+} from './consumers/PayrollAccountingConsumer.js';
 import { handleEmployeeLoanDisbursed } from './consumers/EmployeeLoanAccountingConsumer.js';
 import { handleRcmLiabilityPosted } from './consumers/RcmAccountingConsumer.js';
 
@@ -35,7 +62,11 @@ initializeTelemetry({ serviceName: 'accounting-service' });
 async function bootstrap(): Promise<void> {
   const port = parseInt(process.env['ACCOUNTING_SERVICE_PORT'] ?? '3019', 10);
   const lokiUrl = process.env['LOKI_URL'];
-  const logger = createLogger({ serviceName: 'accounting-service', level: 'info', ...(lokiUrl ? { lokiUrl } : {}) });
+  const logger = createLogger({
+    serviceName: 'accounting-service',
+    level: 'info',
+    ...(lokiUrl ? { lokiUrl } : {}),
+  });
   const config = await loadConfigWithSecrets('accounting-service');
   const databaseUrl = config.databaseUrl;
 
@@ -48,6 +79,7 @@ async function bootstrap(): Promise<void> {
   });
   await ctxFactory.connect();
   ctxFactory.subscribeFeatureFlagInvalidations();
+  ctxFactory.subscribeTenantStatusInvalidations();
   initTenantStatusEnforcement(ctxFactory.rawDb);
 
   // ── Kafka event consumers ─────────────────────────────────────────────────
@@ -61,20 +93,48 @@ async function bootstrap(): Promise<void> {
 
   const eventDispatcher: EventHandler = async (event, db) => {
     switch (event.eventType) {
-      case 'INVOICE_CONFIRMED':  await handleInvoiceConfirmed(event, db); break;
-      case 'INVOICE_CANCELLED':  await handleInvoiceCancelled(event, db); break;
-      case 'GRN_APPROVED':       await handleGRNApproved(event, db); break;
-      case 'COGS_CALCULATED':   await handleCogsCalculated(event, db); break;
-      case 'PAYMENT_RECEIVED':   await handlePaymentReceived(event, db); break;
-      case 'SUPPLIER_PAYMENT_MADE': await handleSupplierPaymentMade(event, db); break;
-      case 'CHEQUE_BOUNCED':     await handleChequeBounced(event, db); break;
-      case 'SALE_RETURN_APPROVED': await handleSaleReturnApproved(event, db); break;
-      case 'EXPENSE_APPROVED':   await handleExpenseApproved(event, db); break;
-      case 'EXPENSE_PAID':       await handleExpensePaid(event, db); break;
-      case 'PAYROLL_RUN_APPROVED':  await handlePayrollRunApproved(event, db); break;
-      case 'PAYROLL_RUN_DISBURSED': await handlePayrollRunDisbursed(event, db); break;
-      case 'EMPLOYEE_LOAN_DISBURSED': await handleEmployeeLoanDisbursed(event, db); break;
-      case 'RCM_LIABILITY_POSTED':  await handleRcmLiabilityPosted(event, db); break;
+      case 'INVOICE_CONFIRMED':
+        await handleInvoiceConfirmed(event, db);
+        break;
+      case 'INVOICE_CANCELLED':
+        await handleInvoiceCancelled(event, db);
+        break;
+      case 'GRN_APPROVED':
+        await handleGRNApproved(event, db);
+        break;
+      case 'COGS_CALCULATED':
+        await handleCogsCalculated(event, db);
+        break;
+      case 'PAYMENT_RECEIVED':
+        await handlePaymentReceived(event, db);
+        break;
+      case 'SUPPLIER_PAYMENT_MADE':
+        await handleSupplierPaymentMade(event, db);
+        break;
+      case 'CHEQUE_BOUNCED':
+        await handleChequeBounced(event, db);
+        break;
+      case 'SALE_RETURN_APPROVED':
+        await handleSaleReturnApproved(event, db);
+        break;
+      case 'EXPENSE_APPROVED':
+        await handleExpenseApproved(event, db);
+        break;
+      case 'EXPENSE_PAID':
+        await handleExpensePaid(event, db);
+        break;
+      case 'PAYROLL_RUN_APPROVED':
+        await handlePayrollRunApproved(event, db);
+        break;
+      case 'PAYROLL_RUN_DISBURSED':
+        await handlePayrollRunDisbursed(event, db);
+        break;
+      case 'EMPLOYEE_LOAN_DISBURSED':
+        await handleEmployeeLoanDisbursed(event, db);
+        break;
+      case 'RCM_LIABILITY_POSTED':
+        await handleRcmLiabilityPosted(event, db);
+        break;
       default:
         logger.warn({ eventType: event.eventType }, 'Unhandled event type in accounting consumer');
     }
@@ -97,7 +157,11 @@ async function bootstrap(): Promise<void> {
     'erp.rcm.liability.posted',
   ];
 
-  const consumer = new PlatformEventConsumer(kafka, 'accounting-service-group', 'accounting-service');
+  const consumer = new PlatformEventConsumer(
+    kafka,
+    'accounting-service-group',
+    'accounting-service'
+  );
   await consumer.subscribe(
     topics,
     eventDispatcher,
@@ -140,31 +204,27 @@ async function bootstrap(): Promise<void> {
     return reply.code(200).header('Content-Type', metricsHandler.contentType).send(body);
   });
 
-  await fastify.register(async (sub) => {
-    await accountRoutes(sub, ctxFactory);
-    await openingBalancesRoutes(sub, ctxFactory);
-    await journalRoutes(sub, ctxFactory);
-    await reportsRoutes(sub, ctxFactory);
-    await bankRoutes(sub, ctxFactory);
-    await financialYearRoutes(sub, ctxFactory);
-    await fixedAssetsRoutes(sub, ctxFactory);
-    await tdsRoutes(sub, ctxFactory);
-    await postingMatrixRoutes(sub, ctxFactory);
-    // Reuses the consumer's own db connection — internal-only, guarded by x-internal-key
-    // rather than a tenant-scoped ctx, so it doesn't need PlatformContextFactory.
-    await searchSyncInternalRoutes(sub, consumerDb);
-    await schedulerInternalRoutes(sub, ctxFactory);
-  }, { prefix: '/api/v2' });
+  await fastify.register(
+    async (sub) => {
+      await accountRoutes(sub, ctxFactory);
+      await openingBalancesRoutes(sub, ctxFactory);
+      await journalRoutes(sub, ctxFactory);
+      await reportsRoutes(sub, ctxFactory);
+      await bankRoutes(sub, ctxFactory);
+      await financialYearRoutes(sub, ctxFactory);
+      await fixedAssetsRoutes(sub, ctxFactory);
+      await tdsRoutes(sub, ctxFactory);
+      await postingMatrixRoutes(sub, ctxFactory);
+      await costCenterRoutes(sub, ctxFactory);
+      // Reuses the consumer's own db connection — internal-only, guarded by x-internal-key
+      // rather than a tenant-scoped ctx, so it doesn't need PlatformContextFactory.
+      await searchSyncInternalRoutes(sub, consumerDb);
+      await schedulerInternalRoutes(sub, ctxFactory);
+    },
+    { prefix: '/api/v2' }
+  );
 
-  fastify.setErrorHandler<FastifyError>((error, request, reply) => {
-    if (error instanceof ERPError) {
-      return reply.code(error.statusCode).send({
-        error: { code: error.code, message: error.message, details: error.details },
-      });
-    }
-    logger.error({ err: error.message, url: request.url, correlationId: (request as { correlationId?: string }).correlationId }, 'Unhandled error in accounting-service');
-    return reply.code(500).send({ error: { code: 'INTERNAL_ERROR', message: 'An unexpected error occurred' } });
-  });
+  registerErrorHandler(fastify, 'accounting-service', logger);
 
   const address = await fastify.listen({ port, host: '0.0.0.0' });
   logger.info({ address }, 'Accounting service started');

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { Eye, Send, ArrowRightLeft } from 'lucide-react';
+import { Eye, Send, ArrowRightLeft, Check, X } from 'lucide-react';
 import { quotationApi } from '../../api/endpoints.js';
 import { useDebounce } from '../../hooks/useDebounce.js';
 import { useAuthStore } from '../../store/auth.store.js';
@@ -48,20 +48,31 @@ export default function QuotationsPage() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
 
-  useEffect(() => { setPage(1); }, [debouncedSearch, status]);
+  useEffect(() => {
+    setPage(1);
+  }, [debouncedSearch, status]);
 
   const { data, isLoading } = useQuery({
     queryKey: ['quotations', debouncedSearch, status, page, pageSize],
-    queryFn: () => quotationApi.list({ search: debouncedSearch || undefined, status: status || undefined, page, pageSize }),
+    queryFn: () =>
+      quotationApi.list({
+        search: debouncedSearch || undefined,
+        status: status || undefined,
+        page,
+        pageSize,
+      }),
     staleTime: 30_000,
   });
 
-  const rows: Quotation[] = (data as Record<string, unknown>)?.content as Quotation[] ?? [];
-  const totalElements = (data as Record<string, unknown>)?.totalElements as number ?? 0;
+  const rows: Quotation[] = ((data as Record<string, unknown>)?.content as Quotation[]) ?? [];
+  const totalElements = ((data as Record<string, unknown>)?.totalElements as number) ?? 0;
 
   const sendMutation = useMutation({
     mutationFn: (id: number) => quotationApi.send(id),
-    onSuccess: () => { toast.success('Quotation sent'); qc.invalidateQueries({ queryKey: ['quotations'] }); },
+    onSuccess: () => {
+      toast.success('Quotation sent');
+      qc.invalidateQueries({ queryKey: ['quotations'] });
+    },
     onError: (e: Error) => toast.error(e.message),
   });
 
@@ -70,6 +81,24 @@ export default function QuotationsPage() {
     onSuccess: (_data, id) => {
       toast.success('Quotation converted — creating invoice');
       navigate(`/sales/invoices/new?quotationId=${id}`);
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const acceptMutation = useMutation({
+    mutationFn: (id: number) => quotationApi.accept(id),
+    onSuccess: () => {
+      toast.success('Quotation accepted');
+      qc.invalidateQueries({ queryKey: ['quotations'] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const rejectMutation = useMutation({
+    mutationFn: (id: number) => quotationApi.reject(id),
+    onSuccess: () => {
+      toast.success('Quotation rejected');
+      qc.invalidateQueries({ queryKey: ['quotations'] });
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -105,10 +134,21 @@ export default function QuotationsPage() {
       header: '',
       align: 'right',
       render: (r) => {
-        const items: ERPMenuItem[] = [{ label: 'View', icon: Eye, onClick: () => navigate(`/sales/quotations/${r.id}`) }];
-        if (canCreateQuotation && r.status === 'DRAFT') items.push({ label: 'Send', icon: Send, onClick: () => sendMutation.mutate(r.id) });
-        if (canConvertQuotation && ['SENT', 'VIEWED', 'ACCEPTED'].includes(r.status)) {
-          items.push({ label: 'Convert to Invoice', icon: ArrowRightLeft, onClick: () => convertMutation.mutate(r.id) });
+        const items: ERPMenuItem[] = [
+          { label: 'View', icon: Eye, onClick: () => navigate(`/sales/quotations/${r.id}`) },
+        ];
+        if (canCreateQuotation && r.status === 'DRAFT')
+          items.push({ label: 'Send', icon: Send, onClick: () => sendMutation.mutate(r.id) });
+        if (canConvertQuotation && ['SENT', 'VIEWED'].includes(r.status)) {
+          items.push({ label: 'Accept', icon: Check, onClick: () => acceptMutation.mutate(r.id) });
+          items.push({ label: 'Reject', icon: X, onClick: () => rejectMutation.mutate(r.id) });
+        }
+        if (canConvertQuotation && r.status === 'ACCEPTED') {
+          items.push({
+            label: 'Convert to Invoice',
+            icon: ArrowRightLeft,
+            onClick: () => convertMutation.mutate(r.id),
+          });
         }
         return <ERPDropdownMenu items={items} />;
       },
@@ -118,10 +158,12 @@ export default function QuotationsPage() {
   return (
     <div>
       <ERPPageHeader variant="list" title="Quotations" subtitle="Manage customer quotations">
-        {canCreateQuotation && <Button onClick={() => navigate('/sales/quotations/new')}>+ New Quotation</Button>}
+        {canCreateQuotation && (
+          <Button onClick={() => navigate('/sales/quotations/new')}>+ New Quotation</Button>
+        )}
       </ERPPageHeader>
 
-      <div className="flex gap-4 mb-4">
+      <div className="flex flex-col sm:flex-row gap-4 mb-4">
         <div className="flex-1 max-w-sm">
           <Input
             placeholder="Search by number..."
@@ -132,7 +174,9 @@ export default function QuotationsPage() {
         <Select value={status} onChange={(e) => setStatus(e.target.value)} className="w-44">
           <option value="">All Statuses</option>
           {['DRAFT', 'SENT', 'VIEWED', 'ACCEPTED', 'CONVERTED', 'EXPIRED', 'REJECTED'].map((s) => (
-            <option key={s} value={s}>{s}</option>
+            <option key={s} value={s}>
+              {s}
+            </option>
           ))}
         </Select>
       </div>
@@ -144,7 +188,10 @@ export default function QuotationsPage() {
         rowKey="id"
         pagination={{ page, pageSize, total: totalElements }}
         onPageChange={setPage}
-        onPageSizeChange={(size) => { setPageSize(size); setPage(1); }}
+        onPageSizeChange={(size) => {
+          setPageSize(size);
+          setPage(1);
+        }}
       />
     </div>
   );

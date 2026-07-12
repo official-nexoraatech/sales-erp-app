@@ -82,5 +82,3 @@ export function maskGstin(gstin: string): string {
 export function maskBankAccount(accountNo: string): string {
   return '••••' + accountNo.slice(-4);
 }
-
-export { encryptField, decryptField } from './encryption.js';

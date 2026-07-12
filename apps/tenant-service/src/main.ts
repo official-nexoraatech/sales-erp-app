@@ -1,11 +1,25 @@
-import Fastify, { type FastifyError } from 'fastify';
+import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 import { createDatabaseClient } from '@erp/db';
-import { HELMET_OPTIONS, PERMISSIONS_POLICY, registerHealthRoute, tenantOrIpKeyGenerator, checkDatabase, initializeTelemetry, initTenantStatusEnforcement, PlatformContextFactory } from '@erp/sdk';
-import { createLogger, createMetricsHandler, createHttpMetricsHook, createCorrelationIdHook } from '@erp/logger';
-import { ERPError } from '@erp/types';
+import {
+  HELMET_OPTIONS,
+  PERMISSIONS_POLICY,
+  registerHealthRoute,
+  tenantOrIpKeyGenerator,
+  checkDatabase,
+  initializeTelemetry,
+  initTenantStatusEnforcement,
+  PlatformContextFactory,
+  registerErrorHandler,
+} from '@erp/sdk';
+import {
+  createLogger,
+  createMetricsHandler,
+  createHttpMetricsHook,
+  createCorrelationIdHook,
+} from '@erp/logger';
 import { loadTenantConfig } from './config.js';
 import { tenantRoutes } from './api/tenant.routes.js';
 import { approvalRoutes } from './api/approval.routes.js';
@@ -20,7 +34,11 @@ initializeTelemetry({ serviceName: 'tenant-service' });
 async function bootstrap(): Promise<void> {
   const config = await loadTenantConfig();
   const lokiUrl = process.env['LOKI_URL'];
-  const logger = createLogger({ serviceName: 'tenant-service', level: 'info', ...(lokiUrl ? { lokiUrl } : {}) });
+  const logger = createLogger({
+    serviceName: 'tenant-service',
+    level: 'info',
+    ...(lokiUrl ? { lokiUrl } : {}),
+  });
 
   const db = createDatabaseClient({ url: config.databaseUrl });
   initTenantStatusEnforcement(db);
@@ -40,6 +58,7 @@ async function bootstrap(): Promise<void> {
     serviceName: 'tenant-service',
   });
   await ctxFactory.connect();
+  ctxFactory.subscribeTenantStatusInvalidations();
 
   const fastify = Fastify({ logger: false, trustProxy: true });
 
@@ -71,29 +90,20 @@ async function bootstrap(): Promise<void> {
     return reply.code(200).header('Content-Type', metricsHandler.contentType).send(body);
   });
 
-  await fastify.register(async (sub) => {
-    await tenantRoutes(sub, db, config);
-    await approvalRoutes(sub, db);
-    await organizationRoutes(sub, ctxFactory);
-    await ssoConfigRoutes(sub, ctxFactory);
-    await branchRoutes(sub, ctxFactory);
-    await searchSyncInternalRoutes(sub, db);
-    await usageRoutes(sub, db);
-  }, { prefix: '/api/v2' });
+  await fastify.register(
+    async (sub) => {
+      await tenantRoutes(sub, db, config, ctxFactory);
+      await approvalRoutes(sub, db);
+      await organizationRoutes(sub, ctxFactory);
+      await ssoConfigRoutes(sub, ctxFactory);
+      await branchRoutes(sub, ctxFactory);
+      await searchSyncInternalRoutes(sub, db);
+      await usageRoutes(sub, db);
+    },
+    { prefix: '/api/v2' }
+  );
 
-  fastify.setErrorHandler<FastifyError>((error, request, reply) => {
-    if (error instanceof ERPError) {
-      return reply.code(error.statusCode).send({
-        error: {
-          code: error.code,
-          message: error.message,
-          details: error.details,
-        },
-      });
-    }
-    logger.error({ err: error.message, url: request.url, correlationId: (request as { correlationId?: string }).correlationId }, 'Unhandled error in tenant-service');
-    return reply.code(500).send({ error: { code: 'INTERNAL_ERROR', message: 'An unexpected error occurred' } });
-  });
+  registerErrorHandler(fastify, 'tenant-service', logger);
 
   const address = await fastify.listen({ port: config.port, host: '0.0.0.0' });
   logger.info({ address }, 'Tenant service started');

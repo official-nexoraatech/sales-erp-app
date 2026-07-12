@@ -25,20 +25,45 @@ import { ValuationService } from './ValuationService.js';
 import { ulid } from 'ulid';
 
 export class InsufficientStockError extends ERPError {
-  constructor(public itemId: number, public available: number, public requested: number) {
-    super('INSUFFICIENT_STOCK', `Item ${itemId} has only ${available} units available`, 422, { itemId, available, requested });
+  constructor(
+    public itemId: number,
+    public available: number,
+    public requested: number
+  ) {
+    super('INSUFFICIENT_STOCK', `Item ${itemId} has only ${available} units available`, 422, {
+      itemId,
+      available,
+      requested,
+    });
   }
 }
 
 export class CreditLimitExceededError extends ERPError {
-  constructor(public limit: number, public newBalance: number) {
-    super('CREDIT_LIMIT_EXCEEDED', `Invoice would exceed credit limit. Limit: ${limit}, New balance: ${newBalance}`, 422);
+  constructor(
+    public limit: number,
+    public newBalance: number
+  ) {
+    super(
+      'CREDIT_LIMIT_EXCEEDED',
+      `Invoice would exceed credit limit. Limit: ${limit}, New balance: ${newBalance}`,
+      422,
+      { limit, newBalance }
+    );
   }
 }
 
 export class PriceFloorViolationError extends ERPError {
-  constructor(public itemId: number, public minPrice: number, public offered: number) {
-    super('PRICE_FLOOR_VIOLATION', `Item ${itemId} min sale price is ${minPrice}, offered ${offered}`, 422);
+  constructor(
+    public itemId: number,
+    public minPrice: number,
+    public offered: number
+  ) {
+    super(
+      'PRICE_FLOOR_VIOLATION',
+      `Item ${itemId} min sale price is ${minPrice}, offered ${offered}`,
+      422,
+      { itemId, minPrice, offered }
+    );
   }
 }
 
@@ -106,19 +131,6 @@ export class InvoiceService {
 
   private async createInTransaction(params: CreateInvoiceParams): Promise<number> {
     return this.db.transaction(async (trx) => {
-      // Step 1 — Validate credit limit
-      const [customer] = await trx
-        .select({ creditLimit: customers.creditLimit, creditLimitEnabled: customers.creditLimitEnabled })
-        .from(customers)
-        .where(and(eq(customers.id, params.customerId), eq(customers.tenantId, params.tenantId)));
-      if (!customer) throw new NotFoundError('Customer not found');
-
-      // Load current balance from projection table
-      const [balanceRow] = await trx
-        .select({ currentBalance: projectionCustomerBalance.currentBalance })
-        .from(projectionCustomerBalance)
-        .where(and(eq(projectionCustomerBalance.customerId, params.customerId), eq(projectionCustomerBalance.tenantId, params.tenantId)));
-
       // Compute line totals first for credit check
       const computedLines = params.lines.map((l, i) => {
         const gst = GSTCalculator.computeLine({
@@ -141,11 +153,38 @@ export class InvoiceService {
         }))
       );
 
-      if (customer.creditLimitEnabled && !params.overrideCreditLimit) {
-        const newBalance = parseFloat(String(balanceRow?.currentBalance ?? 0)) + totals.grandTotal;
-        const limit = parseFloat(String(customer.creditLimit ?? 0));
-        if (limit > 0 && newBalance > limit) {
-          throw new CreditLimitExceededError(limit, newBalance);
+      // Step 1 — Validate credit limit. Skipped for walk-in sales: customerId 0 is a
+      // deliberate "no customer selected" sentinel stored in the NOT NULL column (see
+      // report-service's COALESCE(c.display_name, 'Walk-in')), not a real customer row,
+      // and there's no persistent customer to check credit against.
+      if (params.customerId > 0) {
+        const [customer] = await trx
+          .select({
+            creditLimit: customers.creditLimit,
+            creditLimitEnabled: customers.creditLimitEnabled,
+          })
+          .from(customers)
+          .where(and(eq(customers.id, params.customerId), eq(customers.tenantId, params.tenantId)));
+        if (!customer) throw new NotFoundError('Customer not found');
+
+        // Load current balance from projection table
+        const [balanceRow] = await trx
+          .select({ currentBalance: projectionCustomerBalance.currentBalance })
+          .from(projectionCustomerBalance)
+          .where(
+            and(
+              eq(projectionCustomerBalance.customerId, params.customerId),
+              eq(projectionCustomerBalance.tenantId, params.tenantId)
+            )
+          );
+
+        if (customer.creditLimitEnabled && !params.overrideCreditLimit) {
+          const newBalance =
+            parseFloat(String(balanceRow?.currentBalance ?? 0)) + totals.grandTotal;
+          const limit = parseFloat(String(customer.creditLimit ?? 0));
+          if (limit > 0 && newBalance > limit) {
+            throw new CreditLimitExceededError(limit, newBalance);
+          }
         }
       }
 
@@ -262,7 +301,9 @@ export class InvoiceService {
         await trx
           .update(quotations)
           .set({ status: 'CONVERTED', convertedInvoiceId: invoiceId, convertedAt: new Date() })
-          .where(and(eq(quotations.id, params.quotationId), eq(quotations.tenantId, params.tenantId)));
+          .where(
+            and(eq(quotations.id, params.quotationId), eq(quotations.tenantId, params.tenantId))
+          );
       }
 
       // Mark delivery challan as converted if linked
@@ -270,7 +311,12 @@ export class InvoiceService {
         await trx
           .update(deliveryChallans)
           .set({ status: 'CONVERTED', convertedInvoiceId: invoiceId, convertedAt: new Date() })
-          .where(and(eq(deliveryChallans.id, params.deliveryChallanId), eq(deliveryChallans.tenantId, params.tenantId)));
+          .where(
+            and(
+              eq(deliveryChallans.id, params.deliveryChallanId),
+              eq(deliveryChallans.tenantId, params.tenantId)
+            )
+          );
       }
 
       return invoiceId;
@@ -308,7 +354,12 @@ export class InvoiceService {
           {
             name: 'confirmInvoiceTransaction',
             type: 'RETRYABLE',
-            execute: async (ctx: { id: number; tenantId: number; invoiceNumber: string; userId: number }) => {
+            execute: async (ctx: {
+              id: number;
+              tenantId: number;
+              invoiceNumber: string;
+              userId: number;
+            }) => {
               await this.confirmInTransaction(ctx.id, ctx.tenantId, ctx.invoiceNumber, ctx.userId);
             },
           },
@@ -317,7 +368,10 @@ export class InvoiceService {
     } catch (err) {
       const cause = err instanceof SagaExecutionError ? err.cause : err;
       if (isUniqueConstraintViolation(cause, 'invoices_tenant_number')) {
-        throw new BusinessError('INVOICE_NUMBER_DUPLICATE', `Invoice number ${invoiceNumber} already exists`);
+        throw new BusinessError(
+          'INVOICE_NUMBER_DUPLICATE',
+          `Invoice number ${invoiceNumber} already exists`
+        );
       }
       throw cause;
     }
@@ -336,7 +390,10 @@ export class InvoiceService {
         .where(and(eq(invoices.id, id), eq(invoices.tenantId, tenantId)));
       if (!invoice) throw new NotFoundError('Invoice not found');
       if (invoice.status !== 'DRAFT')
-        throw new BusinessError('INVALID_STATUS', `Cannot confirm invoice in status ${invoice.status}`);
+        throw new BusinessError(
+          'INVALID_STATUS',
+          `Cannot confirm invoice in status ${invoice.status}`
+        );
 
       // ES-14: duplicate invoice number guard — the DB unique index
       // (invoices_tenant_number) is the ultimate backstop, but a raw
@@ -347,7 +404,10 @@ export class InvoiceService {
         .from(invoices)
         .where(and(eq(invoices.tenantId, tenantId), eq(invoices.invoiceNumber, invoiceNumber)));
       if (duplicate && duplicate.id !== id) {
-        throw new BusinessError('INVOICE_NUMBER_DUPLICATE', `Invoice number ${invoiceNumber} already exists`);
+        throw new BusinessError(
+          'INVOICE_NUMBER_DUPLICATE',
+          `Invoice number ${invoiceNumber} already exists`
+        );
       }
 
       // ES-14: period closure guard — cannot confirm (post) an invoice dated
@@ -357,21 +417,21 @@ export class InvoiceService {
       // rather than imported, since sales-service doesn't call into
       // accounting-service's domain classes; see ES-03's architecture notes).
       const invoiceDate = new Date(invoice.invoiceDate);
-      const [closure] = await trx.execute(
+      const [closure] = (await trx.execute(
         sql`SELECT status FROM period_closures
             WHERE tenant_id = ${tenantId}
               AND period_month = ${invoiceDate.getMonth() + 1}
               AND period_year = ${invoiceDate.getFullYear()}
             LIMIT 1`
-      ) as { status: string }[];
+      )) as { status: string }[];
       if (closure?.status === 'CLOSED') {
-        throw new BusinessError('PERIOD_CLOSED', 'Cannot confirm an invoice dated in a closed accounting period');
+        throw new BusinessError(
+          'PERIOD_CLOSED',
+          'Cannot confirm an invoice dated in a closed accounting period'
+        );
       }
 
-      const lines = await trx
-        .select()
-        .from(invoiceLines)
-        .where(eq(invoiceLines.invoiceId, id));
+      const lines = await trx.select().from(invoiceLines).where(eq(invoiceLines.invoiceId, id));
 
       // Step — Deduct stock atomically per line
       // ES-03: inventory_ledger row is written via a direct insert on the shared
@@ -471,7 +531,11 @@ export class InvoiceService {
           collectedAmount: '0',
         })
         .onConflictDoUpdate({
-          target: [projectionDashboardDaily.tenantId, projectionDashboardDaily.branchId, projectionDashboardDaily.date],
+          target: [
+            projectionDashboardDaily.tenantId,
+            projectionDashboardDaily.branchId,
+            projectionDashboardDaily.date,
+          ],
           set: {
             salesCount: sql`${projectionDashboardDaily.salesCount} + 1`,
             salesAmount: sql`${projectionDashboardDaily.salesAmount} + ${parseFloat(String(invoice.grandTotal))}`,
@@ -577,14 +641,14 @@ export class InvoiceService {
         .where(and(eq(invoices.id, id), eq(invoices.tenantId, tenantId)));
       if (!invoice) throw new NotFoundError('Invoice not found');
       if (!['DRAFT', 'CONFIRMED'].includes(invoice.status))
-        throw new BusinessError('INVALID_STATUS', `Cannot cancel invoice in status ${invoice.status}`);
+        throw new BusinessError(
+          'INVALID_STATUS',
+          `Cannot cancel invoice in status ${invoice.status}`
+        );
 
       // Restore stock if confirmed
       if (invoice.status === 'CONFIRMED') {
-        const lines = await trx
-          .select()
-          .from(invoiceLines)
-          .where(eq(invoiceLines.invoiceId, id));
+        const lines = await trx.select().from(invoiceLines).where(eq(invoiceLines.invoiceId, id));
 
         for (const line of lines) {
           const lineQty = parseFloat(String(line.quantity));
@@ -625,10 +689,12 @@ export class InvoiceService {
             totalInvoiced: sql`${projectionCustomerBalance.totalInvoiced} - ${parseFloat(String(invoice.grandTotal))}`,
             updatedAt: new Date(),
           })
-          .where(and(
-            eq(projectionCustomerBalance.tenantId, tenantId),
-            eq(projectionCustomerBalance.customerId, invoice.customerId)
-          ));
+          .where(
+            and(
+              eq(projectionCustomerBalance.tenantId, tenantId),
+              eq(projectionCustomerBalance.customerId, invoice.customerId)
+            )
+          );
 
         // Outbox: INVOICE_CANCELLED
         await trx.insert(outboxEvents).values({
@@ -637,14 +703,25 @@ export class InvoiceService {
           aggregateType: 'Invoice',
           aggregateId: id,
           tenantId,
-          payload: { invoiceId: id, customerId: invoice.customerId, grandTotal: invoice.grandTotal, reason },
+          payload: {
+            invoiceId: id,
+            customerId: invoice.customerId,
+            grandTotal: invoice.grandTotal,
+            reason,
+          },
           published: false,
         });
       }
 
       await trx
         .update(invoices)
-        .set({ status: 'CANCELLED', cancelledAt: new Date(), cancellationReason: reason, updatedBy: userId, updatedAt: new Date() })
+        .set({
+          status: 'CANCELLED',
+          cancelledAt: new Date(),
+          cancellationReason: reason,
+          updatedBy: userId,
+          updatedAt: new Date(),
+        })
         .where(and(eq(invoices.id, id), eq(invoices.tenantId, tenantId)));
 
       await trx.insert(invoiceHistory).values({
@@ -659,7 +736,12 @@ export class InvoiceService {
     });
   }
 
-  async duplicate(id: number, tenantId: number, userId: number, invoiceNumber: string): Promise<number> {
+  async duplicate(
+    id: number,
+    tenantId: number,
+    userId: number,
+    _invoiceNumber: string
+  ): Promise<number> {
     const [original] = await this.db
       .select()
       .from(invoices)
@@ -735,10 +817,7 @@ export class InvoiceService {
       .where(and(eq(invoices.id, id), eq(invoices.tenantId, tenantId)));
     if (!invoice) throw new NotFoundError('Invoice not found');
 
-    const lines = await this.db
-      .select()
-      .from(invoiceLines)
-      .where(eq(invoiceLines.invoiceId, id));
+    const lines = await this.db.select().from(invoiceLines).where(eq(invoiceLines.invoiceId, id));
 
     return { ...invoice, lines };
   }

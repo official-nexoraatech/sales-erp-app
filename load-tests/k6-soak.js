@@ -12,31 +12,38 @@
 import http from 'k6/http';
 import { check, sleep } from 'k6';
 import { Rate, Trend, Gauge } from 'k6/metrics';
-import { BASE_SALES, BASE_INVENTORY, authHeaders, buildInvoicePayload } from './k6-helpers.js';
+import {
+  BASE_AUTH,
+  BASE_SALES,
+  BASE_INVENTORY,
+  TEST_CREDENTIALS,
+  authHeaders,
+  buildInvoicePayload,
+  assertSafeEnvironment,
+} from './k6-helpers.js';
 
 const soakErrors = new Rate('soak_errors');
 const soakLatency = new Trend('soak_latency', true);
 
 export const options = {
   stages: [
-    { duration: '5m', target: 100 },   // ramp up
+    { duration: '5m', target: 100 }, // ramp up
     { duration: '23h50m', target: 100 }, // 24-hour hold
-    { duration: '5m', target: 0 },     // ramp down
+    { duration: '5m', target: 0 }, // ramp down
   ],
   thresholds: {
     // Sustained healthy performance over 24 hours
     soak_errors: ['rate<0.005'],
-    soak_latency: ['p(95)<800'],  // slightly relaxed for long-running soak
+    soak_latency: ['p(95)<800'], // slightly relaxed for long-running soak
     http_req_failed: ['rate<0.005'],
   },
 };
 
 export function setup() {
-  const res = http.post(
-    'http://localhost:3010/auth/login',
-    JSON.stringify({ email: 'admin@testco.com', password: 'TestAdmin@2026!', tenantId: 1 }),
-    { headers: { 'Content-Type': 'application/json' } }
-  );
+  assertSafeEnvironment();
+  const res = http.post(`${BASE_AUTH}/auth/login`, JSON.stringify(TEST_CREDENTIALS), {
+    headers: { 'Content-Type': 'application/json' },
+  });
   return { token: JSON.parse(res.body)?.data?.accessToken ?? '', startTime: Date.now() };
 }
 

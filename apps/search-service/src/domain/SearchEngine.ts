@@ -139,7 +139,15 @@ const ERP_ANALYSIS_SETTINGS = {
 // ── Entity-specific mappings ───────────────────────────────────────────────────
 const ENTITY_MAPPINGS: Record<SearchEntity, Record<string, unknown>> = {
   customer: {
-    name: { type: 'text', analyzer: 'erp_name_analyzer', search_analyzer: 'erp_search_analyzer', fields: { keyword: { type: 'keyword' }, ngram: { type: 'text', analyzer: 'erp_ngram_analyzer' } } },
+    name: {
+      type: 'text',
+      analyzer: 'erp_name_analyzer',
+      search_analyzer: 'erp_search_analyzer',
+      fields: {
+        keyword: { type: 'keyword' },
+        ngram: { type: 'text', analyzer: 'erp_ngram_analyzer' },
+      },
+    },
     phone: { type: 'keyword' },
     email: { type: 'keyword' },
     gstin: { type: 'keyword' },
@@ -147,14 +155,30 @@ const ENTITY_MAPPINGS: Record<SearchEntity, Record<string, unknown>> = {
     tenantId: { type: 'keyword' },
   },
   supplier: {
-    name: { type: 'text', analyzer: 'erp_name_analyzer', search_analyzer: 'erp_search_analyzer', fields: { keyword: { type: 'keyword' }, ngram: { type: 'text', analyzer: 'erp_ngram_analyzer' } } },
+    name: {
+      type: 'text',
+      analyzer: 'erp_name_analyzer',
+      search_analyzer: 'erp_search_analyzer',
+      fields: {
+        keyword: { type: 'keyword' },
+        ngram: { type: 'text', analyzer: 'erp_ngram_analyzer' },
+      },
+    },
     phone: { type: 'keyword' },
     email: { type: 'keyword' },
     gstin: { type: 'keyword' },
     tenantId: { type: 'keyword' },
   },
   item: {
-    name: { type: 'text', analyzer: 'erp_name_analyzer', search_analyzer: 'erp_search_analyzer', fields: { keyword: { type: 'keyword' }, ngram: { type: 'text', analyzer: 'erp_ngram_analyzer' } } },
+    name: {
+      type: 'text',
+      analyzer: 'erp_name_analyzer',
+      search_analyzer: 'erp_search_analyzer',
+      fields: {
+        keyword: { type: 'keyword' },
+        ngram: { type: 'text', analyzer: 'erp_ngram_analyzer' },
+      },
+    },
     sku: { type: 'keyword' },
     barcode: { type: 'keyword' },
     category: { type: 'keyword' },
@@ -164,7 +188,11 @@ const ENTITY_MAPPINGS: Record<SearchEntity, Record<string, unknown>> = {
   },
   invoice: {
     invoiceNumber: { type: 'keyword' },
-    customerName: { type: 'text', analyzer: 'erp_name_analyzer', search_analyzer: 'erp_search_analyzer' },
+    customerName: {
+      type: 'text',
+      analyzer: 'erp_name_analyzer',
+      search_analyzer: 'erp_search_analyzer',
+    },
     amount: { type: 'double' },
     status: { type: 'keyword' },
     invoiceDate: { type: 'date' },
@@ -173,7 +201,11 @@ const ENTITY_MAPPINGS: Record<SearchEntity, Record<string, unknown>> = {
   },
   purchase_order: {
     poNumber: { type: 'keyword' },
-    supplierName: { type: 'text', analyzer: 'erp_name_analyzer', search_analyzer: 'erp_search_analyzer' },
+    supplierName: {
+      type: 'text',
+      analyzer: 'erp_name_analyzer',
+      search_analyzer: 'erp_search_analyzer',
+    },
     amount: { type: 'double' },
     status: { type: 'keyword' },
     poDate: { type: 'date' },
@@ -181,14 +213,23 @@ const ENTITY_MAPPINGS: Record<SearchEntity, Record<string, unknown>> = {
     tenantId: { type: 'keyword' },
   },
   stock: {
-    itemName: { type: 'text', analyzer: 'erp_name_analyzer', search_analyzer: 'erp_search_analyzer' },
+    itemName: {
+      type: 'text',
+      analyzer: 'erp_name_analyzer',
+      search_analyzer: 'erp_search_analyzer',
+    },
     sku: { type: 'keyword' },
     warehouse: { type: 'keyword' },
     quantity: { type: 'double' },
     tenantId: { type: 'keyword' },
   },
   employee: {
-    name: { type: 'text', analyzer: 'erp_name_analyzer', search_analyzer: 'erp_search_analyzer', fields: { keyword: { type: 'keyword' } } },
+    name: {
+      type: 'text',
+      analyzer: 'erp_name_analyzer',
+      search_analyzer: 'erp_search_analyzer',
+      fields: { keyword: { type: 'keyword' } },
+    },
     employeeCode: { type: 'keyword' },
     designation: { type: 'keyword' },
     department: { type: 'keyword' },
@@ -196,7 +237,11 @@ const ENTITY_MAPPINGS: Record<SearchEntity, Record<string, unknown>> = {
   },
   quotation: {
     quotationNumber: { type: 'keyword' },
-    customerName: { type: 'text', analyzer: 'erp_name_analyzer', search_analyzer: 'erp_search_analyzer' },
+    customerName: {
+      type: 'text',
+      analyzer: 'erp_name_analyzer',
+      search_analyzer: 'erp_search_analyzer',
+    },
     amount: { type: 'double' },
     status: { type: 'keyword' },
     quotationDate: { type: 'date' },
@@ -204,40 +249,74 @@ const ENTITY_MAPPINGS: Record<SearchEntity, Record<string, unknown>> = {
     tenantId: { type: 'keyword' },
   },
   crm_interaction: {
-    customerName: { type: 'text', analyzer: 'erp_name_analyzer', search_analyzer: 'erp_search_analyzer' },
+    customerName: {
+      type: 'text',
+      analyzer: 'erp_name_analyzer',
+      search_analyzer: 'erp_search_analyzer',
+    },
     type: { type: 'keyword' },
     notes: { type: 'text', analyzer: 'erp_name_analyzer', search_analyzer: 'erp_search_analyzer' },
     interactionDate: { type: 'date' },
     tenantId: { type: 'keyword' },
   },
   crm_segment: {
-    name: { type: 'text', analyzer: 'erp_name_analyzer', search_analyzer: 'erp_search_analyzer', fields: { keyword: { type: 'keyword' } } },
+    name: {
+      type: 'text',
+      analyzer: 'erp_name_analyzer',
+      search_analyzer: 'erp_search_analyzer',
+      fields: { keyword: { type: 'keyword' } },
+    },
     code: { type: 'keyword' },
     tenantId: { type: 'keyword' },
   },
   crm_campaign: {
-    name: { type: 'text', analyzer: 'erp_name_analyzer', search_analyzer: 'erp_search_analyzer', fields: { keyword: { type: 'keyword' } } },
+    name: {
+      type: 'text',
+      analyzer: 'erp_name_analyzer',
+      search_analyzer: 'erp_search_analyzer',
+      fields: { keyword: { type: 'keyword' } },
+    },
     channel: { type: 'keyword' },
     status: { type: 'keyword' },
     tenantId: { type: 'keyword' },
   },
   category: {
-    name: { type: 'text', analyzer: 'erp_name_analyzer', search_analyzer: 'erp_search_analyzer', fields: { keyword: { type: 'keyword' } } },
+    name: {
+      type: 'text',
+      analyzer: 'erp_name_analyzer',
+      search_analyzer: 'erp_search_analyzer',
+      fields: { keyword: { type: 'keyword' } },
+    },
     code: { type: 'keyword' },
     tenantId: { type: 'keyword' },
   },
   brand: {
-    name: { type: 'text', analyzer: 'erp_name_analyzer', search_analyzer: 'erp_search_analyzer', fields: { keyword: { type: 'keyword' } } },
+    name: {
+      type: 'text',
+      analyzer: 'erp_name_analyzer',
+      search_analyzer: 'erp_search_analyzer',
+      fields: { keyword: { type: 'keyword' } },
+    },
     code: { type: 'keyword' },
     tenantId: { type: 'keyword' },
   },
   unit: {
-    name: { type: 'text', analyzer: 'erp_name_analyzer', search_analyzer: 'erp_search_analyzer', fields: { keyword: { type: 'keyword' } } },
+    name: {
+      type: 'text',
+      analyzer: 'erp_name_analyzer',
+      search_analyzer: 'erp_search_analyzer',
+      fields: { keyword: { type: 'keyword' } },
+    },
     abbreviation: { type: 'keyword' },
     tenantId: { type: 'keyword' },
   },
   warehouse: {
-    name: { type: 'text', analyzer: 'erp_name_analyzer', search_analyzer: 'erp_search_analyzer', fields: { keyword: { type: 'keyword' } } },
+    name: {
+      type: 'text',
+      analyzer: 'erp_name_analyzer',
+      search_analyzer: 'erp_search_analyzer',
+      fields: { keyword: { type: 'keyword' } },
+    },
     code: { type: 'keyword' },
     branchId: { type: 'keyword' },
     tenantId: { type: 'keyword' },
@@ -257,7 +336,11 @@ const ENTITY_MAPPINGS: Record<SearchEntity, Record<string, unknown>> = {
   },
   grn: {
     grnNumber: { type: 'keyword' },
-    supplierName: { type: 'text', analyzer: 'erp_name_analyzer', search_analyzer: 'erp_search_analyzer' },
+    supplierName: {
+      type: 'text',
+      analyzer: 'erp_name_analyzer',
+      search_analyzer: 'erp_search_analyzer',
+    },
     status: { type: 'keyword' },
     grnDate: { type: 'date' },
     branchId: { type: 'keyword' },
@@ -265,27 +348,44 @@ const ENTITY_MAPPINGS: Record<SearchEntity, Record<string, unknown>> = {
   },
   purchase_return: {
     returnNumber: { type: 'keyword' },
-    supplierName: { type: 'text', analyzer: 'erp_name_analyzer', search_analyzer: 'erp_search_analyzer' },
+    supplierName: {
+      type: 'text',
+      analyzer: 'erp_name_analyzer',
+      search_analyzer: 'erp_search_analyzer',
+    },
     status: { type: 'keyword' },
     returnDate: { type: 'date' },
     branchId: { type: 'keyword' },
     tenantId: { type: 'keyword' },
   },
   account: {
-    name: { type: 'text', analyzer: 'erp_name_analyzer', search_analyzer: 'erp_search_analyzer', fields: { keyword: { type: 'keyword' } } },
+    name: {
+      type: 'text',
+      analyzer: 'erp_name_analyzer',
+      search_analyzer: 'erp_search_analyzer',
+      fields: { keyword: { type: 'keyword' } },
+    },
     accountCode: { type: 'keyword' },
     accountType: { type: 'keyword' },
     tenantId: { type: 'keyword' },
   },
   journal_entry: {
     journalId: { type: 'keyword' },
-    description: { type: 'text', analyzer: 'erp_name_analyzer', search_analyzer: 'erp_search_analyzer' },
+    description: {
+      type: 'text',
+      analyzer: 'erp_name_analyzer',
+      search_analyzer: 'erp_search_analyzer',
+    },
     referenceType: { type: 'keyword' },
     tenantId: { type: 'keyword' },
   },
   payment: {
     paymentNumber: { type: 'keyword' },
-    customerName: { type: 'text', analyzer: 'erp_name_analyzer', search_analyzer: 'erp_search_analyzer' },
+    customerName: {
+      type: 'text',
+      analyzer: 'erp_name_analyzer',
+      search_analyzer: 'erp_search_analyzer',
+    },
     amount: { type: 'double' },
     paymentMode: { type: 'keyword' },
     paymentDate: { type: 'date' },
@@ -293,7 +393,11 @@ const ENTITY_MAPPINGS: Record<SearchEntity, Record<string, unknown>> = {
     tenantId: { type: 'keyword' },
   },
   attendance: {
-    employeeName: { type: 'text', analyzer: 'erp_name_analyzer', search_analyzer: 'erp_search_analyzer' },
+    employeeName: {
+      type: 'text',
+      analyzer: 'erp_name_analyzer',
+      search_analyzer: 'erp_search_analyzer',
+    },
     attendanceDate: { type: 'date' },
     tenantId: { type: 'keyword' },
   },
@@ -304,32 +408,61 @@ const ENTITY_MAPPINGS: Record<SearchEntity, Record<string, unknown>> = {
     tenantId: { type: 'keyword' },
   },
   leave_application: {
-    employeeName: { type: 'text', analyzer: 'erp_name_analyzer', search_analyzer: 'erp_search_analyzer' },
+    employeeName: {
+      type: 'text',
+      analyzer: 'erp_name_analyzer',
+      search_analyzer: 'erp_search_analyzer',
+    },
     startDate: { type: 'date' },
     endDate: { type: 'date' },
     status: { type: 'keyword' },
     tenantId: { type: 'keyword' },
   },
   user: {
-    name: { type: 'text', analyzer: 'erp_name_analyzer', search_analyzer: 'erp_search_analyzer', fields: { keyword: { type: 'keyword' } } },
+    name: {
+      type: 'text',
+      analyzer: 'erp_name_analyzer',
+      search_analyzer: 'erp_search_analyzer',
+      fields: { keyword: { type: 'keyword' } },
+    },
     email: { type: 'keyword' },
     tenantId: { type: 'keyword' },
   },
   role: {
-    name: { type: 'text', analyzer: 'erp_name_analyzer', search_analyzer: 'erp_search_analyzer', fields: { keyword: { type: 'keyword' } } },
+    name: {
+      type: 'text',
+      analyzer: 'erp_name_analyzer',
+      search_analyzer: 'erp_search_analyzer',
+      fields: { keyword: { type: 'keyword' } },
+    },
     tenantId: { type: 'keyword' },
   },
   branch: {
-    name: { type: 'text', analyzer: 'erp_name_analyzer', search_analyzer: 'erp_search_analyzer', fields: { keyword: { type: 'keyword' } } },
+    name: {
+      type: 'text',
+      analyzer: 'erp_name_analyzer',
+      search_analyzer: 'erp_search_analyzer',
+      fields: { keyword: { type: 'keyword' } },
+    },
     code: { type: 'keyword' },
     tenantId: { type: 'keyword' },
   },
   organization: {
-    name: { type: 'text', analyzer: 'erp_name_analyzer', search_analyzer: 'erp_search_analyzer', fields: { keyword: { type: 'keyword' } } },
+    name: {
+      type: 'text',
+      analyzer: 'erp_name_analyzer',
+      search_analyzer: 'erp_search_analyzer',
+      fields: { keyword: { type: 'keyword' } },
+    },
     tenantId: { type: 'keyword' },
   },
   attachment: {
-    fileName: { type: 'text', analyzer: 'erp_name_analyzer', search_analyzer: 'erp_search_analyzer', fields: { keyword: { type: 'keyword' } } },
+    fileName: {
+      type: 'text',
+      analyzer: 'erp_name_analyzer',
+      search_analyzer: 'erp_search_analyzer',
+      fields: { keyword: { type: 'keyword' } },
+    },
     entityType: { type: 'keyword' },
     entityId: { type: 'keyword' },
     tenantId: { type: 'keyword' },
@@ -384,8 +517,12 @@ export class SearchEngine {
   async createTenantIndices(tenantId: number): Promise<void> {
     for (const entity of ALL_SEARCH_ENTITIES) {
       const index = this.indexName(tenantId, entity);
+      // number_of_replicas: 0 — search data is always re-derivable from Postgres via
+      // fullReindex(), so a lost replica shard costs a slower recovery, not data loss. Halving
+      // shard count this way matters at tenant-scale (see PG-049): tenant_count × 30 entities
+      // × 2 shards/index accumulates into ES cluster-state bloat well before it's an incident.
       const result = await this.esRequest('PUT', `/${index}`, {
-        settings: { number_of_shards: 1, number_of_replicas: 1, ...ERP_ANALYSIS_SETTINGS },
+        settings: { number_of_shards: 1, number_of_replicas: 0, ...ERP_ANALYSIS_SETTINGS },
         mappings: { properties: ENTITY_MAPPINGS[entity] },
       });
       if (!result.ok && (result.data as { status?: number }).status !== 400) {
@@ -442,8 +579,15 @@ export class SearchEngine {
       { ...doc, tenantId: String(tenantId), _indexed_at: new Date().toISOString() },
     ]);
 
-    const result = await this.esRequest('POST', '/_bulk', body.map((l) => JSON.stringify(l)).join('\n') + '\n');
-    const resp = result.data as { errors?: boolean; items?: Array<{ index?: { error?: unknown } }> };
+    const result = await this.esRequest(
+      'POST',
+      '/_bulk',
+      body.map((l) => JSON.stringify(l)).join('\n') + '\n'
+    );
+    const resp = result.data as {
+      errors?: boolean;
+      items?: Array<{ index?: { error?: unknown } }>;
+    };
     const failed = resp.items?.filter((i) => i.index?.error).length ?? 0;
     return { indexed: documents.length - failed, failed };
   }
@@ -458,7 +602,17 @@ export class SearchEngine {
     query: string,
     options: SearchOptions = {}
   ): Promise<SearchResult> {
-    const { entity, entities, size = 20, from = 0, filters = {}, fuzziness = 'AUTO', branchIds, dateRange, attachmentEntityTypes } = options;
+    const {
+      entity,
+      entities,
+      size = 20,
+      from = 0,
+      filters = {},
+      fuzziness = 'AUTO',
+      branchIds,
+      dateRange,
+      attachmentEntityTypes,
+    } = options;
 
     // Caller (search.routes.ts) passes `entities` for an untyped global search, restricted
     // to whatever the caller's permissions allow. An empty list means no entity is visible
@@ -481,14 +635,32 @@ export class SearchEngine {
         multi_match: {
           query,
           fields: [
-            'name^3', 'name.ngram^1',
-            'sku^2', 'barcode^2', 'code^2', 'gstin^2',
-            'phone^2', 'email^2',
-            'invoiceNumber^2', 'poNumber^2', 'quotationNumber^2', 'grnNumber^2',
-            'returnNumber^2', 'transferNumber^2', 'adjustmentNumber^2', 'paymentNumber^2',
-            'journalId^2', 'accountCode^2', 'employeeCode^2',
-            'customerName', 'supplierName', 'itemName', 'employeeName',
-            'description', 'notes', 'fileName',
+            'name^3',
+            'name.ngram^1',
+            'sku^2',
+            'barcode^2',
+            'code^2',
+            'gstin^2',
+            'phone^2',
+            'email^2',
+            'invoiceNumber^2',
+            'poNumber^2',
+            'quotationNumber^2',
+            'grnNumber^2',
+            'returnNumber^2',
+            'transferNumber^2',
+            'adjustmentNumber^2',
+            'paymentNumber^2',
+            'journalId^2',
+            'accountCode^2',
+            'employeeCode^2',
+            'customerName',
+            'supplierName',
+            'itemName',
+            'employeeName',
+            'description',
+            'notes',
+            'fileName',
           ],
           type: 'best_fields',
           fuzziness,
@@ -588,8 +760,9 @@ export class SearchEngine {
 
     // Delete and recreate index for clean reindex
     await this.esRequest('DELETE', `/${index}`);
+    // number_of_replicas: 0 — see createTenantIndices() for rationale.
     await this.esRequest('PUT', `/${index}`, {
-      settings: { number_of_shards: 1, number_of_replicas: 1, ...ERP_ANALYSIS_SETTINGS },
+      settings: { number_of_shards: 1, number_of_replicas: 0, ...ERP_ANALYSIS_SETTINGS },
       mappings: { properties: ENTITY_MAPPINGS[entity] },
     });
 
@@ -605,7 +778,10 @@ export class SearchEngine {
       totalFailed += failed;
     }
 
-    logger.info({ tenantId, entity, indexed: totalIndexed, failed: totalFailed }, 'Full reindex complete');
+    logger.info(
+      { tenantId, entity, indexed: totalIndexed, failed: totalFailed },
+      'Full reindex complete'
+    );
     return { indexed: totalIndexed, failed: totalFailed };
   }
 

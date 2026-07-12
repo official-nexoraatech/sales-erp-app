@@ -19,8 +19,16 @@ export interface StockMovementParams {
 }
 
 export class InsufficientStockError extends ERPError {
-  constructor(public readonly available: number) {
-    super('INSUFFICIENT_STOCK', `Insufficient stock. Available: ${available}`, 409);
+  constructor(
+    public readonly available: number,
+    public readonly itemId?: number,
+    public readonly requested?: number
+  ) {
+    super('INSUFFICIENT_STOCK', `Insufficient stock. Available: ${available}`, 409, {
+      available,
+      itemId,
+      requested,
+    });
   }
 }
 
@@ -87,12 +95,18 @@ export class InventoryLedgerService {
         .select({ availableQty: items.availableQty })
         .from(items)
         .where(and(eq(items.id, itemId), eq(items.tenantId, tenantId)));
-      throw new InsufficientStockError(parseFloat(current?.availableQty ?? '0'));
+      throw new InsufficientStockError(parseFloat(current?.availableQty ?? '0'), itemId, quantity);
     }
 
     const after = parseFloat(result[0]!.availableQty ?? '0');
     const before = after + quantity;
-    const totalCogs = await ValuationService.consumeForStockOut(db, { tenantId, itemId, warehouseId, quantity });
+    const totalCogs = await ValuationService.consumeForStockOut(db, {
+      tenantId,
+      itemId,
+      variantId: params.variantId,
+      warehouseId,
+      quantity,
+    });
     const cogsPerUnit = quantity > 0 ? Math.round((totalCogs / quantity) * 100) / 100 : 0;
     await this.writeLedger(db, 'STOCK_OUT', before, after, params, cogsPerUnit);
     await this.upsertProjection(db, params, -quantity, 0);
@@ -130,7 +144,7 @@ export class InventoryLedgerService {
         .from(items)
         .where(and(eq(items.id, itemId), eq(items.tenantId, tenantId)));
       if (!current) throw new ERPError('ITEM_NOT_FOUND', 'Item not found', 404);
-      throw new InsufficientStockError(parseFloat(current.availableQty ?? '0'));
+      throw new InsufficientStockError(parseFloat(current.availableQty ?? '0'), itemId, quantity);
     }
 
     const after = parseFloat(result[0]!.availableQty ?? '0');
@@ -146,8 +160,7 @@ export class InventoryLedgerService {
     trx?: ErpDatabase
   ): Promise<void> {
     const db = trx ?? this.db;
-    const { tenantId, itemId, variantId, quantity, referenceType, referenceId, createdBy } =
-      fromParams;
+    const { tenantId, itemId, quantity } = fromParams;
 
     // Deduct from source (atomic)
     const deductResult = await db
@@ -171,7 +184,7 @@ export class InventoryLedgerService {
         .select({ availableQty: items.availableQty })
         .from(items)
         .where(and(eq(items.id, itemId), eq(items.tenantId, tenantId)));
-      throw new InsufficientStockError(parseFloat(current?.availableQty ?? '0'));
+      throw new InsufficientStockError(parseFloat(current?.availableQty ?? '0'), itemId, quantity);
     }
 
     const afterDeduct = parseFloat(deductResult[0]!.availableQty ?? '0');
@@ -197,7 +210,7 @@ export class InventoryLedgerService {
 
   private async writeLedger(
     db: ErpDatabase,
-    movementType: typeof inventoryLedger.$inferInsert['movementType'],
+    movementType: (typeof inventoryLedger.$inferInsert)['movementType'],
     quantityBefore: number,
     quantityAfter: number,
     params: StockMovementParams,

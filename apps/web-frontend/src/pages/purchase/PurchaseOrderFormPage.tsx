@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { purchaseOrderApi, supplierApi, itemApi, warehouseApi, branchApi } from '../../api/endpoints.js';
+import { purchaseOrderApi, itemApi, warehouseApi, branchApi } from '../../api/endpoints.js';
 import { useAuthStore } from '../../store/auth.store.js';
 import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
@@ -28,16 +28,18 @@ interface LineItem {
   lineTotal: number;
 }
 
-function round2(n: number) { return Math.round(n * 100) / 100; }
+function round2(n: number) {
+  return Math.round(n * 100) / 100;
+}
 
 function computeLine(l: LineItem, sellerState: string, placeOfSupply: string) {
   const subtotal = round2(l.unitPrice * l.orderedQty);
-  const discount = round2(subtotal * l.discountPct / 100);
+  const discount = round2((subtotal * l.discountPct) / 100);
   const taxable = round2(subtotal - discount);
   const isIntra = sellerState === placeOfSupply;
-  const cgst = isIntra ? round2(taxable * l.gstRate / 2 / 100) : 0;
-  const sgst = isIntra ? round2(taxable * l.gstRate / 2 / 100) : 0;
-  const igst = isIntra ? 0 : round2(taxable * l.gstRate / 100);
+  const cgst = isIntra ? round2((taxable * l.gstRate) / 2 / 100) : 0;
+  const sgst = isIntra ? round2((taxable * l.gstRate) / 2 / 100) : 0;
+  const igst = isIntra ? 0 : round2((taxable * l.gstRate) / 100);
   return { taxable, cgst, sgst, igst, lineTotal: round2(taxable + cgst + sgst + igst) };
 }
 
@@ -60,24 +62,38 @@ export default function PurchaseOrderFormPage() {
   const [lines, setLines] = useState<LineItem[]>([]);
   const [itemSearch, setItemSearch] = useState('');
 
-  const { data: warehouseData } = useQuery({ queryKey: ['warehouses'], queryFn: () => warehouseApi.list(), enabled: hasPermission(PERMISSIONS.WAREHOUSE_VIEW) });
-  const { data: branchData } = useQuery({ queryKey: ['branches'], queryFn: () => branchApi.list(), enabled: hasPermission(PERMISSIONS.BRANCH_VIEW) });
+  const { data: warehouseData } = useQuery({
+    queryKey: ['warehouses'],
+    queryFn: () => warehouseApi.list(),
+    enabled: hasPermission(PERMISSIONS.WAREHOUSE_VIEW),
+  });
+  const { data: branchData } = useQuery({
+    queryKey: ['branches'],
+    queryFn: () => branchApi.list(),
+    enabled: hasPermission(PERMISSIONS.BRANCH_VIEW),
+  });
   const { data: itemData } = useQuery({
     queryKey: ['item-search', itemSearch],
     queryFn: () => itemApi.list({ search: itemSearch }),
     enabled: itemSearch.length > 1 && hasPermission(PERMISSIONS.ITEM_VIEW),
   });
 
-  const warehouses = (warehouseData as { content?: Array<{ id: number; name: string }> })?.content ?? [];
+  const warehouses =
+    (warehouseData as { content?: Array<{ id: number; name: string }> })?.content ?? [];
   const branches = (branchData as { content?: Array<{ id: number; name: string }> })?.content ?? [];
-  const itemOptions = (itemData as { content?: Array<{ id: number; name: string; gstRate?: number; hsnCode?: string }> })?.content ?? [];
+  const itemOptions =
+    (
+      itemData as {
+        content?: Array<{ id: number; name: string; gstRate?: number; hsnCode?: string }>;
+      }
+    )?.content ?? [];
 
   const computedLines = lines.map((l) => ({ ...l, ...computeLine(l, sellerState, placeOfSupply) }));
 
   const totals = computedLines.reduce(
     (acc, l) => ({
       subtotal: round2(acc.subtotal + l.unitPrice * l.orderedQty),
-      discount: round2(acc.discount + l.unitPrice * l.orderedQty * l.discountPct / 100),
+      discount: round2(acc.discount + (l.unitPrice * l.orderedQty * l.discountPct) / 100),
       taxable: round2(acc.taxable + l.taxable),
       cgst: round2(acc.cgst + l.cgst),
       sgst: round2(acc.sgst + l.sgst),
@@ -88,22 +104,25 @@ export default function PurchaseOrderFormPage() {
   );
 
   const addItem = (item: { id: number; name: string; gstRate?: number; hsnCode?: string }) => {
-    setLines((prev) => [...prev, {
-      itemId: item.id,
-      itemName: item.name,
-      orderedQty: 1,
-      unitPrice: 0,
-      discountPct: 0,
-      gstRate: item.gstRate ?? 18,
-      hsnCode: item.hsnCode ?? '',
-      taxableAmount: 0,
-      lineTotal: 0,
-    }]);
+    setLines((prev) => [
+      ...prev,
+      {
+        itemId: item.id,
+        itemName: item.name,
+        orderedQty: 1,
+        unitPrice: 0,
+        discountPct: 0,
+        gstRate: item.gstRate ?? 18,
+        hsnCode: item.hsnCode ?? '',
+        taxableAmount: 0,
+        lineTotal: 0,
+      },
+    ]);
     setItemSearch('');
   };
 
   const updateLine = (idx: number, field: keyof LineItem, value: number | string) => {
-    setLines((prev) => prev.map((l, i) => i === idx ? { ...l, [field]: value } : l));
+    setLines((prev) => prev.map((l, i) => (i === idx ? { ...l, [field]: value } : l)));
   };
 
   const removeLine = (idx: number) => setLines((prev) => prev.filter((_, i) => i !== idx));
@@ -137,7 +156,7 @@ export default function PurchaseOrderFormPage() {
         orderedQty: l.orderedQty,
         unitPrice: l.unitPrice,
         discountPct: l.discountPct,
-        discountAmount: round2(l.unitPrice * l.orderedQty * l.discountPct / 100),
+        discountAmount: round2((l.unitPrice * l.orderedQty * l.discountPct) / 100),
         gstRate: l.gstRate,
         hsnCode: l.hsnCode || undefined,
       })),
@@ -146,7 +165,11 @@ export default function PurchaseOrderFormPage() {
 
   return (
     <div>
-      <ERPPageHeader variant="list" title="New Purchase Order" subtitle="Create a purchase order for a supplier" />
+      <ERPPageHeader
+        variant="list"
+        title="New Purchase Order"
+        subtitle="Create a purchase order for a supplier"
+      />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
         <ERPAsyncSelect
@@ -162,17 +185,34 @@ export default function PurchaseOrderFormPage() {
           required
           value={branchId}
           onChange={(e) => setBranchId(e.target.value)}
-          options={[{ value: '', label: 'Select branch…' }, ...branches.map((b) => ({ value: String(b.id), label: b.name }))]}
+          options={[
+            { value: '', label: 'Select branch…' },
+            ...branches.map((b) => ({ value: String(b.id), label: b.name })),
+          ]}
         />
         <Select
           label="Warehouse"
           required
           value={warehouseId}
           onChange={(e) => setWarehouseId(e.target.value)}
-          options={[{ value: '', label: 'Select warehouse…' }, ...warehouses.map((w) => ({ value: String(w.id), label: w.name }))]}
+          options={[
+            { value: '', label: 'Select warehouse…' },
+            ...warehouses.map((w) => ({ value: String(w.id), label: w.name })),
+          ]}
         />
-        <Input label="PO Date" required type="date" value={poDate} onChange={(e) => setPoDate(e.target.value)} />
-        <Input label="Expected Delivery Date" type="date" value={expectedDeliveryDate} onChange={(e) => setExpectedDeliveryDate(e.target.value)} />
+        <Input
+          label="PO Date"
+          required
+          type="date"
+          value={poDate}
+          onChange={(e) => setPoDate(e.target.value)}
+        />
+        <Input
+          label="Expected Delivery Date"
+          type="date"
+          value={expectedDeliveryDate}
+          onChange={(e) => setExpectedDeliveryDate(e.target.value)}
+        />
         <Select
           label="Place of Supply"
           required
@@ -196,7 +236,7 @@ export default function PurchaseOrderFormPage() {
       </div>
 
       {/* Line Items */}
-      <div className="bg-surface-card rounded-xl border border-default p-4 mb-4">
+      <div className="bg-surface-card rounded-xl border border-default p-4 mb-4 overflow-x-auto">
         <h3 className="text-sm font-semibold text-primary mb-3">Order Lines</h3>
         <div className="flex gap-2 mb-4">
           <input
@@ -239,25 +279,50 @@ export default function PurchaseOrderFormPage() {
               <tr key={idx}>
                 <td className="py-2 pr-2 text-primary">{l.itemName}</td>
                 <td className="py-2 pr-2">
-                  <input type="number" min="0.001" step="0.001" value={l.orderedQty}
+                  <input
+                    type="number"
+                    min="0.001"
+                    step="0.001"
+                    value={l.orderedQty}
                     onChange={(e) => updateLine(idx, 'orderedQty', parseFloat(e.target.value) || 0)}
-                    className="w-20 rounded border border-default bg-surface-card px-2 py-1 text-sm text-primary" />
+                    className="w-20 rounded border border-default bg-surface-card px-2 py-1 text-sm text-primary"
+                  />
                 </td>
                 <td className="py-2 pr-2">
-                  <input type="number" min="0" step="0.01" value={l.unitPrice}
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={l.unitPrice}
                     onChange={(e) => updateLine(idx, 'unitPrice', parseFloat(e.target.value) || 0)}
-                    className="w-28 rounded border border-default bg-surface-card px-2 py-1 text-sm text-primary" />
+                    className="w-28 rounded border border-default bg-surface-card px-2 py-1 text-sm text-primary"
+                  />
                 </td>
                 <td className="py-2 pr-2">
-                  <input type="number" min="0" max="100" step="0.01" value={l.discountPct}
-                    onChange={(e) => updateLine(idx, 'discountPct', parseFloat(e.target.value) || 0)}
-                    className="w-16 rounded border border-default bg-surface-card px-2 py-1 text-sm text-primary" />
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    step="0.01"
+                    value={l.discountPct}
+                    onChange={(e) =>
+                      updateLine(idx, 'discountPct', parseFloat(e.target.value) || 0)
+                    }
+                    className="w-16 rounded border border-default bg-surface-card px-2 py-1 text-sm text-primary"
+                  />
                 </td>
                 <td className="py-2 pr-2 text-secondary">{l.gstRate}%</td>
                 <td className="py-2 pr-2 text-right text-primary">₹{l.taxable.toFixed(2)}</td>
-                <td className="py-2 pr-2 text-right font-semibold text-primary">₹{l.lineTotal.toFixed(2)}</td>
+                <td className="py-2 pr-2 text-right font-semibold text-primary">
+                  ₹{l.lineTotal.toFixed(2)}
+                </td>
                 <td className="py-2">
-                  <button onClick={() => removeLine(idx)} className="text-danger hover:opacity-70 text-xs px-1">✕</button>
+                  <button
+                    onClick={() => removeLine(idx)}
+                    className="text-danger hover:opacity-70 text-xs px-1"
+                  >
+                    ✕
+                  </button>
                 </td>
               </tr>
             ))}
@@ -280,7 +345,8 @@ export default function PurchaseOrderFormPage() {
               </div>
               {totals.discount > 0 && (
                 <div className="flex justify-between text-danger">
-                  <span>Discount</span><span>-₹{totals.discount.toFixed(2)}</span>
+                  <span>Discount</span>
+                  <span>-₹{totals.discount.toFixed(2)}</span>
                 </div>
               )}
               <div className="flex justify-between">
@@ -332,7 +398,9 @@ export default function PurchaseOrderFormPage() {
       </div>
 
       <div className="flex justify-end gap-3">
-        <Button variant="ghost" onClick={() => navigate('/purchase/orders')}>Cancel</Button>
+        <Button variant="ghost" onClick={() => navigate('/purchase/orders')}>
+          Cancel
+        </Button>
         <Button isLoading={createMutation.isPending} onClick={handleSubmit}>
           Save as Draft
         </Button>

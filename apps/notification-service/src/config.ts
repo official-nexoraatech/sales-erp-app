@@ -3,6 +3,7 @@ import { loadConfigWithSecrets } from '@erp/config';
 export interface NotificationServiceConfig {
   port: number;
   databaseUrl: string;
+  redisUrl: string;
   msg91AuthKey: string;
   msg91TemplateId: string;
   sendgridApiKey: string;
@@ -17,6 +18,7 @@ export async function loadNotificationConfig(): Promise<NotificationServiceConfi
   return {
     port: parseInt(process.env['NOTIFICATION_SERVICE_PORT'] ?? '3014', 10),
     databaseUrl: base.databaseUrl,
+    redisUrl: base.redisUrl,
     msg91AuthKey: process.env['MSG91_AUTH_KEY'] ?? 'test_key',
     msg91TemplateId: process.env['MSG91_TEMPLATE_ID'] ?? 'test_template',
     sendgridApiKey: process.env['SENDGRID_API_KEY'] ?? 'test_key',

@@ -1,7 +1,15 @@
 /**
  * Scenario 5 — Concurrency / Stock Integrity Test
- * Config: 200 VUs all trying to buy the LAST UNIT of item 1 simultaneously
+ * Config: 200 VUs all trying to confirm a purchase of the LAST UNIT of item 1 simultaneously
  * Invariant: exactly 1 success, 199 InsufficientStockError (422), stock = 0 after
+ *
+ * Stock is deducted at CONFIRM time, not CREATE time (see InvoiceService.confirm() —
+ * `create()` only writes a DRAFT invoice and never touches stock). setup() pre-creates one
+ * DRAFT invoice per VU (sequential, no race), then all 200 VUs race on
+ * `POST /invoices/:id/confirm` — that's the endpoint that actually deducts stock and is
+ * where the race condition needs to be observed. An earlier version of this script raced on
+ * `POST /invoices` (create) instead, which never touches stock — every VU would have "won"
+ * and the invariant below could never have failed regardless of whether locking was correct.
  *
  * Prerequisites (run before this test):
  *   1. Reset item 1 stock to exactly 1 unit:
@@ -13,67 +21,82 @@
 
 import http from 'k6/http';
 import { check } from 'k6';
-import { Counter, Rate } from 'k6/metrics';
-import { BASE_SALES, authHeaders } from './k6-helpers.js';
+import exec from 'k6/execution';
+import { Counter, Trend } from 'k6/metrics';
+import {
+  BASE_AUTH,
+  BASE_SALES,
+  TEST_CREDENTIALS,
+  authHeaders,
+  buildInvoicePayload,
+  assertSafeEnvironment,
+  reportSamplesToEventService,
+} from './k6-helpers.js';
 
-const successCount = new Counter('concurrent_buy_success');
-const insufficientStockCount = new Counter('concurrent_buy_insufficient_stock');
-const unexpectedErrorCount = new Counter('concurrent_buy_unexpected_errors');
-const exactlyOneSuccess = new Rate('exactly_one_success');
+const VU_COUNT = 200;
+
+const successCount = new Counter('concurrent_confirm_success');
+const insufficientStockCount = new Counter('concurrent_confirm_insufficient_stock');
+const unexpectedErrorCount = new Counter('concurrent_confirm_unexpected_errors');
+const confirmDuration = new Trend('invoice_confirm_duration', true);
 
 export const options = {
-  // All 200 VUs start simultaneously — true concurrency test
+  setupTimeout: '2m', // setup() pre-creates 200 DRAFT invoices sequentially
+  // All 200 VUs confirm simultaneously — true concurrency test
   scenarios: {
-    concurrent_last_unit: {
+    concurrent_last_unit_confirm: {
       executor: 'shared-iterations',
-      vus: 200,
-      iterations: 200,
+      vus: VU_COUNT,
+      iterations: VU_COUNT,
       maxDuration: '2m',
     },
   },
   thresholds: {
     // Key invariant: exactly 1 success (allow tiny margin for test infra variance)
-    concurrent_buy_success: ['count>=1', 'count<=2'],
-    concurrent_buy_insufficient_stock: ['count>=198'],
-    concurrent_buy_unexpected_errors: ['count==0'],
+    concurrent_confirm_success: ['count>=1', 'count<=2'],
+    concurrent_confirm_insufficient_stock: ['count>=198'],
+    concurrent_confirm_unexpected_errors: ['count==0'],
   },
 };
 
 export function setup() {
-  const res = http.post(
-    'http://localhost:3010/auth/login',
-    JSON.stringify({ email: 'admin@testco.com', password: 'TestAdmin@2026!', tenantId: 1 }),
-    { headers: { 'Content-Type': 'application/json' } }
-  );
-  const token = JSON.parse(res.body)?.data?.accessToken ?? '';
-  if (!token) throw new Error('Setup: login failed — cannot run concurrency test without auth');
-  return { token };
-}
+  assertSafeEnvironment();
 
-export default function ({ token }) {
+  const loginRes = http.post(`${BASE_AUTH}/auth/login`, JSON.stringify(TEST_CREDENTIALS), {
+    headers: { 'Content-Type': 'application/json' },
+  });
+  const token = JSON.parse(loginRes.body ?? '{}')?.data?.accessToken ?? '';
+  if (!token) throw new Error('Setup: login failed — cannot run concurrency test without auth');
   const headers = authHeaders(token);
 
-  // Each VU tries to buy the last unit of item 1
-  const payload = JSON.stringify({
-    customerId: 1,
-    branchId: 1,
-    warehouseId: 1,
-    paymentMode: 'CASH',
-    paidAtConfirmation: 0,
-    lines: [
-      {
-        itemId: 1,
-        quantity: 1,
-        unitPrice: 50000,
-        discountPercent: 0,
-        gstRatePercent: 18,
-        hsnCode: '5007',
-      },
-    ],
-    notes: 'k6-concurrency-test',
-  });
+  // Pre-create one DRAFT invoice per VU. create() never touches stock, so this is race-free —
+  // the actual race happens later, when all 200 VUs confirm concurrently.
+  const invoiceIds = [];
+  for (let i = 0; i < VU_COUNT; i++) {
+    const res = http.post(`${BASE_SALES}/api/v2/invoices`, buildInvoicePayload(), { headers });
+    const id = JSON.parse(res.body ?? '{}')?.data?.id;
+    if (!id) {
+      throw new Error(
+        `Setup: failed to pre-create draft invoice ${i + 1}/${VU_COUNT}: ${res.status} ${res.body}`
+      );
+    }
+    invoiceIds.push(id);
+  }
 
-  const res = http.post(`${BASE_SALES}/api/v2/invoices`, payload, { headers });
+  return { token, invoiceIds };
+}
+
+export default function ({ token, invoiceIds }) {
+  const headers = authHeaders(token);
+  const invoiceId = invoiceIds[(exec.vu.idInTest - 1) % invoiceIds.length];
+
+  const start = Date.now();
+  const res = http.post(
+    `${BASE_SALES}/api/v2/invoices/${invoiceId}/confirm`,
+    JSON.stringify({ invoiceNumber: `LOADTEST-CONC-${invoiceId}` }),
+    { headers }
+  );
+  confirmDuration.add(Date.now() - start);
 
   if (res.status >= 200 && res.status < 300) {
     successCount.add(1);
@@ -100,12 +123,12 @@ export function teardown({ token }) {
 }
 
 export function handleSummary(data) {
-  const success = data.metrics?.concurrent_buy_success?.values?.count ?? 0;
-  const insufficient = data.metrics?.concurrent_buy_insufficient_stock?.values?.count ?? 0;
-  const unexpected = data.metrics?.concurrent_buy_unexpected_errors?.values?.count ?? 0;
+  const success = data.metrics?.concurrent_confirm_success?.values?.count ?? 0;
+  const insufficient = data.metrics?.concurrent_confirm_insufficient_stock?.values?.count ?? 0;
+  const unexpected = data.metrics?.concurrent_confirm_unexpected_errors?.values?.count ?? 0;
+  const confirmP95 = data.metrics?.invoice_confirm_duration?.values?.['p(95)'] ?? 0;
 
-  const verdict =
-    success === 1 && insufficient === 199 && unexpected === 0 ? 'PASS ✅' : 'FAIL ❌';
+  const verdict = success === 1 && insufficient === 199 && unexpected === 0 ? 'PASS ✅' : 'FAIL ❌';
 
   const report = {
     scenario: 'Concurrency / Stock Integrity',
@@ -117,9 +140,18 @@ export function handleSummary(data) {
       expectedSuccessCount: 1,
       expectedInsufficientStock: 199,
     },
-    invariant: 'Exactly 1 sale succeeds; all others get INSUFFICIENT_STOCK (422)',
+    invariant: 'Exactly 1 confirm succeeds; all others get INSUFFICIENT_STOCK (422)',
     raw: data,
   };
+
+  if (confirmP95 > 0) {
+    // Matches TARGETS's literal key in performance.routes.ts ('POST /api/v2/invoices/confirm',
+    // no :id segment) so this sample picks up the stored target — the real route is
+    // /invoices/:id/confirm; see IMPLEMENTATION-NOTES.md for this pre-existing key mismatch.
+    reportSamplesToEventService([
+      { endpoint: '/api/v2/invoices/confirm', method: 'POST', durationMs: Math.round(confirmP95) },
+    ]);
+  }
 
   return {
     'load-test-results/concurrency-summary.json': JSON.stringify(report, null, 2),

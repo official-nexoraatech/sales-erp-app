@@ -53,19 +53,28 @@ export default function GRNsPage() {
   const [rejectReason, setRejectReason] = useState('');
   const [attachmentsForId, setAttachmentsForId] = useState<number | null>(null);
 
-  useEffect(() => { setPage(1); }, [status, debouncedSearch]);
+  useEffect(() => {
+    setPage(1);
+  }, [status, debouncedSearch]);
 
   const { data, isLoading } = useQuery({
     queryKey: ['grns', status, debouncedSearch, page, pageSize],
-    queryFn: () => grnApi.list({ status: status || undefined, search: debouncedSearch || undefined, page, pageSize }),
+    queryFn: () =>
+      grnApi.list({
+        status: status || undefined,
+        search: debouncedSearch || undefined,
+        page,
+        pageSize,
+      }),
     staleTime: 30_000,
   });
 
-  const rows: GRN[] = (data as Record<string, unknown>)?.content as GRN[] ?? [];
-  const totalElements = (data as Record<string, unknown>)?.totalElements as number ?? 0;
+  const rows: GRN[] = ((data as Record<string, unknown>)?.content as GRN[]) ?? [];
+  const totalElements = ((data as Record<string, unknown>)?.totalElements as number) ?? 0;
 
   const approveMutation = useMutation({
-    mutationFn: ({ id, num }: { id: number; num: string }) => grnApi.approve(id, { grnNumber: num }),
+    mutationFn: ({ id, num }: { id: number; num: string }) =>
+      grnApi.approve(id, { grnNumber: num }),
     onSuccess: () => {
       toast.success('GRN approved — stock updated');
       setApproveId(null);
@@ -91,26 +100,45 @@ export default function GRNsPage() {
       key: 'grnNumber',
       header: 'GRN #',
       mono: true,
-      render: (r) => r.grnNumber
-        ? <span className="font-mono text-sm">{r.grnNumber}</span>
-        : <span className="text-secondary italic text-sm">Pending</span>,
+      render: (r) =>
+        r.grnNumber ? (
+          <span className="font-mono text-sm">{r.grnNumber}</span>
+        ) : (
+          <span className="text-secondary italic text-sm">Pending</span>
+        ),
     },
     { key: 'purchaseOrderId', header: 'PO #', render: (r) => `PO-${r.purchaseOrderId}` },
     { key: 'supplierId', header: 'Supplier' },
-    { key: 'grandTotal', header: 'Total', align: 'right', sortable: true, render: (r) => formatCurrency(parseFloat(r.grandTotal)) },
-    { key: 'receivedDate', header: 'Received', sortable: true, render: (r) => formatDate(r.receivedDate) },
+    {
+      key: 'grandTotal',
+      header: 'Total',
+      align: 'right',
+      sortable: true,
+      render: (r) => formatCurrency(parseFloat(r.grandTotal)),
+    },
+    {
+      key: 'receivedDate',
+      header: 'Received',
+      sortable: true,
+      render: (r) => formatDate(r.receivedDate),
+    },
     {
       key: 'hasPriceVariance',
       header: 'Price Variance',
-      render: (r) => r.hasPriceVariance
-        ? <Badge variant="danger">Yes</Badge>
-        : <Badge variant="default">No</Badge>,
+      render: (r) =>
+        r.hasPriceVariance ? (
+          <Badge variant="danger">Yes</Badge>
+        ) : (
+          <Badge variant="default">No</Badge>
+        ),
     },
     {
       key: 'status',
       header: 'Status',
       sortable: true,
-      render: (r) => <Badge variant={STATUS_COLORS[r.status] ?? 'default'}>{r.status.replace('_', ' ')}</Badge>,
+      render: (r) => (
+        <Badge variant={STATUS_COLORS[r.status] ?? 'default'}>{r.status.replace('_', ' ')}</Badge>
+      ),
     },
     {
       key: 'actions',
@@ -119,10 +147,29 @@ export default function GRNsPage() {
       render: (r) => {
         const items: ERPMenuItem[] = [];
         if (canApproveGRN && r.status === 'PENDING_APPROVAL') {
-          items.push({ label: 'Approve', icon: CheckCircle2, onClick: () => { setApproveId(r.id); setGrnNumber(''); } });
-          items.push({ label: 'Reject', icon: XCircle, variant: 'danger', onClick: () => { setRejectId(r.id); setRejectReason(''); } });
+          items.push({
+            label: 'Approve',
+            icon: CheckCircle2,
+            onClick: () => {
+              setApproveId(r.id);
+              setGrnNumber('');
+            },
+          });
+          items.push({
+            label: 'Reject',
+            icon: XCircle,
+            variant: 'danger',
+            onClick: () => {
+              setRejectId(r.id);
+              setRejectReason('');
+            },
+          });
         }
-        items.push({ label: 'Attachments', icon: Paperclip, onClick: () => setAttachmentsForId(r.id) });
+        items.push({
+          label: 'Attachments',
+          icon: Paperclip,
+          onClick: () => setAttachmentsForId(r.id),
+        });
         return <ERPDropdownMenu items={items} />;
       },
     },
@@ -130,18 +177,30 @@ export default function GRNsPage() {
 
   return (
     <div>
-      <ERPPageHeader variant="list" title="Goods Receipt Notes" subtitle="Track and approve incoming goods">
-        {canCreateGRN && <Button onClick={() => navigate('/purchase/grns/new')}>+ Create GRN</Button>}
+      <ERPPageHeader
+        variant="list"
+        title="Goods Receipt Notes"
+        subtitle="Track and approve incoming goods"
+      >
+        {canCreateGRN && (
+          <Button onClick={() => navigate('/purchase/grns/new')}>+ Create GRN</Button>
+        )}
       </ERPPageHeader>
 
-      <div className="flex gap-4 mb-4">
+      <div className="flex flex-wrap gap-4 mb-4">
         <div className="flex-1 max-w-sm">
-          <Input placeholder="Search by GRN number..." value={search} onChange={(e) => setSearch(e.target.value)} />
+          <Input
+            placeholder="Search by GRN number..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
         </div>
         <Select value={status} onChange={(e) => setStatus(e.target.value)} className="w-48">
           <option value="">All Statuses</option>
           {['PENDING_APPROVAL', 'APPROVED', 'REJECTED'].map((s) => (
-            <option key={s} value={s}>{s.replace('_', ' ')}</option>
+            <option key={s} value={s}>
+              {s.replace('_', ' ')}
+            </option>
           ))}
         </Select>
       </div>
@@ -153,7 +212,10 @@ export default function GRNsPage() {
         rowKey="id"
         pagination={{ page, pageSize, total: totalElements }}
         onPageChange={setPage}
-        onPageSizeChange={(size) => { setPageSize(size); setPage(1); }}
+        onPageSizeChange={(size) => {
+          setPageSize(size);
+          setPage(1);
+        }}
       />
 
       <Modal isOpen={approveId !== null} onClose={() => setApproveId(null)} title="Approve GRN">
@@ -169,11 +231,15 @@ export default function GRNsPage() {
             onChange={(e) => setGrnNumber(e.target.value)}
           />
           <div className="flex justify-end gap-2">
-            <Button variant="ghost" onClick={() => setApproveId(null)}>Cancel</Button>
+            <Button variant="ghost" onClick={() => setApproveId(null)}>
+              Cancel
+            </Button>
             <Button
               isLoading={approveMutation.isPending}
               disabled={!grnNumber.trim()}
-              onClick={() => approveId !== null && approveMutation.mutate({ id: approveId, num: grnNumber })}
+              onClick={() =>
+                approveId !== null && approveMutation.mutate({ id: approveId, num: grnNumber })
+              }
             >
               Approve &amp; Add Stock
             </Button>
@@ -191,12 +257,16 @@ export default function GRNsPage() {
             onChange={(e) => setRejectReason(e.target.value)}
           />
           <div className="flex justify-end gap-2">
-            <Button variant="ghost" onClick={() => setRejectId(null)}>Cancel</Button>
+            <Button variant="ghost" onClick={() => setRejectId(null)}>
+              Cancel
+            </Button>
             <Button
               variant="danger"
               isLoading={rejectMutation.isPending}
               disabled={!rejectReason.trim()}
-              onClick={() => rejectId !== null && rejectMutation.mutate({ id: rejectId, reason: rejectReason })}
+              onClick={() =>
+                rejectId !== null && rejectMutation.mutate({ id: rejectId, reason: rejectReason })
+              }
             >
               Reject GRN
             </Button>

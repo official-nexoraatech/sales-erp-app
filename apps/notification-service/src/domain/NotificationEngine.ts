@@ -2,7 +2,12 @@ import Handlebars from 'handlebars';
 import { createHash } from 'crypto';
 import { eq, and } from 'drizzle-orm';
 import type { ErpDatabase } from '@erp/db';
-import { notificationTemplates, notificationLog, notificationPreferences } from '@erp/db';
+import {
+  notificationTemplates,
+  notificationLog,
+  notificationPreferences,
+  featureFlags,
+} from '@erp/db';
 import { createLogger } from '@erp/logger';
 import type { NotificationServiceConfig } from '../config.js';
 
@@ -54,16 +59,11 @@ function deriveIdempotencyKey(
   return createHash('sha256').update(raw).digest('hex');
 }
 
+// PG-047: defaults when a tenant has no 'notification_quiet_hours' feature flag configured —
+// must stay byte-identical to the original hardcoded window for backward compatibility.
 const QUIET_HOURS_START = 22; // 22:00 IST
-const QUIET_HOURS_END = 8;    // 08:00 IST
-
-function isQuietHours(): boolean {
-  const now = new Date();
-  const istOffset = 5.5 * 60 * 60 * 1000;
-  const istTime = new Date(now.getTime() + istOffset);
-  const hour = istTime.getUTCHours();
-  return hour >= QUIET_HOURS_START || hour < QUIET_HOURS_END;
-}
+const QUIET_HOURS_END = 8; // 08:00 IST
+const QUIET_HOURS_FLAG_KEY = 'notification_quiet_hours';
 
 function renderTemplate(template: string, data: Record<string, unknown>): string {
   const compiled = Handlebars.compile(template);
@@ -80,12 +80,45 @@ export class NotificationEngine {
     private readonly config: NotificationServiceConfig
   ) {}
 
+  // PG-047: quiet hours are tenant-configurable via the existing feature_flags table
+  // (config: { startHour, endHour }), falling back to the hardcoded default when absent/disabled.
+  // userOverrideDisabled === true short-circuits the window check entirely (per-user opt-out).
+  private async isQuietHours(tenantId: number, userOverrideDisabled?: boolean): Promise<boolean> {
+    if (userOverrideDisabled) return false;
+
+    const flagRows = await this.db
+      .select()
+      .from(featureFlags)
+      .where(
+        and(eq(featureFlags.tenantId, tenantId), eq(featureFlags.flagKey, QUIET_HOURS_FLAG_KEY))
+      )
+      .limit(1);
+
+    let startHour = QUIET_HOURS_START;
+    let endHour = QUIET_HOURS_END;
+    const flag = flagRows[0];
+    if (flag?.enabled && flag.config && typeof flag.config === 'object') {
+      const config = flag.config as { startHour?: number; endHour?: number };
+      if (typeof config.startHour === 'number' && typeof config.endHour === 'number') {
+        startHour = config.startHour;
+        endHour = config.endHour;
+      }
+    }
+
+    const now = new Date();
+    const istOffset = 5.5 * 60 * 60 * 1000;
+    const istTime = new Date(now.getTime() + istOffset);
+    const hour = istTime.getUTCHours();
+    return hour >= startHour || hour < endHour;
+  }
+
   async send(input: SendNotificationInput): Promise<NotificationResult[]> {
     const results: NotificationResult[] = [];
     const channelsToSend = input.channels ?? ['SMS', 'EMAIL', 'IN_APP'];
 
     // Get user preferences if we have a recipient user
     let prefs: Record<string, boolean> = {};
+    let quietHoursOverrideDisabled = false;
     if (input.recipientUserId) {
       const prefRows = await this.db
         .select()
@@ -106,6 +139,7 @@ export class NotificationEngine {
           WHATSAPP: p.whatsappEnabled,
           IN_APP: p.inAppEnabled,
         };
+        quietHoursOverrideDisabled = p.quietHoursEnabled === false;
       }
     }
 
@@ -116,9 +150,15 @@ export class NotificationEngine {
         continue;
       }
 
-      // Quiet hours: skip SMS between 22:00 and 08:00 IST
-      if (channel === 'SMS' && isQuietHours()) {
-        logger.info({ tenantId: input.tenantId, channel, eventType: input.eventType }, 'SMS skipped — quiet hours');
+      // Quiet hours: skip SMS between 22:00 and 08:00 IST by default (tenant/user configurable)
+      if (
+        channel === 'SMS' &&
+        (await this.isQuietHours(input.tenantId, quietHoursOverrideDisabled))
+      ) {
+        logger.info(
+          { tenantId: input.tenantId, channel, eventType: input.eventType },
+          'SMS skipped — quiet hours'
+        );
         results.push({ channel, status: 'SKIPPED', logId: 0 });
         continue;
       }
@@ -144,15 +184,24 @@ export class NotificationEngine {
       }
 
       const body = renderTemplate(template.bodyTemplate, input.templateData);
-      const subject = template.subject ? renderTemplate(template.subject, input.templateData) : undefined;
+      const subject = template.subject
+        ? renderTemplate(template.subject, input.templateData)
+        : undefined;
 
       // ES-26 (M8): dedup — a caller retry with the same key (explicit or derived) within the
       // time bucket must not re-dispatch. onConflictDoNothing means a colliding insert returns
       // nothing rather than throwing.
-      const recipient = input.recipientPhone ?? input.recipientEmail ?? String(input.recipientUserId ?? '');
+      const recipient =
+        input.recipientPhone ?? input.recipientEmail ?? String(input.recipientUserId ?? '');
       const idempotencyKey = input.idempotencyKey
         ? `${input.idempotencyKey}:${channel}`
-        : deriveIdempotencyKey(input.tenantId, input.eventType, channel, recipient, input.templateData);
+        : deriveIdempotencyKey(
+            input.tenantId,
+            input.eventType,
+            channel,
+            recipient,
+            input.templateData
+          );
 
       // Create log entry (PENDING)
       const [logEntry] = await this.db
@@ -176,18 +225,25 @@ export class NotificationEngine {
         .returning();
 
       if (!logEntry) {
-        logger.info({ tenantId: input.tenantId, channel, eventType: input.eventType }, 'Notification deduped — idempotency key already sent recently');
+        logger.info(
+          { tenantId: input.tenantId, channel, eventType: input.eventType },
+          'Notification deduped — idempotency key already sent recently'
+        );
         results.push({ channel, status: 'SKIPPED', logId: 0 });
         continue;
       }
 
-      const sent = await this.deliverWithRetry(channel, {
-        ...(input.recipientPhone !== undefined ? { phone: input.recipientPhone } : {}),
-        ...(input.recipientEmail !== undefined ? { email: input.recipientEmail } : {}),
-        ...(subject !== undefined ? { subject } : {}),
-        body,
-        tenantId: input.tenantId,
-      }, logEntry.id);
+      const sent = await this.deliverWithRetry(
+        channel,
+        {
+          ...(input.recipientPhone !== undefined ? { phone: input.recipientPhone } : {}),
+          ...(input.recipientEmail !== undefined ? { email: input.recipientEmail } : {}),
+          ...(subject !== undefined ? { subject } : {}),
+          body,
+          tenantId: input.tenantId,
+        },
+        logEntry.id
+      );
 
       results.push({
         channel,
@@ -204,8 +260,11 @@ export class NotificationEngine {
    * lookup — used by callers (e.g. CRM campaigns) that author their own message body per call.
    */
   async sendRaw(input: SendRawInput): Promise<NotificationResult> {
-    if (input.channel === 'SMS' && isQuietHours()) {
-      logger.info({ tenantId: input.tenantId, eventType: input.eventType }, 'Raw SMS skipped — quiet hours');
+    if (input.channel === 'SMS' && (await this.isQuietHours(input.tenantId))) {
+      logger.info(
+        { tenantId: input.tenantId, eventType: input.eventType },
+        'Raw SMS skipped — quiet hours'
+      );
       return { channel: input.channel, status: 'SKIPPED', logId: 0 };
     }
 
@@ -234,17 +293,24 @@ export class NotificationEngine {
       .returning();
 
     if (!logEntry) {
-      logger.info({ tenantId: input.tenantId, channel: input.channel, eventType: input.eventType }, 'Raw notification deduped — idempotency key already sent recently');
+      logger.info(
+        { tenantId: input.tenantId, channel: input.channel, eventType: input.eventType },
+        'Raw notification deduped — idempotency key already sent recently'
+      );
       return { channel: input.channel, status: 'SKIPPED', logId: 0 };
     }
 
-    const sent = await this.deliverWithRetry(input.channel, {
-      ...(input.recipientPhone !== undefined ? { phone: input.recipientPhone } : {}),
-      ...(input.recipientEmail !== undefined ? { email: input.recipientEmail } : {}),
-      ...(input.subject !== undefined ? { subject: input.subject } : {}),
-      body: input.body,
-      tenantId: input.tenantId,
-    }, logEntry.id);
+    const sent = await this.deliverWithRetry(
+      input.channel,
+      {
+        ...(input.recipientPhone !== undefined ? { phone: input.recipientPhone } : {}),
+        ...(input.recipientEmail !== undefined ? { email: input.recipientEmail } : {}),
+        ...(input.subject !== undefined ? { subject: input.subject } : {}),
+        body: input.body,
+        tenantId: input.tenantId,
+      },
+      logEntry.id
+    );
 
     return { channel: input.channel, status: sent ? 'SENT' : 'FAILED', logId: logEntry.id };
   }
@@ -263,7 +329,13 @@ export class NotificationEngine {
 
         await this.db
           .update(notificationLog)
-          .set({ status: 'SENT', externalMessageId: externalId, attemptCount: attempt, lastAttemptAt: new Date(), updatedAt: new Date() })
+          .set({
+            status: 'SENT',
+            externalMessageId: externalId,
+            attemptCount: attempt,
+            lastAttemptAt: new Date(),
+            updatedAt: new Date(),
+          })
           .where(eq(notificationLog.id, logId));
 
         sent = true;
@@ -335,7 +407,7 @@ export class NotificationEngine {
     const response = await fetch('https://api.msg91.com/api/v5/flow/', {
       method: 'POST',
       headers: {
-        'authkey': this.config.msg91AuthKey,
+        authkey: this.config.msg91AuthKey,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({

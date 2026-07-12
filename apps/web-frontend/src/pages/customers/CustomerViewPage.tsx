@@ -15,9 +15,19 @@ import Modal from '../../components/ui/Modal.js';
 import { formatDate, formatDatetime, formatCurrency } from '../../lib/format.js';
 
 type ActivityType =
-  | 'INVOICE' | 'PAYMENT' | 'RETURN' | 'ALTERATION'
-  | 'LOYALTY_EARN' | 'LOYALTY_REDEEM' | 'LOYALTY_EXPIRE'
-  | 'VISIT' | 'CALL' | 'COMPLAINT' | 'EMAIL' | 'WHATSAPP' | 'OTHER';
+  | 'INVOICE'
+  | 'PAYMENT'
+  | 'RETURN'
+  | 'ALTERATION'
+  | 'LOYALTY_EARN'
+  | 'LOYALTY_REDEEM'
+  | 'LOYALTY_EXPIRE'
+  | 'VISIT'
+  | 'CALL'
+  | 'COMPLAINT'
+  | 'EMAIL'
+  | 'WHATSAPP'
+  | 'OTHER';
 
 interface ActivityItem {
   type: ActivityType;
@@ -55,14 +65,22 @@ const ACTIVITY_COLOR: Record<string, string> = {
 
 function activityLabel(item: ActivityItem): string {
   switch (item.type) {
-    case 'INVOICE': return `Invoice #${String(item.invoiceNumber ?? item.id)} — ₹${Number(item.grandTotal ?? 0).toLocaleString()}`;
-    case 'PAYMENT': return `Payment ₹${Number(item.amount ?? 0).toLocaleString()} via ${String(item.paymentMode ?? '')}`;
-    case 'RETURN': return `Return #${String(item.returnNumber ?? item.id)}`;
-    case 'ALTERATION': return `Alteration #${item.id}`;
-    case 'LOYALTY_EARN': return `+${item.pointsEarned ?? 0} loyalty points`;
-    case 'LOYALTY_REDEEM': return `-${item.pointsRedeemed ?? 0} points redeemed`;
-    case 'LOYALTY_EXPIRE': return `${item.pointsExpired ?? 0} points expired`;
-    default: return `${item.type} — ${String(item.notes ?? '')}`;
+    case 'INVOICE':
+      return `Invoice #${String(item.invoiceNumber ?? item.id)} — ₹${Number(item.grandTotal ?? 0).toLocaleString()}`;
+    case 'PAYMENT':
+      return `Payment ₹${Number(item.amount ?? 0).toLocaleString()} via ${String(item.paymentMode ?? '')}`;
+    case 'RETURN':
+      return `Return #${String(item.returnNumber ?? item.id)}`;
+    case 'ALTERATION':
+      return `Alteration #${item.id}`;
+    case 'LOYALTY_EARN':
+      return `+${item.pointsEarned ?? 0} loyalty points`;
+    case 'LOYALTY_REDEEM':
+      return `-${item.pointsRedeemed ?? 0} points redeemed`;
+    case 'LOYALTY_EXPIRE':
+      return `${item.pointsExpired ?? 0} points expired`;
+    default:
+      return `${item.type} — ${String(item.notes ?? '')}`;
   }
 }
 
@@ -86,15 +104,16 @@ export default function CustomerViewPage() {
     queryKey: ['customers', id],
     queryFn: () => customerApi.getById(Number(id)),
   });
-  const customer = (data as Record<string, unknown> | undefined);
+  const customer = data as Record<string, unknown> | undefined;
 
   const { data: timelineData, isFetching: timelineFetching } = useQuery({
     queryKey: ['customer-timeline', id, timelinePage],
     queryFn: () => crmApi.activityTimeline(Number(id), { page: timelinePage, size: 20 }),
     enabled: tab === 'timeline',
   });
-  const timelineItems: ActivityItem[] = (timelineData as Record<string, unknown>)?.items as ActivityItem[] ?? [];
-  const timelineTotal: number = (timelineData as Record<string, unknown>)?.total as number ?? 0;
+  const timelineItems: ActivityItem[] =
+    ((timelineData as Record<string, unknown>)?.items as ActivityItem[]) ?? [];
+  const timelineTotal: number = ((timelineData as Record<string, unknown>)?.total as number) ?? 0;
 
   const { data: interactionData } = useQuery({
     queryKey: ['customer-interactions', id],
@@ -138,7 +157,10 @@ export default function CustomerViewPage() {
   const healthScore = customer.healthScore as number | undefined;
 
   const healthColor: Record<string, 'green' | 'blue' | 'yellow' | 'red' | 'gray'> = {
-    CHAMPION: 'green', LOYAL: 'blue', AT_RISK: 'yellow', LOST: 'red',
+    CHAMPION: 'green',
+    LOYAL: 'blue',
+    AT_RISK: 'yellow',
+    LOST: 'red',
   };
 
   return (
@@ -148,19 +170,23 @@ export default function CustomerViewPage() {
         title={String(customer.displayName)}
         subtitle={`Customer Code: ${customer.customerCode}`}
         actions={
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap">
             {canLogInteraction && (
               <Button onClick={() => setLogOpen(true)}>+ Log Interaction</Button>
             )}
-            <Button variant="secondary" onClick={() => navigate(`/customers/${id}/edit`)}>Edit</Button>
-            <Button variant="secondary" onClick={() => navigate('/customers')}>Back</Button>
+            <Button variant="secondary" onClick={() => navigate(`/customers/${id}/edit`)}>
+              Edit
+            </Button>
+            <Button variant="secondary" onClick={() => navigate('/customers')}>
+              Back
+            </Button>
           </div>
         }
       />
 
       {/* Health score strip */}
       {healthSeg && (
-        <div className="mb-4 flex items-center gap-3 bg-surface-card rounded-xl border border-default px-5 py-3">
+        <div className="mb-4 flex items-center gap-3 bg-surface-card rounded-xl border border-default px-5 py-3 flex-wrap">
           <span className="text-xs text-secondary font-medium uppercase tracking-wide">Health</span>
           <Badge label={healthSeg} color={healthColor[healthSeg] ?? 'gray'} />
           {healthScore != null && (
@@ -193,30 +219,51 @@ export default function CustomerViewPage() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2 space-y-4">
             <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
-              <h2 className="text-sm font-semibold text-gray-500 dark:text-gray-400 mb-4 uppercase tracking-wide">Details</h2>
-              <dl className="grid grid-cols-2 gap-3">
+              <h2 className="text-sm font-semibold text-gray-500 dark:text-gray-400 mb-4 uppercase tracking-wide">
+                Details
+              </h2>
+              <dl className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {[
                   { label: 'Phone', value: customer.phone },
                   { label: 'Email', value: customer.email },
                   { label: 'GSTIN', value: customer.gstin },
                   { label: 'PAN', value: customer.pan },
                   { label: 'Type', value: customer.customerType },
-                  { label: 'Status', value: <Badge label={String(customer.status)} color={customer.status === 'ACTIVE' ? 'green' : 'gray'} /> },
-                  { label: 'Date of Birth', value: customer.dateOfBirth ? formatDate(String(customer.dateOfBirth)) : undefined },
+                  {
+                    label: 'Status',
+                    value: (
+                      <Badge
+                        label={String(customer.status)}
+                        color={customer.status === 'ACTIVE' ? 'green' : 'gray'}
+                      />
+                    ),
+                  },
+                  {
+                    label: 'Date of Birth',
+                    value: customer.dateOfBirth
+                      ? formatDate(String(customer.dateOfBirth))
+                      : undefined,
+                  },
                   { label: 'Loyalty Card', value: customer.loyaltyCardNumber },
                 ].map(({ label, value }) => (
                   <div key={label}>
                     <dt className="text-xs text-disabled">{label}</dt>
-                    <dd className="text-sm text-gray-800 dark:text-gray-200 font-medium">{value as React.ReactNode ?? '–'}</dd>
+                    <dd className="text-sm text-gray-800 dark:text-gray-200 font-medium">
+                      {(value as React.ReactNode) ?? '–'}
+                    </dd>
                   </div>
                 ))}
               </dl>
             </div>
             {billing && (
               <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
-                <h2 className="text-sm font-semibold text-gray-500 dark:text-gray-400 mb-3 uppercase tracking-wide">Billing Address</h2>
+                <h2 className="text-sm font-semibold text-gray-500 dark:text-gray-400 mb-3 uppercase tracking-wide">
+                  Billing Address
+                </h2>
                 <p className="text-sm text-gray-700 dark:text-gray-300">
-                  {billing.addressLine1}{billing.city ? `, ${billing.city}` : ''}{billing.state ? `, ${billing.state}` : ''} {billing.pinCode}
+                  {billing.addressLine1}
+                  {billing.city ? `, ${billing.city}` : ''}
+                  {billing.state ? `, ${billing.state}` : ''} {billing.pinCode}
                 </p>
               </div>
             )}
@@ -225,38 +272,55 @@ export default function CustomerViewPage() {
             {[
               { label: 'Credit Limit', value: formatCurrency(Number(customer.creditLimit ?? 0)) },
               { label: 'Credit Days', value: `${customer.creditDays ?? 0} days` },
-              { label: 'Opening Balance', value: formatCurrency(Number(customer.openingBalance ?? 0)) },
+              {
+                label: 'Opening Balance',
+                value: formatCurrency(Number(customer.openingBalance ?? 0)),
+              },
               { label: 'Loyalty Points', value: String(customer.loyaltyPoints ?? 0) },
             ].map(({ label, value }) => (
-              <div key={label} className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
+              <div
+                key={label}
+                className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5"
+              >
                 <p className="text-xs text-disabled uppercase tracking-wide mb-1">{label}</p>
                 <p className="text-lg font-bold text-gray-900 dark:text-gray-100">{value}</p>
               </div>
             ))}
             <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
-              <p className="text-xs text-disabled uppercase tracking-wide mb-3">Communication Preferences</p>
+              <p className="text-xs text-disabled uppercase tracking-wide mb-3">
+                Communication Preferences
+              </p>
               <div className="space-y-2.5">
-                {([
-                  { key: 'optOutSms', label: 'SMS' },
-                  { key: 'optOutWhatsapp', label: 'WhatsApp' },
-                  { key: 'optOutEmail', label: 'Email' },
-                ] as const).map(({ key, label }) => {
+                {(
+                  [
+                    { key: 'optOutSms', label: 'SMS' },
+                    { key: 'optOutWhatsapp', label: 'WhatsApp' },
+                    { key: 'optOutEmail', label: 'Email' },
+                  ] as const
+                ).map(({ key, label }) => {
                   const optedOut = Boolean(customer[key]);
                   return (
-                    <label key={key} className="flex items-center justify-between text-sm text-gray-700 dark:text-gray-300">
+                    <label
+                      key={key}
+                      className="flex items-center justify-between text-sm text-gray-700 dark:text-gray-300"
+                    >
                       <span>{label}</span>
                       <input
                         type="checkbox"
                         checked={!optedOut}
                         disabled={!canEditCustomer || optOutMut.isPending}
-                        onChange={(e) => optOutMut.mutate({ [key]: !e.target.checked } as Record<string, boolean>)}
+                        onChange={(e) =>
+                          optOutMut.mutate({ [key]: !e.target.checked } as Record<string, boolean>)
+                        }
                         className="h-4 w-4 rounded border-default accent-primary disabled:opacity-50"
                       />
                     </label>
                   );
                 })}
               </div>
-              <p className="text-xs text-disabled mt-3">Checked = customer receives messages on that channel.</p>
+              <p className="text-xs text-disabled mt-3">
+                Checked = customer receives messages on that channel.
+              </p>
             </div>
           </div>
         </div>
@@ -270,13 +334,22 @@ export default function CustomerViewPage() {
               <ERPTableSkeleton rows={5} cols={2} />
             </div>
           ) : timelineItems.length === 0 ? (
-            <ERPEmptyState type="no-data" title="No activity recorded yet" description="Invoices, payments, and loyalty events for this customer will appear here." />
+            <ERPEmptyState
+              type="no-data"
+              title="No activity recorded yet"
+              description="Invoices, payments, and loyalty events for this customer will appear here."
+            />
           ) : (
             <>
               <div className="divide-y divide-default">
                 {timelineItems.map((item, i) => (
-                  <div key={`${item.type}-${item.id}-${i}`} className="flex items-start gap-4 px-5 py-3">
-                    <div className={`mt-0.5 text-xs font-bold uppercase ${ACTIVITY_COLOR[item.type] ?? 'text-gray-400 dark:text-gray-300'}`}>
+                  <div
+                    key={`${item.type}-${item.id}-${i}`}
+                    className="flex items-start gap-4 px-5 py-3"
+                  >
+                    <div
+                      className={`mt-0.5 text-xs font-bold uppercase ${ACTIVITY_COLOR[item.type] ?? 'text-gray-400 dark:text-gray-300'}`}
+                    >
                       {item.type.replace(/_/g, ' ')}
                     </div>
                     <div className="flex-1 min-w-0">
@@ -323,7 +396,9 @@ export default function CustomerViewPage() {
               type="no-data"
               title="No interactions logged yet"
               description="Calls, visits, complaints and other interactions will appear here."
-              {...(canLogInteraction ? { action: { label: '+ Log Interaction', onClick: () => setLogOpen(true) } } : {})}
+              {...(canLogInteraction
+                ? { action: { label: '+ Log Interaction', onClick: () => setLogOpen(true) } }
+                : {})}
             />
           ) : (
             <div className="divide-y divide-default">
@@ -333,7 +408,9 @@ export default function CustomerViewPage() {
                   <div className="flex-1 min-w-0">
                     {i.notes && <p className="text-sm text-primary">{i.notes}</p>}
                     {i.followUpDate && (
-                      <p className={`text-xs mt-0.5 ${i.followUpDone ? 'text-secondary line-through' : 'text-warning'}`}>
+                      <p
+                        className={`text-xs mt-0.5 ${i.followUpDone ? 'text-secondary line-through' : 'text-warning'}`}
+                      >
                         Follow-up: {formatDate(i.followUpDate)}
                         {i.followUpDone ? ' (done)' : ''}
                       </p>
@@ -348,14 +425,12 @@ export default function CustomerViewPage() {
       )}
 
       {/* Log Interaction Modal */}
-      <Modal
-        open={logOpen}
-        onClose={() => setLogOpen(false)}
-        title="Log Customer Interaction"
-      >
+      <Modal open={logOpen} onClose={() => setLogOpen(false)} title="Log Customer Interaction">
         <div className="space-y-4">
           <div>
-            <label className="block text-xs font-medium text-secondary mb-1.5">Interaction Type</label>
+            <label className="block text-xs font-medium text-secondary mb-1.5">
+              Interaction Type
+            </label>
             <div className="flex gap-2 flex-wrap">
               {INTERACTION_TYPES.map((t) => (
                 <button
@@ -373,7 +448,9 @@ export default function CustomerViewPage() {
             </div>
           </div>
           <div>
-            <label className="block text-xs font-medium text-secondary mb-1.5">Notes (optional)</label>
+            <label className="block text-xs font-medium text-secondary mb-1.5">
+              Notes (optional)
+            </label>
             <textarea
               value={interactionForm.notes}
               onChange={(e) => setInteractionForm((f) => ({ ...f, notes: e.target.value }))}
@@ -383,7 +460,9 @@ export default function CustomerViewPage() {
             />
           </div>
           <div>
-            <label className="block text-xs font-medium text-secondary mb-1.5">Follow-up Date (optional)</label>
+            <label className="block text-xs font-medium text-secondary mb-1.5">
+              Follow-up Date (optional)
+            </label>
             <input
               type="date"
               value={interactionForm.followUpDate}
@@ -392,7 +471,9 @@ export default function CustomerViewPage() {
             />
           </div>
           <div className="flex gap-2 justify-end pt-2">
-            <Button variant="ghost" onClick={() => setLogOpen(false)}>Cancel</Button>
+            <Button variant="ghost" onClick={() => setLogOpen(false)}>
+              Cancel
+            </Button>
             <Button onClick={() => logMut.mutate()} disabled={logMut.isPending}>
               {logMut.isPending ? 'Saving…' : 'Save'}
             </Button>

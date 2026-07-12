@@ -2,7 +2,15 @@
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { invoiceApi, quotationApi, deliveryChallanApi, itemApi, customerApi, warehouseApi, branchApi } from '../../api/endpoints.js';
+import {
+  invoiceApi,
+  quotationApi,
+  deliveryChallanApi,
+  itemApi,
+  customerApi,
+  warehouseApi,
+  branchApi,
+} from '../../api/endpoints.js';
 import { useAuthStore } from '../../store/auth.store.js';
 import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
@@ -13,6 +21,8 @@ import Input from '../../components/ui/Input.js';
 import Select from '../../components/ui/Select.js';
 import { INDIAN_STATES } from '../../lib/indianStates.js';
 import { createSearchLoadOptions } from '../../lib/searchSelectOptions.js';
+import { friendlyApiErrorMessage } from '../../lib/errorMessages.js';
+import type { ApiError } from '../../api/client.js';
 
 const loadCustomerOptions = createSearchLoadOptions('customer');
 
@@ -28,19 +38,21 @@ interface LineItem {
   lineTotal: number;
 }
 
-function round2(n: number) { return Math.round(n * 100) / 100; }
+function round2(n: number) {
+  return Math.round(n * 100) / 100;
+}
 
 function computeLine(l: LineItem, sellerState: string, placeOfSupply: string) {
   const subtotal = round2(l.unitPrice * l.quantity);
-  const discount = round2(subtotal * l.discountPct / 100);
+  const discount = round2((subtotal * l.discountPct) / 100);
   const taxable = round2(subtotal - discount);
   const isIntra = sellerState === placeOfSupply;
   const cgstR = isIntra ? l.gstRate / 2 : 0;
   const sgstR = isIntra ? l.gstRate / 2 : 0;
   const igstR = isIntra ? 0 : l.gstRate;
-  const cgst = round2(taxable * cgstR / 100);
-  const sgst = round2(taxable * sgstR / 100);
-  const igst = round2(taxable * igstR / 100);
+  const cgst = round2((taxable * cgstR) / 100);
+  const sgst = round2((taxable * sgstR) / 100);
+  const igst = round2((taxable * igstR) / 100);
   return { taxable, cgst, sgst, igst, lineTotal: round2(taxable + cgst + sgst + igst) };
 }
 
@@ -56,20 +68,34 @@ export default function InvoiceFormPage() {
   const [branchId, setBranchId] = useState('');
   const [warehouseId, setWarehouseId] = useState('');
   const [placeOfSupply, setPlaceOfSupply] = useState('27');
-  const [sellerState, setSellerState] = useState('27');
+  const [sellerState] = useState('27');
   const [invoiceDate, setInvoiceDate] = useState<string>(new Date().toISOString().substring(0, 10));
-  const [dueDate, setDueDate] = useState<string>(new Date(Date.now() + 30 * 86400_000).toISOString().substring(0, 10));
+  const [dueDate, setDueDate] = useState<string>(
+    new Date(Date.now() + 30 * 86400_000).toISOString().substring(0, 10)
+  );
   const [notes, setNotes] = useState('');
   const [lines, setLines] = useState<LineItem[]>([]);
   const [itemSearch, setItemSearch] = useState('');
+  const [overrideCreditLimit, setOverrideCreditLimit] = useState(false);
+  const [overridePriceFloor, setOverridePriceFloor] = useState(false);
+  const canOverrideCreditLimit = hasPermission(PERMISSIONS.CREDIT_LIMIT_OVERRIDE);
+  const canOverridePriceFloor = hasPermission(PERMISSIONS.PRICE_FLOOR_OVERRIDE);
 
   const { data: itemData } = useQuery({
     queryKey: ['item-search', itemSearch],
     queryFn: () => itemApi.list({ search: itemSearch }),
     enabled: itemSearch.length > 1 && hasPermission(PERMISSIONS.ITEM_VIEW),
   });
-  const { data: warehouseData } = useQuery({ queryKey: ['warehouses'], queryFn: () => warehouseApi.list(), enabled: hasPermission(PERMISSIONS.WAREHOUSE_VIEW) });
-  const { data: branchData } = useQuery({ queryKey: ['branches'], queryFn: () => branchApi.list(), enabled: hasPermission(PERMISSIONS.BRANCH_VIEW) });
+  const { data: warehouseData } = useQuery({
+    queryKey: ['warehouses'],
+    queryFn: () => warehouseApi.list(),
+    enabled: hasPermission(PERMISSIONS.WAREHOUSE_VIEW),
+  });
+  const { data: branchData } = useQuery({
+    queryKey: ['branches'],
+    queryFn: () => branchApi.list(),
+    enabled: hasPermission(PERMISSIONS.BRANCH_VIEW),
+  });
   const { data: quotData } = useQuery({
     queryKey: ['quotation-detail', quotationId],
     queryFn: () => quotationApi.getById(Number(quotationId)),
@@ -83,41 +109,66 @@ export default function InvoiceFormPage() {
 
   useEffect(() => {
     if (!quotData) return;
-    const q = (quotData as { customerId?: number; placeOfSupply?: string; lines?: Array<{ itemId: number; quantity: string; unitPrice: string; discountPct: string; gstRate: string; hsnCode?: string }> });
+    const q = quotData as {
+      customerId?: number;
+      placeOfSupply?: string;
+      lines?: Array<{
+        itemId: number;
+        quantity: string;
+        unitPrice: string;
+        discountPct: string;
+        gstRate: string;
+        hsnCode?: string;
+      }>;
+    };
     if (q) {
       if (q.customerId) {
         void customerApi.getById(q.customerId).then((c) => {
           const customer = c as { displayName?: string };
-          setSelectedCustomer({ value: String(q.customerId), label: customer.displayName ?? `Customer ${q.customerId}` });
+          setSelectedCustomer({
+            value: String(q.customerId),
+            label: customer.displayName ?? `Customer ${q.customerId}`,
+          });
         });
       }
       setPlaceOfSupply(q.placeOfSupply ?? '27');
-      setLines((q.lines ?? []).map((l) => ({
-        itemId: l.itemId,
-        itemName: `Item ${l.itemId}`,
-        quantity: parseFloat(l.quantity),
-        unitPrice: parseFloat(l.unitPrice),
-        discountPct: parseFloat(l.discountPct ?? '0'),
-        gstRate: parseFloat(l.gstRate ?? '18'),
-        hsnCode: l.hsnCode ?? '',
-        taxableAmount: 0,
-        lineTotal: 0,
-      })));
+      setLines(
+        (q.lines ?? []).map((l) => ({
+          itemId: l.itemId,
+          itemName: `Item ${l.itemId}`,
+          quantity: parseFloat(l.quantity),
+          unitPrice: parseFloat(l.unitPrice),
+          discountPct: parseFloat(l.discountPct ?? '0'),
+          gstRate: parseFloat(l.gstRate ?? '18'),
+          hsnCode: l.hsnCode ?? '',
+          taxableAmount: 0,
+          lineTotal: 0,
+        }))
+      );
     }
   }, [quotData]);
 
   useEffect(() => {
     if (!challanData) return;
-    const c = (challanData as {
+    const c = challanData as {
       customerId?: number;
       branchId?: number;
       warehouseId?: number;
-      lines?: Array<{ itemId: number; quantity: string; unitPrice: string | null; hsnCode?: string; description?: string }>;
-    });
+      lines?: Array<{
+        itemId: number;
+        quantity: string;
+        unitPrice: string | null;
+        hsnCode?: string;
+        description?: string;
+      }>;
+    };
     if (c.customerId) {
       void customerApi.getById(c.customerId).then((cust) => {
         const customer = cust as { displayName?: string };
-        setSelectedCustomer({ value: String(c.customerId), label: customer.displayName ?? `Customer ${c.customerId}` });
+        setSelectedCustomer({
+          value: String(c.customerId),
+          label: customer.displayName ?? `Customer ${c.customerId}`,
+        });
       });
     }
     setBranchId(String(c.branchId ?? ''));
@@ -125,35 +176,51 @@ export default function InvoiceFormPage() {
 
     let cancelled = false;
     (async () => {
-      const resolvedLines = await Promise.all((c.lines ?? []).map(async (l) => {
-        let gstRate = 18;
-        let itemName = l.description || `Item ${l.itemId}`;
-        try {
-          const item = (await itemApi.getById(l.itemId)) as { name?: string; gstRate?: number };
-          gstRate = item?.gstRate ?? 18;
-          itemName = item?.name ?? itemName;
-        } catch {
-          // item lookup failed — fall back to defaults so the line can still be edited
-        }
-        return {
-          itemId: l.itemId,
-          itemName,
-          quantity: parseFloat(l.quantity),
-          unitPrice: l.unitPrice ? parseFloat(l.unitPrice) : 0,
-          discountPct: 0,
-          gstRate,
-          hsnCode: l.hsnCode ?? '',
-          taxableAmount: 0,
-          lineTotal: 0,
-        };
-      }));
+      const resolvedLines = await Promise.all(
+        (c.lines ?? []).map(async (l) => {
+          let gstRate = 18;
+          let itemName = l.description || `Item ${l.itemId}`;
+          try {
+            const item = (await itemApi.getById(l.itemId)) as { name?: string; gstRate?: number };
+            gstRate = item?.gstRate ?? 18;
+            itemName = item?.name ?? itemName;
+          } catch {
+            // item lookup failed — fall back to defaults so the line can still be edited
+          }
+          return {
+            itemId: l.itemId,
+            itemName,
+            quantity: parseFloat(l.quantity),
+            unitPrice: l.unitPrice ? parseFloat(l.unitPrice) : 0,
+            discountPct: 0,
+            gstRate,
+            hsnCode: l.hsnCode ?? '',
+            taxableAmount: 0,
+            lineTotal: 0,
+          };
+        })
+      );
       if (!cancelled) setLines(resolvedLines);
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [challanData]);
 
-  const itemOptions = (itemData as { content?: Array<{ id: number; name: string; gstRate?: number; hsnCode?: string; minSalePrice?: string }> })?.content ?? [];
-  const warehouses = (warehouseData as { content?: Array<{ id: number; name: string }> })?.content ?? [];
+  const itemOptions =
+    (
+      itemData as {
+        content?: Array<{
+          id: number;
+          name: string;
+          gstRate?: number;
+          hsnCode?: string;
+          minSalePrice?: string;
+        }>;
+      }
+    )?.content ?? [];
+  const warehouses =
+    (warehouseData as { content?: Array<{ id: number; name: string }> })?.content ?? [];
   const branches = (branchData as { content?: Array<{ id: number; name: string }> })?.content ?? [];
 
   const computedLines = lines.map((l) => {
@@ -164,7 +231,7 @@ export default function InvoiceFormPage() {
   const totals = computedLines.reduce(
     (acc, l) => ({
       subtotal: round2(acc.subtotal + l.unitPrice * l.quantity),
-      discount: round2(acc.discount + l.unitPrice * l.quantity * l.discountPct / 100),
+      discount: round2(acc.discount + (l.unitPrice * l.quantity * l.discountPct) / 100),
       taxable: round2(acc.taxable + l.taxable),
       cgst: round2(acc.cgst + l.cgst),
       sgst: round2(acc.sgst + l.sgst),
@@ -175,22 +242,25 @@ export default function InvoiceFormPage() {
   );
 
   const addItem = (item: { id: number; name: string; gstRate?: number; hsnCode?: string }) => {
-    setLines((prev) => [...prev, {
-      itemId: item.id,
-      itemName: item.name,
-      quantity: 1,
-      unitPrice: 0,
-      discountPct: 0,
-      gstRate: item.gstRate ?? 18,
-      hsnCode: item.hsnCode ?? '',
-      taxableAmount: 0,
-      lineTotal: 0,
-    }]);
+    setLines((prev) => [
+      ...prev,
+      {
+        itemId: item.id,
+        itemName: item.name,
+        quantity: 1,
+        unitPrice: 0,
+        discountPct: 0,
+        gstRate: item.gstRate ?? 18,
+        hsnCode: item.hsnCode ?? '',
+        taxableAmount: 0,
+        lineTotal: 0,
+      },
+    ]);
     setItemSearch('');
   };
 
   const updateLine = (idx: number, field: keyof LineItem, value: number | string) => {
-    setLines((prev) => prev.map((l, i) => i === idx ? { ...l, [field]: value } : l));
+    setLines((prev) => prev.map((l, i) => (i === idx ? { ...l, [field]: value } : l)));
   };
 
   const removeLine = (idx: number) => setLines((prev) => prev.filter((_, i) => i !== idx));
@@ -202,7 +272,15 @@ export default function InvoiceFormPage() {
       toast.success('Invoice created');
       navigate(`/sales/invoices/${result?.id}`);
     },
-    onError: (e: Error) => toast.error(e.message),
+    onError: (e: ApiError) =>
+      toast.error(
+        friendlyApiErrorMessage(e, {
+          items: lines.map((l) => ({ id: l.itemId, name: l.itemName })),
+          ...(selectedCustomer?.label !== undefined
+            ? { customerName: selectedCustomer.label }
+            : {}),
+        })
+      ),
   });
 
   const handleSubmit = (): void => {
@@ -222,6 +300,8 @@ export default function InvoiceFormPage() {
       notes,
       quotationId: quotationId ? Number(quotationId) : undefined,
       deliveryChallanId: challanId ? Number(challanId) : undefined,
+      overrideCreditLimit: canOverrideCreditLimit && overrideCreditLimit,
+      overridePriceFloor: canOverridePriceFloor && overridePriceFloor,
       lines: lines.map((l) => ({
         itemId: l.itemId,
         quantity: l.quantity,
@@ -252,17 +332,35 @@ export default function InvoiceFormPage() {
           required
           value={branchId}
           onChange={(e) => setBranchId(e.target.value)}
-          options={[{ value: '', label: 'Select branch...' }, ...branches.map((b) => ({ value: String(b.id), label: b.name }))]}
+          options={[
+            { value: '', label: 'Select branch...' },
+            ...branches.map((b) => ({ value: String(b.id), label: b.name })),
+          ]}
         />
         <Select
           label="Warehouse"
           required
           value={warehouseId}
           onChange={(e) => setWarehouseId(e.target.value)}
-          options={[{ value: '', label: 'Select warehouse...' }, ...warehouses.map((w) => ({ value: String(w.id), label: w.name }))]}
+          options={[
+            { value: '', label: 'Select warehouse...' },
+            ...warehouses.map((w) => ({ value: String(w.id), label: w.name })),
+          ]}
         />
-        <Input label="Invoice Date" required type="date" value={invoiceDate} onChange={(e) => setInvoiceDate(e.target.value)} />
-        <Input label="Due Date" required type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
+        <Input
+          label="Invoice Date"
+          required
+          type="date"
+          value={invoiceDate}
+          onChange={(e) => setInvoiceDate(e.target.value)}
+        />
+        <Input
+          label="Due Date"
+          required
+          type="date"
+          value={dueDate}
+          onChange={(e) => setDueDate(e.target.value)}
+        />
         <Select
           label="Place of Supply"
           required
@@ -300,64 +398,122 @@ export default function InvoiceFormPage() {
           </div>
         )}
 
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-left text-secondary border-b border-default">
-              <th className="pb-2">Item</th>
-              <th className="pb-2">Qty</th>
-              <th className="pb-2">Price</th>
-              <th className="pb-2">Disc %</th>
-              <th className="pb-2">GST %</th>
-              <th className="pb-2">Taxable</th>
-              <th className="pb-2">Total</th>
-              <th className="pb-2"></th>
-            </tr>
-          </thead>
-          <tbody className="divide-y dark:divide-gray-700">
-            {computedLines.map((l, idx) => (
-              <tr key={idx}>
-                <td className="py-2 pr-2">{l.itemName}</td>
-                <td className="py-2 pr-2">
-                  <input type="number" min="0.001" step="0.001" value={l.quantity}
-                    onChange={(e) => updateLine(idx, 'quantity', parseFloat(e.target.value) || 0)}
-                    className="w-20 rounded border-default bg-surface-card px-2 py-1 text-sm" />
-                </td>
-                <td className="py-2 pr-2">
-                  <input type="number" min="0" step="0.01" value={l.unitPrice}
-                    onChange={(e) => updateLine(idx, 'unitPrice', parseFloat(e.target.value) || 0)}
-                    className="w-24 rounded border-default bg-surface-card px-2 py-1 text-sm" />
-                </td>
-                <td className="py-2 pr-2">
-                  <input type="number" min="0" max="100" step="0.01" value={l.discountPct}
-                    onChange={(e) => updateLine(idx, 'discountPct', parseFloat(e.target.value) || 0)}
-                    className="w-16 rounded border-default bg-surface-card px-2 py-1 text-sm" />
-                </td>
-                <td className="py-2 pr-2 text-secondary">{l.gstRate}%</td>
-                <td className="py-2 pr-2 text-right">₹{l.taxable.toFixed(2)}</td>
-                <td className="py-2 pr-2 text-right font-semibold">₹{l.lineTotal.toFixed(2)}</td>
-                <td className="py-2">
-                  <button onClick={() => removeLine(idx)} className="text-danger hover:text-danger text-xs">✕</button>
-                </td>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-secondary border-b border-default">
+                <th className="pb-2">Item</th>
+                <th className="pb-2">Qty</th>
+                <th className="pb-2">Price</th>
+                <th className="pb-2">Disc %</th>
+                <th className="pb-2">GST %</th>
+                <th className="pb-2">Taxable</th>
+                <th className="pb-2">Total</th>
+                <th className="pb-2"></th>
               </tr>
-            ))}
-            {lines.length === 0 && (
-              <tr><td colSpan={8} className="py-6 text-center text-disabled text-sm">No items added yet</td></tr>
-            )}
-          </tbody>
-        </table>
+            </thead>
+            <tbody className="divide-y dark:divide-gray-700">
+              {computedLines.map((l, idx) => (
+                <tr key={idx}>
+                  <td className="py-2 pr-2">{l.itemName}</td>
+                  <td className="py-2 pr-2">
+                    <input
+                      type="number"
+                      min="0.001"
+                      step="0.001"
+                      value={l.quantity}
+                      onChange={(e) => updateLine(idx, 'quantity', parseFloat(e.target.value) || 0)}
+                      className="w-20 rounded border-default bg-surface-card px-2 py-1 text-sm"
+                    />
+                  </td>
+                  <td className="py-2 pr-2">
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={l.unitPrice}
+                      onChange={(e) =>
+                        updateLine(idx, 'unitPrice', parseFloat(e.target.value) || 0)
+                      }
+                      className="w-24 rounded border-default bg-surface-card px-2 py-1 text-sm"
+                    />
+                  </td>
+                  <td className="py-2 pr-2">
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      step="0.01"
+                      value={l.discountPct}
+                      onChange={(e) =>
+                        updateLine(idx, 'discountPct', parseFloat(e.target.value) || 0)
+                      }
+                      className="w-16 rounded border-default bg-surface-card px-2 py-1 text-sm"
+                    />
+                  </td>
+                  <td className="py-2 pr-2 text-secondary">{l.gstRate}%</td>
+                  <td className="py-2 pr-2 text-right">₹{l.taxable.toFixed(2)}</td>
+                  <td className="py-2 pr-2 text-right font-semibold">₹{l.lineTotal.toFixed(2)}</td>
+                  <td className="py-2">
+                    <button
+                      onClick={() => removeLine(idx)}
+                      className="text-danger hover:text-danger text-xs"
+                    >
+                      ✕
+                    </button>
+                  </td>
+                </tr>
+              ))}
+              {lines.length === 0 && (
+                <tr>
+                  <td colSpan={8} className="py-6 text-center text-disabled text-sm">
+                    No items added yet
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
 
         {/* Totals */}
         {lines.length > 0 && (
           <div className="mt-4 pt-4 border-t border-default flex justify-end">
             <div className="w-64 space-y-1 text-sm">
-              <div className="flex justify-between"><span className="text-secondary">Subtotal</span><span>₹{totals.subtotal.toFixed(2)}</span></div>
-              {totals.discount > 0 && <div className="flex justify-between text-danger"><span>Discount</span><span>-₹{totals.discount.toFixed(2)}</span></div>}
-              <div className="flex justify-between"><span className="text-secondary">Taxable Amount</span><span>₹{totals.taxable.toFixed(2)}</span></div>
-              {totals.cgst > 0 && <div className="flex justify-between"><span className="text-secondary">CGST</span><span>₹{totals.cgst.toFixed(2)}</span></div>}
-              {totals.sgst > 0 && <div className="flex justify-between"><span className="text-secondary">SGST</span><span>₹{totals.sgst.toFixed(2)}</span></div>}
-              {totals.igst > 0 && <div className="flex justify-between"><span className="text-secondary">IGST</span><span>₹{totals.igst.toFixed(2)}</span></div>}
+              <div className="flex justify-between">
+                <span className="text-secondary">Subtotal</span>
+                <span>₹{totals.subtotal.toFixed(2)}</span>
+              </div>
+              {totals.discount > 0 && (
+                <div className="flex justify-between text-danger">
+                  <span>Discount</span>
+                  <span>-₹{totals.discount.toFixed(2)}</span>
+                </div>
+              )}
+              <div className="flex justify-between">
+                <span className="text-secondary">Taxable Amount</span>
+                <span>₹{totals.taxable.toFixed(2)}</span>
+              </div>
+              {totals.cgst > 0 && (
+                <div className="flex justify-between">
+                  <span className="text-secondary">CGST</span>
+                  <span>₹{totals.cgst.toFixed(2)}</span>
+                </div>
+              )}
+              {totals.sgst > 0 && (
+                <div className="flex justify-between">
+                  <span className="text-secondary">SGST</span>
+                  <span>₹{totals.sgst.toFixed(2)}</span>
+                </div>
+              )}
+              {totals.igst > 0 && (
+                <div className="flex justify-between">
+                  <span className="text-secondary">IGST</span>
+                  <span>₹{totals.igst.toFixed(2)}</span>
+                </div>
+              )}
               <div className="flex justify-between font-bold text-base pt-1 border-t border-default">
-                <span>Grand Total</span><span>₹{totals.grand.toFixed(2)}</span>
+                <span>Grand Total</span>
+                <span>₹{totals.grand.toFixed(2)}</span>
               </div>
             </div>
           </div>
@@ -365,12 +521,49 @@ export default function InvoiceFormPage() {
       </div>
 
       <div className="mb-6">
-        <ERPTextarea label="Notes" value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} placeholder="Any additional notes for this invoice…" />
+        <ERPTextarea
+          label="Notes"
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          rows={3}
+          placeholder="Any additional notes for this invoice…"
+        />
       </div>
 
+      {(canOverrideCreditLimit || canOverridePriceFloor) && (
+        <div className="mb-6 space-y-2">
+          {canOverrideCreditLimit && (
+            <label className="flex items-center gap-2 text-sm text-secondary select-none">
+              <input
+                type="checkbox"
+                checked={overrideCreditLimit}
+                onChange={(e) => setOverrideCreditLimit(e.target.checked)}
+                className="h-4 w-4 rounded border-default text-brand focus:ring-border-focus"
+              />
+              Override customer credit limit if exceeded
+            </label>
+          )}
+          {canOverridePriceFloor && (
+            <label className="flex items-center gap-2 text-sm text-secondary select-none">
+              <input
+                type="checkbox"
+                checked={overridePriceFloor}
+                onChange={(e) => setOverridePriceFloor(e.target.checked)}
+                className="h-4 w-4 rounded border-default text-brand focus:ring-border-focus"
+              />
+              Override minimum sale price if a line is below floor
+            </label>
+          )}
+        </div>
+      )}
+
       <div className="flex justify-end gap-3">
-        <Button variant="ghost" onClick={() => navigate('/sales/invoices')}>Cancel</Button>
-        <Button isLoading={createMutation.isPending} onClick={handleSubmit}>Save as Draft</Button>
+        <Button variant="ghost" onClick={() => navigate('/sales/invoices')}>
+          Cancel
+        </Button>
+        <Button isLoading={createMutation.isPending} onClick={handleSubmit}>
+          Save as Draft
+        </Button>
       </div>
     </div>
   );

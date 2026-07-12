@@ -39,7 +39,11 @@ export default function AuditLogPage() {
 
   return (
     <div className="space-y-6">
-      <ERPPageHeader variant="list" title="Audit Log" subtitle="Who changed what, when, across business entities." />
+      <ERPPageHeader
+        variant="list"
+        title="Audit Log"
+        subtitle="Who changed what, when, across business entities."
+      />
 
       <div className="card p-4">
         <label className="block text-xs font-medium text-secondary mb-1">Entity Type</label>
@@ -63,72 +67,92 @@ export default function AuditLogPage() {
         {isLoading ? (
           <ERPTableSkeleton rows={8} cols={6} />
         ) : (
-          <table className="w-full text-sm">
-            <thead className="bg-surface-hover">
-              <tr>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-secondary uppercase"></th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-secondary uppercase">Time</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-secondary uppercase">Entity</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-secondary uppercase">Action</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-secondary uppercase">Actor</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-secondary uppercase">Changed Fields</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {rows.map((row) => (
-                <Fragment key={row.id}>
-                  <tr
-                    className="hover:bg-surface-hover cursor-pointer"
-                    onClick={() => setExpandedId(expandedId === row.id ? null : row.id)}
-                  >
-                    <td className="px-4 py-3 text-secondary">
-                      {expandedId === row.id ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                    </td>
-                    <td className="px-4 py-3 text-secondary">{formatDate(row.createdAt)}</td>
-                    <td className="px-4 py-3 text-primary font-medium">
-                      {row.entityType}
-                      {row.entityId ? ` #${row.entityId}` : ''}
-                    </td>
-                    <td className="px-4 py-3 text-secondary">{row.action}</td>
-                    <td className="px-4 py-3 text-secondary">{row.actorEmail ?? '—'}</td>
-                    <td className="px-4 py-3 text-secondary text-xs truncate max-w-[200px]">
-                      {row.changedFields?.length ? row.changedFields.join(', ') : '—'}
-                    </td>
-                  </tr>
-                  {expandedId === row.id && (
-                    <tr className="bg-surface-hover">
-                      <td colSpan={6} className="px-4 py-3">
-                        <div className="grid grid-cols-2 gap-4 text-xs">
-                          <div>
-                            <div className="font-semibold text-secondary mb-1">Before</div>
-                            <pre className="bg-surface-card border border-default rounded-lg p-2 overflow-x-auto">
-                              {row.beforeData ? JSON.stringify(row.beforeData, null, 2) : '—'}
-                            </pre>
-                          </div>
-                          <div>
-                            <div className="font-semibold text-secondary mb-1">After</div>
-                            <pre className="bg-surface-card border border-default rounded-lg p-2 overflow-x-auto">
-                              {row.afterData ? JSON.stringify(row.afterData, null, 2) : '—'}
-                            </pre>
-                          </div>
-                        </div>
-                        {row.ipAddress && (
-                          <div className="mt-2 text-xs text-secondary">IP: {row.ipAddress}</div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-surface-hover">
+                <tr>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-secondary uppercase"></th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-secondary uppercase">
+                    Time
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-secondary uppercase">
+                    Entity
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-secondary uppercase">
+                    Action
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-secondary uppercase">
+                    Actor
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-secondary uppercase">
+                    Changed Fields
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {rows.map((row) => (
+                  <Fragment key={row.id}>
+                    <tr
+                      className="hover:bg-surface-hover cursor-pointer"
+                      onClick={() => setExpandedId(expandedId === row.id ? null : row.id)}
+                    >
+                      <td className="px-4 py-3 text-secondary">
+                        {expandedId === row.id ? (
+                          <ChevronDown size={14} />
+                        ) : (
+                          <ChevronRight size={14} />
                         )}
                       </td>
+                      <td className="px-4 py-3 text-secondary">{formatDate(row.createdAt)}</td>
+                      <td className="px-4 py-3 text-primary font-medium">
+                        {row.entityType}
+                        {row.entityId ? ` #${row.entityId}` : ''}
+                      </td>
+                      <td className="px-4 py-3 text-secondary">{row.action}</td>
+                      <td className="px-4 py-3 text-secondary">{row.actorEmail ?? '—'}</td>
+                      <td className="px-4 py-3 text-secondary text-xs truncate max-w-[200px]">
+                        {row.changedFields?.length ? row.changedFields.join(', ') : '—'}
+                      </td>
                     </tr>
-                  )}
-                </Fragment>
-              ))}
-              {rows.length === 0 && (
-                <tr>
-                  <td colSpan={6}>
-                    <ERPEmptyState type="no-results" title="No audit log entries" description="Try adjusting the entity filter." />
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+                    {expandedId === row.id && (
+                      <tr className="bg-surface-hover">
+                        <td colSpan={6} className="px-4 py-3">
+                          <div className="grid grid-cols-2 gap-4 text-xs">
+                            <div>
+                              <div className="font-semibold text-secondary mb-1">Before</div>
+                              <pre className="bg-surface-card border border-default rounded-lg p-2 overflow-x-auto">
+                                {row.beforeData ? JSON.stringify(row.beforeData, null, 2) : '—'}
+                              </pre>
+                            </div>
+                            <div>
+                              <div className="font-semibold text-secondary mb-1">After</div>
+                              <pre className="bg-surface-card border border-default rounded-lg p-2 overflow-x-auto">
+                                {row.afterData ? JSON.stringify(row.afterData, null, 2) : '—'}
+                              </pre>
+                            </div>
+                          </div>
+                          {row.ipAddress && (
+                            <div className="mt-2 text-xs text-secondary">IP: {row.ipAddress}</div>
+                          )}
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                ))}
+                {rows.length === 0 && (
+                  <tr>
+                    <td colSpan={6}>
+                      <ERPEmptyState
+                        type="no-results"
+                        title="No audit log entries"
+                        description="Try adjusting the entity filter."
+                      />
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
 

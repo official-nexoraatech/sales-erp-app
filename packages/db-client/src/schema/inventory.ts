@@ -5,7 +5,6 @@ import {
   decimal,
   index,
   integer,
-  jsonb,
   pgTable,
   text,
   timestamp,
@@ -76,6 +75,34 @@ export const inventoryFifoLayers = pgTable(
   },
   (t) => [
     index('idx_fifo_layers_consume_order').on(t.tenantId, t.itemId, t.warehouseId, t.receivedAt),
+  ]
+);
+
+// ─── Per-Warehouse WACC Valuation (PG-032: FIFO is already warehouse-scoped via
+// inventory_fifo_layers.warehouse_id; WACC cost/value only has a tenant-wide home on
+// `items`, so this table gives it a warehouse dimension too. Maintained alongside the
+// tenant-wide items.waccCost/currentStockValue columns, not instead of them — see
+// ValuationService.ts for the write path. ─────────────────────────────────────
+export const inventoryWarehouseValuation = pgTable(
+  'inventory_warehouse_valuation',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    tenantId: integer('tenant_id').notNull(),
+    itemId: integer('item_id').notNull(),
+    variantId: integer('variant_id'),
+    warehouseId: integer('warehouse_id').notNull(),
+    waccCost: decimal('wacc_cost', { precision: 15, scale: 2 }).notNull().default('0'),
+    stockValue: decimal('stock_value', { precision: 15, scale: 2 }).notNull().default('0'),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    unique('inventory_warehouse_valuation_tenant_item_variant_wh').on(
+      t.tenantId,
+      t.itemId,
+      t.variantId,
+      t.warehouseId
+    ),
+    index('idx_warehouse_valuation_lookup').on(t.tenantId, t.itemId, t.warehouseId),
   ]
 );
 
@@ -436,3 +463,5 @@ export type FabricCut = typeof fabricCuts.$inferSelect;
 export type ProjectionStockLevel = typeof projectionStockLevel.$inferSelect;
 export type InventoryFifoLayer = typeof inventoryFifoLayers.$inferSelect;
 export type NewInventoryFifoLayer = typeof inventoryFifoLayers.$inferInsert;
+export type InventoryWarehouseValuation = typeof inventoryWarehouseValuation.$inferSelect;
+export type NewInventoryWarehouseValuation = typeof inventoryWarehouseValuation.$inferInsert;

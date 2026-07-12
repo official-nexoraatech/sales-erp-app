@@ -9,6 +9,7 @@ export default defineConfig({
       '@erp/logger': path.resolve(__dirname, '../../packages/logger/src/index.ts'),
       '@erp/config': path.resolve(__dirname, '../../packages/config/src/index.ts'),
       '@erp/sdk': path.resolve(__dirname, '../../packages/platform-sdk/src/index.ts'),
+      '@erp/utils/server': path.resolve(__dirname, '../../packages/shared-utils/src/server.ts'),
       '@erp/utils': path.resolve(__dirname, '../../packages/shared-utils/src/index.ts'),
     },
   },

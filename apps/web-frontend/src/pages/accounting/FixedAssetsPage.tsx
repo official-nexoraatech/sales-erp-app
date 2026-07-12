@@ -15,8 +15,18 @@ import Select from '../../components/ui/Select.js';
 import { formatCurrency, formatDate } from '../../lib/format.js';
 
 const MONTHS = [
-  'January', 'February', 'March', 'April', 'May', 'June',
-  'July', 'August', 'September', 'October', 'November', 'December',
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
 ];
 
 interface FixedAsset {
@@ -59,21 +69,54 @@ export default function FixedAssetsPage() {
   const totalNetBookValue = assets.reduce((s, a) => s + Number(a.currentValue), 0);
 
   const columns: ERPColumnDef<FixedAsset>[] = [
-    { key: 'assetCode', header: 'Code', mono: true, className: 'text-xs text-disabled', hideable: false },
+    {
+      key: 'assetCode',
+      header: 'Code',
+      mono: true,
+      className: 'text-xs text-disabled',
+      hideable: false,
+    },
     { key: 'name', header: 'Asset Name', className: 'font-medium text-primary' },
     { key: 'category', header: 'Category', className: 'text-secondary' },
     { key: 'depreciationMethod', header: 'Method', className: 'text-secondary' },
-    { key: 'purchaseDate', header: 'Purchase Date', className: 'text-secondary text-xs', render: (row) => formatDate(row.purchaseDate) },
-    { key: 'purchaseCost', header: 'Cost', align: 'right', mono: true, render: (row) => formatCurrency(Number(row.purchaseCost)) },
-    { key: 'currentValue', header: 'Net Book Value', align: 'right', mono: true, className: 'font-semibold text-primary', render: (row) => formatCurrency(Number(row.currentValue)) },
-    { key: 'status', header: 'Status', render: (row) => <Badge label={row.status} color={STATUS_COLORS[row.status] ?? 'gray'} /> },
+    {
+      key: 'purchaseDate',
+      header: 'Purchase Date',
+      className: 'text-secondary text-xs',
+      render: (row) => formatDate(row.purchaseDate),
+    },
+    {
+      key: 'purchaseCost',
+      header: 'Cost',
+      align: 'right',
+      mono: true,
+      render: (row) => formatCurrency(Number(row.purchaseCost)),
+    },
+    {
+      key: 'currentValue',
+      header: 'Net Book Value',
+      align: 'right',
+      mono: true,
+      className: 'font-semibold text-primary',
+      render: (row) => formatCurrency(Number(row.currentValue)),
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      render: (row) => <Badge label={row.status} color={STATUS_COLORS[row.status] ?? 'gray'} />,
+    },
   ];
 
   const runDepreciationMutation = useMutation({
     mutationFn: () => fixedAssetApi.runDepreciation({ periodMonth, periodYear }),
     onSuccess: (res) => {
-      const { processed, errors } = (res as { processed: number; errors: number }) ?? { processed: 0, errors: 0 };
-      toast.success(`Posted depreciation for ${processed} asset(s)${errors ? `, ${errors} error(s)` : ''}`);
+      const { processed, errors } = (res as { processed: number; errors: number }) ?? {
+        processed: 0,
+        errors: 0,
+      };
+      toast.success(
+        `Posted depreciation for ${processed} asset(s)${errors ? `, ${errors} error(s)` : ''}`
+      );
       qc.invalidateQueries({ queryKey: ['fixed-assets'] });
       setRunDepModalOpen(false);
     },
@@ -87,7 +130,7 @@ export default function FixedAssetsPage() {
         title="Fixed Asset Register"
         subtitle={`${assets.length} asset(s) · Net Book Value: ${formatCurrency(totalNetBookValue)}`}
         actions={
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             {canRunDepreciation && (
               <Button variant="secondary" onClick={() => setRunDepModalOpen(true)}>
                 Run Depreciation
@@ -113,14 +156,25 @@ export default function FixedAssetsPage() {
             type="no-data"
             title="No fixed assets registered"
             description="Add assets like machinery, vehicles, and computers"
-            {...(canCreateAsset ? { action: { label: 'Add First Asset', onClick: () => navigate('/accounting/fixed-assets/new') } } : {})}
+            {...(canCreateAsset
+              ? {
+                  action: {
+                    label: 'Add First Asset',
+                    onClick: () => navigate('/accounting/fixed-assets/new'),
+                  },
+                }
+              : {})}
           />
         }
         footer={
           assets.length > 0 && (
             <>
-              <td colSpan={6} className="px-4 py-3 text-primary">Total Net Book Value</td>
-              <td className="px-4 py-3 text-right font-mono text-primary">{formatCurrency(totalNetBookValue)}</td>
+              <td colSpan={6} className="px-4 py-3 text-primary">
+                Total Net Book Value
+              </td>
+              <td className="px-4 py-3 text-right font-mono text-primary">
+                {formatCurrency(totalNetBookValue)}
+              </td>
               <td />
             </>
           )
@@ -138,14 +192,16 @@ export default function FixedAssetsPage() {
         description={
           <div className="space-y-3 text-left">
             <p>Post depreciation journal entries for all active assets for the selected period.</p>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <Select
                 label="Month"
                 value={periodMonth}
                 onChange={(e) => setPeriodMonth(Number(e.target.value))}
               >
                 {MONTHS.map((m, i) => (
-                  <option key={m} value={i + 1}>{m}</option>
+                  <option key={m} value={i + 1}>
+                    {m}
+                  </option>
                 ))}
               </Select>
               <Select
@@ -154,7 +210,9 @@ export default function FixedAssetsPage() {
                 onChange={(e) => setPeriodYear(Number(e.target.value))}
               >
                 {[now.getFullYear() - 1, now.getFullYear(), now.getFullYear() + 1].map((y) => (
-                  <option key={y} value={y}>{y}</option>
+                  <option key={y} value={y}>
+                    {y}
+                  </option>
                 ))}
               </Select>
             </div>

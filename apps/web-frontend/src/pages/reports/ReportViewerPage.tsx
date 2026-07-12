@@ -46,7 +46,9 @@ function formatCell(value: string | number | null, type: string): string {
   if (value === null || value === undefined) return '–';
   if (type === 'currency') {
     const n = parseFloat(String(value));
-    return isNaN(n) ? '–' : `₹${n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    return isNaN(n)
+      ? '–'
+      : `₹${n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   }
   if (type === 'percent') {
     const n = parseFloat(String(value));
@@ -83,14 +85,14 @@ export default function ReportViewerPage() {
     if (definition?.params) {
       for (const p of definition.params) {
         if (p.key === 'fromDate') defaults[p.key] = monthStart;
-        else if (p.key === 'toDate' || p.key === 'asOfDate' || p.key === 'date') defaults[p.key] = today;
+        else if (p.key === 'toDate' || p.key === 'asOfDate' || p.key === 'date')
+          defaults[p.key] = today;
         else if (p.default) defaults[p.key] = p.default;
       }
     }
     return defaults;
   });
 
-  const [format, setFormat] = useState<'JSON' | 'CSV' | 'EXCEL'>('JSON');
   const [result, setResult] = useState<ReportResult | null>(null);
   const [page, setPage] = useState(0);
   const [pendingRunId, setPendingRunId] = useState<number | null>(null);
@@ -102,7 +104,12 @@ export default function ReportViewerPage() {
       // Reports flagged supportsAsync on the backend always queue the job and return
       // {runId, status: PENDING} instead of the report rows, regardless of the async
       // param sent — poll run-history until the job finishes to get the real result.
-      if (data && typeof data === 'object' && 'status' in data && (data as ReportRunPending).status === 'PENDING') {
+      if (
+        data &&
+        typeof data === 'object' &&
+        'status' in data &&
+        (data as ReportRunPending).status === 'PENDING'
+      ) {
         setResult(null);
         setPendingRunId((data as ReportRunPending).runId);
       } else {
@@ -173,9 +180,12 @@ export default function ReportViewerPage() {
   return (
     <div className="space-y-4">
       {/* Header */}
-      <div className="flex items-start justify-between gap-4">
+      <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="flex items-center gap-3">
-          <button onClick={() => navigate('/reports')} className="p-1.5 rounded-lg hover:bg-surface-raised text-secondary transition-colors">
+          <button
+            onClick={() => navigate('/reports')}
+            className="p-1.5 rounded-lg hover:bg-surface-raised text-secondary transition-colors"
+          >
             <ArrowLeft size={18} />
           </button>
           <div>
@@ -212,30 +222,42 @@ export default function ReportViewerPage() {
       {/* Parameters */}
       {definition.params.length > 0 && (
         <div className="bg-surface-card border border-default rounded-xl p-4">
-          <h3 className="text-xs font-semibold text-secondary uppercase tracking-wide mb-3">Parameters</h3>
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+          <h3 className="text-xs font-semibold text-secondary uppercase tracking-wide mb-3">
+            Parameters
+          </h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
             {definition.params.map((param) => (
               <div key={param.key}>
                 <label className="block text-xs font-medium text-secondary mb-1">
-                  {param.label}{param.required && <span className="text-error ml-1">*</span>}
+                  {param.label}
+                  {param.required && <span className="text-error ml-1">*</span>}
                 </label>
                 {param.type === 'select' && param.options ? (
                   <div className="relative">
                     <select
                       value={paramValues[param.key] ?? ''}
-                      onChange={(e) => setParamValues((p) => ({ ...p, [param.key]: e.target.value }))}
+                      onChange={(e) =>
+                        setParamValues((p) => ({ ...p, [param.key]: e.target.value }))
+                      }
                       className="w-full appearance-none text-sm border border-default rounded-lg px-3 py-1.5 bg-surface-card text-primary focus:outline-none focus:ring-2 focus:ring-primary/30 pr-8"
                     >
                       <option value="">All</option>
                       {param.options.map((o) => (
-                        <option key={o.value} value={o.value}>{o.label}</option>
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
                       ))}
                     </select>
-                    <ChevronDown size={12} className="absolute right-2 top-1/2 -translate-y-1/2 text-secondary pointer-events-none" />
+                    <ChevronDown
+                      size={12}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-secondary pointer-events-none"
+                    />
                   </div>
                 ) : (
                   <input
-                    type={param.type === 'date' ? 'date' : param.type === 'number' ? 'number' : 'text'}
+                    type={
+                      param.type === 'date' ? 'date' : param.type === 'number' ? 'number' : 'text'
+                    }
                     value={paramValues[param.key] ?? param.default ?? ''}
                     onChange={(e) => setParamValues((p) => ({ ...p, [param.key]: e.target.value }))}
                     placeholder={param.label}
@@ -260,8 +282,10 @@ export default function ReportViewerPage() {
         <div className="bg-surface-card border border-default rounded-xl">
           <div className="flex items-center justify-between px-4 py-3 border-b border-default">
             <div className="text-xs text-secondary">
-              <span className="font-medium text-primary">{result.totalRows.toLocaleString('en-IN')}</span> rows ·{' '}
-              generated in {result.durationMs}ms ·{' '}
+              <span className="font-medium text-primary">
+                {result.totalRows.toLocaleString('en-IN')}
+              </span>{' '}
+              rows · generated in {result.durationMs}ms ·{' '}
               {new Date(result.generatedAt).toLocaleTimeString('en-IN')}
             </div>
             {totalPages > 1 && (
@@ -273,7 +297,9 @@ export default function ReportViewerPage() {
                 >
                   Prev
                 </button>
-                <span>Page {page + 1} / {totalPages}</span>
+                <span>
+                  Page {page + 1} / {totalPages}
+                </span>
                 <button
                   disabled={page >= totalPages - 1}
                   onClick={() => setPage((p) => p + 1)}
@@ -300,7 +326,10 @@ export default function ReportViewerPage() {
               </thead>
               <tbody>
                 {pageRows.map((row, ri) => (
-                  <tr key={ri} className="border-b border-default last:border-0 hover:bg-surface-raised/50 transition-colors">
+                  <tr
+                    key={ri}
+                    className="border-b border-default last:border-0 hover:bg-surface-raised/50 transition-colors"
+                  >
                     {definition.columns.map((col) => (
                       <td
                         key={col.key}
@@ -316,7 +345,11 @@ export default function ReportViewerPage() {
                 {pageRows.length === 0 && (
                   <tr>
                     <td colSpan={definition.columns.length}>
-                      <ERPEmptyState type="no-results" title="No data found" description="Try adjusting the parameters and running the report again." />
+                      <ERPEmptyState
+                        type="no-results"
+                        title="No data found"
+                        description="Try adjusting the parameters and running the report again."
+                      />
                     </td>
                   </tr>
                 )}
@@ -330,9 +363,11 @@ export default function ReportViewerPage() {
                         key={col.key}
                         className={`px-3 py-2 text-xs font-bold whitespace-nowrap ${col.align === 'right' ? 'text-right font-mono' : 'text-primary'}`}
                       >
-                        {ci === 0 ? 'TOTAL' : result.totals[col.key] !== undefined
-                          ? formatCell(result.totals[col.key]!, col.type)
-                          : ''}
+                        {ci === 0
+                          ? 'TOTAL'
+                          : result.totals[col.key] !== undefined
+                            ? formatCell(result.totals[col.key]!, col.type)
+                            : ''}
                       </td>
                     ))}
                   </tr>
@@ -353,7 +388,9 @@ export default function ReportViewerPage() {
       {!result && !isRunning && (
         <div className="text-center py-16 text-secondary">
           <RefreshCw size={28} className="mx-auto mb-3 opacity-30" />
-          <p className="text-sm">Set parameters and click <strong>Run Report</strong> to see results</p>
+          <p className="text-sm">
+            Set parameters and click <strong>Run Report</strong> to see results
+          </p>
         </div>
       )}
     </div>

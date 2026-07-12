@@ -30,6 +30,7 @@ const SEGMENT_LABELS: Record<string, string> = {
   'chart-of-accounts': 'Chart of Accounts',
   accounts: 'Accounts',
   'opening-balances': 'Opening Balances',
+  'cost-centers': 'Cost Centers',
   sales: 'Sales',
   quotations: 'Quotations',
   invoices: 'Invoices',
@@ -43,10 +44,7 @@ const SEGMENT_LABELS: Record<string, string> = {
 
 function toLabel(seg: string): string {
   if (/^\d+$/.test(seg)) return 'Detail';
-  return (
-    SEGMENT_LABELS[seg] ??
-    seg.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
-  );
+  return SEGMENT_LABELS[seg] ?? seg.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 export default function ERPBreadcrumb() {

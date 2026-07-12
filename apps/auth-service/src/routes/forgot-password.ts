@@ -34,7 +34,10 @@ function sendPasswordResetEmail(
       templateData: { resetLink: input.resetLink },
     }),
   }).catch((err) => {
-    fastify.log.warn({ err, userId: input.userId }, 'Password reset email delivery failed (non-fatal)');
+    fastify.log.warn(
+      { err, userId: input.userId },
+      'Password reset email delivery failed (non-fatal)'
+    );
   });
 }
 
@@ -44,6 +47,12 @@ export async function forgotPasswordRoute(
   config: AuthConfig
 ): Promise<void> {
   fastify.post('/auth/forgot-password', {
+    config: {
+      rateLimit: {
+        max: config.forgotPasswordRateLimitMax,
+        timeWindow: config.forgotPasswordRateLimitWindowMs,
+      },
+    },
     handler: async (request, reply) => {
       const body = ForgotPasswordBody.safeParse(request.body);
       if (!body.success) {
@@ -72,10 +81,18 @@ export async function forgotPasswordRoute(
         });
 
         const resetLink = `${config.frontendUrl}/reset-password?token=${plainToken}`;
-        sendPasswordResetEmail(fastify, { tenantId, userId: user.id, email: user.email, resetLink });
+        sendPasswordResetEmail(fastify, {
+          tenantId,
+          userId: user.id,
+          email: user.email,
+          resetLink,
+        });
 
         if (config.nodeEnv !== 'production') {
-          fastify.log.debug({ userId: user.id, tenantId, resetLink }, 'Password reset requested (dev only)');
+          fastify.log.debug(
+            { userId: user.id, tenantId, resetLink },
+            'Password reset requested (dev only)'
+          );
         }
       }
 

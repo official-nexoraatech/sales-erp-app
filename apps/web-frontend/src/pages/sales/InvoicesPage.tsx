@@ -49,22 +49,32 @@ export default function InvoicesPage() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
 
-  useEffect(() => { setPage(1); }, [debouncedSearch, status]);
+  useEffect(() => {
+    setPage(1);
+  }, [debouncedSearch, status]);
 
   const { data, isLoading } = useQuery({
     queryKey: ['invoices', debouncedSearch, status, page, pageSize],
     queryFn: () =>
-      invoiceApi.list({ search: debouncedSearch || undefined, status: status || undefined, page, pageSize }),
+      invoiceApi.list({
+        search: debouncedSearch || undefined,
+        status: status || undefined,
+        page,
+        pageSize,
+      }),
     staleTime: 30_000,
   });
 
-  const rows: Invoice[] = (data as Record<string, unknown>)?.content as Invoice[] ?? [];
-  const totalElements = (data as Record<string, unknown>)?.totalElements as number ?? 0;
+  const rows: Invoice[] = ((data as Record<string, unknown>)?.content as Invoice[]) ?? [];
+  const totalElements = ((data as Record<string, unknown>)?.totalElements as number) ?? 0;
 
   const cancelMutation = useMutation({
     mutationFn: ({ id, reason }: { id: number; reason: string }) =>
       invoiceApi.cancel(id, { reason }),
-    onSuccess: () => { toast.success('Invoice cancelled'); qc.invalidateQueries({ queryKey: ['invoices'] }); },
+    onSuccess: () => {
+      toast.success('Invoice cancelled');
+      qc.invalidateQueries({ queryKey: ['invoices'] });
+    },
     onError: (e: Error) => toast.error(e.message),
   });
 
@@ -82,9 +92,12 @@ export default function InvoicesPage() {
       key: 'invoiceNumber',
       header: 'Invoice #',
       mono: true,
-      render: (r) => r.invoiceNumber
-        ? <span className="font-mono text-sm">{r.invoiceNumber}</span>
-        : <span className="text-disabled text-sm italic">Draft</span>,
+      render: (r) =>
+        r.invoiceNumber ? (
+          <span className="font-mono text-sm">{r.invoiceNumber}</span>
+        ) : (
+          <span className="text-disabled text-sm italic">Draft</span>
+        ),
     },
     { key: 'customerId', header: 'Customer' },
     {
@@ -100,12 +113,19 @@ export default function InvoicesPage() {
       align: 'right',
       render: (r) => {
         const bal = parseFloat(r.balanceDue);
-        return <span className={bal > 0 ? 'text-danger font-semibold' : 'text-success'}>
-          {formatCurrency(bal)}
-        </span>;
+        return (
+          <span className={bal > 0 ? 'text-danger font-semibold' : 'text-success'}>
+            {formatCurrency(bal)}
+          </span>
+        );
       },
     },
-    { key: 'invoiceDate', header: 'Date', sortable: true, render: (r) => formatDate(r.invoiceDate) },
+    {
+      key: 'invoiceDate',
+      header: 'Date',
+      sortable: true,
+      render: (r) => formatDate(r.invoiceDate),
+    },
     { key: 'dueDate', header: 'Due', render: (r) => formatDate(r.dueDate) },
     {
       key: 'status',
@@ -118,13 +138,29 @@ export default function InvoicesPage() {
       header: '',
       align: 'right',
       render: (r) => {
-        const items: ERPMenuItem[] = [{ label: 'View', icon: Eye, onClick: () => navigate(`/sales/invoices/${r.id}`) }];
-        if (canCreateInvoice) items.push({ label: 'Duplicate', icon: Copy, onClick: () => duplicateMutation.mutate(r.id) });
+        const items: ERPMenuItem[] = [
+          { label: 'View', icon: Eye, onClick: () => navigate(`/sales/invoices/${r.id}`) },
+        ];
+        if (canCreateInvoice)
+          items.push({
+            label: 'Duplicate',
+            icon: Copy,
+            onClick: () => duplicateMutation.mutate(r.id),
+          });
         if (canCreatePayment && ['CONFIRMED', 'PARTIALLY_PAID'].includes(r.status)) {
-          items.push({ label: 'Record Payment', icon: IndianRupee, onClick: () => navigate(`/sales/payments/new?invoiceId=${r.id}`) });
+          items.push({
+            label: 'Record Payment',
+            icon: IndianRupee,
+            onClick: () => navigate(`/sales/payments/new?invoiceId=${r.id}`),
+          });
         }
         if (canCancelInvoice && r.status === 'DRAFT') {
-          items.push({ label: 'Cancel', icon: Ban, variant: 'danger', onClick: () => cancelMutation.mutate({ id: r.id, reason: 'Cancelled by user' }) });
+          items.push({
+            label: 'Cancel',
+            icon: Ban,
+            variant: 'danger',
+            onClick: () => cancelMutation.mutate({ id: r.id, reason: 'Cancelled by user' }),
+          });
         }
         return <ERPDropdownMenu items={items} />;
       },
@@ -134,10 +170,12 @@ export default function InvoicesPage() {
   return (
     <div>
       <ERPPageHeader variant="list" title="Invoices" subtitle="Create and manage sales invoices">
-        {canCreateInvoice && <Button onClick={() => navigate('/sales/invoices/new')}>+ New Invoice</Button>}
+        {canCreateInvoice && (
+          <Button onClick={() => navigate('/sales/invoices/new')}>+ New Invoice</Button>
+        )}
       </ERPPageHeader>
 
-      <div className="flex gap-4 mb-4">
+      <div className="flex flex-col sm:flex-row gap-4 mb-4">
         <div className="flex-1 max-w-sm">
           <Input
             placeholder="Search by invoice number..."
@@ -148,7 +186,9 @@ export default function InvoicesPage() {
         <Select value={status} onChange={(e) => setStatus(e.target.value)} className="w-44">
           <option value="">All Statuses</option>
           {['DRAFT', 'CONFIRMED', 'PARTIALLY_PAID', 'PAID', 'OVERDUE', 'CANCELLED'].map((s) => (
-            <option key={s} value={s}>{s}</option>
+            <option key={s} value={s}>
+              {s}
+            </option>
           ))}
         </Select>
       </div>
@@ -160,7 +200,10 @@ export default function InvoicesPage() {
         rowKey="id"
         pagination={{ page, pageSize, total: totalElements }}
         onPageChange={setPage}
-        onPageSizeChange={(size) => { setPageSize(size); setPage(1); }}
+        onPageSizeChange={(size) => {
+          setPageSize(size);
+          setPage(1);
+        }}
       />
     </div>
   );

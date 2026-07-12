@@ -48,11 +48,13 @@ export default function JournalsPage() {
         variant="list"
         title="Journal Entries"
         subtitle={`${total} journal(s) total`}
-        actions={canCreateJournal ? (
-          <Button variant="primary" onClick={() => navigate('/accounting/journals/new')}>
-            + Manual Journal
-          </Button>
-        ) : undefined}
+        actions={
+          canCreateJournal ? (
+            <Button variant="primary" onClick={() => navigate('/accounting/journals/new')}>
+              + Manual Journal
+            </Button>
+          ) : undefined
+        }
       />
 
       <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
@@ -63,47 +65,72 @@ export default function JournalsPage() {
             type="no-data"
             title="No journal entries yet"
             description="Journal entries are posted automatically from business events. You can also add one manually."
-            {...(canCreateJournal ? { action: { label: '+ Manual Journal', onClick: () => navigate('/accounting/journals/new') } } : {})}
+            {...(canCreateJournal
+              ? {
+                  action: {
+                    label: '+ Manual Journal',
+                    onClick: () => navigate('/accounting/journals/new'),
+                  },
+                }
+              : {})}
           />
         ) : (
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50 dark:bg-gray-900/40 border-b border-gray-200 dark:border-gray-700">
-              <tr>
-                <th className="px-4 py-3 text-left font-medium text-secondary">Journal ID</th>
-                <th className="px-4 py-3 text-left font-medium text-secondary">Description</th>
-                <th className="px-4 py-3 text-left font-medium text-secondary">Reference</th>
-                <th className="px-4 py-3 text-left font-medium text-secondary">Status</th>
-                <th className="px-4 py-3 text-right font-medium text-secondary">Amount (DR)</th>
-                <th className="px-4 py-3 text-left font-medium text-secondary">Date</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
-              {journals.map((j) => (
-                <tr
-                  key={j.journalId}
-                  className="hover:bg-gray-50 dark:hover:bg-gray-750 cursor-pointer"
-                  onClick={() => navigate(`/accounting/journals/${j.journalId}`)}
-                >
-                  <td className="px-4 py-3 font-mono text-xs text-blue-600 dark:text-blue-400">{j.journalId.slice(0, 20)}…</td>
-                  <td className="px-4 py-3 text-primary max-w-xs truncate">{j.description}</td>
-                  <td className="px-4 py-3 text-secondary text-xs">{j.referenceType} {j.referenceId ? `#${j.referenceId}` : ''}</td>
-                  <td className="px-4 py-3">
-                    <Badge label={j.status} color={STATUS_COLORS[j.status] ?? 'gray'} />
-                  </td>
-                  <td className="px-4 py-3 text-right font-mono">{formatCurrency(Number(j.totalDebit ?? 0))}</td>
-                  <td className="px-4 py-3 text-secondary text-xs">{formatDatetime(j.createdAt)}</td>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 dark:bg-gray-900/40 border-b border-gray-200 dark:border-gray-700">
+                <tr>
+                  <th className="px-4 py-3 text-left font-medium text-secondary">Journal ID</th>
+                  <th className="px-4 py-3 text-left font-medium text-secondary">Description</th>
+                  <th className="px-4 py-3 text-left font-medium text-secondary">Reference</th>
+                  <th className="px-4 py-3 text-left font-medium text-secondary">Status</th>
+                  <th className="px-4 py-3 text-right font-medium text-secondary">Amount (DR)</th>
+                  <th className="px-4 py-3 text-left font-medium text-secondary">Date</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
+                {journals.map((j) => (
+                  <tr
+                    key={j.journalId}
+                    className="hover:bg-gray-50 dark:hover:bg-gray-750 cursor-pointer"
+                    onClick={() => navigate(`/accounting/journals/${j.journalId}`)}
+                  >
+                    <td className="px-4 py-3 font-mono text-xs text-blue-600 dark:text-blue-400">
+                      {j.journalId.slice(0, 20)}…
+                    </td>
+                    <td className="px-4 py-3 text-primary max-w-xs truncate">{j.description}</td>
+                    <td className="px-4 py-3 text-secondary text-xs">
+                      {j.referenceType} {j.referenceId ? `#${j.referenceId}` : ''}
+                    </td>
+                    <td className="px-4 py-3">
+                      <Badge label={j.status} color={STATUS_COLORS[j.status] ?? 'gray'} />
+                    </td>
+                    <td className="px-4 py-3 text-right font-mono">
+                      {formatCurrency(Number(j.totalDebit ?? 0))}
+                    </td>
+                    <td className="px-4 py-3 text-secondary text-xs">
+                      {formatDatetime(j.createdAt)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
 
         {total > 20 && (
           <div className="flex items-center justify-between px-4 py-3 border-t border-gray-200 dark:border-gray-700">
             <span className="text-sm text-secondary">Page {page + 1}</span>
             <div className="flex gap-2">
-              <Button variant="ghost" disabled={page === 0} onClick={() => setPage((p) => p - 1)}>Prev</Button>
-              <Button variant="ghost" disabled={(page + 1) * 20 >= total} onClick={() => setPage((p) => p + 1)}>Next</Button>
+              <Button variant="ghost" disabled={page === 0} onClick={() => setPage((p) => p - 1)}>
+                Prev
+              </Button>
+              <Button
+                variant="ghost"
+                disabled={(page + 1) * 20 >= total}
+                onClick={() => setPage((p) => p + 1)}
+              >
+                Next
+              </Button>
             </div>
           </div>
         )}

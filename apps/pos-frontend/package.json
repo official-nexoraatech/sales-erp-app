@@ -4,16 +4,18 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc --noEmit",
+    "build": "tsc --noEmit && vite build",
     "dev": "vite",
     "preview": "vite preview",
     "lint": "eslint src/",
     "type-check": "tsc --noEmit",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run --passWithNoTests",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@erp/design-tokens": "workspace:*",
     "@erp/types": "workspace:*",
+    "@erp/ui": "workspace:*",
     "@erp/utils": "workspace:*",
     "@zxing/browser": "^0.1.5",
     "@hookform/resolvers": "^3.9.1",
@@ -30,6 +32,7 @@
     "zustand": "^5.0.2"
   },
   "devDependencies": {
+    "@playwright/test": "^1.49.1",
     "@tailwindcss/vite": "^4.0.0",
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.1.0",

@@ -32,7 +32,7 @@ vi.mock('@erp/config', () => ({
   requireEnv: (_name: string) => '0'.repeat(64),
 }));
 
-vi.mock('@erp/utils', () => ({
+vi.mock('@erp/utils/server', () => ({
   encryptField: (val: string, _key: string) => `enc:${val}`,
   decryptField: (val: string, _key: string) => val.replace(/^enc:/, ''),
 }));
@@ -160,8 +160,16 @@ describe('No regression — HR_MANAGER can view payroll runs', () => {
     const token = await makeToken([PERMISSIONS.PAYROLL_VIEW]);
 
     const [runsRes, slipRes] = await Promise.all([
-      app.inject({ method: 'GET', url: '/payroll-runs', headers: { Authorization: `Bearer ${token}` } }),
-      app.inject({ method: 'GET', url: '/payroll-slips/1', headers: { Authorization: `Bearer ${token}` } }),
+      app.inject({
+        method: 'GET',
+        url: '/payroll-runs',
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+      app.inject({
+        method: 'GET',
+        url: '/payroll-slips/1',
+        headers: { Authorization: `Bearer ${token}` },
+      }),
     ]);
 
     expect(runsRes.statusCode).not.toBe(403);

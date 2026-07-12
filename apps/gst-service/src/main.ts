@@ -1,12 +1,28 @@
-import Fastify, { type FastifyError } from 'fastify';
+import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 import { Kafka } from 'kafkajs';
-import { PlatformContextFactory, TenantScopedDatabase, type EventHandler, HELMET_OPTIONS, PERMISSIONS_POLICY, registerHealthRoute, tenantOrIpKeyGenerator, checkKafka, initializeTelemetry, initTenantStatusEnforcement } from '@erp/sdk';
+import {
+  PlatformContextFactory,
+  TenantScopedDatabase,
+  type EventHandler,
+  HELMET_OPTIONS,
+  PERMISSIONS_POLICY,
+  registerHealthRoute,
+  tenantOrIpKeyGenerator,
+  checkKafka,
+  initializeTelemetry,
+  initTenantStatusEnforcement,
+  registerErrorHandler,
+} from '@erp/sdk';
 import { createDatabaseClient } from '@erp/db';
-import { createLogger, createMetricsHandler, createHttpMetricsHook, createCorrelationIdHook } from '@erp/logger';
-import { ERPError } from '@erp/types';
+import {
+  createLogger,
+  createMetricsHandler,
+  createHttpMetricsHook,
+  createCorrelationIdHook,
+} from '@erp/logger';
 import { loadConfigWithSecrets } from '@erp/config';
 import { hsnMaster } from '@erp/db';
 import { gstRoutes } from './api/gst.routes.js';
@@ -24,7 +40,10 @@ import { HSN_SEED_DATA } from './domain/hsn-seed.js';
 import { handleInvoiceConfirmed } from './consumers/InvoiceGstConsumer.js';
 import { handleSaleReturnApproved } from './consumers/SaleReturnGstConsumer.js';
 import { handleGRNApproved, handlePurchaseReturnApproved } from './consumers/GRNGstConsumer.js';
-import { handleInvoiceConfirmedForEinvoice, handleInvoiceCancelledForEinvoice } from './consumers/EInvoiceEventConsumer.js';
+import {
+  handleInvoiceConfirmedForEinvoice,
+  handleInvoiceCancelledForEinvoice,
+} from './consumers/EInvoiceEventConsumer.js';
 import { createGstComplianceOrchestrator } from './domain/GstComplianceSaga.js';
 
 initializeTelemetry({ serviceName: 'gst-service' });
@@ -34,7 +53,11 @@ async function bootstrap(): Promise<void> {
   const config = await loadConfigWithSecrets('gst-service');
   const databaseUrl = config.databaseUrl;
   const lokiUrl = process.env['LOKI_URL'];
-  const logger = createLogger({ serviceName: 'gst-service', level: 'info', ...(lokiUrl ? { lokiUrl } : {}) });
+  const logger = createLogger({
+    serviceName: 'gst-service',
+    level: 'info',
+    ...(lokiUrl ? { lokiUrl } : {}),
+  });
 
   const ctxFactory = new PlatformContextFactory({
     databaseUrl,
@@ -45,6 +68,7 @@ async function bootstrap(): Promise<void> {
   });
   await ctxFactory.connect();
   ctxFactory.subscribeFeatureFlagInvalidations();
+  ctxFactory.subscribeTenantStatusInvalidations();
   initTenantStatusEnforcement(ctxFactory.rawDb);
 
   // ── Kafka event consumers ─────────────────────────────────────────────────
@@ -68,10 +92,18 @@ async function bootstrap(): Promise<void> {
         await handleInvoiceConfirmed(event, db);
         await handleInvoiceConfirmedForEinvoice(event, db, gstComplianceSaga);
         break;
-      case 'INVOICE_CANCELLED':       await handleInvoiceCancelledForEinvoice(event, db); break;
-      case 'SALE_RETURN_APPROVED':    await handleSaleReturnApproved(event, db); break;
-      case 'GRN_APPROVED':            await handleGRNApproved(event, db); break;
-      case 'PURCHASE_RETURN_APPROVED': await handlePurchaseReturnApproved(event, db); break;
+      case 'INVOICE_CANCELLED':
+        await handleInvoiceCancelledForEinvoice(event, db);
+        break;
+      case 'SALE_RETURN_APPROVED':
+        await handleSaleReturnApproved(event, db);
+        break;
+      case 'GRN_APPROVED':
+        await handleGRNApproved(event, db);
+        break;
+      case 'PURCHASE_RETURN_APPROVED':
+        await handlePurchaseReturnApproved(event, db);
+        break;
       default:
         logger.warn({ eventType: event.eventType }, 'Unhandled event type in gst consumer');
     }
@@ -132,44 +164,42 @@ async function bootstrap(): Promise<void> {
   // Seed HSN master on startup (idempotent) — global table, uses direct db
   try {
     const db = createDatabaseClient({ url: databaseUrl });
-    await db.insert(hsnMaster).values(
-      HSN_SEED_DATA.map((row) => ({
-        hsnCode: row.hsnCode,
-        description: row.description,
-        gstRate: row.gstRate,
-        cessRate: row.cessRate,
-        chapter: row.chapter,
-        heading: row.heading,
-      }))
-    ).onConflictDoNothing();
+    await db
+      .insert(hsnMaster)
+      .values(
+        HSN_SEED_DATA.map((row) => ({
+          hsnCode: row.hsnCode,
+          description: row.description,
+          gstRate: row.gstRate,
+          cessRate: row.cessRate,
+          chapter: row.chapter,
+          heading: row.heading,
+        }))
+      )
+      .onConflictDoNothing();
     logger.info({ count: HSN_SEED_DATA.length }, 'HSN master seed complete');
   } catch (err) {
     logger.error({ err }, 'HSN seed failed (non-fatal)');
   }
 
-  await fastify.register(async (sub) => {
-    await gstRoutes(sub, ctxFactory);
-    await gstRegisterRoutes(sub, ctxFactory);
-    await gstr1Routes(sub, ctxFactory);
-    await gstr3bRoutes(sub, ctxFactory);
-    await gstr9Routes(sub, ctxFactory);
-    await rcmRoutes(sub, ctxFactory);
-    await einvoiceRoutes(sub, ctxFactory);
-    await ewayBillRoutes(sub, ctxFactory);
-    await gstr2aRoutes(sub, ctxFactory);
-    await gstReturnsRoutes(sub, ctxFactory);
-    await internalRoutes(sub, ctxFactory, gstComplianceSaga, consumerDb);
-  }, { prefix: '/api/v2' });
+  await fastify.register(
+    async (sub) => {
+      await gstRoutes(sub, ctxFactory);
+      await gstRegisterRoutes(sub, ctxFactory);
+      await gstr1Routes(sub, ctxFactory);
+      await gstr3bRoutes(sub, ctxFactory);
+      await gstr9Routes(sub, ctxFactory);
+      await rcmRoutes(sub, ctxFactory);
+      await einvoiceRoutes(sub, ctxFactory);
+      await ewayBillRoutes(sub, ctxFactory);
+      await gstr2aRoutes(sub, ctxFactory);
+      await gstReturnsRoutes(sub, ctxFactory);
+      await internalRoutes(sub, ctxFactory, gstComplianceSaga, consumerDb);
+    },
+    { prefix: '/api/v2' }
+  );
 
-  fastify.setErrorHandler<FastifyError>((error, request, reply) => {
-    if (error instanceof ERPError) {
-      return reply.code(error.statusCode).send({
-        error: { code: error.code, message: error.message, details: error.details },
-      });
-    }
-    logger.error({ err: error.message, url: request.url, correlationId: (request as { correlationId?: string }).correlationId }, 'Unhandled error in gst-service');
-    return reply.code(500).send({ error: { code: 'INTERNAL_ERROR', message: 'An unexpected error occurred' } });
-  });
+  registerErrorHandler(fastify, 'gst-service', logger);
 
   const address = await fastify.listen({ port, host: '0.0.0.0' });
   logger.info({ address }, 'GST service started');

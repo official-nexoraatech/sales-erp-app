@@ -43,7 +43,11 @@ export default function SecurityAuditLogPage() {
 
   return (
     <div className="space-y-6">
-      <ERPPageHeader variant="list" title="Security Audit Log" subtitle="Impersonation, 2FA, session, and suspicious login events." />
+      <ERPPageHeader
+        variant="list"
+        title="Security Audit Log"
+        subtitle="Impersonation, 2FA, session, and suspicious login events."
+      />
 
       <div className="card p-4">
         <label className="block text-xs font-medium text-secondary mb-1">Action Type</label>
@@ -67,42 +71,62 @@ export default function SecurityAuditLogPage() {
         {isLoading ? (
           <ERPTableSkeleton rows={8} cols={6} />
         ) : (
-          <table className="w-full text-sm">
-            <thead className="bg-surface-hover">
-              <tr>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-secondary uppercase">Action</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-secondary uppercase">Actor</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-secondary uppercase">Target</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-secondary uppercase">IP</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-secondary uppercase">Timestamp</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-secondary uppercase">Details</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {rows.map((row) => (
-                <tr key={row.id} className="hover:bg-surface-hover">
-                  <td className="px-4 py-3 font-medium text-primary">{row.action}</td>
-                  <td className="px-4 py-3 text-secondary">
-                    {row.actorId}
-                    {row.actorRole ? ` (${row.actorRole})` : ''}
-                  </td>
-                  <td className="px-4 py-3 text-secondary">{row.targetUserId ?? '—'}</td>
-                  <td className="px-4 py-3 font-mono text-xs text-secondary">{row.ipAddress ?? '—'}</td>
-                  <td className="px-4 py-3 text-secondary">{formatDate(row.createdAt)}</td>
-                  <td className="px-4 py-3 text-secondary text-xs truncate max-w-[200px]">
-                    {row.details ? JSON.stringify(row.details) : '—'}
-                  </td>
-                </tr>
-              ))}
-              {rows.length === 0 && (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-surface-hover">
                 <tr>
-                  <td colSpan={6}>
-                    <ERPEmptyState type="no-results" title="No audit log entries" description="Try adjusting the action filter." />
-                  </td>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-secondary uppercase">
+                    Action
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-secondary uppercase">
+                    Actor
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-secondary uppercase">
+                    Target
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-secondary uppercase">
+                    IP
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-secondary uppercase">
+                    Timestamp
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-secondary uppercase">
+                    Details
+                  </th>
                 </tr>
-              )}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {rows.map((row) => (
+                  <tr key={row.id} className="hover:bg-surface-hover">
+                    <td className="px-4 py-3 font-medium text-primary">{row.action}</td>
+                    <td className="px-4 py-3 text-secondary">
+                      {row.actorId}
+                      {row.actorRole ? ` (${row.actorRole})` : ''}
+                    </td>
+                    <td className="px-4 py-3 text-secondary">{row.targetUserId ?? '—'}</td>
+                    <td className="px-4 py-3 font-mono text-xs text-secondary">
+                      {row.ipAddress ?? '—'}
+                    </td>
+                    <td className="px-4 py-3 text-secondary">{formatDate(row.createdAt)}</td>
+                    <td className="px-4 py-3 text-secondary text-xs truncate max-w-[200px]">
+                      {row.details ? JSON.stringify(row.details) : '—'}
+                    </td>
+                  </tr>
+                ))}
+                {rows.length === 0 && (
+                  <tr>
+                    <td colSpan={6}>
+                      <ERPEmptyState
+                        type="no-results"
+                        title="No audit log entries"
+                        description="Try adjusting the action filter."
+                      />
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
 

@@ -1,12 +1,25 @@
-import Fastify, { type FastifyError } from 'fastify';
+import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import multipart from '@fastify/multipart';
 import rateLimit from '@fastify/rate-limit';
-import { PlatformContextFactory, HELMET_OPTIONS, PERMISSIONS_POLICY, registerHealthRoute, tenantOrIpKeyGenerator, initializeTelemetry, initTenantStatusEnforcement } from '@erp/sdk';
-import { ERPError } from '@erp/types';
+import {
+  PlatformContextFactory,
+  HELMET_OPTIONS,
+  PERMISSIONS_POLICY,
+  registerHealthRoute,
+  tenantOrIpKeyGenerator,
+  initializeTelemetry,
+  initTenantStatusEnforcement,
+  registerErrorHandler,
+} from '@erp/sdk';
 import { loadConfigWithSecrets } from '@erp/config';
-import { createLogger, createMetricsHandler, createHttpMetricsHook, createCorrelationIdHook } from '@erp/logger';
+import {
+  createLogger,
+  createMetricsHandler,
+  createHttpMetricsHook,
+  createCorrelationIdHook,
+} from '@erp/logger';
 import { employeeRoutes } from './api/employee.routes.js';
 import { attendanceRoutes } from './api/attendance.routes.js';
 import { attendanceImportConfigRoutes } from './api/attendance-import-config.routes.js';
@@ -25,12 +38,18 @@ initializeTelemetry({ serviceName: 'hr-service' });
 async function bootstrap(): Promise<void> {
   const port = parseInt(process.env['HR_SERVICE_PORT'] ?? '3021', 10);
   const lokiUrl = process.env['LOKI_URL'];
-  const logger = createLogger({ serviceName: 'hr-service', level: 'info', ...(lokiUrl ? { lokiUrl } : {}) });
+  const logger = createLogger({
+    serviceName: 'hr-service',
+    level: 'info',
+    ...(lokiUrl ? { lokiUrl } : {}),
+  });
   // FIELD_ENCRYPTION_KEY isn't part of AppConfig — extraSecrets fetches it
   // from Vault in production and writes it back into process.env, so the
   // requireEnv('FIELD_ENCRYPTION_KEY') calls elsewhere in this service pick
   // it up unchanged.
-  const config = await loadConfigWithSecrets('hr-service', { extraSecrets: ['FIELD_ENCRYPTION_KEY'] });
+  const config = await loadConfigWithSecrets('hr-service', {
+    extraSecrets: ['FIELD_ENCRYPTION_KEY'],
+  });
   const databaseUrl = config.databaseUrl;
 
   const ctxFactory = new PlatformContextFactory({
@@ -49,6 +68,7 @@ async function bootstrap(): Promise<void> {
   });
   await ctxFactory.connect();
   ctxFactory.subscribeFeatureFlagInvalidations();
+  ctxFactory.subscribeTenantStatusInvalidations();
   initTenantStatusEnforcement(ctxFactory.rawDb);
 
   const metricsHandler = await createMetricsHandler('hr-service');
@@ -85,30 +105,25 @@ async function bootstrap(): Promise<void> {
     return reply.code(200).header('Content-Type', metricsHandler.contentType).send(body);
   });
 
-  await fastify.register(async (sub) => {
-    await employeeRoutes(sub, ctxFactory);
-    await attendanceRoutes(sub, ctxFactory);
-    await attendanceImportConfigRoutes(sub, ctxFactory);
-    await leaveRoutes(sub, ctxFactory);
-    await payrollRoutes(sub, ctxFactory);
-    await employeeLoanRoutes(sub, ctxFactory);
-    await alterationRoutes(sub, ctxFactory);
-    await tailorWorkLogRoutes(sub, ctxFactory);
-    await holidayRoutes(sub, ctxFactory);
-    await statutoryRoutes(sub, ctxFactory);
-    await internalRoutes(sub);
-    await searchSyncInternalRoutes(sub, ctxFactory);
-  }, { prefix: '/api/v2' });
+  await fastify.register(
+    async (sub) => {
+      await employeeRoutes(sub, ctxFactory);
+      await attendanceRoutes(sub, ctxFactory);
+      await attendanceImportConfigRoutes(sub, ctxFactory);
+      await leaveRoutes(sub, ctxFactory);
+      await payrollRoutes(sub, ctxFactory);
+      await employeeLoanRoutes(sub, ctxFactory);
+      await alterationRoutes(sub, ctxFactory);
+      await tailorWorkLogRoutes(sub, ctxFactory);
+      await holidayRoutes(sub, ctxFactory);
+      await statutoryRoutes(sub, ctxFactory);
+      await internalRoutes(sub);
+      await searchSyncInternalRoutes(sub, ctxFactory);
+    },
+    { prefix: '/api/v2' }
+  );
 
-  fastify.setErrorHandler<FastifyError>((error, request, reply) => {
-    if (error instanceof ERPError) {
-      return reply.code(error.statusCode).send({
-        error: { code: error.code, message: error.message, details: error.details },
-      });
-    }
-    logger.error({ err: error.message, url: request.url, correlationId: (request as { correlationId?: string }).correlationId }, 'Unhandled error in hr-service');
-    return reply.code(500).send({ error: { code: 'INTERNAL_ERROR', message: 'An unexpected error occurred' } });
-  });
+  registerErrorHandler(fastify, 'hr-service', logger);
 
   const address = await fastify.listen({ port, host: '0.0.0.0' });
   logger.info({ address }, 'HR service started');

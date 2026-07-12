@@ -4,7 +4,9 @@ export async function loadAuthConfig() {
   // jwtPrivateKey/jwtPublicKey come from `base` (Vault-sourced in production
   // via loadConfigWithSecrets, env-var in dev/test) — don't re-read them from
   // process.env here, that would clobber the Vault-sourced value in prod.
-  const base = await loadConfigWithSecrets('auth-service', { extraSecrets: ['FIELD_ENCRYPTION_KEY'] });
+  const base = await loadConfigWithSecrets('auth-service', {
+    extraSecrets: ['FIELD_ENCRYPTION_KEY'],
+  });
   return {
     ...base,
     port: parseInt(process.env['AUTH_SERVICE_PORT'] ?? '3010', 10),
@@ -13,6 +15,11 @@ export async function loadAuthConfig() {
     jwtRefreshTokenTtlDays: parseInt(process.env['JWT_REFRESH_TOKEN_TTL_DAYS'] ?? '7', 10),
     loginRateLimitMax: parseInt(process.env['LOGIN_RATE_LIMIT_MAX'] ?? '10', 10),
     loginRateLimitWindowMs: parseInt(process.env['LOGIN_RATE_LIMIT_WINDOW_MS'] ?? '300000', 10),
+    forgotPasswordRateLimitMax: parseInt(process.env['FORGOT_PASSWORD_RATE_LIMIT_MAX'] ?? '5', 10),
+    forgotPasswordRateLimitWindowMs: parseInt(
+      process.env['FORGOT_PASSWORD_RATE_LIMIT_WINDOW_MS'] ?? '900000',
+      10
+    ),
     accountLockoutAttempts: parseInt(process.env['ACCOUNT_LOCKOUT_ATTEMPTS'] ?? '5', 10),
     accountLockoutDurationMs: parseInt(process.env['ACCOUNT_LOCKOUT_DURATION_MS'] ?? '900000', 10),
     ipLoginFailThreshold: parseInt(process.env['IP_LOGIN_FAIL_THRESHOLD'] ?? '5', 10),

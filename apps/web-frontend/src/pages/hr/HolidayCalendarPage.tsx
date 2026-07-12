@@ -85,7 +85,7 @@ export default function HolidayCalendarPage() {
           title="Holiday Calendar"
           subtitle="Manage public and company holidays by year."
           actions={
-            <div className="flex gap-2">
+            <div className="flex gap-2 flex-wrap">
               <div className="flex items-center gap-2">
                 <label className="text-sm text-secondary">Year</label>
                 <Input
@@ -97,7 +97,11 @@ export default function HolidayCalendarPage() {
               </div>
               {canManage && (
                 <>
-                  <Button variant="secondary" onClick={() => seedMutation.mutate()} loading={seedMutation.isPending}>
+                  <Button
+                    variant="secondary"
+                    onClick={() => seedMutation.mutate()}
+                    loading={seedMutation.isPending}
+                  >
                     Seed 2026-27
                   </Button>
                   <Button onClick={() => setAddOpen(true)}>+ Add Holiday</Button>
@@ -114,58 +118,86 @@ export default function HolidayCalendarPage() {
             type="no-data"
             title={`No holidays found for ${year}`}
             description="Add a holiday or seed the default calendar for this year."
-            {...(canManage ? { action: { label: '+ Add Holiday', onClick: () => setAddOpen(true) } } : {})}
+            {...(canManage
+              ? { action: { label: '+ Add Holiday', onClick: () => setAddOpen(true) } }
+              : {})}
           />
         ) : (
-          <table className="w-full text-sm bg-surface-card rounded-xl border border-default overflow-hidden">
-            <thead className="bg-surface-subtle">
-              <tr className="text-left text-xs uppercase text-secondary">
-                <th className="px-4 py-3">Holiday Name</th>
-                <th className="px-4 py-3">Date</th>
-                <th className="px-4 py-3">Type</th>
-                <th className="px-4 py-3">Branch</th>
-                {canManage && <th className="px-4 py-3"></th>}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-default">
-              {holidays.map((h) => (
-                <tr key={h.id}>
-                  <td className="px-4 py-3 font-medium text-primary">{h.name}</td>
-                  <td className="px-4 py-3">{h.holidayDate}</td>
-                  <td className="px-4 py-3">
-                    <Badge variant={TYPE_VARIANT[h.holidayType] ?? 'default'}>{h.holidayType}</Badge>
-                  </td>
-                  <td className="px-4 py-3 text-secondary">{h.branchId ? `Branch ${h.branchId}` : 'All Branches'}</td>
-                  {canManage && (
-                    <td className="px-4 py-3 text-right">
-                      <Button
-                        size="sm"
-                        variant="danger"
-                        onClick={() => deleteMutation.mutate(h.id)}
-                        loading={deleteMutation.isPending}
-                      >
-                        Remove
-                      </Button>
-                    </td>
-                  )}
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm bg-surface-card rounded-xl border border-default overflow-hidden">
+              <thead className="bg-surface-subtle">
+                <tr className="text-left text-xs uppercase text-secondary">
+                  <th className="px-4 py-3">Holiday Name</th>
+                  <th className="px-4 py-3">Date</th>
+                  <th className="px-4 py-3">Type</th>
+                  <th className="px-4 py-3">Branch</th>
+                  {canManage && <th className="px-4 py-3"></th>}
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="divide-y divide-default">
+                {holidays.map((h) => (
+                  <tr key={h.id}>
+                    <td className="px-4 py-3 font-medium text-primary">{h.name}</td>
+                    <td className="px-4 py-3">{h.holidayDate}</td>
+                    <td className="px-4 py-3">
+                      <Badge variant={TYPE_VARIANT[h.holidayType] ?? 'default'}>
+                        {h.holidayType}
+                      </Badge>
+                    </td>
+                    <td className="px-4 py-3 text-secondary">
+                      {h.branchId ? `Branch ${h.branchId}` : 'All Branches'}
+                    </td>
+                    {canManage && (
+                      <td className="px-4 py-3 text-right">
+                        <Button
+                          size="sm"
+                          variant="danger"
+                          onClick={() => deleteMutation.mutate(h.id)}
+                          loading={deleteMutation.isPending}
+                        >
+                          Remove
+                        </Button>
+                      </td>
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
 
         <Modal open={addOpen} onClose={() => setAddOpen(false)} title="Add Holiday" size="sm">
           <div className="space-y-4">
-            <Input label="Holiday Name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Diwali" />
-            <Input label="Date" type="date" value={holidayDate} onChange={(e) => setHolidayDate(e.target.value)} />
-            <Select label="Type" value={holidayType} onChange={(e) => setHolidayType(e.target.value as 'NATIONAL' | 'STATE' | 'OPTIONAL')}>
+            <Input
+              label="Holiday Name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="e.g. Diwali"
+            />
+            <Input
+              label="Date"
+              type="date"
+              value={holidayDate}
+              onChange={(e) => setHolidayDate(e.target.value)}
+            />
+            <Select
+              label="Type"
+              value={holidayType}
+              onChange={(e) => setHolidayType(e.target.value as 'NATIONAL' | 'STATE' | 'OPTIONAL')}
+            >
               <option value="NATIONAL">National</option>
               <option value="STATE">State</option>
               <option value="OPTIONAL">Optional</option>
             </Select>
             <div className="flex justify-end gap-3 pt-2">
-              <Button variant="secondary" onClick={() => setAddOpen(false)}>Cancel</Button>
-              <Button onClick={() => createMutation.mutate()} loading={createMutation.isPending} disabled={!name || !holidayDate}>
+              <Button variant="secondary" onClick={() => setAddOpen(false)}>
+                Cancel
+              </Button>
+              <Button
+                onClick={() => createMutation.mutate()}
+                loading={createMutation.isPending}
+                disabled={!name || !holidayDate}
+              >
                 Add
               </Button>
             </div>

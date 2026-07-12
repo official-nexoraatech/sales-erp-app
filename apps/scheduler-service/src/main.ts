@@ -1,15 +1,33 @@
-import Fastify, { type FastifyError, type FastifyInstance } from 'fastify';
+import Fastify, { type FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 import Redis from 'ioredis';
 import { Kafka } from 'kafkajs';
-import { HELMET_OPTIONS, PERMISSIONS_POLICY, registerHealthRoute, tenantOrIpKeyGenerator, checkDatabase, checkKafka, initializeTelemetry, initTenantStatusEnforcement, StorageClient, PlatformEventConsumer, TenantScopedDatabase } from '@erp/sdk';
+import {
+  HELMET_OPTIONS,
+  PERMISSIONS_POLICY,
+  registerHealthRoute,
+  tenantOrIpKeyGenerator,
+  checkDatabase,
+  checkKafka,
+  initializeTelemetry,
+  initTenantStatusEnforcement,
+  subscribeToTenantStatusInvalidations,
+  StorageClient,
+  PlatformEventConsumer,
+  TenantScopedDatabase,
+  registerErrorHandler,
+} from '@erp/sdk';
 import { createDatabaseClient, tenants } from '@erp/db';
 import { eq } from 'drizzle-orm';
-import { createLogger, createMetricsHandler, createHttpMetricsHook, createCorrelationIdHook } from '@erp/logger';
+import {
+  createLogger,
+  createMetricsHandler,
+  createHttpMetricsHook,
+  createCorrelationIdHook,
+} from '@erp/logger';
 import { loadConfigWithSecrets } from '@erp/config';
-import { ERPError } from '@erp/types';
 import { JobRegistry } from './JobRegistry.js';
 import { registerSystemJobs } from './jobs/system-jobs.js';
 import { registerProjectionRebuildJobs } from './jobs/projectionRebuildJobs.js';
@@ -29,13 +47,18 @@ async function bootstrap(): Promise<void> {
   const redisUrl = process.env['REDIS_URL'] ?? 'redis://localhost:6380';
 
   const lokiUrl = process.env['LOKI_URL'];
-  const logger = createLogger({ serviceName: 'scheduler-service', level: 'info', ...(lokiUrl ? { lokiUrl } : {}) });
+  const logger = createLogger({
+    serviceName: 'scheduler-service',
+    level: 'info',
+    ...(lokiUrl ? { lokiUrl } : {}),
+  });
   const db = createDatabaseClient({ url: databaseUrl });
   initTenantStatusEnforcement(db);
 
   const redis = new Redis(redisUrl, { maxRetriesPerRequest: null, lazyConnect: true });
   await redis.connect();
   logger.info({}, 'Redis connected');
+  subscribeToTenantStatusInvalidations(redis);
 
   const storage = new StorageClient({
     endpoint: process.env['MINIO_ENDPOINT'] ?? 'localhost:9000',
@@ -60,7 +83,11 @@ async function bootstrap(): Promise<void> {
     clientId: 'scheduler-service-consumer',
     brokers: config.kafkaBrokers,
   });
-  const usageConsumer = new PlatformEventConsumer(kafka, 'scheduler-service-group', 'scheduler-service');
+  const usageConsumer = new PlatformEventConsumer(
+    kafka,
+    'scheduler-service-group',
+    'scheduler-service'
+  );
   const consumerDb = createDatabaseClient({ url: databaseUrl, maxConnections: 3 });
   await usageConsumer.subscribe(
     ['erp.usage.invoice.created', 'erp.usage.api.call.batch'],
@@ -73,8 +100,9 @@ async function bootstrap(): Promise<void> {
   // undefined tenantId — the bug this fixes meant every tenantScoped job (including
   // already-real ones like search.full-reindex, which guards `if (tenantId ===
   // undefined) return`) never actually ran via its cron schedule.
-  const activeTenantIds = (await db.select({ id: tenants.id }).from(tenants).where(eq(tenants.status, 'ACTIVE')))
-    .map((row) => row.id);
+  const activeTenantIds = (
+    await db.select({ id: tenants.id }).from(tenants).where(eq(tenants.status, 'ACTIVE'))
+  ).map((row) => row.id);
 
   // manualOnly jobs (projection rebuild — PG-008) are trigger-only and must not
   // get a recurring cron `schedule()` call.
@@ -143,15 +171,7 @@ async function bootstrap(): Promise<void> {
   await registerSchedulerRoutes(fastify);
   await fastify.register(registerSchedulerRoutes, { prefix: '/api/v2' });
 
-  fastify.setErrorHandler<FastifyError>((error, request, reply) => {
-    if (error instanceof ERPError) {
-      return reply.code(error.statusCode).send({
-        error: { code: error.code, message: error.message, details: error.details },
-      });
-    }
-    logger.error({ err: error.message, url: request.url, correlationId: (request as { correlationId?: string }).correlationId }, 'Unhandled error');
-    return reply.code(500).send({ error: { code: 'INTERNAL_ERROR', message: 'Internal error' } });
-  });
+  registerErrorHandler(fastify, 'scheduler-service', logger);
 
   const gracefulShutdown = async (): Promise<void> => {
     await usageConsumer.stop();
@@ -160,8 +180,12 @@ async function bootstrap(): Promise<void> {
     await fastify.close();
     process.exit(0);
   };
-  process.on('SIGTERM', () => { void gracefulShutdown(); });
-  process.on('SIGINT', () => { void gracefulShutdown(); });
+  process.on('SIGTERM', () => {
+    void gracefulShutdown();
+  });
+  process.on('SIGINT', () => {
+    void gracefulShutdown();
+  });
 
   const address = await fastify.listen({ port, host: '0.0.0.0' });
   logger.info({ address, registeredJobs: registry.listAll().length }, 'Scheduler service started');

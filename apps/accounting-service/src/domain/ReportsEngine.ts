@@ -1,6 +1,5 @@
 import { sql } from 'drizzle-orm';
 import type { TenantScopedDatabase } from '@erp/sdk';
-import { BusinessError } from '@erp/types';
 
 // ─── Types ────────────────────────────────────────────────────────────────
 
@@ -76,6 +75,27 @@ export interface BalanceSheetReport {
   generatedAt: string;
 }
 
+// PG-037: one line per cost center (plus an "Unassigned" bucket for postings with no
+// cost center tag) — additive alongside getProfitLoss, not a replacement.
+export interface PLByCostCenterLine {
+  costCenterId: number | null;
+  costCenterCode: string | null;
+  costCenterName: string | null;
+  revenue: number;
+  cogs: number;
+  operatingExpenses: number;
+  otherExpenses: number;
+  netProfit: number;
+}
+
+export interface ProfitLossByCostCenterReport {
+  from: string;
+  to: string;
+  costCenterId?: number;
+  lines: PLByCostCenterLine[];
+  generatedAt: string;
+}
+
 export interface CashFlowReport {
   from: string;
   to: string;
@@ -98,13 +118,13 @@ export class ReportsEngine {
     db: TenantScopedDatabase,
     tenantId: number,
     asOf: string,
-    branchId?: number
+    _branchId?: number
   ): Promise<TrialBalanceReport> {
     const asOfDate = asOf ? new Date(asOf) : new Date();
     const asOfISO = asOfDate.toISOString();
 
     // Get all accounts with their period debits and credits
-    const rows = await db.raw.execute(sql`
+    const rows = (await db.raw.execute(sql`
       SELECT
         a.id             AS account_id,
         a.account_code,
@@ -126,7 +146,7 @@ export class ReportsEngine {
       GROUP BY a.id, a.account_code, a.name, a.account_type, a.normal_balance,
                a.opening_balance, a.opening_balance_type
       ORDER BY a.account_code
-    `) as Array<{
+    `)) as Array<{
       account_id: number;
       account_code: string;
       account_name: string;
@@ -189,12 +209,12 @@ export class ReportsEngine {
     tenantId: number,
     from: string,
     to: string,
-    branchId?: number
+    _branchId?: number
   ): Promise<ProfitLossReport> {
     const fromDate = new Date(from);
     const toDate = new Date(to + 'T23:59:59.999Z');
 
-    const rows = await db.raw.execute(sql`
+    const rows = (await db.raw.execute(sql`
       SELECT
         a.id             AS account_id,
         a.account_code,
@@ -214,7 +234,7 @@ export class ReportsEngine {
         AND a.deleted_at IS NULL
       GROUP BY a.id, a.account_code, a.name, a.account_type, a.account_sub_type
       ORDER BY a.account_code
-    `) as Array<{
+    `)) as Array<{
       account_id: number;
       account_code: string;
       account_name: string;
@@ -224,7 +244,7 @@ export class ReportsEngine {
       total_credits: string;
     }>;
 
-    const buildLine = (row: typeof rows[number]): PLLine => {
+    const buildLine = (row: (typeof rows)[number]): PLLine => {
       const cr = Number(row.total_credits);
       const dr = Number(row.total_debits);
       // For income: net = credits - debits; For expense: net = debits - credits
@@ -237,11 +257,19 @@ export class ReportsEngine {
       };
     };
 
-    const revenue = rows.filter((r) => r.account_type === 'INCOME' && r.account_sub_type === 'SALES_REVENUE').map(buildLine);
-    const otherIncome = rows.filter((r) => r.account_type === 'INCOME' && r.account_sub_type !== 'SALES_REVENUE').map(buildLine);
+    const revenue = rows
+      .filter((r) => r.account_type === 'INCOME' && r.account_sub_type === 'SALES_REVENUE')
+      .map(buildLine);
+    const otherIncome = rows
+      .filter((r) => r.account_type === 'INCOME' && r.account_sub_type !== 'SALES_REVENUE')
+      .map(buildLine);
     const cogs = rows.filter((r) => r.account_sub_type === 'COST_OF_GOODS').map(buildLine);
-    const operatingExpenses = rows.filter((r) => r.account_type === 'EXPENSE' && r.account_sub_type === 'OPERATING_EXPENSE').map(buildLine);
-    const financialCharges = rows.filter((r) => r.account_type === 'EXPENSE' && r.account_sub_type === 'TAX_EXPENSE').map(buildLine);
+    const operatingExpenses = rows
+      .filter((r) => r.account_type === 'EXPENSE' && r.account_sub_type === 'OPERATING_EXPENSE')
+      .map(buildLine);
+    const financialCharges = rows
+      .filter((r) => r.account_type === 'EXPENSE' && r.account_sub_type === 'TAX_EXPENSE')
+      .map(buildLine);
     const contraRevenue = rows.filter((r) => r.account_type === 'CONTRA').map(buildLine);
 
     const totalRevenue = revenue.reduce((s, l) => s + l.amount, 0);
@@ -276,15 +304,105 @@ export class ReportsEngine {
     };
   }
 
+  // PG-037: additive alongside getProfitLoss — a tenant with no cost centers configured
+  // never calls this; getProfitLoss's own query/output is untouched by this method existing.
+  static async getPnLByCostCenter(
+    db: TenantScopedDatabase,
+    tenantId: number,
+    from: string,
+    to: string,
+    costCenterId?: number
+  ): Promise<ProfitLossByCostCenterReport> {
+    const fromDate = new Date(from);
+    const toDate = new Date(to + 'T23:59:59.999Z');
+
+    const rows = (await db.raw.execute(sql`
+      SELECT
+        fe.cost_center_id AS cost_center_id,
+        cc.code           AS cost_center_code,
+        cc.name           AS cost_center_name,
+        a.account_type,
+        a.account_sub_type,
+        COALESCE(SUM(fe.debit_amount), 0)::NUMERIC  AS total_debits,
+        COALESCE(SUM(fe.credit_amount), 0)::NUMERIC AS total_credits
+      FROM accounts a
+      JOIN financial_entries fe
+        ON fe.account_id = a.id
+       AND fe.tenant_id  = ${tenantId}
+       AND fe.created_at >= ${fromDate.toISOString()}
+       AND fe.created_at <= ${toDate.toISOString()}
+      LEFT JOIN cost_centers cc
+        ON cc.id = fe.cost_center_id
+       AND cc.tenant_id = ${tenantId}
+      WHERE a.tenant_id   = ${tenantId}
+        AND a.account_type IN ('INCOME', 'EXPENSE', 'CONTRA')
+        AND a.deleted_at IS NULL
+        ${costCenterId !== undefined ? sql`AND fe.cost_center_id = ${costCenterId}` : sql``}
+      GROUP BY fe.cost_center_id, cc.code, cc.name, a.account_type, a.account_sub_type
+      ORDER BY fe.cost_center_id NULLS LAST
+    `)) as Array<{
+      cost_center_id: number | null;
+      cost_center_code: string | null;
+      cost_center_name: string | null;
+      account_type: string;
+      account_sub_type: string | null;
+      total_debits: string;
+      total_credits: string;
+    }>;
+
+    const buckets = new Map<number | null, PLByCostCenterLine>();
+    for (const row of rows) {
+      const key = row.cost_center_id;
+      if (!buckets.has(key)) {
+        buckets.set(key, {
+          costCenterId: key,
+          costCenterCode: row.cost_center_code,
+          costCenterName: row.cost_center_name,
+          revenue: 0,
+          cogs: 0,
+          operatingExpenses: 0,
+          otherExpenses: 0,
+          netProfit: 0,
+        });
+      }
+      const bucket = buckets.get(key)!;
+      const dr = Number(row.total_debits);
+      const cr = Number(row.total_credits);
+
+      if (row.account_type === 'INCOME') {
+        bucket.revenue += cr - dr;
+      } else if (row.account_sub_type === 'COST_OF_GOODS') {
+        bucket.cogs += dr - cr;
+      } else if (row.account_sub_type === 'OPERATING_EXPENSE') {
+        bucket.operatingExpenses += dr - cr;
+      } else if (row.account_type === 'EXPENSE' || row.account_type === 'CONTRA') {
+        bucket.otherExpenses += dr - cr;
+      }
+    }
+
+    const lines = Array.from(buckets.values()).map((b) => ({
+      ...b,
+      netProfit: b.revenue - b.cogs - b.operatingExpenses - b.otherExpenses,
+    }));
+
+    return {
+      from,
+      to,
+      ...(costCenterId !== undefined ? { costCenterId } : {}),
+      lines,
+      generatedAt: new Date().toISOString(),
+    };
+  }
+
   static async getBalanceSheet(
     db: TenantScopedDatabase,
     tenantId: number,
     asOf: string,
-    branchId?: number
+    _branchId?: number
   ): Promise<BalanceSheetReport> {
     const asOfDate = asOf ? new Date(asOf) : new Date();
 
-    const rows = await db.raw.execute(sql`
+    const rows = (await db.raw.execute(sql`
       SELECT
         a.id             AS account_id,
         a.account_code,
@@ -308,7 +426,7 @@ export class ReportsEngine {
       GROUP BY a.id, a.account_code, a.name, a.account_type, a.account_sub_type,
                a.normal_balance, a.opening_balance, a.opening_balance_type
       ORDER BY a.account_type, a.account_code
-    `) as Array<{
+    `)) as Array<{
       account_id: number;
       account_code: string;
       account_name: string;
@@ -321,7 +439,7 @@ export class ReportsEngine {
       period_credits: string;
     }>;
 
-    const calcBalance = (row: typeof rows[number]): number => {
+    const calcBalance = (row: (typeof rows)[number]): number => {
       const ob = Number(row.opening_balance);
       const obType = row.opening_balance_type ?? 'DEBIT';
       const obDr = obType === 'DEBIT' ? ob : 0;
@@ -332,7 +450,7 @@ export class ReportsEngine {
       return row.normal_balance === 'DEBIT' ? dr - cr : cr - dr;
     };
 
-    const toSection = (row: typeof rows[number]): BalanceSheetSection => ({
+    const toSection = (row: (typeof rows)[number]): BalanceSheetSection => ({
       accountId: row.account_id,
       accountCode: row.account_code,
       accountName: row.account_name,
@@ -380,7 +498,7 @@ export class ReportsEngine {
     // Classify each cash movement by the account_sub_type of its counter-account
     // in the same journal (dominant/first non-cash counter-line, per journal_id).
     // Cash-to-cash transfers (counter is also CASH_AND_BANK) fall through to Operating.
-    const classifiedRows = await db.raw.execute(sql`
+    const classifiedRows = (await db.raw.execute(sql`
       SELECT
         (fe.debit_amount - fe.credit_amount)::NUMERIC AS net_amount,
         counter.account_sub_type AS counter_sub_type
@@ -406,10 +524,10 @@ export class ReportsEngine {
       WHERE a.tenant_id      = ${tenantId}
         AND a.account_sub_type = 'CASH_AND_BANK'
         AND a.deleted_at IS NULL
-    `) as Array<{ net_amount: string; counter_sub_type: string | null }>;
+    `)) as Array<{ net_amount: string; counter_sub_type: string | null }>;
 
     // Opening cash balance
-    const openingRows = await db.raw.execute(sql`
+    const openingRows = (await db.raw.execute(sql`
       SELECT
         COALESCE(SUM(CASE WHEN fe.debit_amount > 0 THEN fe.debit_amount ELSE 0 END), 0)::NUMERIC
           - COALESCE(SUM(CASE WHEN fe.credit_amount > 0 THEN fe.credit_amount ELSE 0 END), 0)::NUMERIC
@@ -423,7 +541,7 @@ export class ReportsEngine {
       WHERE a.tenant_id      = ${tenantId}
         AND a.account_sub_type = 'CASH_AND_BANK'
         AND a.deleted_at IS NULL
-    `) as Array<{ balance: string }>;
+    `)) as Array<{ balance: string }>;
 
     const openingCash = Number(openingRows[0]?.balance ?? 0);
 
@@ -441,7 +559,8 @@ export class ReportsEngine {
       const counterSubType = row.counter_sub_type;
 
       if (counterSubType === 'FIXED_ASSET' || counterSubType === 'ACCUMULATED_DEPRECIATION') {
-        const label = amount >= 0 ? 'Proceeds from disposal of fixed assets' : 'Purchase of fixed assets';
+        const label =
+          amount >= 0 ? 'Proceeds from disposal of fixed assets' : 'Purchase of fixed assets';
         investingBuckets.set(label, (investingBuckets.get(label) ?? 0) + amount);
       } else if (counterSubType === 'LONG_TERM_LIABILITY') {
         const label = amount >= 0 ? 'Bank loan received' : 'Bank loan repaid';
@@ -462,10 +581,16 @@ export class ReportsEngine {
     ];
     const netOperating = operatingIn + operatingOut;
 
-    const investingActivities = Array.from(investingBuckets, ([label, amount]) => ({ label, amount }));
+    const investingActivities = Array.from(investingBuckets, ([label, amount]) => ({
+      label,
+      amount,
+    }));
     const netInvesting = investingActivities.reduce((s, l) => s + l.amount, 0);
 
-    const financingActivities = Array.from(financingBuckets, ([label, amount]) => ({ label, amount }));
+    const financingActivities = Array.from(financingBuckets, ([label, amount]) => ({
+      label,
+      amount,
+    }));
     const netFinancing = financingActivities.reduce((s, l) => s + l.amount, 0);
 
     const netCashMovement = netOperating + netInvesting + netFinancing;

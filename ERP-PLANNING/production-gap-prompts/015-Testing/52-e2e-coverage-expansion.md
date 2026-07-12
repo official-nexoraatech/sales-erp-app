@@ -86,7 +86,7 @@ Not applicable — no new attack surface; test-only fixtures use throwaway tenan
 
 ## Testing
 
-- This package *is* test infrastructure. Concretely:
+- This package _is_ test infrastructure. Concretely:
   - `apps/web-frontend/e2e/helpers.ts` (new, extracted).
   - `apps/web-frontend/e2e/pos-checkout-smoke.spec.ts` is wrong location — correct path: `apps/pos-frontend/e2e/checkout-smoke.spec.ts` (new).
   - `apps/web-frontend/e2e-full/gst-filing-cycle.spec.ts` (new, build first).
@@ -95,11 +95,11 @@ Not applicable — no new attack surface; test-only fixtures use throwaway tenan
 
 ## Acceptance Criteria
 
-- [ ] `apps/pos-frontend` has a `playwright.config.ts` and at least one passing E2E spec (`checkout-smoke.spec.ts`) runnable via `pnpm --filter @erp/pos-frontend test:e2e`.
-- [ ] `apps/web-frontend/e2e/helpers.ts` exists; `global-search.spec.ts` is refactored to import from it and its existing two tests still pass unchanged.
-- [ ] At least the GST filing cycle full-stack spec exists, runs against real Postgres/Redis + `gst-service`/`sales-service`, and passes locally with `docker compose` services up.
-- [ ] A new `e2e-full` CI job exists in `ci.yml`, gated to `main`/tag pushes (not every PR), and is green on at least one real run.
-- [ ] The existing per-PR `e2e` job's runtime does not measurably regress (still completes in under ~2 minutes).
+- [x] `apps/pos-frontend` has a `playwright.config.ts` and at least one passing E2E spec (`checkout-smoke.spec.ts`) runnable via `pnpm --filter @erp/pos-frontend test:e2e`. Done 2026-07-11 — verified via `pnpm --filter @erp/pos-frontend test:e2e` from repo root, passing, stable across `--repeat-each=3`.
+- [x] `apps/web-frontend/e2e/helpers.ts` exists; `global-search.spec.ts` is refactored to import from it and its existing two tests still pass unchanged. Done 2026-07-11 — also refactored `mobile-responsive-smoke.spec.ts` (PG-053, landed after this doc was written) onto the same helpers; all 8 web-frontend e2e tests pass. See `IMPLEMENTATION-NOTES.md`'s "PG-054" entry.
+- [ ] At least the GST filing cycle full-stack spec exists, runs against real Postgres/Redis + `gst-service`/`sales-service`, and passes locally with `docker compose` services up. Deferred to Session 2 per this doc's own "Next Session Plan" — not attempted this session.
+- [ ] A new `e2e-full` CI job exists in `ci.yml`, gated to `main`/tag pushes (not every PR), and is green on at least one real run. Deferred to Session 2, same as above.
+- [ ] The existing per-PR `e2e` job's runtime does not measurably regress (still completes in under ~2 minutes). Not independently measured in real CI this session — the added pos-frontend suite is a single ~1s test reusing the same Playwright browser install, so the expected marginal cost is one extra dev-server boot (~a few seconds), not a new browser download; worth confirming on the first real CI run.
 
 ## Deliverables
 
@@ -119,6 +119,7 @@ Not applicable — no new attack surface; test-only fixtures use throwaway tenan
 **Current Objective:** Add a full-stack E2E tier (real Postgres/Redis/backend services) covering four business workflows — prioritize GST filing cycle first (most concurrent churn from PG-038/039/040), then order-to-cash, procure-to-pay, payroll cycle — plus a first-ever E2E smoke spec for `pos-frontend` (checkout flow, mocked-API tier matching web-frontend's existing pattern).
 
 **Architecture Snapshot:**
+
 1. The existing suite mocks `**/auth/login`, `**/users/me`, `**/saved-searches`, and any endpoint under test — CORS preflight (OPTIONS) must be answered manually since dev-server and mock-service ports differ.
 2. `apiClient` unwraps every response as `data.data` — mocked responses must be wrapped `{ data: ... }` or assertions silently see `undefined`.
 3. The `test` CI job already runs real `postgres:16-alpine`/`redis:7-alpine` containers for backend integration tests — the new full-stack E2E tier should reuse that same container pattern, not invent a new one.
@@ -136,7 +137,7 @@ Not applicable — no new attack surface; test-only fixtures use throwaway tenan
 
 **APIs Already Available:** every service's real REST API (sales, purchase, HR, GST, accounting, inventory) — the full-stack tier calls these directly, no new endpoints needed.
 
-**Events Already Available:** the outbox/Kafka flows already wired for invoice confirmation → accounting posting, GRN → accounting posting, payroll → accrual journal — full-stack specs assert on their *outcomes* via REST polling, not by touching Kafka directly.
+**Events Already Available:** the outbox/Kafka flows already wired for invoice confirmation → accounting posting, GRN → accounting posting, payroll → accrual journal — full-stack specs assert on their _outcomes_ via REST polling, not by touching Kafka directly.
 
 **Shared Utilities:** none new required; reuse `@erp/sdk`'s health-route convention for stack-readiness polling if needed.
 

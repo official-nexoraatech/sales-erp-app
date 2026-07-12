@@ -25,34 +25,32 @@ export const accounts = pgTable(
     accountType: varchar('account_type', { length: 30 })
       .notNull()
       .$type<'ASSET' | 'LIABILITY' | 'EQUITY' | 'INCOME' | 'EXPENSE' | 'CONTRA'>(),
-    accountSubType: varchar('account_sub_type', { length: 50 })
-      .$type<
-        | 'CASH_AND_BANK'
-        | 'ACCOUNTS_RECEIVABLE'
-        | 'INVENTORY'
-        | 'FIXED_ASSET'
-        | 'OTHER_CURRENT_ASSET'
-        | 'ACCOUNTS_PAYABLE'
-        | 'TAX_PAYABLE'
-        | 'OTHER_CURRENT_LIABILITY'
-        | 'LONG_TERM_LIABILITY'
-        | 'EQUITY'
-        | 'RETAINED_EARNINGS'
-        | 'SALES_REVENUE'
-        | 'OTHER_INCOME'
-        | 'COST_OF_GOODS'
-        | 'OPERATING_EXPENSE'
-        | 'TAX_EXPENSE'
-        | 'OTHER_EXPENSE'
-        | 'CONTRA_REVENUE'
-        | 'INCOME_SUMMARY'
-      >(),
-    normalBalance: varchar('normal_balance', { length: 10 })
-      .notNull()
-      .$type<'DEBIT' | 'CREDIT'>(),
+    accountSubType: varchar('account_sub_type', { length: 50 }).$type<
+      | 'CASH_AND_BANK'
+      | 'ACCOUNTS_RECEIVABLE'
+      | 'INVENTORY'
+      | 'FIXED_ASSET'
+      | 'OTHER_CURRENT_ASSET'
+      | 'ACCOUNTS_PAYABLE'
+      | 'TAX_PAYABLE'
+      | 'OTHER_CURRENT_LIABILITY'
+      | 'LONG_TERM_LIABILITY'
+      | 'EQUITY'
+      | 'RETAINED_EARNINGS'
+      | 'SALES_REVENUE'
+      | 'OTHER_INCOME'
+      | 'COST_OF_GOODS'
+      | 'OPERATING_EXPENSE'
+      | 'TAX_EXPENSE'
+      | 'OTHER_EXPENSE'
+      | 'CONTRA_REVENUE'
+      | 'INCOME_SUMMARY'
+    >(),
+    normalBalance: varchar('normal_balance', { length: 10 }).notNull().$type<'DEBIT' | 'CREDIT'>(),
     isBank: boolean('is_bank').notNull().default(false),
     isCash: boolean('is_cash').notNull().default(false),
     isSystem: boolean('is_system').notNull().default(false),
+    defaultCostCenterId: integer('default_cost_center_id'),
     openingBalance: decimal('opening_balance', { precision: 15, scale: 2 }).notNull().default('0'),
     openingBalanceType: varchar('opening_balance_type', { length: 10 })
       .notNull()
@@ -92,9 +90,7 @@ export const openingBalances = pgTable(
       .$type<'CUSTOMER' | 'SUPPLIER' | 'STOCK' | 'ACCOUNT' | 'CASH_BANK'>(),
     entityId: integer('entity_id'),
     amount: decimal('amount', { precision: 15, scale: 2 }).notNull().default('0'),
-    balanceType: varchar('balance_type', { length: 10 })
-      .notNull()
-      .$type<'DEBIT' | 'CREDIT'>(),
+    balanceType: varchar('balance_type', { length: 10 }).notNull().$type<'DEBIT' | 'CREDIT'>(),
     asOfDate: varchar('as_of_date', { length: 10 }).notNull(),
     notes: text('notes'),
     quantity: decimal('quantity', { precision: 15, scale: 3 }),
@@ -189,6 +185,7 @@ export const financialEntries = pgTable(
     referenceType: varchar('reference_type', { length: 50 }),
     referenceId: integer('reference_id'),
     narration: text('narration'),
+    costCenterId: integer('cost_center_id'),
     createdBy: integer('created_by').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
@@ -196,6 +193,29 @@ export const financialEntries = pgTable(
     index('idx_financial_entries_journal').on(t.journalId, t.tenantId),
     index('idx_financial_entries_account').on(t.accountId, t.tenantId, t.createdAt),
     index('idx_financial_entries_tenant_date').on(t.tenantId, t.createdAt),
+  ]
+);
+
+// ─── Cost Centers (PG-037 — optional departmental/cost-center dimension) ───
+// Tenant-scoped, simple parent/child tree (mirrors accounts.parentId). Purely
+// informational — never referenced by validate_journal_balance.
+export const costCenters = pgTable(
+  'cost_centers',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    tenantId: integer('tenant_id').notNull(),
+    code: varchar('code', { length: 30 }).notNull(),
+    name: varchar('name', { length: 300 }).notNull(),
+    parentId: integer('parent_id'),
+    isActive: boolean('is_active').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    createdBy: integer('created_by').notNull(),
+  },
+  (t) => [
+    unique('cost_centers_tenant_code').on(t.tenantId, t.code),
+    index('idx_cost_centers_tenant').on(t.tenantId),
+    index('idx_cost_centers_parent').on(t.parentId, t.tenantId),
   ]
 );
 
@@ -215,9 +235,7 @@ export const postingMatrix = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     createdBy: integer('created_by').notNull(),
   },
-  (t) => [
-    index('idx_posting_matrix_tenant_event').on(t.tenantId, t.eventType),
-  ]
+  (t) => [index('idx_posting_matrix_tenant_event').on(t.tenantId, t.eventType)]
 );
 
 // ─── Financial Years ───────────────────────────────────────────────────────
@@ -258,10 +276,7 @@ export const periodClosures = pgTable(
     periodYear: integer('period_year').notNull(),
     startDate: date('start_date'),
     endDate: date('end_date'),
-    status: varchar('status', { length: 20 })
-      .notNull()
-      .default('OPEN')
-      .$type<'OPEN' | 'CLOSED'>(),
+    status: varchar('status', { length: 20 }).notNull().default('OPEN').$type<'OPEN' | 'CLOSED'>(),
     closedAt: timestamp('closed_at', { withTimezone: true }),
     closedBy: integer('closed_by'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
@@ -287,9 +302,7 @@ export const bankAccounts = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     createdBy: integer('created_by').notNull(),
   },
-  (t) => [
-    index('idx_bank_accounts_tenant').on(t.tenantId),
-  ]
+  (t) => [index('idx_bank_accounts_tenant').on(t.tenantId)]
 );
 
 // ─── Bank Statements ───────────────────────────────────────────────────────
@@ -310,9 +323,7 @@ export const bankStatements = pgTable(
     importedAt: timestamp('imported_at', { withTimezone: true }).defaultNow().notNull(),
     createdBy: integer('created_by').notNull(),
   },
-  (t) => [
-    index('idx_bank_statements_account').on(t.bankAccountId, t.tenantId),
-  ]
+  (t) => [index('idx_bank_statements_account').on(t.bankAccountId, t.tenantId)]
 );
 
 // ─── Bank Reconciliation Items ─────────────────────────────────────────────
@@ -323,9 +334,7 @@ export const bankReconciliationItems = pgTable(
     tenantId: integer('tenant_id').notNull(),
     bankAccountId: integer('bank_account_id').notNull(),
     bankStatementId: integer('bank_statement_id'),
-    itemType: varchar('item_type', { length: 10 })
-      .notNull()
-      .$type<'BANK' | 'BOOK'>(),
+    itemType: varchar('item_type', { length: 10 }).notNull().$type<'BANK' | 'BOOK'>(),
     transactionDate: date('transaction_date').notNull(),
     description: varchar('description', { length: 500 }),
     debitAmount: decimal('debit_amount', { precision: 15, scale: 2 }).notNull().default('0'),
@@ -421,9 +430,7 @@ export const tdsEntries = pgTable(
     tenantId: integer('tenant_id').notNull(),
     supplierId: integer('supplier_id').notNull(),
     paymentId: integer('payment_id').notNull(),
-    tdsSection: varchar('tds_section', { length: 10 })
-      .notNull()
-      .$type<'194C' | '194H' | '194J'>(),
+    tdsSection: varchar('tds_section', { length: 10 }).notNull().$type<'194C' | '194H' | '194J'>(),
     taxableAmount: decimal('taxable_amount', { precision: 15, scale: 2 }).notNull(),
     tdsRate: decimal('tds_rate', { precision: 5, scale: 2 }).notNull(),
     tdsAmount: decimal('tds_amount', { precision: 15, scale: 2 }).notNull(),
@@ -457,9 +464,7 @@ export const tdsCertificates = pgTable(
     periodYear: integer('period_year').notNull(),
     totalTaxableAmount: decimal('total_taxable_amount', { precision: 15, scale: 2 }).notNull(),
     totalTdsAmount: decimal('total_tds_amount', { precision: 15, scale: 2 }).notNull(),
-    tdsSection: varchar('tds_section', { length: 10 })
-      .notNull()
-      .$type<'194C' | '194H' | '194J'>(),
+    tdsSection: varchar('tds_section', { length: 10 }).notNull().$type<'194C' | '194H' | '194J'>(),
     formType: varchar('form_type', { length: 10 }).notNull().default('16A'),
     generatedAt: timestamp('generated_at', { withTimezone: true }),
     generatedBy: integer('generated_by'),
@@ -467,7 +472,13 @@ export const tdsCertificates = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => [
-    unique('tds_certificates_unique').on(t.tenantId, t.supplierId, t.periodQuarter, t.periodYear, t.tdsSection),
+    unique('tds_certificates_unique').on(
+      t.tenantId,
+      t.supplierId,
+      t.periodQuarter,
+      t.periodYear,
+      t.tdsSection
+    ),
     index('idx_tds_certificates_tenant').on(t.tenantId, t.periodYear),
   ]
 );
@@ -501,6 +512,8 @@ export type Journal = typeof journals.$inferSelect;
 export type NewJournal = typeof journals.$inferInsert;
 export type FinancialEntry = typeof financialEntries.$inferSelect;
 export type NewFinancialEntry = typeof financialEntries.$inferInsert;
+export type CostCenter = typeof costCenters.$inferSelect;
+export type NewCostCenter = typeof costCenters.$inferInsert;
 export type PostingMatrix = typeof postingMatrix.$inferSelect;
 export type FinancialYear = typeof financialYears.$inferSelect;
 export type PeriodClosure = typeof periodClosures.$inferSelect;

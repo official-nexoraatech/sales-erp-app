@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nexoraa ERP Documentation</title>
+<style>
+  :root{
+    --bg:#F7F6F3; --surface:#FFFFFF; --border:#E1DED6;
+    --text:#1E2027; --text-muted:#6B6F76; --text-faint:#93968E;
+    --accent:#2F4B7C; --accent-strong:#1F345A; --accent-soft:#E7ECF5; --accent-soft-border:#CBD8EC;
+    --shadow: 0 1px 2px rgba(30,32,39,.04), 0 4px 16px rgba(30,32,39,.06);
+    --font-display: ui-serif,"Iowan Old Style","Palatino Linotype",Georgia,"Times New Roman",serif;
+    --font-body: -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#14161B; --surface:#1B1E25; --border:#2C313B;
+      --text:#E7E8EC; --text-muted:#9BA0AA; --text-faint:#6D727C;
+      --accent:#8DA9E4; --accent-strong:#B7C9EF; --accent-soft:#212B41; --accent-soft-border:#33456C;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.35);
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#14161B; --surface:#1B1E25; --border:#2C313B;
+    --text:#E7E8EC; --text-muted:#9BA0AA; --text-faint:#6D727C;
+    --accent:#8DA9E4; --accent-strong:#B7C9EF; --accent-soft:#212B41; --accent-soft-border:#33456C;
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.35);
+    color-scheme: dark;
+  }
+  :root[data-theme="light"]{
+    --bg:#F7F6F3; --surface:#FFFFFF; --border:#E1DED6;
+    --text:#1E2027; --text-muted:#6B6F76; --text-faint:#93968E;
+    --accent:#2F4B7C; --accent-strong:#1F345A; --accent-soft:#E7ECF5; --accent-soft-border:#CBD8EC;
+    --shadow: 0 1px 2px rgba(30,32,39,.04), 0 4px 16px rgba(30,32,39,.06);
+    color-scheme: light;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0; background:var(--bg); color:var(--text); font-family:var(--font-body); line-height:1.6;}
+  .wrap{max-width:920px; margin:0 auto; padding:3.5rem 1.5rem 5rem;}
+  header{display:flex; align-items:center; justify-content:space-between; margin-bottom:2.6rem;}
+  .brand{display:flex; align-items:center; gap:.6rem; font-family:var(--font-display); font-weight:600; font-size:1.2rem;}
+  .brand .mark{width:30px; height:30px; border-radius:8px; background:var(--accent); color:var(--surface); display:flex; align-items:center; justify-content:center; font-family:var(--font-body); font-weight:700; font-size:.85rem;}
+  .icon-btn{width:36px; height:36px; border-radius:8px; border:1px solid var(--border); background:var(--surface); color:var(--text); cursor:pointer; font-size:1rem;}
+  h1{font-family:var(--font-display); font-size:2.1rem; margin:0 0 .4em; text-wrap:balance;}
+  p.lede{color:var(--text-muted); max-width:60ch; margin:0 0 2.4rem;}
+  .section-title{font-size:.72rem; text-transform:uppercase; letter-spacing:.08em; color:var(--text-faint); font-weight:700; margin:2.2rem 0 .9rem;}
+  .grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:.9rem;}
+  .card{border:1px solid var(--border); border-radius:12px; padding:1.1rem 1.2rem; background:var(--surface); text-decoration:none; color:var(--text); box-shadow:var(--shadow); display:flex; flex-direction:column; gap:.3rem;}
+  .card:hover{border-color:var(--accent);}
+  .card .title{font-weight:600; font-size:1rem;}
+  .card .desc{font-size:.82rem; color:var(--text-muted);}
+  .card .status{font-size:.66rem; text-transform:uppercase; letter-spacing:.04em; font-weight:700; align-self:flex-start; padding:.15em .55em; border-radius:20px;}
+  .card.live .status{background:var(--accent-soft); color:var(--accent-strong); border:1px solid var(--accent-soft-border);}
+  .card.stub{opacity:.55; cursor:default;}
+  .card.stub .status{background:var(--surface); color:var(--text-faint); border:1px solid var(--border);}
+  .journey-banner{display:flex; align-items:center; justify-content:space-between; gap:1rem; flex-wrap:wrap; background:var(--accent-soft); border:1px solid var(--accent-soft-border); border-radius:12px; padding:1rem 1.2rem; margin-bottom:2rem; text-decoration:none; color:var(--text);}
+  .journey-banner:hover{border-color:var(--accent);}
+  .journey-banner .jb-title{font-weight:600; color:var(--accent-strong); margin-bottom:.2em;}
+  .journey-banner .jb-desc{font-size:.85rem; color:var(--text-muted);}
+  .journey-banner .jb-arrow{font-size:1.3rem; color:var(--accent-strong); flex-shrink:0;}
+  footer{margin-top:3rem; font-size:.8rem; color:var(--text-faint);}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="brand"><span class="mark">N</span> Nexoraa ERP Documentation</div>
+      <button class="icon-btn" id="themeToggle" title="Toggle dark mode">◐</button>
+    </header>
+
+    <h1>Documentation, generated from the code that ships</h1>
+    <p class="lede">Every page here is written from reading the actual implementation — routes, permissions, database schema, and tests — not from what a module was supposed to do. Ambiguous or unverified behavior is flagged as "Needs Review" rather than guessed.</p>
+
+    <a class="journey-banner" href="/tenants/index.html#tenants/client/journey">
+      <div>
+        <div class="jb-title">Start here: End-to-End Client Journey</div>
+        <div class="jb-desc">A single visual map of the whole loop — onboarding a business, running it day to day, and reporting back on it — with links into every module below.</div>
+      </div>
+      <span class="jb-arrow">→</span>
+    </a>
+
+    <div class="section-title">Modules</div>
+    <div class="grid">
+      <a class="card live" href="/pos/index.html">
+        <span class="status">Available</span>
+        <span class="title">POS Terminal</span>
+        <span class="desc">Client, Super Admin, and Developer guides for the counter billing app.</span>
+      </a>
+      <a class="card live" href="/sales/index.html">
+        <span class="status">Available</span>
+        <span class="title">Sales &amp; Invoicing</span>
+        <span class="desc">Invoices, sale returns, payments, credit notes.</span>
+      </a>
+      <a class="card live" href="/purchase/index.html">
+        <span class="status">Available</span>
+        <span class="title">Purchase</span>
+        <span class="desc">Purchase orders, GRN, supplier bills.</span>
+      </a>
+      <a class="card live" href="/inventory/index.html">
+        <span class="status">Available</span>
+        <span class="title">Inventory</span>
+        <span class="desc">Stock ledger, valuation, warehouse transfers.</span>
+      </a>
+      <a class="card live" href="/products/index.html">
+        <span class="status">Available</span>
+        <span class="title">Products &amp; Variants</span>
+        <span class="desc">Items, categories, brands, barcodes.</span>
+      </a>
+      <a class="card live" href="/customers/index.html">
+        <span class="status">Available</span>
+        <span class="title">Customers &amp; Suppliers</span>
+        <span class="desc">Master records, credit limits, loyalty.</span>
+      </a>
+      <a class="card live" href="/accounting/index.html">
+        <span class="status">Available</span>
+        <span class="title">Accounting &amp; GST</span>
+        <span class="desc">Journals, ledgers, GST returns, e-invoicing.</span>
+      </a>
+      <a class="card live" href="/hr/index.html">
+        <span class="status">Available</span>
+        <span class="title">HR &amp; Payroll</span>
+        <span class="desc">Employees, attendance, payroll, Form 16.</span>
+      </a>
+      <a class="card live" href="/reports/index.html">
+        <span class="status">Available</span>
+        <span class="title">Reports</span>
+        <span class="desc">77 reports across Sales, Purchase, Inventory, Financial, HR, GST &amp; Analytics.</span>
+      </a>
+      <a class="card live" href="/tenants/index.html">
+        <span class="status">Available</span>
+        <span class="title">Super Admin / Tenants</span>
+        <span class="desc">Tenant lifecycle, plans, billing, feature flags.</span>
+      </a>
+      <a class="card live" href="/platform/index.html">
+        <span class="status">Available</span>
+        <span class="title">Developer Platform</span>
+        <span class="desc">Shared architecture, API conventions, how to add a module.</span>
+      </a>
+    </div>
+
+    <footer>All 11 modules documented from a direct code audit — no module list left to write. Re-run the audit against any module whenever the underlying code changes meaningfully, since these pages describe a point-in-time snapshot, not a live view.</footer>
+  </div>
+  <script>
+    var btn = document.getElementById('themeToggle');
+    try {
+      var stored = localStorage.getItem('erp-docs-theme');
+      if(stored){ document.documentElement.setAttribute('data-theme', stored); }
+    } catch(e){}
+    btn.addEventListener('click', function(){
+      var isDark = getComputedStyle(document.documentElement).colorScheme.indexOf('dark') !== -1;
+      var next = isDark ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', next);
+      try { localStorage.setItem('erp-docs-theme', next); } catch(e){}
+    });
+  </script>
+</body>
+</html>

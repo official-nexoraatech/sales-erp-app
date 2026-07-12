@@ -3,7 +3,7 @@ import { z } from 'zod';
 import argon2 from 'argon2';
 import { eq, and } from 'drizzle-orm';
 import type { Redis } from 'ioredis';
-import { TenantScopedCache } from '@erp/sdk';
+import { TenantScopedCache, assertTenantActive } from '@erp/sdk';
 import { users } from '@erp/db';
 import type { ErpDatabase } from '@erp/db';
 import { generateSecureToken } from '../crypto.js';
@@ -27,7 +27,9 @@ export async function loginRoute(
   redis: Redis
 ): Promise<void> {
   fastify.post('/auth/login', {
-    config: { rateLimit: { max: config.loginRateLimitMax, timeWindow: config.loginRateLimitWindowMs } },
+    config: {
+      rateLimit: { max: config.loginRateLimitMax, timeWindow: config.loginRateLimitWindowMs },
+    },
     handler: async (request, reply) => {
       const body = LoginBody.safeParse(request.body);
       if (!body.success) {
@@ -43,6 +45,11 @@ export async function loginRoute(
           retryAfterSeconds: ipStatus.retryAfterSeconds,
         });
       }
+
+      // Reject before checking credentials — a suspended/closed tenant's users shouldn't
+      // be able to log in at all, and should see that clearly instead of generic
+      // "Invalid credentials". Thrown ERPError is caught by the shared error handler.
+      await assertTenantActive(tenantId, []);
 
       const [user] = await db
         .select()
@@ -104,12 +111,20 @@ export async function loginRoute(
         const tokenSecret = generateSecureToken(32);
         const mfaToken = `${tenantId}.${tokenSecret}`;
         const cache = new TenantScopedCache(redis, tenantId);
-        await cache.setJson(`mfa:${tokenSecret}`, { userId: user.id, tenantId }, MFA_TOKEN_TTL_SECONDS);
+        await cache.setJson(
+          `mfa:${tokenSecret}`,
+          { userId: user.id, tenantId },
+          MFA_TOKEN_TTL_SECONDS
+        );
         return reply.code(200).send({ data: { requiresMFA: true, mfaToken } });
       }
 
       // Load roles and permissions
-      const { roleNames, permissions, branchIds } = await loadUserRolesAndPermissions(db, user.id, tenantId);
+      const { roleNames, permissions, branchIds } = await loadUserRolesAndPermissions(
+        db,
+        user.id,
+        tenantId
+      );
 
       // Issue tokens + record active session
       const tokens = await issueTokensAndSession(
@@ -129,7 +144,12 @@ export async function loginRoute(
       // Reset failed attempts and record last login
       await db
         .update(users)
-        .set({ failedLoginAttempts: 0, lockedUntil: null, lastLoginAt: new Date(), updatedAt: new Date() })
+        .set({
+          failedLoginAttempts: 0,
+          lockedUntil: null,
+          lastLoginAt: new Date(),
+          updatedAt: new Date(),
+        })
         .where(eq(users.id, user.id));
 
       return reply.code(200).send({ data: tokens });

@@ -50,7 +50,11 @@ beforeAll(async () => {
   process.env['JWT_PUBLIC_KEY'] = pub;
 });
 
-async function signToken(opts: { sub: string; tenantId: number; permissions: string[] }): Promise<string> {
+async function signToken(opts: {
+  sub: string;
+  tenantId: number;
+  permissions: string[];
+}): Promise<string> {
   const nowSec = Math.floor(Date.now() / 1000);
   return new SignJWT({
     tenantId: opts.tenantId,
@@ -75,7 +79,10 @@ function makeFakeDb(tenant?: Record<string, unknown>): {
   db: Record<string, unknown>;
   state: { tenant?: Record<string, unknown>; auditLogs: Record<string, unknown>[] };
 } {
-  const state: { tenant?: Record<string, unknown>; auditLogs: Record<string, unknown>[] } = { tenant, auditLogs: [] };
+  const state: { tenant?: Record<string, unknown>; auditLogs: Record<string, unknown>[] } = {
+    tenant,
+    auditLogs: [],
+  };
   const db = {
     select: () => ({ from: () => selectResult(state.tenant ? [state.tenant] : []) }),
     update: () => ({
@@ -98,9 +105,11 @@ function makeFakeDb(tenant?: Record<string, unknown>): {
 
 const FAKE_CONFIG = { elasticsearchUrl: 'http://localhost:9200', minioBucket: 'erp-local' };
 
+const FAKE_CTX_FACTORY = { publishTenantStatusInvalidation: vi.fn(async () => {}) };
+
 async function buildApp(db: Record<string, unknown>): Promise<FastifyInstance> {
   const app = Fastify({ logger: false });
-  await tenantRoutes(app, db as never, FAKE_CONFIG as never);
+  await tenantRoutes(app, db as never, FAKE_CONFIG as never, FAKE_CTX_FACTORY as never);
   return app;
 }
 
@@ -149,7 +158,11 @@ describe('ES-21 — tenant-admin route authorization (C1, C2)', () => {
   it('4. PATCH /admin/tenants/:id/suspend as a platform-operator role → 200', async () => {
     const { db, state } = makeFakeDb({ id: 2, status: 'ACTIVE' });
     const app = await buildApp(db);
-    const token = await signToken({ sub: '99', tenantId: 999, permissions: ['PLATFORM_TENANT_MANAGE'] });
+    const token = await signToken({
+      sub: '99',
+      tenantId: 999,
+      permissions: ['PLATFORM_TENANT_MANAGE'],
+    });
 
     const res = await app.inject({
       method: 'PATCH',
@@ -169,7 +182,11 @@ describe('ES-21 — tenant-admin route authorization (C1, C2)', () => {
   it('5. PATCH /admin/tenants/:id/suspend writes an audit_log entry with reason and acting user', async () => {
     const { db, state } = makeFakeDb({ id: 2, status: 'ACTIVE' });
     const app = await buildApp(db);
-    const token = await signToken({ sub: '99', tenantId: 999, permissions: ['PLATFORM_TENANT_MANAGE'] });
+    const token = await signToken({
+      sub: '99',
+      tenantId: 999,
+      permissions: ['PLATFORM_TENANT_MANAGE'],
+    });
 
     await app.inject({
       method: 'PATCH',
@@ -195,7 +212,11 @@ describe('ES-21 — tenant-admin route authorization (C1, C2)', () => {
   it('6. PATCH /admin/tenants/:id/activate writes an audit_log entry', async () => {
     const { db, state } = makeFakeDb({ id: 2, status: 'SUSPENDED' });
     const app = await buildApp(db);
-    const token = await signToken({ sub: '99', tenantId: 999, permissions: ['PLATFORM_TENANT_MANAGE'] });
+    const token = await signToken({
+      sub: '99',
+      tenantId: 999,
+      permissions: ['PLATFORM_TENANT_MANAGE'],
+    });
 
     const res = await app.inject({
       method: 'PATCH',
@@ -215,7 +236,11 @@ describe('ES-21 — tenant-admin route authorization (C1, C2)', () => {
   it('7. PATCH /admin/tenants/:id/close writes an audit_log entry with reason', async () => {
     const { db, state } = makeFakeDb({ id: 2, status: 'ACTIVE' });
     const app = await buildApp(db);
-    const token = await signToken({ sub: '99', tenantId: 999, permissions: ['PLATFORM_TENANT_MANAGE'] });
+    const token = await signToken({
+      sub: '99',
+      tenantId: 999,
+      permissions: ['PLATFORM_TENANT_MANAGE'],
+    });
 
     const res = await app.inject({
       method: 'PATCH',

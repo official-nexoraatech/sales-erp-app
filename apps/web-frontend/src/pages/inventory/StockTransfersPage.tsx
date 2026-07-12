@@ -44,25 +44,39 @@ export default function StockTransfersPage() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
 
-  useEffect(() => { setPage(1); }, [status, debouncedSearch]);
+  useEffect(() => {
+    setPage(1);
+  }, [status, debouncedSearch]);
 
   const { data, isLoading } = useQuery({
     queryKey: ['stock-transfers', status, debouncedSearch, page, pageSize],
-    queryFn: () => stockTransferApi.list({ status: status || undefined, search: debouncedSearch || undefined, page, limit: pageSize }),
+    queryFn: () =>
+      stockTransferApi.list({
+        status: status || undefined,
+        search: debouncedSearch || undefined,
+        page,
+        limit: pageSize,
+      }),
   });
 
-  const transfers: Transfer[] = (data as Record<string, unknown>)?.content as Transfer[] ?? [];
-  const totalElements = (data as Record<string, unknown>)?.totalElements as number ?? 0;
+  const transfers: Transfer[] = ((data as Record<string, unknown>)?.content as Transfer[]) ?? [];
+  const totalElements = ((data as Record<string, unknown>)?.totalElements as number) ?? 0;
 
   const approveMutation = useMutation({
     mutationFn: (id: number) => stockTransferApi.approve(id),
-    onSuccess: () => { toast.success('Transfer approved'); qc.invalidateQueries({ queryKey: ['stock-transfers'] }); },
+    onSuccess: () => {
+      toast.success('Transfer approved');
+      qc.invalidateQueries({ queryKey: ['stock-transfers'] });
+    },
     onError: (e: Error) => toast.error(e.message),
   });
 
   const dispatchMutation = useMutation({
     mutationFn: (id: number) => stockTransferApi.dispatch(id),
-    onSuccess: () => { toast.success('Transfer dispatched'); qc.invalidateQueries({ queryKey: ['stock-transfers'] }); },
+    onSuccess: () => {
+      toast.success('Transfer dispatched');
+      qc.invalidateQueries({ queryKey: ['stock-transfers'] });
+    },
     onError: (e: Error) => toast.error(e.message),
   });
 
@@ -81,11 +95,27 @@ export default function StockTransfersPage() {
       header: '',
       align: 'right',
       render: (r) => {
-        const items: ERPMenuItem[] = [{ label: 'View', icon: Eye, onClick: () => navigate(`/inventory/transfers/${r.id}`) }];
-        if (r.status === 'SUBMITTED') items.push({ label: 'Approve', icon: CheckCircle2, onClick: () => approveMutation.mutate(r.id) });
-        if (r.status === 'APPROVED') items.push({ label: 'Dispatch', icon: Truck, onClick: () => dispatchMutation.mutate(r.id) });
+        const items: ERPMenuItem[] = [
+          { label: 'View', icon: Eye, onClick: () => navigate(`/inventory/transfers/${r.id}`) },
+        ];
+        if (r.status === 'SUBMITTED')
+          items.push({
+            label: 'Approve',
+            icon: CheckCircle2,
+            onClick: () => approveMutation.mutate(r.id),
+          });
+        if (r.status === 'APPROVED')
+          items.push({
+            label: 'Dispatch',
+            icon: Truck,
+            onClick: () => dispatchMutation.mutate(r.id),
+          });
         if (r.status === 'DISPATCHED' || r.status === 'IN_TRANSIT') {
-          items.push({ label: 'Receive', icon: PackageCheck, onClick: () => navigate(`/inventory/transfers/${r.id}/receive`) });
+          items.push({
+            label: 'Receive',
+            icon: PackageCheck,
+            onClick: () => navigate(`/inventory/transfers/${r.id}/receive`),
+          });
         }
         return <ERPDropdownMenu items={items} />;
       },
@@ -94,13 +124,21 @@ export default function StockTransfersPage() {
 
   return (
     <div>
-      <ERPPageHeader variant="list" title="Stock Transfers" subtitle="Move stock between warehouses">
+      <ERPPageHeader
+        variant="list"
+        title="Stock Transfers"
+        subtitle="Move stock between warehouses"
+      >
         <Button onClick={() => navigate('/inventory/transfers/new')}>+ New Transfer</Button>
       </ERPPageHeader>
 
-      <div className="flex gap-4 mb-4">
+      <div className="flex flex-wrap gap-4 mb-4">
         <div className="flex-1 max-w-sm">
-          <Input placeholder="Search by transfer number..." value={search} onChange={(e) => setSearch(e.target.value)} />
+          <Input
+            placeholder="Search by transfer number..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
         </div>
         <Select
           label="Filter by Status"
@@ -127,7 +165,10 @@ export default function StockTransfersPage() {
         rowKey="id"
         pagination={{ page, pageSize, total: totalElements }}
         onPageChange={setPage}
-        onPageSizeChange={(size) => { setPageSize(size); setPage(1); }}
+        onPageSizeChange={(size) => {
+          setPageSize(size);
+          setPage(1);
+        }}
       />
     </div>
   );

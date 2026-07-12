@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc --noEmit",
+    "build": "tsc --noEmit && vite build",
     "dev": "vite",
     "preview": "vite preview",
     "lint": "eslint src/",
@@ -15,6 +15,7 @@
   "dependencies": {
     "@erp/design-tokens": "workspace:*",
     "@erp/types": "workspace:*",
+    "@erp/ui": "workspace:*",
     "@erp/utils": "workspace:*",
     "@fontsource/inter": "^5.2.8",
     "@hookform/resolvers": "^3.9.1",

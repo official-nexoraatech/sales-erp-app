@@ -1,5 +1,5 @@
-import { and, asc, eq, sql } from 'drizzle-orm';
-import { items, inventoryFifoLayers } from '@erp/db';
+import { and, asc, eq, isNull, sql } from 'drizzle-orm';
+import { items, inventoryFifoLayers, inventoryWarehouseValuation } from '@erp/db';
 import { StockInsufficientForCostingError } from '@erp/types';
 import type { ErpDatabase } from '@erp/db';
 
@@ -18,6 +18,7 @@ export interface StockInValuationParams {
 export interface StockOutValuationParams {
   tenantId: number;
   itemId: number;
+  variantId?: number | undefined;
   warehouseId: number;
   quantity: number;
 }
@@ -28,7 +29,8 @@ export interface StockOutValuationParams {
 // on why inventory writes must share the caller's transaction for atomicity).
 export class ValuationService {
   static async applyStockIn(db: ErpDatabase, params: StockInValuationParams): Promise<void> {
-    const { tenantId, itemId, warehouseId, quantity, unitCost, qtyBeforeStockIn, sourceLedgerId } = params;
+    const { tenantId, itemId, warehouseId, quantity, unitCost, qtyBeforeStockIn, sourceLedgerId } =
+      params;
     if (unitCost <= 0) return; // no real cost data (e.g. reversal STOCK_IN) — nothing to value
 
     // SELECT ... FOR UPDATE: this was ES-13's original intended design (see
@@ -66,14 +68,31 @@ export class ValuationService {
         unitCost: String(unitCost),
         sourceLedgerId,
       });
+    } else {
+      // PG-032: FIFO already gets a warehouse dimension for free via inventory_fifo_layers.warehouse_id
+      // (see above). WACC has none — mirror the same recompute, scoped to this warehouse only.
+      // items.waccCost above stays the tenant-wide figure; this row tracks per-warehouse divergence.
+      await ValuationService.upsertWarehouseWaccOnStockIn(
+        db,
+        tenantId,
+        itemId,
+        params.variantId,
+        warehouseId,
+        quantity,
+        unitCost
+      );
     }
   }
 
   // Returns the total COGS for `quantity` units, decrementing FIFO layers / the
   // item's running stock value. Caller writes cogsTotal / quantity onto the
   // inventory_ledger row's cogs_per_unit.
-  static async consumeForStockOut(db: ErpDatabase, params: StockOutValuationParams): Promise<number> {
+  static async consumeForStockOut(
+    db: ErpDatabase,
+    params: StockOutValuationParams
+  ): Promise<number> {
     const { tenantId, itemId, warehouseId, quantity } = params;
+    const variantId = params.variantId;
 
     // SELECT ... FOR UPDATE — see applyStockIn() above for why.
     const [item] = await db
@@ -98,7 +117,113 @@ export class ValuationService {
       .update(items)
       .set({ currentStockValue: String(Math.max(0, currentValue - totalCogs)) })
       .where(and(eq(items.id, itemId), eq(items.tenantId, tenantId)));
+
+    // PG-032: deduct from this warehouse's own tracked WACC row (its own cost basis, which may
+    // have diverged from the tenant-wide waccCost above) — not from the tenant-wide figure.
+    await ValuationService.deductWarehouseWaccOnStockOut(
+      db,
+      tenantId,
+      itemId,
+      variantId,
+      warehouseId,
+      quantity
+    );
+
     return totalCogs;
+  }
+
+  private static warehouseValuationWhere(
+    tenantId: number,
+    itemId: number,
+    variantId: number | undefined,
+    warehouseId: number
+  ) {
+    return variantId === undefined
+      ? and(
+          eq(inventoryWarehouseValuation.tenantId, tenantId),
+          eq(inventoryWarehouseValuation.itemId, itemId),
+          eq(inventoryWarehouseValuation.warehouseId, warehouseId),
+          isNull(inventoryWarehouseValuation.variantId)
+        )
+      : and(
+          eq(inventoryWarehouseValuation.tenantId, tenantId),
+          eq(inventoryWarehouseValuation.itemId, itemId),
+          eq(inventoryWarehouseValuation.warehouseId, warehouseId),
+          eq(inventoryWarehouseValuation.variantId, variantId)
+        );
+  }
+
+  // PG-032: same WACC-recompute formula as applyStockIn's items.waccCost update above, scoped to
+  // (item_id, warehouse_id). This table has no independent qty counter — the warehouse's implied
+  // qty-before is derived from stockValue / waccCost, since stock_value == qty * wacc_cost by
+  // construction after every prior write here (mirrors how items.availableQty / items.waccCost
+  // relate, just without a separate qty column since projectionStockLevel already owns qty).
+  private static async upsertWarehouseWaccOnStockIn(
+    db: ErpDatabase,
+    tenantId: number,
+    itemId: number,
+    variantId: number | undefined,
+    warehouseId: number,
+    quantity: number,
+    unitCost: number
+  ): Promise<void> {
+    const [existing] = await db
+      .select()
+      .from(inventoryWarehouseValuation)
+      .where(ValuationService.warehouseValuationWhere(tenantId, itemId, variantId, warehouseId))
+      .for('update');
+
+    const priorValue = existing ? parseFloat(String(existing.stockValue)) : 0;
+    const priorCost = existing ? parseFloat(String(existing.waccCost)) : 0;
+    const priorQty = priorCost > 0 ? priorValue / priorCost : 0;
+
+    const newValue = priorValue + quantity * unitCost;
+    const newQty = priorQty + quantity;
+    const newWacc = newQty > 0 ? Math.round((newValue / newQty) * 100) / 100 : 0;
+
+    if (existing) {
+      await db
+        .update(inventoryWarehouseValuation)
+        .set({ waccCost: String(newWacc), stockValue: String(newValue), updatedAt: new Date() })
+        .where(eq(inventoryWarehouseValuation.id, existing.id));
+    } else {
+      await db.insert(inventoryWarehouseValuation).values({
+        tenantId,
+        itemId,
+        variantId,
+        warehouseId,
+        waccCost: String(newWacc),
+        stockValue: String(newValue),
+      });
+    }
+  }
+
+  // PG-032: mirrors consumeForStockOut's tenant-wide COGS deduction, using this warehouse's own
+  // waccCost instead of items.waccCost. If no per-warehouse row exists yet (pre-backfill, or a
+  // stock-out reaching a warehouse with no recorded stock-in) there's nothing to deduct from —
+  // the valuation report falls back to the ratio estimate for that combination instead of erroring.
+  private static async deductWarehouseWaccOnStockOut(
+    db: ErpDatabase,
+    tenantId: number,
+    itemId: number,
+    variantId: number | undefined,
+    warehouseId: number,
+    quantity: number
+  ): Promise<void> {
+    const [existing] = await db
+      .select()
+      .from(inventoryWarehouseValuation)
+      .where(ValuationService.warehouseValuationWhere(tenantId, itemId, variantId, warehouseId))
+      .for('update');
+    if (!existing) return;
+
+    const waccCost = parseFloat(String(existing.waccCost));
+    const totalCogs = Math.round(quantity * waccCost * 100) / 100;
+    const currentValue = parseFloat(String(existing.stockValue));
+    await db
+      .update(inventoryWarehouseValuation)
+      .set({ stockValue: String(Math.max(0, currentValue - totalCogs)), updatedAt: new Date() })
+      .where(eq(inventoryWarehouseValuation.id, existing.id));
   }
 
   private static async consumeFifoLayers(
@@ -144,7 +269,12 @@ export class ValuationService {
     }
 
     if (remainingToConsume > 0.0001) {
-      throw new StockInsufficientForCostingError(itemId, warehouseId, quantity, quantity - remainingToConsume);
+      throw new StockInsufficientForCostingError(
+        itemId,
+        warehouseId,
+        quantity,
+        quantity - remainingToConsume
+      );
     }
 
     totalCogs = Math.round(totalCogs * 100) / 100;

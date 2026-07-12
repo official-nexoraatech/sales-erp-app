@@ -11,7 +11,8 @@
     "type-check": "tsc --noEmit",
     "test": "vitest run --passWithNoTests",
     "test:coverage": "vitest run --coverage",
-    "bootstrap-operator": "tsx scripts/bootstrap-platform-operator.ts"
+    "bootstrap-operator": "tsx scripts/bootstrap-platform-operator.ts",
+    "reset-operator-password": "tsx scripts/reset-platform-operator-password.ts"
   },
   "dependencies": {
     "@erp/config": "workspace:*",

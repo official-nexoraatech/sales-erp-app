@@ -228,6 +228,12 @@ importers:
         specifier: ^3.2.6
         version: 3.2.6(@types/node@20.19.43)(jiti@2.7.0)(jsdom@25.0.1)(lightningcss@1.32.0)(tsx@4.22.4)(yaml@2.9.0)
 
+  apps/docs-site:
+    devDependencies:
+      vite:
+        specifier: ^6.0.5
+        version: 6.4.3(@types/node@24.13.2)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.22.4)(yaml@2.9.0)
+
   apps/event-service:
     dependencies:
       '@erp/config':
@@ -504,6 +510,9 @@ importers:
       handlebars:
         specifier: ^4.7.8
         version: 4.7.9
+      ioredis:
+        specifier: ^5.11.0
+        version: 5.11.1
       jose:
         specifier: ^5.10.0
         version: 5.10.0
@@ -535,6 +544,9 @@ importers:
       '@erp/types':
         specifier: workspace:*
         version: link:../../packages/shared-types
+      '@erp/ui':
+        specifier: workspace:*
+        version: link:../../packages/ui
       '@erp/utils':
         specifier: workspace:*
         version: link:../../packages/shared-utils
@@ -578,6 +590,9 @@ importers:
         specifier: ^5.0.2
         version: 5.0.14(@types/react@19.2.17)(react@19.2.7)
     devDependencies:
+      '@playwright/test':
+        specifier: ^1.49.1
+        version: 1.61.1
       '@tailwindcss/vite':
         specifier: ^4.0.0
         version: 4.3.1(vite@6.4.3(@types/node@24.13.2)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.22.4)(yaml@2.9.0))
@@ -982,6 +997,9 @@ importers:
       fastify:
         specifier: ^5.9.0
         version: 5.9.0
+      ioredis:
+        specifier: ^5.11.0
+        version: 5.11.1
       jose:
         specifier: ^5.9.6
         version: 5.10.0
@@ -1074,6 +1092,9 @@ importers:
       '@erp/types':
         specifier: workspace:*
         version: link:../../packages/shared-types
+      '@erp/ui':
+        specifier: workspace:*
+        version: link:../../packages/ui
       '@erp/utils':
         specifier: workspace:*
         version: link:../../packages/shared-utils
@@ -1165,22 +1186,6 @@ importers:
       vitest:
         specifier: ^3.2.6
         version: 3.2.6(@types/node@24.13.2)(jiti@2.7.0)(jsdom@25.0.1)(lightningcss@1.32.0)(tsx@4.22.4)(yaml@2.9.0)
-
-  packages/cache-client:
-    dependencies:
-      '@erp/config':
-        specifier: workspace:*
-        version: link:../config
-      ioredis:
-        specifier: ^5.11.0
-        version: 5.11.1
-    devDependencies:
-      '@types/node':
-        specifier: ^20.17.0
-        version: 20.19.43
-      typescript:
-        specifier: ^5.7.3
-        version: 5.9.3
 
   packages/config:
     devDependencies:
@@ -1359,6 +1364,37 @@ importers:
       '@types/node':
         specifier: ^20.17.0
         version: 20.19.43
+      typescript:
+        specifier: ^5.7.3
+        version: 5.9.3
+
+  packages/ui:
+    dependencies:
+      class-variance-authority:
+        specifier: ^0.7.1
+        version: 0.7.1
+      clsx:
+        specifier: ^2.1.1
+        version: 2.1.1
+      lucide-react:
+        specifier: ^0.468.0
+        version: 0.468.0(react@19.2.7)
+      react:
+        specifier: ^19.0.0
+        version: 19.2.7
+      react-dom:
+        specifier: ^19.0.0
+        version: 19.2.7(react@19.2.7)
+      tailwind-merge:
+        specifier: ^2.6.0
+        version: 2.6.1
+    devDependencies:
+      '@types/react':
+        specifier: ^19.0.2
+        version: 19.2.17
+      '@types/react-dom':
+        specifier: ^19.0.2
+        version: 19.2.3(@types/react@19.2.17)
       typescript:
         specifier: ^5.7.3
         version: 5.9.3
@@ -3296,6 +3332,9 @@ packages:
   cjs-module-lexer@2.2.0:
     resolution: {integrity: sha512-4bHTS2YuzUvtoLjdy+98ykbNB5jS0+07EvFNXerqZQJ89F7DI6ET7OQo/HJuW6K0aVsKA9hj9/RVb2kQVOrPDQ==}
 
+  class-variance-authority@0.7.1:
+    resolution: {integrity: sha512-Ka+9Trutv7G8M6WT6SeiRWz792K5qEqIGEGzXKhAE6xOWAY6pPH8U+9IY3oCMv6kqTmLsv7Xh/2w2RigkePMsg==}
+
   cli-cursor@5.0.0:
     resolution: {integrity: sha512-aCj4O5wKyszjMmDT4tZj93kxyydN/K5zPWSCe6/0AV/AA1pqe5ZBIw0a2ZfPQV7lL5/yb5HsUreJ6UFAF1tEQw==}
     engines: {node: '>=18'}
@@ -5097,6 +5136,9 @@ packages:
 
   symbol-tree@3.2.4:
     resolution: {integrity: sha512-9QNk5KwDF+Bvz+PyObkmSYjI5ksVUYtjW7AU22r2NKcfLJcXp96hkDWU3+XndOsUb+AQ9QhfzfCT2O+CNWT5Tw==}
+
+  tailwind-merge@2.6.1:
+    resolution: {integrity: sha512-Oo6tHdpZsGpkKG88HJ8RR1rg/RdnEkQEfMoEk2x1XRI3F1AxeU+ijRXpiVUF4UbLfcxxRGw6TbUINKYdWVsQTQ==}
 
   tailwindcss@4.3.1:
     resolution: {integrity: sha512-hk+TB1m+K8CYNrP6rjQaq/Y+4Zylwpa87mLYBKCunwnnQ9p+fHb7kmSfGqyEJoxF/O6CDyABWVFEafNSYKll+Q==}
@@ -7457,6 +7499,10 @@ snapshots:
 
   cjs-module-lexer@2.2.0: {}
 
+  class-variance-authority@0.7.1:
+    dependencies:
+      clsx: 2.1.1
+
   cli-cursor@5.0.0:
     dependencies:
       restore-cursor: 5.1.0
@@ -9230,6 +9276,8 @@ snapshots:
       has-flag: 4.0.0
 
   symbol-tree@3.2.4: {}
+
+  tailwind-merge@2.6.1: {}
 
   tailwindcss@4.3.1: {}
 

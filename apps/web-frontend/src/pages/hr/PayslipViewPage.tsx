@@ -69,7 +69,9 @@ export default function PayslipViewPage() {
     return (
       <div className="p-8 text-center">
         <p className="text-error text-sm">Could not load payslip.</p>
-        <Button variant="secondary" className="mt-4" onClick={() => navigate('/hr/payroll')}>Back</Button>
+        <Button variant="secondary" className="mt-4" onClick={() => navigate('/hr/payroll')}>
+          Back
+        </Button>
       </div>
     );
   }
@@ -83,8 +85,10 @@ export default function PayslipViewPage() {
           title={`Salary Slip — ${slip.payPeriod ?? ''}`}
           subtitle={slip.employeeName ?? ''}
           actions={
-            <div className="flex gap-2 print:hidden">
-              <Button variant="secondary" onClick={() => navigate(-1)}>Back</Button>
+            <div className="flex gap-2 print:hidden flex-wrap">
+              <Button variant="secondary" onClick={() => navigate(-1)}>
+                Back
+              </Button>
               <Button onClick={() => window.print()}>Print</Button>
             </div>
           }
@@ -92,7 +96,7 @@ export default function PayslipViewPage() {
 
         <div className="bg-surface-card border border-default rounded-xl p-6 space-y-6 print:border-none print:shadow-none">
           {/* Employee info */}
-          <div className="grid grid-cols-2 gap-4 border-b border-default pb-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 border-b border-default pb-4">
             <div>
               <p className="text-xs text-secondary uppercase tracking-wide">Employee</p>
               <p className="font-semibold text-primary">{slip.employeeName ?? '—'}</p>
@@ -112,7 +116,7 @@ export default function PayslipViewPage() {
           </div>
 
           {/* Attendance summary */}
-          <div className="grid grid-cols-4 gap-4 border-b border-default pb-4">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 border-b border-default pb-4">
             <div className="text-center">
               <p className="text-xs text-secondary">Working Days</p>
               <p className="font-semibold">{slip.workingDays}</p>
@@ -132,9 +136,11 @@ export default function PayslipViewPage() {
           </div>
 
           {/* Earnings and Deductions */}
-          <div className="grid grid-cols-2 gap-8">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-8">
             <div>
-              <h3 className="text-sm font-semibold text-primary mb-3 uppercase tracking-wide">Earnings</h3>
+              <h3 className="text-sm font-semibold text-primary mb-3 uppercase tracking-wide">
+                Earnings
+              </h3>
               <table className="w-full">
                 <tbody>
                   <SalaryRow label="Basic Salary" amount={slip.earnings.basicSalary} />
@@ -144,14 +150,18 @@ export default function PayslipViewPage() {
                   <SalaryRow label="Piece Rate" amount={slip.earnings.pieceRateAmount} />
                   <tr className="border-t border-default">
                     <td className="py-2 text-sm font-semibold text-primary">Gross Salary</td>
-                    <td className="py-2 text-sm font-semibold text-right font-mono">{formatCurrency(slip.grossSalary)}</td>
+                    <td className="py-2 text-sm font-semibold text-right font-mono">
+                      {formatCurrency(slip.grossSalary)}
+                    </td>
                   </tr>
                 </tbody>
               </table>
             </div>
 
             <div>
-              <h3 className="text-sm font-semibold text-primary mb-3 uppercase tracking-wide">Deductions</h3>
+              <h3 className="text-sm font-semibold text-primary mb-3 uppercase tracking-wide">
+                Deductions
+              </h3>
               <table className="w-full">
                 <tbody>
                   <SalaryRow label="PF (Employee)" amount={slip.deductions.pfEmployee} />
@@ -161,7 +171,9 @@ export default function PayslipViewPage() {
                   <SalaryRow label="TDS" amount={slip.deductions.tdsDeduction} />
                   <tr className="border-t border-default">
                     <td className="py-2 text-sm font-semibold text-primary">Total Deductions</td>
-                    <td className="py-2 text-sm font-semibold text-right font-mono text-error">{formatCurrency(slip.deductions.totalDeductions)}</td>
+                    <td className="py-2 text-sm font-semibold text-right font-mono text-error">
+                      {formatCurrency(slip.deductions.totalDeductions)}
+                    </td>
                   </tr>
                 </tbody>
               </table>
@@ -171,15 +183,27 @@ export default function PayslipViewPage() {
           {/* Net Salary */}
           <div className="border-t border-default pt-4 flex justify-between items-center">
             <p className="text-base font-bold text-primary">Net Salary</p>
-            <p className="text-xl font-bold text-primary font-mono">{formatCurrency(slip.netSalary)}</p>
+            <p className="text-xl font-bold text-primary font-mono">
+              {formatCurrency(slip.netSalary)}
+            </p>
           </div>
 
           {/* Employer contributions */}
           <div className="bg-surface-subtle rounded-lg p-4 text-sm">
-            <p className="text-xs text-secondary uppercase tracking-wide mb-2">Employer Contributions</p>
-            <div className="flex gap-8">
-              {slip.pfEmployer > 0 && <span>PF: <strong>{formatCurrency(slip.pfEmployer)}</strong></span>}
-              {slip.esiEmployer > 0 && <span>ESI: <strong>{formatCurrency(slip.esiEmployer)}</strong></span>}
+            <p className="text-xs text-secondary uppercase tracking-wide mb-2">
+              Employer Contributions
+            </p>
+            <div className="flex gap-8 flex-wrap">
+              {slip.pfEmployer > 0 && (
+                <span>
+                  PF: <strong>{formatCurrency(slip.pfEmployer)}</strong>
+                </span>
+              )}
+              {slip.esiEmployer > 0 && (
+                <span>
+                  ESI: <strong>{formatCurrency(slip.esiEmployer)}</strong>
+                </span>
+              )}
             </div>
           </div>
         </div>

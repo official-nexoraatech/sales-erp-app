@@ -3,7 +3,12 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { Download, Trash2, Upload, UserRound } from 'lucide-react';
-import { employeeApi, leaveApi, employeeFilesApi, type EmployeeDocument } from '../../api/endpoints.js';
+import {
+  employeeApi,
+  leaveApi,
+  employeeFilesApi,
+  type EmployeeDocument,
+} from '../../api/endpoints.js';
 import { useAuthStore } from '../../store/auth.store.js';
 import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
@@ -84,14 +89,16 @@ export default function EmployeeViewPage() {
     queryKey: ['employees', id],
     queryFn: () => employeeApi.getById(Number(id)),
   });
-  const employee = ((data as Record<string, unknown>)?.data as Employee) ?? (data as unknown as Employee);
+  const employee =
+    ((data as Record<string, unknown>)?.data as Employee) ?? (data as unknown as Employee);
 
   const { data: balanceData } = useQuery({
     queryKey: ['leave-balance', id],
     queryFn: () => leaveApi.balance(Number(id)),
     enabled: hasPermission(PERMISSIONS.LEAVE_VIEW),
   });
-  const balances: LeaveBalance[] = ((balanceData as Record<string, unknown>)?.content as LeaveBalance[]) ?? [];
+  const balances: LeaveBalance[] =
+    ((balanceData as Record<string, unknown>)?.content as LeaveBalance[]) ?? [];
 
   const exitMutation = useMutation({
     mutationFn: () => employeeApi.exit(Number(id), { exitDate, exitReason }),
@@ -199,31 +206,45 @@ export default function EmployeeViewPage() {
         status={employee.status}
         statusVariant={employee.status === 'ACTIVE' ? 'success' : 'default'}
         actions={
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap">
             {hasPermission(PERMISSIONS.EMPLOYEE_UPDATE) && (
-              <Button variant="secondary" onClick={() => navigate(`/hr/employees/${id}/edit`)}>Edit</Button>
+              <Button variant="secondary" onClick={() => navigate(`/hr/employees/${id}/edit`)}>
+                Edit
+              </Button>
             )}
             {hasPermission(PERMISSIONS.EMPLOYEE_UPDATE) && employee.status === 'ACTIVE' && (
-              <Button variant="danger-outline" onClick={() => setExitModalOpen(true)}>Record Exit</Button>
+              <Button variant="danger-outline" onClick={() => setExitModalOpen(true)}>
+                Record Exit
+              </Button>
             )}
           </div>
         }
       />
 
-      <div className="grid grid-cols-2 gap-6 mt-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
         <div className="bg-surface-card rounded-xl border border-default p-5">
           <h3 className="font-semibold text-primary mb-4">Profile</h3>
           <div className="flex items-center gap-4 mb-4">
             <div className="w-16 h-16 rounded-full bg-surface-hover border border-default flex items-center justify-center overflow-hidden shrink-0">
               {photoUrl ? (
-                <img src={photoUrl} alt={employee.displayName} className="w-full h-full object-cover" />
+                <img
+                  src={photoUrl}
+                  alt={employee.displayName}
+                  className="w-full h-full object-cover"
+                />
               ) : (
                 <UserRound size={28} className="text-secondary" />
               )}
             </div>
             {hasPermission(PERMISSIONS.EMPLOYEE_UPDATE) && (
               <div>
-                <input ref={photoInputRef} type="file" accept="image/jpeg,image/png" className="hidden" onChange={handlePhotoChange} />
+                <input
+                  ref={photoInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png"
+                  className="hidden"
+                  onChange={handlePhotoChange}
+                />
                 <Button
                   type="button"
                   size="sm"
@@ -232,18 +253,44 @@ export default function EmployeeViewPage() {
                   disabled={uploadPhotoMutation.isPending}
                 >
                   <Upload size={14} className="mr-1.5" />
-                  {uploadPhotoMutation.isPending ? 'Uploading…' : employee.hasPhoto ? 'Replace Photo' : 'Upload Photo'}
+                  {uploadPhotoMutation.isPending
+                    ? 'Uploading…'
+                    : employee.hasPhoto
+                      ? 'Replace Photo'
+                      : 'Upload Photo'}
                 </Button>
               </div>
             )}
           </div>
           <dl className="space-y-2 text-sm">
-            <div className="flex justify-between"><dt className="text-secondary">Phone</dt><dd>{employee.phone}</dd></div>
-            <div className="flex justify-between"><dt className="text-secondary">Email</dt><dd>{employee.email ?? '–'}</dd></div>
-            <div className="flex justify-between"><dt className="text-secondary">Gender</dt><dd>{employee.gender ?? '–'}</dd></div>
-            <div className="flex justify-between"><dt className="text-secondary">Employment Type</dt><dd><Badge variant="outline">{employee.employmentType}</Badge></dd></div>
-            <div className="flex justify-between"><dt className="text-secondary">Joining Date</dt><dd>{formatDate(employee.joiningDate)}</dd></div>
-            {employee.exitDate && <div className="flex justify-between"><dt className="text-secondary">Exit Date</dt><dd>{formatDate(employee.exitDate)}</dd></div>}
+            <div className="flex justify-between">
+              <dt className="text-secondary">Phone</dt>
+              <dd>{employee.phone}</dd>
+            </div>
+            <div className="flex justify-between">
+              <dt className="text-secondary">Email</dt>
+              <dd>{employee.email ?? '–'}</dd>
+            </div>
+            <div className="flex justify-between">
+              <dt className="text-secondary">Gender</dt>
+              <dd>{employee.gender ?? '–'}</dd>
+            </div>
+            <div className="flex justify-between">
+              <dt className="text-secondary">Employment Type</dt>
+              <dd>
+                <Badge variant="outline">{employee.employmentType}</Badge>
+              </dd>
+            </div>
+            <div className="flex justify-between">
+              <dt className="text-secondary">Joining Date</dt>
+              <dd>{formatDate(employee.joiningDate)}</dd>
+            </div>
+            {employee.exitDate && (
+              <div className="flex justify-between">
+                <dt className="text-secondary">Exit Date</dt>
+                <dd>{formatDate(employee.exitDate)}</dd>
+              </div>
+            )}
           </dl>
         </div>
 
@@ -253,67 +300,108 @@ export default function EmployeeViewPage() {
             <div className="text-sm text-secondary">
               <p>Salary data is encrypted. View on Payroll → Employee Salary page.</p>
               {hasPermission(PERMISSIONS.PAYROLL_PROCESS) && (
-                <Button size="sm" variant="secondary" className="mt-3" onClick={() => navigate(`/hr/payroll?employeeId=${id}`)}>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className="mt-3"
+                  onClick={() => navigate(`/hr/payroll?employeeId=${id}`)}
+                >
                   Manage Salary
                 </Button>
               )}
             </div>
           ) : (
-            <p className="text-sm text-disabled">You do not have permission to view salary information.</p>
+            <p className="text-sm text-disabled">
+              You do not have permission to view salary information.
+            </p>
           )}
         </div>
 
         <div className="bg-surface-card rounded-xl border border-default p-5">
           <h3 className="font-semibold text-primary mb-4">Statutory (PF / ESI)</h3>
           <dl className="space-y-2 text-sm">
-            <div className="flex justify-between"><dt className="text-secondary">UAN</dt><dd>{employee.uan ?? '–'}</dd></div>
-            <div className="flex justify-between"><dt className="text-secondary">ESI Number</dt><dd>{employee.esiNumber ?? '–'}</dd></div>
-            <div className="flex justify-between"><dt className="text-secondary">PF Applicable</dt><dd><Badge variant={employee.pfApplicable ? 'success' : 'default'}>{employee.pfApplicable ? 'Yes' : 'No'}</Badge></dd></div>
-            <div className="flex justify-between"><dt className="text-secondary">ESI Applicable</dt><dd><Badge variant={employee.esiApplicable ? 'success' : 'default'}>{employee.esiApplicable ? 'Yes' : 'No'}</Badge></dd></div>
+            <div className="flex justify-between">
+              <dt className="text-secondary">UAN</dt>
+              <dd>{employee.uan ?? '–'}</dd>
+            </div>
+            <div className="flex justify-between">
+              <dt className="text-secondary">ESI Number</dt>
+              <dd>{employee.esiNumber ?? '–'}</dd>
+            </div>
+            <div className="flex justify-between">
+              <dt className="text-secondary">PF Applicable</dt>
+              <dd>
+                <Badge variant={employee.pfApplicable ? 'success' : 'default'}>
+                  {employee.pfApplicable ? 'Yes' : 'No'}
+                </Badge>
+              </dd>
+            </div>
+            <div className="flex justify-between">
+              <dt className="text-secondary">ESI Applicable</dt>
+              <dd>
+                <Badge variant={employee.esiApplicable ? 'success' : 'default'}>
+                  {employee.esiApplicable ? 'Yes' : 'No'}
+                </Badge>
+              </dd>
+            </div>
           </dl>
         </div>
 
-        <div className="bg-surface-card rounded-xl border border-default p-5 col-span-2">
+        <div className="bg-surface-card rounded-xl border border-default p-5 lg:col-span-2">
           <h3 className="font-semibold text-primary mb-4">Leave Balance</h3>
           {balances.length === 0 ? (
-            <ERPEmptyState type="no-data" title="No leave balance records yet" description="Leave balances will appear here once assigned." />
+            <ERPEmptyState
+              type="no-data"
+              title="No leave balance records yet"
+              description="Leave balances will appear here once assigned."
+            />
           ) : (
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left text-secondary text-xs uppercase">
-                  <th className="py-2">Leave Type</th>
-                  <th className="py-2 text-right">Total</th>
-                  <th className="py-2 text-right">Used</th>
-                  <th className="py-2 text-right">Pending</th>
-                  <th className="py-2 text-right">Carried Forward</th>
-                  <th className="py-2 text-right">Available</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-default">
-                {balances.map((b) => {
-                  const available = parseFloat(b.totalDays) + parseFloat(b.carriedForwardDays) - parseFloat(b.usedDays) - parseFloat(b.pendingDays);
-                  return (
-                    <tr key={b.leaveTypeId}>
-                      <td className="py-2">Leave Type #{b.leaveTypeId}</td>
-                      <td className="py-2 text-right">{b.totalDays}</td>
-                      <td className="py-2 text-right">{b.usedDays}</td>
-                      <td className="py-2 text-right">{b.pendingDays}</td>
-                      <td className="py-2 text-right">{b.carriedForwardDays}</td>
-                      <td className="py-2 text-right font-semibold">{available}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-secondary text-xs uppercase">
+                    <th className="py-2">Leave Type</th>
+                    <th className="py-2 text-right">Total</th>
+                    <th className="py-2 text-right">Used</th>
+                    <th className="py-2 text-right">Pending</th>
+                    <th className="py-2 text-right">Carried Forward</th>
+                    <th className="py-2 text-right">Available</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-default">
+                  {balances.map((b) => {
+                    const available =
+                      parseFloat(b.totalDays) +
+                      parseFloat(b.carriedForwardDays) -
+                      parseFloat(b.usedDays) -
+                      parseFloat(b.pendingDays);
+                    return (
+                      <tr key={b.leaveTypeId}>
+                        <td className="py-2">Leave Type #{b.leaveTypeId}</td>
+                        <td className="py-2 text-right">{b.totalDays}</td>
+                        <td className="py-2 text-right">{b.usedDays}</td>
+                        <td className="py-2 text-right">{b.pendingDays}</td>
+                        <td className="py-2 text-right">{b.carriedForwardDays}</td>
+                        <td className="py-2 text-right font-semibold">{available}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
       </div>
 
       <div className="mt-6">
-        <ERPFormSection title="Documents" description="Aadhaar, PAN, education certificates, offer letter (PDF, JPG or PNG, max 10MB)" columns={1}>
+        <ERPFormSection
+          title="Documents"
+          description="Aadhaar, PAN, education certificates, offer letter (PDF, JPG or PNG, max 10MB)"
+          columns={1}
+        >
           <div className="flex flex-col gap-3">
             {hasPermission(PERMISSIONS.EMPLOYEE_UPDATE) && (
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <Select
                   value={documentType}
                   onChange={(e) => setDocumentType(e.target.value)}
@@ -385,19 +473,44 @@ export default function EmployeeViewPage() {
       <ERPConfirmModal
         open={deleteDocumentId !== null}
         onClose={() => setDeleteDocumentId(null)}
-        onConfirm={() => deleteDocumentId !== null && deleteDocumentMutation.mutate(deleteDocumentId)}
+        onConfirm={() =>
+          deleteDocumentId !== null && deleteDocumentMutation.mutate(deleteDocumentId)
+        }
         title="Delete Document"
         description="This will permanently delete the document. This action cannot be undone."
         isLoading={deleteDocumentMutation.isPending}
       />
 
-      <Modal open={exitModalOpen} onClose={() => setExitModalOpen(false)} title="Record Employee Exit" size="sm">
+      <Modal
+        open={exitModalOpen}
+        onClose={() => setExitModalOpen(false)}
+        title="Record Employee Exit"
+        size="sm"
+      >
         <div className="space-y-4">
-          <Input label="Exit Date" type="date" required value={exitDate} onChange={(e) => setExitDate(e.target.value)} />
-          <Input label="Exit Reason" required value={exitReason} onChange={(e) => setExitReason(e.target.value)} />
+          <Input
+            label="Exit Date"
+            type="date"
+            required
+            value={exitDate}
+            onChange={(e) => setExitDate(e.target.value)}
+          />
+          <Input
+            label="Exit Reason"
+            required
+            value={exitReason}
+            onChange={(e) => setExitReason(e.target.value)}
+          />
           <div className="flex justify-end gap-3 pt-2">
-            <Button variant="secondary" onClick={() => setExitModalOpen(false)}>Cancel</Button>
-            <Button variant="danger" onClick={() => exitMutation.mutate()} loading={exitMutation.isPending} disabled={!exitDate || !exitReason}>
+            <Button variant="secondary" onClick={() => setExitModalOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="danger"
+              onClick={() => exitMutation.mutate()}
+              loading={exitMutation.isPending}
+              disabled={!exitDate || !exitReason}
+            >
               Confirm Exit
             </Button>
           </div>

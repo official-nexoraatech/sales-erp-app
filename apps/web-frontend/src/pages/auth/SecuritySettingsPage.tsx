@@ -25,7 +25,10 @@ export default function SecuritySettingsPage() {
   const qc = useQueryClient();
   const user = useAuthStore((s) => s.user);
   const setUser = useAuthStore((s) => s.setUser);
-  const [enrollment, setEnrollment] = useState<{ qrCodeDataUrl: string; backupCodes: string[] } | null>(null);
+  const [enrollment, setEnrollment] = useState<{
+    qrCodeDataUrl: string;
+    backupCodes: string[];
+  } | null>(null);
   const [showDisableForm, setShowDisableForm] = useState(false);
 
   async function refreshUser(): Promise<void> {
@@ -45,7 +48,8 @@ export default function SecuritySettingsPage() {
 
   const enrollMutation = useMutation({
     mutationFn: () => mfaApi.enroll(),
-    onSuccess: (data) => setEnrollment(data as unknown as { qrCodeDataUrl: string; backupCodes: string[] }),
+    onSuccess: (data) =>
+      setEnrollment(data as unknown as { qrCodeDataUrl: string; backupCodes: string[] }),
     onError: (err: Error) => toast.error(err.message),
   });
 
@@ -91,7 +95,11 @@ export default function SecuritySettingsPage() {
 
   return (
     <div className="space-y-6">
-      <ERPPageHeader variant="list" title="Security Settings" subtitle="Manage two-factor authentication and active sessions." />
+      <ERPPageHeader
+        variant="list"
+        title="Security Settings"
+        subtitle="Manage two-factor authentication and active sessions."
+      />
 
       {/* 2FA Section */}
       <div className="card p-6 max-w-2xl">
@@ -112,7 +120,11 @@ export default function SecuritySettingsPage() {
             </div>
           </div>
           {!user?.totpEnabled && !enrollment && (
-            <Button size="sm" onClick={() => enrollMutation.mutate()} loading={enrollMutation.isPending}>
+            <Button
+              size="sm"
+              onClick={() => enrollMutation.mutate()}
+              loading={enrollMutation.isPending}
+            >
               Enable 2FA
             </Button>
           )}
@@ -126,9 +138,14 @@ export default function SecuritySettingsPage() {
         {enrollment && (
           <div className="mt-6 border-t border-default pt-6 space-y-4">
             <div className="flex flex-col items-center gap-3">
-              <img src={enrollment.qrCodeDataUrl} alt="2FA QR code" className="w-48 h-48 rounded-lg border border-default" />
+              <img
+                src={enrollment.qrCodeDataUrl}
+                alt="2FA QR code"
+                className="w-48 h-48 rounded-lg border border-default"
+              />
               <p className="text-xs text-secondary text-center max-w-sm">
-                Scan this QR code with your authenticator app, then enter the 6-digit code below to confirm.
+                Scan this QR code with your authenticator app, then enter the 6-digit code below to
+                confirm.
               </p>
             </div>
 
@@ -136,7 +153,7 @@ export default function SecuritySettingsPage() {
               <p className="text-xs font-semibold text-primary mb-2">
                 Backup Codes — save these somewhere safe, each works once
               </p>
-              <div className="grid grid-cols-2 gap-2 font-mono text-xs text-secondary">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 font-mono text-xs text-secondary">
                 {enrollment.backupCodes.map((code) => (
                   <span key={code}>{code}</span>
                 ))}
@@ -203,7 +220,11 @@ export default function SecuritySettingsPage() {
         {sessionsLoading ? (
           <ERPFormSkeleton />
         ) : sessions.length === 0 ? (
-          <ERPEmptyState type="no-results" title="No active sessions" description="Sessions will appear here after you sign in." />
+          <ERPEmptyState
+            type="no-results"
+            title="No active sessions"
+            description="Sessions will appear here after you sign in."
+          />
         ) : (
           <div className="divide-y divide-border">
             {sessions.map((session) => (
@@ -224,7 +245,9 @@ export default function SecuritySettingsPage() {
                 <Button
                   size="sm"
                   variant="danger-outline"
-                  loading={terminateMutation.isPending && terminateMutation.variables === session.id}
+                  loading={
+                    terminateMutation.isPending && terminateMutation.variables === session.id
+                  }
                   onClick={() => terminateMutation.mutate(session.id)}
                 >
                   Terminate

@@ -42,7 +42,8 @@ export default function ConsignmentSettlementsPage() {
     queryFn: () => supplierApi.list(),
     enabled: hasPermission(PERMISSIONS.SUPPLIER_VIEW),
   });
-  const suppliers = ((suppliersData as Record<string, unknown>)?.content as { id: number; name: string }[]) ?? [];
+  const suppliers =
+    ((suppliersData as Record<string, unknown>)?.content as { id: number; name: string }[]) ?? [];
 
   const { data, isLoading } = useQuery({
     queryKey: ['consignment-settlements', supplierFilter],
@@ -59,7 +60,8 @@ export default function ConsignmentSettlementsPage() {
   const [cPeriodTo, setCPeriodTo] = useState(new Date().toISOString().slice(0, 10));
 
   const createMutation = useMutation({
-    mutationFn: (payload: Record<string, unknown>) => productionApi.createConsignmentSettlement(payload),
+    mutationFn: (payload: Record<string, unknown>) =>
+      productionApi.createConsignmentSettlement(payload),
     onSuccess: () => {
       toast.success('Settlement created');
       setShowCreateForm(false);
@@ -105,13 +107,34 @@ export default function ConsignmentSettlementsPage() {
       {showCreateForm && (
         <div className="bg-surface-card rounded-xl border border-default p-6 mb-6">
           <h3 className="font-semibold text-primary mb-4">Create Settlement</h3>
-          <form onSubmit={handleCreate} className="grid grid-cols-3 gap-4">
-            <Select label="Supplier" required value={cSupplierId} onChange={(e) => setCSupplierId(e.target.value)}>
+          <form onSubmit={handleCreate} className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <Select
+              label="Supplier"
+              required
+              value={cSupplierId}
+              onChange={(e) => setCSupplierId(e.target.value)}
+            >
               <option value="">Select supplier</option>
-              {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+              {suppliers.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
             </Select>
-            <Input label="Period From" required type="date" value={cPeriodFrom} onChange={(e) => setCPeriodFrom(e.target.value)} />
-            <Input label="Period To" required type="date" value={cPeriodTo} onChange={(e) => setCPeriodTo(e.target.value)} />
+            <Input
+              label="Period From"
+              required
+              type="date"
+              value={cPeriodFrom}
+              onChange={(e) => setCPeriodFrom(e.target.value)}
+            />
+            <Input
+              label="Period To"
+              required
+              type="date"
+              value={cPeriodTo}
+              onChange={(e) => setCPeriodTo(e.target.value)}
+            />
             <div className="col-span-3 flex gap-3">
               <Button type="submit" disabled={createMutation.isPending}>
                 {createMutation.isPending ? 'Creating…' : 'Create Settlement'}
@@ -122,9 +145,17 @@ export default function ConsignmentSettlementsPage() {
       )}
 
       <div className="mb-4">
-        <Select value={supplierFilter} onChange={(e) => setSupplierFilter(e.target.value)} className="max-w-xs">
+        <Select
+          value={supplierFilter}
+          onChange={(e) => setSupplierFilter(e.target.value)}
+          className="max-w-xs"
+        >
           <option value="">All Suppliers</option>
-          {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+          {suppliers.map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.name}
+            </option>
+          ))}
         </Select>
       </div>
 
@@ -140,51 +171,57 @@ export default function ConsignmentSettlementsPage() {
             : {})}
         />
       ) : (
-        <table className="w-full text-sm bg-surface-card rounded-xl border border-default overflow-hidden">
-          <thead className="bg-surface-subtle">
-            <tr className="text-left text-xs uppercase text-secondary">
-              <th className="px-4 py-3">Settlement #</th>
-              <th className="px-4 py-3">Supplier</th>
-              <th className="px-4 py-3">Period</th>
-              <th className="px-4 py-3 text-right">Sold Qty</th>
-              <th className="px-4 py-3 text-right">Amount</th>
-              <th className="px-4 py-3">Status</th>
-              <th className="px-4 py-3">Settled On</th>
-              <th className="px-4 py-3"></th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-default">
-            {settlements.map((s) => (
-              <tr key={s.id} className="hover:bg-surface-subtle">
-                <td className="px-4 py-3 font-mono text-xs">{s.settlementNumber}</td>
-                <td className="px-4 py-3">{s.supplierName ?? '—'}</td>
-                <td className="px-4 py-3 text-xs">
-                  {formatDate(s.periodFrom)} – {formatDate(s.periodTo)}
-                </td>
-                <td className="px-4 py-3 text-right font-mono">{s.totalSoldQty}</td>
-                <td className="px-4 py-3 text-right font-mono">{formatCurrency(Number(s.totalAmount))}</td>
-                <td className="px-4 py-3">
-                  <Badge variant={STATUS_VARIANT[s.status] ?? 'default'}>{s.status}</Badge>
-                </td>
-                <td className="px-4 py-3 text-xs">{s.settledAt ? formatDate(s.settledAt) : '—'}</td>
-                <td className="px-4 py-3 text-right">
-                  {hasPermission(PERMISSIONS.CONSIGNMENT_SETTLE) && s.status === 'PENDING' && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => {
-                        const ref = prompt('Payment reference:');
-                        if (ref) settleMutation.mutate({ id: s.id, paymentReference: ref });
-                      }}
-                    >
-                      Mark Settled
-                    </Button>
-                  )}
-                </td>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm bg-surface-card rounded-xl border border-default overflow-hidden">
+            <thead className="bg-surface-subtle">
+              <tr className="text-left text-xs uppercase text-secondary">
+                <th className="px-4 py-3">Settlement #</th>
+                <th className="px-4 py-3">Supplier</th>
+                <th className="px-4 py-3">Period</th>
+                <th className="px-4 py-3 text-right">Sold Qty</th>
+                <th className="px-4 py-3 text-right">Amount</th>
+                <th className="px-4 py-3">Status</th>
+                <th className="px-4 py-3">Settled On</th>
+                <th className="px-4 py-3"></th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody className="divide-y divide-default">
+              {settlements.map((s) => (
+                <tr key={s.id} className="hover:bg-surface-subtle">
+                  <td className="px-4 py-3 font-mono text-xs">{s.settlementNumber}</td>
+                  <td className="px-4 py-3">{s.supplierName ?? '—'}</td>
+                  <td className="px-4 py-3 text-xs">
+                    {formatDate(s.periodFrom)} – {formatDate(s.periodTo)}
+                  </td>
+                  <td className="px-4 py-3 text-right font-mono">{s.totalSoldQty}</td>
+                  <td className="px-4 py-3 text-right font-mono">
+                    {formatCurrency(Number(s.totalAmount))}
+                  </td>
+                  <td className="px-4 py-3">
+                    <Badge variant={STATUS_VARIANT[s.status] ?? 'default'}>{s.status}</Badge>
+                  </td>
+                  <td className="px-4 py-3 text-xs">
+                    {s.settledAt ? formatDate(s.settledAt) : '—'}
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    {hasPermission(PERMISSIONS.CONSIGNMENT_SETTLE) && s.status === 'PENDING' && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          const ref = prompt('Payment reference:');
+                          if (ref) settleMutation.mutate({ id: s.id, paymentReference: ref });
+                        }}
+                      >
+                        Mark Settled
+                      </Button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );

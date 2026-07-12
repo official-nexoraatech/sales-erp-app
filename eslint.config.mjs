@@ -18,15 +18,16 @@ export default [
     },
     rules: {
       ...tsPlugin.configs['recommended'].rules,
+      // TypeScript's compiler already catches undefined identifiers (incl. ambient
+      // DOM/Node/WebUSB globals via tsconfig `lib`); base no-undef false-positives on
+      // those. Per typescript-eslint's own guidance: disable it for TS/TSX files.
+      'no-undef': 'off',
       'no-console': 'error',
       '@typescript-eslint/no-explicit-any': 'error',
       '@typescript-eslint/explicit-function-return-type': 'warn',
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
       '@typescript-eslint/no-non-null-assertion': 'warn',
-      '@typescript-eslint/consistent-type-imports': [
-        'error',
-        { prefer: 'type-imports' },
-      ],
+      '@typescript-eslint/consistent-type-imports': ['error', { prefer: 'type-imports' }],
     },
   },
   {

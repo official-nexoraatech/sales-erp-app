@@ -24,7 +24,9 @@ const STATUS_STYLES: Record<string, string> = {
 
 function StatusBadge({ status }: { status: string }) {
   return (
-    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLES[status] ?? ''}`}>{status}</span>
+    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLES[status] ?? ''}`}>
+      {status}
+    </span>
   );
 }
 
@@ -32,13 +34,22 @@ const COLUMNS: ERPColumnDef<InventoryAnalyticsRow>[] = [
   { key: 'itemCode', header: 'Item Code', render: (r) => r.itemCode ?? '—' },
   { key: 'itemName', header: 'Item' },
   { key: 'category', header: 'Category', render: (r) => r.category ?? 'Uncategorized' },
-  { key: 'currentStock', header: 'Current Stock', align: 'right', mono: true, render: (r) => Number(r.currentStock).toLocaleString('en-IN') },
+  {
+    key: 'currentStock',
+    header: 'Current Stock',
+    align: 'right',
+    mono: true,
+    render: (r) => Number(r.currentStock).toLocaleString('en-IN'),
+  },
   {
     key: 'daysOfSupply',
     header: 'Days of Supply',
     align: 'right',
     mono: true,
-    render: (r) => (r.daysOfSupply === null || r.daysOfSupply === undefined ? '—' : Number(r.daysOfSupply).toFixed(1)),
+    render: (r) =>
+      r.daysOfSupply === null || r.daysOfSupply === undefined
+        ? '—'
+        : Number(r.daysOfSupply).toFixed(1),
   },
   { key: 'lastSaleDate', header: 'Last Sale', render: (r) => r.lastSaleDate ?? 'Never' },
   { key: 'status', header: 'Status', render: (r) => <StatusBadge status={r.status} /> },
@@ -50,7 +61,9 @@ export default function InventoryAnalyticsPage() {
   const { data, isLoading } = useQuery({
     queryKey: ['inventory-analytics', fastMoverThreshold],
     queryFn: async () =>
-      (await reportsEngineApi.run('inventory-analytics', { fastMoverThreshold })) as { rows: InventoryAnalyticsRow[] },
+      (await reportsEngineApi.run('inventory-analytics', { fastMoverThreshold })) as {
+        rows: InventoryAnalyticsRow[];
+      },
   });
 
   const rows = data?.rows ?? [];
@@ -64,8 +77,10 @@ export default function InventoryAnalyticsPage() {
           title="Inventory Analytics"
           subtitle="Stock levels, days of supply and fast/slow/stockout classification"
           actions={
-            <div className="flex items-center gap-2">
-              <label className="text-xs text-secondary" htmlFor="fast-mover-threshold">Fast mover threshold (units/30d)</label>
+            <div className="flex flex-wrap items-center gap-2">
+              <label className="text-xs text-secondary" htmlFor="fast-mover-threshold">
+                Fast mover threshold (units/30d)
+              </label>
               <input
                 id="fast-mover-threshold"
                 type="number"

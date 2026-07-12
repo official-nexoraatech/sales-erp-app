@@ -5,7 +5,7 @@ import { stockAdjustments, stockAdjustmentLines } from '@erp/db';
 import { PERMISSIONS } from '@erp/types';
 import type { PlatformContextFactory } from '@erp/sdk';
 import { authenticate } from '../middleware/authenticate.js';
-import { requirePermission } from '../middleware/authorize.js';
+import { requireAnyPermission } from '../middleware/authorize.js';
 import { StockAdjustmentService } from '../domain/StockAdjustmentService.js';
 
 const AdjLineSchema = z.object({
@@ -44,14 +44,23 @@ export async function adjustmentRoutes(
   // GET /stock-adjustments
   fastify.get(
     '/stock-adjustments',
-    { preHandler: [authenticate, requirePermission(PERMISSIONS.WAREHOUSE_MANAGE)] },
+    {
+      preHandler: [
+        authenticate,
+        requireAnyPermission([PERMISSIONS.STOCK_ADJUST, PERMISSIONS.WAREHOUSE_MANAGE]),
+      ],
+    },
     async (request, reply) => {
       const ctx = ctxFactory.create({
         tenantId: request.auth.tenantId,
         userId: request.auth.userId,
         correlationId: request.id,
       });
-      const { page = 1, limit = 50, status } = request.query as {
+      const {
+        page = 1,
+        limit = 50,
+        status,
+      } = request.query as {
         page?: number;
         limit?: number;
         status?: string;
@@ -59,7 +68,10 @@ export async function adjustmentRoutes(
       const offset = ((page as number) - 1) * (limit as number);
 
       const whereClause = status
-        ? and(eq(stockAdjustments.tenantId, request.auth.tenantId), eq(stockAdjustments.status, status as typeof stockAdjustments.$inferSelect['status']))
+        ? and(
+            eq(stockAdjustments.tenantId, request.auth.tenantId),
+            eq(stockAdjustments.status, status as (typeof stockAdjustments.$inferSelect)['status'])
+          )
         : eq(stockAdjustments.tenantId, request.auth.tenantId);
 
       const rows = await ctx.db.raw
@@ -75,21 +87,30 @@ export async function adjustmentRoutes(
         .from(stockAdjustments)
         .where(whereClause);
 
-      return reply.code(200).send({ data: { content: rows, totalElements: countRow?.count ?? 0, page, limit } });
+      return reply
+        .code(200)
+        .send({ data: { content: rows, totalElements: countRow?.count ?? 0, page, limit } });
     }
   );
 
   // POST /stock-adjustments
   fastify.post(
     '/stock-adjustments',
-    { preHandler: [authenticate, requirePermission(PERMISSIONS.WAREHOUSE_MANAGE)] },
+    {
+      preHandler: [
+        authenticate,
+        requireAnyPermission([PERMISSIONS.STOCK_ADJUST, PERMISSIONS.WAREHOUSE_MANAGE]),
+      ],
+    },
     async (request, reply) => {
       const ctx = ctxFactory.create({
         tenantId: request.auth.tenantId,
         userId: request.auth.userId,
         correlationId: request.id,
       });
-      const body = CreateAdjSchema.parse((request.body as { data?: unknown })?.data ?? request.body);
+      const body = CreateAdjSchema.parse(
+        (request.body as { data?: unknown })?.data ?? request.body
+      );
       const svc = new StockAdjustmentService(ctx.db.raw);
       const adj = await svc.create({
         tenantId: request.auth.tenantId,
@@ -113,7 +134,12 @@ export async function adjustmentRoutes(
         entityId: adj.id,
         after: adj,
       });
-      await ctx.events.publish('stock_adjustment', adj.id, 'STOCK_ADJUSTMENT_CREATED', adj as unknown as Record<string, unknown>);
+      await ctx.events.publish(
+        'stock_adjustment',
+        adj.id,
+        'STOCK_ADJUSTMENT_CREATED',
+        adj as unknown as Record<string, unknown>
+      );
 
       return reply.code(201).send({ data: adj });
     }
@@ -122,7 +148,12 @@ export async function adjustmentRoutes(
   // GET /stock-adjustments/:id
   fastify.get(
     '/stock-adjustments/:id',
-    { preHandler: [authenticate, requirePermission(PERMISSIONS.WAREHOUSE_MANAGE)] },
+    {
+      preHandler: [
+        authenticate,
+        requireAnyPermission([PERMISSIONS.STOCK_ADJUST, PERMISSIONS.WAREHOUSE_MANAGE]),
+      ],
+    },
     async (request, reply) => {
       const ctx = ctxFactory.create({
         tenantId: request.auth.tenantId,
@@ -143,7 +174,12 @@ export async function adjustmentRoutes(
   // POST /stock-adjustments/:id/submit
   fastify.post(
     '/stock-adjustments/:id/submit',
-    { preHandler: [authenticate, requirePermission(PERMISSIONS.WAREHOUSE_MANAGE)] },
+    {
+      preHandler: [
+        authenticate,
+        requireAnyPermission([PERMISSIONS.STOCK_ADJUST, PERMISSIONS.WAREHOUSE_MANAGE]),
+      ],
+    },
     async (request, reply) => {
       const ctx = ctxFactory.create({
         tenantId: request.auth.tenantId,
@@ -160,7 +196,12 @@ export async function adjustmentRoutes(
   // POST /stock-adjustments/:id/approve
   fastify.post(
     '/stock-adjustments/:id/approve',
-    { preHandler: [authenticate, requirePermission(PERMISSIONS.WAREHOUSE_MANAGE)] },
+    {
+      preHandler: [
+        authenticate,
+        requireAnyPermission([PERMISSIONS.STOCK_ADJUST, PERMISSIONS.WAREHOUSE_MANAGE]),
+      ],
+    },
     async (request, reply) => {
       const ctx = ctxFactory.create({
         tenantId: request.auth.tenantId,
@@ -170,7 +211,12 @@ export async function adjustmentRoutes(
       const { id } = request.params as { id: string };
       const svc = new StockAdjustmentService(ctx.db.raw);
       const adj = await svc.approve(parseInt(id, 10), request.auth.tenantId, request.auth.userId);
-      await ctx.events.publish('stock_adjustment', adj.id, 'STOCK_ADJUSTMENT_UPDATED', adj as unknown as Record<string, unknown>);
+      await ctx.events.publish(
+        'stock_adjustment',
+        adj.id,
+        'STOCK_ADJUSTMENT_UPDATED',
+        adj as unknown as Record<string, unknown>
+      );
       return reply.code(200).send({ data: adj });
     }
   );
@@ -178,7 +224,12 @@ export async function adjustmentRoutes(
   // POST /stock-adjustments/:id/cancel
   fastify.post(
     '/stock-adjustments/:id/cancel',
-    { preHandler: [authenticate, requirePermission(PERMISSIONS.WAREHOUSE_MANAGE)] },
+    {
+      preHandler: [
+        authenticate,
+        requireAnyPermission([PERMISSIONS.STOCK_ADJUST, PERMISSIONS.WAREHOUSE_MANAGE]),
+      ],
+    },
     async (request, reply) => {
       const ctx = ctxFactory.create({
         tenantId: request.auth.tenantId,
@@ -186,10 +237,22 @@ export async function adjustmentRoutes(
         correlationId: request.id,
       });
       const { id } = request.params as { id: string };
-      const { reason } = CancelSchema.parse((request.body as { data?: unknown })?.data ?? request.body);
+      const { reason } = CancelSchema.parse(
+        (request.body as { data?: unknown })?.data ?? request.body
+      );
       const svc = new StockAdjustmentService(ctx.db.raw);
-      const adj = await svc.cancel(parseInt(id, 10), request.auth.tenantId, request.auth.userId, reason);
-      await ctx.events.publish('stock_adjustment', adj.id, 'STOCK_ADJUSTMENT_UPDATED', adj as unknown as Record<string, unknown>);
+      const adj = await svc.cancel(
+        parseInt(id, 10),
+        request.auth.tenantId,
+        request.auth.userId,
+        reason
+      );
+      await ctx.events.publish(
+        'stock_adjustment',
+        adj.id,
+        'STOCK_ADJUSTMENT_UPDATED',
+        adj as unknown as Record<string, unknown>
+      );
       return reply.code(200).send({ data: adj });
     }
   );

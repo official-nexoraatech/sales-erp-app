@@ -1,11 +1,11 @@
 import type { FastifyInstance } from 'fastify';
 import type { PlatformContextFactory } from '@erp/sdk';
-import { quotations, quotationLines } from '@erp/db';
-import { and, desc, eq, ilike, or, sql } from 'drizzle-orm';
+import { quotations } from '@erp/db';
+import { and, desc, eq, ilike, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { PERMISSIONS } from '@erp/types';
 import { authenticate } from '../middleware/authenticate.js';
-import { requirePermission } from '../middleware/authorize.js';
+import { requirePermission, requireAnyPermission } from '../middleware/authorize.js';
 import { QuotationService } from '../domain/QuotationService.js';
 
 const QuotationLineSchema = z.object({
@@ -39,10 +39,21 @@ export async function quotationRoutes(
   fastify.addHook('preHandler', authenticate);
 
   fastify.get('/quotations', {
-    preHandler: requirePermission(PERMISSIONS.INVOICE_VIEW),
+    preHandler: requireAnyPermission([PERMISSIONS.QUOTATION_VIEW, PERMISSIONS.INVOICE_VIEW]),
     handler: async (req, reply) => {
-      const ctx = ctxFactory.create({ tenantId: req.auth.tenantId, userId: req.auth.userId, correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID() });
-      const q = req.query as { search?: string; status?: string; customerId?: string; page?: string; pageSize?: string };
+      const ctx = ctxFactory.create({
+        tenantId: req.auth.tenantId,
+        userId: req.auth.userId,
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+      });
+      const q = req.query as {
+        search?: string;
+        status?: string;
+        customerId?: string;
+        page?: string;
+        pageSize?: string;
+      };
       const page = Math.max(1, parseInt(q.page ?? '1', 10));
       const pageSize = Math.min(100, parseInt(q.pageSize ?? '20', 10));
       const offset = (page - 1) * pageSize;
@@ -65,15 +76,22 @@ export async function quotationRoutes(
         .from(quotations)
         .where(and(...conditions));
 
-      return reply.send({ data: { content: rows, totalElements: countRow?.count ?? 0, page, pageSize } });
+      return reply.send({
+        data: { content: rows, totalElements: countRow?.count ?? 0, page, pageSize },
+      });
     },
   });
 
   fastify.post('/quotations', {
-    preHandler: requirePermission(PERMISSIONS.INVOICE_CREATE),
+    preHandler: requireAnyPermission([PERMISSIONS.QUOTATION_CREATE, PERMISSIONS.INVOICE_CREATE]),
     handler: async (req, reply) => {
       const body = CreateQuotationSchema.parse(req.body);
-      const ctx = ctxFactory.create({ tenantId: req.auth.tenantId, userId: req.auth.userId, correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID() });
+      const ctx = ctxFactory.create({
+        tenantId: req.auth.tenantId,
+        userId: req.auth.userId,
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+      });
       const svc = new QuotationService(ctx.db.raw);
 
       const quotationNumber = `QT-${req.auth.tenantId}-${Date.now()}`;
@@ -105,10 +123,15 @@ export async function quotationRoutes(
   });
 
   fastify.get('/quotations/:id', {
-    preHandler: requirePermission(PERMISSIONS.INVOICE_VIEW),
+    preHandler: requireAnyPermission([PERMISSIONS.QUOTATION_VIEW, PERMISSIONS.INVOICE_VIEW]),
     handler: async (req, reply) => {
       const { id } = req.params as { id: string };
-      const ctx = ctxFactory.create({ tenantId: req.auth.tenantId, userId: req.auth.userId, correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID() });
+      const ctx = ctxFactory.create({
+        tenantId: req.auth.tenantId,
+        userId: req.auth.userId,
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+      });
       const svc = new QuotationService(ctx.db.raw);
       const data = await svc.getWithLines(parseInt(id, 10), req.auth.tenantId);
       return reply.send({ data });
@@ -116,13 +139,61 @@ export async function quotationRoutes(
   });
 
   fastify.post('/quotations/:id/send', {
-    preHandler: requirePermission(PERMISSIONS.INVOICE_CREATE),
+    preHandler: requireAnyPermission([PERMISSIONS.QUOTATION_UPDATE, PERMISSIONS.INVOICE_CREATE]),
     handler: async (req, reply) => {
       const { id } = req.params as { id: string };
-      const ctx = ctxFactory.create({ tenantId: req.auth.tenantId, userId: req.auth.userId, correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID() });
+      const ctx = ctxFactory.create({
+        tenantId: req.auth.tenantId,
+        userId: req.auth.userId,
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+      });
       const svc = new QuotationService(ctx.db.raw);
       await svc.send(parseInt(id, 10), req.auth.tenantId, req.auth.userId);
-      await ctx.events.publish('quotation', parseInt(id, 10), 'QUOTATION_UPDATED', { quotationId: parseInt(id, 10), status: 'SENT' });
+      await ctx.events.publish('quotation', parseInt(id, 10), 'QUOTATION_UPDATED', {
+        quotationId: parseInt(id, 10),
+        status: 'SENT',
+      });
+      return reply.send({ success: true });
+    },
+  });
+
+  fastify.post('/quotations/:id/accept', {
+    preHandler: requireAnyPermission([PERMISSIONS.QUOTATION_UPDATE, PERMISSIONS.INVOICE_CREATE]),
+    handler: async (req, reply) => {
+      const { id } = req.params as { id: string };
+      const ctx = ctxFactory.create({
+        tenantId: req.auth.tenantId,
+        userId: req.auth.userId,
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+      });
+      const svc = new QuotationService(ctx.db.raw);
+      await svc.accept(parseInt(id, 10), req.auth.tenantId, req.auth.userId);
+      await ctx.events.publish('quotation', parseInt(id, 10), 'QUOTATION_UPDATED', {
+        quotationId: parseInt(id, 10),
+        status: 'ACCEPTED',
+      });
+      return reply.send({ success: true });
+    },
+  });
+
+  fastify.post('/quotations/:id/reject', {
+    preHandler: requireAnyPermission([PERMISSIONS.QUOTATION_CANCEL, PERMISSIONS.INVOICE_CREATE]),
+    handler: async (req, reply) => {
+      const { id } = req.params as { id: string };
+      const ctx = ctxFactory.create({
+        tenantId: req.auth.tenantId,
+        userId: req.auth.userId,
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+      });
+      const svc = new QuotationService(ctx.db.raw);
+      await svc.reject(parseInt(id, 10), req.auth.tenantId, req.auth.userId);
+      await ctx.events.publish('quotation', parseInt(id, 10), 'QUOTATION_UPDATED', {
+        quotationId: parseInt(id, 10),
+        status: 'REJECTED',
+      });
       return reply.send({ success: true });
     },
   });
@@ -131,7 +202,12 @@ export async function quotationRoutes(
     preHandler: requirePermission(PERMISSIONS.QUOTATION_CONVERT),
     handler: async (req, reply) => {
       const { id } = req.params as { id: string };
-      const ctx = ctxFactory.create({ tenantId: req.auth.tenantId, userId: req.auth.userId, correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID() });
+      const ctx = ctxFactory.create({
+        tenantId: req.auth.tenantId,
+        userId: req.auth.userId,
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+      });
       const svc = new QuotationService(ctx.db.raw);
       // QuotationService.convert() already writes a QUOTATION_CONVERTED outbox event
       // inside its own transaction — no separate publish needed here.
@@ -141,15 +217,25 @@ export async function quotationRoutes(
   });
 
   fastify.post('/quotations/:id/expire', {
-    preHandler: requirePermission(PERMISSIONS.INVOICE_CREATE),
+    preHandler: requireAnyPermission([PERMISSIONS.QUOTATION_UPDATE, PERMISSIONS.INVOICE_CREATE]),
     handler: async (req, reply) => {
       const { id } = req.params as { id: string };
-      const ctx = ctxFactory.create({ tenantId: req.auth.tenantId, userId: req.auth.userId, correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID() });
+      const ctx = ctxFactory.create({
+        tenantId: req.auth.tenantId,
+        userId: req.auth.userId,
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+      });
       await ctx.db.raw
         .update(quotations)
         .set({ status: 'EXPIRED', updatedAt: new Date() })
-        .where(and(eq(quotations.id, parseInt(id, 10)), eq(quotations.tenantId, req.auth.tenantId)));
-      await ctx.events.publish('quotation', parseInt(id, 10), 'QUOTATION_UPDATED', { quotationId: parseInt(id, 10), status: 'EXPIRED' });
+        .where(
+          and(eq(quotations.id, parseInt(id, 10)), eq(quotations.tenantId, req.auth.tenantId))
+        );
+      await ctx.events.publish('quotation', parseInt(id, 10), 'QUOTATION_UPDATED', {
+        quotationId: parseInt(id, 10),
+        status: 'EXPIRED',
+      });
       return reply.send({ success: true });
     },
   });

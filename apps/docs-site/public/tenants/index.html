@@ -1,0 +1,453 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ERP Docs — Super Admin / Tenants Module</title>
+<link rel="stylesheet" href="/shared/docs-shell.css">
+</head>
+<body data-module="Super Admin / Tenants">
+
+<header class="topbar">
+  <button class="icon-btn navtoggle" id="navToggle" aria-label="Toggle navigation">☰</button>
+  <a class="brand" href="/"><span class="mark">N</span> Nexoraa ERP Docs</a>
+  <div class="searchwrap">
+    <input type="text" class="searchbox" id="searchInput" placeholder="Search Super Admin / Tenants documentation…" autocomplete="off">
+    <div class="search-results" id="searchResults"></div>
+  </div>
+  <div class="topbar-actions">
+    <button class="icon-btn" id="themeToggle" aria-label="Toggle dark mode" title="Toggle dark mode">◐</button>
+    <button class="icon-btn" id="printBtn" aria-label="Print this page" title="Print this page">⎙</button>
+  </div>
+</header>
+
+<div class="shell">
+  <nav class="sidebar" id="sidebar">
+    <div class="sb-group">
+      <div class="sb-group-title">Modules</div>
+      <div class="sb-module active-module">
+        <div class="sb-module-head active-module">Super Admin / Tenants <span class="status">v1</span></div>
+        <div class="sb-track">
+          <div class="sb-track-title">Operator Guide</div>
+          <a class="sb-link" data-page="tenants-client-overview" href="#tenants/client/overview">Overview — Two Different "Super Admins"</a>
+          <a class="sb-link" data-page="tenants-client-journey" href="#tenants/client/journey">End-to-End Client Journey</a>
+          <a class="sb-link" data-page="tenants-client-lifecycle" href="#tenants/client/lifecycle">Managing Tenant Lifecycle</a>
+          <a class="sb-link" data-page="tenants-client-flags" href="#tenants/client/feature-flags">Feature Flags</a>
+          <a class="sb-link" data-page="tenants-client-impersonate" href="#tenants/client/impersonation">Impersonating a User</a>
+          <a class="sb-link" data-page="tenants-client-billing" href="#tenants/client/billing">Plans &amp; Billing</a>
+          <a class="sb-link" data-page="tenants-client-faq" href="#tenants/client/faq">Troubleshooting &amp; FAQ</a>
+        </div>
+        <div class="sb-track">
+          <div class="sb-track-title">Super Admin</div>
+          <a class="sb-link" data-page="tenants-admin-access" href="#tenants/admin/access-roles">Access &amp; Roles</a>
+          <a class="sb-link" data-page="tenants-admin-provisioning" href="#tenants/admin/provisioning">Provisioning Reliability</a>
+          <a class="sb-link" data-page="tenants-admin-limits" href="#tenants/admin/limitations">Limitations to Know</a>
+        </div>
+        <div class="sb-track">
+          <div class="sb-track-title">Developer</div>
+          <a class="sb-link" data-page="tenants-dev-architecture" href="#tenants/dev/architecture">Architecture</a>
+          <a class="sb-link" data-page="tenants-dev-api" href="#tenants/dev/api-reference">API Reference</a>
+          <a class="sb-link" data-page="tenants-dev-data" href="#tenants/dev/data-model">Data Model</a>
+        </div>
+        <div class="sb-track">
+          <div class="sb-track-title">Audit</div>
+          <a class="sb-link" data-page="tenants-issues" href="#tenants/audit/known-issues">Known Issues &amp; Needs Review</a>
+        </div>
+      </div>
+    </div>
+    <div class="sb-group">
+      <div class="sb-group-title">Other modules</div>
+      <a class="sb-module-head" href="/pos/index.html">POS <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/sales/index.html">Sales &amp; Invoicing <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/inventory/index.html">Inventory <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/purchase/index.html">Purchase <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/products/index.html">Products &amp; Variants <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/customers/index.html">Customers &amp; Suppliers <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/accounting/index.html">Accounting &amp; GST <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/hr/index.html">HR &amp; Payroll <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/reports/index.html">Reports <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/platform/index.html">Developer Platform <span class="status">Open →</span></a>
+    </div>
+  </nav>
+
+  <main class="content" id="content">
+    <div class="breadcrumb" id="breadcrumb"></div>
+
+    <!-- ============ CLIENT: OVERVIEW ============ -->
+    <article class="page" id="page-tenants-client-overview" data-track="client" data-title="Overview — Two Different Super Admins">
+      <span class="track-pill client">Operator documentation</span>
+      <h1>Overview — Two Different "Super Admins"</h1>
+      <div class="pilot-banner">Tenth module documented from a direct code audit. Unlike every module so far, this one isn't a workflow any tenant's staff uses — it's the layer that manages the tenants (customer businesses) themselves.</div>
+
+      <div class="callout note"><div class="callout-title">Read this before anything else on this page — two unrelated things share a confusing name</div><p>The word "Super Admin" refers to two completely different things in this system, and mixing them up will misdescribe how access control actually works:</p>
+      <ul>
+        <li><strong>Platform Operator</strong> — the real, cross-tenant SaaS-operator role. This is you, running the platform for all customer businesses. It can suspend/close any tenant, but that's essentially <em>all</em> it can do across tenants (see below).</li>
+        <li><strong>"Super Admin" role</strong> — just the name of a top-tier staff role seeded into <em>every individual tenant</em>, with the same permissions as that tenant's Owner/Admin. It has zero power outside that one tenant. A clothing store's own "Super Admin" account is not the same thing as you, the platform operator.</li>
+      </ul></div>
+
+      <p>What the Platform Operator role can actually do today, precisely: create, suspend, reactivate, or permanently close a tenant, and view basic usage figures. That's the entire cross-tenant surface that exists in the product right now — there's no cross-tenant user management and no cross-tenant audit-log viewer (see below).</p>
+
+      <div class="pager">
+        <span></span>
+        <a class="next" href="#tenants/client/journey"><div class="pg-label">Next</div><div class="pg-title">End-to-End Client Journey →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ CLIENT: END-TO-END JOURNEY ============ -->
+    <article class="page" id="page-tenants-client-journey" data-track="client" data-title="End-to-End Client Journey">
+      <span class="track-pill client">Operator documentation</span>
+      <h1>End-to-End Client Journey</h1>
+      <div class="pilot-banner">A map of the whole loop — onboarding a business, that business running its day-to-day operations, and what it sees when it looks back at its own numbers. This page doesn't introduce new findings; every stage links to the module that documents it in full, including whatever gaps or bugs are known there. Think of this as the table of contents for the entire site, arranged as a story instead of a list.</div>
+
+      <h2 id="stage1">Stage 1 — Onboarding the client</h2>
+      <div class="flow">
+        <div class="flow-step"><div class="fs-label">Platform Operator</div>Provisions the new tenant</div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step"><div class="fs-label">System</div>Creates tenant record, default roles, Head Office branch</div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step"><div class="fs-label">System</div>Creates the client's first user as <strong>Owner</strong></div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step terminal"><div class="fs-label">Client</div>Business is Active</div>
+      </div>
+      <p>Only the cross-tenant Platform Operator role can do this — no business, including this new one, can onboard itself or another business. Full detail, including the credential-handoff gap in this exact step, is on <a href="/tenants/index.html#tenants/client/lifecycle">Managing Tenant Lifecycle</a>.</p>
+
+      <h2 id="stage2">Stage 2 — The business sets itself up</h2>
+      <p>Once the Owner logs in, they configure the business before anyone can start selling:</p>
+      <ol class="steps">
+        <li><h4>Branches &amp; warehouses</h4>Add every physical location stock and sales need to be tracked against. <a href="/inventory/index.html#inventory/client/stock">Inventory →</a></li>
+        <li><h4>Staff &amp; roles</h4>Create user accounts for cashiers, sales staff, accountants, and managers, each assigned a role that determines what they can do.</li>
+        <li><h4>Products</h4>Add items, categories, brands, and barcodes. <a href="/products/index.html#products/client/items">Products &amp; Variants →</a></li>
+        <li><h4>Customers &amp; suppliers</h4>Set up the people and businesses this business will sell to and buy from, including any credit terms. <a href="/customers/index.html#customers/client/overview">Customers &amp; Suppliers →</a></li>
+        <li><h4>Feature flags &amp; branding</h4>Turn on whatever's relevant to this specific business — loyalty points, tailoring/alterations, and so on. <a href="/tenants/index.html#tenants/client/feature-flags">Feature Flags →</a></li>
+      </ol>
+
+      <h2 id="stage3">Stage 3 — Running the business, day to day</h2>
+      <p>This is the actual business the client runs, every day, across four connected modules:</p>
+      <div class="flow">
+        <div class="flow-step"><div class="fs-label">Purchase</div>Order &amp; receive stock from suppliers</div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step"><div class="fs-label">Inventory</div>Stock levels, transfers, valuation update</div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step"><div class="fs-label">Sales / POS</div>Counter sales, invoices, returns, payments</div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step terminal"><div class="fs-label">HR</div>Staff attendance &amp; payroll run in parallel</div>
+      </div>
+      <div class="pill-row">
+        <a class="badge perm" href="/purchase/index.html#purchase/client/overview">Purchase →</a>
+        <a class="badge perm" href="/inventory/index.html#inventory/client/overview">Inventory →</a>
+        <a class="badge perm" href="/pos/index.html#pos/client/overview">POS →</a>
+        <a class="badge perm" href="/sales/index.html#sales/client/overview">Sales &amp; Invoicing →</a>
+        <a class="badge perm" href="/hr/index.html#hr/client/overview">HR &amp; Payroll →</a>
+      </div>
+      <p>Every one of these actions — a sale, a goods receipt, a payroll run — quietly does a second job in the background: it writes the accounting entry that will show up in Stage 4, at the same moment it happens, not as a separate manual step.</p>
+
+      <h2 id="stage4">Stage 4 — Everything lands in the books</h2>
+      <div class="flow">
+        <div class="flow-step"><div class="fs-label">A sale, purchase receipt, or payroll run happens</div></div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step branch"><div class="fs-label">Behind the scenes</div>An accounting entry and a GST register entry are posted automatically</div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step terminal"><div class="fs-label">Result</div>Journals, ledgers, and the GST register are always up to date</div>
+      </div>
+      <p>This automatic posting is real and mostly reliable — but it's also where this project found its most serious defects, including one that silently drops the GST portion of ordinary domestic sales from the books. Anyone relying on these numbers for a real business should read <a href="/accounting/index.html#accounting/audit/known-issues">Accounting &amp; GST's Known Issues</a> before trusting them at face value.</p>
+
+      <h2 id="stage5">Stage 5 — The business looks back at its own numbers</h2>
+      <div class="flow">
+        <div class="flow-step"><div class="fs-label">Owner / Accountant / HR Manager</div>Opens a report</div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step"><div class="fs-label">77 reports</div>Sales, Purchase, Inventory, Financial, HR, GST, Analytics</div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step"><div class="fs-label">Financial statements</div>Trial Balance, P&amp;L, Balance Sheet, Cash Flow</div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step terminal"><div class="fs-label">Decision</div>Restock, hire, price, or collect a payment</div>
+      </div>
+      <p>This is the payoff of the whole loop — the business finds out how it's actually doing, and that decision feeds straight back into Stage 3. Full detail, including which reports don't export correctly and which roles can't see which reports, is on the <a href="/reports/index.html#reports/client/overview">Reports</a> module.</p>
+
+      <div class="callout note"><div class="callout-title">This is a loop, not a straight line</div><p>Stage 5 isn't the end — the decisions it produces become tomorrow's Stage 3 actions. A new business only ever goes through Stage 1 once; everything from Stage 2 onward repeats for as long as the business operates.</p></div>
+
+      <div class="pager">
+        <a href="#tenants/client/overview"><div class="pg-label">Back</div><div class="pg-title">← Overview</div></a>
+        <a class="next" href="#tenants/client/lifecycle"><div class="pg-label">Next</div><div class="pg-title">Managing Tenant Lifecycle →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ CLIENT: LIFECYCLE ============ -->
+    <article class="page" id="page-tenants-client-lifecycle" data-track="client" data-title="Managing Tenant Lifecycle">
+      <span class="track-pill client">Operator documentation</span>
+      <h1>Managing Tenant Lifecycle</h1>
+      <div class="flow">
+        <div class="flow-step"><div class="fs-label">Provisioning</div>New tenant being set up</div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step branch"><div class="fs-label">Active</div>⇄ Suspended (reversible, either direction)</div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step terminal"><div class="fs-label">Closed</div>Permanent — no way back</div>
+      </div>
+
+      <div class="callout ok"><div class="callout-title">Creating a tenant now has a screen</div><p>The tenant list has a "+ New Tenant" button (visible if you hold the platform-management permission) that opens a form for the organization's details, its plan, and its first Owner account — no developer/API call needed for this step anymore.</p></div>
+      <div class="callout review"><div class="callout-title">The new admin's password still isn't delivered by the system itself</div><p>The form requires you to type the new tenant's Owner password directly — there's still no auto-generated password, no "reset on first login" flag, and no email carrying the credential. You still need to relay that password to the client yourself, outside the system, after creating them.</p></div>
+
+      <h2 id="login">How the new user actually logs in</h2>
+      <p>This app's login screen asks for three things, not the usual two: <strong>email</strong>, <strong>password</strong>, and a numeric <strong>Tenant ID</strong>. The same email address can exist in more than one business at once, so the Tenant ID is what tells the system which business you mean.</p>
+      <div class="callout bug"><div class="callout-title">The Tenant ID is only ever shown once, right after creation</div><p>When you submit the New Tenant form, the very next screen shows the new Tenant ID and the admin's login email — that's the only moment this ID is surfaced anywhere. If you close that screen without writing it down, you'd previously have had no way to find it again. The tenant list now also shows a Tenant ID column for exactly this reason — use it to look up an existing business's ID later if you ever need to.</p></div>
+      <p>What to give the client, all three together: their <strong>Tenant ID</strong> (from the success screen or the tenant list), the <strong>email</strong> you set as their contact/admin email, and the <strong>password</strong> you typed into the form. All three are required — any one missing and they can't sign in.</p>
+
+      <h2 id="suspend">Suspending or closing a tenant</h2>
+      <p>Both require a reason (at least 5 characters); closing additionally requires typing a literal confirmation phrase to guard against an accidental click. A closed tenant cannot be reopened — treat Close as genuinely final, unlike Suspend which is fully reversible.</p>
+      <div class="callout note"><div class="callout-title">Suspension isn't instant everywhere at once</div><p>The service handling the request you're using enforces the suspension immediately. Every other backend process independently re-checks within about a minute — so for a short window (under a minute), a suspended tenant's staff might still be able to complete an action already in progress elsewhere in the system. This is a real, if narrow, timing gap.</p></div>
+      <p>A tenant's own staff experience suspension the next time any of their screens makes a request — they're redirected to an "Account Suspended" page, not instantly logged out of a page already open.</p>
+
+      <div class="pager">
+        <a href="#tenants/client/journey"><div class="pg-label">Back</div><div class="pg-title">← End-to-End Client Journey</div></a>
+        <a class="next" href="#tenants/client/feature-flags"><div class="pg-label">Next</div><div class="pg-title">Feature Flags →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ CLIENT: FEATURE FLAGS ============ -->
+    <article class="page" id="page-tenants-client-flags" data-track="client" data-title="Feature Flags">
+      <span class="track-pill client">Operator documentation</span>
+      <h1>Feature Flags</h1>
+      <p>Feature flags turn specific capabilities on or off — genuinely checked live by the system, not just cosmetic. There's a platform-wide default for each flag, and any individual tenant can be given its own override.</p>
+      <div class="callout note"><div class="callout-title">This screen manages a tenant's own flags, not a cross-tenant control panel</div><p>The Feature Flags screen a tenant's staff use only ever shows and edits that tenant's own settings — there is currently no separate platform-operator screen for viewing or changing flags across multiple tenants at once.</p></div>
+      <div class="callout review"><div class="callout-title">One flag on this screen does nothing</div><p>"FIFO Valuation" appears as a toggle here, but nothing in the system actually checks it — whether an item uses FIFO or weighted-average costing is decided per item elsewhere (see Products &amp; Variants), not by this flag. Toggling it currently has no effect.</p></div>
+      <div class="callout review"><div class="callout-title">Several real flags show "No description available"</div><p>The flags that actual business logic checks day-to-day (POS enabled, loyalty program, tailoring/alterations, and others) aren't in the screen's description list, so they show a generic placeholder instead of a helpful label. They still work correctly — the missing description is a documentation gap in the UI itself, not a functional one.</p></div>
+      <div class="pager">
+        <a href="#tenants/client/lifecycle"><div class="pg-label">Back</div><div class="pg-title">← Managing Tenant Lifecycle</div></a>
+        <a class="next" href="#tenants/client/impersonation"><div class="pg-label">Next</div><div class="pg-title">Impersonating a User →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ CLIENT: IMPERSONATION ============ -->
+    <article class="page" id="page-tenants-client-impersonate" data-track="client" data-title="Impersonating a User">
+      <span class="track-pill client">Operator documentation</span>
+      <h1>Impersonating a User</h1>
+      <p>Impersonation lets an authorized account temporarily see the system exactly as another user would — useful for troubleshooting a specific staff member's issue.</p>
+      <ul>
+        <li>Only works <strong>within the same business</strong> — you can only impersonate someone in your own tenant, never a customer of a different business, and (as the platform operator) you cannot impersonate a customer tenant's user at all today.</li>
+        <li>Automatically ends after <strong>one hour</strong>.</li>
+        <li>Fully logged — both the start and the end of every impersonation session are recorded, including who did it, who was impersonated, and why.</li>
+        <li>A visible banner with a live countdown and a "Stop impersonating" button stays on screen the entire time.</li>
+      </ul>
+      <div class="callout review"><div class="callout-title">Stacking impersonation sessions isn't blocked on the server</div><p>The app's own interface won't let you start a second impersonation session while already impersonating someone — but that protection lives only in the browser, not the server. Treat this as a real, if narrow, gap rather than an impossible scenario.</p></div>
+      <div class="pager">
+        <a href="#tenants/client/feature-flags"><div class="pg-label">Back</div><div class="pg-title">← Feature Flags</div></a>
+        <a class="next" href="#tenants/client/billing"><div class="pg-label">Next</div><div class="pg-title">Plans &amp; Billing →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ CLIENT: BILLING ============ -->
+    <article class="page" id="page-tenants-client-billing" data-track="client" data-title="Plans & Billing">
+      <span class="track-pill client">Operator documentation</span>
+      <h1>Plans &amp; Billing</h1>
+      <p>Three plans exist — Starter, Growth, Enterprise — each with a user limit, a branch limit, and a set of feature flags that get switched on automatically for a tenant on that plan.</p>
+      <div class="callout bug"><div class="callout-title">User and branch limits are shown but not enforced</div><p>A tenant's plan limits are genuinely recorded and displayed, but nothing currently stops a Starter-plan tenant from adding more users or branches than their plan allows. If limiting usage by plan matters to your business model today, it needs to be enforced manually, not automatically.</p></div>
+      <div class="callout note"><div class="callout-title">Feature-flag entitlements do work</div><p>Unlike the user/branch limits, the set of features a plan unlocks genuinely gets applied to a tenant when they're provisioned on that plan — this part of "plan" is real.</p></div>
+      <div class="callout review"><div class="callout-title">No way to change a tenant's plan after it's created</div><p>A plan is set once, at provisioning time, via the same developer-only process used to create the tenant in the first place. There's no upgrade/downgrade action anywhere in the app today.</p></div>
+      <p>There is no live payment collection, invoicing automation, or dunning process yet — the groundwork (a billing-invoice table, a "next billing date" field) exists, but nothing acts on it automatically today.</p>
+      <div class="pager">
+        <a href="#tenants/client/impersonation"><div class="pg-label">Back</div><div class="pg-title">← Impersonating a User</div></a>
+        <a class="next" href="#tenants/client/faq"><div class="pg-label">Next</div><div class="pg-title">Troubleshooting &amp; FAQ →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ CLIENT: FAQ ============ -->
+    <article class="page" id="page-tenants-client-faq" data-track="client" data-title="Troubleshooting & FAQ">
+      <span class="track-pill client">Operator documentation</span>
+      <h1>Troubleshooting &amp; FAQ</h1>
+      <div class="tablewrap"><table>
+        <tr><th>Question</th><th>Answer</th></tr>
+        <tr><td>Where do I create a new tenant?</td><td>Tenants → "+ New Tenant" — no developer needed anymore.</td></tr>
+        <tr><td>Can I reopen a closed tenant?</td><td>No — closing is permanent by design.</td></tr>
+        <tr><td>I suspended a tenant but their staff completed one more action afterward</td><td>Possible for up to about a minute — a known, narrow timing gap, not a security hole.</td></tr>
+        <tr><td>Why does "FIFO Valuation" in Feature Flags seem to do nothing?</td><td>Confirmed — that specific flag isn't wired to anything.</td></tr>
+        <tr><td>Can I change a tenant's plan after signup?</td><td>Not through the app today — only at initial provisioning.</td></tr>
+        <tr><td>Can I, as the platform operator, impersonate a customer's staff member?</td><td>No — impersonation only works within the impersonator's own tenant.</td></tr>
+      </table></div>
+      <div class="pager">
+        <a href="#tenants/client/billing"><div class="pg-label">Back</div><div class="pg-title">← Plans &amp; Billing</div></a>
+        <span></span>
+      </div>
+    </article>
+
+    <!-- ============ ADMIN: ACCESS ============ -->
+    <article class="page" id="page-tenants-admin-access" data-track="admin" data-title="Access & Roles">
+      <span class="track-pill admin">Super Admin documentation</span>
+      <h1>Access &amp; Roles</h1>
+      <div class="callout ok"><div class="callout-title">Tenant management itself is correctly locked down — a rare clean bill of health</div><p>Unlike the recurring role/permission mismatches found in nearly every other module of this ERP, tenant creation/suspension/activation/closing is gated correctly and consistently, and no ordinary tenant-level role can reach these endpoints. This wasn't always true — a prior version of the system had effectively no protection here at all, and it's since been fixed and locked in with a dedicated regression test suite.</p></div>
+      <p>Only the Platform Operator role (or a tenant's own Owner-equivalent role, but scoped strictly to that one tenant) has any of this power. Impersonation follows the same tenant-scoping rule: it requires a specific permission, and only within one's own tenant.</p>
+      <div class="pager">
+        <span></span>
+        <a class="next" href="#tenants/admin/provisioning"><div class="pg-label">Next</div><div class="pg-title">Provisioning Reliability →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ ADMIN: PROVISIONING ============ -->
+    <article class="page" id="page-tenants-admin-provisioning" data-track="admin" data-title="Provisioning Reliability">
+      <span class="track-pill admin">Super Admin documentation</span>
+      <h1>Provisioning Reliability</h1>
+      <div class="callout bug"><div class="callout-title">A failed tenant setup can leave a permanently broken, half-created tenant</div><p>Setting up a new tenant involves about ten separate steps — creating the tenant record, seeding its roles, creating its first admin user and head-office branch, setting up its file storage, its search indexes, its feature flags, and more. These steps are not wrapped together as a single all-or-nothing operation. If any one step fails partway through (for example, a storage-provisioning outage), everything before that point is already permanently saved — the tenant is left stuck in a "setting up" state with no automatic retry or rollback. Cleaning this up currently requires a developer to intervene directly in the database. If you're provisioning tenants at any real volume, budget for this as a known operational risk, not an edge case that won't happen.</p></div>
+      <div class="pager">
+        <a href="#tenants/admin/access-roles"><div class="pg-label">Back</div><div class="pg-title">← Access &amp; Roles</div></a>
+        <a class="next" href="#tenants/admin/limitations"><div class="pg-label">Next</div><div class="pg-title">Limitations to Know →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ ADMIN: LIMITATIONS ============ -->
+    <article class="page" id="page-tenants-admin-limits" data-track="admin" data-title="Limitations to Know">
+      <span class="track-pill admin">Super Admin documentation</span>
+      <h1>Limitations to Know</h1>
+      <p>Full technical detail is on <a href="#tenants/audit/known-issues">Known Issues</a>.</p>
+      <ol>
+        <li><strong>No UI to change a tenant's plan after creation</strong> — creating a tenant now has a screen, but upgrading/downgrading an existing one still requires direct backend access.</li>
+        <li><strong>Provisioning can fail partway and leave permanent orphaned state</strong> — no resume or rollback mechanism exists.</li>
+        <li><strong>Plan user/branch limits aren't enforced</strong> — display-only figures today.</li>
+        <li><strong>No cross-tenant user management or audit-log view</strong> — the platform operator's cross-tenant power is limited to tenant lifecycle and basic usage figures only.</li>
+        <li><strong>Tenant-suspension enforcement has a sub-minute cross-process staleness window.</strong></li>
+        <li><strong>No billing/payment automation exists yet</strong> — the schema is ready; nothing acts on it.</li>
+      </ol>
+      <div class="pager">
+        <a href="#tenants/admin/provisioning"><div class="pg-label">Back</div><div class="pg-title">← Provisioning Reliability</div></a>
+        <span></span>
+      </div>
+    </article>
+
+    <!-- ============ DEV: ARCHITECTURE ============ -->
+    <article class="page" id="page-tenants-dev-architecture" data-track="dev" data-title="Architecture">
+      <span class="track-pill dev">Developer documentation</span>
+      <h1>Architecture</h1>
+      <p>No separate Super Admin portal exists — everything lives in <code>apps/web-frontend</code>, permission-gated like any other screen, under a "Platform Admin" nav group.</p>
+
+      <h2 id="two-concepts">PLATFORM_OPERATOR vs. SUPER_ADMIN — the precise distinction</h2>
+      <p><code>PLATFORM_OPERATOR</code> is a real cross-tenant role, scoped to a reserved <code>platform-operations</code> tenant seeded by migration, holding exactly one permission: <code>PLATFORM_TENANT_MANAGE</code>. <code>SUPER_ADMIN</code> is a per-tenant system role name seeded into every tenant with the same permission set as OWNER — <code>PLATFORM_TENANT_MANAGE</code> is explicitly excluded from every tenant-scoped role's permission set, including this one. Do not conflate the two when reasoning about access control.</p>
+      <p class="src">packages/db-client/migrations/0020_es21_platform_operator.sql:16-23; apps/tenant-service/src/rbac/role-defaults.ts:3-9,263</p>
+
+      <h2 id="routes">Routes</h2>
+      <div class="tablewrap"><table>
+        <tr><th>Path</th><th>Component</th><th>Permission</th></tr>
+        <tr><td><code>admin/tenants</code></td><td>TenantsPage</td><td class="badge perm">PLATFORM_TENANT_MANAGE</td></tr>
+        <tr><td><code>admin/tenants/new</code></td><td>TenantFormPage</td><td class="badge perm">PLATFORM_TENANT_MANAGE</td></tr>
+        <tr><td><code>admin/feature-flags</code></td><td>FeatureFlagsPage</td><td class="badge perm">FEATURE_FLAG_VIEW</td> / <span class="badge perm">FEATURE_FLAG_UPDATE</span></tr>
+      </table></div>
+      <p>Impersonation has no dedicated page — it's a row action inside the ordinary Users screen (<code>UsersPage.tsx</code>), gated on <code>IMPERSONATE_USER</code>, with a confirmation dialog and a persistent status banner as separate shared components.</p>
+
+      <h2 id="staleness">Tenant-status cache: no cross-service invalidation broadcast</h2>
+      <div class="callout review"><div class="callout-title">An inconsistent caching pattern within the same codebase</div><p>Every service checks tenant status via a 60-second, per-process in-memory cache. The service handling the actual suspend/close request invalidates its own cache immediately — but nothing broadcasts that invalidation to any other running service instance. This is a real, if narrow, gap: contrast with the feature-flag cache below, which correctly solves the identical problem via Redis pub/sub. Worth aligning both to the same pattern. <span class="src">packages/platform-sdk/src/tenantStatus.ts:21-22,45-49,65-79</span>, <span class="src">apps/tenant-service/src/api/tenant.routes.ts:141,168,198</span></p></div>
+
+      <h2 id="flags-architecture">Feature flags: the correct version of the same problem</h2>
+      <p>Two-tier cache (30s in-process, then 5-minute Redis) falling back to a real DB read — global-default row (<code>tenantId IS NULL</code>) overridden by a tenant-specific row when one exists. Updates clear the local cache <em>and</em> publish a Redis pub/sub invalidation so every other service instance drops its own cached copy immediately — the cross-process consistency mechanism the tenant-status cache above is missing.</p>
+      <p class="src">packages/platform-sdk/src/feature-flags.ts:11-12,21-27,55-61,63-100,113-130</p>
+
+      <div class="pager">
+        <span></span>
+        <a class="next" href="#tenants/dev/api-reference"><div class="pg-label">Next</div><div class="pg-title">API Reference →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ DEV: API ============ -->
+    <article class="page" id="page-tenants-dev-api" data-track="dev" data-title="API Reference">
+      <span class="track-pill dev">Developer documentation</span>
+      <h1>API Reference</h1>
+
+      <h2 id="tenant-endpoints">tenant-service</h2>
+      <div class="tablewrap"><table>
+        <tr><th>Method &amp; Path</th><th>Permission</th><th>Notes</th></tr>
+        <tr><td>POST <code>/admin/tenants</code></td><td class="badge perm">PLATFORM_TENANT_MANAGE</td><td>now called from a real "New Tenant" form (<code>TenantFormPage.tsx</code>) — previously unreachable from any UI</td></tr>
+        <tr><td>GET <code>/admin/tenants</code>, <code>/:id</code></td><td class="badge perm">PLATFORM_TENANT_MANAGE</td><td>cross-tenant list, by design</td></tr>
+        <tr><td>PATCH <code>/admin/tenants/:id/suspend</code></td><td class="badge perm">PLATFORM_TENANT_MANAGE</td><td>reason required, min 5 chars</td></tr>
+        <tr><td>PATCH <code>/admin/tenants/:id/activate</code></td><td class="badge perm">PLATFORM_TENANT_MANAGE</td><td>only from SUSPENDED</td></tr>
+        <tr><td>PATCH <code>/admin/tenants/:id/close</code></td><td class="badge perm">PLATFORM_TENANT_MANAGE</td><td>requires reason + literal confirmation string; terminal, no reactivate path</td></tr>
+        <tr><td>GET <code>/admin/tenants/:id/usage</code>, <code>/admin/tenants/usage-overview</code></td><td class="badge perm">PLATFORM_TENANT_MANAGE</td><td>reads pre-aggregated usage_summary; no frontend consumer found</td></tr>
+      </table></div>
+      <p>No dedicated "assign/change plan" route exists — plan assignment only happens as one step inside initial provisioning.</p>
+
+      <h2 id="auth-endpoints">auth-service</h2>
+      <div class="tablewrap"><table>
+        <tr><th>Method &amp; Path</th><th>Permission</th><th>Notes</th></tr>
+        <tr><td>POST <code>/admin/impersonate</code></td><td class="badge perm">IMPERSONATE_USER</td><td>target must share the caller's own tenantId — no cross-tenant path exists</td></tr>
+        <tr><td>POST <code>/admin/impersonate/end</code></td><td>authenticated session must itself be an impersonation session</td><td></td></tr>
+        <tr><td>GET <code>/admin/feature-flags</code></td><td class="badge perm">FEATURE_FLAG_VIEW</td><td>merges global defaults with the caller's own tenant overrides</td></tr>
+        <tr><td>PUT <code>/admin/feature-flags/:name</code></td><td class="badge perm">FEATURE_FLAG_UPDATE</td><td>upserts a tenant-specific override, publishes cache invalidation</td></tr>
+        <tr><td>GET <code>/admin/security-audit-log</code></td><td class="badge perm">VIEW_AUDIT_LOG</td><td>filtered to the caller's own tenant only — not a cross-tenant viewer</td></tr>
+      </table></div>
+
+      <div class="callout bug"><div class="callout-title">Historical vulnerability, now fixed and regression-tested</div><p>A dedicated test file's own comments document that, prior to a fix, <code>/admin/tenants</code> had no permission check at all, and suspend/activate/close only required being logged in — any authenticated user from any tenant could enumerate and suspend/close any other tenant. Current tests confirm this is closed: no token → 401, valid token lacking the platform permission → 403 (including an ordinary tenant user attempting a suspend), only a token carrying the platform permission succeeds. <span class="src">apps/tenant-service/src/__tests__/tenant-admin-authz.test.ts:1-7,108-235</span></p></div>
+
+      <div class="pager">
+        <a href="#tenants/dev/architecture"><div class="pg-label">Back</div><div class="pg-title">← Architecture</div></a>
+        <a class="next" href="#tenants/dev/data-model"><div class="pg-label">Next</div><div class="pg-title">Data Model →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ DEV: DATA MODEL ============ -->
+    <article class="page" id="page-tenants-dev-data" data-track="dev" data-title="Data Model">
+      <span class="track-pill dev">Developer documentation</span>
+      <h1>Data Model</h1>
+      <p><code>packages/db-client/src/schema/tenant.ts</code> and <code>index.ts</code>.</p>
+
+      <h2 id="tenants-table">tenants</h2>
+      <p><code>status</code>: <code>PROVISIONING|ACTIVE|SUSPENDED|CLOSED</code>. <code>plan</code>: <code>STARTER|GROWTH|ENTERPRISE</code>. <code>provisioningStatus</code> (11-value enum) + <code>provisioningSteps</code> jsonb track granular setup progress. <code>settings</code> jsonb carries <code>maxUsers</code>/<code>maxBranches</code> entitlement caps — recorded but never enforced at write time anywhere in the codebase. <code>suspendedAt/By/Reason</code>, <code>closedAt/By/Reason</code>. <code>nextBillingDate</code>/<code>dunningStartedAt</code>/<code>paymentGatewayCustomerRef</code> exist as schema prep for a billing cycle not yet built.</p>
+      <p class="src">packages/db-client/src/schema/tenant.ts:17-96</p>
+
+      <h2 id="flags-table">feature_flags / plan_entitlements</h2>
+      <p><code>feature_flags.tenantId</code> is nullable — <code>NULL</code> row = global default, non-null = a specific tenant's override, unique on <code>(tenantId, flagKey)</code>. <code>plan_entitlements</code> is a separate global template table, one row per plan, holding <code>maxUsers</code>/<code>maxBranches</code> (nullable = unlimited), a <code>featureFlags</code> string array, and pricing — explicitly a template copied into a tenant's settings/flags at provisioning time, analogous to how default roles are seeded.</p>
+      <p class="src">packages/db-client/src/schema/index.ts:89-104; packages/db-client/src/schema/tenant.ts:241-260</p>
+
+      <h2 id="other-tables">tenant_invoices / usage_events / usage_summary / security_audit_log</h2>
+      <p><code>tenant_invoices</code> — platform billing invoices owed by a tenant (distinct from that tenant's own customer invoices), status <code>PENDING|PAID|FAILED|VOID</code>, currently unpopulated by any live billing automation. <code>usage_events</code> (raw) / <code>usage_summary</code> (nightly rollup) back the usage dashboard. Impersonation events are recorded in <code>security_audit_log</code> (action enum includes <code>IMPERSONATION_START</code>/<code>END</code>), tenant-scoped, not a cross-tenant table.</p>
+      <p class="src">packages/db-client/src/schema/tenant.ts:265-290; packages/db-client/src/schema/index.ts:137-167; packages/db-client/src/schema/auth.ts:163-189</p>
+
+      <div class="pager">
+        <a href="#tenants/dev/api-reference"><div class="pg-label">Back</div><div class="pg-title">← API Reference</div></a>
+        <a class="next" href="#tenants/audit/known-issues"><div class="pg-label">Next</div><div class="pg-title">Known Issues →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ AUDIT: KNOWN ISSUES ============ -->
+    <article class="page" id="page-tenants-issues" data-track="dev" data-title="Known Issues & Needs Review">
+      <span class="track-pill dev">Cross-cutting · Health audit</span>
+      <h1>Known Issues &amp; Needs Review</h1>
+      <p>Ranked by real-world impact. Everything below is a confirmed code-reading finding unless marked Needs Review.</p>
+
+      <div class="callout bug"><div class="callout-title">Tenant provisioning is non-transactional with no resume mechanism</div><p><code>TenantProvisioner.provision()</code> runs roughly ten sequential steps (tenant row, roles/permissions, workflow templates, admin user + head-office branch, S3 storage, search indexes, feature flags, plan entitlements, welcome email) with no surrounding transaction. A failure partway through (confirmed by a dedicated test simulating an S3 outage) leaves the tenant row, its seeded roles, and its admin user already committed, permanently stuck at <code>PROVISIONING</code>/<code>FAILED</code>, with no automatic rollback or resume — cleanup requires manual database intervention. Explicitly acknowledged in code/test comments as a known, unresolved gap.</p></div>
+
+      <div class="callout ok"><div class="callout-title">Fixed: a "New Tenant" screen now exists</div><p><code>POST /admin/tenants</code> was real, tested, and correctly permission-gated but had zero frontend callers anywhere. A form now exists (<code>apps/web-frontend/src/pages/admin/TenantFormPage.tsx</code>, route <code>admin/tenants/new</code>, permission-gated identically to the tenant list) collecting organization details, plan, and the first Owner account, calling this endpoint directly with no other change to the backend. The frontend schema (<code>schemas/tenant.schema.ts</code>) mirrors the backend's <code>CreateTenantSchema</code> field-for-field, following the same "mirror, don't share" convention already used for every other entity form in this app.</p></div>
+
+      <div class="callout review"><div class="callout-title">Still open: no way to change a tenant's plan after creation</div><p>There is no "change plan" endpoint at all post-provisioning — a plan is fixed at creation time. This was not addressed by the fix above; it's a separate, still-real gap.</p></div>
+
+      <div class="callout review"><div class="callout-title">Still open: the new tenant's password isn't delivered by the system</div><p>The new "New Tenant" form requires the operator to type the first Owner's password directly, same as the API always did — there's still no auto-generated password, no forced-password-change flag, and no credential-bearing email. This still has to be relayed to the client manually, outside the system.</p></div>
+
+      <div class="callout ok"><div class="callout-title">Fixed: the new tenant's ID is now discoverable</div><p>Login on this platform requires email, password, <em>and</em> a numeric Tenant ID — but <code>POST /admin/tenants</code>'s response (which already included the new <code>tenantId</code>) was previously discarded by the form with no display, and the tenant list showed no ID column either, so a created tenant's ID was genuinely unrecoverable from the UI. The creation flow now shows the new Tenant ID and admin email on a confirmation screen immediately after submit, and the tenant list now has a Tenant ID column for looking one up again later.</p></div>
+
+      <div class="callout review"><div class="callout-title">Plan entitlement limits are recorded but never enforced</div><p><code>maxUsers</code>/<code>maxBranches</code> are copied into a tenant's settings at provisioning and surfaced read-only on a usage screen with no frontend consumer — but no user-creation or branch-creation code path anywhere checks them. A tenant can exceed its plan's limits freely.</p></div>
+
+      <div class="callout review"><div class="callout-title">Tenant-suspension status cache has no cross-service invalidation broadcast</div><p>Every service caches tenant status in-process for 60 seconds; only the service that performed the suspend/close action invalidates its own cache. Every other running service instance keeps trusting a stale "active" status for up to 60 seconds. Contrast with the feature-flag cache, which correctly uses Redis pub/sub to solve the identical problem — an inconsistent pattern within the same codebase worth aligning.</p></div>
+
+      <div class="callout review"><div class="callout-title">No server-side guard against chained/nested impersonation</div><p>The impersonate endpoint doesn't check whether the calling session is itself an impersonation session before minting a new one. The only protection against stacking impersonation sessions is client-side (the web app's own state management refuses to start a second one) — a direct API call could bypass it. Not confirmed exploited, but the server-side check is genuinely absent.</p></div>
+
+      <div class="callout note"><div class="callout-title">fifo_valuation feature flag is dead</div><p>Seeded as a global default, displayed and toggleable in the admin screen, but never read by any code path — the real FIFO-vs-WACC decision is a per-item field, not this flag. Independently reconfirms a suspicion raised in the Products &amp; Variants audit, now with precise citations.</p></div>
+
+      <div class="callout note"><div class="callout-title">Two incompatible feature-flag naming conventions coexist unreconciled</div><p>Some flags use snake_case (<code>einvoice_enabled</code>, <code>mfa_required</code>), others use dot.case (<code>pos.enabled</code>, <code>sales.loyalty.enabled</code>, <code>hr.tailoring.enabled</code>). The admin screen's hardcoded description list only covers the snake_case set — every dot.case flag actually referenced by real business logic shows a generic "no description" placeholder in the operator UI.</p></div>
+
+      <div class="callout note"><div class="callout-title">No cross-tenant user management or audit-log viewer for the platform operator</div><p>The platform operator's entire cross-tenant surface is tenant lifecycle (suspend/activate/close) plus basic usage figures. There is no way to list, view, or manage a specific customer tenant's user accounts, and the security-audit-log endpoint (the only viewer for impersonation events) is filtered to the caller's own tenant — a platform operator can never see a customer tenant's impersonation activity through this screen.</p></div>
+
+      <div class="callout note"><div class="callout-title">No single reproducible onboarding script — but the manual sequence is now documented</div><p>The UAT seed script assumes tenant IDs 1 and 2 already exist and seeds business data directly via raw SQL — it never calls the actual provisioning endpoint. No migration or script in this repo creates those tenant IDs, and there's still no single command that goes from "nothing" to "a working dev/UAT tenant." What now exists: the real manual sequence — migrate, bootstrap the first <code>PLATFORM_OPERATOR</code>, then provision the tenant via <code>POST /admin/tenants</code> — is written down at <a href="/platform/index.html#platform/dev/environment-setup">Developer Platform → Environment Setup &amp; Bootstrapping</a>, including who is actually trusted to run the bootstrap scripts and why.</p></div>
+
+      <div class="callout ok"><div class="callout-title">Confirmed solid: tenant CRUD permission-gating</div><p>Unlike nearly every other module audited so far, tenant lifecycle management itself has no role/permission mismatch. This wasn't always true — a documented prior vulnerability (zero permission check at all) has been fixed and is locked in with a dedicated regression-test suite covering unauthenticated, under-permissioned, and correctly-permissioned cases.</p></div>
+      <div class="callout ok"><div class="callout-title">Confirmed solid: impersonation design, and a previously-flagged concern that turned out to be already resolved</div><p>Impersonation is properly scoped to a single tenant, time-limited to one hour, and fully audit-logged on both start and end, using the target user's own permissions rather than the impersonator's. Separately, a concern carried over from an earlier session — that several distributed-systems admin consoles (dead-letter queue, saga, schema registry, event store, projections) were gated on an overly broad audit-log permission mismatched against granular frontend checks — was checked directly against the current code and found to already be fixed: all five now consistently use their own specific permission, matching the frontend exactly.</p></div>
+
+      <div class="pager">
+        <a href="#tenants/dev/data-model"><div class="pg-label">Back</div><div class="pg-title">← Data Model</div></a>
+        <span></span>
+      </div>
+    </article>
+
+  </main>
+
+  <aside class="toc">
+    <div class="toc-title">On this page</div>
+    <nav id="tocNav"></nav>
+  </aside>
+</div>
+
+<script src="/shared/docs-shell.js"></script>
+</body>
+</html>

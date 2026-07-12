@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { decryptField } from '@erp/utils';
+import { describe, it, expect, vi } from 'vitest';
+import { decryptField } from '@erp/utils/server';
 
 const MOCK_ENC_KEY = 'a'.repeat(64); // 32-byte hex
 
@@ -10,14 +10,25 @@ vi.mock('@erp/config', () => ({
   },
 }));
 
-const mockInsert = vi.fn();
-const mockUpdate = vi.fn();
-const mockSelect = vi.fn();
-
 vi.mock('@erp/db', () => ({
-  employeeSalaries: { tenantId: {}, employeeId: {}, isActive: {}, basicEncrypted: {}, hraEncrypted: {}, daEncrypted: {}, grossEncrypted: {} },
+  employeeSalaries: {
+    tenantId: {},
+    employeeId: {},
+    isActive: {},
+    basicEncrypted: {},
+    hraEncrypted: {},
+    daEncrypted: {},
+    grossEncrypted: {},
+  },
   attendance: { tenantId: {}, employeeId: {}, attendanceDate: {}, status: {} },
-  leaveApplications: { tenantId: {}, employeeId: {}, status: {}, startDate: {}, endDate: {}, days: {} },
+  leaveApplications: {
+    tenantId: {},
+    employeeId: {},
+    status: {},
+    startDate: {},
+    endDate: {},
+    days: {},
+  },
   tailorWorkLog: { tenantId: {}, employeeId: {}, workDate: {}, amount: {} },
   payrollSlips: { id: {}, tenantId: {}, payrollRunId: {}, employeeId: {} },
 }));
@@ -33,7 +44,7 @@ describe('PayrollEngine encryption', () => {
             where: () => Promise.resolve([]),
           }),
         }),
-        insert: (table: unknown) => ({
+        insert: (_table: unknown) => ({
           values: (vals: Record<string, unknown>) => {
             capturedValues = vals;
             return { returning: () => Promise.resolve([{ id: 1 }]) };

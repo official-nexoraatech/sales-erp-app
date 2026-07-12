@@ -1,23 +1,50 @@
 import { useState, useEffect } from 'react';
 import toast from 'react-hot-toast';
-import { MessageCircle, Mail, Printer, X } from 'lucide-react';
+import { MessageCircle, Mail, Printer, Usb, X } from 'lucide-react';
 import { authFetch } from '../../auth.js';
+import { buildReceipt } from '../../escpos.js';
+import { supportsAnyPrinting, writeToPairedPrinter } from '../../webPrinter.js';
 import type { CompletedSale } from './types.js';
 import POSButton from './POSButton.js';
 
 const SALES_API = import.meta.env['VITE_SALES_API_URL'] ?? 'http://localhost:3013/api/v2';
 
-const PAPER_SIZES: Record<'A4' | '80mm' | '58mm', { pageSize: string; widthMm: number }> = {
-  A4: { pageSize: 'A4', widthMm: 190 },
-  '80mm': { pageSize: '80mm auto', widthMm: 76 },
-  '58mm': { pageSize: '58mm auto', widthMm: 54 },
+const PAPER_SIZES: Record<
+  'A4' | '80mm' | '58mm',
+  { pageSize: string; widthMm: number; widthChars: number | null }
+> = {
+  A4: { pageSize: 'A4', widthMm: 190, widthChars: null },
+  '80mm': { pageSize: '80mm auto', widthMm: 76, widthChars: 42 },
+  '58mm': { pageSize: '58mm auto', widthMm: 54, widthChars: 32 },
 };
 
 export function ReceiptOverlay({ sale, onClose }: { sale: CompletedSale; onClose: () => void }) {
-  const [paperSize, setPaperSize] = useState<'A4' | '80mm' | '58mm'>(() => (localStorage.getItem('pos_paper_size') as 'A4' | '80mm' | '58mm') || '80mm');
+  const [paperSize, setPaperSize] = useState<'A4' | '80mm' | '58mm'>(
+    () => (localStorage.getItem('pos_paper_size') as 'A4' | '80mm' | '58mm') || '80mm'
+  );
   const [sending, setSending] = useState(false);
+  const [hwPrinting, setHwPrinting] = useState(false);
 
-  useEffect(() => { localStorage.setItem('pos_paper_size', paperSize); }, [paperSize]);
+  useEffect(() => {
+    localStorage.setItem('pos_paper_size', paperSize);
+  }, [paperSize]);
+
+  // WebUSB/Web Serial raw ESC/POS printing — feature-detected, additional to
+  // (never a replacement for) the window.print() button below. Absent on
+  // Safari/iOS and any browser lacking both APIs, per OFFLINE-06's
+  // supportsBackgroundSync() precedent for partial-support browser APIs.
+  const printViaHardware = async (widthChars: number) => {
+    setHwPrinting(true);
+    try {
+      const data = buildReceipt(sale, { paperWidthChars: widthChars, drawerKick: true });
+      await writeToPairedPrinter(data);
+      toast.success('Sent to connected printer');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to reach connected printer');
+    } finally {
+      setHwPrinting(false);
+    }
+  };
 
   const sendReceipt = async (channel: 'WHATSAPP' | 'EMAIL') => {
     setSending(true);
@@ -27,7 +54,7 @@ export function ReceiptOverlay({ sale, onClose }: { sale: CompletedSale; onClose
         body: JSON.stringify({ channel }),
       });
       if (!res.ok) {
-        const err = await res.json().catch(() => ({})) as { error?: string };
+        const err = (await res.json().catch(() => ({}))) as { error?: string };
         throw new Error(err.error ?? 'Failed to send receipt');
       }
       toast.success(`Receipt sent via ${channel === 'WHATSAPP' ? 'WhatsApp' : 'Email'}`);
@@ -64,7 +91,9 @@ export function ReceiptOverlay({ sale, onClose }: { sale: CompletedSale; onClose
           <div className="font-bold text-lg">Receipt</div>
           <div className="text-xs text-gray-600">{sale.invoiceNumber}</div>
           {!sale.synced && (
-            <div className="text-xs text-amber-700 font-medium mt-1 print:hidden">Saved offline — will sync when back online</div>
+            <div className="text-xs text-amber-700 font-medium mt-1 print:hidden">
+              Saved offline — will sync when back online
+            </div>
           )}
         </div>
         {sale.customer && <div className="text-xs mb-2">Customer: {sale.customer.displayName}</div>}
@@ -72,16 +101,29 @@ export function ReceiptOverlay({ sale, onClose }: { sale: CompletedSale; onClose
           <tbody>
             {sale.lines.map((l) => (
               <tr key={l.itemId}>
-                <td className="py-0.5">{l.itemName} x{l.quantity}</td>
+                <td className="py-0.5">
+                  {l.itemName} x{l.quantity}
+                </td>
                 <td className="py-0.5 text-right">₹{l.lineTotal.toFixed(2)}</td>
               </tr>
             ))}
           </tbody>
         </table>
         <div className="border-t border-dashed border-gray-400 pt-2 text-sm space-y-0.5">
-          <div className="flex justify-between font-bold"><span>Total</span><span>₹{sale.grandTotal.toFixed(2)}</span></div>
-          <div className="flex justify-between text-xs"><span>Paid via {sale.paymentMode}</span><span>₹{sale.amountTendered.toFixed(2)}</span></div>
-          {sale.change > 0 && <div className="flex justify-between text-xs"><span>Change</span><span>₹{sale.change.toFixed(2)}</span></div>}
+          <div className="flex justify-between font-bold">
+            <span>Total</span>
+            <span>₹{sale.grandTotal.toFixed(2)}</span>
+          </div>
+          <div className="flex justify-between text-xs">
+            <span>Paid via {sale.paymentMode}</span>
+            <span>₹{sale.amountTendered.toFixed(2)}</span>
+          </div>
+          {sale.change > 0 && (
+            <div className="flex justify-between text-xs">
+              <span>Change</span>
+              <span>₹{sale.change.toFixed(2)}</span>
+            </div>
+          )}
         </div>
 
         <div className="mt-4 flex flex-col gap-2 print:hidden">
@@ -91,7 +133,9 @@ export function ReceiptOverlay({ sale, onClose }: { sale: CompletedSale; onClose
                 key={p}
                 onClick={() => setPaperSize(p)}
                 className={`flex-1 py-1.5 min-h-[36px] text-xs font-medium rounded-lg border-2 transition-colors ${
-                  paperSize === p ? 'border-indigo-500 bg-indigo-50 text-indigo-700' : 'border-gray-200 text-gray-600'
+                  paperSize === p
+                    ? 'border-indigo-500 bg-indigo-50 text-indigo-700'
+                    : 'border-gray-200 text-gray-600'
                 }`}
               >
                 {p}
@@ -102,6 +146,18 @@ export function ReceiptOverlay({ sale, onClose }: { sale: CompletedSale; onClose
             <Printer size={16} />
             Print Receipt
           </POSButton>
+          {supportsAnyPrinting() && size.widthChars !== null && (
+            <POSButton
+              variant="outline"
+              disabled={hwPrinting}
+              loading={hwPrinting}
+              onClick={() => void printViaHardware(size.widthChars!)}
+              className="w-full"
+            >
+              <Usb size={16} />
+              Print via connected printer
+            </POSButton>
+          )}
           {sale.synced && sale.customer && (
             <div className="flex gap-2">
               <POSButton

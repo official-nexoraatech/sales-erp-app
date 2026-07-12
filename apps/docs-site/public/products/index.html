@@ -1,0 +1,374 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ERP Docs — Products & Variants Module</title>
+<link rel="stylesheet" href="/shared/docs-shell.css">
+</head>
+<body data-module="Products & Variants">
+
+<header class="topbar">
+  <button class="icon-btn navtoggle" id="navToggle" aria-label="Toggle navigation">☰</button>
+  <a class="brand" href="/"><span class="mark">N</span> Nexoraa ERP Docs</a>
+  <div class="searchwrap">
+    <input type="text" class="searchbox" id="searchInput" placeholder="Search Products &amp; Variants documentation…" autocomplete="off">
+    <div class="search-results" id="searchResults"></div>
+  </div>
+  <div class="topbar-actions">
+    <button class="icon-btn" id="themeToggle" aria-label="Toggle dark mode" title="Toggle dark mode">◐</button>
+    <button class="icon-btn" id="printBtn" aria-label="Print this page" title="Print this page">⎙</button>
+  </div>
+</header>
+
+<div class="shell">
+  <nav class="sidebar" id="sidebar">
+    <div class="sb-group">
+      <div class="sb-group-title">Modules</div>
+      <div class="sb-module active-module">
+        <div class="sb-module-head active-module">Products &amp; Variants <span class="status">v1</span></div>
+        <div class="sb-track">
+          <div class="sb-track-title">Client</div>
+          <a class="sb-link" data-page="products-client-overview" href="#products/client/overview">Overview</a>
+          <a class="sb-link" data-page="products-client-items" href="#products/client/items">Creating &amp; Managing Items</a>
+          <a class="sb-link" data-page="products-client-taxonomy" href="#products/client/taxonomy">Categories, Brands &amp; Units</a>
+          <a class="sb-link" data-page="products-client-barcodes" href="#products/client/barcodes">Barcode Labels &amp; Printing</a>
+          <a class="sb-link" data-page="products-client-pricelists" href="#products/client/price-lists">Price Lists</a>
+          <a class="sb-link" data-page="products-client-faq" href="#products/client/faq">Troubleshooting &amp; FAQ</a>
+        </div>
+        <div class="sb-track">
+          <div class="sb-track-title">Super Admin</div>
+          <a class="sb-link" data-page="products-admin-access" href="#products/admin/access-roles">Access &amp; Roles</a>
+          <a class="sb-link" data-page="products-admin-variants" href="#products/admin/variant-tracking">Variant &amp; Size/Color Tracking</a>
+          <a class="sb-link" data-page="products-admin-limits" href="#products/admin/limitations">Limitations to Know</a>
+        </div>
+        <div class="sb-track">
+          <div class="sb-track-title">Developer</div>
+          <a class="sb-link" data-page="products-dev-architecture" href="#products/dev/architecture">Architecture</a>
+          <a class="sb-link" data-page="products-dev-api" href="#products/dev/api-reference">API Reference</a>
+          <a class="sb-link" data-page="products-dev-data" href="#products/dev/data-model">Data Model</a>
+        </div>
+        <div class="sb-track">
+          <div class="sb-track-title">Audit</div>
+          <a class="sb-link" data-page="products-issues" href="#products/audit/known-issues">Known Issues &amp; Needs Review</a>
+        </div>
+      </div>
+    </div>
+    <div class="sb-group">
+      <div class="sb-group-title">Other modules</div>
+      <a class="sb-module-head" href="/pos/index.html">POS <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/sales/index.html">Sales &amp; Invoicing <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/inventory/index.html">Inventory <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/purchase/index.html">Purchase <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/customers/index.html">Customers &amp; Suppliers <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/accounting/index.html">Accounting &amp; GST <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/hr/index.html">HR &amp; Payroll <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/reports/index.html">Reports <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/tenants/index.html">Super Admin / Tenants <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/platform/index.html">Developer Platform <span class="status">Open →</span></a>
+    </div>
+  </nav>
+
+  <main class="content" id="content">
+    <div class="breadcrumb" id="breadcrumb"></div>
+
+    <!-- ============ CLIENT: OVERVIEW ============ -->
+    <article class="page" id="page-products-client-overview" data-track="client" data-title="Products & Variants Overview">
+      <span class="track-pill client">Client documentation</span>
+      <h1>Products &amp; Variants Overview</h1>
+      <div class="pilot-banner">Fifth module documented from a direct code audit. Covers items, categories, brands, units, barcode labels, and price lists.</div>
+
+      <div class="callout bug"><div class="callout-title">Despite the module's name, there is currently no way to create a "variant" (size/color) at all</div><p>The system has real database support for per-item variants and even a flexible size/color attribute system underneath — but neither has a screen anywhere in the app. Every item today is managed as a single, non-variant record. If your business genuinely needs to track "Red, size M" separately from "Blue, size L" as distinct stock lines, that isn't achievable through the UI today — see <a href="#products/admin/variant-tracking">Variant &amp; Size/Color Tracking</a> for what this means in practice and a same-item workaround.</p></div>
+
+      <h2 id="areas">What's here</h2>
+      <ul>
+        <li><strong>Items</strong> — the product master: name, code, GST/HSN, pricing, barcode.</li>
+        <li><strong>Categories, Brands, Units</strong> — flat lists used to classify items.</li>
+        <li><strong>Barcode Labels</strong> — generate and print real barcode/QR labels for items.</li>
+        <li><strong>Price Lists</strong> — create a named price list; see below for a significant caveat.</li>
+      </ul>
+
+      <div class="callout review"><div class="callout-title">Price Lists don't currently affect any price you charge</div><p>You can create a price list, but there's no screen to put prices into it, and neither POS nor the Sales invoice screen reads from a price list even when one exists. Don't rely on this feature for differentiated pricing yet — see <a href="#products/client/price-lists">Price Lists</a>.</p></div>
+
+      <div class="pager">
+        <span></span>
+        <a class="next" href="#products/client/items"><div class="pg-label">Next</div><div class="pg-title">Creating &amp; Managing Items →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ CLIENT: ITEMS ============ -->
+    <article class="page" id="page-products-client-items" data-track="client" data-title="Creating & Managing Items">
+      <span class="track-pill client">Client documentation</span>
+      <h1>Creating &amp; Managing Items</h1>
+      <ol class="steps">
+        <li><h4>Basic Information</h4>Name, Item Code (SKU), Category, Brand, Unit of Measure, Description.
+          <div class="callout review"><div class="callout-title">"Auto-generated if blank" doesn't happen</div><p>The Item Code field hints that it will be generated for you if left empty — it won't be. Leaving it blank saves the item with no code. Type your own code if you rely on item codes anywhere downstream (labels, reports, integrations).</p></div>
+        </li>
+        <li><h4>GST &amp; HSN</h4>Search and pick an HSN code, set the GST rate (0/5/12/18/28%) and Cess rate.</li>
+        <li><h4>Pricing</h4>MRP, Sale Price, Minimum Sale Price (a hard floor — see Sales &amp; Invoicing's pricing rules), Purchase Price.</li>
+        <li><h4>Inventory &amp; Barcode</h4>Track Inventory toggle, Fabric Item toggle (reveals a Fabric Width field for items sold by length), Reorder Level, and a manual Barcode field with a type (EAN13/CODE128/QR/Custom).</li>
+      </ol>
+      <p>Editing an item works the same form; every save is recorded in a price/change history you can view per item, including plain edits and specifically-flagged price changes.</p>
+      <p>Deleting an item is a soft delete (it's marked Discontinued, not erased) and is blocked if the item already has stock movement history.</p>
+      <div class="pager">
+        <a href="#products/client/overview"><div class="pg-label">Back</div><div class="pg-title">← Overview</div></a>
+        <a class="next" href="#products/client/taxonomy"><div class="pg-label">Next</div><div class="pg-title">Categories, Brands &amp; Units →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ CLIENT: TAXONOMY ============ -->
+    <article class="page" id="page-products-client-taxonomy" data-track="client" data-title="Categories, Brands & Units">
+      <span class="track-pill client">Client documentation</span>
+      <h1>Categories, Brands &amp; Units</h1>
+      <p>All three are simple named lists you attach to items — Name, Code, and a short Description.</p>
+      <div class="callout review"><div class="callout-title">No sub-categories</div><p>The system can technically store a category inside another category, but there's no way to set that from the Categories screen — every category is created as a flat, top-level entry today.</p></div>
+      <div class="callout review"><div class="callout-title">Deleting a category or brand doesn't check whether items still use it</div><p>Nothing stops you from deleting a category or brand that items still reference. Nothing breaks — those items simply show a blank Category/Brand afterward — but there's no warning at delete time. Double-check nothing is still using a category or brand before removing it.</p></div>
+      <p>Units also cannot be deleted once created (no delete option exists) — only added or edited.</p>
+      <div class="pager">
+        <a href="#products/client/items"><div class="pg-label">Back</div><div class="pg-title">← Creating &amp; Managing Items</div></a>
+        <a class="next" href="#products/client/barcodes"><div class="pg-label">Next</div><div class="pg-title">Barcode Labels &amp; Printing →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ CLIENT: BARCODES ============ -->
+    <article class="page" id="page-products-client-barcodes" data-track="client" data-title="Barcode Labels & Printing">
+      <span class="track-pill client">Client documentation</span>
+      <h1>Barcode Labels &amp; Printing</h1>
+      <p>There are two, separate barcode features in the app — easy to confuse, so here's the distinction:</p>
+
+      <h2 id="labels">Barcode Labels (Production → Barcode Labels)</h2>
+      <p>This is the one to use for printing physical labels. Search for an item, choose a quantity and symbology (EAN13, CODE128, or QR), and generate a batch — each one renders as a real, scannable barcode/QR image on screen, ready to print via your browser's print dialog.</p>
+      <div class="callout ok"><div class="callout-title">This actually works</div><p>Barcode generation and printing here is fully functional today, including a correct EAN13 check digit — this is a genuinely shipped feature, not a stub.</p></div>
+
+      <h2 id="item-barcode">The "Generate Barcode" button on the Items list</h2>
+      <p>A different, simpler action: it writes a single barcode value directly onto that item's own record and shows it in a confirmation message. It does not open a printable label or produce an image — for an actual printable label, use Barcode Labels above instead.</p>
+      <div class="callout note"><div class="callout-title">These two features don't share data</div><p>Generating a barcode one way doesn't create anything the other way recognizes. If you use both features on the same item, you may end up with two different barcode values in two different places.</p></div>
+
+      <div class="pager">
+        <a href="#products/client/taxonomy"><div class="pg-label">Back</div><div class="pg-title">← Categories, Brands &amp; Units</div></a>
+        <a class="next" href="#products/client/price-lists"><div class="pg-label">Next</div><div class="pg-title">Price Lists →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ CLIENT: PRICE LISTS ============ -->
+    <article class="page" id="page-products-client-pricelists" data-track="client" data-title="Price Lists">
+      <span class="track-pill client">Client documentation</span>
+      <h1>Price Lists</h1>
+      <div class="callout bug"><div class="callout-title">Price lists are currently empty containers with no effect on pricing</div><p>You can create a price list (name, currency, valid dates) — but there's no screen to add specific item prices into it, and even if prices existed inside one, neither POS nor the Sales invoice screen would read from it. A sale always uses the item's own Sale Price (POS) or whatever the cashier/clerk types manually (Sales invoices, which don't even default to the item's Sale Price — see Sales &amp; Invoicing). If you were expecting customer-tier or bulk pricing from this screen, it isn't functional yet.</p></div>
+      <p>Until this is built out, manage differentiated pricing outside the system (a spreadsheet or a manual process) rather than relying on a price list here.</p>
+      <div class="pager">
+        <a href="#products/client/barcodes"><div class="pg-label">Back</div><div class="pg-title">← Barcode Labels &amp; Printing</div></a>
+        <a class="next" href="#products/client/faq"><div class="pg-label">Next</div><div class="pg-title">Troubleshooting &amp; FAQ →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ CLIENT: FAQ ============ -->
+    <article class="page" id="page-products-client-faq" data-track="client" data-title="Troubleshooting & FAQ">
+      <span class="track-pill client">Client documentation</span>
+      <h1>Troubleshooting &amp; FAQ</h1>
+      <div class="tablewrap"><table>
+        <tr><th>Question</th><th>Answer</th></tr>
+        <tr><td>Where do I add a size or color variant to an item?</td><td>Nowhere yet — this isn't available in the current UI. See <a href="#products/admin/variant-tracking">Variant &amp; Size/Color Tracking</a> for the common workaround (separate items per size/color).</td></tr>
+        <tr><td>Why is my Item Code blank after saving?</td><td>The "auto-generated if blank" hint doesn't actually happen — type your own code.</td></tr>
+        <tr><td>I added prices to a price list — why isn't POS using them?</td><td>You can't actually add prices to a price list yet (no screen for it), and POS wouldn't use them even if you could.</td></tr>
+        <tr><td>I deleted a category and now some items show a blank category</td><td>Expected — deleting a category doesn't check whether items still reference it.</td></tr>
+        <tr><td>Which "generate barcode" should I use for printing labels?</td><td>Production → Barcode Labels — not the Items list's "Generate Barcode" row action.</td></tr>
+      </table></div>
+      <div class="pager">
+        <a href="#products/client/price-lists"><div class="pg-label">Back</div><div class="pg-title">← Price Lists</div></a>
+        <span></span>
+      </div>
+    </article>
+
+    <!-- ============ ADMIN: ACCESS ============ -->
+    <article class="page" id="page-products-admin-access" data-track="admin" data-title="Access & Roles">
+      <span class="track-pill admin">Super Admin documentation</span>
+      <h1>Access &amp; Roles</h1>
+      <div class="tablewrap"><table>
+        <tr><th>Action</th><th>Permission checked</th><th>Notes</th></tr>
+        <tr><td>View / create / edit items</td><td><span class="badge perm">ITEM_VIEW/CREATE/EDIT</span></td><td></td></tr>
+        <tr><td>Delete item</td><td><span class="badge perm">ITEM_DELETE</span></td><td></td></tr>
+        <tr><td>Categories / Brands / Units</td><td><span class="badge perm">CATEGORY_*</span> / <span class="badge perm">BRAND_*</span> / <span class="badge perm">UNIT_*</span></td><td>brand delete reuses <code>BRAND_UPDATE</code> — no separate delete permission exists</td></tr>
+        <tr><td>Generate / print barcode labels</td><td><span class="badge perm">BARCODE_GENERATE</span> / <span class="badge perm">BARCODE_PRINT</span></td><td></td></tr>
+        <tr><td>View / manage price lists</td><td><span class="badge perm">PRICE_LIST_VIEW</span> (page) but <span class="badge perm">ITEM_VIEW/EDIT</span> (the actual API)</td><td><strong>Inventory Manager can't reach this screen</strong> — see below</td></tr>
+      </table></div>
+      <div class="callout review"><div class="callout-title">Inventory Manager is blocked from the Price Lists screen</div><p>The nav link and page both require a permission the Inventory Manager role — the role that owns this whole module — is never granted, even though the underlying API would let that role through if it could reach it. Only Owner/Admin can open Price Lists today. This is the same class of gap the system already hit once for barcode permissions (and fixed via a backfill) — this one hasn't been fixed yet.</p></div>
+      <div class="pager">
+        <span></span>
+        <a class="next" href="#products/admin/variant-tracking"><div class="pg-label">Next</div><div class="pg-title">Variant &amp; Size/Color Tracking →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ ADMIN: VARIANTS ============ -->
+    <article class="page" id="page-products-admin-variants" data-track="admin" data-title="Variant & Size/Color Tracking">
+      <span class="track-pill admin">Super Admin documentation</span>
+      <h1>Variant &amp; Size/Color Tracking</h1>
+
+      <div class="callout bug"><div class="callout-title">Stock is not tracked per size/color — only per item</div><p>This is the single most important thing to understand about this module for a clothing business: even where the database has room to record variants, every stock number the system actually enforces — available quantity, reservations, oversell prevention — is pooled at the item level, not broken out by size or color. In practice, that means if "T-Shirt — Red" and "T-Shirt — Blue" were ever tracked as the same item, selling the last unit of Red would be allowed as long as Blue units are still in stock, because the system only sees one combined number.</p></div>
+
+      <h2 id="today">What this means for how you set up products today</h2>
+      <p>Since there's no working variant screen (see Overview), the practical way to track different sizes/colors as separate, sellable stock is to create them as <strong>separate items</strong> — e.g. "T-Shirt Red M" and "T-Shirt Blue L" as two distinct item records, each with its own barcode/SKU and its own stock count. This is more manual than a true variant system, but it's the only setup that gives you accurate, size/color-specific stock levels today.</p>
+
+      <h2 id="costing">Costing method (FIFO/WACC) can't be changed</h2>
+      <p>Every item is costed using the weighted-average method by default, and there is currently no field anywhere — on creation or edit — to switch an item to FIFO costing, despite FIFO being a fully supported method elsewhere in Inventory's valuation reporting. If your business needs FIFO costing for specific items, that requires a direct data change today, not a settings toggle.</p>
+
+      <div class="pager">
+        <a href="#products/admin/access-roles"><div class="pg-label">Back</div><div class="pg-title">← Access &amp; Roles</div></a>
+        <a class="next" href="#products/admin/limitations"><div class="pg-label">Next</div><div class="pg-title">Limitations to Know →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ ADMIN: LIMITATIONS ============ -->
+    <article class="page" id="page-products-admin-limits" data-track="admin" data-title="Limitations to Know">
+      <span class="track-pill admin">Super Admin documentation</span>
+      <h1>Limitations to Know</h1>
+      <p>Full technical detail is on <a href="#products/audit/known-issues">Known Issues</a>.</p>
+      <ol>
+        <li><strong>No variant (size/color) UI exists at all</strong> — the module's namesake feature isn't usable; work around it with separate items per variant.</li>
+        <li><strong>Stock is pooled at the item level, not per variant</strong> — a real oversell risk if you ever do get variants set up via a workaround or future update.</li>
+        <li><strong>Price Lists have no effect on any real sale</strong> — don't build a pricing strategy around this screen yet.</li>
+        <li><strong>Inventory Manager can't access Price Lists</strong> — a role-configuration gap, same class already fixed once for barcodes.</li>
+        <li><strong>Item Code "auto-generate" doesn't work</strong> — type your own codes.</li>
+        <li><strong>Category/brand deletion doesn't warn about items still using them.</strong></li>
+      </ol>
+      <div class="pager">
+        <a href="#products/admin/variant-tracking"><div class="pg-label">Back</div><div class="pg-title">← Variant &amp; Size/Color Tracking</div></a>
+        <span></span>
+      </div>
+    </article>
+
+    <!-- ============ DEV: ARCHITECTURE ============ -->
+    <article class="page" id="page-products-dev-architecture" data-track="dev" data-title="Architecture">
+      <span class="track-pill dev">Developer documentation</span>
+      <h1>Architecture</h1>
+      <p>Frontend: <code>apps/web-frontend/src/pages/items/</code> (Categories/Brands/Units/Items/Price Lists) and <code>src/pages/production/BarcodeLabelsPage.tsx</code>. Backend: <code>apps/inventory-service/src/api/{item,category,brand,unit}.routes.ts</code> plus <code>apps/production-service/src/api/barcode.routes.ts</code>.</p>
+
+      <h2 id="routes">Routes</h2>
+      <div class="tablewrap"><table>
+        <tr><th>Path</th><th>Component</th><th>Permission</th></tr>
+        <tr><td><code>inventory/categories</code></td><td>CategoriesPage</td><td class="badge perm">CATEGORY_VIEW</td></tr>
+        <tr><td><code>inventory/brands</code></td><td>BrandsPage</td><td class="badge perm">BRAND_VIEW</td></tr>
+        <tr><td><code>inventory/units</code></td><td>UnitsPage</td><td class="badge perm">UNIT_VIEW</td></tr>
+        <tr><td><code>inventory/items</code>, <code>/new</code>, <code>/:id/edit</code></td><td>ItemsPage, ItemFormPage</td><td class="badge perm">ITEM_VIEW/CREATE/EDIT</td></tr>
+        <tr><td><code>inventory/price-lists</code></td><td>PriceListsPage</td><td class="badge perm">PRICE_LIST_VIEW</td></tr>
+        <tr><td><code>production/barcode-labels</code></td><td>BarcodeLabelsPage</td><td class="badge perm">BARCODE_GENERATE</td></tr>
+      </table></div>
+      <div class="callout note"><div class="callout-title">No variant or attribute-set page anywhere</div><p>Exhaustive grep across <code>apps/web-frontend/src</code> for "variant"/"attribute" turns up only the unrelated <code>variant="..."</code> UI-styling prop used on buttons/badges — confirming no such screen exists, not just that it's hard to find.</p></div>
+
+      <h2 id="two-barcode-systems">Two independent barcode systems</h2>
+      <p>(1) inventory-service: a single <code>items.barcode</code>/<code>itemVariants.barcode</code> value, settable manually in the item form or via the Items list's "Generate Barcode" action (deterministic EAN13 checksum, <span class="src">item.routes.ts:429-443</span>). (2) production-service: batch-based <code>barcodes</code>/<code>barcode_batches</code> tables (many codes per item, deactivatable), used exclusively by <code>BarcodeLabelsPage.tsx</code>, which renders real SVG barcodes/QR codes client-side via <code>jsbarcode</code>/<code>qrcode</code> and opens the browser print dialog. Generating via one system doesn't touch the other's tables.</p>
+      <div class="callout note"><div class="callout-title">Barcode lookup fallback order differs between the two systems</div><p>production-service's <code>GET /items/by-barcode/:value</code> (used by POS scanning) checks its own <code>barcodes</code> table first, then falls back to <code>items.barcode</code> — it never checks <code>item_variants.barcode</code>. inventory-service's separate (frontend-unused) <code>GET /items/by-barcode/:barcode</code> checks <code>item_variants</code> first, then <code>items</code>. Needs Review: unclear if this divergence is intentional. <span class="src">apps/production-service/src/domain/BarcodeService.ts:168-197</span>, <span class="src">apps/inventory-service/src/api/item.routes.ts:93-114</span></p></div>
+      <div class="callout ok"><div class="callout-title">The barcode-rendering gap noted in an earlier internal audit has since been closed</div><p>An older note flagged barcode value-generation as real but rendering as entirely missing (JSON-only print endpoint, a stubbed inventory-service route referencing an uninstalled library). As of the current codebase, <code>BarcodeLabelsPage.tsx</code> genuinely renders and prints real barcode/QR images client-side — confirmed via package.json dependencies and the component's own render logic, and via git history showing this was added/fixed in a recent commit. Worth knowing if you're cross-referencing older internal notes on this area.</p></div>
+
+      <div class="pager">
+        <span></span>
+        <a class="next" href="#products/dev/api-reference"><div class="pg-label">Next</div><div class="pg-title">API Reference →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ DEV: API ============ -->
+    <article class="page" id="page-products-dev-api" data-track="dev" data-title="API Reference">
+      <span class="track-pill dev">Developer documentation</span>
+      <h1>API Reference</h1>
+      <p><code>apps/inventory-service/src/api/</code> unless noted.</p>
+      <div class="tablewrap"><table>
+        <tr><th>Method &amp; Path</th><th>Permission</th><th>Notes</th></tr>
+        <tr><td>GET <code>/items</code>, <code>/items/:id</code>, <code>/items/by-barcode/:barcode</code>, <code>/items/:id/price-history</code></td><td class="badge perm">ITEM_VIEW</td><td></td></tr>
+        <tr><td>POST <code>/items</code></td><td class="badge perm">ITEM_CREATE</td><td>no server-side item-code generator despite the frontend hint</td></tr>
+        <tr><td>PUT <code>/items/:id</code></td><td class="badge perm">ITEM_EDIT</td><td>writes an itemsHistory audit row every time</td></tr>
+        <tr><td>DELETE <code>/items/:id</code></td><td class="badge perm">ITEM_DELETE</td><td>soft-delete; blocked if ledger history exists</td></tr>
+        <tr><td>POST <code>/items/:id/variants</code></td><td class="badge perm">ITEM_EDIT</td><td>works server-side; zero frontend callers</td></tr>
+        <tr><td>POST <code>/items/:id/barcode/generate</code></td><td class="badge perm">ITEM_EDIT</td><td>real EAN13 checksum</td></tr>
+        <tr><td><code>/categories...</code></td><td class="badge perm">CATEGORY_VIEW/CREATE/UPDATE/DELETE</td><td>accepts <code>parentId</code>; no UI ever sends one</td></tr>
+        <tr><td><code>/brands...</code></td><td class="badge perm">BRAND_VIEW/CREATE/UPDATE</td><td>delete reuses <code>BRAND_UPDATE</code></td></tr>
+        <tr><td><code>/units...</code></td><td class="badge perm">UNIT_VIEW/CREATE/UPDATE</td><td>no delete route exists</td></tr>
+        <tr><td>GET/POST <code>/price-lists</code>, PUT <code>/price-lists/:id/items</code></td><td class="badge perm">ITEM_VIEW/EDIT</td><td>not gated on any <code>PRICE_LIST_*</code> permission at the API level; item-population endpoint has zero frontend callers</td></tr>
+        <tr><td>POST <code>/api/v2/barcodes/generate</code> (production-service)</td><td class="badge perm">BARCODE_GENERATE</td><td></td></tr>
+        <tr><td>GET <code>/api/v2/barcodes/print/:batchId</code> (production-service)</td><td class="badge perm">BARCODE_PRINT</td><td>returns JSON only, by design — client renders the image</td></tr>
+      </table></div>
+
+      <div class="callout review"><div class="callout-title">Dead permission constants (confirmed by the repo's own regression test)</div><p><code>ITEM_UPDATE</code>, <code>ITEM_PRICE_UPDATE</code>, <code>ITEM_IMPORT</code>, <code>ITEM_EXPORT</code>, <code>ITEM_BARCODE_PRINT</code>, <code>PRICE_LIST_CREATE</code>, <code>PRICE_LIST_UPDATE</code>, <code>PRICE_LIST_DELETE</code> are all defined but never enforced by any route — allowlisted as known-dead in <span class="src">packages/shared-types/src/__tests__/dead-permission-constants.test.ts:28-43</span>. Note <code>ITEM_BARCODE_PRINT</code> is a distinct, unused constant from the live <code>BARCODE_PRINT</code> permission — easy to confuse when writing role configs.</p></div>
+
+      <div class="pager">
+        <a href="#products/dev/architecture"><div class="pg-label">Back</div><div class="pg-title">← Architecture</div></a>
+        <a class="next" href="#products/dev/data-model"><div class="pg-label">Next</div><div class="pg-title">Data Model →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ DEV: DATA MODEL ============ -->
+    <article class="page" id="page-products-dev-data" data-track="dev" data-title="Data Model">
+      <span class="track-pill dev">Developer documentation</span>
+      <h1>Data Model</h1>
+      <p><code>packages/db-client/src/schema/items.ts</code>.</p>
+
+      <h2 id="items">items</h2>
+      <p><code>itemCode</code>, <code>barcode</code>, <code>barcodeType</code> (<code>EAN13|CODE128|QR|CUSTOM</code>), <code>hasVariants</code> + <code>variantAttributeIds</code> (jsonb array), <code>availableQty</code>/<code>reservedQty</code> (item-level, tenant-wide counters), <code>costingMethod</code> (default <code>WACC</code>, no code path ever writes a different value), <code>waccCost</code>, <code>currentStockValue</code>. Unique on <code>(tenantId, itemCode)</code> and <code>(tenantId, barcode)</code> — Postgres allows multiple NULLs through a unique index, so several items can share a blank item code simultaneously.</p>
+      <p class="src">packages/db-client/src/schema/items.ts:158-230</p>
+
+      <h2 id="variants">itemVariants</h2>
+      <p><code>sku</code> (required, manual, no generator), <code>barcode</code>, <code>attributeCombination</code> (freeform jsonb <code>Record&lt;string,string&gt;</code> — not backed by the structured attribute tables below), <code>mrp</code>/<code>salePrice</code>/<code>purchasePrice</code>, <code>imageUrl</code>, <code>isActive</code>. <strong>No <code>availableQty</code>/<code>reservedQty</code> columns at all</strong> — variants have no first-class live stock counter; every stock mutation path in <code>InventoryLedgerService</code> keys its atomic update by <code>itemId</code> only, never <code>variantId</code>. A separate read-model table (<code>projectionStockLevel</code>) does track a per-variant number, but it's a reporting artifact the deduct/reserve path never consults — so oversell protection is effectively pooled across all of an item's variants.</p>
+      <p class="src">packages/db-client/src/schema/items.ts:233-262</p>
+
+      <h2 id="attributes">attributeSets / attributes / attributeValues — dead schema</h2>
+      <p>A full flexible-attribute system exists (e.g. attribute set "Clothing" → attribute "Size"/"Color" → values "S"/"M"/"Red" with a hex color) — but no CRUD route exists for any of these three tables anywhere in inventory-service, and no frontend page references them. The only live connection is the <code>attributeSetId</code> foreign key on <code>items</code>, which nothing currently sets meaningfully.</p>
+      <p class="src">packages/db-client/src/schema/items.ts:89-155</p>
+
+      <h2 id="taxonomy">categories / brands / units</h2>
+      <p><code>categories.parentId</code> is self-referencing and indexed — real hierarchy support at the schema level, unused by any UI. <code>brands</code> and <code>units</code> are flat. Category/brand deletion is soft (sets <code>deletedAt</code>) with no check for referencing items; <code>items.categoryId</code>/<code>items.brandId</code> have no FK constraint, so a deleted category/brand simply renders as blank on existing items going forward.</p>
+      <p class="src">packages/db-client/src/schema/items.ts:16-86</p>
+
+      <h2 id="pricelists">priceLists / priceListItems</h2>
+      <p><code>priceListItems</code> can price an <code>itemId</code> + optional <code>variantId</code> combination distinctly, at the schema level — never populated in practice since no UI writes to it and no consumer (POS, Sales invoicing) reads from it.</p>
+      <p class="src">packages/db-client/src/schema/items.ts:283-329</p>
+
+      <div class="pager">
+        <a href="#products/dev/api-reference"><div class="pg-label">Back</div><div class="pg-title">← API Reference</div></a>
+        <a class="next" href="#products/audit/known-issues"><div class="pg-label">Next</div><div class="pg-title">Known Issues →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ AUDIT: KNOWN ISSUES ============ -->
+    <article class="page" id="page-products-issues" data-track="dev" data-title="Known Issues & Needs Review">
+      <span class="track-pill dev">Cross-cutting · Health audit</span>
+      <h1>Known Issues &amp; Needs Review</h1>
+      <p>Ranked by real-world impact. Everything below is a confirmed code-reading finding.</p>
+
+      <div class="callout bug"><div class="callout-title">Variant-level stock tracking doesn't exist despite the module's name</div><p><code>itemVariants</code> has no <code>availableQty</code>/<code>reservedQty</code> columns; every atomic stock mutation in <code>InventoryLedgerService</code> (<code>addStock</code>, <code>deductStock</code>, <code>adjustStock</code>, <code>transferStock</code>) keys its guarded update by <code>itemId</code> only. A per-variant number exists only in a reporting projection the deduct path never checks. Confirmed, high business impact for a clothing ERP selling by size/color.</p></div>
+
+      <div class="callout bug"><div class="callout-title">Price lists have no populate UI and no consumer</div><p><code>PUT /price-lists/:id/items</code> works server-side but has zero frontend callers — <code>PriceListsPage.tsx</code> can only create empty list headers. Separately, neither <code>InvoiceService</code> (Sales) nor POS ever queries <code>priceLists</code>/<code>priceListItems</code> at all — Sales invoice lines default to ₹0 regardless, and POS uses the item's own <code>salePrice</code> directly. Price lists are fully-modeled but entirely inert.</p></div>
+
+      <div class="callout review"><div class="callout-title">No variant creation/attribute UI anywhere</div><p><code>POST /items/:id/variants</code> and the entire <code>attributeSets</code>/<code>attributes</code>/<code>attributeValues</code> schema have no frontend surface at all — confirmed by exhaustive grep, not just difficulty finding it.</p></div>
+
+      <div class="callout review"><div class="callout-title">Inventory Manager lacks PRICE_LIST_VIEW</div><p>Blocks the role that owns this module from its own Price Lists screen — the same bug class already fixed once for <code>BARCODE_*</code> permissions via migration <code>0026_pos_barcode_permission_backfill.sql</code>, whose own comment documents the root cause precisely. This price-list instance remains unfixed.</p></div>
+
+      <div class="callout review"><div class="callout-title">Item Code "auto-generated if blank" is not implemented</div><p><code>ItemFormPage.tsx</code>'s hint text isn't backed by any generator in <code>POST /items</code> — whatever is submitted (including nothing) is persisted as-is.</p></div>
+
+      <div class="callout note"><div class="callout-title">costingMethod is never settable through any code path</div><p>Not present in the item create/update Zod schemas or the form — every item is permanently WACC-costed at the DB default, extending the same finding from the Inventory module's audit.</p></div>
+
+      <div class="callout note"><div class="callout-title">Category hierarchy is schema-only</div><p><code>categories.parentId</code> is real and indexed, but no create/edit form ever sends it — categories are managed as a flat list in practice.</p></div>
+
+      <div class="callout note"><div class="callout-title">Two barcode-lookup implementations disagree on fallback order</div><p>production-service's lookup (used by POS) checks its own batch table then <code>items.barcode</code>, never <code>item_variants.barcode</code>; inventory-service's separate, frontend-unused lookup checks variants first. Unclear if intentional.</p></div>
+
+      <div class="callout note"><div class="callout-title">Dead permission constants</div><p><code>ITEM_UPDATE</code>, <code>ITEM_PRICE_UPDATE</code>, <code>ITEM_IMPORT</code>, <code>ITEM_EXPORT</code>, <code>ITEM_BARCODE_PRINT</code>, <code>PRICE_LIST_CREATE/UPDATE/DELETE</code> — confirmed dead by the repo's own allowlisted regression test.</p></div>
+
+      <div class="callout note"><div class="callout-title">Test coverage gap</div><p>Item CRUD, optimistic locking, and concurrent item-level stock deduction are well tested. No tests cover variant creation, categories, brands, units, or price-list routes; barcode tests only cover the pure checksum function, not routes/permissions/print-data assembly.</p></div>
+
+      <div class="callout ok"><div class="callout-title">Confirmed fixed since an earlier internal note: barcode label rendering</div><p>A prior audit (6+ days before this one) found barcode value-generation real but rendering entirely missing. Current code shows this was genuinely fixed in a recent commit — <code>BarcodeLabelsPage.tsx</code> now renders and prints real barcode/QR images client-side via real <code>jsbarcode</code>/<code>qrcode</code> dependencies. If you're consulting older internal audit notes on this area, treat this specific finding as resolved.</p></div>
+
+      <div class="pager">
+        <a href="#products/dev/data-model"><div class="pg-label">Back</div><div class="pg-title">← Data Model</div></a>
+        <span></span>
+      </div>
+    </article>
+
+  </main>
+
+  <aside class="toc">
+    <div class="toc-title">On this page</div>
+    <nav id="tocNav"></nav>
+  </aside>
+</div>
+
+<script src="/shared/docs-shell.js"></script>
+</body>
+</html>

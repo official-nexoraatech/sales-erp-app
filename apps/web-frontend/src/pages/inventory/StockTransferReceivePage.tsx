@@ -34,7 +34,7 @@ export default function StockTransferReceivePage() {
     enabled: !!id,
   });
 
-  const transfer = (data as Transfer);
+  const transfer = data as Transfer;
 
   const receiveMutation = useMutation({
     mutationFn: (lines: Array<{ lineId: number; receivedQty: number }>) =>
@@ -61,51 +61,61 @@ export default function StockTransferReceivePage() {
 
   return (
     <div>
-      <ERPPageHeader variant="list"
+      <ERPPageHeader
+        variant="list"
         title={`Receive Transfer ${transfer.transferNumber}`}
         subtitle="Enter actual quantities received per line"
       />
 
       <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-6">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-left text-gray-500 dark:text-gray-400 border-b dark:border-gray-700">
-              <th className="pb-2 font-medium">Item ID</th>
-              <th className="pb-2 font-medium">Requested</th>
-              <th className="pb-2 font-medium">Dispatched</th>
-              <th className="pb-2 font-medium">Received Qty</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y dark:divide-gray-700">
-            {lines.map((line) => {
-              const dispatched = parseFloat(line.dispatchedQty ?? line.requestedQty);
-              const value = receivedQtys[line.id] ?? dispatched;
-              return (
-                <tr key={line.id}>
-                  <td className="py-2">{line.itemId}</td>
-                  <td className="py-2">{parseFloat(line.requestedQty).toFixed(3)}</td>
-                  <td className="py-2">{dispatched.toFixed(3)}</td>
-                  <td className="py-2">
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.001"
-                      value={value}
-                      onChange={(e) =>
-                        setReceivedQtys((prev) => ({ ...prev, [line.id]: parseFloat(e.target.value) || 0 }))
-                      }
-                      className="w-28 rounded border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm px-2 py-1"
-                    />
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-gray-500 dark:text-gray-400 border-b dark:border-gray-700">
+                <th className="pb-2 font-medium">Item ID</th>
+                <th className="pb-2 font-medium">Requested</th>
+                <th className="pb-2 font-medium">Dispatched</th>
+                <th className="pb-2 font-medium">Received Qty</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y dark:divide-gray-700">
+              {lines.map((line) => {
+                const dispatched = parseFloat(line.dispatchedQty ?? line.requestedQty);
+                const value = receivedQtys[line.id] ?? dispatched;
+                return (
+                  <tr key={line.id}>
+                    <td className="py-2">{line.itemId}</td>
+                    <td className="py-2">{parseFloat(line.requestedQty).toFixed(3)}</td>
+                    <td className="py-2">{dispatched.toFixed(3)}</td>
+                    <td className="py-2">
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.001"
+                        value={value}
+                        onChange={(e) =>
+                          setReceivedQtys((prev) => ({
+                            ...prev,
+                            [line.id]: parseFloat(e.target.value) || 0,
+                          }))
+                        }
+                        className="w-28 rounded border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm px-2 py-1"
+                      />
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
 
         <div className="mt-6 flex justify-end gap-3">
-          <Button variant="ghost" onClick={() => navigate('/inventory/transfers')}>Cancel</Button>
-          <Button onClick={handleReceive} isLoading={receiveMutation.isPending}>Confirm Receipt</Button>
+          <Button variant="ghost" onClick={() => navigate('/inventory/transfers')}>
+            Cancel
+          </Button>
+          <Button onClick={handleReceive} isLoading={receiveMutation.isPending}>
+            Confirm Receipt
+          </Button>
         </div>
       </div>
     </div>

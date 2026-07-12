@@ -47,7 +47,7 @@ export default function ReorderReportPage() {
   const createPOMutation = useMutation({
     mutationFn: (payload: Record<string, unknown>) => productionApi.createReorderPOs(payload),
     onSuccess: (res) => {
-      const result = (res as { poIds?: number[] } | undefined);
+      const result = res as { poIds?: number[] } | undefined;
       toast.success(`${result?.poIds?.length ?? 0} purchase order(s) created`);
       setSelected(new Set());
       qc.invalidateQueries({ queryKey: ['purchase-orders'] });
@@ -111,16 +111,28 @@ export default function ReorderReportPage() {
         }
       />
 
-      <div className="flex gap-3 mb-4 items-center">
-        <Select value={warehouseId} onChange={(e) => setWarehouseId(e.target.value)} className="max-w-xs">
+      <div className="flex flex-wrap gap-3 mb-4 items-center">
+        <Select
+          value={warehouseId}
+          onChange={(e) => setWarehouseId(e.target.value)}
+          className="max-w-xs"
+        >
           <option value="">All Warehouses</option>
-          {warehouses.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
+          {warehouses.map((w) => (
+            <option key={w.id} value={w.id}>
+              {w.name}
+            </option>
+          ))}
         </Select>
         {items.length > 0 && (
-          <Button variant="outline" size="sm" onClick={selectAll}>Select All</Button>
+          <Button variant="outline" size="sm" onClick={selectAll}>
+            Select All
+          </Button>
         )}
         {selected.size > 0 && (
-          <Button variant="outline" size="sm" onClick={() => setSelected(new Set())}>Deselect All</Button>
+          <Button variant="outline" size="sm" onClick={() => setSelected(new Set())}>
+            Deselect All
+          </Button>
         )}
       </div>
 
@@ -137,52 +149,60 @@ export default function ReorderReportPage() {
             {items.length} item(s) need restocking.
             {selected.size > 0 && ` ${selected.size} selected.`}
           </p>
-          <table className="w-full text-sm bg-surface-card rounded-xl border border-default overflow-hidden">
-            <thead className="bg-surface-subtle">
-              <tr className="text-left text-xs uppercase text-secondary">
-                <th className="px-4 py-3 w-8">
-                  <input
-                    type="checkbox"
-                    checked={selected.size === items.length && items.length > 0}
-                    onChange={(e) => e.target.checked ? selectAll() : setSelected(new Set())}
-                  />
-                </th>
-                <th className="px-4 py-3">Item</th>
-                <th className="px-4 py-3">SKU</th>
-                <th className="px-4 py-3 text-right">Available</th>
-                <th className="px-4 py-3 text-right">Reorder Level</th>
-                <th className="px-4 py-3 text-right">Reorder Qty</th>
-                <th className="px-4 py-3">Supplier</th>
-                <th className="px-4 py-3 text-right">Last Price</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-default">
-              {items.map((item) => (
-                <tr
-                  key={item.itemId}
-                  className={`hover:bg-surface-subtle cursor-pointer ${selected.has(item.itemId) ? 'bg-primary/5' : ''}`}
-                  onClick={() => toggleSelect(item.itemId)}
-                >
-                  <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm bg-surface-card rounded-xl border border-default overflow-hidden">
+              <thead className="bg-surface-subtle">
+                <tr className="text-left text-xs uppercase text-secondary">
+                  <th className="px-4 py-3 w-8">
                     <input
                       type="checkbox"
-                      checked={selected.has(item.itemId)}
-                      onChange={() => toggleSelect(item.itemId)}
+                      checked={selected.size === items.length && items.length > 0}
+                      onChange={(e) => (e.target.checked ? selectAll() : setSelected(new Set()))}
                     />
-                  </td>
-                  <td className="px-4 py-3 font-medium">{item.itemName}</td>
-                  <td className="px-4 py-3 font-mono text-xs text-secondary">{item.sku ?? '—'}</td>
-                  <td className="px-4 py-3 text-right font-mono text-danger font-semibold">{item.availableQty}</td>
-                  <td className="px-4 py-3 text-right font-mono">{item.reorderLevel}</td>
-                  <td className="px-4 py-3 text-right font-mono">{item.reorderQty}</td>
-                  <td className="px-4 py-3 text-xs">{item.supplierName ?? <span className="text-warning">No supplier</span>}</td>
-                  <td className="px-4 py-3 text-right font-mono">
-                    {item.lastPurchasePrice ? `₹${item.lastPurchasePrice}` : '—'}
-                  </td>
+                  </th>
+                  <th className="px-4 py-3">Item</th>
+                  <th className="px-4 py-3">SKU</th>
+                  <th className="px-4 py-3 text-right">Available</th>
+                  <th className="px-4 py-3 text-right">Reorder Level</th>
+                  <th className="px-4 py-3 text-right">Reorder Qty</th>
+                  <th className="px-4 py-3">Supplier</th>
+                  <th className="px-4 py-3 text-right">Last Price</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="divide-y divide-default">
+                {items.map((item) => (
+                  <tr
+                    key={item.itemId}
+                    className={`hover:bg-surface-subtle cursor-pointer ${selected.has(item.itemId) ? 'bg-primary/5' : ''}`}
+                    onClick={() => toggleSelect(item.itemId)}
+                  >
+                    <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        checked={selected.has(item.itemId)}
+                        onChange={() => toggleSelect(item.itemId)}
+                      />
+                    </td>
+                    <td className="px-4 py-3 font-medium">{item.itemName}</td>
+                    <td className="px-4 py-3 font-mono text-xs text-secondary">
+                      {item.sku ?? '—'}
+                    </td>
+                    <td className="px-4 py-3 text-right font-mono text-danger font-semibold">
+                      {item.availableQty}
+                    </td>
+                    <td className="px-4 py-3 text-right font-mono">{item.reorderLevel}</td>
+                    <td className="px-4 py-3 text-right font-mono">{item.reorderQty}</td>
+                    <td className="px-4 py-3 text-xs">
+                      {item.supplierName ?? <span className="text-warning">No supplier</span>}
+                    </td>
+                    <td className="px-4 py-3 text-right font-mono">
+                      {item.lastPurchasePrice ? `₹${item.lastPurchasePrice}` : '—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </>
       )}
     </div>

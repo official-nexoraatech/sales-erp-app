@@ -42,7 +42,7 @@ describe('SearchEngine.search — tenant isolation', () => {
     expect(calls[0]!.url).toContain('/erp_7_customer,erp_7_invoice/_search');
   });
 
-  it('untyped global search wildcards only within the requesting tenant\'s own prefix', async () => {
+  it("untyped global search wildcards only within the requesting tenant's own prefix", async () => {
     const calls = captureRequest();
     const engine = new SearchEngine({ elasticsearchUrl: 'http://es:9200' });
     await engine.search(7, 'ramesh', {});
@@ -50,7 +50,7 @@ describe('SearchEngine.search — tenant isolation', () => {
     expect(calls[0]!.url).toContain('/erp_7_*/_search');
   });
 
-  it('always adds an exact-match tenantId filter clause matching the caller\'s own tenant', async () => {
+  it("always adds an exact-match tenantId filter clause matching the caller's own tenant", async () => {
     const calls = captureRequest();
     const engine = new SearchEngine({ elasticsearchUrl: 'http://es:9200' });
     await engine.search(7, 'ramesh', { entity: 'customer' });
@@ -115,7 +115,12 @@ describe('SearchEngine.search — ranking', () => {
         hits: {
           total: { value: 2 },
           hits: [
-            { _id: '5', _index: 'erp_7_customer', _score: 9.2, _source: { name: 'Ramesh Textiles' } },
+            {
+              _id: '5',
+              _index: 'erp_7_customer',
+              _score: 9.2,
+              _source: { name: 'Ramesh Textiles' },
+            },
             { _id: '9', _index: 'erp_7_customer', _score: 3.1, _source: { name: 'Ramu Traders' } },
           ],
         },
@@ -127,5 +132,46 @@ describe('SearchEngine.search — ranking', () => {
 
     expect(result.hits.map((h) => h.id)).toEqual(['5', '9']);
     expect(result.hits[0]!.score).toBeGreaterThan(result.hits[1]!.score);
+  });
+});
+
+// PG-049 — index creation must explicitly set shard/replica counts rather than relying on ES
+// cluster defaults. number_of_replicas: 0 is deliberate: search data is always re-derivable
+// from Postgres via fullReindex(), so a lost replica shard costs a slower recovery, not data
+// loss, and halving shard count matters once tenant_count × 30 entities accumulates.
+describe('SearchEngine — index creation settings', () => {
+  afterEach(() => {
+    global.fetch = originalFetch;
+  });
+
+  it('createTenantIndices sets explicit shard/replica counts on every entity index', async () => {
+    const calls = captureRequest();
+    const engine = new SearchEngine({ elasticsearchUrl: 'http://es:9200' });
+    await engine.createTenantIndices(7);
+
+    expect(calls.length).toBeGreaterThan(0);
+    for (const call of calls) {
+      const settings = call.body['settings'] as {
+        number_of_shards: number;
+        number_of_replicas: number;
+      };
+      expect(settings.number_of_shards).toBe(1);
+      expect(settings.number_of_replicas).toBe(0);
+    }
+  });
+
+  it('fullReindex sets explicit shard/replica counts when recreating the index', async () => {
+    const calls = captureRequest();
+    const engine = new SearchEngine({ elasticsearchUrl: 'http://es:9200' });
+    await engine.fullReindex(7, 'customer', async () => []);
+
+    const putCall = calls.find((c) => c.body['settings'] !== undefined);
+    expect(putCall).toBeDefined();
+    const settings = putCall!.body['settings'] as {
+      number_of_shards: number;
+      number_of_replicas: number;
+    };
+    expect(settings.number_of_shards).toBe(1);
+    expect(settings.number_of_replicas).toBe(0);
   });
 });

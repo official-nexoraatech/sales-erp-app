@@ -159,6 +159,23 @@
 
   /* ── Density (applied via [data-density] on <html> — ERP-PLANNING/05 §6) ─── */
   --density-multiplier: 1;
+
+  /* ── Input heights (@erp/ui Input/Select/Textarea size scale) ─────────────
+   * xl exists for POS's hero search/quantity fields — POS achieves "compact
+   * but large-target" by pairing size="xl" with tight surrounding layout
+   * spacing, not by shrinking the control itself. */
+  --input-height-sm: 32px;
+  --input-height-md: 40px;
+  --input-height-lg: 48px;
+  --input-height-xl: 56px;
+
+  /* ── Focus glow (crisp border + soft diffused ring, Stripe/Linear-style) ───
+   * One token per semantic state so every input-family component shares the
+   * exact same focus treatment instead of each hand-rolling a ring/shadow. */
+  --shadow-focus: 0 0 0 3px color-mix(in srgb, var(--brand-primary) 18%, transparent);
+  --shadow-focus-error: 0 0 0 3px color-mix(in srgb, var(--color-danger) 18%, transparent);
+  --shadow-focus-success: 0 0 0 3px color-mix(in srgb, var(--color-success) 18%, transparent);
+  --shadow-focus-warning: 0 0 0 3px color-mix(in srgb, var(--color-warning) 18%, transparent);
 }
 
 /* ── Dark Mode Overrides ─────────────────────────────────────────────────── */

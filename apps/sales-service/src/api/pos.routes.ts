@@ -1,17 +1,27 @@
 import type { FastifyInstance } from 'fastify';
 import type { PlatformContextFactory } from '@erp/sdk';
 import { getBranchScope } from '@erp/sdk';
-import { posSessions, posHeldSales, invoices, invoiceLines, items, customers, projectionDashboardDaily, organizationSettings, paymentAllocations } from '@erp/db';
-import { and, desc, eq, ilike, sql } from 'drizzle-orm';
+import {
+  posSessions,
+  posHeldSales,
+  invoices,
+  items,
+  customers,
+  organizationSettings,
+  paymentAllocations,
+} from '@erp/db';
+import { and, desc, eq, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { PERMISSIONS } from '@erp/types';
 import { authenticate } from '../middleware/authenticate.js';
 import { requirePermission } from '../middleware/authorize.js';
-import { GSTCalculator } from '../domain/GSTCalculator.js';
-import { InvoiceService, DuplicateOperationError, InsufficientStockError } from '../domain/InvoiceService.js';
+import {
+  InvoiceService,
+  DuplicateOperationError,
+  InsufficientStockError,
+} from '../domain/InvoiceService.js';
 import { PaymentService } from '../domain/PaymentService.js';
 import { LoyaltyService } from '../domain/LoyaltyService.js';
-import { randomUUID } from 'node:crypto';
 import { sendError } from './http-errors.js';
 
 // Cashiers can discount up to this without approval; anything higher requires a user
@@ -27,7 +37,10 @@ function round2(n: number): number {
 // which scopes reads via query filters); this rejects a branchId outside the caller's JWT
 // branchIds instead of trusting whatever the client sends, mirroring getBranchScope's use
 // in invoice.routes.ts:84.
-function branchInScope(auth: { permissions: string[]; branchIds: number[] }, branchId: number): boolean {
+function branchInScope(
+  auth: { permissions: string[]; branchIds: number[] },
+  branchId: number
+): boolean {
   const scope = getBranchScope(auth);
   return scope === 'all' || scope.includes(branchId);
 }
@@ -49,25 +62,33 @@ const POSSaleSchema = z.object({
   warehouseId: z.number().int().positive(),
   placeOfSupply: z.string().length(2),
   sellerStateCode: z.string().length(2),
-  lines: z.array(z.object({
-    itemId: z.number().int().positive(),
-    variantId: z.number().int().positive().optional(),
-    quantity: z.number().positive(),
-    unitPrice: z.number().nonnegative(),
-    discountPct: z.number().min(0).max(100).default(0),
-    gstRate: z.number().min(0).max(100),
-    cessRate: z.number().min(0).max(100).default(0),
-    hsnCode: z.string().max(20).optional(),
-  })).min(1),
+  lines: z
+    .array(
+      z.object({
+        itemId: z.number().int().positive(),
+        variantId: z.number().int().positive().optional(),
+        quantity: z.number().positive(),
+        unitPrice: z.number().nonnegative(),
+        discountPct: z.number().min(0).max(100).default(0),
+        gstRate: z.number().min(0).max(100),
+        cessRate: z.number().min(0).max(100).default(0),
+        hsnCode: z.string().max(20).optional(),
+      })
+    )
+    .min(1),
   paymentMode: z.enum(['CASH', 'CARD', 'UPI']),
   amountTendered: z.number().nonnegative(),
   loyaltyPointsRedeem: z.number().int().nonnegative().default(0),
   // Split payment — when provided, overrides paymentMode/amountTendered above (which
   // remain for backward compatibility with a single-mode sale).
-  payments: z.array(z.object({
-    mode: z.enum(['CASH', 'CARD', 'UPI']),
-    amount: z.number().positive(),
-  })).optional(),
+  payments: z
+    .array(
+      z.object({
+        mode: z.enum(['CASH', 'CARD', 'UPI']),
+        amount: z.number().positive(),
+      })
+    )
+    .optional(),
   // OFFLINE-02: client-generated idempotency key, attached at offline-queue time — optional
   // so non-offline/legacy callers that don't send one are unaffected (no dedup for them,
   // same behavior as before this field existed).
@@ -82,7 +103,13 @@ async function waitForOperationResult(
   ctx: ReturnType<PlatformContextFactory['create']>,
   tenantId: number,
   operationId: string
-): Promise<{ invoiceId: number; invoiceNumber: string; grandTotal: string; loyaltyPointsEarned: number; loyaltyRedemptionValue: string } | null> {
+): Promise<{
+  invoiceId: number;
+  invoiceNumber: string;
+  grandTotal: string;
+  loyaltyPointsEarned: number;
+  loyaltyRedemptionValue: string;
+} | null> {
   for (let attempt = 0; attempt < 10; attempt++) {
     const [inv] = await ctx.db.raw
       .select({
@@ -123,7 +150,12 @@ export async function posRoutes(
       if (!branchInScope(req.auth, body.branchId)) {
         return sendError(reply, 403, 'BRANCH_ACCESS_DENIED', 'You are not assigned to this branch');
       }
-      const ctx = ctxFactory.create({ tenantId: req.auth.tenantId, userId: req.auth.userId, correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID() });
+      const ctx = ctxFactory.create({
+        tenantId: req.auth.tenantId,
+        userId: req.auth.userId,
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+      });
       const sessionNumber = `POS-${req.auth.tenantId}-${Date.now()}`;
 
       const [row] = await ctx.db.raw
@@ -151,15 +183,23 @@ export async function posRoutes(
     handler: async (req, reply) => {
       const { id } = req.params as { id: string };
       const body = CloseSessionSchema.parse(req.body);
-      const ctx = ctxFactory.create({ tenantId: req.auth.tenantId, userId: req.auth.userId, correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID() });
+      const ctx = ctxFactory.create({
+        tenantId: req.auth.tenantId,
+        userId: req.auth.userId,
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+      });
 
       const [session] = await ctx.db.raw
         .select()
         .from(posSessions)
-        .where(and(eq(posSessions.id, parseInt(id, 10)), eq(posSessions.tenantId, req.auth.tenantId)));
+        .where(
+          and(eq(posSessions.id, parseInt(id, 10)), eq(posSessions.tenantId, req.auth.tenantId))
+        );
       if (!session) return sendError(reply, 404, 'NOT_FOUND', 'Session not found');
 
-      const expectedCash = parseFloat(String(session.openingCash)) + parseFloat(String(session.totalSales));
+      const expectedCash =
+        parseFloat(String(session.openingCash)) + parseFloat(String(session.totalSales));
       const cashVariance = body.closingCash - expectedCash;
 
       await ctx.db.raw
@@ -172,9 +212,38 @@ export async function posRoutes(
           cashVariance: String(cashVariance),
           closedAt: new Date(),
         })
-        .where(and(eq(posSessions.id, parseInt(id, 10)), eq(posSessions.tenantId, req.auth.tenantId)));
+        .where(
+          and(eq(posSessions.id, parseInt(id, 10)), eq(posSessions.tenantId, req.auth.tenantId))
+        );
 
       return reply.send({ data: { expectedCash, cashVariance } });
+    },
+  });
+
+  // Active session for the caller — lets the frontend recover "is there an open session"
+  // after a page reload, since the only other lookup is by numeric :id.
+  fastify.get('/pos/sessions/active', {
+    preHandler: requirePermission(PERMISSIONS.POS_MANAGE),
+    handler: async (req, reply) => {
+      const ctx = ctxFactory.create({
+        tenantId: req.auth.tenantId,
+        userId: req.auth.userId,
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+      });
+      const [session] = await ctx.db.raw
+        .select()
+        .from(posSessions)
+        .where(
+          and(
+            eq(posSessions.tenantId, req.auth.tenantId),
+            eq(posSessions.openedBy, req.auth.userId),
+            eq(posSessions.status, 'OPEN')
+          )
+        )
+        .orderBy(desc(posSessions.openedAt))
+        .limit(1);
+      return reply.send({ data: session ?? null });
     },
   });
 
@@ -183,11 +252,18 @@ export async function posRoutes(
     preHandler: requirePermission(PERMISSIONS.POS_MANAGE),
     handler: async (req, reply) => {
       const { id } = req.params as { id: string };
-      const ctx = ctxFactory.create({ tenantId: req.auth.tenantId, userId: req.auth.userId, correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID() });
+      const ctx = ctxFactory.create({
+        tenantId: req.auth.tenantId,
+        userId: req.auth.userId,
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+      });
       const [session] = await ctx.db.raw
         .select()
         .from(posSessions)
-        .where(and(eq(posSessions.id, parseInt(id, 10)), eq(posSessions.tenantId, req.auth.tenantId)));
+        .where(
+          and(eq(posSessions.id, parseInt(id, 10)), eq(posSessions.tenantId, req.auth.tenantId))
+        );
       if (!session) return sendError(reply, 404, 'NOT_FOUND', 'Session not found');
       return reply.send({ data: session });
     },
@@ -201,12 +277,22 @@ export async function posRoutes(
       if (!branchInScope(req.auth, body.branchId)) {
         return sendError(reply, 403, 'BRANCH_ACCESS_DENIED', 'You are not assigned to this branch');
       }
-      const ctx = ctxFactory.create({ tenantId: req.auth.tenantId, userId: req.auth.userId, correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID() });
+      const ctx = ctxFactory.create({
+        tenantId: req.auth.tenantId,
+        userId: req.auth.userId,
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+      });
 
       if (!req.auth.permissions.includes(PERMISSIONS.DISCOUNT_OVERRIDE)) {
         const overLimitLine = body.lines.find((l) => l.discountPct > MAX_CASHIER_DISCOUNT_PCT);
         if (overLimitLine) {
-          return sendError(reply, 403, 'DISCOUNT_LIMIT_EXCEEDED', `Discount above ${MAX_CASHIER_DISCOUNT_PCT}% requires a manager to complete this sale`);
+          return sendError(
+            reply,
+            403,
+            'DISCOUNT_LIMIT_EXCEEDED',
+            `Discount above ${MAX_CASHIER_DISCOUNT_PCT}% requires a manager to complete this sale`
+          );
         }
       }
 
@@ -214,11 +300,13 @@ export async function posRoutes(
       const [session] = await ctx.db.raw
         .select()
         .from(posSessions)
-        .where(and(
-          eq(posSessions.id, body.sessionId),
-          eq(posSessions.tenantId, req.auth.tenantId),
-          eq(posSessions.status, 'OPEN')
-        ));
+        .where(
+          and(
+            eq(posSessions.id, body.sessionId),
+            eq(posSessions.tenantId, req.auth.tenantId),
+            eq(posSessions.status, 'OPEN')
+          )
+        );
       if (!session) return sendError(reply, 400, 'NO_OPEN_SESSION', 'No open POS session found');
 
       const svc = new InvoiceService(ctx.db.raw);
@@ -246,12 +334,22 @@ export async function posRoutes(
         if (err instanceof DuplicateOperationError && body.operationId) {
           const existing = await waitForOperationResult(ctx, req.auth.tenantId, body.operationId);
           if (!existing) {
-            return sendError(reply, 409, 'DUPLICATE_OPERATION_PROCESSING', 'This sale is still being processed — please retry shortly');
+            return sendError(
+              reply,
+              409,
+              'DUPLICATE_OPERATION_PROCESSING',
+              'This sale is still being processed — please retry shortly'
+            );
           }
           const paymentRows = await ctx.db.raw
             .selectDistinct({ paymentId: paymentAllocations.paymentId })
             .from(paymentAllocations)
-            .where(and(eq(paymentAllocations.invoiceId, existing.invoiceId), eq(paymentAllocations.tenantId, req.auth.tenantId)));
+            .where(
+              and(
+                eq(paymentAllocations.invoiceId, existing.invoiceId),
+                eq(paymentAllocations.tenantId, req.auth.tenantId)
+              )
+            );
           return reply.code(200).send({
             data: {
               invoiceId: existing.invoiceId,
@@ -276,8 +374,17 @@ export async function posRoutes(
           // block any retry under the same operationId (unique constraint) while never
           // itself reaching a resolvable state. Void it now so the cashier's adjust/cancel
           // resolution (offline sync stuck-item UI) can resubmit cleanly under a new one.
-          await svc.cancel(invoiceId, req.auth.tenantId, req.auth.userId, `Stock conflict at sync: ${err.message}`);
-          return sendError(reply, 422, 'INSUFFICIENT_STOCK', err.message, { itemId: err.itemId, available: err.available, requested: err.requested });
+          await svc.cancel(
+            invoiceId,
+            req.auth.tenantId,
+            req.auth.userId,
+            `Stock conflict at sync: ${err.message}`
+          );
+          return sendError(reply, 422, 'INSUFFICIENT_STOCK', err.message, {
+            itemId: err.itemId,
+            available: err.available,
+            requested: err.requested,
+          });
         }
         throw err;
       }
@@ -296,7 +403,14 @@ export async function posRoutes(
       // recorded as its own Payment row (paymentMode LOYALTY) so it shows in reconciliation.
       let redemptionValue = 0;
       if (body.loyaltyPointsRedeem > 0 && body.customerId) {
-        redemptionValue = await loyaltySvc.redeemPoints(req.auth.tenantId, body.customerId, body.loyaltyPointsRedeem, 'POS_SALE', invoiceId, req.auth.userId);
+        redemptionValue = await loyaltySvc.redeemPoints(
+          req.auth.tenantId,
+          body.customerId,
+          body.loyaltyPointsRedeem,
+          'POS_SALE',
+          invoiceId,
+          req.auth.userId
+        );
         if (redemptionValue > 0) {
           const loyaltyPaymentId = await paymentSvc.create({
             tenantId: req.auth.tenantId,
@@ -309,7 +423,12 @@ export async function posRoutes(
             posSessionId: body.sessionId,
             createdBy: req.auth.userId,
           });
-          await paymentSvc.allocate(loyaltyPaymentId, req.auth.tenantId, [{ invoiceId, amount: redemptionValue }], req.auth.userId);
+          await paymentSvc.allocate(
+            loyaltyPaymentId,
+            req.auth.tenantId,
+            [{ invoiceId, amount: redemptionValue }],
+            req.auth.userId
+          );
           paymentIds.push(loyaltyPaymentId);
         }
       }
@@ -319,13 +438,19 @@ export async function posRoutes(
       // sale (even cash paid in full) looked unpaid in the books forever. Supports a
       // single mode (paymentMode/amountTendered) or a split across multiple modes.
       const amountDue = round2(grandTotal - redemptionValue);
-      const paymentLines = body.payments && body.payments.length > 0
-        ? body.payments
-        : [{ mode: body.paymentMode, amount: amountDue }];
+      const paymentLines =
+        body.payments && body.payments.length > 0
+          ? body.payments
+          : [{ mode: body.paymentMode, amount: amountDue }];
 
       const paymentsSum = round2(paymentLines.reduce((s, p) => s + p.amount, 0));
       if (Math.abs(paymentsSum - amountDue) > 0.02) {
-        return sendError(reply, 400, 'PAYMENT_MISMATCH', `Payments total ₹${paymentsSum} does not match amount due ₹${amountDue}`);
+        return sendError(
+          reply,
+          400,
+          'PAYMENT_MISMATCH',
+          `Payments total ₹${paymentsSum} does not match amount due ₹${amountDue}`
+        );
       }
 
       for (const p of paymentLines) {
@@ -340,7 +465,12 @@ export async function posRoutes(
           posSessionId: body.sessionId,
           createdBy: req.auth.userId,
         });
-        await paymentSvc.allocate(paymentId, req.auth.tenantId, [{ invoiceId, amount: p.amount }], req.auth.userId);
+        await paymentSvc.allocate(
+          paymentId,
+          req.auth.tenantId,
+          [{ invoiceId, amount: p.amount }],
+          req.auth.userId
+        );
         paymentIds.push(paymentId);
       }
 
@@ -348,7 +478,14 @@ export async function posRoutes(
       // is off or there's no real customer on the sale).
       let loyaltyPointsEarned = 0;
       if (body.customerId) {
-        loyaltyPointsEarned = await loyaltySvc.earnPoints(req.auth.tenantId, body.customerId, grandTotal, 'POS_SALE', invoiceId, req.auth.userId);
+        loyaltyPointsEarned = await loyaltySvc.earnPoints(
+          req.auth.tenantId,
+          body.customerId,
+          grandTotal,
+          'POS_SALE',
+          invoiceId,
+          req.auth.userId
+        );
       }
 
       // Update session totals
@@ -360,7 +497,16 @@ export async function posRoutes(
         })
         .where(eq(posSessions.id, body.sessionId));
 
-      return reply.code(201).send({ data: { invoiceId, invoiceNumber, grandTotal: inv?.grandTotal, paymentIds, loyaltyPointsEarned, loyaltyRedemptionValue: redemptionValue } });
+      return reply.code(201).send({
+        data: {
+          invoiceId,
+          invoiceNumber,
+          grandTotal: inv?.grandTotal,
+          paymentIds,
+          loyaltyPointsEarned,
+          loyaltyRedemptionValue: redemptionValue,
+        },
+      });
     },
   });
 
@@ -368,7 +514,12 @@ export async function posRoutes(
   fastify.get('/pos/quick-items', {
     preHandler: requirePermission(PERMISSIONS.POS_MANAGE),
     handler: async (req, reply) => {
-      const ctx = ctxFactory.create({ tenantId: req.auth.tenantId, userId: req.auth.userId, correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID() });
+      const ctx = ctxFactory.create({
+        tenantId: req.auth.tenantId,
+        userId: req.auth.userId,
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+      });
       const rows = await ctx.db.raw
         .select()
         .from(items)
@@ -382,18 +533,25 @@ export async function posRoutes(
   fastify.get('/pos/customer-search', {
     preHandler: requirePermission(PERMISSIONS.POS_MANAGE),
     handler: async (req, reply) => {
-      const ctx = ctxFactory.create({ tenantId: req.auth.tenantId, userId: req.auth.userId, correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID() });
+      const ctx = ctxFactory.create({
+        tenantId: req.auth.tenantId,
+        userId: req.auth.userId,
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+      });
       const q = req.query as { q?: string };
       if (!q.q || q.q.length < 2) return reply.send({ data: [] });
 
       const rows = await ctx.db.raw
         .select()
         .from(customers)
-        .where(and(
-          eq(customers.tenantId, req.auth.tenantId),
-          eq(customers.status, 'ACTIVE'),
-          sql`(${customers.displayName} ILIKE ${`%${q.q}%`} OR ${customers.phone} ILIKE ${`%${q.q}%`})`
-        ))
+        .where(
+          and(
+            eq(customers.tenantId, req.auth.tenantId),
+            eq(customers.status, 'ACTIVE'),
+            sql`(${customers.displayName} ILIKE ${`%${q.q}%`} OR ${customers.phone} ILIKE ${`%${q.q}%`})`
+          )
+        )
         .limit(10);
       return reply.send({ data: rows });
     },
@@ -403,13 +561,20 @@ export async function posRoutes(
   fastify.post('/pos/held-sales', {
     preHandler: requirePermission(PERMISSIONS.POS_MANAGE),
     handler: async (req, reply) => {
-      const body = z.object({
-        sessionId: z.number().int().positive(),
-        customerId: z.number().int().positive().optional(),
-        label: z.string().max(100).optional(),
-        cart: z.array(z.record(z.unknown())).min(1),
-      }).parse(req.body);
-      const ctx = ctxFactory.create({ tenantId: req.auth.tenantId, userId: req.auth.userId, correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID() });
+      const body = z
+        .object({
+          sessionId: z.number().int().positive(),
+          customerId: z.number().int().positive().optional(),
+          label: z.string().max(100).optional(),
+          cart: z.array(z.record(z.unknown())).min(1),
+        })
+        .parse(req.body);
+      const ctx = ctxFactory.create({
+        tenantId: req.auth.tenantId,
+        userId: req.auth.userId,
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+      });
 
       const [row] = await ctx.db.raw
         .insert(posHeldSales)
@@ -431,7 +596,12 @@ export async function posRoutes(
   fastify.get('/pos/held-sales', {
     preHandler: requirePermission(PERMISSIONS.POS_MANAGE),
     handler: async (req, reply) => {
-      const ctx = ctxFactory.create({ tenantId: req.auth.tenantId, userId: req.auth.userId, correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID() });
+      const ctx = ctxFactory.create({
+        tenantId: req.auth.tenantId,
+        userId: req.auth.userId,
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+      });
       const rows = await ctx.db.raw
         .select()
         .from(posHeldSales)
@@ -447,7 +617,12 @@ export async function posRoutes(
     preHandler: requirePermission(PERMISSIONS.POS_MANAGE),
     handler: async (req, reply) => {
       const id = parseInt(req.params.id, 10);
-      const ctx = ctxFactory.create({ tenantId: req.auth.tenantId, userId: req.auth.userId, correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID() });
+      const ctx = ctxFactory.create({
+        tenantId: req.auth.tenantId,
+        userId: req.auth.userId,
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+      });
 
       const [held] = await ctx.db.raw
         .select()
@@ -455,7 +630,9 @@ export async function posRoutes(
         .where(and(eq(posHeldSales.id, id), eq(posHeldSales.tenantId, req.auth.tenantId)));
       if (!held) return sendError(reply, 404, 'NOT_FOUND', 'Held sale not found');
 
-      await ctx.db.raw.delete(posHeldSales).where(and(eq(posHeldSales.id, id), eq(posHeldSales.tenantId, req.auth.tenantId)));
+      await ctx.db.raw
+        .delete(posHeldSales)
+        .where(and(eq(posHeldSales.id, id), eq(posHeldSales.tenantId, req.auth.tenantId)));
 
       return reply.send({ data: { cart: held.cart, customerId: held.customerId } });
     },
@@ -466,8 +643,15 @@ export async function posRoutes(
     preHandler: requirePermission(PERMISSIONS.POS_MANAGE),
     handler: async (req, reply) => {
       const id = parseInt(req.params.id, 10);
-      const ctx = ctxFactory.create({ tenantId: req.auth.tenantId, userId: req.auth.userId, correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID() });
-      await ctx.db.raw.delete(posHeldSales).where(and(eq(posHeldSales.id, id), eq(posHeldSales.tenantId, req.auth.tenantId)));
+      const ctx = ctxFactory.create({
+        tenantId: req.auth.tenantId,
+        userId: req.auth.userId,
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+      });
+      await ctx.db.raw
+        .delete(posHeldSales)
+        .where(and(eq(posHeldSales.id, id), eq(posHeldSales.tenantId, req.auth.tenantId)));
       return reply.send({ data: { success: true } });
     },
   });
@@ -478,57 +662,113 @@ export async function posRoutes(
   fastify.get('/pos/upi-vpa', {
     preHandler: requirePermission(PERMISSIONS.POS_MANAGE),
     handler: async (req, reply) => {
-      const ctx = ctxFactory.create({ tenantId: req.auth.tenantId, userId: req.auth.userId, correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID() });
+      const ctx = ctxFactory.create({
+        tenantId: req.auth.tenantId,
+        userId: req.auth.userId,
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+      });
       const [org] = await ctx.db.raw
-        .select({ orgName: organizationSettings.orgName, bankDetails: organizationSettings.bankDetails })
+        .select({
+          orgName: organizationSettings.orgName,
+          bankDetails: organizationSettings.bankDetails,
+        })
         .from(organizationSettings)
         .where(eq(organizationSettings.tenantId, req.auth.tenantId));
-      return reply.send({ data: { upiVpa: org?.bankDetails?.upiVpa ?? null, payeeName: org?.orgName ?? 'Store' } });
+      return reply.send({
+        data: { upiVpa: org?.bankDetails?.upiVpa ?? null, payeeName: org?.orgName ?? 'Store' },
+      });
     },
   });
 
   // Send the receipt for a completed POS sale via WhatsApp or Email — reuses the same
   // notification-service send-raw-internal pathway CampaignService/InvoiceNotificationService
   // already use, rather than a new integration.
-  fastify.post<{ Params: { id: string }; Body: { channel: 'WHATSAPP' | 'EMAIL' } }>('/pos/sales/:id/send-receipt', {
-    preHandler: requirePermission(PERMISSIONS.POS_MANAGE),
-    handler: async (req, reply) => {
-      const invoiceId = parseInt(req.params.id, 10);
-      const { channel } = z.object({ channel: z.enum(['WHATSAPP', 'EMAIL']) }).parse(req.body);
-      const ctx = ctxFactory.create({ tenantId: req.auth.tenantId, userId: req.auth.userId, correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID() });
-
-      const [invoice] = await ctx.db.raw
-        .select({ invoiceNumber: invoices.invoiceNumber, grandTotal: invoices.grandTotal, customerId: invoices.customerId })
-        .from(invoices)
-        .where(and(eq(invoices.id, invoiceId), eq(invoices.tenantId, req.auth.tenantId)));
-      if (!invoice) return sendError(reply, 404, 'NOT_FOUND', 'Sale not found');
-
-      const [customer] = await ctx.db.raw
-        .select({ displayName: customers.displayName, phone: customers.phone, email: customers.email, optOutWhatsapp: customers.optOutWhatsapp, optOutEmail: customers.optOutEmail })
-        .from(customers)
-        .where(and(eq(customers.id, invoice.customerId), eq(customers.tenantId, req.auth.tenantId)));
-      if (!customer) return sendError(reply, 400, 'NO_CUSTOMER', 'This sale has no customer to send a receipt to');
-      if (channel === 'WHATSAPP' && (customer.optOutWhatsapp || !customer.phone)) return sendError(reply, 400, 'CANNOT_SEND', 'Customer has no phone on file or has opted out of WhatsApp');
-      if (channel === 'EMAIL' && (customer.optOutEmail || !customer.email)) return sendError(reply, 400, 'CANNOT_SEND', 'Customer has no email on file or has opted out of Email');
-
-      const notificationUrl = process.env['NOTIFICATION_SERVICE_URL'] ?? 'http://localhost:3014';
-      const internalKey = process.env['INTERNAL_API_KEY'] ?? '';
-      const message = `Hi ${customer.displayName}, thank you for your purchase! Receipt ${invoice.invoiceNumber}: Rs. ${invoice.grandTotal}.`;
-
-      const res = await fetch(`${notificationUrl}/notifications/send-raw-internal`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-internal-key': internalKey },
-        body: JSON.stringify({
+  fastify.post<{ Params: { id: string }; Body: { channel: 'WHATSAPP' | 'EMAIL' } }>(
+    '/pos/sales/:id/send-receipt',
+    {
+      preHandler: requirePermission(PERMISSIONS.POS_MANAGE),
+      handler: async (req, reply) => {
+        const invoiceId = parseInt(req.params.id, 10);
+        const { channel } = z.object({ channel: z.enum(['WHATSAPP', 'EMAIL']) }).parse(req.body);
+        const ctx = ctxFactory.create({
           tenantId: req.auth.tenantId,
-          eventType: 'POS_RECEIPT',
-          channel,
-          body: message,
-          ...(channel === 'WHATSAPP' ? { recipientPhone: customer.phone } : { recipientEmail: customer.email, subject: `Receipt ${invoice.invoiceNumber}` }),
-        }),
-      });
-      if (!res.ok) return sendError(reply, 502, 'NOTIFICATION_FAILED', 'Could not send the receipt right now');
+          userId: req.auth.userId,
+          correlationId:
+            (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+        });
 
-      return reply.send({ data: { sent: true } });
-    },
-  });
+        const [invoice] = await ctx.db.raw
+          .select({
+            invoiceNumber: invoices.invoiceNumber,
+            grandTotal: invoices.grandTotal,
+            customerId: invoices.customerId,
+          })
+          .from(invoices)
+          .where(and(eq(invoices.id, invoiceId), eq(invoices.tenantId, req.auth.tenantId)));
+        if (!invoice) return sendError(reply, 404, 'NOT_FOUND', 'Sale not found');
+
+        const [customer] = await ctx.db.raw
+          .select({
+            displayName: customers.displayName,
+            phone: customers.phone,
+            email: customers.email,
+            optOutWhatsapp: customers.optOutWhatsapp,
+            optOutEmail: customers.optOutEmail,
+          })
+          .from(customers)
+          .where(
+            and(eq(customers.id, invoice.customerId), eq(customers.tenantId, req.auth.tenantId))
+          );
+        if (!customer)
+          return sendError(
+            reply,
+            400,
+            'NO_CUSTOMER',
+            'This sale has no customer to send a receipt to'
+          );
+        if (channel === 'WHATSAPP' && (customer.optOutWhatsapp || !customer.phone))
+          return sendError(
+            reply,
+            400,
+            'CANNOT_SEND',
+            'Customer has no phone on file or has opted out of WhatsApp'
+          );
+        if (channel === 'EMAIL' && (customer.optOutEmail || !customer.email))
+          return sendError(
+            reply,
+            400,
+            'CANNOT_SEND',
+            'Customer has no email on file or has opted out of Email'
+          );
+
+        const notificationUrl = process.env['NOTIFICATION_SERVICE_URL'] ?? 'http://localhost:3014';
+        const internalKey = process.env['INTERNAL_API_KEY'] ?? '';
+        const message = `Hi ${customer.displayName}, thank you for your purchase! Receipt ${invoice.invoiceNumber}: Rs. ${invoice.grandTotal}.`;
+
+        const res = await fetch(`${notificationUrl}/notifications/send-raw-internal`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-internal-key': internalKey },
+          body: JSON.stringify({
+            tenantId: req.auth.tenantId,
+            eventType: 'POS_RECEIPT',
+            channel,
+            body: message,
+            ...(channel === 'WHATSAPP'
+              ? { recipientPhone: customer.phone }
+              : { recipientEmail: customer.email, subject: `Receipt ${invoice.invoiceNumber}` }),
+          }),
+        });
+        if (!res.ok)
+          return sendError(
+            reply,
+            502,
+            'NOTIFICATION_FAILED',
+            'Could not send the receipt right now'
+          );
+
+        return reply.send({ data: { sent: true } });
+      },
+    }
+  );
 }

@@ -1,0 +1,617 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ERP Docs — POS Module</title>
+<link rel="stylesheet" href="/shared/docs-shell.css">
+</head>
+<body data-module="POS">
+
+<header class="topbar">
+  <button class="icon-btn navtoggle" id="navToggle" aria-label="Toggle navigation">☰</button>
+  <a class="brand" href="/"><span class="mark">N</span> Nexoraa ERP Docs <span class="pilot-tag">Pilot · POS only</span></a>
+  <div class="searchwrap">
+    <input type="text" class="searchbox" id="searchInput" placeholder="Search POS documentation…" autocomplete="off">
+    <div class="search-results" id="searchResults"></div>
+  </div>
+  <div class="topbar-actions">
+    <button class="icon-btn" id="themeToggle" aria-label="Toggle dark mode" title="Toggle dark mode">◐</button>
+    <button class="icon-btn" id="printBtn" aria-label="Print this page" title="Print this page">⎙</button>
+  </div>
+</header>
+
+<div class="shell">
+  <nav class="sidebar" id="sidebar">
+    <div class="sb-group">
+      <div class="sb-group-title">Modules</div>
+      <div class="sb-module active-module">
+        <div class="sb-module-head active-module">POS <span class="status">Pilot</span></div>
+        <div class="sb-track">
+          <div class="sb-track-title">Client</div>
+          <a class="sb-link" data-page="pos-client-overview" href="#pos/client/overview">Overview</a>
+          <a class="sb-link" data-page="pos-client-billing" href="#pos/client/billing">Billing a Sale</a>
+          <a class="sb-link" data-page="pos-client-held" href="#pos/client/held-sales">Held Sales</a>
+          <a class="sb-link" data-page="pos-client-offline" href="#pos/client/offline">Working Offline</a>
+          <a class="sb-link" data-page="pos-client-shifts" href="#pos/client/shifts">Shift Management</a>
+          <a class="sb-link" data-page="pos-client-shortcuts" href="#pos/client/shortcuts">Keyboard Shortcuts</a>
+          <a class="sb-link" data-page="pos-client-faq" href="#pos/client/faq">Troubleshooting &amp; FAQ</a>
+        </div>
+        <div class="sb-track">
+          <div class="sb-track-title">Super Admin</div>
+          <a class="sb-link" data-page="pos-admin-access" href="#pos/admin/access-roles">Access &amp; Roles</a>
+          <a class="sb-link" data-page="pos-admin-flags" href="#pos/admin/feature-flags">Feature Flags</a>
+          <a class="sb-link" data-page="pos-admin-provisioning" href="#pos/admin/provisioning">Branch &amp; Warehouse Setup</a>
+          <a class="sb-link" data-page="pos-admin-limits" href="#pos/admin/limitations">Limitations to Know</a>
+        </div>
+        <div class="sb-track">
+          <div class="sb-track-title">Developer</div>
+          <a class="sb-link" data-page="pos-dev-architecture" href="#pos/dev/architecture">Architecture</a>
+          <a class="sb-link" data-page="pos-dev-api" href="#pos/dev/api-reference">API Reference</a>
+          <a class="sb-link" data-page="pos-dev-data" href="#pos/dev/data-model">Data Model</a>
+          <a class="sb-link" data-page="pos-dev-sync" href="#pos/dev/offline-sync">Offline Sync Design</a>
+        </div>
+        <div class="sb-track">
+          <div class="sb-track-title">Audit</div>
+          <a class="sb-link" data-page="pos-issues" href="#pos/audit/known-issues">Known Issues &amp; Needs Review</a>
+        </div>
+      </div>
+    </div>
+    <div class="sb-group">
+      <div class="sb-group-title">Other modules</div>
+      <a class="sb-module-head" href="/sales/index.html">Sales &amp; Invoicing <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/inventory/index.html">Inventory <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/purchase/index.html">Purchase <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/products/index.html">Products &amp; Variants <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/customers/index.html">Customers &amp; Suppliers <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/accounting/index.html">Accounting &amp; GST <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/hr/index.html">HR &amp; Payroll <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/reports/index.html">Reports <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/tenants/index.html">Super Admin / Tenants <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/platform/index.html">Developer Platform <span class="status">Open →</span></a>
+    </div>
+  </nav>
+
+  <main class="content" id="content">
+    <div class="breadcrumb" id="breadcrumb"></div>
+
+    <!-- ============ CLIENT: OVERVIEW ============ -->
+    <article class="page" id="page-pos-client-overview" data-track="client" data-title="POS Overview" data-nextid="pos-client-billing" data-nexttitle="Billing a Sale">
+      <span class="track-pill client">Client documentation</span>
+      <h1>POS Overview</h1>
+      <div class="pilot-banner">This is a <strong>pilot</strong> covering the POS module only, built entirely from reading <code>apps/pos-frontend</code> and the services it calls — nothing here is guessed. It's the template for documenting the rest of the ERP; once approved, the same structure and rigor extend to every other module as <code>apps/docs-site</code>.</div>
+
+      <p>The POS Terminal is a separate, dedicated app for counter billing — distinct from the main ERP web app and built to keep working with no internet connection. It's meant for cashiers ringing up walk-in and regular customers quickly: barcode/camera scan, a running cart, discounts, split payments, and a receipt, all from one screen.</p>
+
+      <h2 id="who">Who uses it</h2>
+      <p>Cashiers, and anyone with the <code>POS_MANAGE</code> permission (the default <strong>Cashier</strong> role has it, along with <strong>Sales Manager</strong>, <strong>Admin</strong>, and <strong>Owner</strong> roles). A manager-level role additionally has authority to approve discounts above the standard cashier limit and other overrides — see <a href="#pos/admin/access-roles">Access &amp; Roles</a>.</p>
+
+      <h2 id="opening">Opening the terminal</h2>
+      <ol class="steps">
+        <li><h4>Sign in</h4>Go to your POS URL and log in with your cashier credentials.
+          <div class="callout note"><div class="callout-title">Note</div><p>Accounts with two-factor authentication enabled cannot sign in here — POS has no 2FA challenge screen. Sign in to the main ERP app first if your account requires it.</p></div>
+        </li>
+        <li><h4>Pick your branch</h4>You'll only see branches your account is scoped to. If your account isn't scoped to any specific branch, every branch appears — this is expected for multi-branch roles. If exactly one branch and one warehouse apply to you, the terminal skips this screen entirely.</li>
+        <li><h4>Open your shift</h4>Enter your opening cash amount to start a session. You can't ring up sales without an open shift.</li>
+        <li><h4>Start billing</h4>The terminal opens directly on the sale screen, cursor ready in the barcode field.</li>
+      </ol>
+
+      <h2 id="screen">What's on screen</h2>
+      <p>Left side: item search/scan and a quick-item grid of your fastest-moving products. Right side: the current sale — cart lines, discounts, and the Hold/Charge buttons (which become a payment panel once you tap Charge). The top bar always shows Held Sales, a link to Returns/Exchange (opens the main ERP app), End Shift, and the sync status indicator.</p>
+
+      <p>Continue to <a href="#pos/client/billing">Billing a Sale</a> for the full walkthrough, or jump straight to <a href="#pos/client/offline">Working Offline</a> if your store has patchy internet.</p>
+
+      <div class="pager">
+        <span></span>
+        <a class="next" href="#pos/client/billing"><div class="pg-label">Next</div><div class="pg-title">Billing a Sale →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ CLIENT: BILLING ============ -->
+    <article class="page" id="page-pos-client-billing" data-track="client" data-title="Billing a Sale">
+      <span class="track-pill client">Client documentation</span>
+      <h1>Billing a Sale</h1>
+
+      <h2 id="add-items">Step 1 — Add items</h2>
+      <ul>
+        <li>Scan a barcode with a USB scanner — the item adds instantly, with a green flash + beep for success or a red flash + error tone if the barcode isn't recognized.</li>
+        <li>No scanner on hand? Use the camera-scan toggle in the search box to scan with a tablet/webcam instead.</li>
+        <li>Or type an item name/SKU and press Enter.</li>
+        <li>Fast-moving items also sit as tap-to-add tiles in the quick-item grid below the search box.</li>
+      </ul>
+      <div class="callout note"><div class="callout-title">How matching works</div><p>The terminal first checks its own small list of top sellers, then falls back to a full catalog barcode lookup. If neither matches, you'll see "No item found" — the barcode genuinely isn't in the system yet and needs to be added on the Items screen.</p></div>
+
+      <h2 id="qty">Step 2 — Adjust quantity</h2>
+      <p>Use the −/+ buttons or type a quantity directly. Fractional quantities are supported (e.g. <code>2.5</code> for 2.5 metres of fabric) — useful for items sold by length rather than piece.</p>
+
+      <h2 id="discount">Step 3 — Apply a discount (if allowed)</h2>
+      <p>Type a discount % on any line, or use the order-level discount to apply the same percentage to every line at once.</p>
+      <div class="callout review"><div class="callout-title">Cashier limit</div><p>A standard cashier can discount up to <strong>10%</strong> per line. Anything higher is rejected — a manager (Sales Manager, Admin, or Owner) needs to log in and complete the sale.</p></div>
+
+      <h2 id="customer">Step 4 — Select a customer (optional)</h2>
+      <ul>
+        <li>Search by name or phone — matches both your locally cached customers and, when online, a live search.</li>
+        <li>New customer: tap <strong>+ New</strong>, enter a name and phone number.</li>
+        <li>Leave it blank for a walk-in — the sale bills without a named customer.</li>
+        <li>If loyalty points are enabled for your store and the selected customer has a balance, a redeem option appears at payment.</li>
+      </ul>
+
+      <h2 id="payment">Step 5 — Take payment</h2>
+      <p>Tap <strong>Charge</strong> (or press <kbd>F8</kbd>) to open the payment panel.</p>
+      <ul>
+        <li><strong>Cash</strong> — enter the amount tendered; change is calculated for you.</li>
+        <li><strong>Card</strong> — records the payment; card authorization itself happens on your card terminal, not in this screen.</li>
+        <li><strong>UPI</strong> — shows a scannable QR code for the customer's UPI app. This is a display convenience, not a live payment-gateway check — confirm the payment came through before completing the sale.</li>
+        <li><strong>Split across modes</strong> — enter an amount against more than one mode; the total must match the amount due exactly (small rounding is tolerated).</li>
+        <li><strong>Redeem loyalty points</strong> — reduces the amount due before you choose a payment mode, where enabled.</li>
+      </ul>
+      <p>Every sale from POS is paid in full at the time of sale — there's no "invoice now, pay later" option from this screen (use a manual Invoice for that; see the training guide's Invoice module).</p>
+
+      <h2 id="receipt">Step 6 — Receipt</h2>
+      <p>The receipt appears automatically. Choose a paper size (58mm / 80mm / A4) and:</p>
+      <ul>
+        <li><strong>Print</strong> — always available, opens your browser's print dialog.</li>
+        <li><strong>Print to receipt printer</strong> — appears only on devices paired with a supported USB/serial thermal printer; also opens the cash drawer if one is wired to the printer.</li>
+        <li><strong>WhatsApp / Email</strong> — only available once the sale has actually synced to the server <em>and</em> a customer was selected. A sale completed offline shows "Saved offline — will sync when back online" and these buttons are hidden until it syncs.</li>
+      </ul>
+
+      <div class="pager">
+        <a href="#pos/client/overview"><div class="pg-label">Back</div><div class="pg-title">← Overview</div></a>
+        <a class="next" href="#pos/client/held-sales"><div class="pg-label">Next</div><div class="pg-title">Held Sales →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ CLIENT: HELD SALES ============ -->
+    <article class="page" id="page-pos-client-held" data-track="client" data-title="Held Sales">
+      <span class="track-pill client">Client documentation</span>
+      <h1>Held Sales</h1>
+      <p>If you need to step away mid-sale — a customer forgot their wallet, or wants to keep browsing — tap <strong>Hold</strong> next to Charge. The cart is parked and the screen clears for the next customer.</p>
+      <ul>
+        <li>Tap <strong>Held Sales</strong> in the top bar to see everything currently parked.</li>
+        <li><strong>Resume</strong> restores the cart exactly as it was.</li>
+        <li><strong>Discard</strong> removes it permanently.</li>
+      </ul>
+      <div class="callout review"><div class="callout-title">No auto-expiry</div><p>A held sale stays in the list indefinitely — there's no automatic timeout or end-of-day cleanup. If your store holds many sales, get in the habit of discarding ones that are no longer needed so the list stays manageable.</p></div>
+      <div class="callout note"><div class="callout-title">Held on this device</div><p>A held sale lives on the terminal it was parked on — it won't show up if you resume on a different till.</p></div>
+      <div class="pager">
+        <a href="#pos/client/billing"><div class="pg-label">Back</div><div class="pg-title">← Billing a Sale</div></a>
+        <a class="next" href="#pos/client/offline"><div class="pg-label">Next</div><div class="pg-title">Working Offline →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ CLIENT: OFFLINE ============ -->
+    <article class="page" id="page-pos-client-offline" data-track="client" data-title="Working Offline">
+      <span class="track-pill client">Client documentation</span>
+      <h1>Working Offline</h1>
+      <p>The terminal keeps working with no internet. You can still scan items from the last-synced catalog, search and create customers, and complete sales — everything queues locally and syncs automatically once the connection returns. Nothing you enter is lost.</p>
+
+      <h2 id="dot">The sync status indicator</h2>
+      <p>Shown in the top bar, it reflects how many sales/customers are still waiting to reach the server:</p>
+      <div class="tablewrap"><table>
+        <tr><th>State</th><th>Meaning</th></tr>
+        <tr><td>Online, nothing pending</td><td>Fully synced. Nothing to do.</td></tr>
+        <tr><td>Online, N pending</td><td>Connected, and N sale(s)/customer(s) are still being sent. A manual "Sync now" action is available.</td></tr>
+        <tr><td>Offline</td><td>No connection right now. Everything you do is queuing locally.</td></tr>
+      </table></div>
+
+      <h2 id="stuck">When sync gets stuck</h2>
+      <p>An item that fails to sync repeatedly (5 attempts) is flagged for attention with a manual retry option — usually a sign of a persistent connection problem. If it keeps recurring, tell your manager; there may be a server-side issue worth investigating.</p>
+
+      <h2 id="conflict">Stock conflicts</h2>
+      <p>A queued sale can fail to sync for a different reason: the stock for an item changed while you were offline (e.g. another till sold the last units). This is handled explicitly, not just retried:</p>
+      <div class="flow">
+        <div class="flow-step"><div class="fs-label">While offline</div>Sale queued locally with the quantity you entered</div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step branch"><div class="fs-label">On sync</div>Server finds insufficient stock for a line</div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step"><div class="fs-label">You choose</div>Adjust quantity to what's available, or cancel the sale</div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step terminal"><div class="fs-label">Outcome</div>Exactly one result: adjusted invoice, or nothing charged</div>
+      </div>
+      <div class="diagram-note">Simplified flow — see the Developer track's <a href="#pos/dev/offline-sync">Offline Sync Design</a> for the underlying mechanism.</div>
+      <p>Either way you'll never end up with a duplicate invoice or a silently lost sale — the system guarantees one outcome per queued sale, even if you're forced to retry several times.</p>
+
+      <div class="callout note"><div class="callout-title">Session expired while offline?</div><p>If you're pushed back to the login screen after being offline a long time, your session simply expired — log in again. Anything already queued is still saved locally and will sync once you're logged in and back online.</p></div>
+
+      <div class="pager">
+        <a href="#pos/client/held-sales"><div class="pg-label">Back</div><div class="pg-title">← Held Sales</div></a>
+        <a class="next" href="#pos/client/shifts"><div class="pg-label">Next</div><div class="pg-title">Shift Management →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ CLIENT: SHIFTS ============ -->
+    <article class="page" id="page-pos-client-shifts" data-track="client" data-title="Shift Management">
+      <span class="track-pill client">Client documentation</span>
+      <h1>Shift Management</h1>
+      <p>A shift ("session") groups all sales rung up between opening and closing the till, and reconciles cash at the end.</p>
+      <ol class="steps">
+        <li><h4>Open shift</h4>Enter your opening cash float before you can start billing.</li>
+        <li><h4>Bill as normal</h4>Every sale during the shift is tallied against it.</li>
+        <li><h4>Close shift</h4>The summary screen shows expected cash based on sales recorded; enter your actual counted cash and the system shows the variance.</li>
+      </ol>
+      <p>You must have an open shift to reach the sale screen at all — the terminal redirects you to open one first if none is active.</p>
+      <div class="pager">
+        <a href="#pos/client/offline"><div class="pg-label">Back</div><div class="pg-title">← Working Offline</div></a>
+        <a class="next" href="#pos/client/shortcuts"><div class="pg-label">Next</div><div class="pg-title">Keyboard Shortcuts →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ CLIENT: SHORTCUTS ============ -->
+    <article class="page" id="page-pos-client-shortcuts" data-track="client" data-title="Keyboard Shortcuts">
+      <span class="track-pill client">Client documentation</span>
+      <h1>Keyboard Shortcuts</h1>
+      <p>Available anywhere on the sale screen:</p>
+      <div class="tablewrap"><table>
+        <tr><th>Key</th><th>Action</th><th>Notes</th></tr>
+        <tr><td><kbd>F2</kbd></td><td>New bill</td><td>Clears the cart and customer, refocuses the barcode field</td></tr>
+        <tr><td><kbd>F8</kbd></td><td>Process payment</td><td>Only opens once the cart has at least one item</td></tr>
+        <tr><td><kbd>F9</kbd></td><td>Repeat last item</td><td>Re-adds whatever you scanned/added most recently</td></tr>
+        <tr><td><kbd>Esc</kbd></td><td>Cancel / go back</td><td>Closes the payment panel, or whichever dialog is open</td></tr>
+        <tr><td><kbd>Enter</kbd></td><td>Confirm / search</td><td>Submits whatever's typed in the barcode/search field</td></tr>
+      </table></div>
+      <div class="pager">
+        <a href="#pos/client/shifts"><div class="pg-label">Back</div><div class="pg-title">← Shift Management</div></a>
+        <a class="next" href="#pos/client/faq"><div class="pg-label">Next</div><div class="pg-title">Troubleshooting &amp; FAQ →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ CLIENT: FAQ ============ -->
+    <article class="page" id="page-pos-client-faq" data-track="client" data-title="Troubleshooting & FAQ">
+      <span class="track-pill client">Client documentation</span>
+      <h1>Troubleshooting &amp; FAQ</h1>
+      <div class="tablewrap"><table>
+        <tr><th>Issue</th><th>What to do</th></tr>
+        <tr><td>Barcode not scanning</td><td>Check the scanner's USB connection, or switch to camera scan. You can always type the item name instead.</td></tr>
+        <tr><td>"No item found"</td><td>The barcode genuinely isn't in the catalog yet — ask your manager to add it.</td></tr>
+        <tr><td>"Insufficient stock"</td><td>The item is out of stock at your warehouse.</td></tr>
+        <tr><td>Discount rejected above your limit</td><td>A manager needs to log in to authorize it.</td></tr>
+        <tr><td>Sync stuck / "needs attention"</td><td>Tap Retry once; if it recurs, tell your manager.</td></tr>
+        <tr><td>Stock conflict on sync</td><td>Open it and either adjust to the available quantity or cancel that sale — see <a href="#pos/client/offline">Working Offline</a>.</td></tr>
+        <tr><td>Logged out unexpectedly after being offline a while</td><td>Your session expired offline — just log back in.</td></tr>
+      </table></div>
+
+      <details class="ex">
+        <summary>Can I give a bigger discount than my limit allows?</summary>
+        <div class="ex-body">Not from your own login — the limit is enforced by the server, not just hidden in the UI. A manager-level user must log in and complete the sale themselves.</div>
+      </details>
+      <details class="ex">
+        <summary>Does the UPI QR code confirm the customer actually paid?</summary>
+        <div class="ex-body">No — it's a QR code generated for the customer to scan, with no live confirmation from any payment gateway. Treat it like cash: confirm payment came through before completing the sale.</div>
+      </details>
+      <details class="ex">
+        <summary>Can I resume a held sale from a different till?</summary>
+        <div class="ex-body">No — held sales are stored on the device that parked them, not shared across terminals.</div>
+      </details>
+
+      <div class="callout ok"><div class="callout-title">Note on this guide vs. the printed cashier manual</div><p>This page reconciles against <code>docs/training/CASHIER_GUIDE.md</code>. As of this audit, the printed guide's POS module matches the running app closely, including camera scan, split payment, UPI QR, and the offline/stock-conflict flow — features an earlier code review had flagged as not yet built have since shipped.</p></div>
+
+      <div class="pager">
+        <a href="#pos/client/shortcuts"><div class="pg-label">Back</div><div class="pg-title">← Keyboard Shortcuts</div></a>
+        <span></span>
+      </div>
+    </article>
+
+    <!-- ============ ADMIN: ACCESS ============ -->
+    <article class="page" id="page-pos-admin-access" data-track="admin" data-title="Access & Roles">
+      <span class="track-pill admin">Super Admin documentation</span>
+      <h1>Access &amp; Roles</h1>
+      <p>POS authorization is coarse by design: almost every POS action is gated by a single permission, with two narrower overrides layered on top.</p>
+
+      <h2 id="perm">The core permission</h2>
+      <p><span class="badge perm">POS_MANAGE</span> gates essentially everything in the terminal — opening/closing shifts, ringing sales, held sales, quick items, customer search, UPI display, and sending digital receipts. There's no finer split (e.g. no separate "can close shift" vs. "can open shift").</p>
+
+      <h2 id="defaults">Default role grants</h2>
+      <div class="tablewrap"><table>
+        <tr><th>Role</th><th>Relevant permissions</th></tr>
+        <tr><td><strong>Cashier</strong> (default POS role)</td><td><span class="badge perm">POS_MANAGE</span> <span class="badge perm">INVOICE_CREATE</span> <span class="badge perm">CUSTOMER_CREATE</span> <span class="badge perm">PAYMENT_CREATE</span> <span class="badge perm">SALE_RETURN_CREATE</span> <span class="badge perm">ITEM_VIEW</span> <span class="badge perm">STOCK_VIEW</span> — does <strong>not</strong> include <code>DISCOUNT_OVERRIDE</code>, <code>PRICE_LIST_VIEW</code>, or <code>WAREHOUSE_VIEW</code></td></tr>
+        <tr><td><strong>Sales Manager</strong> and above</td><td>Everything Cashier has, plus <span class="badge perm">DISCOUNT_OVERRIDE</span>, <span class="badge perm">PRICE_OVERRIDE</span>, <span class="badge perm">CREDIT_LIMIT_OVERRIDE</span>, <span class="badge perm">PRICE_FLOOR_OVERRIDE</span></td></tr>
+      </table></div>
+
+      <h2 id="discount-cap">The 10% cashier discount cap</h2>
+      <p>A hardcoded server-side limit — a Cashier-role user cannot apply more than 10% discount on any line, regardless of any store policy configured elsewhere. Only a user whose role grants <span class="badge perm">DISCOUNT_OVERRIDE</span> can exceed it. This is enforced on the server, so it can't be bypassed from the terminal itself.</p>
+
+      <div class="callout review"><div class="callout-title">Manager overrides have no POS screen</div><p>Sales Manager and above are granted <code>PRICE_OVERRIDE</code>, <code>PRICE_FLOOR_OVERRIDE</code>, and <code>CREDIT_LIMIT_OVERRIDE</code> in the role system, but the POS terminal itself has no UI that exercises any of them — a price floor violation always hard-blocks a POS sale, even for a manager, because the terminal never sends the override flag. If your business process depends on managers overriding a price floor or credit limit at the counter, that currently has to happen through the main ERP app's manual invoice screen, not POS.</p></div>
+
+      <h2 id="branch-scope">Branch isolation</h2>
+      <p>Users are scoped to specific branches via their account. Opening a shift and completing a sale are both checked against this scope on the server — a user cannot open a shift or bill for a branch they aren't assigned to.</p>
+      <div class="callout review"><div class="callout-title">Empty branch scope means "all branches"</div><p>If a user's account has no branches explicitly assigned, both the branch picker and the server-side check treat that as unrestricted — every branch is shown and billing is allowed anywhere. Confirm this is the intended behavior for your rollout (e.g. reserved for owner/admin-level accounts) rather than an oversight, since it's easy to create a normal staff account that unintentionally ends up with this "no restriction" scope if branch assignment is skipped during setup.</p></div>
+      <div class="callout review"><div class="callout-title">A few POS endpoints skip branch checks</div><p>Held sales, quick items, customer search, UPI QR, and receipt sending are scoped to the tenant but not to the specific branch. In practice this only matters for a user who somehow references another branch's session or held-sale by ID, since the sale and shift endpoints themselves are branch-checked — but it's worth knowing if you're auditing data isolation between branches.</p></div>
+
+      <div class="pager">
+        <span></span>
+        <a class="next" href="#pos/admin/feature-flags"><div class="pg-label">Next</div><div class="pg-title">Feature Flags →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ ADMIN: FLAGS ============ -->
+    <article class="page" id="page-pos-admin-flags" data-track="admin" data-title="Feature Flags">
+      <span class="track-pill admin">Super Admin documentation</span>
+      <h1>Feature Flags</h1>
+      <h2 id="loyalty">Loyalty points</h2>
+      <p>Loyalty earn/redeem on POS sales is gated by a single tenant-level feature flag. When it's off, points simply aren't earned or redeemed — no error, no UI, it silently does nothing.</p>
+      <div class="tablewrap"><table>
+        <tr><th>Setting</th><th>Value</th></tr>
+        <tr><td>Earn rate</td><td class="num">₹100 spent = 1 point</td></tr>
+        <tr><td>Redeem rate</td><td class="num">1 point = ₹0.50</td></tr>
+      </table></div>
+      <div class="callout review"><div class="callout-title">Rates are hardcoded, not per-tenant</div><p>Both rates above are fixed in the codebase, not editable per tenant. If different clients need different loyalty economics, that's a development change today, not a settings change.</p></div>
+
+      <div class="pager">
+        <a href="#pos/admin/access-roles"><div class="pg-label">Back</div><div class="pg-title">← Access &amp; Roles</div></a>
+        <a class="next" href="#pos/admin/provisioning"><div class="pg-label">Next</div><div class="pg-title">Branch &amp; Warehouse Setup →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ ADMIN: PROVISIONING ============ -->
+    <article class="page" id="page-pos-admin-provisioning" data-track="admin" data-title="Branch & Warehouse Setup">
+      <span class="track-pill admin">Super Admin documentation</span>
+      <h1>Branch &amp; Warehouse Setup</h1>
+      <p>Before staff can use POS at a location, that location needs a branch and at least one warehouse set up in the main ERP app, and staff accounts need to be scoped to the correct branch(es).</p>
+      <ul>
+        <li>A Cashier-role account does not have permission to view the warehouse list independently — the terminal handles this expected 403 gracefully with a manual warehouse-ID fallback, but it's worth knowing when troubleshooting a cashier's "can't find my warehouse" report.</li>
+        <li>If exactly one branch and one warehouse apply to a user, the branch-selection screen is skipped entirely for them — useful for single-location tenants.</li>
+      </ul>
+
+      <div class="callout bug"><div class="callout-title">Multi-state GST tenants — read before rollout</div><p>Every POS sale is currently computed as if the selling branch is in <strong>Maharashtra (state code 27)</strong>, regardless of where the branch actually is. For a tenant whose branches are all in Maharashtra this is invisible. For any tenant with a branch outside Maharashtra, POS sales from that branch will be taxed as intra-state (CGST+SGST) when they should be inter-state (IGST) — a real GST compliance issue, not just a display quirk. Do not enable POS for out-of-state branches until this is fixed in the application.</p></div>
+
+      <div class="pager">
+        <a href="#pos/admin/feature-flags"><div class="pg-label">Back</div><div class="pg-title">← Feature Flags</div></a>
+        <a class="next" href="#pos/admin/limitations"><div class="pg-label">Next</div><div class="pg-title">Limitations to Know →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ ADMIN: LIMITATIONS ============ -->
+    <article class="page" id="page-pos-admin-limits" data-track="admin" data-title="Limitations to Know">
+      <span class="track-pill admin">Super Admin documentation</span>
+      <h1>Limitations to Know</h1>
+      <p>A rollup of things worth knowing before depending on POS operationally. Full technical detail is on the <a href="#pos/audit/known-issues">Known Issues</a> page.</p>
+      <ul>
+        <li><strong>GST state code is hardcoded to Maharashtra (27)</strong> for every tenant — see previous page. Highest-priority item for any multi-state client.</li>
+        <li><strong>Held sales never expire</strong> — they accumulate until someone manually resumes or discards them.</li>
+        <li><strong>Invoice numbers are timestamp-based</strong> (<code>POS-{tenant}-{millisecond timestamp}</code>), not a sequential counter. Confirm with your accountant/auditor whether this satisfies your jurisdiction's sequential-invoice-numbering expectations for GST.</li>
+        <li><strong>Two-factor accounts can't sign in to POS</strong> — only the main ERP app supports MFA login today.</li>
+        <li><strong>UPI, card, and cheque payments are all trust-based</strong> from POS — there is no live gateway/bank verification; the cashier is confirming payment was received, same as cash.</li>
+      </ul>
+      <div class="pager">
+        <a href="#pos/admin/provisioning"><div class="pg-label">Back</div><div class="pg-title">← Branch &amp; Warehouse Setup</div></a>
+        <span></span>
+      </div>
+    </article>
+
+    <!-- ============ DEV: ARCHITECTURE ============ -->
+    <article class="page" id="page-pos-dev-architecture" data-track="dev" data-title="Architecture">
+      <span class="track-pill dev">Developer documentation</span>
+      <h1>Architecture</h1>
+      <p>Stack: React 19 + Vite 6 + <code>react-router-dom</code> 7 + TanStack Query 5, IndexedDB via Dexie 4 for the offline store. <span class="src">apps/pos-frontend/package.json</span></p>
+      <div class="callout review"><div class="callout-title">Bypasses the API gateway</div><p>pos-frontend talks directly to each backend service's own port (auth-service, tenant-service, inventory-service, sales-service, production-service) rather than routing through <code>apps/api-gateway</code>. Confirm whether production actually fronts these with the gateway, or whether POS genuinely bypasses it end-to-end — this affects rate-limiting/observability assumptions.</p></div>
+
+      <h2 id="routes">Routes &amp; guards</h2>
+      <div class="tablewrap"><table>
+        <tr><th>Path</th><th>Screen</th><th>Guard chain</th></tr>
+        <tr><td><code>/login</code></td><td>LoginScreen</td><td>none</td></tr>
+        <tr><td><code>/account-suspended</code></td><td>AccountSuspendedScreen</td><td>none</td></tr>
+        <tr><td><code>/branch-select</code></td><td>BranchSelectScreen</td><td>RequireAuth</td></tr>
+        <tr><td><code>/shift/open</code>, <code>/shift/close</code>, <code>/shift/summary</code></td><td>Shift screens</td><td>RequireAuth → RequireBranch</td></tr>
+        <tr><td><code>/</code> (and catch-all)</td><td>POSScreen</td><td>RequireAuth → RequireBranch → RequireSession</td></tr>
+        <tr><td><code>/lookup</code></td><td>LookupScreen</td><td>RequireAuth → RequireBranch</td></tr>
+      </table></div>
+      <p class="src">apps/pos-frontend/src/main.tsx:25-93</p>
+      <div class="callout note"><div class="callout-title">Guards are trust-based, not re-validated</div><p>All three guards are client-side only (token presence, a persisted branch, a server-confirmed session) — <code>POSScreen</code> itself reads <code>sessionId</code>/branch with a non-null assertion, trusting the guard chain already ran. There is <strong>no client-side permission (RBAC) check anywhere</strong> in pos-frontend — authorization is enforced entirely by each backend endpoint's <code>requirePermission()</code>, which returns 403 if a caller lacks it. This is a deliberate architecture, not a gap: the UI simply doesn't attempt to hide actions a user can't perform.</p></div>
+
+      <h2 id="component-tree">Component tree — POSScreen</h2>
+      <div class="tablewrap"><table>
+        <tr><th>Component</th><th>File</th><th>Role</th></tr>
+        <tr><td>POSSearch</td><td><code>components/pos/POSSearch.tsx</code></td><td>Barcode input + camera-scan toggle (ZXing)</td></tr>
+        <tr><td>POSProductCard</td><td><code>components/pos/POSProductCard.tsx</code></td><td>Quick-item grid tile</td></tr>
+        <tr><td>POSCart / POSCartLine</td><td><code>components/pos/POSCart.tsx</code>, <code>POSCartLine.tsx</code></td><td>Cart + per-line qty/discount</td></tr>
+        <tr><td>POSSummary</td><td><code>components/pos/POSSummary.tsx</code></td><td>Order discount, grand total</td></tr>
+        <tr><td>POSPaymentPanel / UpiQr</td><td><code>components/pos/POSPaymentPanel.tsx</code>, <code>UpiQr.tsx</code></td><td>Payment mode selection, split payment, UPI QR</td></tr>
+        <tr><td>ReceiptOverlay</td><td><code>components/pos/ReceiptOverlay.tsx</code></td><td>Print / hardware print / WhatsApp / Email</td></tr>
+        <tr><td>StockConflictModal</td><td><code>components/pos/StockConflictModal.tsx</code></td><td>Offline stock-conflict resolution</td></tr>
+        <tr><td>POSDialog</td><td><code>components/pos/POSDialog.tsx</code></td><td>Held sales list, new-customer form</td></tr>
+        <tr><td>SyncStatusPanel</td><td><code>components/pos/SyncStatusPanel.tsx</code></td><td>Connectivity + pending-sync indicator</td></tr>
+        <tr><td>TenantThemeSync</td><td><code>components/pos/TenantThemeSync.tsx</code></td><td>Applies tenant branding as CSS custom properties</td></tr>
+      </table></div>
+      <p class="src">apps/pos-frontend/src/POSScreen.tsx:92-987</p>
+
+      <h2 id="branding">Tenant branding</h2>
+      <p><code>TenantThemeSync</code> fetches <code>GET /organization</code> and applies <code>brandPrimary/brandSecondary/brandAccent/fontSans/radiusScale</code> as CSS custom properties, syncing across open POS tabs via a same-origin <code>BroadcastChannel</code>.</p>
+      <div class="callout note"><div class="callout-title">Does not sync live with the main web app</div><p><code>BroadcastChannel</code> is same-origin only, and POS and the main ERP web app run on different origins/ports — a branding change made in the desktop app reaches POS only on its next 60-second refetch or page reload, not instantly.</p></div>
+      <p class="src">apps/pos-frontend/src/components/pos/TenantThemeSync.tsx:19-57</p>
+
+      <div class="pager">
+        <span></span>
+        <a class="next" href="#pos/dev/api-reference"><div class="pg-label">Next</div><div class="pg-title">API Reference →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ DEV: API ============ -->
+    <article class="page" id="page-pos-dev-api" data-track="dev" data-title="API Reference">
+      <span class="track-pill dev">Developer documentation</span>
+      <h1>API Reference</h1>
+      <p>Every endpoint pos-frontend actually calls, confirmed by direct source grep — not inferred from route files alone.</p>
+      <div class="tablewrap"><table>
+        <tr><th>Method</th><th>Path</th><th>Service</th><th>Permission</th><th>Frontend call site</th></tr>
+        <tr><td>POST</td><td><code>/auth/login</code></td><td>auth-service</td><td>public</td><td><span class="src">LoginScreen.tsx:22</span></td></tr>
+        <tr><td>POST</td><td><code>/auth/refresh</code></td><td>auth-service</td><td>refresh token</td><td><span class="src">auth.ts:39</span>, <span class="src">swSync.ts:27</span></td></tr>
+        <tr><td>GET</td><td><code>/pos/sessions/active</code></td><td>sales-service</td><td class="badge perm">POS_MANAGE</td><td><span class="src">session.ts:40</span></td></tr>
+        <tr><td>POST</td><td><code>/pos/sessions/open</code></td><td>sales-service</td><td class="badge perm">POS_MANAGE</td><td><span class="src">ShiftOpenScreen.tsx:30</span></td></tr>
+        <tr><td>GET</td><td><code>/pos/sessions/:id/summary</code></td><td>sales-service</td><td class="badge perm">POS_MANAGE</td><td><span class="src">ShiftCloseScreen.tsx:21,46</span></td></tr>
+        <tr><td>POST</td><td><code>/pos/sessions/:id/close</code></td><td>sales-service</td><td class="badge perm">POS_MANAGE</td><td><span class="src">ShiftCloseScreen.tsx:36</span></td></tr>
+        <tr><td>POST</td><td><code>/pos/sales</code></td><td>sales-service</td><td class="badge perm">POS_MANAGE</td><td><span class="src">POSScreen.tsx:173,543</span></td></tr>
+        <tr><td>GET</td><td><code>/pos/quick-items</code></td><td>sales-service</td><td class="badge perm">POS_MANAGE</td><td><span class="src">POSScreen.tsx:344</span></td></tr>
+        <tr><td>GET</td><td><code>/pos/customer-search</code></td><td>sales-service</td><td class="badge perm">POS_MANAGE</td><td><span class="src">POSScreen.tsx:372</span></td></tr>
+        <tr><td>POST</td><td><code>/pos/held-sales</code></td><td>sales-service</td><td class="badge perm">POS_MANAGE</td><td><span class="src">POSScreen.tsx:635</span> (audit copy only)</td></tr>
+        <tr><td>GET</td><td><code>/pos/upi-vpa</code></td><td>sales-service</td><td class="badge perm">POS_MANAGE</td><td><span class="src">POSScreen.tsx:130</span></td></tr>
+        <tr><td>POST</td><td><code>/pos/sales/:id/send-receipt</code></td><td>sales-service</td><td class="badge perm">POS_MANAGE</td><td><span class="src">ReceiptOverlay.tsx:45</span></td></tr>
+        <tr><td>POST</td><td><code>/customers</code></td><td>sales-service</td><td class="badge perm">CUSTOMER_CREATE</td><td><span class="src">POSScreen.tsx:220,695</span></td></tr>
+        <tr><td>GET</td><td><code>/sync/customers</code></td><td>sales-service</td><td class="badge perm">CUSTOMER_VIEW</td><td><span class="src">referenceSync.ts:73</span></td></tr>
+        <tr><td>GET</td><td><code>/sync/items</code></td><td>inventory-service</td><td class="badge perm">ITEM_VIEW</td><td><span class="src">referenceSync.ts:72</span></td></tr>
+        <tr><td>GET</td><td><code>/sync/price-list-items</code></td><td>inventory-service</td><td class="badge perm">PRICE_LIST_VIEW</td><td><span class="src">referenceSync.ts:74</span></td></tr>
+        <tr><td>GET</td><td><code>/sync/tax-rates</code></td><td>inventory-service</td><td class="badge perm">ITEM_VIEW</td><td><span class="src">referenceSync.ts:75</span></td></tr>
+        <tr><td>GET</td><td><code>/items/by-barcode/:value</code></td><td>production-service</td><td class="badge perm">ITEM_VIEW</td><td><span class="src">POSScreen.tsx:446</span></td></tr>
+        <tr><td>GET</td><td><code>/warehouses?branchId=</code></td><td>inventory-service</td><td class="badge perm">WAREHOUSE_VIEW</td><td><span class="src">BranchSelectScreen.tsx:57</span></td></tr>
+        <tr><td>GET</td><td><code>/branches</code></td><td>tenant-service</td><td>(not re-verified)</td><td><span class="src">BranchSelectScreen.tsx:39</span></td></tr>
+        <tr><td>GET</td><td><code>/organization</code></td><td>tenant-service</td><td>(not re-verified)</td><td><span class="src">TenantThemeSync.tsx:41</span></td></tr>
+      </table></div>
+
+      <div class="callout review"><div class="callout-title">CASHIER role hits a permission gap on one sync call</div><p><code>GET /sync/price-list-items</code> requires <code>PRICE_LIST_VIEW</code>, which the default Cashier role does not have. This call 403s for every plain cashier — silently absorbed since all four reference-data syncs run via <code>Promise.allSettled</code>, surfacing only as "reference data sync incomplete (1/4 failed)". Confirm whether price-list visibility should be manager-only by design, or whether <code>PRICE_LIST_VIEW</code> should be added to Cashier's default grants. <span class="src">role-defaults.ts:59-74</span>, <span class="src">sync.routes.ts:83</span></p></div>
+
+      <h3 id="sale-schema">POST /pos/sales — request shape</h3>
+      <p><code>sessionId, customerId?, branchId, warehouseId, placeOfSupply, sellerStateCode, lines[] {itemId, variantId?, quantity, unitPrice, discountPct, gstRate, cessRate, hsnCode?}, paymentMode: CASH|CARD|UPI, amountTendered, loyaltyPointsRedeem, payments[]?, operationId?</code></p>
+      <p class="src">apps/sales-service/src/api/pos.routes.ts:45-75</p>
+      <div class="callout bug"><div class="callout-title">placeOfSupply / sellerStateCode are hardcoded</div><p>The frontend always sends <code>'27'</code> (Maharashtra) for both fields regardless of the branch's actual state — see <span class="src">POSScreen.tsx:519-520</span>. Every sale is computed intra-state (CGST+SGST) even for branches outside Maharashtra. This needs a real fix (deriving the state code from the branch/warehouse record) before enabling POS for any non-Maharashtra branch.</p></div>
+
+      <h3 id="responses">Response shapes</h3>
+      <ul>
+        <li><strong>201</strong> success: <code>{ data: { invoiceId, invoiceNumber, grandTotal, paymentIds, loyaltyPointsEarned, loyaltyRedemptionValue } }</code></li>
+        <li><strong>200</strong> duplicate operation already resolved: same shape, resolved via the original invoice</li>
+        <li><strong>409</strong> <code>DUPLICATE_OPERATION_PROCESSING</code> — original request still in flight</li>
+        <li><strong>422</strong> <code>INSUFFICIENT_STOCK</code> with <code>{ itemId, available, requested }</code> — the orphaned draft invoice is voided server-side before returning</li>
+        <li><strong>400</strong> <code>PAYMENT_MISMATCH</code> — sum of <code>payments[]</code> doesn't match amount due (±0.02 tolerance)</li>
+      </ul>
+      <p class="src">apps/sales-service/src/api/pos.routes.ts:217-301,341-349</p>
+
+      <div class="pager">
+        <a href="#pos/dev/architecture"><div class="pg-label">Back</div><div class="pg-title">← Architecture</div></a>
+        <a class="next" href="#pos/dev/data-model"><div class="pg-label">Next</div><div class="pg-title">Data Model →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ DEV: DATA MODEL ============ -->
+    <article class="page" id="page-pos-dev-data" data-track="dev" data-title="Data Model">
+      <span class="track-pill dev">Developer documentation</span>
+      <h1>Data Model</h1>
+      <p>All tables below live in Postgres, defined in <code>packages/db-client/src/schema/</code>. A POS sale <em>is</em> an invoice — there is no separate "pos_sale" table.</p>
+
+      <h2 id="invoices">invoices</h2>
+      <p>Key columns: <code>id, tenant_id, branch_id, warehouse_id, invoice_number</code> (null until confirm), <code>status</code> (DRAFT / CONFIRMED / PARTIALLY_PAID / PAID / CANCELLED / OVERDUE), <code>customer_id</code> (<code>0</code> = walk-in sentinel, not a real row), <code>place_of_supply, subtotal, discount_amount, taxable_amount, cgst_amount, sgst_amount, igst_amount, cess_amount, grand_total, balance_due, loyalty_points_earned, loyalty_points_redeemed, loyalty_redemption_value, client_operation_id</code>.</p>
+      <p>Constraints: <code>unique(tenant_id, invoice_number)</code> and <strong><code>unique(tenant_id, client_operation_id)</code></strong> — the backstop that makes offline retry safe.</p>
+      <p class="src">packages/db-client/src/schema/sales.ts:92-158</p>
+
+      <h2 id="invoice-lines">invoice_lines</h2>
+      <p><code>invoice_id, tenant_id, line_number, item_id, variant_id?, quantity</code> (decimal(15,3) — fractional, for fabric-by-the-metre), <code>unit_price, discount_pct, discount_amount, taxable_amount, gst_rate, cgst_rate/sgst_rate/igst_rate, cgst_amount/sgst_amount/igst_amount, cess_rate/cess_amount, line_total, hsn_code, warehouse_id, reservation_id</code> (nullable).</p>
+      <div class="callout review"><div class="callout-title">reservation_id is unpopulated on this path</div><p>The column exists but POS never writes it — stock is deducted by a direct conditional row update, not a separate reservation record (see <a href="#pos/dev/offline-sync">Offline Sync Design</a> for the mechanism). Confirm whether this column belongs to a different flow (e.g. e-commerce reservations) or is vestigial.</p></div>
+      <p class="src">packages/db-client/src/schema/sales.ts:160-195</p>
+
+      <h2 id="sessions">pos_sessions</h2>
+      <p><code>id, tenant_id, branch_id, warehouse_id, session_number, status</code> (OPEN/CLOSED), <code>opened_by, closed_by, opening_cash, closing_cash, expected_cash, cash_variance, total_sales, total_transactions, opened_at, closed_at</code>.</p>
+      <p class="src">packages/db-client/src/schema/sales.ts:218-245</p>
+
+      <h2 id="held">pos_held_sales</h2>
+      <p><code>id, tenant_id, session_id, customer_id?, label?, cart</code> (jsonb), <code>created_by, created_at</code>. No expiry column.</p>
+      <p class="src">packages/db-client/src/schema/sales.ts:248-260, migration 0027_pos_held_sales.sql</p>
+
+      <h2 id="customers">customers (relevant columns)</h2>
+      <p><code>display_name, phone, alt_phone, email, customer_type, credit_limit, credit_limit_enabled, opening_balance, loyalty_points, loyalty_card_number, opt_out_sms/whatsapp/email, status, client_operation_id</code>.</p>
+      <p>Constraints: <code>unique(tenant_id, customer_code)</code>, <code>unique(tenant_id, client_operation_id)</code> (added by migration <code>0032_offline05_customer_idempotency.sql</code>).</p>
+
+      <div class="pager">
+        <a href="#pos/dev/api-reference"><div class="pg-label">Back</div><div class="pg-title">← API Reference</div></a>
+        <a class="next" href="#pos/dev/offline-sync"><div class="pg-label">Next</div><div class="pg-title">Offline Sync Design →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ DEV: OFFLINE SYNC ============ -->
+    <article class="page" id="page-pos-dev-sync" data-track="dev" data-title="Offline Sync Design">
+      <span class="track-pill dev">Developer documentation</span>
+      <h1>Offline Sync Design</h1>
+
+      <h2 id="storage">Client storage</h2>
+      <p>Dexie database <code>pos-offline</code> (4 schema versions), tables: <code>pendingSales, pendingCustomers, catalogItems, customers</code> (cache), <code>priceListItems, taxRates, heldSales, syncMeta, authTokens</code>.</p>
+      <p class="src">apps/pos-frontend/src/db.ts:125-179</p>
+      <div class="callout note"><div class="callout-title">Two unrelated "outbox" concepts — don't conflate them</div><p>This client-local Dexie queue is entirely separate from the server-side <code>outboxEvents</code> table used by <code>InvoiceService</code> for cross-service events (<code>INVOICE_CREATED</code> etc., consumed by search-service/gst-service/accounting-service). Same word, two different mechanisms.</p></div>
+
+      <h2 id="idempotency">Idempotency — confirmed end-to-end</h2>
+      <div class="flow">
+        <div class="flow-col">
+          <div class="flow-step"><div class="fs-label">1</div>Client generates <code>operationId</code> (UUID) at queue time, reused on every retry</div>
+        </div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-col">
+          <div class="flow-step"><div class="fs-label">2</div>Sent as <code>operationId</code> in the sale/customer payload</div>
+        </div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-col">
+          <div class="flow-step"><div class="fs-label">3</div>Stored as <code>client_operation_id</code>, backed by a unique DB constraint</div>
+        </div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-col">
+          <div class="flow-step branch"><div class="fs-label">4</div>Retry hits the constraint → server polls for the original result and returns it (200) instead of duplicating</div>
+        </div>
+      </div>
+      <div class="diagram-note">Production docs site: render this as a real Mermaid sequence diagram against pos.routes.ts / InvoiceService.ts.</div>
+      <p>Applies identically to sale creation (<code>invoices.client_operation_id</code>, migration <code>0031_offline02_pos_sale_idempotency.sql</code>) and customer creation (<code>customers.client_operation_id</code>, migration <code>0032_offline05_customer_idempotency.sql</code>). If the poll for the original result never resolves, the client gets a clean <code>409 DUPLICATE_OPERATION_PROCESSING</code> rather than a silent failure.</p>
+      <p>Verified by <code>apps/sales-service/src/__tests__/offline02-pos-sale-idempotency.test.ts</code> and <code>apps/pos-frontend/src/__tests__/crossCutting.test.tsx:35-77</code> (exactly-once sync across a token refresh mid-batch).</p>
+
+      <h2 id="triggers">Sync triggers</h2>
+      <p>No single sync loop — four independent triggers, all converging on the same queue:</p>
+      <ol>
+        <li><code>window</code> <code>online</code> event → sync pending customers, then sales, then reference data</li>
+        <li>Manual "Sync now" button (shown only when online with pending items)</li>
+        <li>Chromium/Android <strong>Background Sync API</strong> (tag <code>sync-pending-sales</code>) — <strong>not supported on Safari/iOS/Firefox</strong></li>
+        <li>Service worker posts <code>BACKGROUND_SYNC_DONE</code> back to open tabs to refresh counters</li>
+      </ol>
+      <p class="src">apps/pos-frontend/src/POSScreen.tsx:293-330</p>
+
+      <h2 id="retry">Retry &amp; stuck handling</h2>
+      <p><code>MAX_RETRIES = 5</code> — after 5 failed attempts, an item flips to <code>status: 'stuck'</code> and stops auto-retrying until a manual reset. Stock conflicts are a distinct sub-case, <strong>not</strong> counted toward this limit: an <code>INSUFFICIENT_STOCK</code> response immediately marks the item <code>stuck</code> with a <code>conflict</code> payload and routes to <code>StockConflictModal</code> rather than the generic retry path. Resolving via "adjust &amp; retry" re-queues under a <strong>new</strong> <code>operationId</code>, since the original invoice was already voided server-side.</p>
+      <p class="src">apps/pos-frontend/src/offlineDb.ts:8,49-51; apps/sales-service/src/api/pos.routes.ts:298-301</p>
+
+      <h2 id="stock">Stock deduction mechanism</h2>
+      <p>No reservation table is used. Stock is deducted atomically at confirm time via a conditional update — <code>UPDATE items SET available_qty = available_qty - qty WHERE available_qty &gt;= qty RETURNING</code> — inside the same transaction that confirms the invoice. Zero rows affected ⇒ <code>InsufficientStockError</code>. This correctly resolves two concurrent tills racing for the last unit: whichever transaction's update commits first wins.</p>
+      <p class="src">apps/sales-service/src/domain/InvoiceService.ts:395-420</p>
+
+      <div class="pager">
+        <a href="#pos/dev/data-model"><div class="pg-label">Back</div><div class="pg-title">← Data Model</div></a>
+        <a class="next" href="#pos/audit/known-issues"><div class="pg-label">Next</div><div class="pg-title">Known Issues →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ AUDIT: KNOWN ISSUES ============ -->
+    <article class="page" id="page-pos-issues" data-track="dev" data-title="Known Issues & Needs Review">
+      <span class="track-pill dev">Cross-cutting · Health audit</span>
+      <h1>Known Issues &amp; Needs Review</h1>
+      <p>Everything below was found while reading the actual POS code for this pilot, not inferred. Ranked roughly by real-world impact.</p>
+
+      <div class="callout bug"><div class="callout-title">GST state code hardcoded to Maharashtra (27)</div><p><code>placeOfSupply</code> and <code>sellerStateCode</code> are hardcoded to <code>'27'</code> in <code>POSScreen.tsx:519-520</code>, regardless of the branch's actual location. Any non-Maharashtra branch gets incorrect CGST/SGST vs. IGST splitting on every POS sale. <strong>Compliance risk, not cosmetic.</strong></p></div>
+
+      <div class="callout review"><div class="callout-title">Invoice numbering is timestamp-based, not sequential</div><p><code>POS-{tenantId}-{Date.now()}</code> — no gapless counter. Needs a business/compliance decision on whether this satisfies sequential-invoice-numbering rules for GST audit purposes. <span class="src">pos.routes.ts:245</span></p></div>
+
+      <div class="callout review"><div class="callout-title">Empty branch scope = unrestricted access</div><p>A JWT with no <code>branchIds</code> is treated as "all branches" on both client and server. Confirm this is intentional (e.g. reserved for owner/admin accounts) rather than a fail-open default that a misconfigured staff account could inherit. <span class="src">BranchSelectScreen.tsx:43</span></p></div>
+
+      <div class="callout review"><div class="callout-title">Several POS endpoints have no branch-scope check</div><p><code>/pos/held-sales</code> (all methods), <code>/pos/quick-items</code>, <code>/pos/customer-search</code>, <code>/pos/upi-vpa</code>, <code>/pos/sales/:id/send-receipt</code> check tenant scope only, not branch. Sessions and sale-creation are properly branch-checked. Confirm whether this is acceptable given upstream gating, or a genuine gap.</p></div>
+
+      <div class="callout review"><div class="callout-title">Manager overrides granted but unreachable from POS</div><p><code>PRICE_OVERRIDE</code>, <code>PRICE_FLOOR_OVERRIDE</code>, and <code>CREDIT_LIMIT_OVERRIDE</code> exist in the role system and are granted to Sales Manager+, but no POS UI ever sets the corresponding override flags — a price-floor violation hard-blocks a POS sale even for a manager. Confirm whether this is intended (overrides only happen via the main ERP invoice screen) or a missing POS feature.</p></div>
+
+      <div class="callout review"><div class="callout-title">CASHIER lacks PRICE_LIST_VIEW</div><p>Causes a guaranteed, silently-absorbed 403 on one of four parallel reference-data syncs for every plain cashier. See <a href="#pos/dev/api-reference">API Reference</a>.</p></div>
+
+      <div class="callout review"><div class="callout-title">Held sales have no expiry</div><p>No TTL column, no cleanup job. They accumulate indefinitely across a terminal's lifetime.</p></div>
+
+      <div class="callout note"><div class="callout-title">Backend "resume held sale" / "list held sales" endpoints are dead code from the frontend's perspective</div><p><code>GET /pos/held-sales</code> and <code>POST /pos/held-sales/:id/resume</code> exist server-side but are never called by pos-frontend, which resumes purely from its local Dexie copy. Confirm whether this is intentional single-terminal design or an incomplete cross-terminal resume feature.</p></div>
+
+      <div class="callout note"><div class="callout-title">Unused dependency</div><p><code>zustand</code> is declared in <code>package.json</code> but has zero imports anywhere in <code>src</code> — likely leftover from an earlier state-management approach.</p></div>
+
+      <div class="callout note"><div class="callout-title">Test coverage gaps (found by absence, not by comment)</div><p>No dedicated test covers split-payment math end-to-end, loyalty-point redemption UI, camera barcode scan, or the keyboard shortcuts as a unit — these are only incidentally exercised via the cross-cutting integration test and one Playwright smoke test. Zero <code>TODO</code>/<code>FIXME</code> comments exist anywhere in <code>apps/pos-frontend/src</code> — the codebase uses dated planning-doc references (e.g. <code>OFFLINE-07</code>, <code>PG-051</code>) in comments instead, so there's no in-code breadcrumb of known-incomplete work beyond what's documented here.</p></div>
+
+      <div class="callout ok"><div class="callout-title">Confirmed solid: offline idempotency</div><p>The <code>clientOperationId</code> pattern for both sales and customers is genuinely end-to-end, backed by real unique constraints and covered by dedicated tests — not just a UI-layer promise. See <a href="#pos/dev/offline-sync">Offline Sync Design</a>.</p></div>
+
+      <div class="pilot-banner" style="margin-top:2rem;">This audit page is scoped to POS only. The full project asked for a codebase-wide Feature Coverage Report, Dead Code Report, Missing Permission Checks, Tenant Isolation Audit, and similar — those require the same file-by-file rigor applied here, module by module, across the other 14+ services and 2 remaining frontends.</div>
+
+      <div class="pager">
+        <a href="#pos/dev/offline-sync"><div class="pg-label">Back</div><div class="pg-title">← Offline Sync Design</div></a>
+        <span></span>
+      </div>
+    </article>
+
+  </main>
+
+  <aside class="toc">
+    <div class="toc-title">On this page</div>
+    <nav id="tocNav"></nav>
+  </aside>
+</div>
+
+<script src="/shared/docs-shell.js"></script>
+</body>
+</html>

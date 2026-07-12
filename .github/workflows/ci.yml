@@ -6,6 +6,42 @@ on:
     tags: ['v*']
   pull_request:
     branches: [main, develop]
+  workflow_dispatch:
+    inputs:
+      scenario:
+        description: 'k6 scenario file (without .js) to run — see load-tests/README.md'
+        required: false
+        default: 'k6-normal-load'
+        type: choice
+        options:
+          - k6-normal-load
+          - k6-peak-load
+          - k6-spike
+          - k6-soak
+          - k6-concurrency
+          - outbox-relay-throughput
+      loadTestEnv:
+        description: 'LOAD_TEST_ENV safety gate (load-tests/k6-helpers.js refuses to run without this)'
+        required: false
+        default: 'staging'
+        type: choice
+        options: ['staging', 'local']
+      baseAuthUrl:
+        description: 'auth-service base URL for the load-test target environment'
+        required: false
+        default: ''
+      baseSalesUrl:
+        description: 'sales-service base URL for the load-test target environment'
+        required: false
+        default: ''
+      baseInventoryUrl:
+        description: 'inventory-service base URL for the load-test target environment'
+        required: false
+        default: ''
+      baseEventUrl:
+        description: 'event-service base URL for the load-test target environment'
+        required: false
+        default: ''
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -62,6 +98,19 @@ jobs:
 
       - name: Validate Kubernetes manifests (kustomize build)
         run: kubectl kustomize infrastructure/k8s/ > /dev/null
+
+      # Syntax/import validation only — does not execute any HTTP requests or generate load,
+      # safe to run on every push/PR. Real k6 runs are manual-dispatch only (see load-test job).
+      - name: Validate k6 load-test scripts (syntax check, no execution)
+        run: |
+          for f in load-tests/*.js; do
+            base="$(basename "$f")"
+            if [ "$base" = "k6-helpers.js" ]; then
+              continue # shared helper module, not a runnable k6 script
+            fi
+            echo "Inspecting $base"
+            docker run --rm -v "$PWD/load-tests:/scripts:ro" -w /scripts grafana/k6:latest inspect "$base"
+          done
 
   # ─── Type Check (runs in parallel) ────────────────────────────────────────
   type-check:
@@ -152,12 +201,12 @@ jobs:
           files: '**/coverage/lcov.info'
           fail_ci_if_error: false
 
-  # ─── E2E Smoke (Global Search) ─────────────────────────────────────────────
-  # Mocks the auth/search HTTP boundary (page.route) rather than standing up the full
+  # ─── E2E Smoke (Global Search + POS checkout) ──────────────────────────────
+  # Mocks the auth/search/POS HTTP boundary (page.route) rather than standing up the full
   # Postgres/Elasticsearch/Kafka stack — see GLOBAL-SEARCH_COMPLETION.md. A full-stack E2E
   # pipeline is a separate future addition, not this smoke suite.
   e2e:
-    name: E2E Smoke (web-frontend)
+    name: E2E Smoke (web-frontend + pos-frontend)
     runs-on: ubuntu-latest
     needs: [lint, type-check]
     steps:
@@ -175,20 +224,33 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # Both apps pin the same @playwright/test version, so one browser install covers both.
       - name: Install Playwright browsers
         working-directory: apps/web-frontend
         run: npx playwright install --with-deps chromium
 
-      - name: Run Playwright E2E smoke suite
+      - name: Run web-frontend Playwright E2E smoke suite
         working-directory: apps/web-frontend
         run: pnpm test:e2e
 
-      - name: Upload Playwright report
+      - name: Run pos-frontend Playwright E2E smoke suite
+        working-directory: apps/pos-frontend
+        run: pnpm test:e2e
+
+      - name: Upload Playwright report (web-frontend)
         uses: actions/upload-artifact@v4
         if: failure()
         with:
-          name: playwright-report
+          name: playwright-report-web-frontend
           path: apps/web-frontend/playwright-report/
+          retention-days: 7
+
+      - name: Upload Playwright report (pos-frontend)
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report-pos-frontend
+          path: apps/pos-frontend/playwright-report/
           retention-days: 7
 
   # ─── Build Docker Images ───────────────────────────────────────────────────
@@ -375,7 +437,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # full history required to scan all commits
+          fetch-depth: 0 # full history required to scan all commits
 
       - name: TruffleHog OSS — scan entire git history for verified secrets
         uses: trufflesecurity/trufflehog@main
@@ -412,6 +474,72 @@ jobs:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
         with:
           args: --severity-threshold=high --all-projects
+
+  # ─── Load Test (manual dispatch only — PG-055) ───────────────────────────
+  # Not run on push/PR — real load runs are expensive/noisy for per-PR feedback (see
+  # load-tests/README.md's Testing section). This job runs one k6 scenario against an
+  # already-reachable target environment (staging URL, or a tunnel to a local dev stack);
+  # it does NOT stand up the 14-service app tier + Kafka/Elasticsearch/MinIO inside the
+  # runner itself — that's a separate, larger piece of infra work this package doesn't
+  # attempt (see load-tests/README.md "Known gaps"). Unverified: no live target environment
+  # was reachable in the session that authored this job — the base URL inputs must be
+  # supplied at dispatch time.
+  load-test:
+    name: Load Test (${{ github.event.inputs.scenario || 'k6-normal-load' }})
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Require target URLs
+        run: |
+          if [ -z "${{ github.event.inputs.baseAuthUrl }}" ] || [ -z "${{ github.event.inputs.baseSalesUrl }}" ] || [ -z "${{ github.event.inputs.baseEventUrl }}" ]; then
+            echo "::error::baseAuthUrl, baseSalesUrl, and baseEventUrl inputs are required to dispatch this workflow."
+            exit 1
+          fi
+
+      - name: Run k6 scenario
+        uses: grafana/k6-action@v0.3.1
+        with:
+          filename: load-tests/${{ github.event.inputs.scenario || 'k6-normal-load' }}.js
+        env:
+          LOAD_TEST_ENV: ${{ github.event.inputs.loadTestEnv || 'staging' }}
+          BASE_AUTH_URL: ${{ github.event.inputs.baseAuthUrl }}
+          BASE_SALES_URL: ${{ github.event.inputs.baseSalesUrl }}
+          BASE_INVENTORY_URL: ${{ github.event.inputs.baseInventoryUrl }}
+          BASE_EVENT_URL: ${{ github.event.inputs.baseEventUrl }}
+
+      - name: Upload k6 JSON summary
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: load-test-results
+          path: load-test-results/
+          retention-days: 30
+
+      # Compares each endpoint's just-recorded P95 (posted to event-service by the k6 script's
+      # handleSummary()) against its stored target and fails the workflow if any exceeds it by
+      # more than 20% — the CI regression gate required by PG-055's acceptance criteria.
+      - name: Fail if measured P95 exceeds target by more than 20%
+        if: always()
+        run: |
+          TOKEN=$(curl -sf -X POST "${{ github.event.inputs.baseAuthUrl }}/auth/login" \
+            -H 'Content-Type: application/json' \
+            -d '{"email":"admin@testco.com","password":"TestAdmin@2026!","tenantId":1}' \
+            | jq -r '.data.accessToken')
+          if [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ]; then
+            echo "::error::Could not authenticate against baseAuthUrl to fetch performance baselines."
+            exit 1
+          fi
+          BASELINES=$(curl -sf -H "Authorization: Bearer $TOKEN" "${{ github.event.inputs.baseEventUrl }}/admin/performance/baselines")
+          REGRESSIONS=$(echo "$BASELINES" | jq -c '[.data[] | select(.targetP95Ms != null and .p95Ms != null and (.p95Ms > (.targetP95Ms * 1.2)))]')
+          COUNT=$(echo "$REGRESSIONS" | jq 'length')
+          if [ "$COUNT" -gt 0 ]; then
+            echo "::error::${COUNT} endpoint(s) exceed their target P95 by more than 20%:"
+            echo "$REGRESSIONS" | jq .
+            exit 1
+          fi
+          echo "No endpoint exceeds its target P95 by more than 20% (or no targets recorded yet)."
 
   # ─── Deploy to Staging (on git tag) ──────────────────────────────────────
   # NOTE: infrastructure/k8s/*.yaml manifests are namespaced to `erp-system` (see

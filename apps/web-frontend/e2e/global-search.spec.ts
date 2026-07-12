@@ -7,55 +7,20 @@
 // true end-to-end run belongs in a separate, full-stack integration pipeline, not this smoke
 // test. What's still "real" here: DOM rendering, the Ctrl+K hook, debounced query state,
 // TanStack Query, and react-router navigation.
-import { test, expect, type Route, type Page } from '@playwright/test';
+//
+// login()/mockJson() live in ./helpers.ts — see that file for the CORS-preflight and
+// apiClient response-wrapping gotchas they encode.
+import { test, expect } from '@playwright/test';
+import { login, mockJson } from './helpers.js';
 
 const SEARCH_GLOBAL = 'SEARCH_GLOBAL';
 const DASHBOARD_VIEW = 'DASHBOARD_VIEW';
 
-function fakeJwt(payload: Record<string, unknown>): string {
-  const b64 = (obj: unknown) => Buffer.from(JSON.stringify(obj)).toString('base64');
-  return `${b64({ alg: 'RS256', typ: 'JWT' })}.${b64(payload)}.unsigned-test-signature`;
-}
-
-// The dev server (localhost:5173) and the mocked services (localhost:3010/3017) are different
-// origins, so every POST with a JSON body triggers a real CORS preflight (OPTIONS) before the
-// browser will send it — this must be answered, and the actual response needs an
-// Access-Control-Allow-Origin header, or the browser blocks it as a network error before our
-// mock body is ever seen by application code. apiClient (client.ts) also unwraps every
-// response as `data.data`, so payloads must be wrapped accordingly.
-async function mockJson(route: Route, data: unknown, status = 200): Promise<void> {
-  const corsHeaders = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET,POST,PUT,PATCH,DELETE,OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type,Authorization',
-  };
-  if (route.request().method() === 'OPTIONS') {
-    await route.fulfill({ status: 204, headers: corsHeaders });
-    return;
-  }
-  await route.fulfill({ status, headers: corsHeaders, json: { data } });
-}
-
-async function login(page: Page): Promise<void> {
-  const accessToken = fakeJwt({ sub: '1', tenantId: 1, roles: ['OWNER'], permissions: [DASHBOARD_VIEW, SEARCH_GLOBAL] });
-
-  await page.route('**/auth/login', (route) => mockJson(route, { accessToken, refreshToken: 'fake-refresh-token' }));
-  await page.route('**/users/me', (route) =>
-    mockJson(route, { id: 1, tenantId: 1, email: 'owner@example.com', firstName: 'Test', lastName: 'Owner' })
-  );
-  await page.route('**/saved-searches', (route) => mockJson(route, { content: [], totalElements: 0 }));
-
-  await page.goto('/login');
-  await page.getByLabel('Tenant ID').fill('1');
-  await page.getByLabel('Email').fill('owner@example.com');
-  await page.getByLabel('Password', { exact: true }).fill('correct-horse-battery-staple');
-  await page.getByRole('button', { name: /sign in|log in/i }).click();
-  await page.waitForURL('**/dashboard');
-}
-
 test.describe('Global search command palette', () => {
-  test('Ctrl+K opens the palette, searching calls the search API, and selecting a result navigates there', async ({ page }) => {
-    await login(page);
+  test('Ctrl+K opens the palette, searching calls the search API, and selecting a result navigates there', async ({
+    page,
+  }) => {
+    await login(page, [DASHBOARD_VIEW, SEARCH_GLOBAL]);
 
     let capturedQuery: string | null = null;
     await page.route('**/search?**', (route) => {
@@ -102,7 +67,7 @@ test.describe('Global search command palette', () => {
   });
 
   test('Escape closes the palette without navigating', async ({ page }) => {
-    await login(page);
+    await login(page, [DASHBOARD_VIEW, SEARCH_GLOBAL]);
 
     await page.getByText('Test Owner').click();
     await page.keyboard.press('Control+K');

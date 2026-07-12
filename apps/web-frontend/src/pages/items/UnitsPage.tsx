@@ -13,7 +13,11 @@ import Button from '../../components/ui/Button.js';
 import Modal from '../../components/ui/Modal.js';
 import Input from '../../components/ui/Input.js';
 
-interface Unit { id: number; name: string; abbreviation: string; }
+interface Unit {
+  id: number;
+  name: string;
+  abbreviation: string;
+}
 
 export default function UnitsPage() {
   const qc = useQueryClient();
@@ -24,15 +28,30 @@ export default function UnitsPage() {
   const { data, isLoading } = useQuery({ queryKey: ['units'], queryFn: () => unitApi.list() });
   const units: Unit[] = (data as { content?: Unit[] })?.content ?? [];
 
-  const { register, handleSubmit, reset, formState: { errors, isSubmitting } } = useForm<Partial<Unit>>();
+  const {
+    register,
+    handleSubmit,
+    reset,
+    formState: { errors, isSubmitting },
+  } = useForm<Partial<Unit>>();
 
-  function openNew() { reset({}); setModal({ open: true }); }
-  function openEdit(u: Unit) { reset(u); setModal({ open: true, unit: u }); }
+  function openNew() {
+    reset({});
+    setModal({ open: true });
+  }
+  function openEdit(u: Unit) {
+    reset(u);
+    setModal({ open: true, unit: u });
+  }
 
   const saveMutation = useMutation({
     mutationFn: (d: Record<string, unknown>) =>
       modal.unit ? unitApi.update(modal.unit!.id, d) : unitApi.create(d),
-    onSuccess: () => { toast.success('Saved'); qc.invalidateQueries({ queryKey: ['units'] }); setModal({ open: false }); },
+    onSuccess: () => {
+      toast.success('Saved');
+      qc.invalidateQueries({ queryKey: ['units'] });
+      setModal({ open: false });
+    },
     onError: (err: Error) => toast.error(err.message),
   });
 
@@ -40,9 +59,13 @@ export default function UnitsPage() {
     { key: 'abbreviation', header: 'Symbol', mono: true, sortable: true },
     { key: 'name', header: 'Name', sortable: true },
     {
-      key: 'actions', header: '', align: 'right',
+      key: 'actions',
+      header: '',
+      align: 'right',
       render: (r) => {
-        const items: ERPMenuItem[] = canUpdateUnit ? [{ label: 'Edit', icon: Pencil, onClick: () => openEdit(r) }] : [];
+        const items: ERPMenuItem[] = canUpdateUnit
+          ? [{ label: 'Edit', icon: Pencil, onClick: () => openEdit(r) }]
+          : [];
         return items.length > 0 ? <ERPDropdownMenu items={items} /> : null;
       },
     },
@@ -50,18 +73,46 @@ export default function UnitsPage() {
 
   return (
     <div>
-      <ERPPageHeader variant="list" title="Units of Measure" actions={canCreateUnit ? <Button onClick={openNew}>+ New Unit</Button> : undefined} />
+      <ERPPageHeader
+        variant="list"
+        title="Units of Measure"
+        actions={canCreateUnit ? <Button onClick={openNew}>+ New Unit</Button> : undefined}
+      />
       <ERPDataGrid columns={columns} data={units} isLoading={isLoading} rowKey="id" />
 
-      <Modal open={modal.open} onClose={() => setModal({ open: false })} title={modal.unit ? 'Edit Unit' : 'New Unit'} size="sm">
-        <form onSubmit={handleSubmit((d) => saveMutation.mutate(d as Record<string, unknown>))} className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <Input label="Name" required placeholder="Metre" {...register('name', { required: 'Required' })} error={errors.name?.message} />
-            <Input label="Symbol" required placeholder="m" {...register('abbreviation', { required: 'Required' })} error={errors.abbreviation?.message} />
+      <Modal
+        open={modal.open}
+        onClose={() => setModal({ open: false })}
+        title={modal.unit ? 'Edit Unit' : 'New Unit'}
+        size="sm"
+      >
+        <form
+          onSubmit={handleSubmit((d) => saveMutation.mutate(d as Record<string, unknown>))}
+          className="space-y-4"
+        >
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <Input
+              label="Name"
+              required
+              placeholder="Metre"
+              {...register('name', { required: 'Required' })}
+              error={errors.name?.message}
+            />
+            <Input
+              label="Symbol"
+              required
+              placeholder="m"
+              {...register('abbreviation', { required: 'Required' })}
+              error={errors.abbreviation?.message}
+            />
           </div>
           <div className="flex justify-end gap-3 pt-2">
-            <Button variant="secondary" type="button" onClick={() => setModal({ open: false })}>Cancel</Button>
-            <Button type="submit" loading={isSubmitting || saveMutation.isPending}>Save</Button>
+            <Button variant="secondary" type="button" onClick={() => setModal({ open: false })}>
+              Cancel
+            </Button>
+            <Button type="submit" loading={isSubmitting || saveMutation.isPending}>
+              Save
+            </Button>
           </div>
         </form>
       </Modal>

@@ -2,10 +2,25 @@ import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
+import Redis from 'ioredis';
 import { createDatabaseClient } from '@erp/db';
-import { HELMET_OPTIONS, PERMISSIONS_POLICY, registerHealthRoute, tenantOrIpKeyGenerator, checkDatabase, initializeTelemetry, initTenantStatusEnforcement } from '@erp/sdk';
-import { createLogger, createMetricsHandler, createHttpMetricsHook, createCorrelationIdHook } from '@erp/logger';
-import { ERPError } from '@erp/types';
+import {
+  HELMET_OPTIONS,
+  PERMISSIONS_POLICY,
+  registerHealthRoute,
+  tenantOrIpKeyGenerator,
+  checkDatabase,
+  initializeTelemetry,
+  initTenantStatusEnforcement,
+  subscribeToTenantStatusInvalidations,
+  registerErrorHandler,
+} from '@erp/sdk';
+import {
+  createLogger,
+  createMetricsHandler,
+  createHttpMetricsHook,
+  createCorrelationIdHook,
+} from '@erp/logger';
 import { loadNotificationConfig } from './config.js';
 import { notificationRoutes } from './api/notification.routes.js';
 
@@ -14,11 +29,23 @@ initializeTelemetry({ serviceName: 'notification-service' });
 async function bootstrap(): Promise<void> {
   const config = await loadNotificationConfig();
   const lokiUrl = process.env['LOKI_URL'];
-  const logger = createLogger({ serviceName: 'notification-service', level: 'info', ...(lokiUrl ? { lokiUrl } : {}) });
+  const logger = createLogger({
+    serviceName: 'notification-service',
+    level: 'info',
+    ...(lokiUrl ? { lokiUrl } : {}),
+  });
 
   const db = createDatabaseClient({ url: config.databaseUrl });
   initTenantStatusEnforcement(db);
   const metricsHandler = await createMetricsHandler('notification-service');
+
+  // Dedicated to tenant-status pub/sub invalidation only — this service otherwise has
+  // no Redis-backed caching or rate-limiting (see the rate-limit registration below).
+  const redis = new Redis(config.redisUrl, { maxRetriesPerRequest: null, enableReadyCheck: false });
+  redis.on('error', (err: Error) => {
+    logger.error({ err: err.message }, 'Redis connection error in notification-service');
+  });
+  subscribeToTenantStatusInvalidations(redis);
 
   const fastify = Fastify({ logger: false, trustProxy: true });
 
@@ -32,7 +59,8 @@ async function bootstrap(): Promise<void> {
     origin: process.env['ALLOWED_ORIGINS']?.split(',') ?? ['http://localhost:3000'],
     credentials: true,
   });
-  // No Redis connection in this service — in-memory rate-limit store (same fallback auth-service uses).
+  // In-memory rate-limit store (same fallback auth-service uses) — the Redis connection
+  // above is dedicated to tenant-status invalidation, not wired up as the rate-limit store.
   await fastify.register(rateLimit, {
     global: true,
     max: 200,
@@ -53,19 +81,14 @@ async function bootstrap(): Promise<void> {
   // PG-010: dual-registered — unprefixed (legacy, deprecation window) and under /api/v2
   // (baseline convention) — until web-frontend/pos-frontend fully migrate to /api/v2.
   await notificationRoutes(fastify, db, config);
-  await fastify.register(async (sub) => {
-    await notificationRoutes(sub, db, config);
-  }, { prefix: '/api/v2' });
+  await fastify.register(
+    async (sub) => {
+      await notificationRoutes(sub, db, config);
+    },
+    { prefix: '/api/v2' }
+  );
 
-  fastify.setErrorHandler((error, request, reply) => {
-    if (error instanceof ERPError) {
-      return reply.code(error.statusCode).send({
-        error: { code: error.code, message: error.message, details: error.details },
-      });
-    }
-    logger.error({ err: error instanceof Error ? error.message : String(error), url: request.url, correlationId: (request as { correlationId?: string }).correlationId }, 'Unhandled error');
-    return reply.code(500).send({ error: { code: 'INTERNAL_ERROR', message: 'Internal error' } });
-  });
+  registerErrorHandler(fastify, 'notification-service', logger);
 
   const address = await fastify.listen({ port: config.port, host: '0.0.0.0' });
   logger.info({ address }, 'Notification service started');

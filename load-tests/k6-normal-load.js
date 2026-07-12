@@ -10,7 +10,16 @@
 import http from 'k6/http';
 import { check, sleep } from 'k6';
 import { Trend, Rate, Counter } from 'k6/metrics';
-import { BASE_SALES, BASE_INVENTORY, authHeaders, buildInvoicePayload } from './k6-helpers.js';
+import {
+  BASE_AUTH,
+  BASE_SALES,
+  BASE_INVENTORY,
+  TEST_CREDENTIALS,
+  authHeaders,
+  buildInvoicePayload,
+  assertSafeEnvironment,
+  reportSamplesToEventService,
+} from './k6-helpers.js';
 
 // Custom metrics
 const invoiceCreateDuration = new Trend('invoice_create_duration', true);
@@ -21,9 +30,9 @@ const invoicesCreated = new Counter('invoices_created');
 
 export const options = {
   stages: [
-    { duration: '2m', target: 50 },  // ramp up
+    { duration: '2m', target: 50 }, // ramp up
     { duration: '26m', target: 50 }, // hold
-    { duration: '2m', target: 0 },   // ramp down
+    { duration: '2m', target: 0 }, // ramp down
   ],
   thresholds: {
     http_req_duration: ['p(95)<500', 'p(99)<1000'],
@@ -35,12 +44,12 @@ export const options = {
 };
 
 export function setup() {
+  assertSafeEnvironment();
+
   // Login once and pass token to VUs
-  const res = http.post(
-    `http://localhost:3010/auth/login`,
-    JSON.stringify({ email: 'admin@testco.com', password: 'TestAdmin@2026!', tenantId: 1 }),
-    { headers: { 'Content-Type': 'application/json' } }
-  );
+  const res = http.post(`${BASE_AUTH}/auth/login`, JSON.stringify(TEST_CREDENTIALS), {
+    headers: { 'Content-Type': 'application/json' },
+  });
   const token = JSON.parse(res.body)?.data?.accessToken ?? '';
   return { token };
 }
@@ -60,7 +69,9 @@ export default function ({ token }) {
       else errorRate.add(0);
     } else {
       const start = Date.now();
-      const res = http.get(`${BASE_INVENTORY}/api/v2/warehouses/1/stock?page=1&size=20`, { headers });
+      const res = http.get(`${BASE_INVENTORY}/api/v2/warehouses/1/stock?page=1&size=20`, {
+        headers,
+      });
       stockQueryDuration.add(Date.now() - start);
       const ok = check(res, { 'stock query 200': (r) => r.status === 200 });
       if (!ok) errorRate.add(1);
@@ -69,11 +80,7 @@ export default function ({ token }) {
   } else if (rand < 0.9) {
     // 30% invoice creates
     const start = Date.now();
-    const res = http.post(
-      `${BASE_SALES}/api/v2/invoices`,
-      buildInvoicePayload(),
-      { headers }
-    );
+    const res = http.post(`${BASE_SALES}/api/v2/invoices`, buildInvoicePayload(), { headers });
     invoiceCreateDuration.add(Date.now() - start);
     const ok = check(res, { 'invoice create 2xx': (r) => r.status >= 200 && r.status < 300 });
     if (ok) invoicesCreated.add(1);
@@ -89,6 +96,26 @@ export default function ({ token }) {
 }
 
 export function handleSummary(data) {
+  reportSamplesToEventService(
+    [
+      {
+        endpoint: '/api/v2/invoices',
+        method: 'POST',
+        durationMs: Math.round(data.metrics?.invoice_create_duration?.values?.['p(95)'] ?? 0),
+      },
+      {
+        endpoint: '/api/v2/invoices',
+        method: 'GET',
+        durationMs: Math.round(data.metrics?.list_invoices_duration?.values?.['p(95)'] ?? 0),
+      },
+      {
+        endpoint: '/api/v2/warehouses/:id/stock',
+        method: 'GET',
+        durationMs: Math.round(data.metrics?.stock_query_duration?.values?.['p(95)'] ?? 0),
+      },
+    ].filter((s) => s.durationMs > 0)
+  );
+
   return {
     'load-test-results/normal-load-summary.json': JSON.stringify(data, null, 2),
   };

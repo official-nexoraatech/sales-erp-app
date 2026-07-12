@@ -36,9 +36,18 @@ export default function SchemaRegistryPage() {
   const hasPermission = useAuthStore((s) => s.hasPermission);
   const [selectedSchema, setSelectedSchema] = useState<SchemaEntry | null>(null);
   const [showRegister, setShowRegister] = useState(false);
-  const [form, setForm] = useState({ eventType: '', version: '1', schema: '{\n  "required": [],\n  "properties": {}\n}', compatibilityMode: 'BACKWARD', description: '' });
+  const [form, setForm] = useState({
+    eventType: '',
+    version: '1',
+    schema: '{\n  "required": [],\n  "properties": {}\n}',
+    compatibilityMode: 'BACKWARD',
+    description: '',
+  });
   const [checkPayload, setCheckPayload] = useState('');
-  const [checkResult, setCheckResult] = useState<{ compatible: boolean; incompatibilities?: string[] } | null>(null);
+  const [checkResult, setCheckResult] = useState<{
+    compatible: boolean;
+    incompatibilities?: string[];
+  } | null>(null);
 
   const { data: catalogData, isLoading } = useQuery({
     queryKey: ['schema-catalog'],
@@ -47,8 +56,13 @@ export default function SchemaRegistryPage() {
   const schemas: SchemaEntry[] = (catalogData as unknown as SchemaEntry[]) ?? [];
 
   const registerMutation = useMutation({
-    mutationFn: (entry: { eventType: string; schemaVersion: number; jsonSchema: Record<string, unknown>; compatibilityMode?: string; description?: string }) =>
-      schemaRegistryApi.register(entry),
+    mutationFn: (entry: {
+      eventType: string;
+      schemaVersion: number;
+      jsonSchema: Record<string, unknown>;
+      compatibilityMode?: string;
+      description?: string;
+    }) => schemaRegistryApi.register(entry),
     onSuccess: () => {
       toast.success('Schema registered');
       setShowRegister(false);
@@ -60,8 +74,10 @@ export default function SchemaRegistryPage() {
   const checkMutation = useMutation({
     mutationFn: ({ type, jsonSchema }: { type: string; jsonSchema: Record<string, unknown> }) =>
       schemaRegistryApi.check(type, { jsonSchema }),
-    onSuccess: (result) => setCheckResult(result as { compatible: boolean; incompatibilities?: string[] }),
-    onError: () => setCheckResult({ compatible: false, incompatibilities: ['Compatibility check failed'] }),
+    onSuccess: (result) =>
+      setCheckResult(result as { compatible: boolean; incompatibilities?: string[] }),
+    onError: () =>
+      setCheckResult({ compatible: false, incompatibilities: ['Compatibility check failed'] }),
   });
 
   function handleRegister() {
@@ -86,9 +102,13 @@ export default function SchemaRegistryPage() {
         variant="list"
         title="Schema Registry"
         subtitle="Manage event schema versions and compatibility"
-        actions={hasPermission(PERMISSIONS.SCHEMA_REGISTRY_MANAGE) ? (
-          <Button variant="primary" onClick={() => setShowRegister(true)}>Register Schema</Button>
-        ) : undefined}
+        actions={
+          hasPermission(PERMISSIONS.SCHEMA_REGISTRY_MANAGE) ? (
+            <Button variant="primary" onClick={() => setShowRegister(true)}>
+              Register Schema
+            </Button>
+          ) : undefined
+        }
       />
 
       {/* Catalog table */}
@@ -96,62 +116,104 @@ export default function SchemaRegistryPage() {
         {isLoading ? (
           <ERPTableSkeleton rows={6} cols={6} />
         ) : (
-          <table className="w-full text-sm">
-            <thead className="bg-surface-hover">
-              <tr>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-secondary uppercase">Event Type</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-secondary uppercase">Version</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-secondary uppercase">Compatibility</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-secondary uppercase">Description</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-secondary uppercase">Registered</th>
-                <th className="px-4 py-3" />
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {schemas.map((s) => (
-                <tr key={s.id} className="hover:bg-surface-hover">
-                  <td className="px-4 py-3 font-medium text-primary">{s.eventType}</td>
-                  <td className="px-4 py-3 text-secondary">v{s.version}</td>
-                  <td className="px-4 py-3">
-                    <Badge variant={COMPAT_VARIANT[s.compatibilityMode] ?? 'default'}>{s.compatibilityMode}</Badge>
-                  </td>
-                  <td className="px-4 py-3 text-secondary truncate max-w-[200px]">{s.description ?? '—'}</td>
-                  <td className="px-4 py-3 text-secondary">{formatDate(s.registeredAt)}</td>
-                  <td className="px-4 py-3">
-                    <Button size="sm" variant="ghost" onClick={() => setSelectedSchema(s)}>View</Button>
-                  </td>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-surface-hover">
+                <tr>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-secondary uppercase">
+                    Event Type
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-secondary uppercase">
+                    Version
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-secondary uppercase">
+                    Compatibility
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-secondary uppercase">
+                    Description
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-secondary uppercase">
+                    Registered
+                  </th>
+                  <th className="px-4 py-3" />
                 </tr>
-              ))}
-              {schemas.length === 0 && (
-                <tr><td colSpan={6}>
-                  <ERPEmptyState
-                    type="no-data"
-                    title="No schemas registered"
-                    description="Registered event schema versions will appear here."
-                    {...(hasPermission(PERMISSIONS.SCHEMA_REGISTRY_MANAGE)
-                      ? { action: { label: 'Register Schema', onClick: () => setShowRegister(true) } }
-                      : {})}
-                  />
-                </td></tr>
-              )}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {schemas.map((s) => (
+                  <tr key={s.id} className="hover:bg-surface-hover">
+                    <td className="px-4 py-3 font-medium text-primary">{s.eventType}</td>
+                    <td className="px-4 py-3 text-secondary">v{s.version}</td>
+                    <td className="px-4 py-3">
+                      <Badge variant={COMPAT_VARIANT[s.compatibilityMode] ?? 'default'}>
+                        {s.compatibilityMode}
+                      </Badge>
+                    </td>
+                    <td className="px-4 py-3 text-secondary truncate max-w-[200px]">
+                      {s.description ?? '—'}
+                    </td>
+                    <td className="px-4 py-3 text-secondary">{formatDate(s.registeredAt)}</td>
+                    <td className="px-4 py-3">
+                      <Button size="sm" variant="ghost" onClick={() => setSelectedSchema(s)}>
+                        View
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+                {schemas.length === 0 && (
+                  <tr>
+                    <td colSpan={6}>
+                      <ERPEmptyState
+                        type="no-data"
+                        title="No schemas registered"
+                        description="Registered event schema versions will appear here."
+                        {...(hasPermission(PERMISSIONS.SCHEMA_REGISTRY_MANAGE)
+                          ? {
+                              action: {
+                                label: 'Register Schema',
+                                onClick: () => setShowRegister(true),
+                              },
+                            }
+                          : {})}
+                      />
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
 
       {/* Schema detail modal */}
       {selectedSchema && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => { setSelectedSchema(null); setCheckResult(null); }}>
-          <div className="bg-surface rounded-xl shadow-xl max-w-2xl w-full max-h-[80vh] overflow-y-auto p-6" onClick={(e) => e.stopPropagation()}>
+        <div
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+          onClick={() => {
+            setSelectedSchema(null);
+            setCheckResult(null);
+          }}
+        >
+          <div
+            className="bg-surface rounded-xl shadow-xl max-w-2xl w-full max-h-[80vh] overflow-y-auto p-6"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-primary">{selectedSchema.eventType} v{selectedSchema.version}</h3>
-              <Badge variant={COMPAT_VARIANT[selectedSchema.compatibilityMode] ?? 'default'}>{selectedSchema.compatibilityMode}</Badge>
+              <h3 className="text-lg font-semibold text-primary">
+                {selectedSchema.eventType} v{selectedSchema.version}
+              </h3>
+              <Badge variant={COMPAT_VARIANT[selectedSchema.compatibilityMode] ?? 'default'}>
+                {selectedSchema.compatibilityMode}
+              </Badge>
             </div>
-            <pre className="bg-surface-hover rounded p-4 text-xs overflow-x-auto mb-4">{JSON.stringify(selectedSchema.schema, null, 2)}</pre>
+            <pre className="bg-surface-hover rounded p-4 text-xs overflow-x-auto mb-4">
+              {JSON.stringify(selectedSchema.schema, null, 2)}
+            </pre>
 
             {hasPermission(PERMISSIONS.SCHEMA_REGISTRY_MANAGE) && (
               <div className="border-t border-border pt-4">
-                <h4 className="text-sm font-semibold text-primary mb-2">Check Payload Compatibility</h4>
+                <h4 className="text-sm font-semibold text-primary mb-2">
+                  Check Payload Compatibility
+                </h4>
                 <textarea
                   value={checkPayload}
                   onChange={(e) => setCheckPayload(e.target.value)}
@@ -160,8 +222,12 @@ export default function SchemaRegistryPage() {
                   className="w-full px-3 py-2 rounded-lg border border-border bg-surface text-primary text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary/30 mb-2"
                 />
                 {checkResult && (
-                  <div className={`px-3 py-2 rounded-lg text-sm mb-2 ${checkResult.compatible ? 'bg-success/10 text-success' : 'bg-danger/10 text-danger'}`}>
-                    {checkResult.compatible ? 'Compatible' : `Incompatible: ${checkResult.incompatibilities?.join(', ')}`}
+                  <div
+                    className={`px-3 py-2 rounded-lg text-sm mb-2 ${checkResult.compatible ? 'bg-success/10 text-success' : 'bg-danger/10 text-danger'}`}
+                  >
+                    {checkResult.compatible
+                      ? 'Compatible'
+                      : `Incompatible: ${checkResult.incompatibilities?.join(', ')}`}
                   </div>
                 )}
                 <Button
@@ -172,7 +238,9 @@ export default function SchemaRegistryPage() {
                     try {
                       const jsonSchema = JSON.parse(checkPayload) as Record<string, unknown>;
                       checkMutation.mutate({ type: selectedSchema.eventType, jsonSchema });
-                    } catch { toast.error('Invalid JSON'); }
+                    } catch {
+                      toast.error('Invalid JSON');
+                    }
                   }}
                 >
                   Check
@@ -180,15 +248,31 @@ export default function SchemaRegistryPage() {
               </div>
             )}
 
-            <Button variant="secondary" size="sm" className="mt-4" onClick={() => { setSelectedSchema(null); setCheckResult(null); }}>Close</Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              className="mt-4"
+              onClick={() => {
+                setSelectedSchema(null);
+                setCheckResult(null);
+              }}
+            >
+              Close
+            </Button>
           </div>
         </div>
       )}
 
       {/* Register modal */}
       {showRegister && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setShowRegister(false)}>
-          <div className="bg-surface rounded-xl shadow-xl max-w-xl w-full p-6" onClick={(e) => e.stopPropagation()}>
+        <div
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+          onClick={() => setShowRegister(false)}
+        >
+          <div
+            className="bg-surface rounded-xl shadow-xl max-w-xl w-full p-6"
+            onClick={(e) => e.stopPropagation()}
+          >
             <h3 className="text-lg font-semibold text-primary mb-4">Register Schema</h3>
             <div className="space-y-3">
               <div>
@@ -213,13 +297,19 @@ export default function SchemaRegistryPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-secondary mb-1">Compatibility</label>
+                  <label className="block text-xs font-medium text-secondary mb-1">
+                    Compatibility
+                  </label>
                   <select
                     value={form.compatibilityMode}
                     onChange={(e) => setForm((f) => ({ ...f, compatibilityMode: e.target.value }))}
                     className="w-full px-3 py-2 rounded-lg border border-border bg-surface text-primary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
                   >
-                    {COMPATIBILITY_MODES.map((m) => <option key={m} value={m}>{m}</option>)}
+                    {COMPATIBILITY_MODES.map((m) => (
+                      <option key={m} value={m}>
+                        {m}
+                      </option>
+                    ))}
                   </select>
                 </div>
               </div>
@@ -244,10 +334,18 @@ export default function SchemaRegistryPage() {
               </div>
             </div>
             <div className="flex gap-2 mt-4">
-              <Button variant="primary" size="sm" loading={registerMutation.isPending} onClick={handleRegister} disabled={!form.eventType}>
+              <Button
+                variant="primary"
+                size="sm"
+                loading={registerMutation.isPending}
+                onClick={handleRegister}
+                disabled={!form.eventType}
+              >
                 Register
               </Button>
-              <Button variant="secondary" size="sm" onClick={() => setShowRegister(false)}>Cancel</Button>
+              <Button variant="secondary" size="sm" onClick={() => setShowRegister(false)}>
+                Cancel
+              </Button>
             </div>
           </div>
         </div>

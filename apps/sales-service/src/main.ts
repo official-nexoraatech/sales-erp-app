@@ -1,12 +1,29 @@
 /* global crypto, setInterval */
-import Fastify, { type FastifyError } from 'fastify';
+import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import multipart from '@fastify/multipart';
 import rateLimit from '@fastify/rate-limit';
-import { PlatformContextFactory, HELMET_OPTIONS, PERMISSIONS_POLICY, registerHealthRoute, tenantOrIpKeyGenerator, initializeTelemetry, initTenantStatusEnforcement } from '@erp/sdk';
-import { createLogger, createMetricsHandler, erpInvoiceCreateTotal, erpInvoiceCreateFailedTotal, erpHttpRequestTotal, erpHttpErrorTotal, erpHttpRequestDuration, createCorrelationIdHook } from '@erp/logger';
-import { ERPError } from '@erp/types';
+import {
+  PlatformContextFactory,
+  HELMET_OPTIONS,
+  PERMISSIONS_POLICY,
+  registerHealthRoute,
+  tenantOrIpKeyGenerator,
+  initializeTelemetry,
+  initTenantStatusEnforcement,
+  registerErrorHandler,
+} from '@erp/sdk';
+import {
+  createLogger,
+  createMetricsHandler,
+  erpInvoiceCreateTotal,
+  erpInvoiceCreateFailedTotal,
+  erpHttpRequestTotal,
+  erpHttpErrorTotal,
+  erpHttpRequestDuration,
+  createCorrelationIdHook,
+} from '@erp/logger';
 import { loadConfigWithSecrets } from '@erp/config';
 import { customerRoutes } from './api/customer.routes.js';
 import { supplierRoutes } from './api/supplier.routes.js';
@@ -29,7 +46,11 @@ initializeTelemetry({ serviceName: 'sales-service' });
 async function bootstrap(): Promise<void> {
   const port = parseInt(process.env['SALES_SERVICE_PORT'] ?? '3013', 10);
   const lokiUrl = process.env['LOKI_URL'];
-  const logger = createLogger({ serviceName: 'sales-service', level: 'info', ...(lokiUrl ? { lokiUrl } : {}) });
+  const logger = createLogger({
+    serviceName: 'sales-service',
+    level: 'info',
+    ...(lokiUrl ? { lokiUrl } : {}),
+  });
 
   const metricsHandler = await createMetricsHandler('sales-service');
 
@@ -50,6 +71,7 @@ async function bootstrap(): Promise<void> {
   });
   await ctxFactory.connect();
   ctxFactory.subscribeFeatureFlagInvalidations();
+  ctxFactory.subscribeTenantStatusInvalidations();
   initTenantStatusEnforcement(ctxFactory.rawDb);
 
   const fastify = Fastify({ logger: false, trustProxy: true });
@@ -95,13 +117,18 @@ async function bootstrap(): Promise<void> {
       if (count <= 0) continue;
       try {
         const ctx = ctxFactory.create({ tenantId, userId: 0, correlationId: crypto.randomUUID() });
-        await ctx.events.publish('usage', tenantId, 'USAGE_API_CALL_BATCH', { quantity: count, service: 'sales-service' });
+        await ctx.events.publish('usage', tenantId, 'USAGE_API_CALL_BATCH', {
+          quantity: count,
+          service: 'sales-service',
+        });
       } catch (err) {
         logger.warn({ tenantId, err }, 'Failed to flush API-call usage batch (non-fatal)');
       }
     }
   };
-  setInterval(() => { void flushApiCallCounts(); }, API_CALL_FLUSH_INTERVAL_MS).unref();
+  setInterval(() => {
+    void flushApiCallCounts();
+  }, API_CALL_FLUSH_INTERVAL_MS).unref();
 
   // Instrument every response for erp_http_request_total and erp_http_error_total
   fastify.addHook('onResponse', async (request, reply) => {
@@ -109,13 +136,18 @@ async function bootstrap(): Promise<void> {
     const route = request.routeOptions?.url ?? request.url;
     const status = String(reply.statusCode);
     erpHttpRequestTotal.inc({ method, route, status_code: status });
-    erpHttpRequestDuration.observe({ method, route, status_code: status, service: 'sales-service' }, reply.elapsedTime / 1000);
+    erpHttpRequestDuration.observe(
+      { method, route, status_code: status, service: 'sales-service' },
+      reply.elapsedTime / 1000
+    );
     if (reply.statusCode >= 500) {
       erpHttpErrorTotal.inc({ method, route });
     }
     // Track invoice creations for the erp_invoice_create_total counter
     if (method === 'POST' && route === '/api/v2/invoices') {
-      const tenantId = String((request as { auth?: { tenantId?: number } }).auth?.tenantId ?? 'unknown');
+      const tenantId = String(
+        (request as { auth?: { tenantId?: number } }).auth?.tenantId ?? 'unknown'
+      );
       if (reply.statusCode === 201) {
         erpInvoiceCreateTotal.inc({ tenant_id: tenantId, branch_id: 'unknown' });
       } else if (reply.statusCode >= 400) {
@@ -129,33 +161,28 @@ async function bootstrap(): Promise<void> {
     }
   });
 
-  await fastify.register(async (sub) => {
-    await customerRoutes(sub, ctxFactory);
-    await supplierRoutes(sub, ctxFactory);
-    await quotationRoutes(sub, ctxFactory);
-    await invoiceRoutes(sub, ctxFactory);
-    await posRoutes(sub, ctxFactory);
-    await paymentRoutes(sub, ctxFactory);
-    await saleReturnRoutes(sub, ctxFactory);
-    await loyaltyRoutes(sub, ctxFactory);
-    await deliveryChallanRoutes(sub, ctxFactory);
-    await crmRoutes(sub, ctxFactory);
-    await dashboardRoutes(sub, ctxFactory);
-    await internalRoutes(sub, ctxFactory);
-    await attachmentRoutes(sub, ctxFactory);
-    await searchSyncInternalRoutes(sub, ctxFactory);
-    await syncRoutes(sub, ctxFactory);
-  }, { prefix: '/api/v2' });
+  await fastify.register(
+    async (sub) => {
+      await customerRoutes(sub, ctxFactory);
+      await supplierRoutes(sub, ctxFactory);
+      await quotationRoutes(sub, ctxFactory);
+      await invoiceRoutes(sub, ctxFactory);
+      await posRoutes(sub, ctxFactory);
+      await paymentRoutes(sub, ctxFactory);
+      await saleReturnRoutes(sub, ctxFactory);
+      await loyaltyRoutes(sub, ctxFactory);
+      await deliveryChallanRoutes(sub, ctxFactory);
+      await crmRoutes(sub, ctxFactory);
+      await dashboardRoutes(sub, ctxFactory);
+      await internalRoutes(sub, ctxFactory);
+      await attachmentRoutes(sub, ctxFactory);
+      await searchSyncInternalRoutes(sub, ctxFactory);
+      await syncRoutes(sub, ctxFactory);
+    },
+    { prefix: '/api/v2' }
+  );
 
-  fastify.setErrorHandler<FastifyError>((error, request, reply) => {
-    if (error instanceof ERPError) {
-      return reply.code(error.statusCode).send({
-        error: { code: error.code, message: error.message, details: error.details },
-      });
-    }
-    logger.error({ err: error.message, url: request.url, correlationId: (request as { correlationId?: string }).correlationId }, 'Unhandled error in sales-service');
-    return reply.code(500).send({ error: { code: 'INTERNAL_ERROR', message: 'An unexpected error occurred' } });
-  });
+  registerErrorHandler(fastify, 'sales-service', logger);
 
   const address = await fastify.listen({ port, host: '0.0.0.0' });
   logger.info({ address }, 'Sales service started');

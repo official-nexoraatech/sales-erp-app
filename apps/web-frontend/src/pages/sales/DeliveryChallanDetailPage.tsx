@@ -8,7 +8,6 @@ import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
 import { ERPDetailSkeleton } from '../../components/erp/ERPSkeleton.js';
 import ERPEmptyState from '../../components/erp/ERPEmptyState.js';
 import Button from '../../components/ui/Button.js';
-import Badge from '../../components/ui/Badge.js';
 import { formatDate, formatCurrency } from '../../lib/format.js';
 
 interface ChallanLine {
@@ -87,9 +86,13 @@ export default function DeliveryChallanDetailPage() {
         statusVariant={STATUS_COLORS[c.status] ?? 'default'}
         backTo="/sales/delivery-challans"
       >
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           {canCreateChallan && c.status === 'DRAFT' && (
-            <Button variant="ghost" isLoading={dispatchMutation.isPending} onClick={() => dispatchMutation.mutate()}>
+            <Button
+              variant="ghost"
+              isLoading={dispatchMutation.isPending}
+              onClick={() => dispatchMutation.mutate()}
+            >
               Dispatch
             </Button>
           )}
@@ -99,7 +102,10 @@ export default function DeliveryChallanDetailPage() {
             </Button>
           )}
           {c.convertedInvoiceId && (
-            <Button variant="ghost" onClick={() => navigate(`/sales/invoices/${c.convertedInvoiceId}`)}>
+            <Button
+              variant="ghost"
+              onClick={() => navigate(`/sales/invoices/${c.convertedInvoiceId}`)}
+            >
               View Invoice
             </Button>
           )}
@@ -107,7 +113,7 @@ export default function DeliveryChallanDetailPage() {
       </ERPPageHeader>
 
       {/* Summary cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         {[
           { label: 'Customer', value: `ID: ${c.customerId}` },
           { label: 'Challan Date', value: formatDate(c.challanDate) },

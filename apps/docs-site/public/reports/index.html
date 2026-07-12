@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ERP Docs — Reports Module</title>
+<link rel="stylesheet" href="/shared/docs-shell.css">
+</head>
+<body data-module="Reports">
+
+<header class="topbar">
+  <button class="icon-btn navtoggle" id="navToggle" aria-label="Toggle navigation">☰</button>
+  <a class="brand" href="/"><span class="mark">N</span> Nexoraa ERP Docs</a>
+  <div class="searchwrap">
+    <input type="text" class="searchbox" id="searchInput" placeholder="Search Reports documentation…" autocomplete="off">
+    <div class="search-results" id="searchResults"></div>
+  </div>
+  <div class="topbar-actions">
+    <button class="icon-btn" id="themeToggle" aria-label="Toggle dark mode" title="Toggle dark mode">◐</button>
+    <button class="icon-btn" id="printBtn" aria-label="Print this page" title="Print this page">⎙</button>
+  </div>
+</header>
+
+<div class="shell">
+  <nav class="sidebar" id="sidebar">
+    <div class="sb-group">
+      <div class="sb-group-title">Modules</div>
+      <div class="sb-module active-module">
+        <div class="sb-module-head active-module">Reports <span class="status">v1</span></div>
+        <div class="sb-track">
+          <div class="sb-track-title">Client</div>
+          <a class="sb-link" data-page="reports-client-overview" href="#reports/client/overview">Overview</a>
+          <a class="sb-link" data-page="reports-client-running" href="#reports/client/running">Browsing &amp; Running a Report</a>
+          <a class="sb-link" data-page="reports-client-categories" href="#reports/client/categories">Report Categories</a>
+          <a class="sb-link" data-page="reports-client-export" href="#reports/client/export">Exporting Reports</a>
+          <a class="sb-link" data-page="reports-client-scheduling" href="#reports/client/scheduling">Scheduling Reports</a>
+          <a class="sb-link" data-page="reports-client-faq" href="#reports/client/faq">Troubleshooting &amp; FAQ</a>
+        </div>
+        <div class="sb-track">
+          <div class="sb-track-title">Super Admin</div>
+          <a class="sb-link" data-page="reports-admin-access" href="#reports/admin/access-roles">Access &amp; Roles</a>
+          <a class="sb-link" data-page="reports-admin-freshness" href="#reports/admin/data-freshness">Report Data Freshness</a>
+          <a class="sb-link" data-page="reports-admin-limits" href="#reports/admin/limitations">Limitations to Know</a>
+        </div>
+        <div class="sb-track">
+          <div class="sb-track-title">Developer</div>
+          <a class="sb-link" data-page="reports-dev-architecture" href="#reports/dev/architecture">Architecture</a>
+          <a class="sb-link" data-page="reports-dev-api" href="#reports/dev/api-reference">API Reference</a>
+          <a class="sb-link" data-page="reports-dev-data" href="#reports/dev/data-model">Data Model</a>
+        </div>
+        <div class="sb-track">
+          <div class="sb-track-title">Audit</div>
+          <a class="sb-link" data-page="reports-issues" href="#reports/audit/known-issues">Known Issues &amp; Needs Review</a>
+        </div>
+      </div>
+    </div>
+    <div class="sb-group">
+      <div class="sb-group-title">Other modules</div>
+      <a class="sb-module-head" href="/pos/index.html">POS <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/sales/index.html">Sales &amp; Invoicing <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/inventory/index.html">Inventory <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/purchase/index.html">Purchase <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/products/index.html">Products &amp; Variants <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/customers/index.html">Customers &amp; Suppliers <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/accounting/index.html">Accounting &amp; GST <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/hr/index.html">HR &amp; Payroll <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/tenants/index.html">Super Admin / Tenants <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/platform/index.html">Developer Platform <span class="status">Open →</span></a>
+    </div>
+  </nav>
+
+  <main class="content" id="content">
+    <div class="breadcrumb" id="breadcrumb"></div>
+
+    <!-- ============ CLIENT: OVERVIEW ============ -->
+    <article class="page" id="page-reports-client-overview" data-track="client" data-title="Reports Overview">
+      <span class="track-pill client">Client documentation</span>
+      <h1>Reports Overview</h1>
+      <div class="pilot-banner">Ninth module documented from a direct code audit. Covers the general-purpose Reports browser — a single screen that can run any of 77 registered reports across Sales, Purchase, Inventory, Financial, HR, GST, and Analytics.</div>
+
+      <p>This is separate from the dedicated Trial Balance / Profit &amp; Loss / Balance Sheet / Cash Flow pages documented under <a href="/accounting/index.html">Accounting &amp; GST</a> — those four also happen to appear in this general browser too, computed by a second, independently-built copy of the same logic. They agree with each other except for Cash Flow, where the version in this browser is missing the Investing/Financing breakdown the dedicated page has — see that module's "Two Cash Flow Reports That Disagree" page for detail.</p>
+
+      <div class="callout ok"><div class="callout-title">Good news correcting an older internal note</div><p>An older audit flagged the "Day Book" report (and several others) as having broken column references. That's been fixed — Day Book, Account Ledger, Expense Analysis, Bank Book, and Fund Flow all now query the correct real columns and are covered by passing tests. If you're consulting older notes on this area, treat that specific concern as resolved.</p></div>
+
+      <div class="callout bug"><div class="callout-title">Exporting to CSV or Excel silently produces a broken file for many of the busiest reports</div><p>For reports that process in the background (most of the higher-volume ones — sales register, purchase register, stock movement, payroll, GST register, and more), clicking Export CSV/Excel downloads a tiny file containing a status message instead of your actual data — with no error shown. See <a href="#reports/client/export">Exporting Reports</a> before relying on an exported file from one of these.</p></div>
+
+      <div class="pager">
+        <span></span>
+        <a class="next" href="#reports/client/running"><div class="pg-label">Next</div><div class="pg-title">Browsing &amp; Running a Report →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ CLIENT: RUNNING ============ -->
+    <article class="page" id="page-reports-client-running" data-track="client" data-title="Browsing & Running a Report">
+      <span class="track-pill client">Client documentation</span>
+      <h1>Browsing &amp; Running a Report</h1>
+      <ol class="steps">
+        <li><h4>Find a report</h4>Search by name or filter by category on the Reports page.</li>
+        <li><h4>Set parameters</h4>Date range (defaulting to this month), and any report-specific filters like branch or warehouse.</li>
+        <li><h4>Run it</h4>Results display as a table, with totals at the bottom for currency/number columns. Busier reports process in the background and update automatically once ready — a quick "waiting" state is normal for those.</li>
+      </ol>
+      <div class="callout review"><div class="callout-title">The report list shows you reports you might not actually be allowed to run</div><p>Every report you have general reporting access to appears in the list, regardless of whether you hold that specific report's own permission — you'll only find out you're blocked after clicking in and trying to run it. Seeing a report in the list isn't a guarantee you can use it.</p></div>
+      <div class="pager">
+        <a href="#reports/client/overview"><div class="pg-label">Back</div><div class="pg-title">← Overview</div></a>
+        <a class="next" href="#reports/client/categories"><div class="pg-label">Next</div><div class="pg-title">Report Categories →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ CLIENT: CATEGORIES ============ -->
+    <article class="page" id="page-reports-client-categories" data-track="client" data-title="Report Categories">
+      <span class="track-pill client">Client documentation</span>
+      <h1>Report Categories</h1>
+      <p>77 reports across seven categories:</p>
+      <div class="tablewrap"><table>
+        <tr><th>Category</th><th>Count</th><th>Examples</th></tr>
+        <tr><td>Sales</td><td class="num">20</td><td>Sales register, top-selling/slow-moving items, customer ledger &amp; statement, POS summary, loyalty points, discounts</td></tr>
+        <tr><td>Purchase</td><td class="num">12</td><td>Purchase register, outstanding payables, GRN report, supplier ledger, landed cost, price trend</td></tr>
+        <tr><td>Inventory</td><td class="num">13</td><td>Stock summary/movement/ageing, valuation, reorder, dead stock, physical verification, warehouse-wise stock</td></tr>
+        <tr><td>Financial</td><td class="num">15</td><td>The four core statements, day book, account ledger, bank book, TDS, depreciation schedule, AR/AP ageing</td></tr>
+        <tr><td>HR</td><td class="num">6</td><td>Payroll, attendance, leave, employee master, alterations, tailor work log</td></tr>
+        <tr><td>GST</td><td class="num">6</td><td>GST register, GSTR-1/3B, ITC register, GST payable, reverse charge</td></tr>
+        <tr><td>Analytics</td><td class="num">6</td><td>Chart-based dashboards for sales trend, inventory, and HR headcount/salary/hiring metrics</td></tr>
+      </table></div>
+      <div class="callout review"><div class="callout-title">The GST rate column on the GSTR-1 report always shows 0%</div><p>Every other figure on this report is real; the rate column specifically is a placeholder. Cross-check the actual applicable rate elsewhere before using this report to prepare a filing.</p></div>
+      <div class="pager">
+        <a href="#reports/client/running"><div class="pg-label">Back</div><div class="pg-title">← Browsing &amp; Running a Report</div></a>
+        <a class="next" href="#reports/client/export"><div class="pg-label">Next</div><div class="pg-title">Exporting Reports →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ CLIENT: EXPORT ============ -->
+    <article class="page" id="page-reports-client-export" data-track="client" data-title="Exporting Reports">
+      <span class="track-pill client">Client documentation</span>
+      <h1>Exporting Reports</h1>
+      <p>Two export formats exist: CSV and Excel. There is no PDF export from this screen.</p>
+      <div class="callout bug"><div class="callout-title">CSV/Excel export doesn't work for background-processed reports</div><p>About 30 of the 77 reports — generally the higher-volume ones, including Sales Register, Sales by Customer/Item, Customer Ledger, Purchase Register, Purchase by Item, Supplier Ledger, GRN Report, Stock Summary/Movement/Ageing, Inventory Valuation, Account Ledger, Bank Book, Payroll Report, Attendance Report, and GST Register — process in the background. For exactly these reports, clicking Export CSV or Export Excel currently downloads a small file containing a status message instead of your report data, with no error or warning shown. <strong>Always open the report on screen and verify it looks right before trusting an exported file from one of these</strong> — export works correctly for the remaining ~54 reports that don't process in the background.</p></div>
+      <div class="pager">
+        <a href="#reports/client/categories"><div class="pg-label">Back</div><div class="pg-title">← Report Categories</div></a>
+        <a class="next" href="#reports/client/scheduling"><div class="pg-label">Next</div><div class="pg-title">Scheduling Reports →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ CLIENT: SCHEDULING ============ -->
+    <article class="page" id="page-reports-client-scheduling" data-track="client" data-title="Scheduling Reports">
+      <span class="track-pill client">Client documentation</span>
+      <h1>Scheduling Reports</h1>
+      <p>A scheduled report emails itself to chosen recipients on a recurring cadence, with a CSV or Excel attachment of the data.</p>
+      <div class="callout bug"><div class="callout-title">Do not choose "PDF" as the schedule format</div><p>PDF is offered as a format option, but it isn't actually implemented — a PDF-format schedule sends an email with no attachment at all, while the email text still (incorrectly) says "see the attached file for the full report data." Always choose CSV or Excel for a scheduled report; both of those genuinely attach real data.</p></div>
+      <div class="callout note"><div class="callout-title">Scheduling is currently Owner/Admin-only</div><p>No other role can create or manage a scheduled report by default — see <a href="#reports/admin/access-roles">Access &amp; Roles</a>.</p></div>
+      <div class="pager">
+        <a href="#reports/client/export"><div class="pg-label">Back</div><div class="pg-title">← Exporting Reports</div></a>
+        <a class="next" href="#reports/client/faq"><div class="pg-label">Next</div><div class="pg-title">Troubleshooting &amp; FAQ →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ CLIENT: FAQ ============ -->
+    <article class="page" id="page-reports-client-faq" data-track="client" data-title="Troubleshooting & FAQ">
+      <span class="track-pill client">Client documentation</span>
+      <h1>Troubleshooting &amp; FAQ</h1>
+      <div class="tablewrap"><table>
+        <tr><th>Question</th><th>Answer</th></tr>
+        <tr><td>My exported CSV/Excel file just has one line of odd text in it, not my report</td><td>A confirmed bug for background-processed reports — see <a href="#reports/client/export">Exporting Reports</a>.</td></tr>
+        <tr><td>I can see a report in the list but get denied when I run it</td><td>Expected currently — the list isn't filtered by your specific permissions ahead of time.</td></tr>
+        <tr><td>My scheduled PDF report email has no attachment</td><td>Confirmed bug — switch the schedule to CSV or Excel instead.</td></tr>
+        <tr><td>Can I get a chart instead of a table?</td><td>Only for the six Analytics-category reports, which are dashboard-style; everything else in this browser is a table.</td></tr>
+        <tr><td>Why can't I create a scheduled report?</td><td>Only Owner/Admin-level accounts can by default today.</td></tr>
+      </table></div>
+      <div class="pager">
+        <a href="#reports/client/scheduling"><div class="pg-label">Back</div><div class="pg-title">← Scheduling Reports</div></a>
+        <span></span>
+      </div>
+    </article>
+
+    <!-- ============ ADMIN: ACCESS ============ -->
+    <article class="page" id="page-reports-admin-access" data-track="admin" data-title="Access & Roles">
+      <span class="track-pill admin">Super Admin documentation</span>
+      <h1>Access &amp; Roles</h1>
+      <div class="callout bug"><div class="callout-title">Several roles can't run the reports most relevant to their own job</div><p>Each report declares its own required permission, and several of those permissions aren't granted to the role you'd expect to use them — reachable only by Owner/Admin-tier accounts today:</p>
+      <ul>
+        <li><strong>HR Manager</strong> cannot run the Attendance Report (a different permission than the attendance-marking rights it does have).</li>
+        <li><strong>Inventory Manager</strong> cannot run the Stock Transfer, Stock Adjustment, Physical Verification, Fabric Roll, or Reorder reports — despite having the underlying permissions to perform those actions themselves.</li>
+        <li><strong>Accountant</strong> cannot run the Bank Book, GSTR-1, or GSTR-3B reports.</li>
+        <li><strong>No one except Owner/Admin</strong> can create a scheduled report, or open the Dashboard/Analytics screens at all.</li>
+      </ul>
+      <p>If staff report being unable to run a report you'd expect their role to use daily, this is very likely why.</p></div>
+      <div class="pager">
+        <span></span>
+        <a class="next" href="#reports/admin/data-freshness"><div class="pg-label">Next</div><div class="pg-title">Report Data Freshness →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ ADMIN: FRESHNESS ============ -->
+    <article class="page" id="page-reports-admin-freshness" data-track="admin" data-title="Report Data Freshness">
+      <span class="track-pill admin">Super Admin documentation</span>
+      <h1>Report Data Freshness</h1>
+      <p>Reports (and dashboards) are architected to read from a separate database copy rather than the live transactional database — this is the only part of the system built this way, done deliberately so heavy reporting queries can't slow down checkout, invoicing, or any other live operation.</p>
+      <div class="callout note"><div class="callout-title">In practice today, this doesn't cause any noticeable staleness</div><p>The safeguard that's supposed to detect when that separate copy is lagging behind falls back to the live database automatically if it can't confirm the copy is healthy and current — and in this environment's own local/development setup, that copy isn't genuinely kept in sync in the first place, so the fallback triggers every time and reports quietly read live data regardless. In a fully production-configured deployment with real replication actually set up, reports could lag by roughly ten seconds and dashboards by up to two minutes behind live activity — an intentional tradeoff for performance, not a bug — but that real setup has not yet been confirmed as done per the project's own deployment notes. Confirm this explicitly before assuming reports reflect live data with any specific staleness guarantee in production.</p></div>
+      <div class="pager">
+        <a href="#reports/admin/access-roles"><div class="pg-label">Back</div><div class="pg-title">← Access &amp; Roles</div></a>
+        <a class="next" href="#reports/admin/limitations"><div class="pg-label">Next</div><div class="pg-title">Limitations to Know →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ ADMIN: LIMITATIONS ============ -->
+    <article class="page" id="page-reports-admin-limits" data-track="admin" data-title="Limitations to Know">
+      <span class="track-pill admin">Super Admin documentation</span>
+      <h1>Limitations to Know</h1>
+      <p>Full technical detail is on <a href="#reports/audit/known-issues">Known Issues</a>.</p>
+      <ol>
+        <li><strong>CSV/Excel export is broken for ~30 background-processed reports</strong> — the most commonly needed ones for external analysis.</li>
+        <li><strong>PDF-format scheduled reports silently send no attachment.</strong></li>
+        <li><strong>Several operational roles can't run reports core to their own job</strong> — a recurring role-configuration gap, same pattern found in every other module.</li>
+        <li><strong>Real database replication for reports has not been confirmed as actually provisioned in production</strong> — the routing code exists and is tested, but the deployment step itself is marked incomplete in the project's own notes.</li>
+        <li><strong>The report list doesn't pre-filter by what you can actually run</strong> — expect some access-denied surprises.</li>
+      </ol>
+      <div class="pager">
+        <a href="#reports/admin/data-freshness"><div class="pg-label">Back</div><div class="pg-title">← Report Data Freshness</div></a>
+        <span></span>
+      </div>
+    </article>
+
+    <!-- ============ DEV: ARCHITECTURE ============ -->
+    <article class="page" id="page-reports-dev-architecture" data-track="dev" data-title="Architecture">
+      <span class="track-pill dev">Developer documentation</span>
+      <h1>Architecture</h1>
+      <p>Frontend: <code>apps/web-frontend/src/pages/reports/ReportsPage.tsx</code> (browse/search/filter) → <code>ReportViewerPage.tsx</code> (run one). Backend: <code>apps/report-service/src/domain/ReportRegistry.ts</code> (77 <code>ReportDefinition</code> entries: slug/name/category/description/params/columns/permission/supportsAsync) + <code>ReportEngine.ts</code> (one SQL-generating case per slug, ~2000 lines).</p>
+
+      <div class="callout ok"><div class="callout-title">Registry ↔ engine parity is clean</div><p>Every registry slug has a matching engine case and vice versa — confirmed by an exhaustive diff. This module doesn't have the "dead API surface" pattern found elsewhere.</p></div>
+
+      <h2 id="async">Sync vs. async execution</h2>
+      <p>23 of 77 reports are flagged <code>supportsAsync: true</code> (the higher-volume ones) and are <strong>always</strong> queued as a background job server-side regardless of what the client requests — returning <code>202 {runId, status:'PENDING'}</code> immediately. The frontend polls a run-history endpoint every 1.5s until the job completes. The remaining 54 reports run synchronously and return results inline.</p>
+      <p class="src">apps/report-service/src/api/analytics-reports.routes.ts:84; apps/web-frontend/src/pages/reports/ReportViewerPage.tsx:115-142</p>
+
+      <div class="callout bug"><div class="callout-title">The CSV/Excel export bug, precisely</div><p>The frontend's export buttons POST directly to <code>/api/v2/reports/:slug/run</code> with a <code>format</code> field and always treat the response as a downloadable file blob. On the backend, the <code>supportsAsync</code> branch is checked <em>before</em> the format branch — so for any of the 23 async reports, the response is always the small <code>{runId, status, message}</code> JSON object, which gets saved to disk with a <code>.csv</code>/<code>.xlsx</code> extension and JSON content inside. Export only works end-to-end for the 54 synchronous reports. No test exercises this path — all existing tests call <code>ReportEngine.generate()</code> directly, bypassing the route handler where this bug actually lives. <span class="src">analytics-reports.routes.ts:84,139-153</span>, <span class="src">ReportViewerPage.tsx:144-163</span></p></div>
+
+      <h2 id="dashboards">Dashboards are a separate feature</h2>
+      <p>The three "Analytics" links on the Reports page (Sales/Inventory/HR) go to dedicated chart dashboards backed by <code>dashboard.routes.ts</code> and daily KPI projection tables — a distinct code path from the registry-driven report runner, gated on its own <code>DASHBOARD_VIEW</code> permission (also Owner/Admin-only by default).</p>
+
+      <div class="pager">
+        <span></span>
+        <a class="next" href="#reports/dev/api-reference"><div class="pg-label">Next</div><div class="pg-title">API Reference →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ DEV: API ============ -->
+    <article class="page" id="page-reports-dev-api" data-track="dev" data-title="API Reference">
+      <span class="track-pill dev">Developer documentation</span>
+      <h1>API Reference</h1>
+      <p>All in <code>apps/report-service/src/api/analytics-reports.routes.ts</code> unless noted.</p>
+      <div class="tablewrap"><table>
+        <tr><th>Method &amp; Path</th><th>Permission</th><th>Notes</th></tr>
+        <tr><td>GET <code>/api/v2/reports</code></td><td class="badge perm">REPORT_VIEW</td><td>list is not filtered per-user beyond this blanket check</td></tr>
+        <tr><td>GET <code>/api/v2/reports/:slug</code></td><td class="badge perm">REPORT_VIEW</td><td></td></tr>
+        <tr><td>POST <code>/api/v2/reports/:slug/run</code></td><td>the report's own declared permission</td><td>checked inline, independent of the list-level <code>REPORT_VIEW</code> gate</td></tr>
+        <tr><td>GET <code>/api/v2/reports/run-history</code>, <code>/:runId</code></td><td class="badge perm">REPORT_VIEW</td><td>tenant-scoped</td></tr>
+        <tr><td>POST/GET/DELETE <code>/api/v2/report-schedules</code></td><td class="badge perm">REPORT_SCHEDULE</td> / <span class="badge perm">REPORT_VIEW</span><td><code>REPORT_SCHEDULE</code> granted to no named business role</td></tr>
+        <tr><td>GET <code>/api/v1/reports/ar-aging</code>, <code>/ap-aging</code></td><td class="badge perm">AR_AGING_VIEW</td> / <span class="badge perm">AP_AGING_VIEW</span><td>legacy-versioned, same engine</td></tr>
+        <tr><td>GET <code>/api/v2/unsubscribe/:token</code></td><td>public, no auth</td><td>toggles a schedule inactive</td></tr>
+      </table></div>
+      <div class="callout review"><div class="callout-title">11 report-specific permissions plus REPORT_SCHEDULE and DASHBOARD_VIEW are granted to no named business role</div><p><code>TDS_VIEW</code>, <code>CRM_LOYALTY_VIEW</code>, <code>REORDER_VIEW</code>, <code>PHYSICAL_VERIFICATION_VIEW</code>, <code>STOCK_TRANSFER_VIEW</code>, <code>FABRIC_ROLL_VIEW</code>, <code>STOCK_ADJUSTMENT_VIEW</code>, <code>GSTR1_VIEW</code>, <code>GSTR3B_VIEW</code>, <code>ATTENDANCE_REPORT</code>, and <code>ALTERATION_VIEW</code> are each reachable only via Owner/Admin/Super Admin's blanket permission grant — confirmed by grepping each constant against every seeded role.</p></div>
+
+      <div class="pager">
+        <a href="#reports/dev/architecture"><div class="pg-label">Back</div><div class="pg-title">← Architecture</div></a>
+        <a class="next" href="#reports/dev/data-model"><div class="pg-label">Next</div><div class="pg-title">Data Model →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ DEV: DATA MODEL ============ -->
+    <article class="page" id="page-reports-dev-data" data-track="dev" data-title="Data Model">
+      <span class="track-pill dev">Developer documentation</span>
+      <h1>Data Model</h1>
+      <p>Reports mostly query real transactional/CQRS tables already documented under their owning modules (invoices, projection_stock_level, inventory_ledger, payroll_slips, financial_entries, etc.) rather than maintaining their own copies of data. This module's own schema is limited to scheduling/run-tracking infrastructure.</p>
+
+      <h2 id="scheduling-tables">Report schedules &amp; run history</h2>
+      <p><code>packages/db-client/src/schema/report.ts</code> defines the report-schedule table (report slug, recipients, cadence, format — defaulting to <code>PDF</code>, which is the format that doesn't actually work, see Known Issues) and a run-history table tracking each execution's status (<code>PENDING/COMPLETED/FAILED</code>) for the async-report polling flow.</p>
+
+      <h2 id="replica-router">Read-replica routing (report-service only)</h2>
+      <p>A <code>ReplicaRouter</code> health-checks a Postgres read replica (via <code>pg_last_xact_replay_timestamp()</code> lag) and falls back to the primary database automatically if the replica is unhealthy or its lag exceeds a threshold — 5 seconds for reports, 120 seconds for dashboard KPIs. This exists <strong>only</strong> in report-service; every other service in the system reads and writes the primary database directly.</p>
+      <p class="src">packages/db-client/src/replica-router.ts:17-46; packages/db-client/src/replica-health.ts:11-22; apps/report-service/src/main.ts:33-36</p>
+
+      <div class="pager">
+        <a href="#reports/dev/api-reference"><div class="pg-label">Back</div><div class="pg-title">← API Reference</div></a>
+        <a class="next" href="#reports/audit/known-issues"><div class="pg-label">Next</div><div class="pg-title">Known Issues →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ AUDIT: KNOWN ISSUES ============ -->
+    <article class="page" id="page-reports-issues" data-track="dev" data-title="Known Issues & Needs Review">
+      <span class="track-pill dev">Cross-cutting · Health audit</span>
+      <h1>Known Issues &amp; Needs Review</h1>
+      <p>Ranked by real-world impact. Everything below is a confirmed code-reading finding unless marked Needs Review.</p>
+
+      <div class="callout bug"><div class="callout-title">CSV/Excel export broken for all 23 supportsAsync:true reports</div><p>The route's async-vs-format branch order means the response for these reports is always the small job-status JSON object, saved with a <code>.csv</code>/<code>.xlsx</code> extension. Affects sales-register, sales-by-customer, sales-by-item, customer-ledger, payment-collection-report, discount-report, purchase-register, purchase-by-item, supplier-ledger, grn-report, supplier-payment-report, stock-summary, stock-movement, inventory-valuation, stock-ageing, warehouse-wise-stock, stock-ledger, account-ledger, bank-book, journal-report, payroll-report, attendance-report, and gst-register. <span class="src">analytics-reports.routes.ts:84,139-153</span>, <span class="src">ReportViewerPage.tsx:144-163</span></p></div>
+
+      <div class="callout bug"><div class="callout-title">Scheduled reports in PDF format send no attachment</div><p><code>ReportFormatter</code> only implements <code>toCSV()</code>/<code>toExcel()</code> — no <code>toPDF()</code> exists. <code>ScheduledReportJob.runSchedule()</code>'s format branch handles only <code>EXCEL</code>/<code>CSV</code>; for <code>PDF</code> neither fires, so the email sends with no attachment at all — while its body text still claims "see the attached file." The schema's own default format is <code>PDF</code>, and the frontend's schedule-creation UI offers it as a selectable option, making this an easy trap. Not covered by any test (existing scheduled-report tests only exercise the CSV path). <span class="src">ReportFormatter.ts</span>, <span class="src">ScheduledReportJob.ts:146-158,173,179</span></p></div>
+
+      <div class="callout review"><div class="callout-title">Permission gaps block several roles from reports core to their job</div><p><code>ATTENDANCE_REPORT</code> (HR Manager), <code>STOCK_TRANSFER_VIEW</code>/<code>STOCK_ADJUSTMENT_VIEW</code>/<code>PHYSICAL_VERIFICATION_VIEW</code>/<code>FABRIC_ROLL_VIEW</code>/<code>REORDER_VIEW</code> (Inventory Manager, which has the underlying action permissions but not the report-view ones), <code>GSTR1_VIEW</code>/<code>GSTR3B_VIEW</code>/<code>BANK_RECONCILIATION_VIEW</code> (Accountant), <code>TDS_VIEW</code>, <code>CRM_LOYALTY_VIEW</code>, <code>ALTERATION_VIEW</code>, <code>REPORT_SCHEDULE</code>, and <code>DASHBOARD_VIEW</code> are all granted to no named business role — Owner/Admin/Super Admin only.</p></div>
+
+      <div class="callout review"><div class="callout-title">Production read-replica setup for reports is unconfirmed</div><p>The routing/fallback code is real and unit-tested, but the project's own deployment notes mark provisioning a genuine streaming read-replica (and a read-only DB role for it) as an incomplete checklist item. In this repo's local dev configuration, the "replica" isn't true streaming replication, so the health check always fails and every report silently falls back to reading the primary database — meaning the staleness tradeoff has never actually been exercised against a real replica in this environment.</p></div>
+
+      <div class="callout note"><div class="callout-title">Report list isn't pre-filtered by the viewer's specific permissions</div><p>All 77 reports are shown to anyone with the blanket <code>REPORT_VIEW</code> permission; a report-specific 403 only appears after attempting to run one. A minor UX gap, not a security issue — the backend correctly blocks the run itself.</p></div>
+
+      <div class="callout note"><div class="callout-title">GSTR-1 report's GST-rate column is hardcoded to 0</div><p>Every other column is computed from real data; this one specific column is a placeholder.</p></div>
+
+      <div class="callout note"><div class="callout-title">Scheduled-report email delivery bypasses notification-service</div><p>Unlike the rest of the application, which routes outbound email/SMS/WhatsApp through notification-service, scheduled reports send email directly via a local mail library. Not currently broken, but an inconsistent integration pattern worth normalizing.</p></div>
+
+      <div class="callout note"><div class="callout-title">Dead declarations</div><p><code>REPORT_EXPORT</code> permission is granted to five roles but never checked anywhere. A <code>multiselect</code> parameter type is declared in the report-definition interface but used by no report and unhandled by the viewer UI. A <code>format</code> state variable in the report viewer is set but never read — the "Run Report" button always requests JSON regardless.</p></div>
+
+      <div class="callout ok"><div class="callout-title">Confirmed fixed since an earlier internal note: the "broken columns" reports</div><p>Day Book, Account Ledger, Expense Analysis, Bank Book, and Fund Flow were previously flagged as referencing non-existent database columns. All five now use the correct real column names and are covered by passing regression tests (verified by actually running the test suite: 122/122 passing). If you're consulting older notes, treat this specific class of bug as resolved for these five reports.</p></div>
+      <div class="callout ok"><div class="callout-title">Confirmed solid: registry/engine parity and tenant isolation</div><p>Every one of the 77 registered reports has exactly one matching implementation, with no orphans in either direction — unlike the dead-API-surface pattern found in several other modules. Tenant isolation is exhaustively tested across all 77 report types, confirming no report can ever leak another tenant's data through its generated SQL.</p></div>
+
+      <div class="pager">
+        <a href="#reports/dev/data-model"><div class="pg-label">Back</div><div class="pg-title">← Data Model</div></a>
+        <span></span>
+      </div>
+    </article>
+
+  </main>
+
+  <aside class="toc">
+    <div class="toc-title">On this page</div>
+    <nav id="tocNav"></nav>
+  </aside>
+</div>
+
+<script src="/shared/docs-shell.js"></script>
+</body>
+</html>

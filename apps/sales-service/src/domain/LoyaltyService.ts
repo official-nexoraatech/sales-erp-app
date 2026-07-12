@@ -13,7 +13,9 @@ export class LoyaltyService {
     const [flag] = await this.db
       .select({ enabled: featureFlags.enabled })
       .from(featureFlags)
-      .where(and(eq(featureFlags.tenantId, tenantId), eq(featureFlags.flagKey, 'sales.loyalty.enabled')));
+      .where(
+        and(eq(featureFlags.tenantId, tenantId), eq(featureFlags.flagKey, 'sales.loyalty.enabled'))
+      );
     return flag?.enabled ?? false;
   }
 
@@ -77,7 +79,11 @@ export class LoyaltyService {
     if (!customer) throw new NotFoundError('Customer not found');
 
     const balance = customer.loyaltyPoints ?? 0;
-    if (points > balance) throw new BusinessError('INSUFFICIENT_POINTS', `Only ${balance} points available`);
+    if (points > balance)
+      throw new BusinessError('INSUFFICIENT_POINTS', `Only ${balance} points available`, {
+        available: balance,
+        requested: points,
+      });
 
     const redemptionValue = round2(points * DEFAULT_REDEEM_RATE);
     const balanceAfter = balance - points;
@@ -105,18 +111,25 @@ export class LoyaltyService {
 
   async expirePoints(db: ErpDatabase): Promise<number> {
     const expiredRows = await db
-      .select({ id: loyaltyTransactions.id, customerId: loyaltyTransactions.customerId, tenantId: loyaltyTransactions.tenantId, points: loyaltyTransactions.points })
+      .select({
+        id: loyaltyTransactions.id,
+        customerId: loyaltyTransactions.customerId,
+        tenantId: loyaltyTransactions.tenantId,
+        points: loyaltyTransactions.points,
+      })
       .from(loyaltyTransactions)
-      .where(and(
-        inArray(loyaltyTransactions.type, ['EARN']),
-        lt(loyaltyTransactions.expiryDate, new Date()),
-        sql`NOT EXISTS (
+      .where(
+        and(
+          inArray(loyaltyTransactions.type, ['EARN']),
+          lt(loyaltyTransactions.expiryDate, new Date()),
+          sql`NOT EXISTS (
           SELECT 1 FROM loyalty_transactions lt2
           WHERE lt2.reference_id = ${loyaltyTransactions.id}
           AND lt2.reference_type = 'EXPIRY'
           AND lt2.type = 'EXPIRE'
         )`
-      ));
+        )
+      );
 
     for (const row of expiredRows) {
       const [customer] = await db
@@ -160,14 +173,21 @@ export class LoyaltyService {
 
     const redeemValue = round2((customer.loyaltyPoints ?? 0) * DEFAULT_REDEEM_RATE);
     const tier =
-      (customer.loyaltyPoints ?? 0) >= 5000 ? 'GOLD'
-      : (customer.loyaltyPoints ?? 0) >= 1000 ? 'SILVER'
-      : 'BRONZE';
+      (customer.loyaltyPoints ?? 0) >= 5000
+        ? 'GOLD'
+        : (customer.loyaltyPoints ?? 0) >= 1000
+          ? 'SILVER'
+          : 'BRONZE';
 
     const history = await this.db
       .select()
       .from(loyaltyTransactions)
-      .where(and(eq(loyaltyTransactions.customerId, customerId), eq(loyaltyTransactions.tenantId, tenantId)))
+      .where(
+        and(
+          eq(loyaltyTransactions.customerId, customerId),
+          eq(loyaltyTransactions.tenantId, tenantId)
+        )
+      )
       .orderBy(sql`created_at DESC`)
       .limit(20);
 

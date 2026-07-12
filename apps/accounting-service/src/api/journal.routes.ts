@@ -27,6 +27,7 @@ const ManualJournalSchema = z.object({
         creditAmount: z.number().min(0).default(0),
         description: z.string().max(300).optional(),
         narration: z.string().max(500).optional(),
+        costCenterId: z.number().int().positive().optional(),
       })
     )
     .min(2, 'A journal must have at least 2 lines'),
@@ -42,8 +43,17 @@ export async function journalRoutes(
     { preHandler: [authenticate, requirePermission(PERMISSIONS.JOURNAL_VIEW)] },
     async (request, reply) => {
       const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({ tenantId, userId, correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID() });
-      const query = request.query as { page?: string; size?: string; referenceType?: string; referenceId?: string };
+      const ctx = ctxFactory.create({
+        tenantId,
+        userId,
+        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
+      });
+      const query = request.query as {
+        page?: string;
+        size?: string;
+        referenceType?: string;
+        referenceId?: string;
+      };
       const page = Math.max(0, parseInt(query.page ?? '0', 10));
       const size = Math.min(100, Math.max(1, parseInt(query.size ?? '20', 10)));
 
@@ -84,7 +94,11 @@ export async function journalRoutes(
     { preHandler: [authenticate, requirePermission(PERMISSIONS.JOURNAL_VIEW)] },
     async (request, reply) => {
       const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({ tenantId, userId, correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID() });
+      const ctx = ctxFactory.create({
+        tenantId,
+        userId,
+        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
+      });
       const journalId = request.params.id;
 
       const [journal] = await ctx.db.raw
@@ -103,10 +117,16 @@ export async function journalRoutes(
           creditAmount: financialEntries.creditAmount,
           description: financialEntries.description,
           narration: financialEntries.narration,
+          costCenterId: financialEntries.costCenterId,
         })
         .from(financialEntries)
-        .innerJoin(accounts, and(eq(accounts.id, financialEntries.accountId), eq(accounts.tenantId, tenantId)))
-        .where(and(eq(financialEntries.journalId, journalId), eq(financialEntries.tenantId, tenantId)));
+        .innerJoin(
+          accounts,
+          and(eq(accounts.id, financialEntries.accountId), eq(accounts.tenantId, tenantId))
+        )
+        .where(
+          and(eq(financialEntries.journalId, journalId), eq(financialEntries.tenantId, tenantId))
+        );
 
       return reply.code(200).send({ data: { ...journal, lines } });
     }
@@ -118,25 +138,37 @@ export async function journalRoutes(
     { preHandler: [authenticate, requirePermission(PERMISSIONS.JOURNAL_CREATE)] },
     async (request, reply) => {
       const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({ tenantId, userId, correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID() });
+      const ctx = ctxFactory.create({
+        tenantId,
+        userId,
+        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
+      });
 
       const body = ManualJournalSchema.safeParse(request.body);
-      if (!body.success) throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
+      if (!body.success)
+        throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
 
       await JournalEngine.checkPeriodOpen(ctx.db, tenantId, new Date());
 
-      const result = await JournalEngine.post(ctx.db, tenantId, userId, {
-        description: body.data.description,
-        ...(body.data.referenceType ? { referenceType: body.data.referenceType } : {}),
-        ...(body.data.referenceId !== undefined ? { referenceId: body.data.referenceId } : {}),
-        lines: body.data.lines.map((l) => ({
-          accountId: l.accountId,
-          debitAmount: l.debitAmount,
-          creditAmount: l.creditAmount,
-          ...(l.description ? { description: l.description } : {}),
-          ...(l.narration ? { narration: l.narration } : {}),
-        })),
-      }, ctx.tenant.correlationId);
+      const result = await JournalEngine.post(
+        ctx.db,
+        tenantId,
+        userId,
+        {
+          description: body.data.description,
+          ...(body.data.referenceType ? { referenceType: body.data.referenceType } : {}),
+          ...(body.data.referenceId !== undefined ? { referenceId: body.data.referenceId } : {}),
+          lines: body.data.lines.map((l) => ({
+            accountId: l.accountId,
+            debitAmount: l.debitAmount,
+            creditAmount: l.creditAmount,
+            ...(l.description ? { description: l.description } : {}),
+            ...(l.narration ? { narration: l.narration } : {}),
+            ...(l.costCenterId !== undefined ? { costCenterId: l.costCenterId } : {}),
+          })),
+        },
+        ctx.tenant.correlationId
+      );
 
       await ctx.audit.log({
         action: 'CREATE',
@@ -157,16 +189,31 @@ export async function journalRoutes(
     { preHandler: [authenticate, requirePermission(PERMISSIONS.CANCEL_POSTED_JOURNAL)] },
     async (request, reply) => {
       const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({ tenantId, userId, correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID() });
+      const ctx = ctxFactory.create({
+        tenantId,
+        userId,
+        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
+      });
       const journalId = request.params.id;
       const { reason } = ReverseJournalSchema.parse(request.body ?? {});
 
-      const result = await JournalEngine.reverse(ctx.db, tenantId, userId, journalId, reason, ctx.tenant.correlationId);
+      const result = await JournalEngine.reverse(
+        ctx.db,
+        tenantId,
+        userId,
+        journalId,
+        reason,
+        ctx.tenant.correlationId
+      );
 
       await ctx.audit.log({
         action: 'UPDATE',
         entityType: 'journal',
-        metadata: { action: 'REVERSE', originalJournalId: journalId, reversalJournalId: result.journalId },
+        metadata: {
+          action: 'REVERSE',
+          originalJournalId: journalId,
+          reversalJournalId: result.journalId,
+        },
       });
 
       return reply.code(201).send({ data: result });
@@ -179,9 +226,18 @@ export async function journalRoutes(
     { preHandler: [authenticate, requirePermission(PERMISSIONS.LEDGER_VIEW)] },
     async (request, reply) => {
       const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({ tenantId, userId, correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID() });
+      const ctx = ctxFactory.create({
+        tenantId,
+        userId,
+        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
+      });
       const accountId = parseInt(request.params.id, 10);
-      const query = request.query as { fromDate?: string; toDate?: string; page?: string; size?: string };
+      const query = request.query as {
+        fromDate?: string;
+        toDate?: string;
+        page?: string;
+        size?: string;
+      };
 
       const [account] = await ctx.db.raw
         .select()
@@ -189,7 +245,8 @@ export async function journalRoutes(
         .where(and(eq(accounts.id, accountId), eq(accounts.tenantId, tenantId)));
       if (!account) throw new NotFoundError('Account', accountId);
 
-      const fromDate = query.fromDate ?? new Date(new Date().getFullYear(), 3, 1).toISOString().substring(0, 10);
+      const fromDate =
+        query.fromDate ?? new Date(new Date().getFullYear(), 3, 1).toISOString().substring(0, 10);
       const toDate = query.toDate ?? new Date().toISOString().substring(0, 10);
       const page = Math.max(0, parseInt(query.page ?? '0', 10));
       const size = Math.min(200, Math.max(1, parseInt(query.size ?? '50', 10)));
@@ -218,13 +275,13 @@ export async function journalRoutes(
         LIMIT ${size} OFFSET ${page * size}
       `);
 
-      const [totalRow] = await ctx.db.raw.execute(sql`
+      const [totalRow] = (await ctx.db.raw.execute(sql`
         SELECT COUNT(*)::INTEGER AS cnt FROM financial_entries
         WHERE tenant_id = ${tenantId}
           AND account_id = ${accountId}
           AND created_at >= ${fromDate}::DATE
           AND created_at <= (${toDate}::DATE + INTERVAL '1 day')
-      `) as { cnt: number }[];
+      `)) as { cnt: number }[];
 
       return reply.code(200).send({
         data: {

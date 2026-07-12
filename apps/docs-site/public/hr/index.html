@@ -1,0 +1,402 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ERP Docs — HR & Payroll Module</title>
+<link rel="stylesheet" href="/shared/docs-shell.css">
+</head>
+<body data-module="HR & Payroll">
+
+<header class="topbar">
+  <button class="icon-btn navtoggle" id="navToggle" aria-label="Toggle navigation">☰</button>
+  <a class="brand" href="/"><span class="mark">N</span> Nexoraa ERP Docs</a>
+  <div class="searchwrap">
+    <input type="text" class="searchbox" id="searchInput" placeholder="Search HR &amp; Payroll documentation…" autocomplete="off">
+    <div class="search-results" id="searchResults"></div>
+  </div>
+  <div class="topbar-actions">
+    <button class="icon-btn" id="themeToggle" aria-label="Toggle dark mode" title="Toggle dark mode">◐</button>
+    <button class="icon-btn" id="printBtn" aria-label="Print this page" title="Print this page">⎙</button>
+  </div>
+</header>
+
+<div class="shell">
+  <nav class="sidebar" id="sidebar">
+    <div class="sb-group">
+      <div class="sb-group-title">Modules</div>
+      <div class="sb-module active-module">
+        <div class="sb-module-head active-module">HR &amp; Payroll <span class="status">v1</span></div>
+        <div class="sb-track">
+          <div class="sb-track-title">Client</div>
+          <a class="sb-link" data-page="hr-client-overview" href="#hr/client/overview">Overview</a>
+          <a class="sb-link" data-page="hr-client-employees" href="#hr/client/employees">Managing Employees</a>
+          <a class="sb-link" data-page="hr-client-attendance" href="#hr/client/attendance-leave">Attendance &amp; Leave</a>
+          <a class="sb-link" data-page="hr-client-payroll" href="#hr/client/payroll">Running Payroll</a>
+          <a class="sb-link" data-page="hr-client-statutory" href="#hr/client/statutory">Statutory Filings &amp; Form 16</a>
+          <a class="sb-link" data-page="hr-client-alterations" href="#hr/client/alterations">Alteration Orders</a>
+          <a class="sb-link" data-page="hr-client-faq" href="#hr/client/faq">Troubleshooting &amp; FAQ</a>
+        </div>
+        <div class="sb-track">
+          <div class="sb-track-title">Super Admin</div>
+          <a class="sb-link" data-page="hr-admin-access" href="#hr/admin/access-roles">Access &amp; Roles</a>
+          <a class="sb-link" data-page="hr-admin-privacy" href="#hr/admin/data-privacy">Data Privacy &amp; Encryption</a>
+          <a class="sb-link" data-page="hr-admin-limits" href="#hr/admin/limitations">Limitations to Know</a>
+        </div>
+        <div class="sb-track">
+          <div class="sb-track-title">Developer</div>
+          <a class="sb-link" data-page="hr-dev-architecture" href="#hr/dev/architecture">Architecture</a>
+          <a class="sb-link" data-page="hr-dev-api" href="#hr/dev/api-reference">API Reference</a>
+          <a class="sb-link" data-page="hr-dev-data" href="#hr/dev/data-model">Data Model</a>
+        </div>
+        <div class="sb-track">
+          <div class="sb-track-title">Audit</div>
+          <a class="sb-link" data-page="hr-issues" href="#hr/audit/known-issues">Known Issues &amp; Needs Review</a>
+        </div>
+      </div>
+    </div>
+    <div class="sb-group">
+      <div class="sb-group-title">Other modules</div>
+      <a class="sb-module-head" href="/pos/index.html">POS <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/sales/index.html">Sales &amp; Invoicing <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/inventory/index.html">Inventory <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/purchase/index.html">Purchase <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/products/index.html">Products &amp; Variants <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/customers/index.html">Customers &amp; Suppliers <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/accounting/index.html">Accounting &amp; GST <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/reports/index.html">Reports <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/tenants/index.html">Super Admin / Tenants <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/platform/index.html">Developer Platform <span class="status">Open →</span></a>
+    </div>
+  </nav>
+
+  <main class="content" id="content">
+    <div class="breadcrumb" id="breadcrumb"></div>
+
+    <!-- ============ CLIENT: OVERVIEW ============ -->
+    <article class="page" id="page-hr-client-overview" data-track="client" data-title="HR & Payroll Overview">
+      <span class="track-pill client">Client documentation</span>
+      <h1>HR &amp; Payroll Overview</h1>
+      <div class="pilot-banner">Eighth module documented from a direct code audit. Covers employees, attendance/leave, payroll, statutory filings, Form 16, and alteration orders (tailoring).</div>
+
+      <div class="callout bug"><div class="callout-title">HR Manager is currently locked out of Alteration Orders entirely</div><p>Alterations sits directly under the HR menu, but the HR Manager role doesn't have permission to open, create, or update a single alteration order — despite this being exactly the kind of day-to-day task this role exists for. If your HR staff report they can't do anything on the Alterations screen, this is why. See <a href="#hr/admin/access-roles">Access &amp; Roles</a>.</p></div>
+
+      <div class="callout review"><div class="callout-title">Several things your printed HR training material describes don't actually exist yet</div><p>Full &amp; final settlement on exit, leave encashment, manual leave-balance adjustment, a bank-transfer export file, "sync biometric device" button, and bulk email/WhatsApp/ZIP delivery of salary slips are all described in HR training material but are not implemented — see the relevant pages below and <a href="#hr/audit/known-issues">Known Issues</a> for the exact list.</p></div>
+
+      <h2 id="areas">What's here</h2>
+      <ul>
+        <li><strong>Employees</strong> — master records, with genuinely encrypted PAN and bank account fields.</li>
+        <li><strong>Attendance &amp; Leave</strong> — daily marking, leave application/approval.</li>
+        <li><strong>Payroll</strong> — a real PF/ESI/professional-tax/TDS calculation engine, run monthly.</li>
+        <li><strong>Statutory Filings &amp; Form 16</strong> — PF/ESI challan prep, annual tax certificate data.</li>
+        <li><strong>Alteration Orders</strong> — tailoring/stitching job tracking.</li>
+      </ul>
+
+      <div class="pager">
+        <span></span>
+        <a class="next" href="#hr/client/employees"><div class="pg-label">Next</div><div class="pg-title">Managing Employees →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ CLIENT: EMPLOYEES ============ -->
+    <article class="page" id="page-hr-client-employees" data-track="client" data-title="Managing Employees">
+      <span class="track-pill client">Client documentation</span>
+      <h1>Managing Employees</h1>
+      <p>The employee form has three tabs: <strong>Basic</strong> (name, phone, gender, date of birth, last 4 digits of Aadhaar only), <strong>Employment</strong> (type, joining date, department, designation), and <strong>Bank &amp; Tax</strong> (PAN, bank details, UAN, ESI number, PF/ESI applicability).</p>
+      <div class="callout ok"><div class="callout-title">PAN and bank account number are genuinely encrypted</div><p>Unlike the customer/supplier records elsewhere in this ERP (where "encrypted" fields turned out to still be plaintext), an employee's PAN and bank account number really are encrypted at rest here — the label on the form is accurate.</p></div>
+      <p>An employee's photo and documents (Aadhaar, PAN, certificates, offer letter) can be uploaded and downloaded from their profile, along with a leave-balance summary and — if you have salary-viewing rights — whether salary data exists for them.</p>
+      <h2 id="exit">When someone leaves</h2>
+      <p>"Record Exit" captures an exit date and reason and marks the employee inactive.</p>
+      <div class="callout review"><div class="callout-title">No full-and-final settlement calculation happens automatically</div><p>Exiting an employee doesn't calculate anything — no pending-salary total, no leave encashment, no advance reconciliation, no settlement document. If your process depends on the system producing an F&amp;F settlement figure, that has to be worked out manually today.</p></div>
+      <p>There's no employee-delete option — only "exit," which is the correct/expected behavior for maintaining historical payroll records.</p>
+
+      <div class="pager">
+        <a href="#hr/client/overview"><div class="pg-label">Back</div><div class="pg-title">← Overview</div></a>
+        <a class="next" href="#hr/client/attendance-leave"><div class="pg-label">Next</div><div class="pg-title">Attendance &amp; Leave →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ CLIENT: ATTENDANCE & LEAVE ============ -->
+    <article class="page" id="page-hr-client-attendance" data-track="client" data-title="Attendance & Leave">
+      <span class="track-pill client">Client documentation</span>
+      <h1>Attendance &amp; Leave</h1>
+      <h2 id="attendance">Attendance</h2>
+      <p>Mark attendance individually or in bulk, or import from a biometric device's CSV export.</p>
+      <div class="callout review"><div class="callout-title">There's no live "sync biometric device" button</div><p>Attendance import only works from a CSV file today — there's no direct, one-click sync with a biometric machine. If your training material describes a sync button, that feature isn't built yet.</p></div>
+      <h2 id="leave">Leave</h2>
+      <p>Apply for leave, and (if you have approval rights) approve or reject pending requests. Approving deducts from the employee's leave balance and marks those days present-on-leave for payroll purposes.</p>
+      <div class="callout review"><div class="callout-title">Rejecting leave doesn't let you type a reason</div><p>A rejected leave request is always recorded with the same generic reason — there's no field to explain why.</p></div>
+      <div class="callout review"><div class="callout-title">If an employee has no leave-balance record yet, their leave request isn't checked against any limit</div><p>The balance check only runs if a balance record already exists for that employee and leave type. A newly added employee without an initialized balance can have a leave request approved with no cap at all. Make sure leave balances are set up for every employee before relying on this check.</p></div>
+      <p>There's no way to manually adjust a leave balance (e.g. a goodwill extra day) or encash unused leave — both would need to happen outside the system today.</p>
+
+      <div class="pager">
+        <a href="#hr/client/employees"><div class="pg-label">Back</div><div class="pg-title">← Managing Employees</div></a>
+        <a class="next" href="#hr/client/payroll"><div class="pg-label">Next</div><div class="pg-title">Running Payroll →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ CLIENT: PAYROLL ============ -->
+    <article class="page" id="page-hr-client-payroll" data-track="client" data-title="Running Payroll">
+      <span class="track-pill client">Client documentation</span>
+      <h1>Running Payroll</h1>
+      <div class="flow">
+        <div class="flow-step"><div class="fs-label">1</div>Create the run for a period, Calculate</div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step branch"><div class="fs-label">2</div>Approve <span style="font-weight:400;">(often a different, more senior person)</span></div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step terminal"><div class="fs-label">3</div>Disburse — permanent, cannot be undone</div>
+      </div>
+      <div class="callout note"><div class="callout-title">By design, the person who calculates payroll usually isn't the one who approves it</div><p>HR staff can create and calculate a payroll run, but approving and disbursing it is reserved for an Owner/Admin-level account in most setups — a deliberate separation of duties, not a bug. If your HR Manager can't find an Approve button, that's expected.</p></div>
+      <p>Genuinely calculated per employee: PF (employee + employer share), ESI (for lower earners), professional tax (correctly varies by the employee's state), TDS (income-tax withholding), and any active loan EMI deduction — all based on real attendance and leave data for the period.</p>
+      <div class="callout review"><div class="callout-title">TDS tax slabs may be out of date</div><p>The income-tax withholding calculation uses a fixed set of slab rates tied to a specific past financial year, with no setting to update them for a new year. Have your accountant verify the TDS figures against the current year's actual slabs before relying on them, especially at the start of a new financial year.</p></div>
+      <div class="callout note"><div class="callout-title">Once approved, a payroll run cannot be changed for that month</div><p>This is intentional — recalculating is blocked the moment a run is approved, and there's no "undo" once disbursed. Double-check a run carefully before approving it.</p></div>
+
+      <h2 id="loans">Employee loans</h2>
+      <div class="callout bug"><div class="callout-title">Employee loans have no screen anywhere in the app</div><p>The system can track an employee loan and automatically deduct its EMI from payroll each month, correctly post it to accounting, and stop once repaid — all of that works. But there is currently no page anywhere to create, view, or manage a loan. This is a fully backend-only feature today; using it requires a developer to call the system directly.</p></div>
+
+      <h2 id="slips">Payslips</h2>
+      <p>View a slip on screen and print it via your browser. There's no bulk "email/WhatsApp all payslips" or "download all as ZIP" action — even though this is described in HR training material, it isn't wired up end-to-end yet.</p>
+
+      <div class="pager">
+        <a href="#hr/client/attendance-leave"><div class="pg-label">Back</div><div class="pg-title">← Attendance &amp; Leave</div></a>
+        <a class="next" href="#hr/client/statutory"><div class="pg-label">Next</div><div class="pg-title">Statutory Filings &amp; Form 16 →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ CLIENT: STATUTORY ============ -->
+    <article class="page" id="page-hr-client-statutory" data-track="client" data-title="Statutory Filings & Form 16">
+      <span class="track-pill client">Client documentation</span>
+      <h1>Statutory Filings &amp; Form 16</h1>
+      <p>PF and ESI challan screens show per-employee contribution totals for a period, let you export a CSV for the government portal, and let you mark the challan as filed for your own records (this doesn't file anything with the government automatically).</p>
+      <h2 id="form16">Form 16</h2>
+      <p>Pick an employee and financial year to generate a summary of their annual gross pay and tax withheld.</p>
+      <div class="callout review"><div class="callout-title">Form 16 downloads as raw data, not a certificate</div><p>"Download" produces a plain data file, not a formatted PDF certificate, and there's no official certificate number attached to it. Treat this as the underlying figures to build your official Form 16 from, not a document you can hand to an employee as-is.</p></div>
+      <div class="pager">
+        <a href="#hr/client/payroll"><div class="pg-label">Back</div><div class="pg-title">← Running Payroll</div></a>
+        <a class="next" href="#hr/client/alterations"><div class="pg-label">Next</div><div class="pg-title">Alteration Orders →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ CLIENT: ALTERATIONS ============ -->
+    <article class="page" id="page-hr-client-alterations" data-track="client" data-title="Alteration Orders">
+      <span class="track-pill client">Client documentation</span>
+      <h1>Alteration Orders</h1>
+      <div class="callout bug"><div class="callout-title">HR Manager accounts currently can't use this screen at all</div><p>See <a href="#hr/admin/access-roles">Access &amp; Roles</a> — this needs a role-configuration fix, not anything you're doing wrong.</p></div>
+
+      <h2 id="lifecycle">The real status flow</h2>
+      <p>An alteration order actually moves through <strong>seven</strong> stages: Received → Assigned → In Progress → Quality Check → Ready → Delivered (Cancelled is possible from any point before Delivered). If your training material describes a simpler four-step flow (Received/In Progress/Ready/Delivered), the real system has two extra steps — Assigned (to a specific tailor) and Quality Check.</p>
+      <div class="callout review"><div class="callout-title">No token slip is printed</div><p>Creating an order doesn't produce a printable token slip — there's no print/receipt output for alteration orders at all yet. Orders are also found by their order number, not a separate "token number" — those are the same thing in this system.</p></div>
+      <p>Delivering an order requires it to be in "Ready" status and the payment collected to cover the full balance due.</p>
+
+      <div class="pager">
+        <a href="#hr/client/statutory"><div class="pg-label">Back</div><div class="pg-title">← Statutory Filings &amp; Form 16</div></a>
+        <a class="next" href="#hr/client/faq"><div class="pg-label">Next</div><div class="pg-title">Troubleshooting &amp; FAQ →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ CLIENT: FAQ ============ -->
+    <article class="page" id="page-hr-client-faq" data-track="client" data-title="Troubleshooting & FAQ">
+      <span class="track-pill client">Client documentation</span>
+      <h1>Troubleshooting &amp; FAQ</h1>
+      <div class="tablewrap"><table>
+        <tr><th>Question</th><th>Answer</th></tr>
+        <tr><td>My HR Manager account can't do anything on the Alterations screen</td><td>Confirmed role-configuration gap — see <a href="#hr/admin/access-roles">Access &amp; Roles</a>.</td></tr>
+        <tr><td>My HR Manager can calculate payroll but not approve it</td><td>Expected by design — approval is intentionally reserved for a more senior account.</td></tr>
+        <tr><td>Where do I record an employee loan?</td><td>Nowhere in the current UI — this feature exists but has no screen yet.</td></tr>
+        <tr><td>Where's the "email all payslips" button?</td><td>It doesn't work end-to-end yet — slips must be viewed/printed individually.</td></tr>
+        <tr><td>Where do I encash unused leave or manually adjust a balance?</td><td>Nowhere yet — not implemented.</td></tr>
+        <tr><td>Does Form 16 print as an official certificate?</td><td>No — it downloads as raw data today, not a formatted PDF.</td></tr>
+      </table></div>
+      <div class="pager">
+        <a href="#hr/client/alterations"><div class="pg-label">Back</div><div class="pg-title">← Alteration Orders</div></a>
+        <span></span>
+      </div>
+    </article>
+
+    <!-- ============ ADMIN: ACCESS ============ -->
+    <article class="page" id="page-hr-admin-access" data-track="admin" data-title="Access & Roles">
+      <span class="track-pill admin">Super Admin documentation</span>
+      <h1>Access &amp; Roles</h1>
+
+      <h2 id="intentional">Intentional: payroll approval is separated from payroll processing</h2>
+      <p>HR Manager can create and calculate a payroll run, but cannot approve or disburse it, cannot bulk-send payslips, and cannot print the PDF payslip — those require an Owner/Admin-level account by default. This matches a deliberate segregation-of-duties pattern reflected elsewhere in the system's workflow configuration, not an oversight.</p>
+
+      <div class="callout bug"><div class="callout-title">Unintentional-looking gaps: HR Manager is missing several permissions core to its own job</div><ul>
+        <li><strong>Alteration orders</strong> — cannot view, create, or update any alteration order, despite Alterations sitting directly under the HR menu this role uses.</li>
+        <li><strong>Holiday calendar</strong> — cannot manage it, despite HR training material instructing this role to do exactly that.</li>
+        <li><strong>Monthly attendance reports</strong> — cannot view them, despite being instructed to check this before every payroll run.</li>
+        <li><strong>Rejecting leave</strong> — can approve leave but not reject it.</li>
+        <li><strong>Applying for its own leave</strong> — cannot submit a leave application for itself.</li>
+      </ul><p>None of these look like deliberate restrictions the way payroll-approval separation does — they read as role-configuration gaps worth fixing.</p></div>
+
+      <div class="callout note"><div class="callout-title">Regular staff can see the "Apply for Leave" form even without permission to submit it</div><p>The leave screen shows the application form to everyone, but a Staff-level account that lacks leave-application rights will be rejected only after clicking Submit — worth knowing if staff report a confusing error at that point.</p></div>
+
+      <div class="pager">
+        <span></span>
+        <a class="next" href="#hr/admin/data-privacy"><div class="pg-label">Next</div><div class="pg-title">Data Privacy &amp; Encryption →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ ADMIN: PRIVACY ============ -->
+    <article class="page" id="page-hr-admin-privacy" data-track="admin" data-title="Data Privacy & Encryption">
+      <span class="track-pill admin">Super Admin documentation</span>
+      <h1>Data Privacy &amp; Encryption</h1>
+      <div class="callout ok"><div class="callout-title">This module's encryption claims are genuinely accurate — a contrast worth noting</div><p>Employee PAN, bank account number, and full salary-structure figures (CTC, basic, HRA, DA, gross) are all really encrypted at rest. This is the one place in the system so far where "encrypted" in the UI copy matches what the code actually does — unlike customer/supplier records elsewhere.</p></div>
+      <div class="callout review"><div class="callout-title">Coverage is inconsistent within this module itself</div><p>A generated payslip only encrypts its gross and net totals — the individual PF, ESI, professional tax, TDS, and loan-deduction line amounts on that same payslip are stored as plain, readable figures. Employee loan balances and EMI amounts aren't encrypted at all either, despite being just as salary-sensitive as the figures that are protected. If full protection of salary-adjacent data matters for your compliance posture, this is a gap worth closing.</p></div>
+      <div class="pager">
+        <a href="#hr/admin/access-roles"><div class="pg-label">Back</div><div class="pg-title">← Access &amp; Roles</div></a>
+        <a class="next" href="#hr/admin/limitations"><div class="pg-label">Next</div><div class="pg-title">Limitations to Know →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ ADMIN: LIMITATIONS ============ -->
+    <article class="page" id="page-hr-admin-limits" data-track="admin" data-title="Limitations to Know">
+      <span class="track-pill admin">Super Admin documentation</span>
+      <h1>Limitations to Know</h1>
+      <p>Full technical detail is on <a href="#hr/audit/known-issues">Known Issues</a>.</p>
+      <ol>
+        <li><strong>HR Manager is locked out of Alteration Orders</strong> entirely — likely your highest-priority role-configuration fix.</li>
+        <li><strong>TDS slabs are fixed to a past financial year</strong> with no way to update them — verify payroll tax figures manually each new financial year until this is addressed.</li>
+        <li><strong>Employee loans have no UI</strong> — fully backend-only today.</li>
+        <li><strong>Bulk payslip delivery (email/WhatsApp/ZIP) doesn't work end-to-end</strong>, despite being documented.</li>
+        <li><strong>Full &amp; final settlement, leave encashment, and manual leave adjustment don't exist</strong> — all manual processes today.</li>
+        <li><strong>Payslip line items and employee loan figures aren't encrypted</strong>, despite being as sensitive as the salary-structure fields that are.</li>
+      </ol>
+      <div class="pager">
+        <a href="#hr/admin/data-privacy"><div class="pg-label">Back</div><div class="pg-title">← Data Privacy &amp; Encryption</div></a>
+        <span></span>
+      </div>
+    </article>
+
+    <!-- ============ DEV: ARCHITECTURE ============ -->
+    <article class="page" id="page-hr-dev-architecture" data-track="dev" data-title="Architecture">
+      <span class="track-pill dev">Developer documentation</span>
+      <h1>Architecture</h1>
+      <p>Frontend: <code>apps/web-frontend/src/pages/hr/</code>. Backend: <code>apps/hr-service</code>.</p>
+
+      <h2 id="routes">Routes</h2>
+      <p>All under the nav's HR group: Employees, Attendance, Leave, Payroll, PF Challan, ESI Challan, Form 16, Alterations. <code>hr/holidays</code> is registered but <strong>absent from the nav menu</strong> — reachable only by direct URL.</p>
+      <p class="src">apps/web-frontend/src/App.tsx:342-357, apps/web-frontend/src/lib/navigation.ts:168-182</p>
+
+      <h2 id="loans-dead">Employee Loans: complete backend, zero frontend</h2>
+      <div class="callout bug"><div class="callout-title">No page, no API-client entry, no nav link</div><p><code>apps/hr-service/src/api/employee-loans.routes.ts</code>, <code>EmployeeLoanService.ts</code>, the DB tables, and even the accounting-event integration (<code>EMPLOYEE_LOAN_DISBURSED</code> → <code>EmployeeLoanAccountingConsumer.ts</code>) are all fully implemented and tested. Confirmed by exhaustive grep of <code>apps/web-frontend/src</code> for "loan" — zero hits outside this audit.</p></div>
+
+      <h2 id="alteration-architecture">Alteration events: published to a bus nothing listens to, notifications sent a different way</h2>
+      <div class="callout review"><div class="callout-title">Inconsistent integration pattern</div><p><code>ALTERATION_RECEIVED</code>/<code>ALTERATION_DELIVERED</code>/<code>ALTERATION_STATUS_CHANGED</code> are published to the outbox event bus but have zero consumers anywhere in the codebase. Customer notifications for assignment/ready-for-pickup are instead sent via a direct, synchronous HTTP call straight into notification-service, bypassing the event bus entirely. Both mechanisms currently coexist for the same feature area — not broken, but worth normalizing to one pattern. <span class="src">apps/hr-service/src/api/alteration.routes.ts:62-81,142,204-209,236-246,248,279</span></p></div>
+
+      <h2 id="workflow-seed">An unclear workflow-seed layer</h2>
+      <p>A system "workflow" seed defines approval templates keyed on strings like <code>PAYROLL_PROCESS</code>/<code>EMPLOYEE_CREATE</code>/<code>LEAVE_APPLY</code> — but these match permission-constant names, not the actual event names hr-service publishes (<code>EMPLOYEE_JOINED</code>/<code>LEAVE_APPLIED</code>). No dedicated workflow-service exists; whether/how this layer is actually triggered off live events wasn't fully traceable in this pass — flagged as Needs Review rather than asserted broken. <span class="src">packages/platform-sdk/src/workflow.ts:115-122,158-173</span></p>
+
+      <div class="pager">
+        <span></span>
+        <a class="next" href="#hr/dev/api-reference"><div class="pg-label">Next</div><div class="pg-title">API Reference →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ DEV: API ============ -->
+    <article class="page" id="page-hr-dev-api" data-track="dev" data-title="API Reference">
+      <span class="track-pill dev">Developer documentation</span>
+      <h1>API Reference</h1>
+      <p>All in <code>apps/hr-service/src/api/</code>.</p>
+
+      <div class="tablewrap"><table>
+        <tr><th>Area</th><th>Method &amp; Path</th><th>Permission</th><th>Notes</th></tr>
+        <tr><td>Employees</td><td>GET/POST <code>/employees</code>, PUT <code>/employees/:id</code>, POST <code>/employees/:id/exit</code></td><td class="badge perm">EMPLOYEE_VIEW/CREATE/UPDATE</td><td>no delete endpoint; exit only sets status</td></tr>
+        <tr><td>Attendance</td><td>POST <code>/attendance/mark</code>, <code>/bulk-mark</code>, <code>/import</code></td><td class="badge perm">ATTENDANCE_MARK</td><td></td></tr>
+        <tr><td>Attendance</td><td>PUT <code>/attendance/:id/correct</code></td><td class="badge perm">ATTENDANCE_CORRECT</td><td>granted to no seeded role except Owner/Admin; no UI caller either</td></tr>
+        <tr><td>Attendance</td><td>GET <code>/attendance/report</code>, <code>/team-summary</code></td><td class="badge perm">ATTENDANCE_REPORT</td><td>not granted to HR Manager</td></tr>
+        <tr><td>Leave</td><td>POST <code>/leave-applications</code></td><td class="badge perm">LEAVE_APPLY</td><td>not granted to HR Manager or Staff by default</td></tr>
+        <tr><td>Leave</td><td>POST <code>/leave-applications/:id/approve</code>, <code>/reject</code></td><td class="badge perm">LEAVE_APPROVE</td> / <span class="badge perm">LEAVE_REJECT</span><td>HR Manager has approve, not reject</td></tr>
+        <tr><td>Payroll</td><td>POST <code>/payroll-runs</code>, <code>/:id/calculate</code></td><td class="badge perm">PAYROLL_PROCESS</td><td></td></tr>
+        <tr><td>Payroll</td><td>POST <code>/payroll-runs/:id/approve</code>, <code>/disburse</code>, <code>/bulk-send</code></td><td class="badge perm">PAYROLL_APPROVE</td><td>not granted to HR Manager (by design — see Access &amp; Roles); no reversal endpoint exists at any stage</td></tr>
+        <tr><td>Payroll</td><td>GET <code>/payroll-slips/:id</code></td><td class="badge perm">VIEW_SALARY_DETAILS</td><td>a different permission than <code>PAYROLL_VIEW</code>, which gates the run list</td></tr>
+        <tr><td>Payroll</td><td>GET <code>/payroll-slips/:id/pdf</code></td><td class="badge perm">SALARY_SLIP_PRINT</td><td>real report-service PDF; unused by the frontend, which prints the HTML view instead</td></tr>
+        <tr><td>Statutory</td><td><code>/pf-challans...</code>, <code>/esi-challans...</code></td><td class="badge perm">HR_STATUTORY</td><td></td></tr>
+        <tr><td>Form 16</td><td>GET <code>/employees/:id/form16</code></td><td class="badge perm">VIEW_SALARY_DETAILS</td><td>computed on demand, no PDF, no certificate number</td></tr>
+        <tr><td>Employee Loans</td><td>POST/GET/PATCH <code>/employee-loans...</code></td><td class="badge perm">EMPLOYEE_LOAN_MANAGE</td><td>fully functional, zero frontend caller</td></tr>
+        <tr><td>Alterations</td><td>GET/POST/PUT <code>/alterations...</code>, <code>/assign</code>, <code>/status</code>, <code>/deliver</code></td><td class="badge perm">ALTERATION_VIEW/CREATE/UPDATE</td><td>not granted to HR Manager</td></tr>
+        <tr><td>Holidays</td><td><code>/holidays...</code></td><td class="badge perm">HR_MANAGE</td><td>not granted to HR Manager (a different permission than the HR_STATUTORY/PAYROLL_* set it does have)</td></tr>
+      </table></div>
+
+      <h2 id="payroll-math">Payroll calculation constants</h2>
+      <p>PF: employee 12% of basic (capped at ₹15,000 basic), employer split 8.33% EPS (capped ₹1,250/month) + remainder EPF — hardcoded, not per-tenant configurable. ESI: 0.75%/3.25% employee/employer, only if gross ≤ ₹21,000 — hardcoded. Professional tax: genuinely resolved per-state from a seeded slab table keyed by state code, with free-text branch/organization state names normalized to codes — this part is <em>not</em> hardcoded and correctly handles India's multi-state PT variation. TDS: Section-192-style monthly withholding, standard deduction ₹75,000, slabs at 5/10/15/20/30% — explicitly commented as "FY 2024-25" slabs with no effective-dated versioning, unlike the PT slab table.</p>
+      <p class="src">apps/hr-service/src/domain/PayrollEngine.ts:43-138; PTSlabService.ts:10-32</p>
+
+      <div class="pager">
+        <a href="#hr/dev/architecture"><div class="pg-label">Back</div><div class="pg-title">← Architecture</div></a>
+        <a class="next" href="#hr/dev/data-model"><div class="pg-label">Next</div><div class="pg-title">Data Model →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ DEV: DATA MODEL ============ -->
+    <article class="page" id="page-hr-dev-data" data-track="dev" data-title="Data Model">
+      <span class="track-pill dev">Developer documentation</span>
+      <h1>Data Model</h1>
+      <p><code>packages/db-client/src/schema/hr.ts</code>.</p>
+
+      <h2 id="employees">employees</h2>
+      <p><code>aadhaarLast4</code> (4 chars only, by design), <code>panEncrypted</code>+<code>panHash</code>, <code>bankAccountNoEncrypted</code>+<code>bankAccountNoHash</code> — genuinely encrypted, HMAC-SHA256 hash columns for exact-match lookup only (not unique constraints — duplicate PAN across employees isn't prevented at the DB level). <code>bankName</code>/<code>bankIfsc</code> remain plaintext.</p>
+
+      <h2 id="payroll-tables">employee_salaries / payroll_runs / payroll_slips</h2>
+      <p><code>employee_salaries</code>: ctc/basic/hra/da/allowances/gross all encrypted, with an explicit in-code comment: never cache, never log, never return from a list endpoint. <code>payroll_runs</code>: status <code>DRAFT→CALCULATING→CALCULATED→APPROVED→DISBURSED</code>, unique per <code>(tenant, month, year)</code>; carries <code>salaryJournalId</code>/<code>disbursalJournalId</code> columns that no route ever populates — dead columns, since the real journal linkage lives entirely on the accounting-service side via events. <code>payroll_slips</code>: only <code>grossSalary</code>/<code>netSalary</code> are encrypted (ciphertext-bearing text columns) — PF/ESI/PT/TDS/loan-deduction/basic/HRA/DA/allowance amounts are all plain decimals. No slip/certificate number column exists; the numeric row <code>id</code> is the only identifier.</p>
+
+      <h2 id="alteration-tables">alteration_orders / alteration_tasks</h2>
+      <p><code>alteration_orders.status</code>: 7-value enum <code>RECEIVED/ASSIGNED/IN_PROGRESS/QUALITY_CHECK/READY/DELIVERED/CANCELLED</code>, unique <code>orderNumber</code> generated post-insert. <code>alteration_tasks</code> is defined in the schema but never read or written by any route — dead table, superseded by the simpler assigned-tailor-plus-status-on-order model actually in use.</p>
+
+      <h2 id="other-tables">Other tables</h2>
+      <p><code>pt_slabs</code> is deliberately global/non-tenant-scoped reference data keyed by state code and effective date range — states with no PT law intentionally have zero rows. <code>employee_loans</code>/<code>loan_deduction_history</code>: flat, no-interest EMI with a full per-slip deduction audit trail — not encrypted, despite being salary-adjacent.</p>
+
+      <div class="pager">
+        <a href="#hr/dev/api-reference"><div class="pg-label">Back</div><div class="pg-title">← API Reference</div></a>
+        <a class="next" href="#hr/audit/known-issues"><div class="pg-label">Next</div><div class="pg-title">Known Issues →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ AUDIT: KNOWN ISSUES ============ -->
+    <article class="page" id="page-hr-issues" data-track="dev" data-title="Known Issues & Needs Review">
+      <span class="track-pill dev">Cross-cutting · Health audit</span>
+      <h1>Known Issues &amp; Needs Review</h1>
+      <p>Ranked by real-world impact. Everything below is a confirmed code-reading finding unless marked Needs Review.</p>
+
+      <div class="callout bug"><div class="callout-title">HR Manager cannot use Alteration Orders, Holidays, or Attendance Reports</div><p>None of <code>ALTERATION_VIEW/CREATE/UPDATE</code>, <code>HR_MANAGE</code>, or <code>ATTENDANCE_REPORT</code> are granted to the HR Manager role by default, despite the role's own training material instructing exactly these actions. Unlike the payroll-approval gap (which has clear segregation-of-duties justification elsewhere in the codebase), nothing suggests these are intentional.</p></div>
+
+      <div class="callout bug"><div class="callout-title">Employee Loans: fully implemented backend, zero frontend</div><p>Routes, service logic, database tables, tests, and even correct accounting-event integration all exist and work. No page, API-client method, or nav link exists anywhere in <code>apps/web-frontend</code>.</p></div>
+
+      <div class="callout bug"><div class="callout-title">Bulk payslip delivery doesn't work end-to-end</div><p><code>POST /payroll-runs/:id/bulk-send</code> is real and publishes a <code>SALARY_SLIP_READY</code> event, but that event has zero consumers anywhere in the codebase, no email/WhatsApp actually goes out, no ZIP download exists, and the frontend never even calls this endpoint. The feature described in HR training material doesn't exist end-to-end at any layer beyond the single publish call.</p></div>
+
+      <div class="callout review"><div class="callout-title">TDS slabs are hardcoded to a specific past financial year with no update mechanism</div><p>Unlike the professional-tax slab table (which is genuinely effective-dated per state), income-tax withholding uses fixed constants explicitly commented as "FY 2024-25" with no versioning table — these will silently go stale every financial year without a code change.</p></div>
+
+      <div class="callout review"><div class="callout-title">Payslip and loan figures are inconsistently encrypted</div><p><code>payroll_slips</code> only encrypts gross/net totals; every individual statutory-deduction and loan-deduction amount on the same row is plaintext. <code>employee_loans</code> isn't encrypted at all. Contrast with <code>employee_salaries</code>, which correctly encrypts every compensation figure.</p></div>
+
+      <div class="callout note"><div class="callout-title">Several HR-training-documented features don't exist in code at all</div><p>Full &amp; final settlement calculation on exit, leave encashment, manual leave-balance adjustment, a bank-transfer export file, and a "sync biometric device" button are all described in training material but absent from both frontend and backend — confirmed by targeted grep, not just difficulty finding them. The nightly biometric-sync scheduler job is a literal no-op stub that always reports zero imported records.</p></div>
+
+      <div class="callout note"><div class="callout-title">Alteration orders differ from their own training description</div><p>The real flow has seven states (adding Assigned and Quality Check) versus the four-state flow described in cashier training material; no token-slip printing exists at all; and orders are found by order number, not a separate "token number" concept.</p></div>
+
+      <div class="callout note"><div class="callout-title">Inconsistent event architecture for alterations</div><p>Alteration lifecycle events are published to the outbox bus with zero consumers, while the actual customer notifications for the same lifecycle moments are sent via a separate, direct synchronous HTTP call. Both mechanisms exist for the same feature; only one does anything.</p></div>
+
+      <div class="callout note"><div class="callout-title">Leave balance check is skippable</div><p>If no balance record exists yet for an employee/leave-type combination, the balance check is bypassed entirely rather than defaulting to zero-allowed — a newly onboarded employee could have unlimited leave approved until their balance is explicitly initialized.</p></div>
+
+      <div class="callout note"><div class="callout-title">Dead/orphaned schema and permissions</div><p><code>payroll_runs.salaryJournalId</code>/<code>disbursalJournalId</code> columns are never written by any route. <code>alteration_tasks</code> table is never read or written by any route. The <code>SALARY_VIEW</code> permission constant (granted to HR Manager) is never checked by any route guard anywhere.</p></div>
+
+      <div class="callout note"><div class="callout-title">A regular Staff account can submit a leave application it doesn't have permission for</div><p>The "Apply for Leave" panel isn't gated on the submit permission client-side — a Staff user without leave-apply rights sees the form and only gets rejected at submit time, a confusing UX rather than a security issue (the backend correctly blocks it).</p></div>
+
+      <div class="callout ok"><div class="callout-title">Confirmed solid: payroll's own accounting-event wiring</div><p>Unlike the equivalent invoice/sale-return event postings audited in Accounting &amp; GST, payroll-run approval/disbursal and employee-loan-disbursal events are published and consumed with matching field names and correct posting-matrix entries — no mismatch found here.</p></div>
+      <div class="callout ok"><div class="callout-title">Confirmed solid: professional tax multi-state handling, and the core payroll/statutory test suite</div><p>PT is genuinely computed per-state via seeded, effective-dated reference data — not hardcoded to one state. PF/ESI/PT/TDS math, Form-16 aggregation, and loan-EMI computation are all covered by real tests that exercise actual domain logic, not mocked-away assertions.</p></div>
+
+      <div class="pager">
+        <a href="#hr/dev/data-model"><div class="pg-label">Back</div><div class="pg-title">← Data Model</div></a>
+        <span></span>
+      </div>
+    </article>
+
+  </main>
+
+  <aside class="toc">
+    <div class="toc-title">On this page</div>
+    <nav id="tocNav"></nav>
+  </aside>
+</div>
+
+<script src="/shared/docs-shell.js"></script>
+</body>
+</html>

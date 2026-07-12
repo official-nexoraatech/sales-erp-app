@@ -1,13 +1,28 @@
-import Fastify, { type FastifyError } from 'fastify';
+import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 import Redis from 'ioredis';
 import { createDatabaseClient, createReadReplicaClient, ReplicaRouter } from '@erp/db';
-import { HELMET_OPTIONS, PERMISSIONS_POLICY, registerHealthRoute, tenantOrIpKeyGenerator, checkDatabase, initializeTelemetry, initTenantStatusEnforcement } from '@erp/sdk';
-import { createLogger, createMetricsHandler, createHttpMetricsHook, createCorrelationIdHook, erpReplicaFallbackTotal } from '@erp/logger';
+import {
+  HELMET_OPTIONS,
+  PERMISSIONS_POLICY,
+  registerHealthRoute,
+  tenantOrIpKeyGenerator,
+  checkDatabase,
+  initializeTelemetry,
+  initTenantStatusEnforcement,
+  subscribeToTenantStatusInvalidations,
+  registerErrorHandler,
+} from '@erp/sdk';
+import {
+  createLogger,
+  createMetricsHandler,
+  createHttpMetricsHook,
+  createCorrelationIdHook,
+  erpReplicaFallbackTotal,
+} from '@erp/logger';
 import { loadConfigWithSecrets } from '@erp/config';
-import { ERPError } from '@erp/types';
 import { PdfEngine } from './domain/PdfEngine.js';
 import { reportRoutes } from './api/report.routes.js';
 import { analyticsReportsRoutes } from './api/analytics-reports.routes.js';
@@ -22,7 +37,11 @@ async function bootstrap(): Promise<void> {
   const databaseUrl = config.databaseUrl;
 
   const lokiUrl = process.env['LOKI_URL'];
-  const logger = createLogger({ serviceName: 'report-service', level: 'info', ...(lokiUrl ? { lokiUrl } : {}) });
+  const logger = createLogger({
+    serviceName: 'report-service',
+    level: 'info',
+    ...(lokiUrl ? { lokiUrl } : {}),
+  });
   const db = createDatabaseClient({ url: databaseUrl });
   initTenantStatusEnforcement(db);
 
@@ -32,9 +51,14 @@ async function bootstrap(): Promise<void> {
   // matching projection_dashboard_daily's own documented staleness tolerance (event-service's
   // STALE_TOLERANCE_MS), since a replica within that window is already "fresh enough" today.
   const replicaDb = createReadReplicaClient({ url: config.databaseReplicaUrl });
-  const onReplicaFallback = (): void => { erpReplicaFallbackTotal.inc({ service: 'report-service' }); };
+  const onReplicaFallback = (): void => {
+    erpReplicaFallbackTotal.inc({ service: 'report-service' });
+  };
   const reportReplicaRouter = new ReplicaRouter(db, replicaDb, { onFallback: onReplicaFallback });
-  const dashboardReplicaRouter = new ReplicaRouter(db, replicaDb, { maxLagMs: 120_000, onFallback: onReplicaFallback });
+  const dashboardReplicaRouter = new ReplicaRouter(db, replicaDb, {
+    maxLagMs: 120_000,
+    onFallback: onReplicaFallback,
+  });
 
   // ES-26 (M7): 3-minute cache for the GST-payable report — the only cached query in this service.
   const redisUrl = process.env['REDIS_URL'] ?? 'redis://localhost:6380';
@@ -42,6 +66,7 @@ async function bootstrap(): Promise<void> {
   await redis.connect().catch((err: Error) => {
     logger.warn({ err: err.message }, 'Redis connect failed — report caching disabled');
   });
+  subscribeToTenantStatusInvalidations(redis);
 
   const pdfEngine = new PdfEngine();
   const metricsHandler = await createMetricsHandler('report-service');
@@ -86,24 +111,19 @@ async function bootstrap(): Promise<void> {
   // time under an outer /api/v2 prefix would double it (/api/v2/api/v2/reports), so they
   // stay registered once, as-is; their pre-existing versioning is untouched by this change.
   await reportRoutes(fastify, db, pdfEngine);
-  await fastify.register(async (sub) => {
-    await reportRoutes(sub, db, pdfEngine);
-  }, { prefix: '/api/v2' });
+  await fastify.register(
+    async (sub) => {
+      await reportRoutes(sub, db, pdfEngine);
+    },
+    { prefix: '/api/v2' }
+  );
 
   await analyticsReportsRoutes(fastify, db, redis, reportReplicaRouter);
   await dashboardRoutes(fastify, db, dashboardReplicaRouter);
 
-  fastify.setErrorHandler<FastifyError>((error, request, reply) => {
-    if (error instanceof ERPError) {
-      return reply.code(error.statusCode).send({
-        error: { code: error.code, message: error.message, details: error.details },
-      });
-    }
-    logger.error({ err: error.message, url: request.url, correlationId: (request as { correlationId?: string }).correlationId }, 'Unhandled error');
-    return reply.code(500).send({ error: { code: 'INTERNAL_ERROR', message: 'Internal error' } });
-  });
+  registerErrorHandler(fastify, 'report-service', logger);
 
-  const scheduledJob = new ScheduledReportJob(db, logger);
+  const scheduledJob = new ScheduledReportJob(db, logger, redis);
 
   const gracefulShutdown = async (): Promise<void> => {
     await scheduledJob.stop();
@@ -113,23 +133,33 @@ async function bootstrap(): Promise<void> {
     process.exit(0);
   };
 
-  process.on('SIGTERM', () => { void gracefulShutdown(); });
-  process.on('SIGINT', () => { void gracefulShutdown(); });
+  process.on('SIGTERM', () => {
+    void gracefulShutdown();
+  });
+  process.on('SIGINT', () => {
+    void gracefulShutdown();
+  });
 
   const address = await fastify.listen({ port, host: '0.0.0.0' });
   logger.info({ address }, 'Report service started');
 
-  pdfEngine.init().then(() => {
-    logger.info({}, 'PDF engine initialized');
-  }).catch((err: Error) => {
-    logger.error({ err: err.message }, 'PDF engine failed to initialize');
-  });
+  pdfEngine
+    .init()
+    .then(() => {
+      logger.info({}, 'PDF engine initialized');
+    })
+    .catch((err: Error) => {
+      logger.error({ err: err.message }, 'PDF engine failed to initialize');
+    });
 
-  scheduledJob.start().then(() => {
-    logger.info({}, 'Scheduled report job started');
-  }).catch((err: Error) => {
-    logger.error({ err: err.message }, 'Scheduled report job failed to start');
-  });
+  scheduledJob
+    .start()
+    .then(() => {
+      logger.info({}, 'Scheduled report job started');
+    })
+    .catch((err: Error) => {
+      logger.error({ err: err.message }, 'Scheduled report job failed to start');
+    });
 }
 
 bootstrap().catch((error: unknown) => {

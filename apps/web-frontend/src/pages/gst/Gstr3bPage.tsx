@@ -14,7 +14,11 @@ function getCurrentPeriod(): string {
 }
 
 function formatCurrency(val: unknown): string {
-  return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 2 }).format(Number(val ?? 0));
+  return new Intl.NumberFormat('en-IN', {
+    style: 'currency',
+    currency: 'INR',
+    maximumFractionDigits: 2,
+  }).format(Number(val ?? 0));
 }
 
 interface TableRowProps {
@@ -30,10 +34,19 @@ interface TableRowProps {
 
 function TableRow({ label, igst, cgst, sgst, cess, total, bold, indent }: TableRowProps) {
   return (
-    <tr className={`${bold ? 'bg-gray-50 dark:bg-gray-900/30 font-semibold' : ''} border-b border-gray-100 dark:border-gray-700`}>
-      <td className={`py-3 pr-4 text-sm text-gray-700 dark:text-gray-300 ${indent ? 'pl-8' : 'pl-4'}`}>{label}</td>
+    <tr
+      className={`${bold ? 'bg-gray-50 dark:bg-gray-900/30 font-semibold' : ''} border-b border-gray-100 dark:border-gray-700`}
+    >
+      <td
+        className={`py-3 pr-4 text-sm text-gray-700 dark:text-gray-300 ${indent ? 'pl-8' : 'pl-4'}`}
+      >
+        {label}
+      </td>
       {[igst, cgst, sgst, cess, total].map((v, i) => (
-        <td key={i} className="py-3 px-4 text-sm text-right text-gray-700 dark:text-gray-300 whitespace-nowrap">
+        <td
+          key={i}
+          className="py-3 px-4 text-sm text-right text-gray-700 dark:text-gray-300 whitespace-nowrap"
+        >
           {v !== undefined ? formatCurrency(v) : '—'}
         </td>
       ))}
@@ -50,7 +63,11 @@ function Section({ title, children }: { title: string; children: React.ReactNode
         onClick={() => setOpen((o) => !o)}
       >
         <span className="text-sm font-semibold text-gray-900 dark:text-white">{title}</span>
-        {open ? <ChevronDown className="w-4 h-4 text-gray-400 dark:text-gray-500" /> : <ChevronRight className="w-4 h-4 text-gray-400 dark:text-gray-500" />}
+        {open ? (
+          <ChevronDown className="w-4 h-4 text-gray-400 dark:text-gray-500" />
+        ) : (
+          <ChevronRight className="w-4 h-4 text-gray-400 dark:text-gray-500" />
+        )}
       </button>
       {open && <div className="border-t border-gray-100 dark:border-gray-700">{children}</div>}
     </div>
@@ -110,7 +127,9 @@ export function Gstr3bPage() {
       </div>
 
       <div>
-        <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Period</label>
+        <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
+          Period
+        </label>
         <input
           type="month"
           value={period}
@@ -125,45 +144,115 @@ export function Gstr3bPage() {
           <ERPCardSkeleton lines={3} />
         </div>
       ) : !result ? (
-        <div className="py-12 text-center text-sm text-gray-400 dark:text-gray-500">No data for selected period</div>
+        <div className="py-12 text-center text-sm text-gray-400 dark:text-gray-500">
+          No data for selected period
+        </div>
       ) : (
         <div className="space-y-4">
           {/* Table 3.1 */}
           <Section title="3.1 — Outward Taxable Supplies (net of credit notes)">
-            <table className="min-w-full">
-              <thead><tr className="bg-gray-50 dark:bg-gray-900/30">
-                <th className="py-3 pl-4 pr-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Nature of supply</th>
-                <th className="py-3 px-4 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">IGST</th>
-                <th className="py-3 px-4 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">CGST</th>
-                <th className="py-3 px-4 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">SGST</th>
-                <th className="py-3 px-4 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Cess</th>
-                <th className="py-3 px-4 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Total Tax</th>
-              </tr></thead>
-              <tbody>
-                <TableRow label="(a) Outward taxable supplies (other than zero rated, nil and exempted)" igst={(table31 as Record<string, unknown> | undefined)?.a_igst} cgst={(table31 as Record<string, unknown> | undefined)?.a_cgst} sgst={(table31 as Record<string, unknown> | undefined)?.a_sgst} cess={(table31 as Record<string, unknown> | undefined)?.a_cess} />
-                <TableRow label="(d) Inward supplies (reverse charge)" igst={(table31 as Record<string, unknown> | undefined)?.d_igst} cgst={(table31 as Record<string, unknown> | undefined)?.d_cgst} sgst={(table31 as Record<string, unknown> | undefined)?.d_sgst} />
-                <TableRow label="Total outward liability" igst={(table31 as Record<string, unknown> | undefined)?.total_igst} cgst={(table31 as Record<string, unknown> | undefined)?.total_cgst} sgst={(table31 as Record<string, unknown> | undefined)?.total_sgst} cess={(table31 as Record<string, unknown> | undefined)?.total_cess} bold />
-              </tbody>
-            </table>
+            <div className="overflow-x-auto">
+              <table className="min-w-full">
+                <thead>
+                  <tr className="bg-gray-50 dark:bg-gray-900/30">
+                    <th className="py-3 pl-4 pr-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
+                      Nature of supply
+                    </th>
+                    <th className="py-3 px-4 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
+                      IGST
+                    </th>
+                    <th className="py-3 px-4 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
+                      CGST
+                    </th>
+                    <th className="py-3 px-4 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
+                      SGST
+                    </th>
+                    <th className="py-3 px-4 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
+                      Cess
+                    </th>
+                    <th className="py-3 px-4 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
+                      Total Tax
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <TableRow
+                    label="(a) Outward taxable supplies (other than zero rated, nil and exempted)"
+                    igst={(table31 as Record<string, unknown> | undefined)?.a_igst}
+                    cgst={(table31 as Record<string, unknown> | undefined)?.a_cgst}
+                    sgst={(table31 as Record<string, unknown> | undefined)?.a_sgst}
+                    cess={(table31 as Record<string, unknown> | undefined)?.a_cess}
+                  />
+                  <TableRow
+                    label="(d) Inward supplies (reverse charge)"
+                    igst={(table31 as Record<string, unknown> | undefined)?.d_igst}
+                    cgst={(table31 as Record<string, unknown> | undefined)?.d_cgst}
+                    sgst={(table31 as Record<string, unknown> | undefined)?.d_sgst}
+                  />
+                  <TableRow
+                    label="Total outward liability"
+                    igst={(table31 as Record<string, unknown> | undefined)?.total_igst}
+                    cgst={(table31 as Record<string, unknown> | undefined)?.total_cgst}
+                    sgst={(table31 as Record<string, unknown> | undefined)?.total_sgst}
+                    cess={(table31 as Record<string, unknown> | undefined)?.total_cess}
+                    bold
+                  />
+                </tbody>
+              </table>
+            </div>
           </Section>
 
           {/* Table 4 */}
           <Section title="4 — Eligible ITC">
-            <table className="min-w-full">
-              <thead><tr className="bg-gray-50 dark:bg-gray-900/30">
-                <th className="py-3 pl-4 pr-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Details</th>
-                <th className="py-3 px-4 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">IGST</th>
-                <th className="py-3 px-4 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">CGST</th>
-                <th className="py-3 px-4 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">SGST</th>
-                <th className="py-3 px-4 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Cess</th>
-                <th className="py-3 px-4 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Total</th>
-              </tr></thead>
-              <tbody>
-                <TableRow label="(A) ITC Available — Imports & others" igst={(table4 as Record<string, unknown> | undefined)?.a_igst} cgst={(table4 as Record<string, unknown> | undefined)?.a_cgst} sgst={(table4 as Record<string, unknown> | undefined)?.a_sgst} cess={(table4 as Record<string, unknown> | undefined)?.a_cess} />
-                <TableRow label="(D) Reversals of ITC" igst={(table4 as Record<string, unknown> | undefined)?.d_igst} cgst={(table4 as Record<string, unknown> | undefined)?.d_cgst} sgst={(table4 as Record<string, unknown> | undefined)?.d_sgst} />
-                <TableRow label="Net ITC Available" igst={(table4 as Record<string, unknown> | undefined)?.net_igst} cgst={(table4 as Record<string, unknown> | undefined)?.net_cgst} sgst={(table4 as Record<string, unknown> | undefined)?.net_sgst} cess={(table4 as Record<string, unknown> | undefined)?.net_cess} bold />
-              </tbody>
-            </table>
+            <div className="overflow-x-auto">
+              <table className="min-w-full">
+                <thead>
+                  <tr className="bg-gray-50 dark:bg-gray-900/30">
+                    <th className="py-3 pl-4 pr-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
+                      Details
+                    </th>
+                    <th className="py-3 px-4 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
+                      IGST
+                    </th>
+                    <th className="py-3 px-4 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
+                      CGST
+                    </th>
+                    <th className="py-3 px-4 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
+                      SGST
+                    </th>
+                    <th className="py-3 px-4 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
+                      Cess
+                    </th>
+                    <th className="py-3 px-4 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
+                      Total
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <TableRow
+                    label="(A) ITC Available — Imports & others"
+                    igst={(table4 as Record<string, unknown> | undefined)?.a_igst}
+                    cgst={(table4 as Record<string, unknown> | undefined)?.a_cgst}
+                    sgst={(table4 as Record<string, unknown> | undefined)?.a_sgst}
+                    cess={(table4 as Record<string, unknown> | undefined)?.a_cess}
+                  />
+                  <TableRow
+                    label="(D) Reversals of ITC"
+                    igst={(table4 as Record<string, unknown> | undefined)?.d_igst}
+                    cgst={(table4 as Record<string, unknown> | undefined)?.d_cgst}
+                    sgst={(table4 as Record<string, unknown> | undefined)?.d_sgst}
+                  />
+                  <TableRow
+                    label="Net ITC Available"
+                    igst={(table4 as Record<string, unknown> | undefined)?.net_igst}
+                    cgst={(table4 as Record<string, unknown> | undefined)?.net_cgst}
+                    sgst={(table4 as Record<string, unknown> | undefined)?.net_sgst}
+                    cess={(table4 as Record<string, unknown> | undefined)?.net_cess}
+                    bold
+                  />
+                </tbody>
+              </table>
+            </div>
           </Section>
 
           {/* ITC Set-off summary */}
@@ -172,21 +261,35 @@ export function Gstr3bPage() {
               <div className="px-5 py-4">
                 <div className="flex items-start gap-2 mb-4 text-xs text-indigo-700 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/20 rounded-lg px-3 py-2">
                   <Info className="w-4 h-4 flex-shrink-0 mt-0.5" />
-                  <span>Set-off order: IGST liability → IGST ITC → CGST ITC → SGST ITC. CGST liability uses IGST then CGST only (never SGST). SGST liability uses IGST then SGST only (never CGST).</span>
+                  <span>
+                    Set-off order: IGST liability → IGST ITC → CGST ITC → SGST ITC. CGST liability
+                    uses IGST then CGST only (never SGST). SGST liability uses IGST then SGST only
+                    (never CGST).
+                  </span>
                 </div>
-                <div className="grid grid-cols-3 gap-4 text-sm">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
                   {(['igst', 'cgst', 'sgst'] as const).map((t) => {
-                    const so = (itcSetoff.setoffBreakdown as Record<string, unknown> | undefined)?.[t] as Record<string, unknown> | undefined;
-                    const cash = (itcSetoff.cashRequired as Record<string, unknown> | undefined)?.[t];
+                    const so = (itcSetoff.setoffBreakdown as Record<string, unknown> | undefined)?.[
+                      t
+                    ] as Record<string, unknown> | undefined;
+                    const cash = (itcSetoff.cashRequired as Record<string, unknown> | undefined)?.[
+                      t
+                    ];
                     return (
                       <div key={t} className="bg-gray-50 dark:bg-gray-900/30 rounded-lg p-4">
-                        <div className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase mb-3">{t.toUpperCase()} Liability</div>
-                        {so && Object.entries(so).map(([k, v]) => (
-                          <div key={k} className="flex justify-between text-xs text-gray-600 dark:text-gray-400 mb-1">
-                            <span>{k.replace(/_/g, ' ')}</span>
-                            <span>{formatCurrency(v)}</span>
-                          </div>
-                        ))}
+                        <div className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase mb-3">
+                          {t.toUpperCase()} Liability
+                        </div>
+                        {so &&
+                          Object.entries(so).map(([k, v]) => (
+                            <div
+                              key={k}
+                              className="flex justify-between text-xs text-gray-600 dark:text-gray-400 mb-1"
+                            >
+                              <span>{k.replace(/_/g, ' ')}</span>
+                              <span>{formatCurrency(v)}</span>
+                            </div>
+                          ))}
                         {cash !== undefined && Number(cash) > 0 && (
                           <div className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-700 flex justify-between text-xs font-semibold text-red-600 dark:text-red-400">
                             <span>Cash required</span>
@@ -198,12 +301,20 @@ export function Gstr3bPage() {
                   })}
                 </div>
                 <div className="mt-4 flex justify-between items-center px-4 py-3 bg-orange-50 dark:bg-orange-900/20 rounded-lg border border-orange-200 dark:border-orange-800">
-                  <span className="text-sm font-medium text-orange-800 dark:text-orange-300">Total Cash Required (GST payable)</span>
+                  <span className="text-sm font-medium text-orange-800 dark:text-orange-300">
+                    Total Cash Required (GST payable)
+                  </span>
                   <span className="text-lg font-bold text-orange-700 dark:text-orange-400">
                     {formatCurrency(
-                      Number((itcSetoff.cashRequired as Record<string, unknown> | undefined)?.igst ?? 0) +
-                      Number((itcSetoff.cashRequired as Record<string, unknown> | undefined)?.cgst ?? 0) +
-                      Number((itcSetoff.cashRequired as Record<string, unknown> | undefined)?.sgst ?? 0)
+                      Number(
+                        (itcSetoff.cashRequired as Record<string, unknown> | undefined)?.igst ?? 0
+                      ) +
+                        Number(
+                          (itcSetoff.cashRequired as Record<string, unknown> | undefined)?.cgst ?? 0
+                        ) +
+                        Number(
+                          (itcSetoff.cashRequired as Record<string, unknown> | undefined)?.sgst ?? 0
+                        )
                     )}
                   </span>
                 </div>

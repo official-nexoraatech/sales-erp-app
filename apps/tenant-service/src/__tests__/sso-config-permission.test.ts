@@ -17,7 +17,7 @@ vi.mock('drizzle-orm', () => ({
   eq: vi.fn(() => '__eq__'),
 }));
 
-vi.mock('@erp/utils', () => ({
+vi.mock('@erp/utils/server', () => ({
   encryptField: vi.fn(() => 'iv:tag:ciphertext'),
 }));
 
@@ -122,7 +122,13 @@ describe('PG-020 — GET /sso-config permission gating', () => {
       method: 'PUT',
       url: '/sso-config',
       headers: { Authorization: `Bearer ${token}` },
-      payload: { provider: 'OKTA', issuerUrl: 'https://acme.okta.com', clientId: 'abc', enabled: true, bypassLocalMfa: false },
+      payload: {
+        provider: 'OKTA',
+        issuerUrl: 'https://acme.okta.com',
+        clientId: 'abc',
+        enabled: true,
+        bypassLocalMfa: false,
+      },
     });
     expect(res.statusCode).toBe(403);
   });
@@ -133,7 +139,14 @@ describe('PG-020 — GET /sso-config permission gating', () => {
       method: 'PUT',
       url: '/sso-config',
       headers: { Authorization: `Bearer ${token}` },
-      payload: { provider: 'OKTA', issuerUrl: 'http://acme.okta.com', clientId: 'abc', clientSecret: 'shh', enabled: true, bypassLocalMfa: false },
+      payload: {
+        provider: 'OKTA',
+        issuerUrl: 'http://acme.okta.com',
+        clientId: 'abc',
+        clientSecret: 'shh',
+        enabled: true,
+        bypassLocalMfa: false,
+      },
     });
     expect(res.statusCode).toBe(422);
   });

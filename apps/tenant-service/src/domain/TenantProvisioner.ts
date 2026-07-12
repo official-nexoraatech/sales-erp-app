@@ -2,7 +2,6 @@
 import type { ErpDatabase } from '@erp/db';
 import { tenants, roles, rolePermissions, users, featureFlags, branches } from '@erp/db';
 import { createLogger } from '@erp/logger';
-import { PERMISSIONS } from '@erp/types';
 import { eq, and } from 'drizzle-orm';
 import argon2 from 'argon2';
 import { randomUUID } from 'node:crypto';
@@ -36,6 +35,7 @@ export interface ProvisionResult {
 
 const logger = createLogger({ serviceName: 'tenant-service' });
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- used only in the ProvisionStep type query below
 const ALL_PROVISION_STEPS = [
   'CREATE_RECORD',
   'CREATE_SCHEMA',
@@ -338,7 +338,7 @@ export class TenantProvisioner {
           body: JSON.stringify({
             settings: {
               number_of_shards: 1,
-              number_of_replicas: 1,
+              number_of_replicas: 0,
               analysis: {
                 analyzer: {
                   erp_name_analyzer: {
@@ -373,10 +373,16 @@ export class TenantProvisioner {
           }),
         });
         if (!res.ok && res.status !== 400) {
-          logger.warn({ tenantId, indexName, status: res.status }, 'ES index creation returned non-OK');
+          logger.warn(
+            { tenantId, indexName, status: res.status },
+            'ES index creation returned non-OK'
+          );
         }
       } catch (err) {
-        logger.warn({ tenantId, indexName, err }, 'ES index creation failed (non-fatal during provisioning)');
+        logger.warn(
+          { tenantId, indexName, err },
+          'ES index creation failed (non-fatal during provisioning)'
+        );
       }
     }
   }
@@ -421,7 +427,12 @@ export class TenantProvisioner {
   // this tenant needs first — no such template was ever seeded anywhere, so even a
   // correctly-shaped call would have been silently skipped by NotificationEngine's
   // no-template-row-found path (see [[pg017_password_reset_email_delivery]]'s same gap).
-  private async sendWelcomeEmail(tenantId: number, email: string, tenantName: string, firstName: string): Promise<void> {
+  private async sendWelcomeEmail(
+    tenantId: number,
+    email: string,
+    tenantName: string,
+    firstName: string
+  ): Promise<void> {
     const notificationUrl = process.env['NOTIFICATION_SERVICE_URL'];
     if (!notificationUrl) {
       logger.warn({ email }, 'NOTIFICATION_SERVICE_URL not configured — skipping welcome email');

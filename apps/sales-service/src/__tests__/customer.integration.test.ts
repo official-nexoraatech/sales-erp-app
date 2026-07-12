@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createDatabaseClient } from '@erp/db';
 import { customers, branches } from '@erp/db';
 import { eq, and } from 'drizzle-orm';
-import { encryptField } from '@erp/utils';
+import { encryptField } from '@erp/utils/server';
 
 const DB_URL = process.env['DATABASE_URL'];
 
@@ -16,7 +16,14 @@ describe.skipIf(!DB_URL)('Customer integration', () => {
 
     const [branch] = await db
       .insert(branches)
-      .values({ tenantId: TEST_TENANT, name: 'Test HO', code: 'HO', isHeadOffice: true, isActive: true, createdBy: 1 })
+      .values({
+        tenantId: TEST_TENANT,
+        name: 'Test HO',
+        code: 'HO',
+        isHeadOffice: true,
+        isActive: true,
+        createdBy: 1,
+      })
       .returning();
 
     branchId = branch!.id;
@@ -90,7 +97,13 @@ describe.skipIf(!DB_URL)('Customer integration', () => {
     const stale = await db
       .update(customers)
       .set({ displayName: 'Should Not Update', version: 1 })
-      .where(and(eq(customers.id, created!.id), eq(customers.tenantId, TEST_TENANT), eq(customers.version, 5)))
+      .where(
+        and(
+          eq(customers.id, created!.id),
+          eq(customers.tenantId, TEST_TENANT),
+          eq(customers.version, 5)
+        )
+      )
       .returning();
 
     expect(stale).toHaveLength(0);
@@ -99,7 +112,13 @@ describe.skipIf(!DB_URL)('Customer integration', () => {
     const [updated] = await db
       .update(customers)
       .set({ displayName: 'Updated Customer', version: 1 })
-      .where(and(eq(customers.id, created!.id), eq(customers.tenantId, TEST_TENANT), eq(customers.version, 0)))
+      .where(
+        and(
+          eq(customers.id, created!.id),
+          eq(customers.tenantId, TEST_TENANT),
+          eq(customers.version, 0)
+        )
+      )
       .returning();
 
     expect(updated!.displayName).toBe('Updated Customer');

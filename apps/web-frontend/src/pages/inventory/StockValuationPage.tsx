@@ -4,6 +4,7 @@ import { Download } from 'lucide-react';
 import ERPDataGrid, { type ERPColumnDef } from '../../components/erp/ERPDataGrid.js';
 import ERPErrorBoundary from '../../components/erp/ERPErrorBoundary.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
+import Badge from '../../components/ui/Badge.js';
 import Select from '../../components/ui/Select.js';
 import { stockValuationApi, warehouseApi, type StockValuationRow } from '../../api/endpoints.js';
 import { useAuthStore } from '../../store/auth.store.js';
@@ -23,14 +24,37 @@ const COLUMNS: ERPColumnDef<StockValuationRow>[] = [
   { key: 'itemName', header: 'Item Name' },
   { key: 'costingMethod', header: 'Costing Method' },
   { key: 'qty', header: 'Quantity', align: 'right', mono: true, render: (r) => r.qty.toFixed(2) },
-  { key: 'unitCost', header: 'Unit Cost (₹)', align: 'right', mono: true, render: (r) => fmt(r.unitCost) },
-  { key: 'totalValue', header: 'Total Value (₹)', align: 'right', mono: true, render: (r) => fmt(r.totalValue) },
+  {
+    key: 'unitCost',
+    header: 'Unit Cost (₹)',
+    align: 'right',
+    mono: true,
+    render: (r) => (
+      <span className="inline-flex items-center gap-1.5 justify-end">
+        {fmt(r.unitCost)}
+        {r.estimated && (
+          <span title="Warehouse-specific cost not yet tracked — showing the tenant-wide average applied proportionally.">
+            <Badge variant="warning">Estimated</Badge>
+          </span>
+        )}
+      </span>
+    ),
+  },
+  {
+    key: 'totalValue',
+    header: 'Total Value (₹)',
+    align: 'right',
+    mono: true,
+    render: (r) => fmt(r.totalValue),
+  },
 ];
 
 function exportCsv(rows: StockValuationRow[], totalStockValue: number, asOf: string) {
   const header = 'Item Code,Item Name,Costing Method,Quantity,Unit Cost,Total Value';
   const lines = rows.map((r) =>
-    [r.itemCode ?? '', `"${r.itemName}"`, r.costingMethod, r.qty, r.unitCost, r.totalValue].join(',')
+    [r.itemCode ?? '', `"${r.itemName}"`, r.costingMethod, r.qty, r.unitCost, r.totalValue].join(
+      ','
+    )
   );
   lines.push(['', '', '', '', 'TOTAL', totalStockValue].join(','));
   const csv = [header, ...lines].join('\n');
@@ -43,7 +67,10 @@ function exportCsv(rows: StockValuationRow[], totalStockValue: number, asOf: str
   URL.revokeObjectURL(url);
 }
 
-interface Warehouse { id: number; name: string; }
+interface Warehouse {
+  id: number;
+  name: string;
+}
 
 export default function StockValuationPage() {
   const hasPermission = useAuthStore((s) => s.hasPermission);
@@ -53,10 +80,11 @@ export default function StockValuationPage() {
 
   const { data, isLoading } = useQuery({
     queryKey: ['stock-valuation', warehouseId, asOf],
-    queryFn: () => stockValuationApi.get({
-      warehouseId: warehouseId ? Number(warehouseId) : undefined,
-      asOf,
-    }),
+    queryFn: () =>
+      stockValuationApi.get({
+        warehouseId: warehouseId ? Number(warehouseId) : undefined,
+        asOf,
+      }),
   });
 
   const { data: whData } = useQuery({
@@ -71,7 +99,9 @@ export default function StockValuationPage() {
 
   const footer = (
     <>
-      <td className="px-3 py-2 text-primary" colSpan={5}>TOTAL STOCK VALUE</td>
+      <td className="px-3 py-2 text-primary" colSpan={5}>
+        TOTAL STOCK VALUE
+      </td>
       <td className="px-3 py-2 text-right font-mono">{fmt(totalStockValue)}</td>
     </>
   );

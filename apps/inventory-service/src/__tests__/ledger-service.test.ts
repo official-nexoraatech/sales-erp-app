@@ -11,28 +11,66 @@ import { describe, it, expect, vi } from 'vitest';
 vi.mock('@erp/db', () => ({
   items: { id: 'id', tenantId: 'tenant_id', availableQty: 'available_qty', version: 'version' },
   inventoryLedger: {},
-  projectionStockLevel: { tenantId: 'tenant_id', itemId: 'item_id', warehouseId: 'warehouse_id', variantId: 'variant_id' },
+  projectionStockLevel: {
+    tenantId: 'tenant_id',
+    itemId: 'item_id',
+    warehouseId: 'warehouse_id',
+    variantId: 'variant_id',
+  },
+  inventoryFifoLayers: {
+    id: 'id',
+    tenantId: 'tenant_id',
+    itemId: 'item_id',
+    warehouseId: 'warehouse_id',
+    remainingQty: 'remaining_qty',
+  },
+  inventoryWarehouseValuation: {
+    id: 'id',
+    tenantId: 'tenant_id',
+    itemId: 'item_id',
+    variantId: 'variant_id',
+    warehouseId: 'warehouse_id',
+    waccCost: 'wacc_cost',
+    stockValue: 'stock_value',
+  },
 }));
 
 vi.mock('drizzle-orm', () => ({
   and: vi.fn((...args) => ({ type: 'and', args })),
   eq: vi.fn((col, val) => ({ type: 'eq', col, val })),
+  asc: vi.fn((col) => ({ type: 'asc', col })),
+  isNull: vi.fn((col) => ({ type: 'isNull', col })),
   sql: vi.fn((s) => s),
 }));
 
-import { InventoryLedgerService, InsufficientStockError } from '../domain/InventoryLedgerService.js';
+import {
+  InventoryLedgerService,
+  InsufficientStockError,
+} from '../domain/InventoryLedgerService.js';
 import { ERPError } from '@erp/types';
 
 function makeDb(script: unknown[]) {
   let i = 0;
   const next = () => Promise.resolve(script[i++]);
   const chainable: Record<string, unknown> = {};
-  for (const m of ['select', 'from', 'where', 'insert', 'values', 'update', 'set', 'onConflictDoUpdate', 'for']) {
+  for (const m of [
+    'select',
+    'from',
+    'where',
+    'insert',
+    'values',
+    'update',
+    'set',
+    'onConflictDoUpdate',
+    'for',
+  ]) {
     chainable[m] = vi.fn(() => chainable);
   }
   chainable['returning'] = vi.fn(() => next());
-  (chainable as { then: unknown })['then'] = (resolve: (v: unknown) => void, reject: (e: unknown) => void) =>
-    next().then(resolve, reject);
+  (chainable as { then: unknown })['then'] = (
+    resolve: (v: unknown) => void,
+    reject: (e: unknown) => void
+  ) => next().then(resolve, reject);
   return chainable;
 }
 
@@ -53,6 +91,7 @@ describe('InventoryLedgerService.deductStock — ES-03', () => {
       [{ availableQty: '100.000' }], // update items ... returning (deduct)
       [{ costingMethod: 'WACC', waccCost: '0', currentStockValue: '0' }], // ES-13: ValuationService item lookup
       undefined, // ES-13: ValuationService update items.current_stock_value (WACC branch)
+      [], // PG-032: select inventory_warehouse_valuation row — none yet, no-op
       [{ id: 1 }], // insert inventoryLedger ... returning
       undefined, // insert projectionStockLevel ... onConflictDoUpdate
     ];
@@ -72,7 +111,9 @@ describe('InventoryLedgerService.deductStock — ES-03', () => {
     const db = makeDb(script);
     const svc = new InventoryLedgerService(db as never);
 
-    await expect(svc.deductStock(baseParams, db as never)).rejects.toBeInstanceOf(InsufficientStockError);
+    await expect(svc.deductStock(baseParams, db as never)).rejects.toBeInstanceOf(
+      InsufficientStockError
+    );
   });
 
   it('throws (does not silently succeed) when the item does not exist for the given tenant', async () => {

@@ -1,0 +1,394 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ERP Docs — Purchase Module</title>
+<link rel="stylesheet" href="/shared/docs-shell.css">
+</head>
+<body data-module="Purchase">
+
+<header class="topbar">
+  <button class="icon-btn navtoggle" id="navToggle" aria-label="Toggle navigation">☰</button>
+  <a class="brand" href="/"><span class="mark">N</span> Nexoraa ERP Docs</a>
+  <div class="searchwrap">
+    <input type="text" class="searchbox" id="searchInput" placeholder="Search Purchase documentation…" autocomplete="off">
+    <div class="search-results" id="searchResults"></div>
+  </div>
+  <div class="topbar-actions">
+    <button class="icon-btn" id="themeToggle" aria-label="Toggle dark mode" title="Toggle dark mode">◐</button>
+    <button class="icon-btn" id="printBtn" aria-label="Print this page" title="Print this page">⎙</button>
+  </div>
+</header>
+
+<div class="shell">
+  <nav class="sidebar" id="sidebar">
+    <div class="sb-group">
+      <div class="sb-group-title">Modules</div>
+      <div class="sb-module active-module">
+        <div class="sb-module-head active-module">Purchase <span class="status">v1</span></div>
+        <div class="sb-track">
+          <div class="sb-track-title">Client</div>
+          <a class="sb-link" data-page="purchase-client-overview" href="#purchase/client/overview">Overview</a>
+          <a class="sb-link" data-page="purchase-client-po" href="#purchase/client/purchase-orders">Creating a Purchase Order</a>
+          <a class="sb-link" data-page="purchase-client-grn" href="#purchase/client/grn">Receiving Goods (GRN)</a>
+          <a class="sb-link" data-page="purchase-client-returns" href="#purchase/client/returns">Purchase Returns &amp; Debit Notes</a>
+          <a class="sb-link" data-page="purchase-client-payments" href="#purchase/client/payments">Supplier Payments &amp; Expenses</a>
+          <a class="sb-link" data-page="purchase-client-faq" href="#purchase/client/faq">Troubleshooting &amp; FAQ</a>
+        </div>
+        <div class="sb-track">
+          <div class="sb-track-title">Super Admin</div>
+          <a class="sb-link" data-page="purchase-admin-access" href="#purchase/admin/access-roles">Access &amp; Roles</a>
+          <a class="sb-link" data-page="purchase-admin-compliance" href="#purchase/admin/compliance">Numbering &amp; 3-Way Match</a>
+          <a class="sb-link" data-page="purchase-admin-limits" href="#purchase/admin/limitations">Limitations to Know</a>
+        </div>
+        <div class="sb-track">
+          <div class="sb-track-title">Developer</div>
+          <a class="sb-link" data-page="purchase-dev-architecture" href="#purchase/dev/architecture">Architecture</a>
+          <a class="sb-link" data-page="purchase-dev-api" href="#purchase/dev/api-reference">API Reference</a>
+          <a class="sb-link" data-page="purchase-dev-data" href="#purchase/dev/data-model">Data Model</a>
+        </div>
+        <div class="sb-track">
+          <div class="sb-track-title">Audit</div>
+          <a class="sb-link" data-page="purchase-issues" href="#purchase/audit/known-issues">Known Issues &amp; Needs Review</a>
+        </div>
+      </div>
+    </div>
+    <div class="sb-group">
+      <div class="sb-group-title">Other modules</div>
+      <a class="sb-module-head" href="/pos/index.html">POS <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/sales/index.html">Sales &amp; Invoicing <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/inventory/index.html">Inventory <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/products/index.html">Products &amp; Variants <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/customers/index.html">Customers &amp; Suppliers <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/accounting/index.html">Accounting &amp; GST <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/hr/index.html">HR &amp; Payroll <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/reports/index.html">Reports <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/tenants/index.html">Super Admin / Tenants <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/platform/index.html">Developer Platform <span class="status">Open →</span></a>
+    </div>
+  </nav>
+
+  <main class="content" id="content">
+    <div class="breadcrumb" id="breadcrumb"></div>
+
+    <!-- ============ CLIENT: OVERVIEW ============ -->
+    <article class="page" id="page-purchase-client-overview" data-track="client" data-title="Purchase Overview">
+      <span class="track-pill client">Client documentation</span>
+      <h1>Purchase Overview</h1>
+      <div class="pilot-banner">Fourth module documented from a direct code audit. Covers Purchase Orders, Goods Receipt (GRN), Purchase Returns/Debit Notes, and Supplier Payments &amp; Expenses.</div>
+
+      <div class="callout bug"><div class="callout-title">Two core screens in this module cannot currently be used</div><p><strong>Creating a Goods Receipt Note (GRN)</strong> and <strong>creating a Purchase Return</strong> both fail every time you submit them, due to confirmed defects in the forms themselves — not something you're doing wrong. Between them, that means the "receive what you ordered" step of purchasing doesn't work end-to-end today. Full detail on both is on their own pages and on <a href="#purchase/audit/known-issues">Known Issues</a>. Treat this module as PO-creation-and-approval-only until these are fixed.</p></div>
+
+      <h2 id="areas">What's here</h2>
+      <ul>
+        <li><strong>Purchase Orders</strong> — request goods from a supplier; single-level approval with a credit-limit check.</li>
+        <li><strong>Goods Receipt (GRN)</strong> — record what actually arrived against an approved PO. <strong>Currently broken</strong> — see below.</li>
+        <li><strong>Purchase Returns &amp; Debit Notes</strong> — send goods back to a supplier. <strong>Currently broken</strong> — see below.</li>
+        <li><strong>Supplier Payments &amp; Expenses</strong> — pay suppliers and log purchase-related expenses.</li>
+      </ul>
+      <p>Supplier records themselves (create/edit a supplier) are managed under a separate <strong>Suppliers</strong> section, not inside this module.</p>
+
+      <div class="pager">
+        <span></span>
+        <a class="next" href="#purchase/client/purchase-orders"><div class="pg-label">Next</div><div class="pg-title">Creating a Purchase Order →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ CLIENT: PO ============ -->
+    <article class="page" id="page-purchase-client-po" data-track="client" data-title="Creating a Purchase Order">
+      <span class="track-pill client">Client documentation</span>
+      <h1>Creating a Purchase Order</h1>
+      <ol class="steps">
+        <li><h4>New Purchase Order</h4><strong>Purchase → Orders → New</strong>. Pick a supplier and add line items with quantity and rate.</li>
+        <li><h4>Submit</h4>Moves the PO from Draft to Submitted, ready for approval.</li>
+        <li><h4>Approve</h4>A single approval step finalizes it — there's no multi-level sign-off chain.
+          <div class="callout note"><div class="callout-title">Credit-limit check on approval</div><p>If the supplier has a credit limit configured, approving a PO that would push their outstanding balance over that limit is blocked unless the approver has override authority.</p></div>
+        </li>
+      </ol>
+      <p>Once approved, the PO becomes eligible for receiving against — see <a href="#purchase/client/grn">Receiving Goods</a>.</p>
+      <div class="callout review"><div class="callout-title">Cancelling an approved or partially-received PO</div><p>The Cancel option is only shown in the list for Draft/Submitted purchase orders. An Approved or Partially Received PO can technically still be cancelled through the system, but there's no button for it in the current screen — treat those as not cancellable until this is clarified or added.</p></div>
+      <div class="callout note"><div class="callout-title">Printing a PO</div><p>The "Download PDF" action doesn't currently produce a file — no PDF is generated for purchase orders yet.</p></div>
+
+      <div class="pager">
+        <a href="#purchase/client/overview"><div class="pg-label">Back</div><div class="pg-title">← Overview</div></a>
+        <a class="next" href="#purchase/client/grn"><div class="pg-label">Next</div><div class="pg-title">Receiving Goods (GRN) →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ CLIENT: GRN ============ -->
+    <article class="page" id="page-purchase-client-grn" data-track="client" data-title="Receiving Goods (GRN)">
+      <span class="track-pill client">Client documentation</span>
+      <h1>Receiving Goods (GRN)</h1>
+
+      <div class="callout bug"><div class="callout-title">Creating a GRN currently fails every time</div><p>This is a confirmed defect: the "New GRN" form doesn't send the exact fields the server expects, so every submission is rejected. There is no workaround from this screen today — it needs a development fix. If goods have physically arrived and you need stock updated urgently, that has to happen as a manual stock adjustment in Inventory in the meantime, not through this screen.</p></div>
+
+      <h2 id="intended">How this is meant to work</h2>
+      <p>Documenting the intended flow so it's ready the moment it's fixed:</p>
+      <div class="flow">
+        <div class="flow-step"><div class="fs-label">1</div>Open an Approved (or Partially Received) PO, click Receive</div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step"><div class="fs-label">2</div>Adjust received quantity per line — partial receipt is fully supported by design</div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step terminal"><div class="fs-label">3</div>Approve the GRN — stock and cost update immediately</div>
+      </div>
+      <p>A GRN can only ever be created against an approved PO — there's no way to log received goods without one, by design.</p>
+
+      <h2 id="variance">Price variance flag</h2>
+      <p>If the rate you're receiving at differs from the PO rate by more than 5%, the GRN is routed for a second approval instead of auto-approving — a safeguard against silent overbilling, sometimes described internally as a "3-way match" (it's really a PO-vs-received-goods check; see <a href="#purchase/admin/compliance">Numbering &amp; 3-Way Match</a> for the precise scope).</p>
+
+      <div class="pager">
+        <a href="#purchase/client/purchase-orders"><div class="pg-label">Back</div><div class="pg-title">← Creating a Purchase Order</div></a>
+        <a class="next" href="#purchase/client/returns"><div class="pg-label">Next</div><div class="pg-title">Purchase Returns &amp; Debit Notes →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ CLIENT: RETURNS ============ -->
+    <article class="page" id="page-purchase-client-returns" data-track="client" data-title="Purchase Returns & Debit Notes">
+      <span class="track-pill client">Client documentation</span>
+      <h1>Purchase Returns &amp; Debit Notes</h1>
+
+      <div class="callout bug"><div class="callout-title">Creating a Purchase Return currently fails every time</div><p>Confirmed defect: the return form doesn't let you pick which items are being returned, and its reason dropdown offers choices the server doesn't recognize. Every submission is rejected. No workaround exists from this screen today.</p></div>
+
+      <h2 id="intended">How this is meant to work</h2>
+      <p>A return is created against an already-approved GRN — you're sending back goods you already received. Approving it restores the paperwork trail and automatically issues a <strong>Debit Note</strong> against the supplier, reducing what you owe them.</p>
+      <div class="callout review"><div class="callout-title">Debit note value doesn't reduce your ledger cost automatically</div><p>Even once return creation is fixed: approving a purchase return correctly reduces stock quantity, but does not adjust the ₹ cost value your system holds for that item. Over time, if you use purchase returns often, your recorded stock value can drift from its true value. Flag this to your accountant if purchase returns are common in your business.</p></div>
+
+      <div class="pager">
+        <a href="#purchase/client/grn"><div class="pg-label">Back</div><div class="pg-title">← Receiving Goods (GRN)</div></a>
+        <a class="next" href="#purchase/client/payments"><div class="pg-label">Next</div><div class="pg-title">Supplier Payments &amp; Expenses →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ CLIENT: PAYMENTS ============ -->
+    <article class="page" id="page-purchase-client-payments" data-track="client" data-title="Supplier Payments & Expenses">
+      <span class="track-pill client">Client documentation</span>
+      <h1>Supplier Payments &amp; Expenses</h1>
+
+      <h2 id="payments">Paying a supplier</h2>
+      <p>Record a payment mode, amount, and (for cheque) the details — the same shape as customer payments in Sales &amp; Invoicing. Payments can be allocated against specific GRNs, and a bounced cheque correctly reverses the payment.</p>
+      <div class="callout review"><div class="callout-title">Supplier statement / outstanding balance isn't wired up</div><p>The system has a real, working calculation of what you owe a supplier — but there's currently no screen that shows it to you, and even where the API for it exists, most roles don't have permission to call it. Don't rely on an in-app "supplier statement" yet; check with your accountant for the true outstanding balance.</p></div>
+
+      <h2 id="expenses">Expenses</h2>
+      <p>Log a purchase-related expense, submit it, and have it approved and marked paid.</p>
+      <div class="callout review"><div class="callout-title">Branch is not selectable when creating a return, payment, or expense</div><p>These three forms currently record everything against a single fixed branch regardless of which branch you're actually working from. If you operate more than one branch, check with your admin about how this affects your branch-level reporting until it's fixed.</p></div>
+
+      <div class="pager">
+        <a href="#purchase/client/returns"><div class="pg-label">Back</div><div class="pg-title">← Purchase Returns &amp; Debit Notes</div></a>
+        <a class="next" href="#purchase/client/faq"><div class="pg-label">Next</div><div class="pg-title">Troubleshooting &amp; FAQ →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ CLIENT: FAQ ============ -->
+    <article class="page" id="page-purchase-client-faq" data-track="client" data-title="Troubleshooting & FAQ">
+      <span class="track-pill client">Client documentation</span>
+      <h1>Troubleshooting &amp; FAQ</h1>
+      <div class="tablewrap"><table>
+        <tr><th>Issue</th><th>What's actually going on</th></tr>
+        <tr><td>"New GRN" won't save</td><td>Confirmed defect — this form cannot succeed today. Not something you're doing wrong.</td></tr>
+        <tr><td>"New Purchase Return" won't save</td><td>Confirmed defect — same as above.</td></tr>
+        <tr><td>Downloaded PO PDF is missing/broken</td><td>Expected currently — PO PDF generation isn't implemented yet.</td></tr>
+        <tr><td>Can't find a supplier's outstanding balance in the app</td><td>Expected currently — no screen surfaces it yet, even though the number exists internally.</td></tr>
+        <tr><td>Cancel button missing on an approved PO</td><td>Expected currently — Cancel is only shown for Draft/Submitted POs in this screen.</td></tr>
+        <tr><td>Landed costs (freight, customs, insurance)</td><td>Can be recorded via the API but there is no screen for it yet — not reachable from the app today.</td></tr>
+      </table></div>
+      <div class="pager">
+        <a href="#purchase/client/payments"><div class="pg-label">Back</div><div class="pg-title">← Supplier Payments &amp; Expenses</div></a>
+        <span></span>
+      </div>
+    </article>
+
+    <!-- ============ ADMIN: ACCESS ============ -->
+    <article class="page" id="page-purchase-admin-access" data-track="admin" data-title="Access & Roles">
+      <span class="track-pill admin">Super Admin documentation</span>
+      <h1>Access &amp; Roles</h1>
+      <div class="tablewrap"><table>
+        <tr><th>Action</th><th>Permission checked</th><th>Notes</th></tr>
+        <tr><td>View / create / update PO</td><td><span class="badge perm">PO_VIEW</span> / <span class="badge perm">PO_CREATE</span> / <span class="badge perm">PO_UPDATE</span></td><td></td></tr>
+        <tr><td>Approve PO</td><td><span class="badge perm">PO_APPROVE</span></td><td>+ <span class="badge perm">CREDIT_LIMIT_OVERRIDE</span> if overriding the supplier credit check</td></tr>
+        <tr><td>Amend / cancel PO</td><td><span class="badge perm">PO_AMEND</span> / <span class="badge perm">PO_CANCEL</span></td><td>Amend has a real backend endpoint but no UI button anywhere today</td></tr>
+        <tr><td>View / create GRN</td><td><span class="badge perm">GRN_VIEW</span> / <span class="badge perm">GRN_CREATE</span></td><td></td></tr>
+        <tr><td>Approve / reject GRN</td><td><span class="badge perm">GRN_APPROVE</span></td><td></td></tr>
+        <tr><td>Purchase return view/create/approve</td><td><span class="badge perm">PURCHASE_RETURN_VIEW/CREATE/APPROVE</span></td><td></td></tr>
+        <tr><td>Supplier payments view/create</td><td><span class="badge perm">PAYMENT_OUT_VIEW/CREATE</span></td><td></td></tr>
+        <tr><td>Supplier outstanding / statement</td><td><span class="badge perm">SUPPLIER_STATEMENT_VIEW</span></td><td><strong>Not granted to Purchase Manager by default</strong></td></tr>
+      </table></div>
+      <div class="callout review"><div class="callout-title">Purchase Manager can't check a supplier's outstanding balance</div><p>The permission that gates both supplier-statement endpoints is never included in the Purchase Manager role's default permission set — only Owner/Admin have it. Since checking a supplier's balance before approving a PO is exactly the kind of thing a Purchase Manager would want to do, this looks like a role-configuration gap worth fixing, not an intentional restriction.</p></div>
+      <div class="callout note"><div class="callout-title">Supplier records are managed by a different service than Purchase</div><p>Supplier CRUD (create/edit/delete a supplier) is technically implemented in the same backend service as Sales &amp; Invoicing's customer records, not Purchase's own backend. This is invisible to end users — the Suppliers screen works the same either way — but matters for anyone debugging supplier-related issues.</p></div>
+      <div class="pager">
+        <span></span>
+        <a class="next" href="#purchase/admin/compliance"><div class="pg-label">Next</div><div class="pg-title">Numbering &amp; 3-Way Match →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ ADMIN: COMPLIANCE ============ -->
+    <article class="page" id="page-purchase-admin-compliance" data-track="admin" data-title="Numbering & 3-Way Match">
+      <span class="track-pill admin">Super Admin documentation</span>
+      <h1>Numbering &amp; 3-Way Match</h1>
+      <div class="callout review"><div class="callout-title">PO and GRN numbers are typed manually, not generated</div><p>Same pattern already flagged for Sales &amp; Invoicing: the approver types the PO/GRN number themselves, with only a per-tenant uniqueness check — no sequence enforcement. Purchase-return and debit-note numbers <em>are</em> auto-generated, but from a timestamp, not a true gapless counter. If sequential document numbering matters for your compliance/audit needs, none of these four document types currently guarantee it.</p></div>
+      <div class="callout note"><div class="callout-title">"3-way match" is a bit of a misnomer here</div><p>Internally, a price-variance check between the Purchase Order and the received goods is sometimes called a "3-way match." In practice it only compares two documents — the PO and what was actually received — and flags anything more than 5% off rate for a second approval. The supplier's own invoice is recorded as reference information on the GRN but isn't independently entered or amount-matched against it. If your accounting process expects a true PO-vs-goods-receipt-vs-supplier-invoice match, that third leg doesn't exist today.</p></div>
+      <div class="pager">
+        <a href="#purchase/admin/access-roles"><div class="pg-label">Back</div><div class="pg-title">← Access &amp; Roles</div></a>
+        <a class="next" href="#purchase/admin/limitations"><div class="pg-label">Next</div><div class="pg-title">Limitations to Know →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ ADMIN: LIMITATIONS ============ -->
+    <article class="page" id="page-purchase-admin-limits" data-track="admin" data-title="Limitations to Know">
+      <span class="track-pill admin">Super Admin documentation</span>
+      <h1>Limitations to Know</h1>
+      <p>Full technical detail is on <a href="#purchase/audit/known-issues">Known Issues</a>.</p>
+      <ol>
+        <li><strong>GRN creation is broken end-to-end</strong> — the core "receive what you ordered" step of purchasing doesn't work today. Highest-priority fix if purchasing is active for this tenant.</li>
+        <li><strong>Purchase Return creation is broken end-to-end</strong> — same severity as #1.</li>
+        <li><strong>Purchase returns don't adjust stock value</strong> — quantity is correct, ₹ cost isn't, and will drift for tenants using returns regularly.</li>
+        <li><strong>Purchase Manager can't view supplier outstanding balances</strong> — a role-configuration gap.</li>
+        <li><strong>Purchase returns, supplier payments, and expenses are all recorded against a single fixed branch</strong> regardless of the user's actual branch.</li>
+        <li><strong>PO PDF generation and the Landed Cost UI don't exist</strong> — both are stubs/API-only today.</li>
+      </ol>
+      <div class="pager">
+        <a href="#purchase/admin/compliance"><div class="pg-label">Back</div><div class="pg-title">← Numbering &amp; 3-Way Match</div></a>
+        <span></span>
+      </div>
+    </article>
+
+    <!-- ============ DEV: ARCHITECTURE ============ -->
+    <article class="page" id="page-purchase-dev-architecture" data-track="dev" data-title="Architecture">
+      <span class="track-pill dev">Developer documentation</span>
+      <h1>Architecture</h1>
+      <p>Frontend: <code>apps/web-frontend/src/pages/purchase/</code> and <code>src/pages/suppliers/</code>. Backend: <code>apps/purchase-service</code>, mounted at <code>/api/v2</code>.</p>
+
+      <h2 id="routes">Routes</h2>
+      <div class="tablewrap"><table>
+        <tr><th>Path</th><th>Component</th><th>Permission</th></tr>
+        <tr><td><code>purchase/orders</code>, <code>/new</code></td><td>PurchaseOrdersPage, PurchaseOrderFormPage</td><td class="badge perm">PO_VIEW</td> / <span class="badge perm">PO_CREATE</span></tr>
+        <tr><td><code>purchase/grns</code>, <code>/new</code></td><td>GRNsPage, GRNCreatePage</td><td class="badge perm">GRN_VIEW</td> / <span class="badge perm">GRN_CREATE</span></tr>
+        <tr><td><code>purchase/returns</code></td><td>PurchaseReturnsPage</td><td class="badge perm">PURCHASE_RETURN_VIEW</td></tr>
+        <tr><td><code>purchase/payments</code></td><td>SupplierPaymentsPage</td><td class="badge perm">PAYMENT_OUT_VIEW</td></tr>
+        <tr><td><code>purchase/expenses</code></td><td>ExpensesPage</td><td class="badge perm">EXPENSE_VIEW</td></tr>
+        <tr><td><code>suppliers</code>, <code>/new</code>, <code>/:id/edit</code></td><td>SuppliersPage, SupplierFormPage</td><td class="badge perm">SUPPLIER_VIEW/CREATE/EDIT</td></tr>
+      </table></div>
+      <div class="callout note"><div class="callout-title">No detail/edit route for POs, GRNs, or returns</div><p>Zero matches for <code>purchase/orders/:id</code> or similar in <code>App.tsx</code> — all interaction happens through list-page dropdown actions and modals, not a dedicated detail page.</p></div>
+      <div class="callout note"><div class="callout-title">Suppliers are CRUD'd by sales-service, not purchase-service</div><p><code>supplierApi</code> in the frontend routes every call through the <code>'sales'</code> gateway key; the implementation is <code>apps/sales-service/src/api/supplier.routes.ts</code>. purchase-service only reads the shared <code>suppliers</code> table (credit-limit checks, RCM checks, balance projections) — it doesn't own the CRUD, despite Purchase Manager holding <code>SUPPLIER_CREATE</code>/<code>SUPPLIER_EDIT</code>. <span class="src">apps/web-frontend/src/api/endpoints.ts:164-178</span></p></div>
+
+      <h2 id="po-grn">PO → GRN is a separate linked document, not a "convert"</h2>
+      <p>Unlike Sales' quotation→invoice conversion, a GRN is its own record referencing <code>purchaseOrderId</code> by FK. The list page's "Receive" action navigates to <code>/purchase/grns/new?poId=&lt;id&gt;</code>, which loads the PO and pre-fills a receiving grid. Partial receipt is a first-class concept: each PO line tracks <code>orderedQty</code> vs <code>receivedQty</code> independently. <span class="src">apps/web-frontend/src/pages/purchase/PurchaseOrdersPage.tsx:141-143</span>, <span class="src">GRNCreatePage.tsx:58-77</span></p>
+
+      <div class="pager">
+        <span></span>
+        <a class="next" href="#purchase/dev/api-reference"><div class="pg-label">Next</div><div class="pg-title">API Reference →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ DEV: API ============ -->
+    <article class="page" id="page-purchase-dev-api" data-track="dev" data-title="API Reference">
+      <span class="track-pill dev">Developer documentation</span>
+      <h1>API Reference</h1>
+      <p>All under <code>/api/v2</code>, <code>apps/purchase-service/src/api/</code>.</p>
+
+      <div class="tablewrap"><table>
+        <tr><th>Method &amp; Path</th><th>Permission</th><th>Notes</th></tr>
+        <tr><td>GET/POST/PUT <code>/purchase-orders...</code></td><td class="badge perm">PO_VIEW/CREATE/UPDATE</td><td></td></tr>
+        <tr><td>POST <code>/purchase-orders/:id/submit</code>|<code>approve</code>|<code>amend</code>|<code>cancel</code>|<code>duplicate</code></td><td class="badge perm">PO_CREATE/APPROVE/AMEND/CANCEL</td><td>approve additionally needs <code>CREDIT_LIMIT_OVERRIDE</code> if overriding</td></tr>
+        <tr><td>GET <code>/purchase-orders/:id/pdf</code></td><td class="badge perm">PO_VIEW</td><td>returns the <code>pdfUrl</code> column only — nothing in this service ever writes it</td></tr>
+        <tr><td>GET/POST <code>/grns</code>, GET <code>/grns/:id</code></td><td class="badge perm">GRN_VIEW/CREATE</td><td>no PUT/update route exists for GRNs at all</td></tr>
+        <tr><td>POST <code>/grns/:id/approve</code>|<code>reject</code></td><td class="badge perm">GRN_APPROVE</td><td></td></tr>
+        <tr><td><code>/grns/:id/landed-costs...</code>, <code>/allocate</code></td><td class="badge perm">GRN_APPROVE/VIEW</td><td>no frontend caller anywhere</td></tr>
+        <tr><td>GET/POST <code>/purchase-returns</code></td><td class="badge perm">PURCHASE_RETURN_VIEW/CREATE</td><td></td></tr>
+        <tr><td>POST <code>/purchase-returns/:id/approve</code></td><td class="badge perm">PURCHASE_RETURN_APPROVE</td><td></td></tr>
+        <tr><td>GET <code>/debit-notes</code></td><td class="badge perm">PURCHASE_RETURN_VIEW</td><td></td></tr>
+        <tr><td>GET/POST <code>/supplier-payments...</code>, <code>/allocate</code>, <code>/bounce</code></td><td class="badge perm">PAYMENT_OUT_VIEW/CREATE</td><td></td></tr>
+        <tr><td>GET <code>/suppliers/:id/outstanding</code>, <code>/statement</code></td><td class="badge perm">SUPPLIER_STATEMENT_VIEW</td><td>real implementation, but unreachable from the UI and not granted to Purchase Manager</td></tr>
+        <tr><td>GET/POST <code>/expenses...</code>, <code>/submit</code>, <code>/approve</code>, <code>/pay</code></td><td class="badge perm">EXPENSE_VIEW/CREATE/APPROVE</td><td></td></tr>
+      </table></div>
+
+      <h2 id="grn-bug">GRN creation — the exact field mismatch</h2>
+      <div class="callout bug"><div class="callout-title">Frontend and backend disagree on the payload shape</div><p><code>GRNCreatePage.tsx</code> submits <code>receivedDate</code> and never includes <code>branchId</code>. The backend's <code>CreateGRNSchema</code> requires a field named <code>grnDate</code> (not <code>receivedDate</code>) and a required <code>branchId</code>. Every submission fails Zod validation. Separately, <code>GRNsPage.tsx</code> reads/renders <code>r.receivedDate</code> for its "Received" column, but the actual column is <code>grnDate</code> — so even a GRN created directly via the API would show an empty/invalid date in this list. <span class="src">apps/web-frontend/src/pages/purchase/GRNCreatePage.tsx:117-127</span>, <span class="src">apps/purchase-service/src/api/grn.routes.ts:25-35</span>, <span class="src">GRNsPage.tsx:22-31,101</span></p></div>
+
+      <h2 id="return-bug">Purchase Return creation — the exact defects</h2>
+      <div class="callout bug"><div class="callout-title">Empty line items plus an invalid reason enum</div><p><code>PurchaseReturnsPage.tsx</code> always submits <code>lines: []</code> with no item picker in the UI at all — the backend requires at least one line. Its reason dropdown also offers <code>DEFECTIVE</code>/<code>EXCESS_QTY</code>, values the backend's enum doesn't recognize (it expects <code>QUALITY_ISSUE</code>/<code>WRONG_ITEM</code>/<code>EXCESS_QUANTITY</code>/<code>DAMAGED</code>/<code>OTHER</code>) — the default selected value alone would fail validation even with lines fixed. Separately, the Debit Notes tab reads <code>r.total</code> for its Amount column, but the actual field is <code>amount</code> — renders as <code>₹NaN</code>. <span class="src">PurchaseReturnsPage.tsx:51,62,218-226,35,132</span>, <span class="src">apps/purchase-service/src/api/purchase-return.routes.ts:20-29</span></p></div>
+
+      <div class="pager">
+        <a href="#purchase/dev/architecture"><div class="pg-label">Back</div><div class="pg-title">← Architecture</div></a>
+        <a class="next" href="#purchase/dev/data-model"><div class="pg-label">Next</div><div class="pg-title">Data Model →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ DEV: DATA MODEL ============ -->
+    <article class="page" id="page-purchase-dev-data" data-track="dev" data-title="Data Model">
+      <span class="track-pill dev">Developer documentation</span>
+      <h1>Data Model</h1>
+      <p><code>packages/db-client/src/schema/purchase.ts</code>. Supplier master data lives in <code>packages/db-client/src/schema/master.ts</code> (owned/CRUD'd by sales-service).</p>
+
+      <h2 id="po">purchase_orders / purchase_order_lines</h2>
+      <p>Status: <code>DRAFT|SUBMITTED|PENDING_APPROVAL|APPROVED|PARTIALLY_RECEIVED|RECEIVED|CLOSED|CANCELLED</code>. <code>CLOSED</code> is declared but never assigned by any code path — dead enum value. Also: <code>purchase_order_history</code>, <code>purchase_order_amendments</code>.</p>
+      <p class="src">packages/db-client/src/schema/purchase.ts:16-135</p>
+
+      <h2 id="grn">grns / grn_lines</h2>
+      <p>Status: <code>DRAFT|PENDING_APPROVAL|APPROVED|REJECTED</code>. Carries <code>supplierInvoiceNumber</code>/<code>supplierInvoiceDate</code> directly — <strong>there is no separate supplier-bill/purchase-invoice table</strong>; the supplier's bill reference is folded into the GRN record itself. Also: <code>grn_history</code>, <code>landed_costs</code> (cost types customs/freight/insurance/handling/other; allocation by value/quantity/weight — computed but never fed into item valuation).</p>
+      <p class="src">packages/db-client/src/schema/purchase.ts:138-264</p>
+
+      <h2 id="returns">purchase_returns / purchase_return_lines / debit_notes</h2>
+      <p>Return status: <code>DRAFT|PENDING_APPROVAL|APPROVED|CANCELLED</code>; reason: <code>QUALITY_ISSUE|WRONG_ITEM|EXCESS_QUANTITY|DAMAGED|OTHER</code>. Debit note status: <code>OPEN|PARTIALLY_APPLIED|APPLIED|CANCELLED</code>.</p>
+      <p class="src">packages/db-client/src/schema/purchase.ts:326-415</p>
+
+      <h2 id="payments">supplier_payments / supplier_payment_allocations / expenses</h2>
+      <p>Payment status: <code>PAID|PARTIALLY_ALLOCATED|FULLY_ALLOCATED|BOUNCED|CANCELLED</code>, includes post-dated-cheque fields. Expense status: <code>DRAFT|SUBMITTED|PENDING_APPROVAL|APPROVED|PAID</code>. <code>projection_supplier_balance</code> is the CQRS read model, updated inline inside GRN-approve/return-approve/payment-create transactions.</p>
+      <p class="src">packages/db-client/src/schema/purchase.ts:267-498</p>
+
+      <h2 id="numbering">Numbering</h2>
+      <p><code>poNumber</code>/<code>grnNumber</code> are free-text, typed manually at approval time, unique per tenant only. <code>returnNumber</code>/<code>debitNoteNumber</code> auto-generate as <code>PR-{tenantId}-{Date.now()}</code>/<code>DN-{tenantId}-{Date.now()}</code> — timestamp-based, same pattern as invoice numbering already flagged in Sales &amp; Invoicing. No sequence-generation service exists anywhere in the repo.</p>
+
+      <div class="pager">
+        <a href="#purchase/dev/api-reference"><div class="pg-label">Back</div><div class="pg-title">← API Reference</div></a>
+        <a class="next" href="#purchase/audit/known-issues"><div class="pg-label">Next</div><div class="pg-title">Known Issues →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ AUDIT: KNOWN ISSUES ============ -->
+    <article class="page" id="page-purchase-issues" data-track="dev" data-title="Known Issues & Needs Review">
+      <span class="track-pill dev">Cross-cutting · Health audit</span>
+      <h1>Known Issues &amp; Needs Review</h1>
+      <p>Ranked by real-world impact. Everything below is a confirmed code-reading finding.</p>
+
+      <div class="callout bug"><div class="callout-title">GRN creation is broken end-to-end</div><p><code>GRNCreatePage.tsx</code> submits <code>receivedDate</code> and omits <code>branchId</code>; the backend's <code>CreateGRNSchema</code> requires <code>grnDate</code> and a required <code>branchId</code>. Every submission fails validation. <code>GRNsPage.tsx</code> also reads the wrong field name for its date column. <span class="src">GRNCreatePage.tsx:117-127</span>, <span class="src">grn.routes.ts:25-35</span>, <span class="src">GRNsPage.tsx:22-31,101</span></p></div>
+
+      <div class="callout bug"><div class="callout-title">Purchase Return creation is broken end-to-end</div><p><code>PurchaseReturnsPage.tsx</code> always submits <code>lines: []</code> (no item picker exists) against a schema requiring at least one line, and its reason dropdown includes two values (<code>DEFECTIVE</code>, <code>EXCESS_QTY</code>) the backend enum doesn't accept. The Debit Notes tab separately reads a non-existent <code>total</code> field instead of <code>amount</code>. <span class="src">PurchaseReturnsPage.tsx:51,62,218-226,35,132</span>, <span class="src">purchase-return.routes.ts:20-29</span></p></div>
+
+      <div class="callout review"><div class="callout-title">Purchase returns don't update stock valuation</div><p><code>PurchaseReturnService.approve()</code> correctly deducts quantity and writes a STOCK_OUT ledger row, but never imports or calls <code>ValuationService</code> — WACC/FIFO cost data isn't adjusted. Confirmed unresolved from an earlier phase's own documented gap.</p></div>
+
+      <div class="callout review"><div class="callout-title">Purchase Manager lacks SUPPLIER_STATEMENT_VIEW</div><p>Both supplier-statement/outstanding-balance endpoints require this permission, which is absent from the Purchase Manager role's default grants — only Owner/Admin have it via their all-permissions wildcard. <span class="src">apps/tenant-service/src/rbac/role-defaults.ts:76-99</span></p></div>
+
+      <div class="callout note"><div class="callout-title">Hardcoded branchId: 1</div><p><code>PurchaseReturnsPage.tsx</code>, <code>SupplierPaymentsPage.tsx</code>, and <code>ExpensesPage.tsx</code> all hardcode <code>branchId: 1</code> in their create payloads rather than using the user's actual branch — every purchase return, supplier payment, and expense is attributed to branch 1 regardless of who creates it.</p></div>
+
+      <div class="callout note"><div class="callout-title">Landed costs have zero UI</div><p><code>landedCosts</code>/<code>addLandedCost</code>/<code>allocateLandedCost</code> client functions exist but are called from nowhere in the frontend. Separately, even when allocated via direct API use, landed costs never feed into item WACC/FIFO cost — <code>GRNService.approve()</code> reads the plain <code>grnRate</code>, not the landed-cost-adjusted <code>effectiveUnitCost</code>.</p></div>
+
+      <div class="callout note"><div class="callout-title">"3-way match" is really a 2-document price-variance check</div><p>Only PO rate vs. received rate is compared (5% threshold); the supplier's own invoice is stored as reference metadata on the GRN, never independently amount-matched.</p></div>
+
+      <div class="callout note"><div class="callout-title">Two competing, both-unused supplier statement implementations</div><p>Sales-service's version is a stub that returns empty arrays; purchase-service's version is a real implementation joining the supplier-balance projection with recent GRNs/payments. Neither is called from any frontend page.</p></div>
+
+      <div class="callout note"><div class="callout-title">Dead permission/status surface</div><p><code>purchase_orders.status</code>'s <code>CLOSED</code> value is never assigned by any code path. <code>PAYMENT_OUT_CANCEL</code>/<code>PAYMENT_OUT_APPROVE</code> permission constants gate no route. <code>GRN_UPDATE</code> is granted to Purchase Manager but only gates GRN attachment uploads — there is no GRN edit endpoint. <code>PO_AMEND</code> has a full backend implementation but no frontend caller anywhere.</p></div>
+
+      <div class="callout note"><div class="callout-title">PO PDF generation is a stub</div><p><code>GET /purchase-orders/:id/pdf</code> only returns the <code>pdfUrl</code> column; nothing in purchase-service ever writes to it.</p></div>
+
+      <div class="callout note"><div class="callout-title">Test coverage gap</div><p>PO approval/credit-limit/amend, GRN over-receipt guards, RCM detection, and purchase-return ledger writes are well tested. No test exercises valuation behavior on GRN approval or purchase-return approval, <code>LandedCostService</code>, or <code>ExpenseService</code> — consistent with the still-open valuation-drift gap having no regression guard. No TODO/FIXME comments exist anywhere in purchase-service.</p></div>
+
+      <div class="callout ok"><div class="callout-title">Confirmed solid: PO approval and over-receipt guards</div><p>Supplier credit-limit checking on PO approval, and the double-guarded (optimistic + atomic) over-receipt protection on GRN creation/approval, are both real, race-safe, and tested — including a specific concurrent-approval race guard.</p></div>
+
+      <div class="pager">
+        <a href="#purchase/dev/data-model"><div class="pg-label">Back</div><div class="pg-title">← Data Model</div></a>
+        <span></span>
+      </div>
+    </article>
+
+  </main>
+
+  <aside class="toc">
+    <div class="toc-title">On this page</div>
+    <nav id="tocNav"></nav>
+  </aside>
+</div>
+
+<script src="/shared/docs-shell.js"></script>
+</body>
+</html>

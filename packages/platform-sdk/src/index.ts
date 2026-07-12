@@ -47,21 +47,29 @@ export type {
   EvaluationSummary,
 } from './rule-engine.js';
 
-export {
-  initializeTelemetry,
-  shutdownTelemetry,
-  trace,
-  setCorrelationId,
-} from './telemetry.js';
+export { initializeTelemetry, shutdownTelemetry, trace, setCorrelationId } from './telemetry.js';
 export type { TelemetryOptions, SpanOptions } from './telemetry.js';
 
 export { EventStoreService } from './event-store.js';
 export type { DomainEvent, EventStoreQuery, AggregateState } from './event-store.js';
 
-export { SchemaRegistry, SchemaCompatibilityError, getUpcaster, upcastEvent } from './schema-registry.js';
-export type { JsonSchema, SchemaEntry, CompatibilityCheckResult, Upcaster } from './schema-registry.js';
+export {
+  SchemaRegistry,
+  SchemaCompatibilityError,
+  getUpcaster,
+  upcastEvent,
+} from './schema-registry.js';
+export type {
+  JsonSchema,
+  SchemaEntry,
+  CompatibilityCheckResult,
+  Upcaster,
+} from './schema-registry.js';
 
 export { HELMET_OPTIONS, PERMISSIONS_POLICY } from './http-security.js';
+
+export { registerErrorHandler } from './error-handler.js';
+export type { ErrorHandlerApp, ErrorHandlerLogger } from './error-handler.js';
 
 export { createCircuitBreaker } from './circuitBreaker.js';
 export type { CircuitBreakerOptions } from './circuitBreaker.js';
@@ -73,12 +81,29 @@ export { tenantOrIpKeyGenerator, RATE_LIMIT_DEFAULTS } from './rate-limit.js';
 export type { RateLimitRequest } from './rate-limit.js';
 
 export { SagaOrchestrator, SagaExecutionError } from './saga.js';
-export type { SagaStepDefinition, SagaStepType, SagaStepRecord, SagaStatus, SagaResult, SagaStepFactory } from './saga.js';
+export type {
+  SagaStepDefinition,
+  SagaStepType,
+  SagaStepRecord,
+  SagaStatus,
+  SagaResult,
+  SagaStepFactory,
+} from './saga.js';
 
-export { GST_COMPLIANCE_SAGA_TYPE, EWB_VALUE_THRESHOLD, createGstComplianceStepFactory } from './sagas/gst-compliance.js';
+export {
+  GST_COMPLIANCE_SAGA_TYPE,
+  EWB_VALUE_THRESHOLD,
+  createGstComplianceStepFactory,
+} from './sagas/gst-compliance.js';
 export type { GstComplianceContext, GstComplianceActionDeps } from './sagas/gst-compliance.js';
 
-export { initTenantStatusEnforcement, assertTenantActive, invalidateTenantStatusCache } from './tenantStatus.js';
+export {
+  initTenantStatusEnforcement,
+  assertTenantActive,
+  invalidateTenantStatusCache,
+  publishTenantStatusInvalidation,
+  subscribeToTenantStatusInvalidations,
+} from './tenantStatus.js';
 
 export {
   DuplicateOperationError,

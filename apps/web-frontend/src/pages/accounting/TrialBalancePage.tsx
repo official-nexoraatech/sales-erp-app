@@ -36,18 +36,66 @@ export default function TrialBalancePage() {
     queryFn: () => reportsApi.trialBalance({ asOfDate }),
   });
 
-  const tb: TBData | undefined = (data as TBData);
+  const tb: TBData | undefined = data as TBData;
 
   const columns: ERPColumnDef<TBRow>[] = [
-    { key: 'accountCode', header: 'Code', mono: true, className: 'text-xs text-disabled', hideable: false },
+    {
+      key: 'accountCode',
+      header: 'Code',
+      mono: true,
+      className: 'text-xs text-disabled',
+      hideable: false,
+    },
     { key: 'accountName', header: 'Account Name' },
-    { key: 'accountType', header: 'Type', render: (row) => <Badge label={row.accountType} color="gray" /> },
-    { key: 'openingDebit', header: 'Opening DR', align: 'right', mono: true, render: (row) => formatCurrency(row.openingDebit) },
-    { key: 'openingCredit', header: 'Opening CR', align: 'right', mono: true, render: (row) => formatCurrency(row.openingCredit) },
-    { key: 'periodDebit', header: 'Period DR', align: 'right', mono: true, render: (row) => formatCurrency(row.periodDebit) },
-    { key: 'periodCredit', header: 'Period CR', align: 'right', mono: true, render: (row) => formatCurrency(row.periodCredit) },
-    { key: 'closingDebit', header: 'Closing DR', align: 'right', mono: true, className: 'font-semibold', render: (row) => formatCurrency(row.closingDebit) },
-    { key: 'closingCredit', header: 'Closing CR', align: 'right', mono: true, className: 'font-semibold', render: (row) => formatCurrency(row.closingCredit) },
+    {
+      key: 'accountType',
+      header: 'Type',
+      render: (row) => <Badge label={row.accountType} color="gray" />,
+    },
+    {
+      key: 'openingDebit',
+      header: 'Opening DR',
+      align: 'right',
+      mono: true,
+      render: (row) => formatCurrency(row.openingDebit),
+    },
+    {
+      key: 'openingCredit',
+      header: 'Opening CR',
+      align: 'right',
+      mono: true,
+      render: (row) => formatCurrency(row.openingCredit),
+    },
+    {
+      key: 'periodDebit',
+      header: 'Period DR',
+      align: 'right',
+      mono: true,
+      render: (row) => formatCurrency(row.periodDebit),
+    },
+    {
+      key: 'periodCredit',
+      header: 'Period CR',
+      align: 'right',
+      mono: true,
+      render: (row) => formatCurrency(row.periodCredit),
+    },
+    {
+      key: 'closingDebit',
+      header: 'Closing DR',
+      align: 'right',
+      mono: true,
+      className: 'font-semibold',
+      render: (row) => formatCurrency(row.closingDebit),
+    },
+    {
+      key: 'closingCredit',
+      header: 'Closing CR',
+      align: 'right',
+      mono: true,
+      className: 'font-semibold',
+      render: (row) => formatCurrency(row.closingCredit),
+    },
   ];
 
   return (
@@ -57,8 +105,10 @@ export default function TrialBalancePage() {
         title="Trial Balance"
         subtitle="Debit and credit totals by account"
         actions={
-          <div className="flex items-center gap-3">
-            <label htmlFor="tb-as-of-date" className="text-sm text-secondary">As of</label>
+          <div className="flex flex-wrap items-center gap-3">
+            <label htmlFor="tb-as-of-date" className="text-sm text-secondary">
+              As of
+            </label>
             <input
               id="tb-as-of-date"
               type="date"
@@ -71,9 +121,15 @@ export default function TrialBalancePage() {
       />
 
       {tb && (
-        <div className={`flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium ${tb.isBalanced ? 'bg-success-bg text-success' : 'bg-danger-bg text-danger'}`}>
-          {tb.isBalanced ? '✓ Trial balance is balanced' : `⚠ Trial balance does NOT balance — difference: ${formatCurrency(Math.abs(tb.totalDebits - tb.totalCredits))}`}
-          <span className="ml-auto text-secondary font-normal">Total DR: {formatCurrency(tb.totalDebits)} / Total CR: {formatCurrency(tb.totalCredits)}</span>
+        <div
+          className={`flex flex-wrap items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium ${tb.isBalanced ? 'bg-success-bg text-success' : 'bg-danger-bg text-danger'}`}
+        >
+          {tb.isBalanced
+            ? '✓ Trial balance is balanced'
+            : `⚠ Trial balance does NOT balance — difference: ${formatCurrency(Math.abs(tb.totalDebits - tb.totalCredits))}`}
+          <span className="ml-auto text-secondary font-normal">
+            Total DR: {formatCurrency(tb.totalDebits)} / Total CR: {formatCurrency(tb.totalCredits)}
+          </span>
         </div>
       )}
 
@@ -82,13 +138,25 @@ export default function TrialBalancePage() {
         data={tb?.rows ?? []}
         isLoading={isLoading}
         rowKey="accountId"
-        emptyState={<ERPEmptyState type="no-results" title="No data for this period" description="Try selecting a different date." />}
+        emptyState={
+          <ERPEmptyState
+            type="no-results"
+            title="No data for this period"
+            description="Try selecting a different date."
+          />
+        }
         footer={
           tb && (
             <>
-              <td colSpan={7} className="px-4 py-3 text-primary">TOTAL</td>
-              <td className="px-4 py-3 text-right font-mono text-primary">{formatCurrency(tb.totalDebits)}</td>
-              <td className="px-4 py-3 text-right font-mono text-primary">{formatCurrency(tb.totalCredits)}</td>
+              <td colSpan={7} className="px-4 py-3 text-primary">
+                TOTAL
+              </td>
+              <td className="px-4 py-3 text-right font-mono text-primary">
+                {formatCurrency(tb.totalDebits)}
+              </td>
+              <td className="px-4 py-3 text-right font-mono text-primary">
+                {formatCurrency(tb.totalCredits)}
+              </td>
             </>
           )
         }

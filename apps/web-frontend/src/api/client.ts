@@ -79,7 +79,11 @@ async function performRefresh(): Promise<string | null> {
         roles?: string[];
         permissions?: string[];
       };
-      setUser({ ...user, roles: jwtPayload.roles ?? user.roles, permissions: jwtPayload.permissions ?? user.permissions });
+      setUser({
+        ...user,
+        roles: jwtPayload.roles ?? user.roles,
+        permissions: jwtPayload.permissions ?? user.permissions,
+      });
     } catch {
       // malformed token payload — keep the previous permissions rather than crash the refresh flow
     }
@@ -100,7 +104,7 @@ async function request<T>(
   const response = await fetch(url, {
     ...options,
     headers: {
-      'Content-Type': 'application/json',
+      ...(options?.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
       ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
       ...(options?.headers ?? {}),
     },
@@ -108,7 +112,10 @@ async function request<T>(
 
   const isRefreshRoute = service === 'auth' && path === '/auth/refresh';
 
-  if (response.status === 401 && !isRetry && !isRefreshRoute) {
+  // A 401 with no access token attached (login, MFA verify, forgot-password) means the
+  // credentials themselves were rejected, not that a session expired — let it fall through
+  // to the normal error path below instead of trying to refresh/redirect.
+  if (response.status === 401 && !isRetry && !isRefreshRoute && accessToken) {
     // An impersonation access token has no refresh token of its own (see /admin/impersonate) —
     // a 401 here means it expired or was revoked, so fall back to the admin's real session
     // rather than attempting to refresh it (which would silently trade impersonated
@@ -118,7 +125,9 @@ async function request<T>(
       return request<T>(service, path, options, true);
     }
     if (!refreshPromise) {
-      refreshPromise = performRefresh().finally(() => { refreshPromise = null; });
+      refreshPromise = performRefresh().finally(() => {
+        refreshPromise = null;
+      });
     }
     const newToken = await refreshPromise;
     if (newToken) {
@@ -140,14 +149,22 @@ async function request<T>(
     // from a blocked tenant fails identically, so redirect once to a dedicated full-page
     // message instead of letting each caller's own error handling show a confusing
     // generic toast for what is really an account-level, not request-level, problem.
-    if ((err.code === 'TENANT_SUSPENDED' || err.code === 'TENANT_CLOSED') && typeof window !== 'undefined') {
+    if (
+      (err.code === 'TENANT_SUSPENDED' || err.code === 'TENANT_CLOSED') &&
+      typeof window !== 'undefined'
+    ) {
       const reason = err.code === 'TENANT_CLOSED' ? 'closed' : 'suspended';
       if (!window.location.pathname.startsWith('/account-suspended')) {
         window.location.href = `/account-suspended?reason=${reason}`;
       }
     }
 
-    throw new ApiError(err.code ?? 'UNKNOWN', err.message ?? 'Request failed', response.status, err.details);
+    throw new ApiError(
+      err.code ?? 'UNKNOWN',
+      err.message ?? 'Request failed',
+      response.status,
+      err.details
+    );
   }
 
   return data.data as T;
@@ -158,27 +175,44 @@ export const apiClient = {
     request<T>(service, path, { method: 'GET' }),
 
   post: <T>(service: keyof typeof BASE_URLS, path: string, body?: unknown) =>
-    request<T>(service, path, { method: 'POST', ...(body !== undefined ? { body: JSON.stringify(body) } : {}) }),
+    request<T>(service, path, {
+      method: 'POST',
+      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+    }),
 
   put: <T>(service: keyof typeof BASE_URLS, path: string, body?: unknown) =>
-    request<T>(service, path, { method: 'PUT', ...(body !== undefined ? { body: JSON.stringify(body) } : {}) }),
+    request<T>(service, path, {
+      method: 'PUT',
+      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+    }),
 
   patch: <T>(service: keyof typeof BASE_URLS, path: string, body?: unknown) =>
-    request<T>(service, path, { method: 'PATCH', ...(body !== undefined ? { body: JSON.stringify(body) } : {}) }),
+    request<T>(service, path, {
+      method: 'PATCH',
+      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+    }),
 
   delete: <T>(service: keyof typeof BASE_URLS, path: string, body?: unknown) =>
-    request<T>(service, path, { method: 'DELETE', ...(body !== undefined ? { body: JSON.stringify(body) } : {}) }),
+    request<T>(service, path, {
+      method: 'DELETE',
+      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+    }),
 
   getBlob: async (service: keyof typeof BASE_URLS, path: string): Promise<Blob> => {
     const { accessToken } = useAuthStore.getState();
     const response = await fetch(`${BASE_URLS[service]}${path}`, {
       headers: { ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}) },
     });
-    if (!response.ok) throw new ApiError('DOWNLOAD_FAILED', 'Failed to download file', response.status);
+    if (!response.ok)
+      throw new ApiError('DOWNLOAD_FAILED', 'Failed to download file', response.status);
     return response.blob();
   },
 
-  upload: async <T>(service: keyof typeof BASE_URLS, path: string, formData: FormData): Promise<T> => {
+  upload: async <T>(
+    service: keyof typeof BASE_URLS,
+    path: string,
+    formData: FormData
+  ): Promise<T> => {
     const { accessToken } = useAuthStore.getState();
     const response = await fetch(`${BASE_URLS[service]}${path}`, {
       method: 'POST',
@@ -188,7 +222,12 @@ export const apiClient = {
     const data = await response.json();
     if (!response.ok) {
       const err = data.error ?? {};
-      throw new ApiError(err.code ?? 'UNKNOWN', err.message ?? 'Upload failed', response.status, err.details);
+      throw new ApiError(
+        err.code ?? 'UNKNOWN',
+        err.message ?? 'Upload failed',
+        response.status,
+        err.details
+      );
     }
     return data.data as T;
   },

@@ -13,7 +13,11 @@ function getCurrentPeriod(): string {
 
 function formatCurrency(val: unknown): string {
   const n = Number(val ?? 0);
-  return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 2 }).format(n);
+  return new Intl.NumberFormat('en-IN', {
+    style: 'currency',
+    currency: 'INR',
+    maximumFractionDigits: 2,
+  }).format(n);
 }
 
 export function GstRegisterPage() {
@@ -30,12 +34,27 @@ export function GstRegisterPage() {
     queryFn: () => gstApi.summary(period),
   });
 
-  const entries = ((registerData as { content?: Record<string, unknown>[] } | undefined)?.content) ?? [];
+  const entries =
+    (registerData as { content?: Record<string, unknown>[] } | undefined)?.content ?? [];
   const summary = summaryData as Record<string, Record<string, unknown>> | undefined;
 
   const handleDownloadCsv = () => {
-    if (!entries.length) { toast.error('No data to export'); return; }
-    const headers = ['Date', 'Type', 'Document No', 'Counterparty', 'GSTIN', 'Taxable', 'CGST', 'SGST', 'IGST', 'Total GST'];
+    if (!entries.length) {
+      toast.error('No data to export');
+      return;
+    }
+    const headers = [
+      'Date',
+      'Type',
+      'Document No',
+      'Counterparty',
+      'GSTIN',
+      'Taxable',
+      'CGST',
+      'SGST',
+      'IGST',
+      'Total GST',
+    ];
     const rows = entries.map((e) => [
       String(e.documentDate ?? ''),
       String(e.entryType ?? ''),
@@ -64,7 +83,9 @@ export function GstRegisterPage() {
         <div className="flex items-center gap-3">
           <BookOpen className="w-6 h-6 text-indigo-600 dark:text-indigo-400" />
           <div>
-            <h1 className="text-xl font-semibold text-gray-900 dark:text-white">GST Ledger Register</h1>
+            <h1 className="text-xl font-semibold text-gray-900 dark:text-white">
+              GST Ledger Register
+            </h1>
             <p className="text-sm text-gray-500 dark:text-gray-400">Append-only GST entry log</p>
           </div>
         </div>
@@ -78,9 +99,11 @@ export function GstRegisterPage() {
       </div>
 
       {/* Filters */}
-      <div className="flex gap-4 items-end">
+      <div className="flex flex-wrap gap-4 items-end">
         <div>
-          <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Period</label>
+          <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
+            Period
+          </label>
           <input
             type="month"
             value={period}
@@ -89,7 +112,9 @@ export function GstRegisterPage() {
           />
         </div>
         <div>
-          <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Type</label>
+          <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
+            Type
+          </label>
           <select
             value={type}
             onChange={(e) => setType(e.target.value as typeof type)}
@@ -109,10 +134,21 @@ export function GstRegisterPage() {
             const s = summary[key] as Record<string, unknown> | undefined;
             const isSales = key === 'sales' || key === 'purchases';
             const Icon = isSales ? TrendingUp : TrendingDown;
-            const color = key === 'sales' ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400';
-            const labels: Record<string, string> = { sales: 'Sales', purchases: 'Purchases', creditNotes: 'Credit Notes', purchaseReturns: 'Purchase Returns' };
+            const color =
+              key === 'sales'
+                ? 'text-green-600 dark:text-green-400'
+                : 'text-red-500 dark:text-red-400';
+            const labels: Record<string, string> = {
+              sales: 'Sales',
+              purchases: 'Purchases',
+              creditNotes: 'Credit Notes',
+              purchaseReturns: 'Purchase Returns',
+            };
             return (
-              <div key={key} className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4">
+              <div
+                key={key}
+                className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4"
+              >
                 <div className="flex items-center gap-2 mb-2">
                   <Icon className={`w-4 h-4 ${color}`} />
                   <span className="text-xs text-gray-500 dark:text-gray-400">{labels[key]}</span>
@@ -120,7 +156,9 @@ export function GstRegisterPage() {
                 <div className="text-lg font-semibold text-gray-900 dark:text-white">
                   {formatCurrency(s?.totalGst)}
                 </div>
-                <div className="text-xs text-secondary mt-1">Taxable: {formatCurrency(s?.taxableAmount)}</div>
+                <div className="text-xs text-secondary mt-1">
+                  Taxable: {formatCurrency(s?.taxableAmount)}
+                </div>
               </div>
             );
           })}
@@ -132,54 +170,100 @@ export function GstRegisterPage() {
         {regLoading ? (
           <ERPTableSkeleton rows={8} cols={11} />
         ) : (
-        <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-            <thead className="bg-gray-50 dark:bg-gray-900/50">
-              <tr>
-                {['Date', 'Type', 'Document', 'Counterparty', 'GSTIN', 'Taxable', 'CGST', 'SGST', 'IGST', 'Total GST', 'ITC?'].map((h) => (
-                  <th key={h} className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap">
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-              {entries.length === 0 ? (
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+              <thead className="bg-gray-50 dark:bg-gray-900/50">
                 <tr>
-                  <td colSpan={11}>
-                    <ERPEmptyState type="no-results" title="No GST entries" description={`No GST entries for ${period}.`} />
-                  </td>
+                  {[
+                    'Date',
+                    'Type',
+                    'Document',
+                    'Counterparty',
+                    'GSTIN',
+                    'Taxable',
+                    'CGST',
+                    'SGST',
+                    'IGST',
+                    'Total GST',
+                    'ITC?',
+                  ].map((h) => (
+                    <th
+                      key={h}
+                      className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap"
+                    >
+                      {h}
+                    </th>
+                  ))}
                 </tr>
-              ) : entries.map((row, i) => (
-                <tr key={i} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
-                  <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300 whitespace-nowrap">{String(row.documentDate ?? '')}</td>
-                  <td className="px-4 py-3">
-                    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
-                      String(row.entryType).includes('SALES') || String(row.entryType) === 'CREDIT_NOTE'
-                        ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400'
-                        : 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400'
-                    }`}>
-                      {String(row.entryType ?? '').replace('_', ' ')}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300 font-mono">{String(row.documentNumber ?? '')}</td>
-                  <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">{String(row.counterpartyName ?? '-')}</td>
-                  <td className="px-4 py-3 text-sm text-gray-500 dark:text-gray-400 font-mono">{String(row.gstinOfCounterparty ?? '-')}</td>
-                  <td className="px-4 py-3 text-sm text-right text-gray-700 dark:text-gray-300">{formatCurrency(row.taxableAmount)}</td>
-                  <td className="px-4 py-3 text-sm text-right text-gray-700 dark:text-gray-300">{formatCurrency(row.cgstAmount)}</td>
-                  <td className="px-4 py-3 text-sm text-right text-gray-700 dark:text-gray-300">{formatCurrency(row.sgstAmount)}</td>
-                  <td className="px-4 py-3 text-sm text-right text-gray-700 dark:text-gray-300">{formatCurrency(row.igstAmount)}</td>
-                  <td className="px-4 py-3 text-sm text-right font-medium text-gray-900 dark:text-white">{formatCurrency(row.totalGst)}</td>
-                  <td className="px-4 py-3 text-center">
-                    {row.itcEligible
-                      ? <span className="text-xs font-medium text-green-600 dark:text-green-400">Yes</span>
-                      : <span className="text-xs text-disabled">No</span>}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                {entries.length === 0 ? (
+                  <tr>
+                    <td colSpan={11}>
+                      <ERPEmptyState
+                        type="no-results"
+                        title="No GST entries"
+                        description={`No GST entries for ${period}.`}
+                      />
+                    </td>
+                  </tr>
+                ) : (
+                  entries.map((row, i) => (
+                    <tr key={i} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                      <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300 whitespace-nowrap">
+                        {String(row.documentDate ?? '')}
+                      </td>
+                      <td className="px-4 py-3">
+                        <span
+                          className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                            String(row.entryType).includes('SALES') ||
+                            String(row.entryType) === 'CREDIT_NOTE'
+                              ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400'
+                              : 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400'
+                          }`}
+                        >
+                          {String(row.entryType ?? '').replace('_', ' ')}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300 font-mono">
+                        {String(row.documentNumber ?? '')}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">
+                        {String(row.counterpartyName ?? '-')}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-500 dark:text-gray-400 font-mono">
+                        {String(row.gstinOfCounterparty ?? '-')}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-right text-gray-700 dark:text-gray-300">
+                        {formatCurrency(row.taxableAmount)}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-right text-gray-700 dark:text-gray-300">
+                        {formatCurrency(row.cgstAmount)}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-right text-gray-700 dark:text-gray-300">
+                        {formatCurrency(row.sgstAmount)}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-right text-gray-700 dark:text-gray-300">
+                        {formatCurrency(row.igstAmount)}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-right font-medium text-gray-900 dark:text-white">
+                        {formatCurrency(row.totalGst)}
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        {row.itcEligible ? (
+                          <span className="text-xs font-medium text-green-600 dark:text-green-400">
+                            Yes
+                          </span>
+                        ) : (
+                          <span className="text-xs text-disabled">No</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
         )}
         {entries.length > 0 && (
           <div className="px-4 py-3 border-t border-gray-200 dark:border-gray-700 text-xs text-gray-500 dark:text-gray-400">

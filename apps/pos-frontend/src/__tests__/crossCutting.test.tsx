@@ -8,14 +8,21 @@
 import 'fake-indexeddb/auto';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { db } from '../db.js';
 import { mirrorTokens } from '../tokenStore.js';
 import { queueSale, getPendingSales, resolveConflict, markStockConflict } from '../offlineDb.js';
 import { runBackgroundSync } from '../swSync.js';
-import { StockConflictModal, supportsBackgroundSync } from '../POSScreen.js';
+import { setActiveSessionId } from '../session.js';
+import { setSelectedBranch } from '../branchStore.js';
+import POSScreen, { StockConflictModal, supportsBackgroundSync } from '../POSScreen.js';
 
 function jsonResponse(status: number, body: unknown): Response {
-  return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  });
 }
 
 beforeEach(async () => {
@@ -48,7 +55,9 @@ describe('Cross-cutting: outage + mid-outage token expiry + reconnect', () => {
     const fetchMock = vi.fn((url: string, init?: RequestInit) => {
       if (url.includes('/auth/refresh')) {
         refreshCalls++;
-        return Promise.resolve(jsonResponse(200, { accessToken: 'fresh-access', refreshToken: 'fresh-refresh' }));
+        return Promise.resolve(
+          jsonResponse(200, { accessToken: 'fresh-access', refreshToken: 'fresh-refresh' })
+        );
       }
       if (firstSaleAttempt) {
         firstSaleAttempt = false;
@@ -56,7 +65,9 @@ describe('Cross-cutting: outage + mid-outage token expiry + reconnect', () => {
       }
       const body = JSON.parse((init?.body as string) ?? '{}') as { operationId: string };
       submittedOperationIds.push(body.operationId);
-      return Promise.resolve(jsonResponse(200, { data: { invoiceId: submittedOperationIds.length } }));
+      return Promise.resolve(
+        jsonResponse(200, { data: { invoiceId: submittedOperationIds.length } })
+      );
     });
     vi.stubGlobal('fetch', fetchMock);
 
@@ -110,7 +121,9 @@ describe('Cross-cutting: stuck stock-conflict resolved via the OFFLINE-07 UI pro
 
     render(
       <StockConflictModal
-        conflicts={[{ ...queued!, status: 'stuck', conflict: { itemId: 42, available: 2, requested: 5 } }]}
+        conflicts={[
+          { ...queued!, status: 'stuck', conflict: { itemId: 42, available: 2, requested: 5 } },
+        ]}
         onResolve={(id, action) => void resolveConflict(id, action)}
         onClose={() => {}}
       />
@@ -137,7 +150,94 @@ describe('Cross-cutting: stuck stock-conflict resolved via the OFFLINE-07 UI pro
 
     expect(result.syncedSales).toBe(1);
     expect(await getPendingSales()).toEqual([]); // exactly one final state: synced, not stuck or duplicated
-    const salesCalls = fetchMock.mock.calls.filter(([url]) => (url as string).includes('/pos/sales'));
+    const salesCalls = fetchMock.mock.calls.filter(([url]) =>
+      (url as string).includes('/pos/sales')
+    );
     expect(salesCalls).toHaveLength(1); // exactly one invoice submission, not zero or two
+  });
+});
+
+describe('Cross-cutting: PG-050 — POSScreen reads sessionId from the persisted value, not a hardcoded constant', () => {
+  it('carries the persisted pos_session_id on a held-sale audit POST, not a fixed literal', async () => {
+    await db.heldSales.clear();
+    setActiveSessionId(77);
+
+    const heldSalePosts: Array<{ sessionId?: number }> = [];
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      const u = String(url);
+      if (u.includes('/pos/quick-items')) {
+        return Promise.resolve(
+          jsonResponse(200, { data: [{ id: 1, name: 'Test Item', salePrice: '50', gstRate: 18 }] })
+        );
+      }
+      if (u.includes('/pos/held-sales') && init?.method === 'POST') {
+        heldSalePosts.push(JSON.parse((init.body as string) ?? '{}'));
+        return Promise.resolve(jsonResponse(201, { data: { id: 1 } }));
+      }
+      if (u.includes('/sync/')) {
+        return Promise.resolve(
+          jsonResponse(200, { data: { content: [], totalElements: 0, hasMore: false } })
+        );
+      }
+      return Promise.resolve(jsonResponse(200, { data: [] }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <POSScreen />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+
+    fireEvent.click(await screen.findByText('Test Item'));
+    fireEvent.click(screen.getByText('Hold'));
+
+    await vi.waitFor(() => expect(heldSalePosts.length).toBe(1));
+    // Not the old hardcoded useState(1) — the value persisted via setActiveSessionId above.
+    expect(heldSalePosts[0]!.sessionId).toBe(77);
+  });
+});
+
+describe('Cross-cutting: PG-051 — POSScreen reads branchId from the persisted branch selection, not a hardcoded literal', () => {
+  it('records the persisted pos_branch_id on a locally-held sale, not the old literal 1', async () => {
+    await db.heldSales.clear();
+    setActiveSessionId(77);
+    setSelectedBranch(5, 50);
+
+    const fetchMock = vi.fn((url: string) => {
+      const u = String(url);
+      if (u.includes('/pos/quick-items')) {
+        return Promise.resolve(
+          jsonResponse(200, { data: [{ id: 1, name: 'Test Item', salePrice: '50', gstRate: 18 }] })
+        );
+      }
+      if (u.includes('/sync/')) {
+        return Promise.resolve(
+          jsonResponse(200, { data: { content: [], totalElements: 0, hasMore: false } })
+        );
+      }
+      return Promise.resolve(jsonResponse(200, { data: [] }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <POSScreen />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+
+    fireEvent.click(await screen.findByText('Test Item'));
+    fireEvent.click(screen.getByText('Hold'));
+
+    await vi.waitFor(async () => expect((await db.heldSales.toArray()).length).toBe(1));
+    const [held] = await db.heldSales.toArray();
+    // Not the old hardcoded branchId: 1 — the value persisted via setSelectedBranch above.
+    expect(held!.branchId).toBe(5);
   });
 });

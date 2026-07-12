@@ -129,6 +129,36 @@ export class QuotationService {
       .where(and(eq(quotations.id, id), eq(quotations.tenantId, tenantId)));
   }
 
+  async accept(id: number, tenantId: number, userId: number): Promise<void> {
+    const [q] = await this.db
+      .select()
+      .from(quotations)
+      .where(and(eq(quotations.id, id), eq(quotations.tenantId, tenantId)));
+    if (!q) throw new NotFoundError('Quotation not found');
+    if (!['SENT', 'VIEWED'].includes(q.status))
+      throw new BusinessError('INVALID_STATUS', `Cannot accept quotation in status ${q.status}`);
+
+    await this.db
+      .update(quotations)
+      .set({ status: 'ACCEPTED', updatedBy: userId, updatedAt: new Date() })
+      .where(and(eq(quotations.id, id), eq(quotations.tenantId, tenantId)));
+  }
+
+  async reject(id: number, tenantId: number, userId: number): Promise<void> {
+    const [q] = await this.db
+      .select()
+      .from(quotations)
+      .where(and(eq(quotations.id, id), eq(quotations.tenantId, tenantId)));
+    if (!q) throw new NotFoundError('Quotation not found');
+    if (!['SENT', 'VIEWED'].includes(q.status))
+      throw new BusinessError('INVALID_STATUS', `Cannot reject quotation in status ${q.status}`);
+
+    await this.db
+      .update(quotations)
+      .set({ status: 'REJECTED', updatedBy: userId, updatedAt: new Date() })
+      .where(and(eq(quotations.id, id), eq(quotations.tenantId, tenantId)));
+  }
+
   async convert(id: number, tenantId: number, userId: number): Promise<{ quotationId: number }> {
     return this.db.transaction(async (trx) => {
       const [q] = await trx
@@ -137,11 +167,19 @@ export class QuotationService {
         .where(and(eq(quotations.id, id), eq(quotations.tenantId, tenantId)));
       if (!q) throw new NotFoundError('Quotation not found');
       if (q.status !== 'ACCEPTED')
-        throw new BusinessError('INVALID_STATUS', `Cannot convert quotation in status ${q.status} — must be ACCEPTED`);
+        throw new BusinessError(
+          'INVALID_STATUS',
+          `Cannot convert quotation in status ${q.status} — must be ACCEPTED`
+        );
 
       await trx
         .update(quotations)
-        .set({ status: 'CONVERTED', convertedAt: new Date(), updatedBy: userId, updatedAt: new Date() })
+        .set({
+          status: 'CONVERTED',
+          convertedAt: new Date(),
+          updatedBy: userId,
+          updatedAt: new Date(),
+        })
         .where(and(eq(quotations.id, id), eq(quotations.tenantId, tenantId)));
 
       await trx.insert(outboxEvents).values({
@@ -150,7 +188,12 @@ export class QuotationService {
         aggregateType: 'Quotation',
         aggregateId: id,
         tenantId,
-        payload: { quotationId: id, customerId: q.customerId, grandTotal: q.grandTotal, convertedBy: userId },
+        payload: {
+          quotationId: id,
+          customerId: q.customerId,
+          grandTotal: q.grandTotal,
+          convertedBy: userId,
+        },
         published: false,
       });
 
@@ -162,7 +205,12 @@ export class QuotationService {
     const rows = await db
       .update(quotations)
       .set({ status: 'EXPIRED', updatedAt: new Date() })
-      .where(and(inArray(quotations.status, ['DRAFT', 'SENT', 'VIEWED']), lt(quotations.validUntil, new Date())))
+      .where(
+        and(
+          inArray(quotations.status, ['DRAFT', 'SENT', 'VIEWED']),
+          lt(quotations.validUntil, new Date())
+        )
+      )
       .returning({ id: quotations.id });
     return rows.length;
   }

@@ -10,18 +10,25 @@
 import http from 'k6/http';
 import { check, sleep } from 'k6';
 import { Rate, Trend } from 'k6/metrics';
-import { BASE_SALES, authHeaders, buildInvoicePayload } from './k6-helpers.js';
+import {
+  BASE_AUTH,
+  BASE_SALES,
+  TEST_CREDENTIALS,
+  authHeaders,
+  buildInvoicePayload,
+  assertSafeEnvironment,
+} from './k6-helpers.js';
 
 const spikeErrors = new Rate('spike_errors');
 const spikeDuration = new Trend('spike_duration', true);
 
 export const options = {
   stages: [
-    { duration: '1m', target: 10 },   // baseline
-    { duration: '2m', target: 500 },  // spike — instant surge
-    { duration: '2m', target: 500 },  // hold at spike — HPA should fire within 90s
-    { duration: '2m', target: 10 },   // recovery
-    { duration: '1m', target: 0 },    // ramp down
+    { duration: '1m', target: 10 }, // baseline
+    { duration: '2m', target: 500 }, // spike — instant surge
+    { duration: '2m', target: 500 }, // hold at spike — HPA should fire within 90s
+    { duration: '2m', target: 10 }, // recovery
+    { duration: '1m', target: 0 }, // ramp down
   ],
   thresholds: {
     // During spike: allow degraded P95, but no 5xx cascade
@@ -32,11 +39,10 @@ export const options = {
 };
 
 export function setup() {
-  const res = http.post(
-    'http://localhost:3010/auth/login',
-    JSON.stringify({ email: 'admin@testco.com', password: 'TestAdmin@2026!', tenantId: 1 }),
-    { headers: { 'Content-Type': 'application/json' } }
-  );
+  assertSafeEnvironment();
+  const res = http.post(`${BASE_AUTH}/auth/login`, JSON.stringify(TEST_CREDENTIALS), {
+    headers: { 'Content-Type': 'application/json' },
+  });
   return { token: JSON.parse(res.body)?.data?.accessToken ?? '' };
 }
 

@@ -5,7 +5,7 @@ import { stockTransfers } from '@erp/db';
 import { PERMISSIONS } from '@erp/types';
 import type { PlatformContextFactory } from '@erp/sdk';
 import { authenticate } from '../middleware/authenticate.js';
-import { requirePermission } from '../middleware/authorize.js';
+import { requireAnyPermission } from '../middleware/authorize.js';
 import { StockTransferService } from '../domain/StockTransferService.js';
 
 const TransferLineSchema = z.object({
@@ -44,7 +44,12 @@ export async function transferRoutes(
   // GET /stock-transfers
   fastify.get(
     '/stock-transfers',
-    { preHandler: [authenticate, requirePermission(PERMISSIONS.WAREHOUSE_MANAGE)] },
+    {
+      preHandler: [
+        authenticate,
+        requireAnyPermission([PERMISSIONS.STOCK_TRANSFER, PERMISSIONS.WAREHOUSE_MANAGE]),
+      ],
+    },
     async (request, reply) => {
       const ctx = ctxFactory.create({
         tenantId: request.auth.tenantId,
@@ -52,7 +57,12 @@ export async function transferRoutes(
         correlationId: request.id,
       });
 
-      const { page = 1, limit = 50, status, search } = request.query as {
+      const {
+        page = 1,
+        limit = 50,
+        status,
+        search,
+      } = request.query as {
         page?: number;
         limit?: number;
         status?: string;
@@ -61,7 +71,10 @@ export async function transferRoutes(
       const offset = ((page as number) - 1) * (limit as number);
 
       const conditions = [eq(stockTransfers.tenantId, request.auth.tenantId)];
-      if (status) conditions.push(eq(stockTransfers.status, status as typeof stockTransfers.$inferSelect['status']));
+      if (status)
+        conditions.push(
+          eq(stockTransfers.status, status as (typeof stockTransfers.$inferSelect)['status'])
+        );
       if (search) conditions.push(ilike(stockTransfers.transferNumber, `%${search}%`));
       const whereClause = and(...conditions);
 
@@ -78,14 +91,21 @@ export async function transferRoutes(
         .from(stockTransfers)
         .where(whereClause);
 
-      return reply.code(200).send({ data: { content: rows, totalElements: countRow?.count ?? 0, page, limit } });
+      return reply
+        .code(200)
+        .send({ data: { content: rows, totalElements: countRow?.count ?? 0, page, limit } });
     }
   );
 
   // POST /stock-transfers
   fastify.post(
     '/stock-transfers',
-    { preHandler: [authenticate, requirePermission(PERMISSIONS.WAREHOUSE_MANAGE)] },
+    {
+      preHandler: [
+        authenticate,
+        requireAnyPermission([PERMISSIONS.STOCK_TRANSFER, PERMISSIONS.WAREHOUSE_MANAGE]),
+      ],
+    },
     async (request, reply) => {
       const ctx = ctxFactory.create({
         tenantId: request.auth.tenantId,
@@ -93,7 +113,9 @@ export async function transferRoutes(
         correlationId: request.id,
       });
 
-      const body = CreateTransferSchema.parse((request.body as { data?: unknown })?.data ?? request.body);
+      const body = CreateTransferSchema.parse(
+        (request.body as { data?: unknown })?.data ?? request.body
+      );
       const svc = new StockTransferService(ctx.db.raw);
 
       const transfer = await svc.create({
@@ -124,7 +146,12 @@ export async function transferRoutes(
   // PUT /stock-transfers/:id — update DRAFT transfer
   fastify.put(
     '/stock-transfers/:id',
-    { preHandler: [authenticate, requirePermission(PERMISSIONS.WAREHOUSE_MANAGE)] },
+    {
+      preHandler: [
+        authenticate,
+        requireAnyPermission([PERMISSIONS.STOCK_TRANSFER, PERMISSIONS.WAREHOUSE_MANAGE]),
+      ],
+    },
     async (request, reply) => {
       const ctx = ctxFactory.create({
         tenantId: request.auth.tenantId,
@@ -148,7 +175,12 @@ export async function transferRoutes(
   // GET /stock-transfers/:id
   fastify.get(
     '/stock-transfers/:id',
-    { preHandler: [authenticate, requirePermission(PERMISSIONS.WAREHOUSE_MANAGE)] },
+    {
+      preHandler: [
+        authenticate,
+        requireAnyPermission([PERMISSIONS.STOCK_TRANSFER, PERMISSIONS.WAREHOUSE_MANAGE]),
+      ],
+    },
     async (request, reply) => {
       const ctx = ctxFactory.create({
         tenantId: request.auth.tenantId,
@@ -166,7 +198,12 @@ export async function transferRoutes(
   // POST /stock-transfers/:id/submit
   fastify.post(
     '/stock-transfers/:id/submit',
-    { preHandler: [authenticate, requirePermission(PERMISSIONS.WAREHOUSE_MANAGE)] },
+    {
+      preHandler: [
+        authenticate,
+        requireAnyPermission([PERMISSIONS.STOCK_TRANSFER, PERMISSIONS.WAREHOUSE_MANAGE]),
+      ],
+    },
     async (request, reply) => {
       const ctx = ctxFactory.create({
         tenantId: request.auth.tenantId,
@@ -175,7 +212,11 @@ export async function transferRoutes(
       });
       const { id } = request.params as { id: string };
       const svc = new StockTransferService(ctx.db.raw);
-      const transfer = await svc.submit(parseInt(id, 10), request.auth.tenantId, request.auth.userId);
+      const transfer = await svc.submit(
+        parseInt(id, 10),
+        request.auth.tenantId,
+        request.auth.userId
+      );
       return reply.code(200).send({ data: transfer });
     }
   );
@@ -183,7 +224,12 @@ export async function transferRoutes(
   // POST /stock-transfers/:id/approve
   fastify.post(
     '/stock-transfers/:id/approve',
-    { preHandler: [authenticate, requirePermission(PERMISSIONS.WAREHOUSE_MANAGE)] },
+    {
+      preHandler: [
+        authenticate,
+        requireAnyPermission([PERMISSIONS.STOCK_TRANSFER, PERMISSIONS.WAREHOUSE_MANAGE]),
+      ],
+    },
     async (request, reply) => {
       const ctx = ctxFactory.create({
         tenantId: request.auth.tenantId,
@@ -192,7 +238,11 @@ export async function transferRoutes(
       });
       const { id } = request.params as { id: string };
       const svc = new StockTransferService(ctx.db.raw);
-      const transfer = await svc.approve(parseInt(id, 10), request.auth.tenantId, request.auth.userId);
+      const transfer = await svc.approve(
+        parseInt(id, 10),
+        request.auth.tenantId,
+        request.auth.userId
+      );
       return reply.code(200).send({ data: transfer });
     }
   );
@@ -200,7 +250,12 @@ export async function transferRoutes(
   // POST /stock-transfers/:id/dispatch
   fastify.post(
     '/stock-transfers/:id/dispatch',
-    { preHandler: [authenticate, requirePermission(PERMISSIONS.WAREHOUSE_MANAGE)] },
+    {
+      preHandler: [
+        authenticate,
+        requireAnyPermission([PERMISSIONS.STOCK_TRANSFER, PERMISSIONS.WAREHOUSE_MANAGE]),
+      ],
+    },
     async (request, reply) => {
       const ctx = ctxFactory.create({
         tenantId: request.auth.tenantId,
@@ -209,7 +264,11 @@ export async function transferRoutes(
       });
       const { id } = request.params as { id: string };
       const svc = new StockTransferService(ctx.db.raw);
-      const transfer = await svc.dispatch(parseInt(id, 10), request.auth.tenantId, request.auth.userId);
+      const transfer = await svc.dispatch(
+        parseInt(id, 10),
+        request.auth.tenantId,
+        request.auth.userId
+      );
 
       await ctx.events.publish('STOCK_TRANSFER', transfer.id, 'TRANSFER_DISPATCHED', {
         transferId: transfer.id,
@@ -224,7 +283,12 @@ export async function transferRoutes(
   // POST /stock-transfers/:id/receive
   fastify.post(
     '/stock-transfers/:id/receive',
-    { preHandler: [authenticate, requirePermission(PERMISSIONS.WAREHOUSE_MANAGE)] },
+    {
+      preHandler: [
+        authenticate,
+        requireAnyPermission([PERMISSIONS.STOCK_TRANSFER, PERMISSIONS.WAREHOUSE_MANAGE]),
+      ],
+    },
     async (request, reply) => {
       const ctx = ctxFactory.create({
         tenantId: request.auth.tenantId,
@@ -233,9 +297,7 @@ export async function transferRoutes(
       });
       const { id } = request.params as { id: string };
       const bodyRaw = (request.body as { data?: unknown })?.data ?? request.body;
-      const { lines } = z
-        .object({ lines: z.array(ReceiveLineSchema).min(1) })
-        .parse(bodyRaw);
+      const { lines } = z.object({ lines: z.array(ReceiveLineSchema).min(1) }).parse(bodyRaw);
 
       const svc = new StockTransferService(ctx.db.raw);
       const transfer = await svc.receive(
@@ -258,7 +320,12 @@ export async function transferRoutes(
   // POST /stock-transfers/:id/cancel
   fastify.post(
     '/stock-transfers/:id/cancel',
-    { preHandler: [authenticate, requirePermission(PERMISSIONS.WAREHOUSE_MANAGE)] },
+    {
+      preHandler: [
+        authenticate,
+        requireAnyPermission([PERMISSIONS.STOCK_TRANSFER, PERMISSIONS.WAREHOUSE_MANAGE]),
+      ],
+    },
     async (request, reply) => {
       const ctx = ctxFactory.create({
         tenantId: request.auth.tenantId,
@@ -266,9 +333,16 @@ export async function transferRoutes(
         correlationId: request.id,
       });
       const { id } = request.params as { id: string };
-      const { reason } = CancelSchema.parse((request.body as { data?: unknown })?.data ?? request.body);
+      const { reason } = CancelSchema.parse(
+        (request.body as { data?: unknown })?.data ?? request.body
+      );
       const svc = new StockTransferService(ctx.db.raw);
-      const transfer = await svc.cancel(parseInt(id, 10), request.auth.tenantId, request.auth.userId, reason);
+      const transfer = await svc.cancel(
+        parseInt(id, 10),
+        request.auth.tenantId,
+        request.auth.userId,
+        reason
+      );
       return reply.code(200).send({ data: transfer });
     }
   );

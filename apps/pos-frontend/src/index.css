@@ -5,6 +5,11 @@
       before any @utility or @layer utilities (section 4). */
 @import "tailwindcss";
 
+/* 1b. @erp/ui ships its class names as source .tsx, not compiled CSS — Tailwind's v4
+       auto-scanner only walks this app's own directory tree, so the shared component
+       package needs to be added as an explicit extra source. */
+@source "../../../packages/ui/src";
+
 /* 2. Design tokens (CSS custom properties only — no @layer here) */
 @import "./styles/tokens.css";
 

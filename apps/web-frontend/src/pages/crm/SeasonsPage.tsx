@@ -26,7 +26,12 @@ interface Season {
   version: number;
 }
 
-const SEASON_TYPES = ['FESTIVAL_SEASON', 'WEDDING_SEASON', 'SUMMER_COLLECTION', 'YEAR_END_SALE'] as const;
+const SEASON_TYPES = [
+  'FESTIVAL_SEASON',
+  'WEDDING_SEASON',
+  'SUMMER_COLLECTION',
+  'YEAR_END_SALE',
+] as const;
 
 const BLANK_FORM = {
   name: '',
@@ -47,11 +52,17 @@ export default function SeasonsPage() {
   const [editSeason, setEditSeason] = useState<Season | null>(null);
   const [form, setForm] = useState({ ...BLANK_FORM });
 
-  const { data, isLoading } = useQuery({ queryKey: ['crm-seasons'], queryFn: () => crmApi.listSeasons() });
+  const { data, isLoading } = useQuery({
+    queryKey: ['crm-seasons'],
+    queryFn: () => crmApi.listSeasons(),
+  });
   const seasons: Season[] = (data as { content?: Season[] })?.content ?? [];
 
-  const { data: activeData } = useQuery({ queryKey: ['crm-active-season'], queryFn: () => crmApi.activeSeason() });
-  const active = (activeData as Season | null | undefined);
+  const { data: activeData } = useQuery({
+    queryKey: ['crm-active-season'],
+    queryFn: () => crmApi.activeSeason(),
+  });
+  const active = activeData as Season | null | undefined;
 
   const createMut = useMutation({
     mutationFn: () =>
@@ -92,7 +103,8 @@ export default function SeasonsPage() {
       qc.invalidateQueries({ queryKey: ['crm-active-season'] });
       setEditSeason(null);
     },
-    onError: () => toast.error('Failed to update season (possible conflict — refresh and try again)'),
+    onError: () =>
+      toast.error('Failed to update season (possible conflict — refresh and try again)'),
   });
 
   function openEdit(s: Season) {
@@ -109,15 +121,24 @@ export default function SeasonsPage() {
   }
 
   function SeasonForm() {
-    const f = <K extends keyof typeof form>(key: K, val: typeof form[K]) =>
+    const f = <K extends keyof typeof form>(key: K, val: (typeof form)[K]) =>
       setForm((prev) => ({ ...prev, [key]: val }));
 
     const today = new Date();
     const seasonStart = form.startDate ? new Date(form.startDate) : null;
     const seasonEnd = form.endDate ? new Date(form.endDate) : null;
-    const daysTotal = seasonStart && seasonEnd ? Math.ceil((seasonEnd.getTime() - seasonStart.getTime()) / 86400000) : 0;
+    const daysTotal =
+      seasonStart && seasonEnd
+        ? Math.ceil((seasonEnd.getTime() - seasonStart.getTime()) / 86400000)
+        : 0;
     const daysLeft = seasonEnd ? Math.ceil((seasonEnd.getTime() - today.getTime()) / 86400000) : 0;
-    const pct = daysTotal > 0 ? Math.max(0, Math.min(100, Math.round(((daysTotal - Math.max(0, daysLeft)) / daysTotal) * 100))) : 0;
+    const pct =
+      daysTotal > 0
+        ? Math.max(
+            0,
+            Math.min(100, Math.round(((daysTotal - Math.max(0, daysLeft)) / daysTotal) * 100))
+          )
+        : 0;
 
     return (
       <div className="space-y-4">
@@ -129,26 +150,63 @@ export default function SeasonsPage() {
             onChange={(e) => f('seasonType', e.target.value as Season['seasonType'])}
             className="w-full rounded-lg border border-default bg-surface-card text-primary text-sm px-3 py-2"
           >
-            {SEASON_TYPES.map((t) => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}
+            {SEASON_TYPES.map((t) => (
+              <option key={t} value={t}>
+                {t.replace(/_/g, ' ')}
+              </option>
+            ))}
           </select>
         </div>
-        <div className="grid grid-cols-2 gap-3">
-          <Input label="Start Date" type="date" value={form.startDate} onChange={(e) => f('startDate', e.target.value)} />
-          <Input label="End Date" type="date" value={form.endDate} onChange={(e) => f('endDate', e.target.value)} />
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <Input
+            label="Start Date"
+            type="date"
+            value={form.startDate}
+            onChange={(e) => f('startDate', e.target.value)}
+          />
+          <Input
+            label="End Date"
+            type="date"
+            value={form.endDate}
+            onChange={(e) => f('endDate', e.target.value)}
+          />
         </div>
-        <div className="grid grid-cols-2 gap-3">
-          <Input label="Stock Multiplier" type="number" step="0.1" value={form.stockMultiplier} onChange={(e) => f('stockMultiplier', e.target.value)} />
-          <Input label="Loyalty Multiplier" type="number" step="0.1" value={form.loyaltyMultiplier} onChange={(e) => f('loyaltyMultiplier', e.target.value)} />
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <Input
+            label="Stock Multiplier"
+            type="number"
+            step="0.1"
+            value={form.stockMultiplier}
+            onChange={(e) => f('stockMultiplier', e.target.value)}
+          />
+          <Input
+            label="Loyalty Multiplier"
+            type="number"
+            step="0.1"
+            value={form.loyaltyMultiplier}
+            onChange={(e) => f('loyaltyMultiplier', e.target.value)}
+          />
         </div>
-        <Input label="Sales Target (optional)" type="number" step="1000" value={form.salesTarget} onChange={(e) => f('salesTarget', e.target.value)} />
+        <Input
+          label="Sales Target (optional)"
+          type="number"
+          step="1000"
+          value={form.salesTarget}
+          onChange={(e) => f('salesTarget', e.target.value)}
+        />
         {daysTotal > 0 && (
           <div className="mt-2">
             <div className="flex justify-between text-xs text-secondary mb-1">
               <span>Season progress</span>
-              <span>{pct}% — {Math.max(0, daysLeft)} days left</span>
+              <span>
+                {pct}% — {Math.max(0, daysLeft)} days left
+              </span>
             </div>
             <div className="h-2 bg-surface-raised rounded-full overflow-hidden">
-              <div className="h-full bg-primary rounded-full transition-all" style={{ width: `${pct}%` }} />
+              <div
+                className="h-full bg-primary rounded-full transition-all"
+                style={{ width: `${pct}%` }}
+              />
             </div>
           </div>
         )}
@@ -164,19 +222,26 @@ export default function SeasonsPage() {
         subtitle="Manage business seasons, stock multipliers, and loyalty bonuses"
         actions={
           canManage ? (
-            <Button onClick={() => { setForm({ ...BLANK_FORM }); setCreateOpen(true); }}>+ New Season</Button>
+            <Button
+              onClick={() => {
+                setForm({ ...BLANK_FORM });
+                setCreateOpen(true);
+              }}
+            >
+              + New Season
+            </Button>
           ) : undefined
         }
       />
 
       {/* Active season banner */}
       {active && (
-        <div className="mb-6 bg-primary-subtle border border-primary/20 rounded-xl p-4 flex items-center justify-between">
+        <div className="mb-6 bg-primary-subtle border border-primary/20 rounded-xl p-4 flex items-center justify-between flex-wrap gap-3">
           <div>
             <p className="text-sm font-semibold text-brand">Active Season: {active.name}</p>
             <p className="text-xs text-secondary mt-0.5">
-              {formatDate(active.startDate)} – {formatDate(active.endDate)} ·
-              {' '}{active.stockMultiplier}× stock · {active.loyaltyMultiplier}× loyalty
+              {formatDate(active.startDate)} – {formatDate(active.endDate)} ·{' '}
+              {active.stockMultiplier}× stock · {active.loyaltyMultiplier}× loyalty
             </p>
           </div>
           <Badge label="ACTIVE" color="green" />
@@ -192,7 +257,17 @@ export default function SeasonsPage() {
             type="no-data"
             title="No seasons configured yet"
             description="Manage business seasons, stock multipliers, and loyalty bonuses."
-            {...(canManage ? { action: { label: '+ New Season', onClick: () => { setForm({ ...BLANK_FORM }); setCreateOpen(true); } } } : {})}
+            {...(canManage
+              ? {
+                  action: {
+                    label: '+ New Season',
+                    onClick: () => {
+                      setForm({ ...BLANK_FORM });
+                      setCreateOpen(true);
+                    },
+                  },
+                }
+              : {})}
           />
         ) : (
           <div className="divide-y divide-default">
@@ -202,7 +277,16 @@ export default function SeasonsPage() {
               const end = new Date(s.endDate);
               const daysTotal = Math.ceil((end.getTime() - start.getTime()) / 86400000);
               const daysLeft = Math.ceil((end.getTime() - today.getTime()) / 86400000);
-              const pct = daysTotal > 0 ? Math.max(0, Math.min(100, Math.round(((daysTotal - Math.max(0, daysLeft)) / daysTotal) * 100))) : 0;
+              const pct =
+                daysTotal > 0
+                  ? Math.max(
+                      0,
+                      Math.min(
+                        100,
+                        Math.round(((daysTotal - Math.max(0, daysLeft)) / daysTotal) * 100)
+                      )
+                    )
+                  : 0;
               return (
                 <div key={s.id} className="px-5 py-4">
                   <div className="flex items-start justify-between gap-4">
@@ -213,8 +297,8 @@ export default function SeasonsPage() {
                         <Badge label={s.seasonType.replace(/_/g, ' ')} color="blue" />
                       </div>
                       <p className="text-xs text-secondary mt-0.5">
-                        {formatDate(s.startDate)} – {formatDate(s.endDate)} ·
-                        {' '}{s.stockMultiplier}× stock · {s.loyaltyMultiplier}× loyalty
+                        {formatDate(s.startDate)} – {formatDate(s.endDate)} · {s.stockMultiplier}×
+                        stock · {s.loyaltyMultiplier}× loyalty
                         {s.salesTarget ? ` · Target ₹${s.salesTarget.toLocaleString()}` : ''}
                       </p>
                       <div className="mt-2 max-w-xs">
@@ -223,12 +307,17 @@ export default function SeasonsPage() {
                           <span>{pct}%</span>
                         </div>
                         <div className="h-1.5 bg-surface-raised rounded-full overflow-hidden">
-                          <div className="h-full bg-primary rounded-full" style={{ width: `${pct}%` }} />
+                          <div
+                            className="h-full bg-primary rounded-full"
+                            style={{ width: `${pct}%` }}
+                          />
                         </div>
                       </div>
                     </div>
                     {canManage && (
-                      <Button variant="secondary" size="sm" onClick={() => openEdit(s)}>Edit</Button>
+                      <Button variant="secondary" size="sm" onClick={() => openEdit(s)}>
+                        Edit
+                      </Button>
                     )}
                   </div>
                 </div>
@@ -243,8 +332,13 @@ export default function SeasonsPage() {
         <div className="space-y-1">
           <SeasonForm />
           <div className="flex gap-2 justify-end pt-4">
-            <Button variant="ghost" onClick={() => setCreateOpen(false)}>Cancel</Button>
-            <Button onClick={() => createMut.mutate()} disabled={createMut.isPending || !form.name || !form.startDate || !form.endDate}>
+            <Button variant="ghost" onClick={() => setCreateOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => createMut.mutate()}
+              disabled={createMut.isPending || !form.name || !form.startDate || !form.endDate}
+            >
               {createMut.isPending ? 'Creating…' : 'Create'}
             </Button>
           </div>
@@ -256,8 +350,13 @@ export default function SeasonsPage() {
         <div className="space-y-1">
           <SeasonForm />
           <div className="flex gap-2 justify-end pt-4">
-            <Button variant="ghost" onClick={() => setEditSeason(null)}>Cancel</Button>
-            <Button onClick={() => updateMut.mutate()} disabled={updateMut.isPending || !form.name || !form.startDate || !form.endDate}>
+            <Button variant="ghost" onClick={() => setEditSeason(null)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => updateMut.mutate()}
+              disabled={updateMut.isPending || !form.name || !form.startDate || !form.endDate}
+            >
               {updateMut.isPending ? 'Saving…' : 'Save'}
             </Button>
           </div>

@@ -4,7 +4,7 @@ import { eq, and, gte, lte, desc, count } from 'drizzle-orm';
 import { auditLog } from '@erp/db';
 import type { ErpDatabase } from '@erp/db';
 import { PERMISSIONS } from '@erp/types';
-import { requirePermission } from '../middleware/authorize.js';
+import { requireAnyPermission } from '../middleware/authorize.js';
 
 const QuerySchema = z.object({
   entity: z.string().optional(),
@@ -16,7 +16,7 @@ const QuerySchema = z.object({
 
 export async function auditLogRoutes(fastify: FastifyInstance, db: ErpDatabase): Promise<void> {
   fastify.get('/admin/audit-logs', {
-    preHandler: [requirePermission(PERMISSIONS.VIEW_AUDIT_LOG)],
+    preHandler: [requireAnyPermission([PERMISSIONS.VIEW_AUDIT_LOG, PERMISSIONS.AUDIT_LOG_VIEW])],
     handler: async (request, reply) => {
       const query = QuerySchema.safeParse(request.query);
       if (!query.success) return reply.code(400).send({ error: 'Invalid query' });

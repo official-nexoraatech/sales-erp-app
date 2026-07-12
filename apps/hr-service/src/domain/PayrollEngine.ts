@@ -1,4 +1,4 @@
-import { decryptField, encryptField } from '@erp/utils';
+import { decryptField, encryptField } from '@erp/utils/server';
 import { requireEnv } from '@erp/config';
 import type { TenantScopedDatabase } from '@erp/sdk';
 import {
@@ -79,10 +79,10 @@ export function computeESI(grossSalary: number, esiApplicable: boolean): ESIResu
 const INCOME_TAX_SLABS = [
   { upTo: 300000, rate: 0 },
   { upTo: 600000, rate: 0.05 },
-  { upTo: 900000, rate: 0.10 },
+  { upTo: 900000, rate: 0.1 },
   { upTo: 1200000, rate: 0.15 },
-  { upTo: 1500000, rate: 0.20 },
-  { upTo: Infinity, rate: 0.30 },
+  { upTo: 1500000, rate: 0.2 },
+  { upTo: Infinity, rate: 0.3 },
 ];
 
 export function calculateIncomeTax(taxableIncome: number): number {
@@ -141,8 +141,13 @@ export async function resolveEmployeeState(
 // outstandingBalance so the final EMI never overshoots. Read-only — balances are only
 // decremented at payroll-run approval (EmployeeLoanService.applyMonthlyDeduction), not here,
 // since computeSlip can run repeatedly on a still-DRAFT payroll run.
-export function computeLoanDeduction(activeLoans: Pick<EmployeeLoanRow, 'monthlyDeduction' | 'outstandingBalance'>[]): number {
-  const total = activeLoans.reduce((sum, loan) => sum + Math.min(loan.monthlyDeduction, loan.outstandingBalance), 0);
+export function computeLoanDeduction(
+  activeLoans: Pick<EmployeeLoanRow, 'monthlyDeduction' | 'outstandingBalance'>[]
+): number {
+  const total = activeLoans.reduce(
+    (sum, loan) => sum + Math.min(loan.monthlyDeduction, loan.outstandingBalance),
+    0
+  );
   return Math.round(total * 100) / 100;
 }
 
@@ -162,11 +167,13 @@ export class PayrollEngine {
     const [salRow] = await db.raw
       .select()
       .from(employeeSalaries)
-      .where(and(
-        eq(employeeSalaries.tenantId, tenantId),
-        eq(employeeSalaries.employeeId, employeeId),
-        eq(employeeSalaries.isActive, true),
-      ));
+      .where(
+        and(
+          eq(employeeSalaries.tenantId, tenantId),
+          eq(employeeSalaries.employeeId, employeeId),
+          eq(employeeSalaries.isActive, true)
+        )
+      );
 
     if (!salRow) {
       throw new BusinessError(
@@ -176,7 +183,11 @@ export class PayrollEngine {
     }
 
     const [empRow] = await db.raw
-      .select({ pfApplicable: employees.pfApplicable, esiApplicable: employees.esiApplicable, branchId: employees.branchId })
+      .select({
+        pfApplicable: employees.pfApplicable,
+        esiApplicable: employees.esiApplicable,
+        branchId: employees.branchId,
+      })
       .from(employees)
       .where(and(eq(employees.tenantId, tenantId), eq(employees.id, employeeId)));
     const pfApplicable = empRow?.pfApplicable ?? true;
@@ -196,28 +207,32 @@ export class PayrollEngine {
     const attRows = await db.raw
       .select({ status: attendance.status })
       .from(attendance)
-      .where(and(
-        eq(attendance.tenantId, tenantId),
-        eq(attendance.employeeId, employeeId),
-        gte(attendance.attendanceDate, startDate),
-        lte(attendance.attendanceDate, endDate),
-      ));
+      .where(
+        and(
+          eq(attendance.tenantId, tenantId),
+          eq(attendance.employeeId, employeeId),
+          gte(attendance.attendanceDate, startDate),
+          lte(attendance.attendanceDate, endDate)
+        )
+      );
 
-    const presentDays = attRows.filter((r) =>
-      r.status === 'PRESENT' || r.status === 'LATE' || r.status === 'HALF_DAY'
+    const presentDays = attRows.filter(
+      (r) => r.status === 'PRESENT' || r.status === 'LATE' || r.status === 'HALF_DAY'
     ).length;
 
     // Approved paid leaves in this period
     const leaveRows = await db.raw
       .select({ days: leaveApplications.days })
       .from(leaveApplications)
-      .where(and(
-        eq(leaveApplications.tenantId, tenantId),
-        eq(leaveApplications.employeeId, employeeId),
-        eq(leaveApplications.status, 'APPROVED'),
-        gte(leaveApplications.startDate, startDate),
-        lte(leaveApplications.endDate, endDate),
-      ));
+      .where(
+        and(
+          eq(leaveApplications.tenantId, tenantId),
+          eq(leaveApplications.employeeId, employeeId),
+          eq(leaveApplications.status, 'APPROVED'),
+          gte(leaveApplications.startDate, startDate),
+          lte(leaveApplications.endDate, endDate)
+        )
+      );
 
     const paidLeaveDays = leaveRows.reduce((sum, r) => sum + parseFloat(r.days), 0);
 
@@ -233,15 +248,17 @@ export class PayrollEngine {
     const tailorRows = await db.raw
       .select({ amount: sql<string>`SUM(${tailorWorkLog.amount})` })
       .from(tailorWorkLog)
-      .where(and(
-        eq(tailorWorkLog.tenantId, tenantId),
-        eq(tailorWorkLog.employeeId, employeeId),
-        gte(tailorWorkLog.workDate, startDate),
-        lte(tailorWorkLog.workDate, endDate),
-      ));
+      .where(
+        and(
+          eq(tailorWorkLog.tenantId, tenantId),
+          eq(tailorWorkLog.employeeId, employeeId),
+          gte(tailorWorkLog.workDate, startDate),
+          lte(tailorWorkLog.workDate, endDate)
+        )
+      );
     const pieceRateAmount = parseFloat(tailorRows[0]?.amount ?? '0') || 0;
 
-    const otherAllowances = Math.max(0, (grossFull - basicFull - hraFull - daFull)) * paidDaysRatio;
+    const otherAllowances = Math.max(0, grossFull - basicFull - hraFull - daFull) * paidDaysRatio;
     const grossSalary = basic + hra + da + otherAllowances + pieceRateAmount;
 
     const { pfEmployee, pfEmployer, epsAmount } = computePF(basic, pfApplicable);
@@ -249,18 +266,30 @@ export class PayrollEngine {
 
     // Professional Tax (monthly) — state-resolved: employee's branch state, falling back
     // to the tenant's registered state (PG-044).
-    const employeeState = await resolveEmployeeState(db, tenantId, empRow?.branchId ?? null, ptStateCache);
-    const ptSlabs = employeeState ? await PTSlabService.getSlabsForState(db, employeeState, startDate) : [];
+    const employeeState = await resolveEmployeeState(
+      db,
+      tenantId,
+      empRow?.branchId ?? null,
+      ptStateCache
+    );
+    const ptSlabs = employeeState
+      ? await PTSlabService.getSlabsForState(db, employeeState, startDate)
+      : [];
     const professionalTax = PTSlabService.computePT(grossSalary, ptSlabs);
 
     // Loan EMI (PG-045): read-only sum of active loans, capped per-loan at remaining balance.
     // outstandingBalance is only decremented at payroll-run approval, not here.
-    const activeLoans = await EmployeeLoanService.getActiveLoansForEmployee(db, tenantId, employeeId);
+    const activeLoans = await EmployeeLoanService.getActiveLoansForEmployee(
+      db,
+      tenantId,
+      employeeId
+    );
     const loanDeduction = computeLoanDeduction(activeLoans);
     // TDS (Section 192): projected on full (non-prorated) monthly gross × 12
     const tdsDeduction = computeMonthlyTDS(grossFull * 12);
 
-    const totalDeductions = pfEmployee + esiEmployee + professionalTax + loanDeduction + tdsDeduction;
+    const totalDeductions =
+      pfEmployee + esiEmployee + professionalTax + loanDeduction + tdsDeduction;
     const netSalary = Math.max(0, grossSalary - totalDeductions);
 
     return {
@@ -299,11 +328,13 @@ export class PayrollEngine {
     const existing = await db.raw
       .select({ id: payrollSlips.id })
       .from(payrollSlips)
-      .where(and(
-        eq(payrollSlips.tenantId, tenantId),
-        eq(payrollSlips.payrollRunId, payrollRunId),
-        eq(payrollSlips.employeeId, slip.employeeId),
-      ));
+      .where(
+        and(
+          eq(payrollSlips.tenantId, tenantId),
+          eq(payrollSlips.payrollRunId, payrollRunId),
+          eq(payrollSlips.employeeId, slip.employeeId)
+        )
+      );
 
     const values = {
       tenantId,

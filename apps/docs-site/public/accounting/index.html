@@ -1,0 +1,393 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ERP Docs — Accounting & GST Module</title>
+<link rel="stylesheet" href="/shared/docs-shell.css">
+</head>
+<body data-module="Accounting & GST">
+
+<header class="topbar">
+  <button class="icon-btn navtoggle" id="navToggle" aria-label="Toggle navigation">☰</button>
+  <a class="brand" href="/"><span class="mark">N</span> Nexoraa ERP Docs</a>
+  <div class="searchwrap">
+    <input type="text" class="searchbox" id="searchInput" placeholder="Search Accounting &amp; GST documentation…" autocomplete="off">
+    <div class="search-results" id="searchResults"></div>
+  </div>
+  <div class="topbar-actions">
+    <button class="icon-btn" id="themeToggle" aria-label="Toggle dark mode" title="Toggle dark mode">◐</button>
+    <button class="icon-btn" id="printBtn" aria-label="Print this page" title="Print this page">⎙</button>
+  </div>
+</header>
+
+<div class="shell">
+  <nav class="sidebar" id="sidebar">
+    <div class="sb-group">
+      <div class="sb-group-title">Modules</div>
+      <div class="sb-module active-module">
+        <div class="sb-module-head active-module">Accounting &amp; GST <span class="status">v1</span></div>
+        <div class="sb-track">
+          <div class="sb-track-title">Client</div>
+          <a class="sb-link" data-page="accounting-client-overview" href="#accounting/client/overview">Overview</a>
+          <a class="sb-link" data-page="accounting-client-coa" href="#accounting/client/coa-journals">Chart of Accounts &amp; Journals</a>
+          <a class="sb-link" data-page="accounting-client-reports" href="#accounting/client/reports">Financial Reports</a>
+          <a class="sb-link" data-page="accounting-client-closing" href="#accounting/client/closing">Closing a Financial Period</a>
+          <a class="sb-link" data-page="accounting-client-gst" href="#accounting/client/gst-returns">GST Returns (GSTR-1/3B)</a>
+          <a class="sb-link" data-page="accounting-client-einvoice" href="#accounting/client/einvoice">E-Invoice &amp; E-Way Bill</a>
+          <a class="sb-link" data-page="accounting-client-faq" href="#accounting/client/faq">Troubleshooting &amp; FAQ</a>
+        </div>
+        <div class="sb-track">
+          <div class="sb-track-title">Super Admin</div>
+          <a class="sb-link" data-page="accounting-admin-access" href="#accounting/admin/access-roles">Access &amp; Roles</a>
+          <a class="sb-link" data-page="accounting-admin-dual" href="#accounting/admin/dual-reports">Two Cash Flow Reports That Disagree</a>
+          <a class="sb-link" data-page="accounting-admin-limits" href="#accounting/admin/limitations">Limitations to Know</a>
+        </div>
+        <div class="sb-track">
+          <div class="sb-track-title">Developer</div>
+          <a class="sb-link" data-page="accounting-dev-architecture" href="#accounting/dev/architecture">Architecture</a>
+          <a class="sb-link" data-page="accounting-dev-api" href="#accounting/dev/api-reference">API Reference</a>
+          <a class="sb-link" data-page="accounting-dev-data" href="#accounting/dev/data-model">Data Model</a>
+        </div>
+        <div class="sb-track">
+          <div class="sb-track-title">Audit</div>
+          <a class="sb-link" data-page="accounting-issues" href="#accounting/audit/known-issues">Known Issues &amp; Needs Review</a>
+        </div>
+      </div>
+    </div>
+    <div class="sb-group">
+      <div class="sb-group-title">Other modules</div>
+      <a class="sb-module-head" href="/pos/index.html">POS <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/sales/index.html">Sales &amp; Invoicing <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/inventory/index.html">Inventory <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/purchase/index.html">Purchase <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/products/index.html">Products &amp; Variants <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/customers/index.html">Customers &amp; Suppliers <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/hr/index.html">HR &amp; Payroll <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/reports/index.html">Reports <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/tenants/index.html">Super Admin / Tenants <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/platform/index.html">Developer Platform <span class="status">Open →</span></a>
+    </div>
+  </nav>
+
+  <main class="content" id="content">
+    <div class="breadcrumb" id="breadcrumb"></div>
+
+    <!-- ============ CLIENT: OVERVIEW ============ -->
+    <article class="page" id="page-accounting-client-overview" data-track="client" data-title="Accounting & GST Overview">
+      <span class="track-pill client">Client documentation</span>
+      <h1>Accounting &amp; GST Overview</h1>
+      <div class="pilot-banner">Seventh module documented from a direct code audit. Covers the chart of accounts, journals, financial reports, period closing, GST returns, e-invoicing, and e-way bills.</div>
+
+      <div class="callout bug"><div class="callout-title">Read this before trusting any financial report for a domestic (intrastate) sale</div><p>A confirmed bug means that for a regular domestic sale — the ordinary case for most retail transactions — the GST portion is <strong>not</strong> being posted to the accounting ledger at all. The sale itself records correctly, but the CGST/SGST liability and the tax portion of what the customer owes you are silently left out of every journal, trial balance, and balance sheet. Interstate sales are not affected. <strong>Treat your Trial Balance, Profit &amp; Loss, and Balance Sheet as understating your GST position until this is fixed</strong> — see <a href="#accounting/audit/known-issues">Known Issues</a> for the precise mechanism.</p></div>
+
+      <div class="callout bug"><div class="callout-title">Sale returns don't post to accounting or the GST register correctly either</div><p>Separately from the above: every approved sale return posts a ₹0 accounting entry (the return's real value never reaches the ledger), and the GST-register recording for a sale return is even more broken — it's likely to fail outright rather than just record a wrong number. If your business processes sale returns, don't rely on the books balancing correctly around them yet.</p></div>
+
+      <h2 id="areas">What's here</h2>
+      <ul>
+        <li><strong>Chart of Accounts &amp; Journals</strong> — your account structure and the underlying double-entry ledger.</li>
+        <li><strong>Financial Reports</strong> — Trial Balance, Profit &amp; Loss, Balance Sheet, Cash Flow.</li>
+        <li><strong>Financial Period Closing</strong> — locking a month/year so nothing more can post into it.</li>
+        <li><strong>GST Returns</strong> — GSTR-1 and GSTR-3B data preparation.</li>
+        <li><strong>E-Invoice &amp; E-Way Bill</strong> — real government (NIC) integration for B2B invoices.</li>
+      </ul>
+
+      <div class="pager">
+        <span></span>
+        <a class="next" href="#accounting/client/coa-journals"><div class="pg-label">Next</div><div class="pg-title">Chart of Accounts &amp; Journals →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ CLIENT: COA & JOURNALS ============ -->
+    <article class="page" id="page-accounting-client-coa" data-track="client" data-title="Chart of Accounts & Journals">
+      <span class="track-pill client">Client documentation</span>
+      <h1>Chart of Accounts &amp; Journals</h1>
+
+      <h2 id="coa">Chart of Accounts</h2>
+      <p>Create and manage the accounts your business books post to — assets, liabilities, equity, income, and expense, each with a normal balance side.</p>
+
+      <h2 id="journals">Journals</h2>
+      <p>Every posted transaction — a sale, a purchase receipt, a payment — creates a journal automatically behind the scenes. You can browse the journal list to see what's been posted.</p>
+      <div class="callout review"><div class="callout-title">The Amount column on the journal list always shows ₹0.00</div><p>This is a display bug, not a sign that nothing posted — open the account's own ledger to see the real debit/credit amounts for any transaction.</p></div>
+      <div class="callout bug"><div class="callout-title">There is no screen to create a manual journal entry</div><p>The journal list has "New Journal" and row-click links, but neither currently leads anywhere — both open a page that doesn't exist. Manual journal entries (the kind an accountant would post directly, outside of a sale/purchase/payment) can only be created by a developer calling the system directly today, not through this screen.</p></div>
+      <p>Every journal is still required to balance (debits equal credits) — that rule is enforced by the database itself, not just the screen, so nothing can silently post out of balance.</p>
+
+      <div class="pager">
+        <a href="#accounting/client/overview"><div class="pg-label">Back</div><div class="pg-title">← Overview</div></a>
+        <a class="next" href="#accounting/client/reports"><div class="pg-label">Next</div><div class="pg-title">Financial Reports →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ CLIENT: REPORTS ============ -->
+    <article class="page" id="page-accounting-client-reports" data-track="client" data-title="Financial Reports">
+      <span class="track-pill client">Client documentation</span>
+      <h1>Financial Reports</h1>
+      <p>Trial Balance, Profit &amp; Loss, Balance Sheet, and Cash Flow are all available as dedicated pages under Accounting → Reports.</p>
+
+      <div class="callout bug"><div class="callout-title">These reports currently understate GST liability on domestic sales</div><p>Because of the posting bug described on the Overview page, none of these reports currently reflect the correct GST liability or true receivable amount for intrastate (domestic) sales — only the base sale amount posts. Interstate sales post correctly. Reconcile against your invoice-level GST totals separately until this is fixed; don't treat these reports as the final word on your GST position.</p></div>
+
+      <h2 id="cashflow">Cash Flow Statement</h2>
+      <p>Splits cash movement into Operating, Investing, and Financing activities.</p>
+      <div class="callout review"><div class="callout-title">Every activity row is missing its description</div><p>The report correctly calculates amounts, but the description/label text for each line doesn't display — you'll see a blank cell next to each figure. The numbers themselves are unaffected; only the text label is missing.</p></div>
+      <div class="callout note"><div class="callout-title">There's a second "Cash Flow" report elsewhere that gives a different answer</div><p>If you run a report literally called "Cash Flow" from the general Reports browser (rather than this dedicated Accounting page), you'll get a simpler calculation with no Investing/Financing breakdown at all — a different, less complete report under a very similar name. See <a href="#accounting/admin/dual-reports">Two Cash Flow Reports That Disagree</a>.</p></div>
+
+      <div class="pager">
+        <a href="#accounting/client/coa-journals"><div class="pg-label">Back</div><div class="pg-title">← Chart of Accounts &amp; Journals</div></a>
+        <a class="next" href="#accounting/client/closing"><div class="pg-label">Next</div><div class="pg-title">Closing a Financial Period →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ CLIENT: CLOSING ============ -->
+    <article class="page" id="page-accounting-client-closing" data-track="client" data-title="Closing a Financial Period">
+      <span class="track-pill client">Client documentation</span>
+      <h1>Closing a Financial Period</h1>
+      <p>Locking a month (or closing a full financial year) stops anything new from posting into it — invoices, GRNs, payments, and manual journals dated in a closed period are all rejected consistently across the system.</p>
+      <h2 id="checklist">Year-end close checklist</h2>
+      <p>Before a full year can close, the system runs through a real checklist: no draft invoices left open, no open goods-receipts, all payments allocated, bank reconciliation complete, trial balance genuinely balanced, and a few other integrity checks — then posts real closing entries that zero out income/expense into retained earnings.</p>
+      <div class="callout note"><div class="callout-title">The "Owner 2FA confirmed" checklist item doesn't actually check anything itself</div><p>One item on the checklist always shows as passed by design — the real two-factor check happens separately, earlier in the process, not as part of this specific checklist step. This isn't a gap in your protection, just worth knowing the checklist item itself is a placeholder for a check that happens elsewhere.</p></div>
+      <p>Only Owner-level accounts can close a year or lock a period by default — see <a href="#accounting/admin/access-roles">Access &amp; Roles</a>.</p>
+      <div class="pager">
+        <a href="#accounting/client/reports"><div class="pg-label">Back</div><div class="pg-title">← Financial Reports</div></a>
+        <a class="next" href="#accounting/client/gst-returns"><div class="pg-label">Next</div><div class="pg-title">GST Returns (GSTR-1/3B) →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ CLIENT: GST RETURNS ============ -->
+    <article class="page" id="page-accounting-client-gst" data-track="client" data-title="GST Returns (GSTR-1/3B)">
+      <span class="track-pill client">Client documentation</span>
+      <h1>GST Returns (GSTR-1/3B)</h1>
+      <p>Pick a period and the system assembles your GSTR-1 (B2B, B2C, credit/debit notes, exports, HSN summary) and GSTR-3B data genuinely from your real invoices, purchases, and returns.</p>
+
+      <div class="callout review"><div class="callout-title">"Filing" here means marking it as filed yourself — it does not submit to the government</div><p>There is no direct connection from this screen to the GST portal. Preparing the return here gets your numbers ready; you (or your CA) still file the actual return on the government GST portal separately, then come back and mark it "Filed" here for your own record-keeping. Don't assume clicking "Mark as Filed" means the return has actually reached the government — it hasn't.</p></div>
+      <div class="callout bug"><div class="callout-title">The "Documents Issued" summary in GSTR-1 is not real data</div><p>GSTR-1's required summary of invoice number ranges and cancelled documents is currently a placeholder — it always reports the same fixed starting number and never reports any cancelled invoices, regardless of what actually happened. Because invoice numbers in this system are typed manually rather than issued in a true sequence (see Sales &amp; Invoicing), this section can't yet be computed correctly. <strong>Fill in this specific section by hand from your own invoice register before filing</strong> — don't submit it as generated.</p></div>
+
+      <div class="pager">
+        <a href="#accounting/client/closing"><div class="pg-label">Back</div><div class="pg-title">← Closing a Financial Period</div></a>
+        <a class="next" href="#accounting/client/einvoice"><div class="pg-label">Next</div><div class="pg-title">E-Invoice &amp; E-Way Bill →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ CLIENT: E-INVOICE ============ -->
+    <article class="page" id="page-accounting-client-einvoice" data-track="client" data-title="E-Invoice & E-Way Bill">
+      <span class="track-pill client">Client documentation</span>
+      <h1>E-Invoice &amp; E-Way Bill</h1>
+      <div class="callout ok"><div class="callout-title">This one genuinely talks to the government</div><p>Unlike GSTR filing, e-invoicing is a real integration with the NIC (government e-invoice) system — when a B2B invoice (one where the customer has a GSTIN) is confirmed, the system automatically requests a real Invoice Reference Number (IRN) and QR code from the government's servers.</p></div>
+      <p>For eligible high-value invoices, an e-way bill is generated automatically as a follow-on step once the e-invoice succeeds — you'll see its number and validity on the invoice's E-Invoice screen.</p>
+      <div class="callout note"><div class="callout-title">No manual "Generate E-Way Bill" button exists</div><p>E-way bills are only ever created automatically as part of the e-invoice flow above — there's no separate screen to trigger one by hand for an invoice that didn't qualify automatically.</p></div>
+      <div class="callout note"><div class="callout-title">Cancelling an e-invoice has a 24-hour window</div><p>Past 24 hours from generation, the system can no longer cancel the IRN for you — it flags the invoice for manual cancellation, which you'd need to do directly on the government portal.</p></div>
+      <div class="pager">
+        <a href="#accounting/client/gst-returns"><div class="pg-label">Back</div><div class="pg-title">← GST Returns (GSTR-1/3B)</div></a>
+        <a class="next" href="#accounting/client/faq"><div class="pg-label">Next</div><div class="pg-title">Troubleshooting &amp; FAQ →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ CLIENT: FAQ ============ -->
+    <article class="page" id="page-accounting-client-faq" data-track="client" data-title="Troubleshooting & FAQ">
+      <span class="track-pill client">Client documentation</span>
+      <h1>Troubleshooting &amp; FAQ</h1>
+      <div class="tablewrap"><table>
+        <tr><th>Question</th><th>Answer</th></tr>
+        <tr><td>My Trial Balance/P&amp;L/Balance Sheet doesn't seem to include GST on domestic sales</td><td>Confirmed, real issue — see the warning on Overview. Reconcile GST separately for now.</td></tr>
+        <tr><td>Where do I post a manual journal entry?</td><td>Nowhere in the current UI — this needs a developer to do it directly today.</td></tr>
+        <tr><td>Why is the Amount column blank/zero on the journal list?</td><td>Display-only bug — open the specific account's ledger for real figures.</td></tr>
+        <tr><td>Cash Flow report rows have no description text</td><td>Known display bug — the amounts are correct, only the label is missing.</td></tr>
+        <tr><td>I ran "Cash Flow" from Reports and got a different answer than the Accounting Cash Flow page</td><td>Expected currently — there are two different implementations. See <a href="#accounting/admin/dual-reports">Two Cash Flow Reports That Disagree</a>.</td></tr>
+        <tr><td>Does "Mark GSTR-1 as Filed" actually submit my return?</td><td>No — you must file on the government portal yourself; this just records that you did.</td></tr>
+        <tr><td>Can I trust the "Documents Issued" section of GSTR-1?</td><td>No — fill that specific section in manually before filing.</td></tr>
+      </table></div>
+      <div class="pager">
+        <a href="#accounting/client/einvoice"><div class="pg-label">Back</div><div class="pg-title">← E-Invoice &amp; E-Way Bill</div></a>
+        <span></span>
+      </div>
+    </article>
+
+    <!-- ============ ADMIN: ACCESS ============ -->
+    <article class="page" id="page-accounting-admin-access" data-track="admin" data-title="Access & Roles">
+      <span class="track-pill admin">Super Admin documentation</span>
+      <h1>Access &amp; Roles</h1>
+      <div class="callout bug"><div class="callout-title">Neither accounting role can open GST returns, and Accountant can't view any financial report</div><p>Both dedicated accounting roles have real, significant gaps against what they're named for:</p>
+      <ul>
+        <li><strong>Accountant</strong> cannot view the Trial Balance, Profit &amp; Loss, Balance Sheet, or Cash Flow pages at all, cannot edit or delete an account once created, and — along with Accountant Supervisor — cannot open GSTR-1 or GSTR-3B.</li>
+        <li><strong>Accountant Supervisor</strong> can view P&amp;L/Balance Sheet/Trial Balance but <strong>not</strong> Cash Flow — while the read-only Auditor role can.</li>
+        <li>Only Owner/Super Admin-tier accounts can cancel a generated e-invoice.</li>
+      </ul>
+      <p>If your accounting staff report being unable to open a screen you'd expect them to use daily, this is very likely why — it's a role-configuration gap, not a training issue.</p></div>
+      <div class="pager">
+        <span></span>
+        <a class="next" href="#accounting/admin/dual-reports"><div class="pg-label">Next</div><div class="pg-title">Two Cash Flow Reports That Disagree →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ ADMIN: DUAL REPORTS ============ -->
+    <article class="page" id="page-accounting-admin-dual" data-track="admin" data-title="Two Cash Flow Reports That Disagree">
+      <span class="track-pill admin">Super Admin documentation</span>
+      <h1>Two Cash Flow Reports That Disagree</h1>
+      <p>Trial Balance, Profit &amp; Loss, and Balance Sheet each exist in two independently-built places in this system: a dedicated Accounting page, and an entry in the general Reports browser. For those three, both versions currently agree with each other.</p>
+      <div class="callout bug"><div class="callout-title">Cash Flow is the exception — the two versions genuinely disagree</div><p>The dedicated Accounting → Cash Flow page correctly splits cash movement into Operating, Investing, and Financing activities. The "Cash Flow" report available from the general Reports browser is a simpler, separately-built calculation that only reports one lump Operating total with no Investing/Financing split at all. Anyone comparing the two will see different structures and different numbers for the same period. Until these are unified, treat the dedicated Accounting → Cash Flow page as the authoritative one.</p></div>
+      <div class="pager">
+        <a href="#accounting/admin/access-roles"><div class="pg-label">Back</div><div class="pg-title">← Access &amp; Roles</div></a>
+        <a class="next" href="#accounting/admin/limitations"><div class="pg-label">Next</div><div class="pg-title">Limitations to Know →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ ADMIN: LIMITATIONS ============ -->
+    <article class="page" id="page-accounting-admin-limits" data-track="admin" data-title="Limitations to Know">
+      <span class="track-pill admin">Super Admin documentation</span>
+      <h1>Limitations to Know</h1>
+      <p>Full technical detail is on <a href="#accounting/audit/known-issues">Known Issues</a>. Ordered by financial-correctness impact.</p>
+      <ol>
+        <li><strong>GST is not posted to accounting for domestic (intrastate) sales</strong> — the single highest-priority item in this module. Every trial balance/P&amp;L/balance sheet since this bug was introduced understates GST liability and receivables for domestic sales.</li>
+        <li><strong>Sale returns post ₹0 to accounting, and likely fail to record in the GST register at all.</strong></li>
+        <li><strong>Accountant and Accountant Supervisor roles are missing permissions core to their job</strong> — financial-report viewing and GST-return access, respectively/jointly.</li>
+        <li><strong>GSTR-1's "Documents Issued" section is placeholder data</strong> — must be manually corrected before filing.</li>
+        <li><strong>Two Cash Flow report implementations disagree</strong> — see the dedicated page for detail.</li>
+        <li><strong>No UI exists to post a manual journal entry.</strong></li>
+      </ol>
+      <div class="pager">
+        <a href="#accounting/admin/dual-reports"><div class="pg-label">Back</div><div class="pg-title">← Two Cash Flow Reports That Disagree</div></a>
+        <span></span>
+      </div>
+    </article>
+
+    <!-- ============ DEV: ARCHITECTURE ============ -->
+    <article class="page" id="page-accounting-dev-architecture" data-track="dev" data-title="Architecture">
+      <span class="track-pill dev">Developer documentation</span>
+      <h1>Architecture</h1>
+      <p>Frontend: <code>apps/web-frontend/src/pages/accounting/</code> and <code>src/pages/gst/</code>, plus a generic Reports browser (<code>ReportsPage.tsx</code> → <code>ReportViewerPage.tsx</code>). Backend: <code>apps/accounting-service</code> (chart of accounts, journals, financial reports, financial-year/period closing) and <code>apps/gst-service</code> (GSTR-1/3B, e-invoice, e-way bill).</p>
+
+      <h2 id="routes">Routes</h2>
+      <div class="tablewrap"><table>
+        <tr><th>Path</th><th>Component</th><th>Permission</th></tr>
+        <tr><td><code>accounting/chart-of-accounts</code>, <code>/accounts/new</code>, <code>/:id/edit</code></td><td>ChartOfAccountsPage, AccountFormPage</td><td class="badge perm">ACCOUNT_VIEW/CREATE/UPDATE</td></tr>
+        <tr><td><code>accounting/accounts/:id/ledger</code></td><td>LedgerPage</td><td class="badge perm">LEDGER_VIEW</td></tr>
+        <tr><td><code>accounting/journals</code></td><td>JournalsPage (list only)</td><td class="badge perm">JOURNAL_VIEW</td></tr>
+        <tr><td><code>accounting/reports/trial-balance</code>, <code>profit-loss</code>, <code>balance-sheet</code>, <code>cash-flow</code></td><td>dedicated report pages</td><td class="badge perm">TRIAL_BALANCE_VIEW / PROFIT_LOSS_VIEW / BALANCE_SHEET_VIEW / CASH_FLOW_VIEW</td></tr>
+        <tr><td><code>accounting/financial-years</code></td><td>FinancialYearsPage</td><td class="badge perm">FINANCIAL_YEAR_VIEW</td></tr>
+        <tr><td><code>gst/gstr1</code>, <code>gst/gstr3b</code></td><td>Gstr1Page, Gstr3bPage</td><td class="badge perm">GSTR1_VIEW / GSTR3B_VIEW</td></tr>
+        <tr><td><code>gst/einvoice</code></td><td>EInvoicePage</td><td class="badge perm">GST_VIEW</td></tr>
+      </table></div>
+      <div class="callout bug"><div class="callout-title">Manual journal create/detail routes don't exist</div><p><code>JournalsPage.tsx</code> links to <code>/accounting/journals/new</code> and <code>/accounting/journals/:journalId</code>, but neither is registered in <code>App.tsx</code> — both fall through to <code>NotFoundPage</code>. No <code>JournalFormPage</code>/<code>JournalDetailPage</code> component exists anywhere. Manual journal creation is backend-API-only. <span class="src">apps/web-frontend/src/pages/accounting/JournalsPage.tsx:52,86</span>, <span class="src">App.tsx:276,391</span></p></div>
+      <div class="callout bug"><div class="callout-title">Journal list amount column reads a non-existent field</div><p><code>JournalsPage.tsx:94</code> renders <code>j.totalDebit</code>, but the <code>journals</code> table has no such column (it's header-only; amounts live on <code>financial_entries</code>) and the list endpoint never returns it — always renders ₹0.00.</p></div>
+
+      <h2 id="events">Event-driven posting architecture</h2>
+      <p>Sales/Purchase/Inventory services write domain events to their own outbox table in the same transaction as the business action; accounting-service and gst-service each run Kafka consumers keyed by event type to post journals/GST-ledger entries asynchronously. This is the same outbox pattern already documented in prior modules, applied here for the actual bookkeeping.</p>
+
+      <div class="pager">
+        <span></span>
+        <a class="next" href="#accounting/dev/api-reference"><div class="pg-label">Next</div><div class="pg-title">API Reference →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ DEV: API ============ -->
+    <article class="page" id="page-accounting-dev-api" data-track="dev" data-title="API Reference">
+      <span class="track-pill dev">Developer documentation</span>
+      <h1>API Reference</h1>
+
+      <h2 id="accounting-endpoints">accounting-service</h2>
+      <div class="tablewrap"><table>
+        <tr><th>Method &amp; Path</th><th>Permission</th><th>Notes</th></tr>
+        <tr><td>GET/POST <code>/accounts</code>, GET <code>/accounts/tree</code>, GET/PUT/DELETE <code>/accounts/:id</code></td><td class="badge perm">ACCOUNT_VIEW/CREATE/UPDATE</td><td></td></tr>
+        <tr><td>GET/POST <code>/journals</code>, GET <code>/journals/:id</code>, POST <code>/journals/:id/reverse</code></td><td class="badge perm">JOURNAL_VIEW/CREATE</td> / <span class="badge perm">CANCEL_POSTED_JOURNAL</span><td>create requires <code>lines.min(2)</code> and a balanced sum (±0.01), re-checked by a DB deferred constraint trigger</td></tr>
+        <tr><td>GET <code>/accounts/:id/ledger</code></td><td class="badge perm">LEDGER_VIEW</td><td></td></tr>
+        <tr><td>GET <code>/reports/trial-balance</code>, <code>/profit-loss(.pdf)</code>, <code>/pnl-by-cost-center</code>, <code>/balance-sheet</code>, <code>/cash-flow</code></td><td class="badge perm">TRIAL_BALANCE_VIEW / PROFIT_LOSS_VIEW / BALANCE_SHEET_VIEW / CASH_FLOW_VIEW</td><td></td></tr>
+        <tr><td>GET/POST <code>/financial-years</code>, GET <code>.../close-checklist</code>, POST <code>.../close</code>, POST <code>.../lock-period</code></td><td class="badge perm">FINANCIAL_YEAR_VIEW/OPEN/CLOSE</td><td>close/lock granted to Owner/Super Admin only by default</td></tr>
+      </table></div>
+
+      <h2 id="gst-endpoints">gst-service</h2>
+      <div class="tablewrap"><table>
+        <tr><th>Method &amp; Path</th><th>Permission</th><th>Notes</th></tr>
+        <tr><td>POST <code>/gst/einvoice/generate/:invoiceId</code></td><td class="badge perm">EINVOICE_GENERATE</td><td>real NIC HTTP call with retry</td></tr>
+        <tr><td>POST <code>/gst/einvoice/cancel/:invoiceId</code></td><td class="badge perm">EINVOICE_CANCEL</td><td>only within 24h of generation; granted to no default role</td></tr>
+        <tr><td>POST <code>/gst/einvoice/retry/:invoiceId</code></td><td class="badge perm">EINVOICE_GENERATE</td><td></td></tr>
+        <tr><td>GET <code>/gst/einvoice/status/:invoiceId</code>, <code>/list</code></td><td class="badge perm">GST_VIEW</td><td></td></tr>
+        <tr><td>POST <code>/gst/eway-bill/generate</code></td><td class="badge perm">EWAY_BILL_GENERATE</td><td>real endpoint, zero frontend callers</td></tr>
+        <tr><td>GET <code>/gst/eway-bill/expiring-soon</code></td><td class="badge perm">GST_VIEW</td><td></td></tr>
+        <tr><td>GET <code>/gst/gstr1</code>, POST <code>/gstr1/export</code></td><td class="badge perm">GSTR1_VIEW/FILE</td><td><strong>not granted to Accountant or Accountant Supervisor</strong></td></tr>
+        <tr><td>GET <code>/gst/gstr3b</code>, POST <code>/gstr3b/export</code></td><td class="badge perm">GSTR3B_VIEW/FILE</td><td>same gap</td></tr>
+      </table></div>
+
+      <h2 id="event-bugs">Confirmed event payload/consumer mismatches</h2>
+      <div class="callout bug"><div class="callout-title">SALE_RETURN_APPROVED → accounting: wrong field name, posts ₹0</div><p><code>SaleReturnService.ts:236-244</code> sends <code>totalAmount</code>; <code>SaleReturnAccountingConsumer.ts:9-21</code> reads <code>p.grandTotal</code>, which is never sent — always evaluates to 0. Confirmed still present (previously flagged in the Sales &amp; Invoicing audit).</p></div>
+      <div class="callout bug"><div class="callout-title">SALE_RETURN_APPROVED → GST ledger: near-total payload mismatch, likely throws</div><p><code>SaleReturnGstConsumer.ts:8-27</code> expects <code>creditNoteNumber</code>, <code>taxableAmount</code>, <code>cgstAmount</code>, <code>sgstAmount</code>, <code>igstAmount</code>, <code>customerGstin</code>, <code>placeOfSupply</code>, <code>hsnCode</code>, <code>gstRate</code> — none of which are ever sent. Since <code>gst_ledger.document_number</code> is <code>NOT NULL</code>, the insert should fail and the consumer's catch block re-throws rather than swallowing the error. <span class="src">gst.ts:77</span>, <span class="src">SaleReturnGstConsumer.ts:76-78</span></p></div>
+      <div class="callout bug"><div class="callout-title">INVOICE_CONFIRMED: interstate flag always miscalculates to true</div><p><code>InvoiceService.ts:520-544</code> never sends <code>sellerStateCode</code> on the outbox event. <code>InvoiceAccountingConsumer.ts:39</code> computes <code>isInterstate = p.placeOfSupply !== p.sellerStateCode</code> — since <code>sellerStateCode</code> is always <code>undefined</code> and <code>placeOfSupply</code> is always a real value, this is always <code>true</code>. In <code>PostingMatrixService.buildJournalEntry()</code>, the CGST/SGST branch requires <code>!isInterstate</code> (never true) and the IGST branch requires a nonzero <code>igstAmount</code> (zero for a genuinely intrastate sale) — <strong>neither branch ever fires for a domestic sale</strong>, so no GST line posts at all; only the base taxable amount posts (DR AR / CR Sales Revenue). The journal still balances (2 equal lines), so nothing errors — this is a silent understatement, not a crash. Interstate invoices are unaffected because their real nonzero <code>igstAmount</code> happens to align with the (wrongly-derived but also-true) flag. <span class="src">InvoiceAccountingConsumer.ts:9-20,39</span>, <span class="src">PostingMatrixService.ts:207-225</span></p></div>
+      <div class="callout ok"><div class="callout-title">GRN and RCM postings are confirmed correct</div><p><code>GRN_APPROVED</code> and <code>RCM_LIABILITY_POSTED</code> event payloads match their consumers field-for-field — an in-code comment documents this was a previously-fixed bug (every ITC/GST line silently zero), and direct comparison confirms the fix holds today.</p></div>
+
+      <div class="pager">
+        <a href="#accounting/dev/architecture"><div class="pg-label">Back</div><div class="pg-title">← Architecture</div></a>
+        <a class="next" href="#accounting/dev/data-model"><div class="pg-label">Next</div><div class="pg-title">Data Model →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ DEV: DATA MODEL ============ -->
+    <article class="page" id="page-accounting-dev-data" data-track="dev" data-title="Data Model">
+      <span class="track-pill dev">Developer documentation</span>
+      <h1>Data Model</h1>
+      <p><code>packages/db-client/src/schema/accounting.ts</code> and <code>gst.ts</code>.</p>
+
+      <h2 id="coa-journal-tables">accounts / journals / financial_entries</h2>
+      <p><code>accounts</code>: chart of accounts with <code>accountType</code> (Asset/Liability/Equity/Income/Expense/Contra) and a 19-value <code>accountSubType</code> enum. <code>journals</code> is header-only (no debit/credit totals) — actual double-entry lines live on <code>financial_entries</code> (<code>journalId</code>, <code>accountId</code>, <code>debitAmount</code>, <code>creditAmount</code>, <code>costCenterId</code>).</p>
+      <div class="callout note"><div class="callout-title">Journals are balanced at the database level, not just the application level</div><p>A deferred constraint trigger re-checks <code>SUM(debit) − SUM(credit) = 0</code> per journal at transaction commit — an out-of-balance journal cannot be persisted even if application logic were bypassed.</p></div>
+      <p class="src">packages/db-client/src/schema/accounting.ts:17-202; migration 0002_phase6_accounting.sql:91-116</p>
+
+      <h2 id="period-tables">financial_years / period_closures</h2>
+      <p>Both carry an independent <code>OPEN</code>/<code>CLOSED</code> status; a period can be locked without closing the whole year. Every posting path (invoice confirm, GRN approve, manual journal, payment) checks the relevant period before posting and throws a period-closed error consistently.</p>
+      <p class="src">packages/db-client/src/schema/accounting.ts:249-300</p>
+
+      <h2 id="gst-tables">gst_ledger / gst_return_filings / gst_2a_entries / einvoice_data</h2>
+      <p><code>gst_ledger</code> is an append-only register (one row per invoice/credit-note/purchase/purchase-return) with a <code>NOT NULL documentNumber</code> — the exact constraint the sale-return GST consumer bug above violates. <code>gst_return_filings</code> tracks GSTR-1/3B/9/9C status (Pending/Filed/Late Filed/Nil Filed) plus a manual-adjustments field for import-of-goods/services IGST that has no ledger source. <code>einvoice_data</code> combines e-invoice <em>and</em> e-way-bill fields on a single row (IRN, QR code, status, e-way-bill number/validity/status) — <strong>there is no separate e-way-bill table</strong>.</p>
+      <p class="src">packages/db-client/src/schema/gst.ts:63-219</p>
+
+      <div class="pager">
+        <a href="#accounting/dev/api-reference"><div class="pg-label">Back</div><div class="pg-title">← API Reference</div></a>
+        <a class="next" href="#accounting/audit/known-issues"><div class="pg-label">Next</div><div class="pg-title">Known Issues →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ AUDIT: KNOWN ISSUES ============ -->
+    <article class="page" id="page-accounting-issues" data-track="dev" data-title="Known Issues & Needs Review">
+      <span class="track-pill dev">Cross-cutting · Health audit</span>
+      <h1>Known Issues &amp; Needs Review</h1>
+      <p>Ranked by financial-correctness impact. Everything below is a confirmed code-reading finding unless marked Needs Review. This is the highest-severity module audited so far.</p>
+
+      <div class="callout bug"><div class="callout-title">Highest priority: GST never posts to accounting for intrastate (domestic) sales</div><p>The interstate/intrastate flag used by the invoice-confirmation accounting consumer is always miscalculated as <code>true</code> because the required <code>sellerStateCode</code> field is never included on the triggering event. As a direct result, neither the CGST/SGST branch nor the IGST branch of the posting logic ever fires for a genuinely intrastate sale — no GST line posts at all, only the base sale amount. This silently understates GST liability and true receivables in every trial balance, P&amp;L, and balance sheet for domestic sales, with zero test coverage catching it. Fully detailed on the API Reference page.</p></div>
+
+      <div class="callout bug"><div class="callout-title">Sale returns: two separate posting bugs on the same event</div><p>Accounting posts the return at ₹0 (wrong field name read). The GST-ledger consumer expects roughly ten fields that are never sent and will likely throw outright when <code>gst_ledger</code>'s <code>NOT NULL documentNumber</code> constraint is violated by the resulting undefined value.</p></div>
+
+      <div class="callout review"><div class="callout-title">Accountant/Accountant Supervisor roles are missing core permissions</div><p>Accountant cannot view any of the four core financial reports and cannot edit/delete accounts. Neither accounting role can open GSTR-1 or GSTR-3B. Accountant Supervisor specifically lacks Cash Flow view, which the read-only Auditor role does have. No default role has e-invoice cancellation rights.</p></div>
+
+      <div class="callout review"><div class="callout-title">GSTR-1 "Documents Issued" summary is hardcoded placeholder data</div><p>An explicit in-code TODO confirms the invoice-number-range and cancelled-document counts required by this GSTR-1 section are fixed values, not derived from real data — a direct consequence of invoice numbering being free-text rather than a true sequence (see Sales &amp; Invoicing).</p></div>
+
+      <div class="callout review"><div class="callout-title">Two independently-built Cash Flow report implementations disagree</div><p>The dedicated Accounting page's version splits Operating/Investing/Financing correctly; the general Reports browser's version only computes a single lump Operating figure with no breakdown. Trial Balance/P&amp;L/Balance Sheet are aligned between the two engines; Cash Flow is not.</p></div>
+
+      <div class="callout note"><div class="callout-title">Cash Flow page field-name mismatch</div><p><code>ReportsEngine.getCashFlow()</code> returns a <code>label</code> field per activity row; the frontend reads <code>description</code>, which doesn't exist on the response — every row's description renders blank. Amounts are unaffected.</p></div>
+
+      <div class="callout note"><div class="callout-title">No UI for manual journal entry</div><p>Both the "new journal" and "journal detail" links on the journal list lead to unregistered routes and fall through to a not-found page. Manual journal posting is fully functional server-side but reachable only via direct API call.</p></div>
+
+      <div class="callout note"><div class="callout-title">Journal list Amount column always shows ₹0.00</div><p>Reads a <code>totalDebit</code> field that doesn't exist on the <code>journals</code> table or its API response.</p></div>
+
+      <div class="callout note"><div class="callout-title">E-way bill has no manual generation UI</div><p>The generate endpoint is real and wired into the API client, but no page ever calls it — e-way bills only ever get created automatically as a follow-on to e-invoice generation for qualifying invoices.</p></div>
+
+      <div class="callout note"><div class="callout-title">GSTR-1/3B "filing" is self-attested, not a real government submission</div><p>Worth stating plainly for anyone assuming otherwise: there is no direct call to the GST portal anywhere in this flow. "Mark as Filed" only records that filing happened elsewhere.</p></div>
+
+      <div class="callout note"><div class="callout-title">Test coverage gap directly explains why the intrastate GST bug went unnoticed</div><p>No test exists anywhere for <code>InvoiceAccountingConsumer</code>, <code>SaleReturnAccountingConsumer</code>/<code>SaleReturnGstConsumer</code>, or <code>GRNAccountingConsumer</code>/<code>RcmAccountingConsumer</code> — precisely the consumers where the confirmed bugs above live. Cash-flow investing/financing splits, cost-center P&amp;L, financial-year close checklist, and permission guards are all well tested by contrast.</p></div>
+
+      <div class="callout ok"><div class="callout-title">Confirmed solid: e-invoice/e-way bill NIC integration, and GRN/RCM postings</div><p>E-invoice generation is a real, retried HTTP integration against the actual NIC sandbox/production endpoints, not a stub — it fails loudly if not configured rather than faking a response. GRN and reverse-charge (RCM) journal/GST-ledger postings are confirmed correct, including a previously-fixed version of the exact same class of bug found above for sale returns.</p></div>
+      <div class="callout ok"><div class="callout-title">Confirmed solid: double-entry integrity and period-closed enforcement</div><p>Every journal is balanced at the database level via a deferred constraint trigger, independent of any application-level bug. Period-closed enforcement is consistent across every posting path in the system (invoices, GRNs, manual journals, payments).</p></div>
+
+      <div class="pager">
+        <a href="#accounting/dev/data-model"><div class="pg-label">Back</div><div class="pg-title">← Data Model</div></a>
+        <span></span>
+      </div>
+    </article>
+
+  </main>
+
+  <aside class="toc">
+    <div class="toc-title">On this page</div>
+    <nav id="tocNav"></nav>
+  </aside>
+</div>
+
+<script src="/shared/docs-shell.js"></script>
+</body>
+</html>

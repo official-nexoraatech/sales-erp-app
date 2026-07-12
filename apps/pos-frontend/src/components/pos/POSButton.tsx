@@ -1,5 +1,6 @@
 import type { ButtonHTMLAttributes } from 'react';
 import { Loader2 } from 'lucide-react';
+import { buttonVariants, cn } from '@erp/ui';
 
 interface Props extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: 'primary' | 'secondary' | 'success' | 'danger' | 'ghost' | 'outline';
@@ -7,23 +8,12 @@ interface Props extends ButtonHTMLAttributes<HTMLButtonElement> {
   loading?: boolean;
 }
 
-const BASE =
-  'inline-flex items-center justify-center gap-2 font-semibold rounded-xl transition-colors ' +
-  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-focus ' +
-  'disabled:opacity-50 disabled:cursor-not-allowed';
-
-const VARIANTS: Record<NonNullable<Props['variant']>, string> = {
-  primary: 'bg-primary hover:bg-primary-hover text-primary-fg',
-  secondary: 'bg-surface-raised hover:bg-surface-sunken text-primary',
-  success: 'bg-success hover:bg-[var(--color-success-hover)] text-white',
-  danger: 'bg-danger hover:bg-[var(--color-danger-hover)] text-white',
-  ghost: 'text-secondary hover:bg-surface-raised',
-  outline: 'border border-default text-primary hover:bg-surface-raised bg-transparent',
-};
-
 // Every size meets or exceeds --pos-touch-target (44px) except `sm`, reserved for
 // dense inline controls (e.g. cart qty +/- buttons) that are still individually
-// at least 36px and always paired with generous surrounding tap spacing.
+// at least 36px and always paired with generous surrounding tap spacing. Kept as its
+// own scale (distinct from @erp/ui Button's size prop) because cashier-screen touch
+// targets are a POS-only constraint — colors, radius, and focus-glow still come from
+// the shared buttonVariants recipe, so it's the same visual language, not a fork.
 const SIZES: Record<NonNullable<Props['size']>, string> = {
   sm: 'px-3 min-h-[36px] text-sm',
   md: 'px-4 min-h-[44px] text-sm',
@@ -43,7 +33,7 @@ export default function POSButton({
     <button
       {...rest}
       disabled={disabled || loading}
-      className={`${BASE} ${VARIANTS[variant]} ${SIZES[size]} ${className}`}
+      className={cn(buttonVariants({ variant }), 'font-semibold gap-2', SIZES[size], className)}
     >
       {loading && <Loader2 size={16} className="animate-spin shrink-0" />}
       {children}

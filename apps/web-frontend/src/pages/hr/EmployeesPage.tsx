@@ -27,8 +27,16 @@ interface Employee {
   status: string;
 }
 
-interface Department { id: number; name: string; code: string; }
-interface Designation { id: number; name: string; code: string; }
+interface Department {
+  id: number;
+  name: string;
+  code: string;
+}
+interface Designation {
+  id: number;
+  name: string;
+  code: string;
+}
 
 const EMPLOYMENT_TYPES = ['FULL_TIME', 'PART_TIME', 'CONTRACT', 'DAILY_WAGE', 'TRAINEE', 'TAILOR'];
 
@@ -44,26 +52,37 @@ export default function EmployeesPage() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
 
-  useEffect(() => { setPage(1); }, [debouncedSearch, departmentId, employmentType]);
+  useEffect(() => {
+    setPage(1);
+  }, [debouncedSearch, departmentId, employmentType]);
 
   const { data, isLoading } = useQuery({
     queryKey: ['employees', debouncedSearch, departmentId, employmentType, page, pageSize],
-    queryFn: () => employeeApi.list({
-      search: debouncedSearch || undefined,
-      departmentId: departmentId ? Number(departmentId) : undefined,
-      employmentType: employmentType || undefined,
-      page: page - 1,
-      size: pageSize,
-    }),
+    queryFn: () =>
+      employeeApi.list({
+        search: debouncedSearch || undefined,
+        departmentId: departmentId ? Number(departmentId) : undefined,
+        employmentType: employmentType || undefined,
+        page: page - 1,
+        size: pageSize,
+      }),
   });
   const employees: Employee[] = ((data as Record<string, unknown>)?.content as Employee[]) ?? [];
-  const totalElements = (data as Record<string, unknown>)?.totalElements as number ?? 0;
+  const totalElements = ((data as Record<string, unknown>)?.totalElements as number) ?? 0;
 
-  const { data: deptData } = useQuery({ queryKey: ['departments'], queryFn: () => departmentApi.list() });
-  const departments: Department[] = ((deptData as Record<string, unknown>)?.content as Department[]) ?? [];
+  const { data: deptData } = useQuery({
+    queryKey: ['departments'],
+    queryFn: () => departmentApi.list(),
+  });
+  const departments: Department[] =
+    ((deptData as Record<string, unknown>)?.content as Department[]) ?? [];
 
-  const { data: desigData } = useQuery({ queryKey: ['designations'], queryFn: () => designationApi.list() });
-  const designations: Designation[] = ((desigData as Record<string, unknown>)?.content as Designation[]) ?? [];
+  const { data: desigData } = useQuery({
+    queryKey: ['designations'],
+    queryFn: () => designationApi.list(),
+  });
+  const designations: Designation[] =
+    ((desigData as Record<string, unknown>)?.content as Designation[]) ?? [];
 
   const deptName = (id?: number) => departments.find((d) => d.id === id)?.name ?? '–';
   const desigName = (id?: number) => designations.find((d) => d.id === id)?.name ?? '–';
@@ -71,7 +90,9 @@ export default function EmployeesPage() {
   const columns: ERPColumnDef<Employee>[] = [
     { key: 'employeeCode', header: 'Code', mono: true, sortable: true },
     {
-      key: 'displayName', header: 'Name', sortable: true,
+      key: 'displayName',
+      header: 'Name',
+      sortable: true,
       render: (r) => (
         <div>
           <p className="font-medium">{r.displayName}</p>
@@ -81,16 +102,33 @@ export default function EmployeesPage() {
     },
     { key: 'department', header: 'Department', render: (r) => deptName(r.departmentId) },
     { key: 'designation', header: 'Designation', render: (r) => desigName(r.designationId) },
-    { key: 'employmentType', header: 'Type', render: (r) => <Badge variant="outline">{r.employmentType}</Badge> },
     {
-      key: 'status', header: 'Status', sortable: true,
-      render: (r) => <Badge variant={r.status === 'ACTIVE' ? 'success' : 'default'}>{r.status}</Badge>,
+      key: 'employmentType',
+      header: 'Type',
+      render: (r) => <Badge variant="outline">{r.employmentType}</Badge>,
     },
     {
-      key: 'actions', header: '', align: 'right',
+      key: 'status',
+      header: 'Status',
+      sortable: true,
+      render: (r) => (
+        <Badge variant={r.status === 'ACTIVE' ? 'success' : 'default'}>{r.status}</Badge>
+      ),
+    },
+    {
+      key: 'actions',
+      header: '',
+      align: 'right',
       render: (r) => {
-        const items: ERPMenuItem[] = [{ label: 'View', icon: Eye, onClick: () => navigate(`/hr/employees/${r.id}`) }];
-        if (hasPermission(PERMISSIONS.EMPLOYEE_UPDATE)) items.push({ label: 'Edit', icon: Pencil, onClick: () => navigate(`/hr/employees/${r.id}/edit`) });
+        const items: ERPMenuItem[] = [
+          { label: 'View', icon: Eye, onClick: () => navigate(`/hr/employees/${r.id}`) },
+        ];
+        if (hasPermission(PERMISSIONS.EMPLOYEE_UPDATE))
+          items.push({
+            label: 'Edit',
+            icon: Pencil,
+            onClick: () => navigate(`/hr/employees/${r.id}/edit`),
+          });
         return <ERPDropdownMenu items={items} />;
       },
     },
@@ -103,8 +141,10 @@ export default function EmployeesPage() {
         title="Employees"
         subtitle="Manage your workforce, departments, and designations."
         actions={
-          <div className="flex gap-2">
-            <Button variant="secondary" onClick={() => setDeptModalOpen(true)}>Departments</Button>
+          <div className="flex gap-2 flex-wrap">
+            <Button variant="secondary" onClick={() => setDeptModalOpen(true)}>
+              Departments
+            </Button>
             {hasPermission(PERMISSIONS.EMPLOYEE_CREATE) && (
               <Button onClick={() => navigate('/hr/employees/new')}>+ New Employee</Button>
             )}
@@ -113,14 +153,35 @@ export default function EmployeesPage() {
       />
 
       <div className="flex gap-3 mb-4 flex-wrap">
-        <Input placeholder="Search employees…" value={search} onChange={(e) => setSearch(e.target.value)} className="max-w-xs" />
-        <Select value={departmentId} onChange={(e) => setDepartmentId(e.target.value)} className="max-w-xs">
+        <Input
+          placeholder="Search employees…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="max-w-xs"
+        />
+        <Select
+          value={departmentId}
+          onChange={(e) => setDepartmentId(e.target.value)}
+          className="max-w-xs"
+        >
           <option value="">All Departments</option>
-          {departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+          {departments.map((d) => (
+            <option key={d.id} value={d.id}>
+              {d.name}
+            </option>
+          ))}
         </Select>
-        <Select value={employmentType} onChange={(e) => setEmploymentType(e.target.value)} className="max-w-xs">
+        <Select
+          value={employmentType}
+          onChange={(e) => setEmploymentType(e.target.value)}
+          className="max-w-xs"
+        >
           <option value="">All Employment Types</option>
-          {EMPLOYMENT_TYPES.map((t) => <option key={t} value={t}>{t.replace('_', ' ')}</option>)}
+          {EMPLOYMENT_TYPES.map((t) => (
+            <option key={t} value={t}>
+              {t.replace('_', ' ')}
+            </option>
+          ))}
         </Select>
       </div>
 
@@ -131,7 +192,10 @@ export default function EmployeesPage() {
         rowKey="id"
         pagination={{ page, pageSize, total: totalElements }}
         onPageChange={setPage}
-        onPageSizeChange={(size) => { setPageSize(size); setPage(1); }}
+        onPageSizeChange={(size) => {
+          setPageSize(size);
+          setPage(1);
+        }}
       />
 
       <DepartmentDesignationModal
@@ -139,16 +203,27 @@ export default function EmployeesPage() {
         onClose={() => setDeptModalOpen(false)}
         departments={departments}
         designations={designations}
-        onChanged={() => { qc.invalidateQueries({ queryKey: ['departments'] }); qc.invalidateQueries({ queryKey: ['designations'] }); }}
+        onChanged={() => {
+          qc.invalidateQueries({ queryKey: ['departments'] });
+          qc.invalidateQueries({ queryKey: ['designations'] });
+        }}
       />
     </div>
   );
 }
 
 function DepartmentDesignationModal({
-  open, onClose, departments, designations, onChanged,
+  open,
+  onClose,
+  departments,
+  designations,
+  onChanged,
 }: {
-  open: boolean; onClose: () => void; departments: Department[]; designations: Designation[]; onChanged: () => void;
+  open: boolean;
+  onClose: () => void;
+  departments: Department[];
+  designations: Designation[];
+  onChanged: () => void;
 }) {
   const canCreate = useAuthStore((s) => s.hasPermission(PERMISSIONS.EMPLOYEE_CREATE));
   const [tab, setTab] = useState<'department' | 'designation'>('department');
@@ -157,27 +232,54 @@ function DepartmentDesignationModal({
 
   const createDept = useMutation({
     mutationFn: () => departmentApi.create({ name, code }),
-    onSuccess: () => { toast.success('Department added'); setName(''); setCode(''); onChanged(); },
+    onSuccess: () => {
+      toast.success('Department added');
+      setName('');
+      setCode('');
+      onChanged();
+    },
     onError: (e: Error) => toast.error(e.message),
   });
 
   const createDesig = useMutation({
     mutationFn: () => designationApi.create({ name, code }),
-    onSuccess: () => { toast.success('Designation added'); setName(''); setCode(''); onChanged(); },
+    onSuccess: () => {
+      toast.success('Designation added');
+      setName('');
+      setCode('');
+      onChanged();
+    },
     onError: (e: Error) => toast.error(e.message),
   });
 
   return (
     <Modal open={open} onClose={onClose} title="Departments & Designations" size="md">
       <div className="flex gap-2 mb-4">
-        <Button size="sm" variant={tab === 'department' ? 'primary' : 'secondary'} onClick={() => setTab('department')}>Departments</Button>
-        <Button size="sm" variant={tab === 'designation' ? 'primary' : 'secondary'} onClick={() => setTab('designation')}>Designations</Button>
+        <Button
+          size="sm"
+          variant={tab === 'department' ? 'primary' : 'secondary'}
+          onClick={() => setTab('department')}
+        >
+          Departments
+        </Button>
+        <Button
+          size="sm"
+          variant={tab === 'designation' ? 'primary' : 'secondary'}
+          onClick={() => setTab('designation')}
+        >
+          Designations
+        </Button>
       </div>
 
       {canCreate && (
         <div className="flex gap-2 mb-4">
           <Input placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
-          <Input placeholder="Code" value={code} onChange={(e) => setCode(e.target.value)} className="max-w-[120px]" />
+          <Input
+            placeholder="Code"
+            value={code}
+            onChange={(e) => setCode(e.target.value)}
+            className="max-w-[120px]"
+          />
           <Button
             onClick={() => (tab === 'department' ? createDept.mutate() : createDesig.mutate())}
             loading={createDept.isPending || createDesig.isPending}

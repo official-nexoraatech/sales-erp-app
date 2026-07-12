@@ -178,6 +178,8 @@ export const PERMISSIONS = {
   FINANCIAL_YEAR_VIEW: 'FINANCIAL_YEAR_VIEW',
   FINANCIAL_YEAR_CLOSE: 'FINANCIAL_YEAR_CLOSE',
   FINANCIAL_YEAR_OPEN: 'FINANCIAL_YEAR_OPEN',
+  COST_CENTER_VIEW: 'COST_CENTER_VIEW',
+  COST_CENTER_MANAGE: 'COST_CENTER_MANAGE',
 
   // ── GST ───────────────────────────────────────────────────────────────────
   GST_VIEW: 'GST_VIEW',
@@ -300,14 +302,14 @@ export const PERMISSIONS = {
   PRICE_LIST_DELETE: 'PRICE_LIST_DELETE',
 
   // ── Overrides ─────────────────────────────────────────────────────────────
-  CREDIT_LIMIT_OVERRIDE: 'CREDIT_LIMIT_OVERRIDE',   // POST /invoices (when overrideCreditLimit=true)
+  CREDIT_LIMIT_OVERRIDE: 'CREDIT_LIMIT_OVERRIDE', // POST /invoices (when overrideCreditLimit=true)
   DISCOUNT_OVERRIDE: 'DISCOUNT_OVERRIDE',
   PRICE_OVERRIDE: 'PRICE_OVERRIDE',
-  PRICE_FLOOR_OVERRIDE: 'PRICE_FLOOR_OVERRIDE',      // POST /invoices (when overridePriceFloor=true)
-  CANCEL_POSTED_JOURNAL: 'CANCEL_POSTED_JOURNAL',    // POST /journals/:id/reverse
-  EXPORT_CUSTOMER_DATA: 'EXPORT_CUSTOMER_DATA',      // GET /customers/export
-  VIEW_AUDIT_LOG: 'VIEW_AUDIT_LOG',                  // GET /admin/audit-logs (not yet implemented — ES-20)
-  IMPERSONATE_USER: 'IMPERSONATE_USER',              // POST /admin/impersonate (auth-service)
+  PRICE_FLOOR_OVERRIDE: 'PRICE_FLOOR_OVERRIDE', // POST /invoices (when overridePriceFloor=true)
+  CANCEL_POSTED_JOURNAL: 'CANCEL_POSTED_JOURNAL', // POST /journals/:id/reverse
+  EXPORT_CUSTOMER_DATA: 'EXPORT_CUSTOMER_DATA', // GET /customers/export
+  VIEW_AUDIT_LOG: 'VIEW_AUDIT_LOG', // GET /admin/audit-logs (not yet implemented — ES-20)
+  IMPERSONATE_USER: 'IMPERSONATE_USER', // POST /admin/impersonate (auth-service)
 
   // ── Config / Audit ────────────────────────────────────────────────────────
   // PG-014: generic CONFIG_VIEW/CONFIG_UPDATE retired — no route ever checked them;

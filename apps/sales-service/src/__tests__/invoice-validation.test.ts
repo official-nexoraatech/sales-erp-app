@@ -11,11 +11,34 @@ import { z } from 'zod';
 vi.mock('ulid', () => ({ ulid: () => 'TEST-ULID-01' }));
 
 vi.mock('@erp/db', () => ({
-  invoices: { id: 'id', tenantId: 'tenant_id', status: 'status', customerId: 'customer_id', grandTotal: 'grand_total', version: 'version', branchId: 'branch_id', invoiceDate: 'invoice_date', warehouseId: 'warehouse_id', invoiceNumber: 'invoice_number' },
+  invoices: {
+    id: 'id',
+    tenantId: 'tenant_id',
+    status: 'status',
+    customerId: 'customer_id',
+    grandTotal: 'grand_total',
+    version: 'version',
+    branchId: 'branch_id',
+    invoiceDate: 'invoice_date',
+    warehouseId: 'warehouse_id',
+    invoiceNumber: 'invoice_number',
+  },
   invoiceLines: { invoiceId: 'invoice_id', itemId: 'item_id', quantity: 'quantity' },
   invoiceHistory: {},
-  customers: { id: 'id', tenantId: 'tenant_id', creditLimit: 'credit_limit', creditLimitEnabled: 'credit_limit_enabled' },
-  items: { id: 'id', tenantId: 'tenant_id', availableQty: 'available_qty', version: 'version', minSalePrice: 'min_sale_price', trackInventory: 'track_inventory' },
+  customers: {
+    id: 'id',
+    tenantId: 'tenant_id',
+    creditLimit: 'credit_limit',
+    creditLimitEnabled: 'credit_limit_enabled',
+  },
+  items: {
+    id: 'id',
+    tenantId: 'tenant_id',
+    availableQty: 'available_qty',
+    version: 'version',
+    minSalePrice: 'min_sale_price',
+    trackInventory: 'track_inventory',
+  },
   outboxEvents: {},
   projectionDashboardDaily: { tenantId: 'tenant_id', branchId: 'branch_id', date: 'date' },
   projectionCustomerBalance: { tenantId: 'tenant_id', customerId: 'customer_id' },
@@ -37,13 +60,25 @@ function makeTrx(script: unknown[]) {
   let i = 0;
   const next = () => Promise.resolve(script[i++]);
   const chainable: Record<string, unknown> = {};
-  for (const m of ['select', 'from', 'where', 'orderBy', 'insert', 'values', 'update', 'set', 'onConflictDoUpdate']) {
+  for (const m of [
+    'select',
+    'from',
+    'where',
+    'orderBy',
+    'insert',
+    'values',
+    'update',
+    'set',
+    'onConflictDoUpdate',
+  ]) {
     chainable[m] = vi.fn(() => chainable);
   }
   chainable['returning'] = vi.fn(() => next());
   chainable['execute'] = vi.fn(() => next());
-  (chainable as { then: unknown })['then'] = (resolve: (v: unknown) => void, reject: (e: unknown) => void) =>
-    next().then(resolve, reject);
+  (chainable as { then: unknown })['then'] = (
+    resolve: (v: unknown) => void,
+    reject: (e: unknown) => void
+  ) => next().then(resolve, reject);
   return chainable;
 }
 
@@ -87,10 +122,10 @@ describe('ES-14 — API-boundary shape validation (Zod)', () => {
     unitPrice: z.number().nonnegative(),
     gstRate: z.number().min(0).max(100),
   });
-  const InvoiceDateSchema = z.string().datetime().refine(
-    (val) => new Date(val).getTime() <= Date.now(),
-    'Invoice date cannot be in the future'
-  );
+  const InvoiceDateSchema = z
+    .string()
+    .datetime()
+    .refine((val) => new Date(val).getTime() <= Date.now(), 'Invoice date cannot be in the future');
 
   it('rejects quantity = 0', () => {
     expect(InvoiceLineSchema.safeParse({ ...baseLine, quantity: 0 }).success).toBe(false);
@@ -107,7 +142,9 @@ describe('ES-14 — API-boundary shape validation (Zod)', () => {
 
   it('accepts a valid line and a past invoice date', () => {
     expect(InvoiceLineSchema.safeParse(baseLine).success).toBe(true);
-    expect(InvoiceDateSchema.safeParse(new Date(Date.now() - 86400000).toISOString()).success).toBe(true);
+    expect(InvoiceDateSchema.safeParse(new Date(Date.now() - 86400000).toISOString()).success).toBe(
+      true
+    );
   });
 });
 
@@ -136,14 +173,38 @@ describe('ES-14 — InvoiceService.create price floor', () => {
     const db = makeDb(script);
     const svc = new InvoiceService(db as never);
 
-    await expect(
-      svc.create({ ...baseCreateParams, overridePriceFloor: true })
-    ).resolves.toBe(1);
+    await expect(svc.create({ ...baseCreateParams, overridePriceFloor: true })).resolves.toBe(1);
+  });
+});
+
+describe('InvoiceService.create walk-in sale (customerId 0)', () => {
+  it('skips the customer lookup/credit check for customerId 0 instead of 404ing (POS walk-in sale)', async () => {
+    const script = [
+      [], // select item for price-floor check — empty result is fine, just proves this
+      // ran WITHOUT a preceding customer select consuming it (that select must not
+      // happen at all for customerId 0 — see pos.routes.ts's `body.customerId ?? 0`)
+      [{ id: 7 }], // insert invoices ... returning
+      undefined, // insert invoiceLines
+      undefined, // insert invoiceHistory
+    ];
+    const db = makeDb(script);
+    const svc = new InvoiceService(db as never);
+
+    await expect(svc.create({ ...baseCreateParams, customerId: 0 })).resolves.toBe(7);
   });
 });
 
 describe('ES-14 — InvoiceService.confirm duplicate invoice number + period closure', () => {
-  const invoiceRow = { id: 1, tenantId: 1, status: 'DRAFT', customerId: 42, grandTotal: '1180.00', branchId: 1, invoiceDate: new Date(), warehouseId: 7 };
+  const invoiceRow = {
+    id: 1,
+    tenantId: 1,
+    status: 'DRAFT',
+    customerId: 42,
+    grandTotal: '1180.00',
+    branchId: 1,
+    invoiceDate: new Date(),
+    warehouseId: 7,
+  };
 
   it('rejects confirm() when the invoice number already exists for another invoice', async () => {
     const script = [
@@ -153,7 +214,9 @@ describe('ES-14 — InvoiceService.confirm duplicate invoice number + period clo
     const db = makeDb(script);
     const svc = new InvoiceService(db as never);
 
-    await expect(svc.confirm(1, 1, 'INV-DUPLICATE', 99)).rejects.toMatchObject({ code: 'INVOICE_NUMBER_DUPLICATE' });
+    await expect(svc.confirm(1, 1, 'INV-DUPLICATE', 99)).rejects.toMatchObject({
+      code: 'INVOICE_NUMBER_DUPLICATE',
+    });
   });
 
   it('allows confirm() when the only invoice with that number is itself', async () => {
@@ -184,7 +247,9 @@ describe('ES-14 — InvoiceService.confirm duplicate invoice number + period clo
     const db = makeDb(script);
     const svc = new InvoiceService(db as never);
 
-    await expect(svc.confirm(1, 1, 'INV-0001', 99)).rejects.toMatchObject({ code: 'PERIOD_CLOSED' });
+    await expect(svc.confirm(1, 1, 'INV-0001', 99)).rejects.toMatchObject({
+      code: 'PERIOD_CLOSED',
+    });
   });
 });
 

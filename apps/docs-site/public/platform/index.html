@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ERP Docs — Developer Platform Module</title>
+<link rel="stylesheet" href="/shared/docs-shell.css">
+</head>
+<body data-module="Developer Platform">
+
+<header class="topbar">
+  <button class="icon-btn navtoggle" id="navToggle" aria-label="Toggle navigation">☰</button>
+  <a class="brand" href="/"><span class="mark">N</span> Nexoraa ERP Docs</a>
+  <div class="searchwrap">
+    <input type="text" class="searchbox" id="searchInput" placeholder="Search Developer Platform documentation…" autocomplete="off">
+    <div class="search-results" id="searchResults"></div>
+  </div>
+  <div class="topbar-actions">
+    <button class="icon-btn" id="themeToggle" aria-label="Toggle dark mode" title="Toggle dark mode">◐</button>
+    <button class="icon-btn" id="printBtn" aria-label="Print this page" title="Print this page">⎙</button>
+  </div>
+</header>
+
+<div class="shell">
+  <nav class="sidebar" id="sidebar">
+    <div class="sb-group">
+      <div class="sb-group-title">Modules</div>
+      <div class="sb-module active-module">
+        <div class="sb-module-head active-module">Developer Platform <span class="status">v1</span></div>
+        <div class="sb-track">
+          <div class="sb-track-title">Developer</div>
+          <a class="sb-link" data-page="platform-dev-overview" href="#platform/dev/overview">Overview</a>
+          <a class="sb-link" data-page="platform-dev-structure" href="#platform/dev/structure">Monorepo &amp; Package Structure</a>
+          <a class="sb-link" data-page="platform-dev-adding" href="#platform/dev/adding-pages-permissions">Adding a Page, Permission, or Endpoint</a>
+          <a class="sb-link" data-page="platform-dev-migrations" href="#platform/dev/tables-migrations">Adding a Table &amp; Writing Migrations</a>
+          <a class="sb-link" data-page="platform-dev-reports" href="#platform/dev/adding-reports">Adding a Report</a>
+          <a class="sb-link" data-page="platform-dev-events" href="#platform/dev/event-consumers">Adding an Event Consumer Safely</a>
+          <a class="sb-link" data-page="platform-dev-testing" href="#platform/dev/testing-ci">Testing &amp; CI</a>
+          <a class="sb-link" data-page="platform-dev-env-setup" href="#platform/dev/environment-setup">Environment Setup &amp; Bootstrapping</a>
+        </div>
+        <div class="sb-track">
+          <div class="sb-track-title">Audit</div>
+          <a class="sb-link" data-page="platform-issues" href="#platform/audit/known-issues">Known Issues &amp; Needs Review</a>
+        </div>
+      </div>
+    </div>
+    <div class="sb-group">
+      <div class="sb-group-title">Other modules</div>
+      <a class="sb-module-head" href="/pos/index.html">POS <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/sales/index.html">Sales &amp; Invoicing <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/inventory/index.html">Inventory <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/purchase/index.html">Purchase <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/products/index.html">Products &amp; Variants <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/customers/index.html">Customers &amp; Suppliers <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/accounting/index.html">Accounting &amp; GST <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/hr/index.html">HR &amp; Payroll <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/reports/index.html">Reports <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/tenants/index.html">Super Admin / Tenants <span class="status">Open →</span></a>
+    </div>
+  </nav>
+
+  <main class="content" id="content">
+    <div class="breadcrumb" id="breadcrumb"></div>
+
+    <!-- ============ DEV: OVERVIEW ============ -->
+    <article class="page" id="page-platform-dev-overview" data-track="dev" data-title="Overview">
+      <span class="track-pill dev">Developer documentation</span>
+      <h1>Developer Platform Overview</h1>
+      <div class="pilot-banner">Eleventh and final module documented from a direct code audit. Unlike every prior module, this one has no client or admin audience — it's architecture conventions and "how do I add X" guidance for engineers working in this codebase, synthesized from patterns confirmed across all ten business modules already documented here.</div>
+
+      <p>This monorepo is a pnpm + Turborepo workspace: 18 apps (15 backend services + 2 frontends + this docs site) and 8 shared packages. If you've read any of the other ten modules, you've already seen this platform's two defining, repeating traits in action:</p>
+      <ul>
+        <li><strong>The permission-drift pattern</strong> — a role's granted permissions not matching what a route actually checks — appeared in nearly every business module audited. It has a name and a paper trail in this codebase (see <a href="#platform/dev/adding-pages-permissions">Adding a Page, Permission, or Endpoint</a>), and there's still no automated check preventing it from recurring.</li>
+        <li><strong>The event-payload-mismatch pattern</strong> — a service publishing one field name, a consumer expecting another — caused several of the most severe bugs found in this audit (notably in Accounting &amp; GST). It has a root cause: no shared, typed event-payload contracts exist anywhere in the codebase. See <a href="#platform/dev/event-consumers">Adding an Event Consumer Safely</a> for the concrete fix.</li>
+      </ul>
+
+      <div class="pager">
+        <span></span>
+        <a class="next" href="#platform/dev/structure"><div class="pg-label">Next</div><div class="pg-title">Monorepo &amp; Package Structure →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ DEV: STRUCTURE ============ -->
+    <article class="page" id="page-platform-dev-structure" data-track="dev" data-title="Monorepo & Package Structure">
+      <span class="track-pill dev">Developer documentation</span>
+      <h1>Monorepo &amp; Package Structure</h1>
+      <p>pnpm workspace (<code>apps/*</code>, <code>packages/*</code>), Turborepo-orchestrated, Node ≥20, pnpm ≥9 (only pinned at the repo root — no individual app/package overrides its own engine requirement).</p>
+
+      <h2 id="packages">Shared packages</h2>
+      <div class="tablewrap"><table>
+        <tr><th>Package</th><th>Purpose</th><th>Used by</th></tr>
+        <tr><td><code>@erp/types</code></td><td>Barrel of errors, event envelope types, permission constants, validators</td><td class="num">17 of 18 apps</td></tr>
+        <tr><td><code>@erp/config</code></td><td><code>loadConfig()</code>/<code>requireEnv()</code>, Vault client</td><td class="num">15</td></tr>
+        <tr><td><code>@erp/logger</code></td><td>Structured Winston logging, Loki transport, correlation IDs, Prometheus metrics registry</td><td class="num">15</td></tr>
+        <tr><td><code>@erp/sdk</code> (platform-sdk)</td><td>The mandatory infrastructure layer per this project's own architecture spec — auth/permission checks, tenant-scoped DB/cache, distributed locks, the event bus, feature flags, workflow/rule engines</td><td class="num">15</td></tr>
+        <tr><td><code>@erp/db</code> (db-client)</td><td>Drizzle schema definitions, DB client factory, read-replica router</td><td class="num">14 (backend only)</td></tr>
+        <tr><td><code>@erp/utils</code></td><td>Indian-locale formatters (currency/date/number) + a separate server-only export for encryption utilities</td><td class="num">13</td></tr>
+        <tr><td><code>@erp/ui</code></td><td>React form-input component library</td><td class="num">2 (frontends only)</td></tr>
+        <tr><td><code>@erp/design-tokens</code></td><td>Pure CSS custom-property export, no JS</td><td class="num">2 (frontends only)</td></tr>
+      </table></div>
+
+      <h2 id="apps">Apps</h2>
+      <p>15 backend services (ports 3000/3010–3023, sequential by creation order — see API Reference pages of each business module for exact ports), plus <code>web-frontend</code> (5173), <code>pos-frontend</code> (5174), and this <code>docs-site</code>.</p>
+      <div class="callout review"><div class="callout-title"><code>.env.example</code>'s notification-service URL is wrong</div><p>It lists port 3020 for notification-service, but notification-service's own real default is 3014 — 3020 actually belongs to purchase-service. Looks like a copy-paste error, not an intentional alias. Worth fixing before anyone copies it into a real deployment config.</p></div>
+      <div class="callout note"><div class="callout-title">Most frontend traffic bypasses the API gateway entirely</div><p>A real API gateway exists and does genuine HTTP proxying, but <code>web-frontend</code>'s own API client maps each service directly to its own host:port — the gateway is never in the request path for ordinary app usage. This has been noted independently in several of the business-module audits already.</p></div>
+
+      <div class="pager">
+        <a href="#platform/dev/overview"><div class="pg-label">Back</div><div class="pg-title">← Overview</div></a>
+        <a class="next" href="#platform/dev/adding-pages-permissions"><div class="pg-label">Next</div><div class="pg-title">Adding a Page, Permission, or Endpoint →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ DEV: ADDING PAGES/PERMISSIONS/ENDPOINTS ============ -->
+    <article class="page" id="page-platform-dev-adding" data-track="dev" data-title="Adding a Page, Permission, or Endpoint">
+      <span class="track-pill dev">Developer documentation</span>
+      <h1>Adding a Page, Permission, or Endpoint</h1>
+
+      <h2 id="page">Adding a page to web-frontend</h2>
+      <p>Register a lazy-loaded route in <code>App.tsx</code> wrapped in the shared <code>PermissionRoute</code> guard, and add a matching entry to <code>navigation.ts</code> whose own doc-comment says its <code>permission</code> field must match the route guard.</p>
+      <div class="callout note"><div class="callout-title">One confirmed exception to this pattern</div><p>The account-level Security Settings page is deliberately registered without a permission guard — every logged-in user can reach their own security settings, which makes sense for that one page. It's worth knowing this exception exists rather than assuming the guard is truly universal when you go looking for a reference example.</p></div>
+      <div class="callout note"><div class="callout-title">pos-frontend does not use this pattern at all</div><p>POS has no router and no navigation config — it's a flat set of top-level screens shown/hidden directly in code. Don't look for the <code>App.tsx</code>/<code>navigation.ts</code> convention there; it's a structurally different app, not a variant of the same one.</p></div>
+
+      <h2 id="permission">Adding a permission</h2>
+      <p>Add a constant to the shared permissions file, then grant it to the relevant role(s) in the tenant-service's role-defaults seed file.</p>
+      <div class="callout bug"><div class="callout-title">This is the exact step where the recurring role/permission mismatch bug gets introduced</div><p>Nearly every business module audited on this site found at least one case of a role missing a permission its own screens or training material assume it has — or the reverse, a permission nobody's role actually needs. There's a documented paper trail of a past cleanup pass that already removed several fully-dead permission constants, but the underlying gap — nothing automatically checks that a new permission actually gets granted to the right role, or that an old one is still referenced anywhere — remains open today. If you add a permission, manually verify which role(s) should have it and add it to their seed entry in the same change, and check whether it's actually referenced by an existing route before assuming a new one is needed.</p></div>
+
+      <h2 id="endpoint">Adding a REST endpoint</h2>
+      <p>A Fastify route file under a service's <code>src/api/</code> directory, with an <code>[authenticate, requirePermission(PERMISSIONS.X)]</code> preHandler on the route — this exact pattern is consistent across every service audited on this site.</p>
+
+      <div class="pager">
+        <a href="#platform/dev/structure"><div class="pg-label">Back</div><div class="pg-title">← Monorepo &amp; Package Structure</div></a>
+        <a class="next" href="#platform/dev/tables-migrations"><div class="pg-label">Next</div><div class="pg-title">Adding a Table &amp; Writing Migrations →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ DEV: TABLES & MIGRATIONS ============ -->
+    <article class="page" id="page-platform-dev-migrations" data-track="dev" data-title="Adding a Table & Writing Migrations">
+      <span class="track-pill dev">Developer documentation</span>
+      <h1>Adding a Table &amp; Writing Migrations</h1>
+      <p>Add a table definition to the relevant file under the shared DB package's schema directory, export it through the existing schema barrel, then generate a migration with the package's own generate script.</p>
+
+      <h2 id="mandatory-columns">Every table needs these columns</h2>
+      <p>This project's own architecture spec mandates <code>tenant_id</code> (always first, not null), <code>created_at</code>/<code>updated_at</code>, <code>created_by</code>, and a <code>version</code> column for optimistic locking on every table — and in practice, this is followed consistently across the schema. Tenant isolation in this system is enforced entirely at the application layer (there's no database-level row-security policy doing it for you), so a missing or forgotten <code>tenant_id</code> filter is a real, exploitable data-leak risk, not just a style violation.</p>
+      <div class="callout review"><div class="callout-title">This rule lives in a planning document, not next to the migrations folder itself</div><p>The mandatory-columns rule is real and documented, but it's in a separate architecture-spec document, not a README inside the migrations directory itself. A new engineer opening that folder cold wouldn't discover the rule without already knowing where to look.</p></div>
+
+      <div class="callout bug"><div class="callout-title">The migration tool's own bookkeeping is currently out of sync — be careful generating a new migration right now</div><p>Every migration file that's ever been created is correctly tracked in the tool's own index — that part is fine. But the tool also needs a "snapshot" of the database schema as it stood after each migration, to correctly compute the next one, and only the very first two migrations in this project's history have a snapshot saved. Every migration added since is missing one. In practice, this means the tool's next auto-generated migration has to guess at a schema baseline that's dozens of migrations out of date — it could either fail outright or quietly try to redo something that's already been done. <strong>Before trusting an auto-generated migration today, generate it in a throwaway branch first and read the SQL it produces carefully</strong> rather than assuming it's correct.</p></div>
+
+      <div class="pager">
+        <a href="#platform/dev/adding-pages-permissions"><div class="pg-label">Back</div><div class="pg-title">← Adding a Page, Permission, or Endpoint</div></a>
+        <a class="next" href="#platform/dev/adding-reports"><div class="pg-label">Next</div><div class="pg-title">Adding a Report →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ DEV: ADDING REPORTS ============ -->
+    <article class="page" id="page-platform-dev-reports" data-track="dev" data-title="Adding a Report">
+      <span class="track-pill dev">Developer documentation</span>
+      <h1>Adding a Report</h1>
+      <p>Add a definition to the report registry (slug, name, category, parameters, columns, required permission) in report-service, and a matching implementation case in the report engine right next to it.</p>
+      <div class="callout ok"><div class="callout-title">This is the one place in the whole codebase with genuinely clean parity</div><p>Every one of the 77 currently-registered reports has exactly one matching implementation, with zero orphans in either direction — confirmed by direct comparison, twice, across two separate audits. Every other "registry vs. implementation" or "permission vs. route" pairing checked across this whole documentation project had at least one mismatch somewhere. Whatever discipline keeps these two files in sync, it's worth understanding and replicating elsewhere in the codebase.</p></div>
+      <p>Remember to grant the report's required permission to whichever role should actually be able to run it — the Reports module's own audit found several reports gated on permissions no real operational role holds by default, purely because that step was missed.</p>
+      <div class="pager">
+        <a href="#platform/dev/tables-migrations"><div class="pg-label">Back</div><div class="pg-title">← Adding a Table &amp; Writing Migrations</div></a>
+        <a class="next" href="#platform/dev/event-consumers"><div class="pg-label">Next</div><div class="pg-title">Adding an Event Consumer Safely →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ DEV: EVENT CONSUMERS ============ -->
+    <article class="page" id="page-platform-dev-events" data-track="dev" data-title="Adding an Event Consumer Safely">
+      <span class="track-pill dev">Developer documentation</span>
+      <h1>Adding an Event Consumer Safely</h1>
+      <p>Services publish domain events to an outbox table inside their own database transaction; other services run background consumers keyed by event type to react asynchronously (posting a journal entry, updating a GST register, sending a notification, and so on).</p>
+
+      <div class="callout bug"><div class="callout-title">This exact mechanism caused several of the most serious bugs found across this whole documentation project</div><p>The shared event envelope only types its outer shape — the actual business payload inside it is untyped on purpose at the platform level. Every consumer written so far responds to this by declaring its own private copy of what it expects the payload to look like, then forcibly casting the untyped data into that shape without any real validation. When a publisher's real payload doesn't match a consumer's guessed shape — a missing field, a different field name — nothing catches it at compile time or runtime. This is precisely how the accounting module ended up silently failing to post GST for ordinary domestic sales, and how sale-return accounting entries ended up posting at zero: two of the most significant defects found in this entire audit trace back to this one root cause.</p></div>
+
+      <h2 id="safest-way">The safest way to add a new one</h2>
+      <p>Define the event's payload shape once, as a proper named type living alongside the event-type constant itself in the shared types package — not as a private interface re-declared inside the consumer. Have the publishing service build its event payload against that same shared type, and have the consumer import and use it directly instead of casting an untyped object. This isn't how any existing consumer in this codebase actually works today — it's a recommendation based on the fact that nothing currently stops this exact class of bug from recurring, not a documented house style you're expected to already know.</p>
+
+      <div class="pager">
+        <a href="#platform/dev/adding-reports"><div class="pg-label">Back</div><div class="pg-title">← Adding a Report</div></a>
+        <a class="next" href="#platform/dev/testing-ci"><div class="pg-label">Next</div><div class="pg-title">Testing &amp; CI →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ DEV: TESTING & CI ============ -->
+    <article class="page" id="page-platform-dev-testing" data-track="dev" data-title="Testing & CI">
+      <span class="track-pill dev">Developer documentation</span>
+      <h1>Testing &amp; CI</h1>
+      <p>Vitest everywhere. Integration tests connect to a genuinely running Postgres instance via a real database URL — there's no mocking or ephemeral test-container layer for these; if that URL isn't set, the tests silently skip rather than fail, so a green run locally without a database configured doesn't actually prove anything about the integration suite.</p>
+
+      <h2 id="ci">CI pipeline</h2>
+      <p>Lint, type-check, a coverage-gated test job (≥80%, against real Postgres/Redis service containers), a mocked-boundary Playwright smoke suite for both frontends, a 14-service + gateway Docker build matrix, dependency audit, static analysis (Semgrep), container scanning (Trivy), secret scanning across full git history (TruffleHog), Snyk, a manual-dispatch load-test job, and a tag-triggered staging deploy.</p>
+      <div class="callout review"><div class="callout-title">Adding a new backend service to CI is entirely manual, in four separate places</div><p>There's no automatic discovery of new services anywhere in the pipeline. A new service has to be added by hand to the Docker build matrix, the container-scan matrix, and two separate hardcoded service-name lists inside the staging-deploy job's rollout and rollback steps. Miss one of the four and that service silently doesn't get its intended coverage (built but never security-scanned, or deployed but never included in an automatic rollback) with no error telling you it was left out.</p></div>
+
+      <div class="pager">
+        <a href="#platform/dev/event-consumers"><div class="pg-label">Back</div><div class="pg-title">← Adding an Event Consumer Safely</div></a>
+        <a class="next" href="#platform/dev/environment-setup"><div class="pg-label">Next</div><div class="pg-title">Environment Setup &amp; Bootstrapping →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ DEV: ENVIRONMENT SETUP & BOOTSTRAPPING ============ -->
+    <article class="page" id="page-platform-dev-env-setup" data-track="dev" data-title="Environment Setup & Bootstrapping">
+      <span class="track-pill dev">Developer documentation</span>
+      <h1>Environment Setup &amp; Bootstrapping</h1>
+      <p>How to bring up a <strong>new environment</strong> — a fresh, empty database for local dev, QA, staging, or the first production deploy — from nothing to a working first tenant. This is distinct from the go-live runbook (<code>docs/go-live-runbook.md</code>), which migrates an existing business's data into a tenant that's already been provisioned; this page covers what happens before that tenant exists at all.</p>
+
+      <h2 id="step1">Step 1 — Run migrations</h2>
+      <p>Apply every migration under the shared DB package's migrations directory, in order. <code>0020_es21_platform_operator.sql</code> is required — it seeds a reserved <code>platform-operations</code> tenant and a <code>PLATFORM_OPERATOR</code> role holding exactly one permission, <code>PLATFORM_TENANT_MANAGE</code>, but deliberately seeds <strong>zero users</strong>.</p>
+
+      <h2 id="step2">Step 2 — Bootstrap the first PLATFORM_OPERATOR (once per environment)</h2>
+      <pre><code>DATABASE_URL="&lt;env-db-url&gt;" pnpm --filter @erp/tenant-service bootstrap-operator -- --email=&lt;ops-email&gt; --password=&lt;strong-password&gt;</code></pre>
+      <p>Refuses to run again once a <code>PLATFORM_OPERATOR</code> user already exists, so it's safe to run exactly once right after migrations. Log in via the normal <code>/auth/login</code> with that email/password and whatever <code>tenantId</code> the <code>platform-operations</code> tenant actually got in that environment — <strong>do not assume it's <code>1</code></strong>; confirm with <code>SELECT id FROM tenants WHERE slug='platform-operations'</code>. This account can only manage tenant lifecycle; it has no sales/inventory/accounting access of its own.</p>
+      <p class="src">apps/tenant-service/scripts/bootstrap-platform-operator.ts</p>
+
+      <h2 id="step3">Step 3 — Provision the environment's first real tenant</h2>
+      <p>Using the operator's token, call <code>POST /admin/tenants</code> with <code>name</code>, <code>slug</code>, <code>contactEmail</code>, <code>adminFirstName</code>/<code>adminLastName</code>, <code>adminPassword</code>, and <code>plan</code>. This creates the tenant, seeds its roles, and creates one <code>OWNER</code>-role user from <code>contactEmail</code>/<code>adminPassword</code> — that OWNER account, not the platform operator, is what real users work with day to day.</p>
+      <p class="src">apps/tenant-service/src/domain/TenantProvisioner.ts</p>
+
+      <h2 id="step4">Step 4 — Seed auth notification templates, per tenant</h2>
+      <p>Call <code>POST /api/v2/notifications/templates/seed-auth</code> with <code>{ "tenantId": &lt;new-id&gt; }</code> once for every newly provisioned tenant, including <code>platform-operations</code> itself (which has never had this run — see the recovery script below for why that matters). Skipping it means that tenant's forgot-password and other auth emails silently no-op.</p>
+
+      <h2 id="security">Security model — who can actually run the bootstrap/reset scripts</h2>
+      <div class="callout bug"><div class="callout-title">Not gated by the app at all — DB credential + shell access is the entire trust boundary</div><p>Both the bootstrap script above and the password-reset script below connect straight to Postgres via <code>DATABASE_URL</code>. There is no HTTP route, no RBAC check, no application-level auth wrapping either one. Anyone who holds an environment's <code>DATABASE_URL</code> and has shell access to run <code>pnpm</code>/<code>tsx</code> against it (a CI runner, a bastion host, a pod you can <code>kubectl exec</code> into) can run these — equivalent to DBA-level trust, not a scoped platform-operator permission. This is intentional: they exist for the case where no operator account exists yet, or the only one is locked out. In production, <code>DATABASE_URL</code> is already Vault-gated (see <code>docs/vault-rollout.md</code>) — apply the same discipline to QA/staging credentials, don't leave them in a shared dev <code>.env</code>. Neither script writes an audit-log entry, so the only record of who ran one and when lives in your infra logs (CI job history, shell history, DB connection logs), not in the app.</p></div>
+
+      <h2 id="recovery">Recovering a locked-out or forgotten operator password</h2>
+      <pre><code>DATABASE_URL="&lt;env-db-url&gt;" pnpm --filter @erp/tenant-service reset-operator-password -- --email=&lt;ops-email&gt; --new-password=&lt;new-password&gt;</code></pre>
+      <p>Scoped strictly to the <code>platform-operations</code> tenant's own user row, so it can't accidentally reset an unrelated user in a different tenant that happens to share the same email address — this has actually happened in this codebase's own test data. Same security model as Step 2 applies, and it force-revokes that account's existing sessions.</p>
+      <p class="src">apps/tenant-service/scripts/reset-platform-operator-password.ts</p>
+
+      <div class="pager">
+        <a href="#platform/dev/testing-ci"><div class="pg-label">Back</div><div class="pg-title">← Testing &amp; CI</div></a>
+        <a class="next" href="#platform/audit/known-issues"><div class="pg-label">Next</div><div class="pg-title">Known Issues →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ AUDIT: KNOWN ISSUES ============ -->
+    <article class="page" id="page-platform-issues" data-track="dev" data-title="Known Issues & Needs Review">
+      <span class="track-pill dev">Cross-cutting · Health audit</span>
+      <h1>Known Issues &amp; Needs Review</h1>
+      <p>This is the final page of the final module in this documentation project. Ranked by impact to a developer working in this codebase.</p>
+
+      <div class="callout bug"><div class="callout-title">Migration tooling's schema-snapshot baseline is 49 migrations out of date</div><p>Every migration is correctly indexed, but the schema snapshots needed to safely auto-generate the next one only exist for the first two migrations in the project's history — everything since has no corresponding snapshot. The next auto-generated migration has no reliable baseline to diff against. Confirmed as a real, currently-open state, not a stale or exaggerated concern — verify the exact file counts yourself before generating a migration if this matters to your change.</p></div>
+
+      <div class="callout bug"><div class="callout-title">No shared, typed event-payload contracts exist anywhere</div><p>This is the single root cause behind several of the most serious defects found across this entire documentation project. Every consumer re-declares its own guess at a payload shape and force-casts into it with no real validation. See <a href="#platform/dev/event-consumers">Adding an Event Consumer Safely</a> for the concrete, actionable fix — it isn't a documented convention today, it's a gap.</p></div>
+
+      <div class="callout review"><div class="callout-title">The permission-drift pattern has no automated guard</div><p>A past cleanup pass already found and removed several fully-dead permission constants, and the project's own architecture notes explicitly acknowledge there's still no automated check preventing new drift from recurring. This single gap is the direct cause of a role/permission mismatch found in nearly every business module documented on this site.</p></div>
+
+      <div class="callout review"><div class="callout-title">Local-dev bootstrap sequence is now documented, but still fully manual</div><p>The Docker compose file still only brings up infrastructure (database, message queue, object storage, search, observability stack) — none of the actual application services or frontends run inside it, and there's no single script that ties starting services, running migrations, and creating the first tenant together. What's changed: the manual sequence itself — migrate, bootstrap the first <code>PLATFORM_OPERATOR</code>, provision the first tenant — is now written down in one place. See <a href="#platform/dev/environment-setup">Environment Setup &amp; Bootstrapping</a>. This matches a related gap already found independently in the Super Admin / Tenants module.</p></div>
+
+      <div class="callout note"><div class="callout-title">No root README, CONTRIBUTING guide, or architecture-decision-record directory</div><p>Real architecture documentation exists and is candid about known issues — including this exact permission-drift pattern — but it lives in a planning-documents folder that isn't linked from anywhere a new engineer would naturally start looking, and there's no top-level onboarding document at all.</p></div>
+
+      <div class="callout note"><div class="callout-title">A stale environment-variable example and an unused API gateway</div><p>The example environment file lists the wrong default port for notification-service (it actually documents purchase-service's port under the wrong name). Separately, a real, working API gateway exists in the codebase but the main web application never actually routes through it — every service is called directly instead, a fact already noted independently across several business-module audits on this site.</p></div>
+
+      <div class="callout ok"><div class="callout-title">What's genuinely solid</div><p>The mandatory multi-tenant column convention (tenant ID, audit columns, optimistic-lock version) is real, documented, and followed consistently across the schema. The CI pipeline itself is thorough — coverage gating, static analysis, container scanning, and secret scanning are all real and wired in, not decorative. And the report registry — mentioned throughout this project as the one place with zero drift between what's declared and what's implemented — remains a genuine model for how the rest of the codebase's "two things that must stay in sync" pairs could work.</p></div>
+
+      <div class="pager">
+        <a href="#platform/dev/testing-ci"><div class="pg-label">Back</div><div class="pg-title">← Testing &amp; CI</div></a>
+        <span></span>
+      </div>
+    </article>
+
+  </main>
+
+  <aside class="toc">
+    <div class="toc-title">On this page</div>
+    <nav id="tocNav"></nav>
+  </aside>
+</div>
+
+<script src="/shared/docs-shell.js"></script>
+</body>
+</html>
