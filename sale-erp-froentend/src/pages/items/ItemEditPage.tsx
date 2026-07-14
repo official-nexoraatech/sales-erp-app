@@ -13,7 +13,12 @@ export const ItemEditPage: React.FC = () => {
   const id = Number(useParams<{ id: string }>().id);
   const item = useQuery({ queryKey: ['item', id], queryFn: () => itemApi.getById(id), enabled: id > 0 });
   const mutation = useMutation({
-    mutationFn: (payload: any) => itemApi.update(id, payload),
+    mutationFn: async ({ payload, imageFile }: { payload: any; imageFile: File | null }) => {
+      await itemApi.update(id, payload);
+      if (imageFile) {
+        await itemApi.uploadLogo(id, imageFile);
+      }
+    },
     onSuccess: async () => {
       toast.success('Item updated successfully');
       await Promise.all([
@@ -27,5 +32,5 @@ export const ItemEditPage: React.FC = () => {
     },
   });
   if (item.isLoading) return <Loader />;
-  return <div className="space-y-5"><div className="text-sm text-gray-500">Home &gt; Items &gt; Item List &gt; Edit Item</div><ItemForm initial={item.data?.data} submitText="Update" loading={mutation.isPending} validationErrors={getValidationErrors(mutation.error)} onFieldChange={mutation.reset} onSubmit={(payload) => mutation.mutate(payload)} onCancel={() => navigate('/items')} /></div>;
+  return <div className="space-y-5"><div className="text-sm text-gray-500">Home &gt; Items &gt; Item List &gt; Edit Item</div><ItemForm initial={item.data?.data} submitText="Update" loading={mutation.isPending} validationErrors={getValidationErrors(mutation.error)} onFieldChange={mutation.reset} onSubmit={(payload, imageFile) => mutation.mutate({ payload, imageFile })} onCancel={() => navigate('/items')} /></div>;
 };

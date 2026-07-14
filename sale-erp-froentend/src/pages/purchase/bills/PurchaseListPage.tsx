@@ -19,9 +19,11 @@ import { formatDate } from '../../../utils/formatDate';
 import { downloadCsv, downloadExcel, printTable } from '../../../utils/tableExport';
 import { PERMISSIONS } from '../../../auth/permissions';
 
-const exportColumns = ['Purchase Code', 'Date', 'Days', 'Supplier', 'Total', 'Balance', 'Status'];
+const exportColumns = ['Purchase Code', 'Date', 'Days', 'Supplier', 'Qty', 'Total', 'Balance', 'Status'];
 const daysSince = (date: string) => Math.max(0, Math.ceil((Date.now() - new Date(date).getTime()) / 86400000));
 const purchaseCode = (purchase: PurchaseListItem) => purchase.purchaseNo || purchase.purchaseCode || `PB/${purchase.purchaseId}`;
+const statusLabel = (status?: string) => status === 'CREATED' ? 'Created' : status === 'ACTIVE' ? 'Partially Paid' : status === 'PAID' ? 'Paid' : status === 'CANCELLED' ? 'Cancelled' : 'Paid';
+const statusBadgeClass = (status?: string) => status === 'CREATED' ? 'bg-gray-100 text-gray-700' : status === 'ACTIVE' ? 'bg-amber-100 text-amber-700' : status === 'CANCELLED' ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700';
 
 interface Props { mode?: 'bill' | 'order' }
 
@@ -45,8 +47,15 @@ export const PurchaseListPage: React.FC<Props> = ({ mode = 'bill' }) => {
 
   const suppliers = useQuery({ queryKey: ['purchase-suppliers'], queryFn: () => supplierApi.getAll({ page: 0, size: 100, search: '' }) });
   const purchases = useQuery({
-    queryKey: ['purchases', page, pageSize, debouncedSearch, fromDate, toDate],
-    queryFn: () => purchaseApi.getAll({ page, size: pageSize, search: debouncedSearch, fromDate: fromDate || undefined, toDate: toDate || undefined }),
+    queryKey: ['purchases', mode, page, pageSize, debouncedSearch, fromDate, toDate],
+    queryFn: () => purchaseApi.getAll({
+      page,
+      size: pageSize,
+      search: debouncedSearch,
+      fromDate: fromDate || undefined,
+      toDate: toDate || undefined,
+      status: isOrder ? 'ACTIVE,PAID' : 'CREATED',
+    }),
   });
 
   const cancel = useMutation({
@@ -79,9 +88,10 @@ export const PurchaseListPage: React.FC<Props> = ({ mode = 'bill' }) => {
     purchase.purchaseDate,
     daysSince(purchase.purchaseDate),
     purchase.supplierName,
+    purchase.totalQuantity ?? 0,
     purchase.grandTotal,
     purchase.dueAmount || 0,
-    purchase.status || ((purchase.dueAmount || 0) <= 0 ? 'PAID' : 'DUE'),
+    statusLabel(purchase.status),
   ]);
 
   const download = (extension: 'csv' | 'xls') => {
@@ -173,7 +183,7 @@ export const PurchaseListPage: React.FC<Props> = ({ mode = 'bill' }) => {
               <thead className="bg-gray-50">
                 <tr>
                   {canDelete && <th className="border p-3"><input type="checkbox" checked={allSelected} onChange={() => setSelectedIds(allSelected ? [] : rows.map((purchase) => purchase.purchaseId))} /></th>}
-                  {(isOrder ? ['Order ID', 'Date', 'Due Date', 'Supplier', 'Total', 'Balance', 'Status', 'Created by', 'Created at', 'Action'] : ['Purchase Code', 'Date', 'Days', 'Supplier', 'Total', 'Balance', 'Status', 'Created by', 'Created at', 'Action']).map((heading) => <th key={heading} className="border p-3 text-left">{heading}</th>)}
+                  {(isOrder ? ['Order ID', 'Date', 'Due Date', 'Supplier', 'Qty', 'Total', 'Balance', 'Status', 'Created by', 'Created at', 'Action'] : ['Purchase Code', 'Date', 'Days', 'Supplier', 'Qty', 'Total', 'Balance', 'Status', 'Created by', 'Created at', 'Action']).map((heading) => <th key={heading} className="border p-3 text-left">{heading}</th>)}
                 </tr>
               </thead>
               <tbody>
@@ -184,9 +194,10 @@ export const PurchaseListPage: React.FC<Props> = ({ mode = 'bill' }) => {
                     <td className="border p-3">{formatDate(purchase.purchaseDate)}</td>
                     <td className="border p-3">{isOrder ? formatDate(purchase.purchaseDate) : daysSince(purchase.purchaseDate)}</td>
                     <td className="border p-3">{purchase.supplierName}</td>
+                    <td className="border p-3">{purchase.totalQuantity ?? '-'}</td>
                     <td className="border p-3 font-semibold text-green-600">{formatCurrency(purchase.grandTotal)}</td>
                     <td className="border p-3">{formatCurrency(purchase.dueAmount || 0)}</td>
-                    <td className="border p-3"><span className={`rounded-full px-3 py-1 text-xs font-semibold ${isOrder ? 'bg-amber-100 text-amber-700' : (purchase.dueAmount || 0) <= 0 ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>{isOrder ? 'PENDING' : purchase.status || ((purchase.dueAmount || 0) <= 0 ? 'PAID' : 'DUE')}</span></td>
+                    <td className="border p-3"><span className={`rounded-full px-3 py-1 text-xs font-semibold ${statusBadgeClass(purchase.status)}`}>{statusLabel(purchase.status)}</span></td>
                     <td className="border p-3">{user?.userName || 'admin'}</td>
                     <td className="border p-3">{formatDate(purchase.purchaseDate)}</td>
                     <td className="border p-3">
@@ -226,7 +237,7 @@ export const PurchaseListPage: React.FC<Props> = ({ mode = 'bill' }) => {
                       </div>
                     </td>
                   </tr>
-                )) : <tr><td colSpan={11} className="bg-gray-50 p-5 text-center">No data available in table</td></tr>}
+                )) : <tr><td colSpan={12} className="bg-gray-50 p-5 text-center">No data available in table</td></tr>}
               </tbody>
             </table>
           )}

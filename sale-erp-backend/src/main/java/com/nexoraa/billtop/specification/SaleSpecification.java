@@ -33,6 +33,15 @@ public final class SaleSpecification {
         return (root, query, criteriaBuilder) -> criteriaBuilder.equal(root.get("organization").get("id"), organizationId);
     }
 
+    public static Specification<Sale> statusIn(List<String> statuses) {
+        return (root, query, criteriaBuilder) -> {
+            if (statuses == null || statuses.isEmpty()) {
+                return criteriaBuilder.conjunction();
+            }
+            return root.get("status").in(statuses);
+        };
+    }
+
     public static Specification<Sale> search(String search) {
         return (root, query, criteriaBuilder) -> {
             if (!StringUtils.hasText(search)) {

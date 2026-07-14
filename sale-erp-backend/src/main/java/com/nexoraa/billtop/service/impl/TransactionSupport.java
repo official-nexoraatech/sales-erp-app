@@ -42,6 +42,8 @@ class TransactionSupport {
 
     static final String CUSTOMER = "CUSTOMER";
     static final String SUPPLIER = "SUPPLIER";
+    static final String STATUS_PENDING = "PENDING";
+    static final String STATUS_CREATED = "CREATED";
     static final String STATUS_ACTIVE = "ACTIVE";
     static final String STATUS_PAID = "PAID";
     static final String STATUS_CANCELLED = "CANCELLED";

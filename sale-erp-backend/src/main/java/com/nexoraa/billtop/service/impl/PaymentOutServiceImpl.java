@@ -20,6 +20,7 @@ import com.nexoraa.billtop.repository.PurchasePaymentRepository;
 import com.nexoraa.billtop.repository.PurchaseRepository;
 import com.nexoraa.billtop.security.CurrentOrganizationService;
 import com.nexoraa.billtop.service.PaymentOutService;
+import com.nexoraa.billtop.service.PurchaseService;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
@@ -40,6 +41,7 @@ public class PaymentOutServiceImpl implements PaymentOutService {
     private final TransactionSupport support;
     private final FinanceSupport financeSupport;
     private final CurrentOrganizationService currentOrganizationService;
+    private final PurchaseService purchaseService;
 
     public PaymentOutServiceImpl(
             PaymentRepository paymentRepository,
@@ -47,7 +49,8 @@ public class PaymentOutServiceImpl implements PaymentOutService {
             PurchasePaymentRepository purchasePaymentRepository,
             TransactionSupport support,
             FinanceSupport financeSupport,
-            CurrentOrganizationService currentOrganizationService
+            CurrentOrganizationService currentOrganizationService,
+            PurchaseService purchaseService
     ) {
         this.paymentRepository = paymentRepository;
         this.purchaseRepository = purchaseRepository;
@@ -55,6 +58,7 @@ public class PaymentOutServiceImpl implements PaymentOutService {
         this.support = support;
         this.financeSupport = financeSupport;
         this.currentOrganizationService = currentOrganizationService;
+        this.purchaseService = purchaseService;
     }
 
     @Override
@@ -198,6 +202,9 @@ public class PaymentOutServiceImpl implements PaymentOutService {
             }
             if (support.isCancelled(purchase.getStatus())) {
                 throw new BadRequestException(ErrorMessage.PURCHASE_ALREADY_CANCELLED, "PURCHASE_ALREADY_CANCELLED");
+            }
+            if (TransactionSupport.STATUS_CREATED.equals(purchase.getStatus())) {
+                purchaseService.commitPurchaseStock(purchase.getId());
             }
             BigDecimal dueAmount = support.defaultZero(purchase.getDueAmount());
             if (dueAmount.compareTo(TransactionSupport.ZERO) <= 0) {

@@ -2,6 +2,7 @@ package com.nexoraa.billtop.service.impl;
 
 import com.nexoraa.billtop.constants.ErrorMessage;
 import com.nexoraa.billtop.dto.PageResponseDto;
+import com.nexoraa.billtop.dto.common.FileUploadResponseDto;
 import com.nexoraa.billtop.dto.item.ItemCreateResponseDto;
 import com.nexoraa.billtop.dto.item.ItemDetailResponseDto;
 import com.nexoraa.billtop.dto.item.ItemListResponseDto;
@@ -31,6 +32,7 @@ import com.nexoraa.billtop.repository.SubCategoryRepository;
 import com.nexoraa.billtop.repository.UnitRepository;
 import com.nexoraa.billtop.repository.WarehouseRepository;
 import com.nexoraa.billtop.security.CurrentOrganizationService;
+import com.nexoraa.billtop.service.FileStorageService;
 import com.nexoraa.billtop.service.ItemStockStatusService;
 import com.nexoraa.billtop.service.ItemService;
 import com.nexoraa.billtop.specification.ItemSpecification;
@@ -40,6 +42,7 @@ import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -62,6 +65,7 @@ public class ItemServiceImpl implements ItemService {
     private final ItemMapper itemMapper;
     private final ItemStockStatusService itemStockStatusService;
     private final CurrentOrganizationService currentOrganizationService;
+    private final FileStorageService fileStorageService;
 
     public ItemServiceImpl(
             ItemRepository itemRepository,
@@ -75,7 +79,8 @@ public class ItemServiceImpl implements ItemService {
             StockRepository stockRepository,
             ItemMapper itemMapper,
             ItemStockStatusService itemStockStatusService,
-            CurrentOrganizationService currentOrganizationService
+            CurrentOrganizationService currentOrganizationService,
+            FileStorageService fileStorageService
     ) {
         this.itemRepository = itemRepository;
         this.categoryRepository = categoryRepository;
@@ -89,6 +94,7 @@ public class ItemServiceImpl implements ItemService {
         this.itemMapper = itemMapper;
         this.itemStockStatusService = itemStockStatusService;
         this.currentOrganizationService = currentOrganizationService;
+        this.fileStorageService = fileStorageService;
     }
 
     @Override
@@ -118,6 +124,19 @@ public class ItemServiceImpl implements ItemService {
                 .id(savedItem.getId())
                 .itemCode(savedItem.getItemCode())
                 .build();
+    }
+
+    @Override
+    @Transactional
+    public FileUploadResponseDto uploadItemLogo(Long id, MultipartFile file) {
+        Item item = getActiveItem(id);
+        FileUploadResponseDto upload = fileStorageService.uploadImage(
+                file,
+                "organizations/" + item.getOrganization().getId() + "/items/" + item.getId()
+        );
+        item.setImageUrl(upload.getObjectUrl());
+        itemRepository.save(item);
+        return upload;
     }
 
     @Override

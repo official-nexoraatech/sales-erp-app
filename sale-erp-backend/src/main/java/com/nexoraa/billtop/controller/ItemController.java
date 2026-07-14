@@ -3,6 +3,8 @@ package com.nexoraa.billtop.controller;
 import com.nexoraa.billtop.constants.ResponseMessage;
 import com.nexoraa.billtop.dto.ApiResponseDto;
 import com.nexoraa.billtop.dto.PageResponseDto;
+import com.nexoraa.billtop.dto.common.FileUploadResponseDto;
+import com.nexoraa.billtop.dto.item.ItemCreateResponseDto;
 import com.nexoraa.billtop.dto.item.ItemDetailResponseDto;
 import com.nexoraa.billtop.dto.item.ItemListResponseDto;
 import com.nexoraa.billtop.dto.item.ItemRequestDto;
@@ -64,11 +66,21 @@ public class ItemController {
     }
 
     @PostMapping
-    public ResponseEntity<ApiResponseDto<Void>> createItem(
+    public ResponseEntity<ApiResponseDto<ItemCreateResponseDto>> createItem(
             @Valid @RequestBody ItemRequestDto request
     ) {
-        itemService.createItem(request);
-        return ResponseEntity.ok(ApiResponseDto.success(ResponseMessage.ITEM_CREATED));
+        return ResponseEntity.ok(ApiResponseDto.success(ResponseMessage.ITEM_CREATED, itemService.createItem(request)));
+    }
+
+    @PostMapping(value = "/{id}/logo", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<ApiResponseDto<FileUploadResponseDto>> uploadItemLogo(
+            @PathVariable @Positive Long id,
+            @RequestParam MultipartFile file
+    ) {
+        return ResponseEntity.ok(ApiResponseDto.success(
+                ResponseMessage.ITEM_LOGO_UPLOADED,
+                itemService.uploadItemLogo(id, file)
+        ));
     }
 
     @GetMapping("/{id}")

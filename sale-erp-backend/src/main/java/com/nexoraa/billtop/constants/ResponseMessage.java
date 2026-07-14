@@ -28,6 +28,7 @@ public class ResponseMessage {
     public static final String ITEMS_RETRIEVED = "Items retrieved successfully";
     public static final String ITEM_RETRIEVED = "Item retrieved successfully";
     public static final String ITEM_STOCK_RETRIEVED = "Item stock retrieved successfully";
+    public static final String ITEM_LOGO_UPLOADED = "Item image uploaded successfully";
 
     // Customer Messages
     public static final String CUSTOMER_CREATED = "Customer created successfully";

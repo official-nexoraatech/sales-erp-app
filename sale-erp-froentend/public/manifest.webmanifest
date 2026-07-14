@@ -1,0 +1,19 @@
+{
+  "name": "Texmintra",
+  "short_name": "Texmintra",
+  "description": "Retail ERP for textile trade",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#0f766e",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "/texmintra-favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

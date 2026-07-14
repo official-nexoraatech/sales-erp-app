@@ -3,11 +3,12 @@ import { CirclePlus, Trash2 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { carrierApi, itemApi, paymentMethodApi, supplierApi, warehouseApi } from '../../../api/endpoints';
+import { carrierApi, itemApi, paymentMethodApi, purchaseApi, supplierApi, warehouseApi } from '../../../api/endpoints';
 import type { PurchaseRequest } from '../../../api/endpoints';
 import { CountryStateSelect } from '../../../components/form/CountryStateSelect';
 import { Button } from '../../../components/ui/Button';
 import { NumericInput } from '../../../components/ui/NumericInput';
+import { BillSelector } from './BillSelector';
 
 interface Line {
   itemId: number;
@@ -33,10 +34,13 @@ interface PaymentLine extends PurchasePaymentLine {
 
 export type PurchaseSubmitPayload = PurchaseRequest & {
   payments?: PurchasePaymentLine[];
+  loadedPurchaseId?: number;
+  requestCancel?: boolean;
+  statusOverride?: string;
 };
 
 interface Props {
-  initial?: PurchaseRequest & { lines?: Line[] };
+  initial?: PurchaseRequest & { lines?: Line[]; purchaseNo?: string; status?: string };
   submitText: string;
   loading: boolean;
   onSubmit: (payload: PurchaseSubmitPayload) => void;
@@ -63,22 +67,56 @@ export const PurchaseForm: React.FC<Props> = ({ initial, submitText, loading, on
   const [payments, setPayments] = useState<PaymentLine[]>([{ id: 1, amount: 0, paymentMethodId: 0, paymentNote: '' }]);
   const [nextPaymentId, setNextPaymentId] = useState(2);
   const [lines, setLines] = useState<Line[]>(initial?.lines || []);
+  const [selectedBillId, setSelectedBillId] = useState(0);
+  const [pendingBillId, setPendingBillId] = useState(0);
+  const [orderStatus, setOrderStatus] = useState(initial?.status || '');
+  const showBillPicker = isOrder && !initial;
 
   const suppliers = useQuery({ queryKey: ['purchase-form-suppliers'], queryFn: () => supplierApi.getAll({ page: 0, size: 100, search: '' }) });
   const warehouses = useQuery({ queryKey: ['purchase-form-warehouses'], queryFn: () => warehouseApi.getAll() });
   const carriers = useQuery({ queryKey: ['purchase-form-carriers'], queryFn: () => carrierApi.getAll({ page: 0, size: 100, search: '' }), retry: false });
   const items = useQuery({ queryKey: ['purchase-form-items'], queryFn: () => itemApi.getAll({ page: 0, size: 100, search: '' }) });
   const paymentMethods = useQuery({ queryKey: ['purchase-form-payment-methods'], queryFn: () => paymentMethodApi.getAll('') });
+  const selectedBill = useQuery({
+    queryKey: ['purchase-form-selected-bill', selectedBillId],
+    queryFn: () => purchaseApi.getById(selectedBillId),
+    enabled: selectedBillId > 0,
+  });
   const warehouseRows = warehouses.data?.data || [];
   const selectedPaymentMethodIds = new Set(payments.map((payment) => payment.paymentMethodId).filter(Boolean));
   const paymentMethodRows = (paymentMethods.data?.data?.content || [])
     .filter((method) => method.status === 'ACTIVE' || selectedPaymentMethodIds.has(method.id));
+  const loadedBill = selectedBill.data?.data;
+  const currentStatus = loadedBill?.status || initial?.status || '';
 
   useEffect(() => {
     if (!warehouseId && warehouseRows.length) {
       setWarehouseId(warehouseRows[0].id);
     }
   }, [warehouseId, warehouseRows]);
+
+  useEffect(() => {
+    if (!loadedBill) return;
+    setSupplierId(loadedBill.supplier.id);
+    setPurchaseDate(loadedBill.purchaseDate);
+    setReferenceNo(loadedBill.referenceNo || '');
+    setWarehouseId(loadedBill.warehouse.id);
+    setCarrierId(loadedBill.carrier?.id || 0);
+    setNotes(loadedBill.notes || '');
+    setOrderStatus(loadedBill.status || '');
+    setLines(loadedBill.items.map((item) => ({
+      itemId: item.itemId,
+      itemName: item.itemName,
+      batchNo: item.batchNo || '',
+      manufacturingDate: item.manufacturingDate || today,
+      expiryDate: item.expiryDate || today,
+      quantity: item.qty || item.quantity || 1,
+      unitPrice: item.unitPrice,
+      discountPercent: item.discountPercent || 0,
+      taxPercent: item.taxPercent || 0,
+    })));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadedBill]);
 
   const addItem = () => {
     const item = items.data?.data?.content.find((entry) => entry.id === selectedItem);
@@ -99,6 +137,14 @@ export const PurchaseForm: React.FC<Props> = ({ initial, submitText, loading, on
     }]);
   };
 
+  const loadSelectedBill = () => {
+    if (!pendingBillId) {
+      toast.error('Select a bill to load.');
+      return;
+    }
+    setSelectedBillId(pendingBillId);
+  };
+
   const updateNumber = (index: number, field: keyof Pick<Line, 'quantity' | 'unitPrice' | 'discountPercent' | 'taxPercent'>, value: number) => {
     setLines((current) => current.map((line, i) => i === index ? { ...line, [field]: value } : line));
   };
@@ -111,6 +157,21 @@ export const PurchaseForm: React.FC<Props> = ({ initial, submitText, loading, on
   const totalQuantity = lines.reduce((sum, line) => sum + line.quantity, 0);
 
   const submit = () => {
+    if (isOrder && currentStatus && currentStatus !== 'CANCELLED' && orderStatus === 'CANCELLED') {
+      onSubmit({
+        supplierId,
+        purchaseDate,
+        referenceNo,
+        warehouseId,
+        carrierId,
+        stateId,
+        notes,
+        items: [],
+        loadedPurchaseId: selectedBillId || undefined,
+        requestCancel: true,
+      });
+      return;
+    }
     if (!supplierId || !warehouseId || !lines.length || lines.some((line) => line.quantity <= 0)) {
       toast.error('Select supplier, warehouse, and at least one valid item.');
       return;
@@ -158,6 +219,8 @@ export const PurchaseForm: React.FC<Props> = ({ initial, submitText, loading, on
         taxPercent,
       })),
       payments: paymentLines,
+      loadedPurchaseId: selectedBillId || undefined,
+      statusOverride: isOrder && currentStatus && orderStatus !== currentStatus ? orderStatus : undefined,
     });
   };
   const addPaymentLine = () => {
@@ -188,15 +251,35 @@ export const PurchaseForm: React.FC<Props> = ({ initial, submitText, loading, on
         <label className="text-sm text-gray-600">Date
           <input type="date" className={`${inputClass} mt-1`} value={purchaseDate} onChange={(event) => setPurchaseDate(event.target.value)} />
         </label>
-        <label className="text-sm text-gray-600">{isOrder ? 'Due Date' : 'Purchase Code'}
-          {isOrder ? <input type="date" className={`${inputClass} mt-1`} defaultValue={purchaseDate} /> : <div className="mt-1 flex"><input className={`${inputClass} rounded-r-none`} value="PB/" readOnly /><span className="flex h-10 items-center border-y border-gray-300 px-3">#</span><input className={`${inputClass} rounded-l-none`} value="3" readOnly /></div>}
+        <label className="text-sm text-gray-600">{isOrder ? 'Shipping Carrier' : 'Purchase Code'}
+          {isOrder ? (
+            <select className={`${inputClass} mt-1`} value={carrierId} onChange={(event) => setCarrierId(Number(event.target.value))}>
+              <option value={0}>Choose one thing</option>
+              {carriers.data?.data?.content.map((carrier) => <option key={carrier.id} value={carrier.id}>{carrier.name}</option>)}
+            </select>
+          ) : <div className="mt-1 flex"><input className={`${inputClass} rounded-r-none`} value="PB/" readOnly /><span className="flex h-10 items-center border-y border-gray-300 px-3">#</span><input className={`${inputClass} rounded-l-none`} value="3" readOnly /></div>}
         </label>
         <label className="text-sm text-gray-600">{isOrder ? 'Order ID' : 'Ref No.'}
-          {isOrder ? <div className="mt-1 flex"><input className={`${inputClass} rounded-r-none`} value="PO/" readOnly /><span className="flex h-10 items-center border-y border-gray-300 px-3">#</span><input className={`${inputClass} rounded-l-none`} value="3" readOnly /></div> : <input className={`${inputClass} mt-1`} placeholder="(Optional)" value={referenceNo} onChange={(event) => setReferenceNo(event.target.value)} />}
+          {isOrder ? <input className={`${inputClass} mt-1`} value={loadedBill?.purchaseNo || initial?.purchaseNo || 'New (unsaved)'} readOnly /> : <input className={`${inputClass} mt-1`} placeholder="(Optional)" value={referenceNo} onChange={(event) => setReferenceNo(event.target.value)} />}
         </label>
         <CountryStateSelect stateId={stateId} onStateChange={setStateId} className={inputClass} />
         <label className="text-sm text-gray-600">{isOrder ? 'Order Status' : 'Shipping Carrier'}
-          {isOrder ? <select className={`${inputClass} mt-1`} defaultValue="PENDING"><option value="PENDING">Pending</option><option value="APPROVED">Approved</option><option value="CANCELLED">Cancelled</option></select> : <select className={`${inputClass} mt-1`} value={carrierId} onChange={(event) => setCarrierId(Number(event.target.value))}><option value={0}>Choose one thing</option>{carriers.data?.data?.content.map((carrier) => <option key={carrier.id} value={carrier.id}>{carrier.name}</option>)}</select>}
+          {isOrder ? (
+            <select
+              className={`${inputClass} mt-1`}
+              value={orderStatus}
+              //disabled={!currentStatus || currentStatus === 'CANCELLED'}
+              onChange={(event) => setOrderStatus(event.target.value)}
+            >
+              
+              <option value="CREATED">Created</option>
+              <option value="ACTIVE">Conform</option>
+              <option value="PAID">Paid</option>
+              <option value="CANCELLED">Cancelled</option>
+            </select>
+          ) : (
+            <select className={`${inputClass} mt-1`} value={carrierId} onChange={(event) => setCarrierId(Number(event.target.value))}><option value={0}>Choose one thing</option>{carriers.data?.data?.content.map((carrier) => <option key={carrier.id} value={carrier.id}>{carrier.name}</option>)}</select>
+          )}
         </label>
       </div>
 
@@ -207,18 +290,37 @@ export const PurchaseForm: React.FC<Props> = ({ initial, submitText, loading, on
             {warehouseRows.map((warehouse) => <option key={warehouse.id} value={warehouse.id}>{warehouse.name}</option>)}
           </select>
         </label>
-        <label className="text-sm text-gray-600">Enter Item Name
-          <div className="mt-1 flex">
-            <select className={`${inputClass} rounded-r-none`} value={selectedItem} onChange={(event) => setSelectedItem(Number(event.target.value))}>
-              <option value={0}>Search Item/Brand Name</option>
-              {items.data?.data?.content.map((item) => <option key={item.id} value={item.id}>{item.itemName}</option>)}
-            </select>
-            <button type="button" onClick={() => navigate('/items/create')} className="flex h-10 w-11 items-center justify-center rounded-r border border-l-0 border-blue-400 text-blue-500" title="Create item" aria-label="Create item"><CirclePlus size={18} /></button>
-          </div>
-        </label>
-        <label className="text-sm text-gray-600">Purchased Items
-          <button type="button" onClick={addItem} className={loadButtonClass}>Load</button>
-        </label>
+        {showBillPicker ? (
+          <BillSelector
+            value={pendingBillId}
+            onChange={setPendingBillId}
+            onCreate={() => navigate('/purchase/bills/create')}
+            supplierId={supplierId}
+            purchaseDate={purchaseDate}
+            stateId={stateId}
+          />
+        ) : (
+          <label className="text-sm text-gray-600">Enter Item Name
+            <div className="mt-1 flex">
+              <select className={`${inputClass} rounded-r-none`} value={selectedItem} onChange={(event) => setSelectedItem(Number(event.target.value))}>
+                <option value={0}>Search Item/Brand Name</option>
+                {items.data?.data?.content.map((item) => <option key={item.id} value={item.id}>{item.itemName}</option>)}
+              </select>
+              <button type="button" onClick={() => navigate('/items/create')} className="flex h-10 w-11 items-center justify-center rounded-r border border-l-0 border-blue-400 text-blue-500" title="Create item" aria-label="Create item"><CirclePlus size={18} /></button>
+            </div>
+          </label>
+        )}
+        {showBillPicker ? (
+          <label className="text-sm text-gray-600">Bill
+            <button type="button" onClick={loadSelectedBill} disabled={selectedBill.isFetching} className={loadButtonClass}>
+              {selectedBill.isFetching ? 'Loading...' : 'Load'}
+            </button>
+          </label>
+        ) : (
+          <label className="text-sm text-gray-600">Purchased Items
+            <button type="button" onClick={addItem} className={loadButtonClass}>Load</button>
+          </label>
+        )}
       </div>
 
       <div className="overflow-x-auto px-5">
@@ -258,24 +360,28 @@ export const PurchaseForm: React.FC<Props> = ({ initial, submitText, loading, on
         </div>
       </div>
 
-      <h2 className="border-y px-5 py-4 text-lg font-semibold">Payment</h2>
-      <div className="space-y-5 p-5">
-        {payments.map((payment, index) => (
-          <div key={payment.id} className="grid grid-cols-1 gap-5 md:grid-cols-2">
-            <label className="text-sm text-gray-600">#{index + 1} Amount<div className="mt-1 flex"><NumericInput min={0} className={`${inputClass} rounded-r-none text-right`} value={payment.amount || ''} onValueChange={(value) => updatePaymentLine(payment.id, 'amount', value)} /><span className="flex h-10 w-10 items-center justify-center rounded-r border border-l-0 border-gray-300">Rs.</span></div></label>
-            <label className="text-sm text-gray-600">Payment Type<div className="mt-1 flex"><select className={`${inputClass} rounded-r-none`} value={payment.paymentMethodId} disabled={paymentMethods.isLoading || paymentMethods.isError} onChange={(event) => updatePaymentLine(payment.id, 'paymentMethodId', Number(event.target.value))}><option value={0}>{paymentMethods.isLoading ? 'Loading payment types...' : paymentMethods.isError ? 'Failed to load payment types' : 'Choose one thing'}</option>{paymentMethodRows.map((method) => <option key={method.id} value={method.id}>{method.name}</option>)}</select><button type="button" title="Add payment type" aria-label="Add payment type" onClick={addPaymentLine} className="flex h-10 w-9 items-center justify-center rounded-r border border-l-0 border-gray-300 text-blue-500"><CirclePlus size={15} /></button></div></label>
-            <label className="text-sm text-gray-600">Payment Note<textarea className="mt-1 h-20 w-full rounded border border-gray-300 p-3" value={payment.paymentNote} onChange={(event) => updatePaymentLine(payment.id, 'paymentNote', event.target.value)} /></label>
-            {payments.length > 1 && (
-              <div className="flex items-end">
-                <button type="button" onClick={() => removePaymentLine(payment.id)} className="inline-flex h-10 items-center gap-2 rounded border border-red-200 px-3 text-sm text-red-600 hover:bg-red-50">
-                  <Trash2 size={15} /> Remove
-                </button>
+      {isOrder && (
+        <>
+          <h2 className="border-y px-5 py-4 text-lg font-semibold">Payment</h2>
+          <div className="space-y-5 p-5">
+            {payments.map((payment, index) => (
+              <div key={payment.id} className="grid grid-cols-1 gap-5 md:grid-cols-2">
+                <label className="text-sm text-gray-600">#{index + 1} Amount<div className="mt-1 flex"><NumericInput min={0} className={`${inputClass} rounded-r-none text-right`} value={payment.amount || ''} onValueChange={(value) => updatePaymentLine(payment.id, 'amount', value)} /><span className="flex h-10 w-10 items-center justify-center rounded-r border border-l-0 border-gray-300">Rs.</span></div></label>
+                <label className="text-sm text-gray-600">Payment Type<div className="mt-1 flex"><select className={`${inputClass} rounded-r-none`} value={payment.paymentMethodId} disabled={paymentMethods.isLoading || paymentMethods.isError} onChange={(event) => updatePaymentLine(payment.id, 'paymentMethodId', Number(event.target.value))}><option value={0}>{paymentMethods.isLoading ? 'Loading payment types...' : paymentMethods.isError ? 'Failed to load payment types' : 'Choose one thing'}</option>{paymentMethodRows.map((method) => <option key={method.id} value={method.id}>{method.name}</option>)}</select><button type="button" title="Add payment type" aria-label="Add payment type" onClick={addPaymentLine} className="flex h-10 w-9 items-center justify-center rounded-r border border-l-0 border-gray-300 text-blue-500"><CirclePlus size={15} /></button></div></label>
+                <label className="text-sm text-gray-600">Payment Note<textarea className="mt-1 h-20 w-full rounded border border-gray-300 p-3" value={payment.paymentNote} onChange={(event) => updatePaymentLine(payment.id, 'paymentNote', event.target.value)} /></label>
+                {payments.length > 1 && (
+                  <div className="flex items-end">
+                    <button type="button" onClick={() => removePaymentLine(payment.id)} className="inline-flex h-10 items-center gap-2 rounded border border-red-200 px-3 text-sm text-red-600 hover:bg-red-50">
+                      <Trash2 size={15} /> Remove
+                    </button>
+                  </div>
+                )}
               </div>
-            )}
+            ))}
           </div>
-        ))}
-      </div>
-      <div className="px-5 pb-5"><button type="button" onClick={addPaymentLine} className="text-sm text-blue-600">+ Add Payment Type</button></div>
+          <div className="px-5 pb-5"><button type="button" onClick={addPaymentLine} className="text-sm text-blue-600">+ Add Payment Type</button></div>
+        </>
+      )}
 
       <div className="flex gap-3 border-t p-5">
         <Button onClick={submit} isLoading={loading}>{submitText}</Button>

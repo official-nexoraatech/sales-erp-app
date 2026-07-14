@@ -147,6 +147,34 @@ const dispatchLanguageChange = (language: AppLanguage) => {
   return true;
 };
 
+// Google's widget re-runs a full-page (re)translate pass every time it receives a
+// 'change' event on the combo, even if the value didn't actually change - that's what
+// shows up to users as repeated flicker/refresh. So we only ever fire the event when
+// the combo isn't already set to the target language.
+const isAlreadyTranslatedTo = (language: AppLanguage) => {
+  const combo = document.querySelector<HTMLSelectElement>('.goog-te-combo');
+  const expectedValue = language === PAGE_LANGUAGE ? '' : language;
+  return Boolean(combo) && combo!.value === expectedValue;
+};
+
+// The combo select is rendered asynchronously by Google's script, so poll briefly for
+// it instead of firing several blind dispatches on a fixed schedule (which was the
+// actual source of the repeated flicker - most of those dispatches landed on an
+// already-translated page and re-triggered translation for nothing). Once the widget
+// is toggled on, Google translates any later-added DOM content on its own.
+const waitForComboAndDispatch = (language: AppLanguage) => {
+  if (isAlreadyTranslatedTo(language)) return;
+
+  let attempts = 0;
+  const maxAttempts = 15;
+  const intervalId = window.setInterval(() => {
+    attempts += 1;
+    if (isAlreadyTranslatedTo(language) || dispatchLanguageChange(language) || attempts >= maxAttempts) {
+      window.clearInterval(intervalId);
+    }
+  }, 300);
+};
+
 const clearTranslationMarkers = () => {
   document.documentElement.classList.remove('translated-ltr', 'translated-rtl');
   document.body.classList.remove('translated-ltr', 'translated-rtl');
@@ -183,12 +211,11 @@ const applyTranslation = async (language: AppLanguage, shouldRepaintOnReset: boo
     return;
   }
 
+  if (isAlreadyTranslatedTo(language)) return;
+
   setTranslateCookie(language);
   await loadGoogleTranslate();
-
-  [0, 250, 750, 1500].forEach((delay) => {
-    window.setTimeout(() => dispatchLanguageChange(language), delay);
-  });
+  waitForComboAndDispatch(language);
 };
 
 export const usePageTranslation = (language: AppLanguage) => {

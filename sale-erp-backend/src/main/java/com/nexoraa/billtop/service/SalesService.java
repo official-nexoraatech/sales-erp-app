@@ -8,6 +8,7 @@ import com.nexoraa.billtop.dto.sales.SalesListResponseDto;
 import com.nexoraa.billtop.dto.sales.SalesRequestDto;
 
 import java.time.LocalDate;
+import java.util.List;
 
 public interface SalesService {
 
@@ -18,7 +19,8 @@ public interface SalesService {
             int size,
             String search,
             LocalDate fromDate,
-            LocalDate toDate
+            LocalDate toDate,
+            List<String> status
     );
 
     SalesDetailResponseDto getSaleById(Long id);
@@ -28,6 +30,8 @@ public interface SalesService {
     void cancelSale(Long id);
 
     void deleteSale(Long id);
+
+    void commitSaleStock(Long id);
 
     SalesInvoiceResponseDto getInvoice(Long id);
 }

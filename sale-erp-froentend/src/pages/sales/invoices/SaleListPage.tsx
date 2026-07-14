@@ -1,12 +1,11 @@
 import React, { useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { Ban, Edit, Eye, FileText, Plus } from 'lucide-react';
+import { Ban, Eye, FileText } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { customerApi, salesApi } from '../../../api/endpoints';
 import type { SaleListItem } from '../../../api/endpoints';
 import { queryClient } from '../../../app/queryClient';
-import { Button } from '../../../components/ui/Button';
 import { Loader } from '../../../components/ui/Loader';
 import { Pagination } from '../../../components/ui/Pagination';
 import { useAuth } from '../../../hooks/useAuth';
@@ -23,8 +22,6 @@ const exportColumns = ['Sale Code', 'Date', 'Customer', 'Total', 'Balance', 'Sta
 export const SaleListPage: React.FC = () => {
   const navigate = useNavigate();
   const { user, hasPermission } = useAuth();
-  const canCreate = hasPermission(PERMISSIONS.SALES_CREATE);
-  const canUpdate = hasPermission(PERMISSIONS.SALES_UPDATE);
   const canDelete = hasPermission(PERMISSIONS.SALES_DELETE);
   const canPrint = hasPermission(PERMISSIONS.SALES_INVOICE_PRINT);
   const { confirmAction, confirmationDialog } = useConfirmation();
@@ -61,7 +58,8 @@ export const SaleListPage: React.FC = () => {
       toast.success(`Invoice ${response.data.invoiceNo} · ${response.data.customerName} · ${formatCurrency(response.data.grandTotal)}`);
     } catch (error: any) { toast.error(error?.message || 'Failed to load invoice'); }
   };
-  const exportRows = () => rows.map((sale) => [sale.invoiceNo, sale.invoiceDate, sale.customerName, sale.grandTotal, sale.dueAmount, sale.dueAmount <= 0 ? 'PAID' : 'DUE']);
+  const statusLabel = (status?: string) => status === 'PENDING' ? 'Pending' : status === 'ACTIVE' ? 'Partially Paid' : status === 'CANCELLED' ? 'Cancelled' : 'Paid';
+  const exportRows = () => rows.map((sale) => [sale.invoiceNo, sale.invoiceDate, sale.customerName, sale.grandTotal, sale.dueAmount, statusLabel(sale.status)]);
   const download = (extension: 'csv' | 'xls') => {
     const separator = extension === 'csv' ? ',' : '\t';
     const content = [exportColumns, ...exportRows()].map((row) => row.map((value) => `"${String(value).replaceAll('"', '""')}"`).join(separator)).join('\n');
@@ -88,7 +86,6 @@ export const SaleListPage: React.FC = () => {
       <div className="overflow-hidden rounded-lg bg-white shadow">
         <div className="flex items-center justify-between border-b px-5 py-4">
           <h1 className="text-xl font-semibold uppercase text-gray-900">Sale List</h1>
-          {canCreate && <Button onClick={() => navigate('/sales/invoices/create')} className="flex items-center gap-2"><Plus size={18} />Create Sale</Button>}
         </div>
 
         <div className="grid grid-cols-1 gap-x-4 gap-y-3 border-b p-5 md:grid-cols-2">
@@ -123,7 +120,7 @@ export const SaleListPage: React.FC = () => {
         <div className="overflow-x-auto px-3 pb-3">
           {isSalesLoading ? <div className="p-10"><Loader /></div> : <table className="w-full text-sm">
             <thead className="bg-gray-50"><tr>{canDelete && <th className="p-3"><input type="checkbox" checked={allSelected} onChange={() => setSelectedIds(allSelected ? [] : rows.map((sale) => sale.saleId))} /></th>}{['Sale Code','Date','Customer','Total','Balance','Status','Created by','Created at','Action'].map((heading) => <th key={heading} className="border-b p-3 text-left">{heading}</th>)}</tr></thead>
-            <tbody>{rows.map((sale: SaleListItem) => <tr key={sale.saleId} className="border-b even:bg-gray-50">{canDelete && <td className="p-3"><input type="checkbox" checked={selectedIds.includes(sale.saleId)} onChange={() => setSelectedIds((current) => current.includes(sale.saleId) ? current.filter((id) => id !== sale.saleId) : [...current, sale.saleId])} /></td>}<td className="p-3 font-semibold">{sale.invoiceNo}</td><td className="p-3">{formatDate(sale.invoiceDate)}</td><td className="p-3">{sale.customerName}</td><td className="p-3 font-semibold text-green-600">{formatCurrency(sale.grandTotal)}</td><td className="p-3">{formatCurrency(sale.dueAmount)}</td><td className="p-3"><span className={`rounded-full px-3 py-1 text-xs font-semibold ${sale.dueAmount <= 0 ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>{sale.dueAmount <= 0 ? 'PAID' : 'DUE'}</span></td><td className="p-3">{user?.userName || 'N/A'}</td><td className="p-3">{formatDate(sale.invoiceDate)}</td><td className="p-3"><div className="flex gap-1"><button title="View sale" onClick={() => navigate(`/sales/invoices/${sale.saleId}`)} className="text-blue-600"><Eye size={17} /></button>{canUpdate && <button title="Edit sale" onClick={() => navigate(`/sales/invoices/${sale.saleId}/edit`)} className="text-orange-600"><Edit size={17} /></button>}{canPrint && <button title="View invoice" onClick={() => invoice(sale.saleId)} className="text-indigo-600"><FileText size={17} /></button>}{canDelete && <button title="Cancel sale" onClick={async () => { if (await confirmAction({ title: 'Cancel Sale', message: 'Cancel this sale?', confirmText: 'Cancel', variant: 'danger' })) cancel.mutate(sale.saleId); }} className="text-red-600"><Ban size={17} /></button>}</div></td></tr>)}</tbody>
+            <tbody>{rows.map((sale: SaleListItem) => <tr key={sale.saleId} className="border-b even:bg-gray-50">{canDelete && <td className="p-3"><input type="checkbox" checked={selectedIds.includes(sale.saleId)} onChange={() => setSelectedIds((current) => current.includes(sale.saleId) ? current.filter((id) => id !== sale.saleId) : [...current, sale.saleId])} /></td>}<td className="p-3 font-semibold">{sale.invoiceNo}</td><td className="p-3">{formatDate(sale.invoiceDate)}</td><td className="p-3">{sale.customerName}</td><td className="p-3 font-semibold text-green-600">{formatCurrency(sale.grandTotal)}</td><td className="p-3">{formatCurrency(sale.dueAmount)}</td><td className="p-3"><span className={`rounded-full px-3 py-1 text-xs font-semibold ${sale.status === 'PAID' ? 'bg-green-100 text-green-700' : sale.status === 'CANCELLED' ? 'bg-red-100 text-red-700' : sale.status === 'PENDING' ? 'bg-gray-100 text-gray-700' : 'bg-amber-100 text-amber-700'}`}>{statusLabel(sale.status)}</span></td><td className="p-3">{user?.userName || 'N/A'}</td><td className="p-3">{formatDate(sale.invoiceDate)}</td><td className="p-3"><div className="flex gap-1"><button title="View sale" onClick={() => navigate(`/sales/invoices/${sale.saleId}`)} className="text-blue-600"><Eye size={17} /></button>{canPrint && <button title="View invoice" onClick={() => invoice(sale.saleId)} className="text-indigo-600"><FileText size={17} /></button>}{canDelete && <button title="Cancel sale" onClick={async () => { if (await confirmAction({ title: 'Cancel Sale', message: 'Cancel this sale?', confirmText: 'Cancel', variant: 'danger' })) cancel.mutate(sale.saleId); }} className="text-red-600"><Ban size={17} /></button>}</div></td></tr>)}</tbody>
           </table>}
         </div>
 

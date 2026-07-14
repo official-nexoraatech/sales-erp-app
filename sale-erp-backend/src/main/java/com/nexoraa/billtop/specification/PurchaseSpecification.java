@@ -33,6 +33,33 @@ public final class PurchaseSpecification {
         return (root, query, criteriaBuilder) -> criteriaBuilder.equal(root.get("organization").get("id"), organizationId);
     }
 
+    public static Specification<Purchase> statusIn(List<String> statuses) {
+        return (root, query, criteriaBuilder) -> {
+            if (statuses == null || statuses.isEmpty()) {
+                return criteriaBuilder.conjunction();
+            }
+            return root.get("status").in(statuses);
+        };
+    }
+
+    public static Specification<Purchase> supplier(Long supplierId) {
+        return (root, query, criteriaBuilder) -> {
+            if (supplierId == null) {
+                return criteriaBuilder.conjunction();
+            }
+            return criteriaBuilder.equal(root.get("supplier").get("id"), supplierId);
+        };
+    }
+
+    public static Specification<Purchase> state(Long stateId) {
+        return (root, query, criteriaBuilder) -> {
+            if (stateId == null) {
+                return criteriaBuilder.conjunction();
+            }
+            return criteriaBuilder.equal(root.get("state").get("id"), stateId);
+        };
+    }
+
     public static Specification<Purchase> search(String search) {
         return (root, query, criteriaBuilder) -> {
             if (!StringUtils.hasText(search)) {
