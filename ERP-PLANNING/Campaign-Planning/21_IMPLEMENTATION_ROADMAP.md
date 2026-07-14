@@ -131,7 +131,7 @@ _(Mirrors the table in `README.md` — update both when a phase completes.)_
 | Phase | Status       | Started    | Completed  | Report                                 |
 | ----- | ------------ | ---------- | ---------- | -------------------------------------- |
 | CP-1  | **Complete** | 2026-07-15 | 2026-07-15 | `phase-completions/CP-1_COMPLETION.md` |
-| CP-2  | Not started  | —          | —          | —                                      |
+| CP-2  | **Complete** | 2026-07-15 | 2026-07-15 | `phase-completions/CP-2_COMPLETION.md` |
 | CP-3  | Not started  | —          | —          | —                                      |
 | CP-4  | Not started  | —          | —          | —                                      |
 | CP-5  | Not started  | —          | —          | —                                      |

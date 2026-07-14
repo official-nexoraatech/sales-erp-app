@@ -11,6 +11,8 @@ import {
   checkChannelLimits,
   renderCampaignMessage,
   optOutCondition,
+  mediaTypeFromMime,
+  validateMediaForChannel,
   CampaignService,
 } from '../domain/CampaignService.js';
 
@@ -81,6 +83,62 @@ describe('optOutCondition', () => {
     expect(optOutCondition('SMS')).toBeDefined();
     expect(optOutCondition('WHATSAPP')).toBeDefined();
     expect(optOutCondition('EMAIL')).toBeDefined();
+  });
+});
+
+describe('mediaTypeFromMime', () => {
+  it('classifies image/* mime types as image', () => {
+    expect(mediaTypeFromMime('image/png')).toBe('image');
+    expect(mediaTypeFromMime('image/jpeg')).toBe('image');
+  });
+
+  it('classifies video/* mime types as video', () => {
+    expect(mediaTypeFromMime('video/mp4')).toBe('video');
+  });
+
+  it('classifies everything else as document', () => {
+    expect(mediaTypeFromMime('application/pdf')).toBe('document');
+    expect(mediaTypeFromMime('application/vnd.ms-excel')).toBe('document');
+  });
+});
+
+describe('validateMediaForChannel (CP-2)', () => {
+  it('rejects any media on SMS', () => {
+    expect(() => validateMediaForChannel('SMS', 'image/png', 1000)).toThrow(
+      'SMS campaigns cannot have media attachments'
+    );
+  });
+
+  it('rejects any media on IN_APP', () => {
+    expect(() => validateMediaForChannel('IN_APP', 'image/png', 1000)).toThrow(
+      'IN_APP campaigns cannot have media attachments'
+    );
+  });
+
+  it('allows an image under the 5MB limit on EMAIL', () => {
+    expect(() => validateMediaForChannel('EMAIL', 'image/png', 4 * 1024 * 1024)).not.toThrow();
+  });
+
+  it('rejects an image over the 5MB limit on WHATSAPP', () => {
+    expect(() => validateMediaForChannel('WHATSAPP', 'image/jpeg', 6 * 1024 * 1024)).toThrow(
+      /exceeds the 5MB limit/
+    );
+  });
+
+  it('allows a video under the 16MB limit on WHATSAPP', () => {
+    expect(() => validateMediaForChannel('WHATSAPP', 'video/mp4', 10 * 1024 * 1024)).not.toThrow();
+  });
+
+  it('rejects a video over the 16MB limit on EMAIL', () => {
+    expect(() => validateMediaForChannel('EMAIL', 'video/mp4', 20 * 1024 * 1024)).toThrow(
+      /exceeds the 16MB limit/
+    );
+  });
+
+  it('allows a document under the 100MB limit on EMAIL', () => {
+    expect(() =>
+      validateMediaForChannel('EMAIL', 'application/pdf', 50 * 1024 * 1024)
+    ).not.toThrow();
   });
 });
 

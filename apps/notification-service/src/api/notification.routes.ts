@@ -35,9 +35,16 @@ const SendRawInternalSchema = z.object({
   subject: z.string().optional(),
   body: z.string().min(1),
   idempotencyKey: z.string().min(1).max(200).optional(),
+  // CP-2: signed URL to a campaign's media attachment, resolved once by the caller (sales-
+  // service's CampaignService) and passed through to whichever channel adapter supports media.
+  mediaUrl: z.string().url().optional(),
+  mediaType: z.enum(['image', 'video', 'document']).optional(),
 });
 
-function requireInternalKey(req: { headers: Record<string, string | string[] | undefined> }, reply: { code: (n: number) => { send: (b: unknown) => void } }): boolean {
+function requireInternalKey(
+  req: { headers: Record<string, string | string[] | undefined> },
+  reply: { code: (n: number) => { send: (b: unknown) => void } }
+): boolean {
   const key = req.headers['x-internal-key'];
   const expected = process.env['INTERNAL_API_KEY'];
   const keyBuffer = Buffer.from(typeof key === 'string' ? key : '');
@@ -72,31 +79,39 @@ export async function notificationRoutes(
   const engine = new NotificationEngine(db, config);
 
   // ── POST /notifications/send — Send a notification ──────────────────────
-  fastify.post('/notifications/send', { preHandler: [authenticate, requirePermission(PERMISSIONS.NOTIFICATION_SEND)] }, async (request, reply) => {
-    const { tenantId } = (request as unknown as AuthedRequest).auth;
-    const body = SendSchema.safeParse(request.body);
-    if (!body.success) throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
+  fastify.post(
+    '/notifications/send',
+    { preHandler: [authenticate, requirePermission(PERMISSIONS.NOTIFICATION_SEND)] },
+    async (request, reply) => {
+      const { tenantId } = (request as unknown as AuthedRequest).auth;
+      const body = SendSchema.safeParse(request.body);
+      if (!body.success)
+        throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
 
-    const { recipientUserId, recipientPhone, recipientEmail, channels, idempotencyKey, ...rest } = body.data;
-    const results = await engine.send({
-      tenantId,
-      ...rest,
-      ...(recipientUserId !== undefined ? { recipientUserId } : {}),
-      ...(recipientPhone !== undefined ? { recipientPhone } : {}),
-      ...(recipientEmail !== undefined ? { recipientEmail } : {}),
-      ...(channels !== undefined ? { channels } : {}),
-      ...(idempotencyKey !== undefined ? { idempotencyKey } : {}),
-    });
-    return reply.code(200).send({ data: { results } });
-  });
+      const { recipientUserId, recipientPhone, recipientEmail, channels, idempotencyKey, ...rest } =
+        body.data;
+      const results = await engine.send({
+        tenantId,
+        ...rest,
+        ...(recipientUserId !== undefined ? { recipientUserId } : {}),
+        ...(recipientPhone !== undefined ? { recipientPhone } : {}),
+        ...(recipientEmail !== undefined ? { recipientEmail } : {}),
+        ...(channels !== undefined ? { channels } : {}),
+        ...(idempotencyKey !== undefined ? { idempotencyKey } : {}),
+      });
+      return reply.code(200).send({ data: { results } });
+    }
+  );
 
   // ── POST /notifications/send-internal — Service-to-service send (no JWT) ─
   fastify.post('/notifications/send-internal', async (request, reply) => {
     if (!requireInternalKey(request as never, reply as never)) return;
     const body = InternalSendSchema.safeParse(request.body);
-    if (!body.success) throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
+    if (!body.success)
+      throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
 
-    const { recipientUserId, recipientPhone, recipientEmail, channels, idempotencyKey, ...rest } = body.data;
+    const { recipientUserId, recipientPhone, recipientEmail, channels, idempotencyKey, ...rest } =
+      body.data;
     const results = await engine.send({
       ...rest,
       ...(recipientUserId !== undefined ? { recipientUserId } : {}),
@@ -112,15 +127,26 @@ export async function notificationRoutes(
   fastify.post('/notifications/send-raw-internal', async (request, reply) => {
     if (!requireInternalKey(request as never, reply as never)) return;
     const body = SendRawInternalSchema.safeParse(request.body);
-    if (!body.success) throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
+    if (!body.success)
+      throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
 
-    const { recipientPhone, recipientEmail, subject, idempotencyKey, ...rest } = body.data;
+    const {
+      recipientPhone,
+      recipientEmail,
+      subject,
+      idempotencyKey,
+      mediaUrl,
+      mediaType,
+      ...rest
+    } = body.data;
     const result = await engine.sendRaw({
       ...rest,
       ...(recipientPhone !== undefined ? { recipientPhone } : {}),
       ...(recipientEmail !== undefined ? { recipientEmail } : {}),
       ...(subject !== undefined ? { subject } : {}),
       ...(idempotencyKey !== undefined ? { idempotencyKey } : {}),
+      ...(mediaUrl !== undefined ? { mediaUrl } : {}),
+      ...(mediaType !== undefined ? { mediaType } : {}),
     });
     return reply.code(200).send({ data: result });
   });
@@ -128,19 +154,42 @@ export async function notificationRoutes(
   // ── POST /notifications/templates/seed-crm — Seed CRM domain templates ───
   fastify.post('/notifications/templates/seed-crm', async (request, reply) => {
     if (!requireInternalKey(request as never, reply as never)) return;
-    const body = z.object({ tenantId: z.number().int().positive(), createdBy: z.number().int().positive().default(0) }).safeParse(request.body);
-    if (!body.success) throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
+    const body = z
+      .object({
+        tenantId: z.number().int().positive(),
+        createdBy: z.number().int().positive().default(0),
+      })
+      .safeParse(request.body);
+    if (!body.success)
+      throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
 
     const templates = [
-      { name: 'Birthday Greeting (WhatsApp)', eventType: 'BIRTHDAY_GREETING', channel: 'WHATSAPP' as const, bodyTemplate: 'Happy Birthday {{customerName}}! 🎉 {{shopName}} wishes you a wonderful year ahead. Visit us for a special birthday surprise!' },
-      { name: 'Birthday Greeting (SMS fallback)', eventType: 'BIRTHDAY_GREETING', channel: 'SMS' as const, bodyTemplate: 'Happy Birthday {{customerName}}! {{shopName}} wishes you a great year. Visit us for a special offer.' },
+      {
+        name: 'Birthday Greeting (WhatsApp)',
+        eventType: 'BIRTHDAY_GREETING',
+        channel: 'WHATSAPP' as const,
+        bodyTemplate:
+          'Happy Birthday {{customerName}}! 🎉 {{shopName}} wishes you a wonderful year ahead. Visit us for a special birthday surprise!',
+      },
+      {
+        name: 'Birthday Greeting (SMS fallback)',
+        eventType: 'BIRTHDAY_GREETING',
+        channel: 'SMS' as const,
+        bodyTemplate:
+          'Happy Birthday {{customerName}}! {{shopName}} wishes you a great year. Visit us for a special offer.',
+      },
     ];
 
     let count = 0;
     for (const t of templates) {
       const [inserted] = await db
         .insert(notificationTemplates)
-        .values({ tenantId: body.data.tenantId, createdBy: body.data.createdBy, isSystem: true, ...t })
+        .values({
+          tenantId: body.data.tenantId,
+          createdBy: body.data.createdBy,
+          isSystem: true,
+          ...t,
+        })
         .onConflictDoNothing()
         .returning();
       if (inserted) count++;
@@ -152,12 +201,30 @@ export async function notificationRoutes(
   // ── POST /notifications/templates/seed-hr — Seed HR domain templates ─────
   fastify.post('/notifications/templates/seed-hr', async (request, reply) => {
     if (!requireInternalKey(request as never, reply as never)) return;
-    const body = z.object({ tenantId: z.number().int().positive(), createdBy: z.number().int().positive().default(0) }).safeParse(request.body);
-    if (!body.success) throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
+    const body = z
+      .object({
+        tenantId: z.number().int().positive(),
+        createdBy: z.number().int().positive().default(0),
+      })
+      .safeParse(request.body);
+    if (!body.success)
+      throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
 
     const templates = [
-      { name: 'Alteration Ready', eventType: 'ALTERATION_READY', channel: 'WHATSAPP' as const, bodyTemplate: 'Hi {{customerName}}, your alteration is ready. Ref: {{orderNumber}}', isSystem: true },
-      { name: 'Alteration Assigned', eventType: 'ALTERATION_ASSIGNED', channel: 'IN_APP' as const, bodyTemplate: 'You have been assigned alteration order {{orderNumber}}', isSystem: true },
+      {
+        name: 'Alteration Ready',
+        eventType: 'ALTERATION_READY',
+        channel: 'WHATSAPP' as const,
+        bodyTemplate: 'Hi {{customerName}}, your alteration is ready. Ref: {{orderNumber}}',
+        isSystem: true,
+      },
+      {
+        name: 'Alteration Assigned',
+        eventType: 'ALTERATION_ASSIGNED',
+        channel: 'IN_APP' as const,
+        bodyTemplate: 'You have been assigned alteration order {{orderNumber}}',
+        isSystem: true,
+      },
     ];
 
     let count = 0;
@@ -176,8 +243,14 @@ export async function notificationRoutes(
   // ── POST /notifications/templates/seed-auth — Seed Auth domain templates ─
   fastify.post('/notifications/templates/seed-auth', async (request, reply) => {
     if (!requireInternalKey(request as never, reply as never)) return;
-    const body = z.object({ tenantId: z.number().int().positive(), createdBy: z.number().int().positive().default(0) }).safeParse(request.body);
-    if (!body.success) throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
+    const body = z
+      .object({
+        tenantId: z.number().int().positive(),
+        createdBy: z.number().int().positive().default(0),
+      })
+      .safeParse(request.body);
+    if (!body.success)
+      throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
 
     const templates = [
       {
@@ -185,7 +258,8 @@ export async function notificationRoutes(
         eventType: 'PASSWORD_RESET_REQUESTED',
         channel: 'EMAIL' as const,
         subject: 'Reset your password',
-        bodyTemplate: '<p>We received a request to reset your password.</p><p><a href="{{resetLink}}">Click here to reset your password</a></p><p>If you did not request this, you can safely ignore this email.</p>',
+        bodyTemplate:
+          '<p>We received a request to reset your password.</p><p><a href="{{resetLink}}">Click here to reset your password</a></p><p>If you did not request this, you can safely ignore this email.</p>',
         isSystem: true,
       },
     ];
@@ -209,8 +283,14 @@ export async function notificationRoutes(
   // call itself would still have silently no-op'd without a template row to look up.
   fastify.post('/notifications/templates/seed-tenant', async (request, reply) => {
     if (!requireInternalKey(request as never, reply as never)) return;
-    const body = z.object({ tenantId: z.number().int().positive(), createdBy: z.number().int().positive().default(0) }).safeParse(request.body);
-    if (!body.success) throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
+    const body = z
+      .object({
+        tenantId: z.number().int().positive(),
+        createdBy: z.number().int().positive().default(0),
+      })
+      .safeParse(request.body);
+    if (!body.success)
+      throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
 
     const templates = [
       {
@@ -218,7 +298,8 @@ export async function notificationRoutes(
         eventType: 'WELCOME_EMAIL',
         channel: 'EMAIL' as const,
         subject: 'Welcome to {{tenantName}}',
-        bodyTemplate: '<p>Hi {{firstName}},</p><p>Welcome to {{tenantName}}! Your account has been created and is ready to use.</p>',
+        bodyTemplate:
+          '<p>Hi {{firstName}},</p><p>Welcome to {{tenantName}}! Your account has been created and is ready to use.</p>',
         isSystem: true,
       },
     ];
@@ -233,13 +314,15 @@ export async function notificationRoutes(
       if (inserted) count++;
     }
 
-    return reply.code(200).send({ data: { message: 'Tenant-provisioning templates seeded', count } });
+    return reply
+      .code(200)
+      .send({ data: { message: 'Tenant-provisioning templates seeded', count } });
   });
 
   // ── GET /notifications — List in-app notifications for current user ──────
   fastify.get('/notifications', { preHandler: authenticate }, async (request, reply) => {
     const { tenantId, userId = 0 } = (request as unknown as AuthedRequest).auth;
-    const query = (request.query as { page?: string; size?: string });
+    const query = request.query as { page?: string; size?: string };
     const page = parseInt(query.page ?? '0', 10);
     const size = Math.min(parseInt(query.size ?? '20', 10), 100);
 
@@ -253,7 +336,7 @@ export async function notificationRoutes(
           eq(notificationLog.channel, 'IN_APP')
         )
       )
-      .orderBy(desc(notificationLog.createdAt))
+      .orderBy(desc(notificationLog.createdAt), desc(notificationLog.id))
       .limit(size)
       .offset(page * size);
 
@@ -265,91 +348,118 @@ export async function notificationRoutes(
   });
 
   // ── POST /notifications/:id/read — Mark in-app notification as read ──────
-  fastify.post<{ Params: { id: string } }>('/notifications/:id/read', { preHandler: authenticate }, async (request, reply) => {
-    const { tenantId } = (request as unknown as AuthedRequest).auth;
-    const id = parseInt(request.params.id, 10);
+  fastify.post<{ Params: { id: string } }>(
+    '/notifications/:id/read',
+    { preHandler: authenticate },
+    async (request, reply) => {
+      const { tenantId } = (request as unknown as AuthedRequest).auth;
+      const id = parseInt(request.params.id, 10);
 
-    await db
-      .update(notificationLog)
-      .set({ readAt: new Date(), updatedAt: new Date() })
-      .where(and(eq(notificationLog.id, id), eq(notificationLog.tenantId, tenantId)));
+      await db
+        .update(notificationLog)
+        .set({ readAt: new Date(), updatedAt: new Date() })
+        .where(and(eq(notificationLog.id, id), eq(notificationLog.tenantId, tenantId)));
 
-    return reply.code(200).send({ data: { message: 'Marked as read' } });
-  });
+      return reply.code(200).send({ data: { message: 'Marked as read' } });
+    }
+  );
 
   // ── POST /notifications/preferences — Update per-user channel prefs ──────
-  fastify.post('/notifications/preferences', { preHandler: authenticate }, async (request, reply) => {
-    const { tenantId, userId = 0 } = (request as unknown as AuthedRequest).auth;
-    const body = PreferencesSchema.safeParse(request.body);
-    if (!body.success) throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
+  fastify.post(
+    '/notifications/preferences',
+    { preHandler: authenticate },
+    async (request, reply) => {
+      const { tenantId, userId = 0 } = (request as unknown as AuthedRequest).auth;
+      const body = PreferencesSchema.safeParse(request.body);
+      if (!body.success)
+        throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
 
-    await db
-      .insert(notificationPreferences)
-      .values({
-        tenantId,
-        userId,
-        eventType: body.data.eventType,
-        smsEnabled: body.data.smsEnabled ?? true,
-        emailEnabled: body.data.emailEnabled ?? true,
-        whatsappEnabled: body.data.whatsappEnabled ?? false,
-        inAppEnabled: body.data.inAppEnabled ?? true,
-        quietHoursEnabled: body.data.quietHoursEnabled ?? true,
-        createdBy: userId,
-      })
-      .onConflictDoUpdate({
-        target: [
-          notificationPreferences.userId,
-          notificationPreferences.eventType,
-          notificationPreferences.tenantId,
-        ],
-        set: {
+      await db
+        .insert(notificationPreferences)
+        .values({
+          tenantId,
+          userId,
+          eventType: body.data.eventType,
           smsEnabled: body.data.smsEnabled ?? true,
           emailEnabled: body.data.emailEnabled ?? true,
           whatsappEnabled: body.data.whatsappEnabled ?? false,
           inAppEnabled: body.data.inAppEnabled ?? true,
           quietHoursEnabled: body.data.quietHoursEnabled ?? true,
-          updatedAt: new Date(),
-        },
-      });
+          createdBy: userId,
+        })
+        .onConflictDoUpdate({
+          target: [
+            notificationPreferences.userId,
+            notificationPreferences.eventType,
+            notificationPreferences.tenantId,
+          ],
+          set: {
+            smsEnabled: body.data.smsEnabled ?? true,
+            emailEnabled: body.data.emailEnabled ?? true,
+            whatsappEnabled: body.data.whatsappEnabled ?? false,
+            inAppEnabled: body.data.inAppEnabled ?? true,
+            quietHoursEnabled: body.data.quietHoursEnabled ?? true,
+            updatedAt: new Date(),
+          },
+        });
 
-    return reply.code(200).send({ data: { message: 'Preferences saved' } });
-  });
+      return reply.code(200).send({ data: { message: 'Preferences saved' } });
+    }
+  );
 
   // ── GET /notifications/unread-count — Fast unread bell count ─────────────
-  fastify.get('/notifications/unread-count', { preHandler: authenticate }, async (request, reply) => {
-    const { tenantId, userId = 0 } = (request as unknown as AuthedRequest).auth;
-    const count = await engine.getUnreadCount(tenantId, userId);
-    return reply.code(200).send({ data: { count } });
-  });
+  fastify.get(
+    '/notifications/unread-count',
+    { preHandler: authenticate },
+    async (request, reply) => {
+      const { tenantId, userId = 0 } = (request as unknown as AuthedRequest).auth;
+      const count = await engine.getUnreadCount(tenantId, userId);
+      return reply.code(200).send({ data: { count } });
+    }
+  );
 
   // ── SSE: GET /notifications/stream — Real-time in-app push ───────────────
-  fastify.get('/notifications/stream', { preHandler: authenticateStream }, async (request, reply) => {
-    const { tenantId, userId = 0 } = (request as unknown as AuthedRequest).auth;
+  fastify.get(
+    '/notifications/stream',
+    { preHandler: authenticateStream },
+    async (request, reply) => {
+      const { tenantId, userId = 0 } = (request as unknown as AuthedRequest).auth;
 
-    reply.raw.writeHead(200, {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      Connection: 'keep-alive',
-      'X-Accel-Buffering': 'no',
-    });
+      reply.raw.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        Connection: 'keep-alive',
+        'X-Accel-Buffering': 'no',
+        // The shared HELMET_OPTIONS sets Cross-Origin-Resource-Policy: same-origin service-wide,
+        // which is correct for regular JSON API responses but blocks the browser's native
+        // EventSource from ever opening this cross-origin (web-frontend on a different port) —
+        // confirmed live: curl succeeds (CORP is a browser-enforced check, not a server one), but
+        // a real browser's EventSource fails immediately with readyState CLOSED despite valid
+        // CORS (Access-Control-Allow-Origin) headers, because CORP is an independent, additional
+        // check the CORS response headers don't satisfy. This route is the one legitimately
+        // cross-origin-embeddable resource in the service; override just here rather than
+        // weakening CORP for every other (same-origin-only-appropriate) response.
+        'Cross-Origin-Resource-Policy': 'cross-origin',
+      });
 
-    // Send initial heartbeat
-    reply.raw.write('data: {"type":"connected"}\n\n');
+      // Send initial heartbeat
+      reply.raw.write('data: {"type":"connected"}\n\n');
 
-    // Poll every 5 seconds for new notifications
-    const interval = setInterval(async () => {
-      try {
-        const count = await engine.getUnreadCount(tenantId, userId);
-        reply.raw.write(`data: ${JSON.stringify({ type: 'unread_count', count })}\n\n`);
-      } catch {
+      // Poll every 5 seconds for new notifications
+      const interval = setInterval(async () => {
+        try {
+          const count = await engine.getUnreadCount(tenantId, userId);
+          reply.raw.write(`data: ${JSON.stringify({ type: 'unread_count', count })}\n\n`);
+        } catch {
+          clearInterval(interval);
+        }
+      }, 5000);
+
+      request.raw.on('close', () => {
         clearInterval(interval);
-      }
-    }, 5000);
+      });
 
-    request.raw.on('close', () => {
-      clearInterval(interval);
-    });
-
-    await new Promise<void>((resolve) => request.raw.on('close', resolve));
-  });
+      await new Promise<void>((resolve) => request.raw.on('close', resolve));
+    }
+  );
 }

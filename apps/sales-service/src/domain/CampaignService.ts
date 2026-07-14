@@ -61,6 +61,40 @@ export function checkChannelLimits(channel: Campaign['channel'], message: string
   return warnings;
 }
 
+// CP-2: channels that can carry a media attachment, and the size limit for each resolved media
+// type — mirrors Meta's published WhatsApp Cloud API media limits; Email limits are this
+// platform's own sanity cap since the asset is only ever referenced by URL, never re-uploaded.
+const MEDIA_CAPABLE_CHANNELS: ReadonlySet<Campaign['channel']> = new Set(['EMAIL', 'WHATSAPP']);
+const MEDIA_SIZE_LIMITS_BYTES: Record<'image' | 'video' | 'document', number> = {
+  image: 5 * 1024 * 1024,
+  video: 16 * 1024 * 1024,
+  document: 100 * 1024 * 1024,
+};
+
+export function mediaTypeFromMime(mimeType: string): 'image' | 'video' | 'document' {
+  if (mimeType.startsWith('image/')) return 'image';
+  if (mimeType.startsWith('video/')) return 'video';
+  return 'document';
+}
+
+/** Throws ValidationError if the given media cannot be attached to a campaign on this channel. */
+export function validateMediaForChannel(
+  channel: Campaign['channel'],
+  mimeType: string,
+  fileSize: number
+): void {
+  if (!MEDIA_CAPABLE_CHANNELS.has(channel)) {
+    throw new ValidationError(`${channel} campaigns cannot have media attachments`);
+  }
+  const mediaType = mediaTypeFromMime(mimeType);
+  const limit = MEDIA_SIZE_LIMITS_BYTES[mediaType];
+  if (fileSize > limit) {
+    throw new ValidationError(
+      `${mediaType} attachment is ${(fileSize / (1024 * 1024)).toFixed(1)}MB — exceeds the ${(limit / (1024 * 1024)).toFixed(0)}MB limit for ${channel} ${mediaType} messages`
+    );
+  }
+}
+
 export function renderCampaignMessage(
   template: string,
   vars: {
@@ -184,6 +218,21 @@ export class CampaignService {
     };
   }
 
+  // CP-2: a campaign may have at most one media attachment today (uploaded via POST /attachments
+  // with entityType=CAMPAIGN) — resolves it once per send, not per recipient, since every
+  // recipient on a given campaign gets the same asset.
+  private static async getPrimaryMedia(
+    ctx: PlatformContext,
+    campaignId: number
+  ): Promise<{ mediaUrl: string; mediaType: 'image' | 'video' | 'document' } | null> {
+    if (!ctx.files) return null;
+    const attachments = await ctx.files.list('CAMPAIGN', campaignId);
+    const first = attachments[0];
+    if (!first) return null;
+    const { url } = await ctx.files.getDownloadUrl(first.id);
+    return { mediaUrl: url, mediaType: mediaTypeFromMime(first.mimeType) };
+  }
+
   private static async getBalance(ctx: PlatformContext, customerId: number): Promise<number> {
     const [bal] = await ctx.db.raw
       .select({ currentBalance: projectionCustomerBalance.currentBalance })
@@ -221,6 +270,7 @@ export class CampaignService {
       .from(organizationSettings)
       .where(eq(organizationSettings.tenantId, ctx.tenant.tenantId));
     const shopName = org?.orgName ?? 'Our Store';
+    const media = await CampaignService.getPrimaryMedia(ctx, campaignId);
 
     await ctx.db.raw
       .update(campaigns)
@@ -275,6 +325,7 @@ export class CampaignService {
                 eventType: 'CRM_CAMPAIGN',
                 ...(campaign.channel !== 'EMAIL' ? { recipientPhone: recipient.phone } : {}),
                 ...(recipient.email ? { recipientEmail: recipient.email } : {}),
+                ...(media ? { mediaUrl: media.mediaUrl, mediaType: media.mediaType } : {}),
                 body,
               })
             );

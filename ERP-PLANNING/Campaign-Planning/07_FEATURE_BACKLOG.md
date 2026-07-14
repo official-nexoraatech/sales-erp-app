@@ -56,15 +56,16 @@ section per phase in `phase-completions/`).
 
 ## Nice to Have (valuable, defer without blocking release)
 
-| ID    | Item                                                                                                | Source            | Phase                     |
-| ----- | --------------------------------------------------------------------------------------------------- | ----------------- | ------------------------- |
-| NH-01 | Template categorization/search                                                                      | Gap: Templates    | CP-4                      |
-| NH-02 | Segment overlap/de-dup preview                                                                      | Gap: Segmentation | CP-3                      |
-| NH-03 | Funnel analysis beyond basic dashboard                                                              | FR-I4             | CP-6                      |
-| NH-04 | Public/external API surface for campaigns                                                           | Gap: Integration  | CP-8                      |
-| NH-05 | Segment membership caching/materialization                                                          | Gap: Performance  | CP-8                      |
-| NH-06 | Table partitioning for very high send volume                                                        | Gap: Performance  | CP-8                      |
-| NH-07 | Additional offline/physical channel adapters (QR/print/signage) — interface only, no implementation | FR-B4             | Documented, not scheduled |
+| ID    | Item                                                                                                                                                                                                                    | Source                             | Phase                     |
+| ----- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- | ------------------------- |
+| NH-01 | Template categorization/search                                                                                                                                                                                          | Gap: Templates                     | CP-4                      |
+| NH-02 | Segment overlap/de-dup preview                                                                                                                                                                                          | Gap: Segmentation                  | CP-3                      |
+| NH-03 | Funnel analysis beyond basic dashboard                                                                                                                                                                                  | FR-I4                              | CP-6                      |
+| NH-04 | Public/external API surface for campaigns                                                                                                                                                                               | Gap: Integration                   | CP-8                      |
+| NH-05 | Segment membership caching/materialization                                                                                                                                                                              | Gap: Performance                   | CP-8                      |
+| NH-06 | Table partitioning for very high send volume                                                                                                                                                                            | Gap: Performance                   | CP-8                      |
+| NH-07 | Additional offline/physical channel adapters (QR/print/signage) — interface only, no implementation                                                                                                                     | FR-B4                              | Documented, not scheduled |
+| NH-08 | Cross-campaign media asset library (browsable, reusable across many campaigns — CP-2 shipped per-campaign attachments via the existing `document_attachments`/`PlatformAttachments` system, not a many-to-many library) | Gap: Media, CP-2 completion report | Not scheduled             |
 
 ## Explicitly Deferred / Out of Roadmap
 

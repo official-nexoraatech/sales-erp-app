@@ -23,15 +23,31 @@ renamed or removed; no existing endpoint's request/response shape breaks. See
 matching the exact pattern already used in `StockTransferService`/`StockAdjustmentService`/etc. across the
   codebase. No behavior change — additive column usage only, sets up CP-4's editing feature.
 
-### CP-2 (Channel Abstraction + Media)
+### CP-2 (Channel Abstraction + Media) — DEVIATION FROM ORIGINAL PLAN, see CP-2 completion report
 
-- `campaign_media_assets`: `id, tenant_id, filename, mime_type, size_bytes, storage_key, tags (jsonb),
-uploaded_by, created_at`.
-- `campaign_media_links`: `id, campaign_id, media_asset_id` (many-to-many, a campaign can attach multiple
-  assets, an asset can be reused across campaigns).
-- `channel_provider_config`: `id, tenant_id, channel, config (jsonb, e.g. sender identity), enabled` — seeds
-  the sender-identity work done fully in CP-8 but the table is introduced here since it's where channel
-  config naturally lives once channels are abstracted.
+- **No new `campaign_media_assets`/`campaign_media_links` tables were created.** This ERP already has a
+  generic, tenant-scoped, entity-agnostic attachment system (`document_attachments` table +
+  `PlatformAttachments` class in `packages/platform-sdk`, backed by real object storage/MinIO), already used
+  by purchase-service (PURCHASE_ORDER/GRN attachments) and hr-service (employee documents) via a shared
+  `entityType`/`entityId` polymorphic-association pattern. CP-2 extended sales-service's existing
+  `attachment.routes.ts` (previously hardcoded to `entityType === 'INVOICE'` only) to also accept
+  `entityType: 'CAMPAIGN'`, with its own view/write permission mapping (`CRM_VIEW`/`CRM_CAMPAIGN_CREATE`),
+  matching purchase-service's established multi-entity-type pattern exactly. Uploads go through the same
+  `POST /attachments` endpoint every other module uses; storage/download/delete are already solved, and no
+  new migration was needed at all.
+- **Scope reduction, tracked not dropped:** the original plan's "reuse an asset across many campaigns" (a
+  many-to-many library) isn't modeled by `document_attachments` (it's a 1-campaign-to-N-attachments
+  relationship, matching how PURCHASE_ORDER/GRN attachments already work). Cross-campaign asset reuse as a
+  browsable library remains a legitimate future enhancement — added to `07_FEATURE_BACKLOG.md` as a
+  Nice-to-Have rather than silently dropped.
+- **Channel-aware media validation** (`FR-G2`) is real: `CampaignService.validateMediaForChannel(channel,
+mimeType, fileSize)` rejects media entirely for SMS/IN_APP and enforces per-type size limits (image 5MB,
+  video 16MB, document 100MB — the image/video limits mirror Meta's published WhatsApp Cloud API limits) for
+  EMAIL/WHATSAPP. The upload route looks up the target campaign's channel and calls this before accepting
+  the file.
+- `channel_provider_config` (tenant-configurable sender identity) was **not** built in CP-2 — deferred to
+  CP-8 as originally planned; CP-2 focused on the adapter interface + media, not sender-identity
+  configuration, which has no dependents until CP-8.
 
 ### CP-3 (Segmentation + Personalization)
 

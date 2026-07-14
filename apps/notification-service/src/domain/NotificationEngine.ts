@@ -10,6 +10,8 @@ import {
 } from '@erp/db';
 import { createLogger } from '@erp/logger';
 import type { NotificationServiceConfig } from '../config.js';
+import { ChannelRegistry } from './channels/ChannelRegistry.js';
+import type { ChannelDeliveryParams } from './channels/types.js';
 
 const logger = createLogger({ serviceName: 'notification-service' });
 
@@ -40,6 +42,9 @@ export interface SendRawInput {
   body: string;
   createdBy?: number;
   idempotencyKey?: string;
+  /** CP-2: signed URL to a media asset attached to the sending campaign, if any. */
+  mediaUrl?: string;
+  mediaType?: 'image' | 'video' | 'document';
 }
 
 // ES-26 (M8): dedup key for a caller retry landing on an already-recently-sent notification.
@@ -75,10 +80,17 @@ async function sleep(ms: number): Promise<void> {
 }
 
 export class NotificationEngine {
+  // CP-2: channel dispatch now goes through a pluggable adapter registry (see domain/channels/)
+  // instead of an inline switch — built from the same config this class already took, so the
+  // public constructor signature is unchanged and every existing caller/test is unaffected.
+  private readonly channels: ChannelRegistry;
+
   constructor(
     private readonly db: ErpDatabase,
     private readonly config: NotificationServiceConfig
-  ) {}
+  ) {
+    this.channels = new ChannelRegistry(config);
+  }
 
   // PG-047: quiet hours are tenant-configurable via the existing feature_flags table
   // (config: { startHour, endHour }), falling back to the hardcoded default when absent/disabled.
@@ -306,6 +318,8 @@ export class NotificationEngine {
         ...(input.recipientPhone !== undefined ? { phone: input.recipientPhone } : {}),
         ...(input.recipientEmail !== undefined ? { email: input.recipientEmail } : {}),
         ...(input.subject !== undefined ? { subject: input.subject } : {}),
+        ...(input.mediaUrl !== undefined ? { mediaUrl: input.mediaUrl } : {}),
+        ...(input.mediaType !== undefined ? { mediaType: input.mediaType } : {}),
         body: input.body,
         tenantId: input.tenantId,
       },
@@ -317,7 +331,7 @@ export class NotificationEngine {
 
   private async deliverWithRetry(
     channel: 'SMS' | 'EMAIL' | 'WHATSAPP' | 'IN_APP',
-    params: { phone?: string; email?: string; subject?: string; body: string; tenantId: number },
+    params: ChannelDeliveryParams,
     logId: number
   ): Promise<boolean> {
     let sent = false;
@@ -325,7 +339,7 @@ export class NotificationEngine {
 
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
-        const externalId = await this.deliverViaChannel(channel, params);
+        const { externalId } = await this.channels.get(channel).send(params);
 
         await this.db
           .update(notificationLog)
@@ -378,113 +392,4 @@ export class NotificationEngine {
 
     return rows.filter((r) => r).length;
   }
-
-  private async deliverViaChannel(
-    channel: 'SMS' | 'EMAIL' | 'WHATSAPP' | 'IN_APP',
-    params: {
-      phone?: string;
-      email?: string;
-      subject?: string;
-      body: string;
-      tenantId: number;
-    }
-  ): Promise<string> {
-    switch (channel) {
-      case 'SMS':
-        return this.sendSms(params.phone ?? '', params.body);
-      case 'EMAIL':
-        return this.sendEmail(params.email ?? '', params.subject ?? 'Notification', params.body);
-      case 'WHATSAPP':
-        return this.sendWhatsApp(params.phone ?? '', params.body);
-      case 'IN_APP':
-        return this.deliverInApp(params.tenantId, params.body);
-    }
-  }
-
-  private async sendSms(phone: string, body: string): Promise<string> {
-    if (!phone) throw new Error('SMS requires phone number');
-
-    const response = await fetch('https://api.msg91.com/api/v5/flow/', {
-      method: 'POST',
-      headers: {
-        authkey: this.config.msg91AuthKey,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        template_id: this.config.msg91TemplateId,
-        recipients: [{ mobiles: `91${phone}`, body }],
-      }),
-    });
-
-    if (!response.ok) {
-      const text = await response.text();
-      throw new Error(`MSG91 error: ${text}`);
-    }
-
-    const data = (await response.json()) as { request_id?: string };
-    return data.request_id ?? `sms_${Date.now()}`;
-  }
-
-  private async sendEmail(to: string, subject: string, html: string): Promise<string> {
-    if (!to) throw new Error('Email requires recipient address');
-
-    const response = await fetch('https://api.sendgrid.com/v3/mail/send', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${this.config.sendgridApiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        personalizations: [{ to: [{ email: to }] }],
-        from: { email: this.config.fromEmail },
-        subject,
-        content: [{ type: 'text/html', value: html }],
-      }),
-    });
-
-    if (!response.ok) {
-      const text = await response.text();
-      throw new Error(`SendGrid error: ${text}`);
-    }
-
-    const msgId = response.headers.get('X-Message-Id') ?? `email_${Date.now()}`;
-    return msgId;
-  }
-
-  private async sendWhatsApp(phone: string, body: string): Promise<string> {
-    if (!phone) throw new Error('WhatsApp requires phone number');
-    // WhatsApp Business API integration
-    // Using Meta's Cloud API
-    const url = `https://graph.facebook.com/v18.0/${this.config.whatsappPhoneNumberId}/messages`;
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${this.config.whatsappAccessToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        messaging_product: 'whatsapp',
-        to: `91${phone}`,
-        type: 'text',
-        text: { body },
-      }),
-    });
-
-    if (!response.ok) {
-      const text = await response.text();
-      throw new Error(`WhatsApp API error: ${text}`);
-    }
-
-    const data = (await response.json()) as { messages?: Array<{ id: string }> };
-    return data.messages?.[0]?.id ?? `wa_${Date.now()}`;
-  }
-
-  private async deliverInApp(_tenantId: number, _body: string): Promise<string> {
-    // In-app delivery = notification written to DB (already done via log entry)
-    // SSE/WebSocket push is done by the SSE endpoint
-    return `inapp_${ulid()}`;
-  }
 }
-
-// Import ulid at top for in-app IDs
-import { ulid } from 'ulid';

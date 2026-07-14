@@ -12,8 +12,9 @@ phases (see `21_IMPLEMENTATION_ROADMAP.md`); each phase has a copy-paste starter
 and produces a completion report in `phase-completions/`, exactly like the pattern already used in
 `ERP-PLANNING/phase-prompts/` and `ERP-PLANNING/phase-completions/` for the original 15-phase build.
 
-**No code has been changed as part of producing this documentation set.** Everything below is analysis,
-requirements, and planning only.
+This documentation set was originally produced with no code changes. Implementation began 2026-07-15
+(CP-1 onward, executed autonomously) — check the status table below and `phase-completions/` for what has
+actually shipped versus what is still planning-only.
 
 ---
 
@@ -135,7 +136,7 @@ Campaign-Planning/
 | Phase                               | Status                    | Completion Report                      |
 | ----------------------------------- | ------------------------- | -------------------------------------- |
 | CP-1 Foundation Hardening           | **Complete** (2026-07-15) | `phase-completions/CP-1_COMPLETION.md` |
-| CP-2 Channel Abstraction            | Not started               | —                                      |
+| CP-2 Channel Abstraction            | **Complete** (2026-07-15) | `phase-completions/CP-2_COMPLETION.md` |
 | CP-3 Segmentation & Personalization | Not started               | —                                      |
 | CP-4 Campaign Builder 2.0           | Not started               | —                                      |
 | CP-5 Scheduling & Automation        | Not started               | —                                      |
