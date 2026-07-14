@@ -70,7 +70,8 @@ public class CustomUserDetailsService implements UserDetailsService {
                 user.getPassword(),
                 user.getRole().getName(),
                 permissions,
-                com.nexoraa.billtop.enums.Status.ACTIVE.equals(user.getStatus())
+                com.nexoraa.billtop.enums.Status.ACTIVE.equals(user.getStatus()),
+                user.getOrganization() == null || Boolean.TRUE.equals(user.getOrganization().getIsSubscribed())
         );
     }
 }

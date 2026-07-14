@@ -22,6 +22,7 @@ public class OrganizationResponseDto {
     private String gstNumber;
     private OrganizationAddressResponseDto address;
     private Status status;
+    private Boolean isSubscribed;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

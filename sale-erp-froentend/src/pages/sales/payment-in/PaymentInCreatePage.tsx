@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { customerApi, paymentInApi, paymentMethodApi, salesApi } from '../../../api/endpoints';
 import type { PaymentInRequest } from '../../../api/endpoints';
@@ -12,13 +12,15 @@ const inputClass = 'h-10 w-full rounded border border-gray-300 bg-white px-3 tex
 
 export const PaymentInCreatePage: React.FC = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const preselectedSaleId = Number(searchParams.get('saleId')) || 0;
   const [customerId, setCustomerId] = useState(0);
   const [paymentDate, setPaymentDate] = useState(new Date().toISOString().slice(0, 10));
   const [paymentMethodId, setPaymentMethodId] = useState(0);
   const [referenceNo, setReferenceNo] = useState('');
   const [amount, setAmount] = useState(0);
   const [notes, setNotes] = useState('');
-  const [saleIds, setSaleIds] = useState<number[]>([]);
+  const [saleIds, setSaleIds] = useState<number[]>(preselectedSaleId ? [preselectedSaleId] : []);
 
   const customers = useQuery({ queryKey: ['payment-in-create-customers'], queryFn: () => customerApi.getAll({ page: 0, size: 100, search: '' }) });
   const sales = useQuery({ queryKey: ['payment-in-create-sales'], queryFn: () => salesApi.getAll({ page: 0, size: 100, search: '' }) });
@@ -26,6 +28,17 @@ export const PaymentInCreatePage: React.FC = () => {
   const paymentMethodRows = (paymentMethods.data?.data?.content || [])
     .filter((method) => method.status === 'ACTIVE' || method.id === paymentMethodId);
   const saleRows = (sales.data?.data?.content || []).filter((sale) => !customerId || sale.customerName === customers.data?.data?.content.find((customer) => customer.id === customerId)?.customerName);
+
+  useEffect(() => {
+    if (!preselectedSaleId || customerId) return;
+    const sale = sales.data?.data?.content.find((entry) => entry.saleId === preselectedSaleId);
+    if (!sale) return;
+    const customer = customers.data?.data?.content.find((entry) => entry.customerName === sale.customerName);
+    if (customer) {
+      setCustomerId(customer.id);
+      setAmount((current) => current || sale.dueAmount || 0);
+    }
+  }, [preselectedSaleId, customerId, sales.data, customers.data]);
 
   const mutation = useMutation({
     mutationFn: (payload: PaymentInRequest) => paymentInApi.create(payload),

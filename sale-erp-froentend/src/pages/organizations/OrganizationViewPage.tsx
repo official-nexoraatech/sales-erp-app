@@ -9,7 +9,7 @@ import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
 import { Loader } from '../../components/ui/Loader';
 import { useAuth } from '../../hooks/useAuth';
-import { formatOrganizationAddress, getOrganizationId, getOrganizationStatus } from './organization.utils';
+import { formatOrganizationAddress, getOrganizationId, getOrganizationStatus, getOrganizationSubscribed } from './organization.utils';
 
 const displayValue = (value?: React.ReactNode) => {
   if (value === undefined || value === null || value === '') {
@@ -69,6 +69,7 @@ export const OrganizationViewPage: React.FC = () => {
   }
 
   const status = getOrganizationStatus(organization.status);
+  const subscribed = getOrganizationSubscribed(organization.isSubscribed);
   const address = formatOrganizationAddress(organization.address);
 
   return (
@@ -148,6 +149,14 @@ export const OrganizationViewPage: React.FC = () => {
               value={
                 <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${status === 'ACTIVE' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
                   {status}
+                </span>
+              }
+            />
+            <DetailField
+              label="Subscription"
+              value={
+                <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${subscribed ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                  {subscribed ? 'Subscribed' : 'Not Subscribed'}
                 </span>
               }
             />

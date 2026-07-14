@@ -16,6 +16,7 @@ public interface OrganizationMapper {
     @Mapping(target = "id", ignore = true)
     @Mapping(target = "address", ignore = true)
     @Mapping(target = "status", expression = "java(request.getStatus() == null ? com.nexoraa.billtop.enums.Status.ACTIVE : request.getStatus())")
+    @Mapping(target = "isSubscribed", expression = "java(request.getIsSubscribed() == null ? Boolean.TRUE : request.getIsSubscribed())")
     @Mapping(target = "createdAt", ignore = true)
     @Mapping(target = "updatedAt", ignore = true)
     Organization toEntity(OrganizationRequestDto request);
@@ -25,6 +26,7 @@ public interface OrganizationMapper {
     @Mapping(target = "createdAt", ignore = true)
     @Mapping(target = "updatedAt", ignore = true)
     @Mapping(target = "status", expression = "java(request.getStatus() == null ? organization.getStatus() : request.getStatus())")
+    @Mapping(target = "isSubscribed", expression = "java(request.getIsSubscribed() == null ? organization.getIsSubscribed() : request.getIsSubscribed())")
     void updateEntity(OrganizationRequestDto request, @MappingTarget Organization organization);
 
     OrganizationResponseDto toResponse(Organization organization);

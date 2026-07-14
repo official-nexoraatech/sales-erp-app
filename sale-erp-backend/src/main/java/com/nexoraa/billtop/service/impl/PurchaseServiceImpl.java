@@ -41,6 +41,11 @@ public class PurchaseServiceImpl implements PurchaseService {
     private static final String TX_PURCHASE = "PURCHASE";
     private static final String TX_PURCHASE_REVERSE = "PURCHASE_REVERSE";
     private static final String TX_PURCHASE_CANCEL = "PURCHASE_CANCEL";
+    private static final List<String> MANUAL_STATUSES = List.of(
+            TransactionSupport.STATUS_CREATED,
+            TransactionSupport.STATUS_ACTIVE,
+            TransactionSupport.STATUS_PAID
+    );
 
     private final PurchaseRepository purchaseRepository;
     private final PurchaseItemRepository purchaseItemRepository;
@@ -64,9 +69,9 @@ public class PurchaseServiceImpl implements PurchaseService {
     public PurchaseCreateResponseDto createPurchase(PurchaseRequestDto request) {
         Organization organization = currentOrganizationService.getOrganizationReference();
         String purchaseNo = nextPurchaseNo();
-        PreparedPurchase preparedPurchase = preparePurchase(new Purchase(), request, purchaseNo, organization);
+        PreparedPurchase preparedPurchase = preparePurchase(new Purchase(), request, purchaseNo, organization, false);
         Purchase savedPurchase = purchaseRepository.save(preparedPurchase.purchase());
-        saveItemsAndIncreaseStock(savedPurchase, preparedPurchase.items(), TX_PURCHASE, organization);
+        saveItems(savedPurchase, preparedPurchase.items(), TX_PURCHASE, organization, false);
         return toCreateResponse(savedPurchase);
     }
 
@@ -77,13 +82,19 @@ public class PurchaseServiceImpl implements PurchaseService {
             int size,
             String search,
             LocalDate fromDate,
-            LocalDate toDate
+            LocalDate toDate,
+            List<String> status,
+            Long supplierId,
+            Long stateId
     ) {
         Specification<Purchase> specification = PurchaseSpecification.notCancelled()
                 .and(PurchaseSpecification.notDeleted())
                 .and(PurchaseSpecification.organization(currentOrganizationService.getOrganizationId()))
                 .and(PurchaseSpecification.search(search))
-                .and(PurchaseSpecification.dateBetween(fromDate, toDate));
+                .and(PurchaseSpecification.dateBetween(fromDate, toDate))
+                .and(PurchaseSpecification.statusIn(status))
+                .and(PurchaseSpecification.supplier(supplierId))
+                .and(PurchaseSpecification.state(stateId));
         Page<Purchase> purchases = purchaseRepository.findAll(
                 specification,
                 PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "id"))
@@ -105,12 +116,15 @@ public class PurchaseServiceImpl implements PurchaseService {
         Purchase purchase = getPurchase(id);
         ensureNotCancelled(purchase);
 
-        reversePurchaseStock(purchase, TX_PURCHASE_REVERSE);
+        boolean commitStock = !isCreated(purchase);
+        if (commitStock) {
+            reversePurchaseStock(purchase, TX_PURCHASE_REVERSE);
+        }
         purchaseItemRepository.deleteByPurchaseIdAndOrganizationId(id, currentOrganizationService.getOrganizationId());
 
-        PreparedPurchase preparedPurchase = preparePurchase(purchase, request, purchase.getPurchaseNo(), organization);
+        PreparedPurchase preparedPurchase = preparePurchase(purchase, request, purchase.getPurchaseNo(), organization, commitStock);
         Purchase savedPurchase = purchaseRepository.save(preparedPurchase.purchase());
-        saveItemsAndIncreaseStock(savedPurchase, preparedPurchase.items(), TX_PURCHASE, organization);
+        saveItems(savedPurchase, preparedPurchase.items(), TX_PURCHASE, organization, commitStock);
     }
 
     @Override
@@ -118,7 +132,9 @@ public class PurchaseServiceImpl implements PurchaseService {
     public void cancelPurchase(Long id) {
         Purchase purchase = getPurchase(id);
         ensureNotCancelled(purchase);
-        reversePurchaseStock(purchase, TX_PURCHASE_CANCEL);
+        if (!isCreated(purchase)) {
+            reversePurchaseStock(purchase, TX_PURCHASE_CANCEL);
+        }
         purchase.setStatus(TransactionSupport.STATUS_CANCELLED);
         purchaseRepository.save(purchase);
     }
@@ -130,10 +146,52 @@ public class PurchaseServiceImpl implements PurchaseService {
         if (support.defaultZero(purchase.getPaidAmount()).compareTo(TransactionSupport.ZERO) > 0) {
             throw new BadRequestException(ErrorMessage.PURCHASE_HAS_PAYMENTS, "PURCHASE_HAS_PAYMENTS");
         }
-        if (!support.isCancelled(purchase.getStatus())) {
+        if (!support.isCancelled(purchase.getStatus()) && !isCreated(purchase)) {
             reversePurchaseStock(purchase, TX_PURCHASE_CANCEL);
         }
         purchase.setIsDeleted(true);
+        purchaseRepository.save(purchase);
+    }
+
+    @Override
+    @Transactional
+    public void commitPurchaseStock(Long id) {
+        Purchase purchase = getPurchase(id);
+        if (!isCreated(purchase)) {
+            return;
+        }
+        List<PurchaseItem> items = purchaseItemRepository.findByPurchaseIdAndOrganizationId(
+                id,
+                currentOrganizationService.getOrganizationId()
+        );
+        for (PurchaseItem item : items) {
+            support.increaseStock(
+                    item.getItem(),
+                    purchase.getWarehouse(),
+                    item.getBatch(),
+                    item.getQty(),
+                    TX_PURCHASE,
+                    purchase.getId(),
+                    "Purchase " + purchase.getPurchaseNo()
+            );
+        }
+        purchase.setStatus(TransactionSupport.STATUS_ACTIVE);
+        purchaseRepository.save(purchase);
+    }
+
+    @Override
+    @Transactional
+    public void setPurchaseStatus(Long id, String status) {
+        if (!MANUAL_STATUSES.contains(status)) {
+            throw new BadRequestException("Invalid purchase status", "INVALID_PURCHASE_STATUS");
+        }
+        Purchase purchase = getPurchase(id);
+        ensureNotCancelled(purchase);
+        if (isCreated(purchase) && !TransactionSupport.STATUS_CREATED.equals(status)) {
+            commitPurchaseStock(id);
+            purchase = getPurchase(id);
+        }
+        purchase.setStatus(status);
         purchaseRepository.save(purchase);
     }
 
@@ -141,7 +199,8 @@ public class PurchaseServiceImpl implements PurchaseService {
             Purchase purchase,
             PurchaseRequestDto request,
             String purchaseNo,
-            Organization organization
+            Organization organization,
+            boolean commitStock
     ) {
         Contact supplier = support.getActiveSupplier(request.getSupplierId());
         Warehouse warehouse = support.getActiveWarehouse(request.getWarehouseId());
@@ -184,16 +243,17 @@ public class PurchaseServiceImpl implements PurchaseService {
         purchase.setGrandTotal(support.money(grandTotal));
         purchase.setPaidAmount(paidAmount);
         purchase.setDueAmount(support.money(grandTotal.subtract(paidAmount)));
-        purchase.setStatus(TransactionSupport.STATUS_ACTIVE);
+        purchase.setStatus(commitStock ? TransactionSupport.STATUS_ACTIVE : TransactionSupport.STATUS_CREATED);
         purchase.setNotes(request.getNotes());
         return new PreparedPurchase(purchase, items);
     }
 
-    private void saveItemsAndIncreaseStock(
+    private void saveItems(
             Purchase purchase,
             List<PreparedPurchaseItem> items,
             String transactionType,
-            Organization organization
+            Organization organization,
+            boolean commitStock
     ) {
         for (PreparedPurchaseItem preparedItem : items) {
             PurchaseItem purchaseItem = PurchaseItem.builder()
@@ -210,15 +270,17 @@ public class PurchaseServiceImpl implements PurchaseService {
                     .totalAmount(preparedItem.totals().totalAmount())
                     .build();
             purchaseItemRepository.save(purchaseItem);
-            support.increaseStock(
-                    preparedItem.item(),
-                    purchase.getWarehouse(),
-                    preparedItem.batch(),
-                    preparedItem.request().getQuantity(),
-                    transactionType,
-                    purchase.getId(),
-                    "Purchase " + purchase.getPurchaseNo()
-            );
+            if (commitStock) {
+                support.increaseStock(
+                        preparedItem.item(),
+                        purchase.getWarehouse(),
+                        preparedItem.batch(),
+                        preparedItem.request().getQuantity(),
+                        transactionType,
+                        purchase.getId(),
+                        "Purchase " + purchase.getPurchaseNo()
+                );
+            }
         }
     }
 
@@ -250,6 +312,10 @@ public class PurchaseServiceImpl implements PurchaseService {
         }
     }
 
+    private boolean isCreated(Purchase purchase) {
+        return TransactionSupport.STATUS_CREATED.equals(purchase.getStatus());
+    }
+
     private String nextPurchaseNo() {
         String currentNumber = purchaseRepository.findTopByPurchaseNoStartingWithAndOrganizationIdOrderByIdDesc(
                         PURCHASE_PREFIX,
@@ -277,11 +343,17 @@ public class PurchaseServiceImpl implements PurchaseService {
         return PurchaseListResponseDto.builder()
                 .purchaseId(purchase.getId())
                 .purchaseNo(purchase.getPurchaseNo())
+                .supplierId(purchase.getSupplier() != null ? purchase.getSupplier().getId() : null)
                 .supplierName(support.contactDisplayName(purchase.getSupplier()))
                 .purchaseDate(purchase.getPurchaseDate())
                 .grandTotal(purchase.getGrandTotal())
                 .paidAmount(purchase.getPaidAmount())
                 .dueAmount(purchase.getDueAmount())
+                .status(purchase.getStatus())
+                .totalQuantity(purchaseItemRepository.sumQuantityByPurchaseIdAndOrganizationId(
+                        purchase.getId(),
+                        currentOrganizationService.getOrganizationId()
+                ))
                 .build();
     }
 

@@ -13,6 +13,7 @@ import {
   emptyOrganizationForm,
   getOrganizationId,
   getOrganizationStatus,
+  getOrganizationSubscribed,
   getUploadedOrganizationLogoUrl,
   normalizeOrganizationAddress,
   toOrganizationAddressRequest,
@@ -29,6 +30,7 @@ const toForm = (organization: Organization): UpdateOrganizationRequest => ({
   logoUrl: organization.logoUrl || '',
   address: normalizeOrganizationAddress(organization.address),
   status: getOrganizationStatus(organization.status),
+  isSubscribed: getOrganizationSubscribed(organization.isSubscribed),
 });
 
 export const OrganizationEditPage: React.FC = () => {

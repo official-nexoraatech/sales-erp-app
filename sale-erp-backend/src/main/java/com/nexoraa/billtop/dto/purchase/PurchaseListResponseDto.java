@@ -16,9 +16,12 @@ public class PurchaseListResponseDto {
 
     private Long purchaseId;
     private String purchaseNo;
+    private Long supplierId;
     private String supplierName;
     private LocalDate purchaseDate;
     private BigDecimal grandTotal;
     private BigDecimal paidAmount;
     private BigDecimal dueAmount;
+    private String status;
+    private BigDecimal totalQuantity;
 }

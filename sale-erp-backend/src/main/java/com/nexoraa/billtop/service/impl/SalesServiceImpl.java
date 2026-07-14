@@ -66,9 +66,9 @@ public class SalesServiceImpl implements SalesService {
     public SalesCreateResponseDto createSale(SalesRequestDto request) {
         Organization organization = currentOrganizationService.getOrganizationReference();
         String invoiceNo = nextInvoiceNo(INVOICE_PREFIX);
-        PreparedSale preparedSale = prepareSale(new Sale(), request, invoiceNo, organization);
+        PreparedSale preparedSale = prepareSale(new Sale(), request, invoiceNo, organization, false);
         Sale savedSale = saleRepository.save(preparedSale.sale());
-        saveItemsAndDecreaseStock(savedSale, preparedSale.items(), TX_SALE, organization);
+        saveItems(savedSale, preparedSale.items(), TX_SALE, organization, false);
         return toCreateResponse(savedSale);
     }
 
@@ -79,13 +79,15 @@ public class SalesServiceImpl implements SalesService {
             int size,
             String search,
             LocalDate fromDate,
-            LocalDate toDate
+            LocalDate toDate,
+            List<String> status
     ) {
         Specification<Sale> specification = SaleSpecification.notCancelled()
                 .and(SaleSpecification.notDeleted())
                 .and(SaleSpecification.organization(currentOrganizationService.getOrganizationId()))
                 .and(SaleSpecification.search(search))
-                .and(SaleSpecification.dateBetween(fromDate, toDate));
+                .and(SaleSpecification.dateBetween(fromDate, toDate))
+                .and(SaleSpecification.statusIn(status));
         Page<Sale> sales = saleRepository.findAll(
                 specification,
                 PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "id"))
@@ -107,12 +109,15 @@ public class SalesServiceImpl implements SalesService {
         Sale sale = getSale(id);
         ensureNotCancelled(sale);
 
-        reverseSaleStock(sale, TX_SALE_REVERSE);
+        boolean commitStock = !isPending(sale);
+        if (commitStock) {
+            reverseSaleStock(sale, TX_SALE_REVERSE);
+        }
         salesItemRepository.deleteBySaleIdAndOrganizationId(id, currentOrganizationService.getOrganizationId());
 
-        PreparedSale preparedSale = prepareSale(sale, request, sale.getInvoiceNo(), organization);
+        PreparedSale preparedSale = prepareSale(sale, request, sale.getInvoiceNo(), organization, commitStock);
         Sale savedSale = saleRepository.save(preparedSale.sale());
-        saveItemsAndDecreaseStock(savedSale, preparedSale.items(), TX_SALE, organization);
+        saveItems(savedSale, preparedSale.items(), TX_SALE, organization, commitStock);
     }
 
     @Override
@@ -120,7 +125,9 @@ public class SalesServiceImpl implements SalesService {
     public void cancelSale(Long id) {
         Sale sale = getSale(id);
         ensureNotCancelled(sale);
-        reverseSaleStock(sale, TX_SALE_CANCEL);
+        if (!isPending(sale)) {
+            reverseSaleStock(sale, TX_SALE_CANCEL);
+        }
         sale.setStatus(TransactionSupport.STATUS_CANCELLED);
         saleRepository.save(sale);
     }
@@ -132,10 +139,44 @@ public class SalesServiceImpl implements SalesService {
         if (support.defaultZero(sale.getPaidAmount()).compareTo(TransactionSupport.ZERO) > 0) {
             throw new BadRequestException(ErrorMessage.SALE_HAS_PAYMENTS, "SALE_HAS_PAYMENTS");
         }
-        if (!support.isCancelled(sale.getStatus())) {
+        if (!support.isCancelled(sale.getStatus()) && !isPending(sale)) {
             reverseSaleStock(sale, TX_SALE_CANCEL);
         }
         sale.setIsDeleted(true);
+        saleRepository.save(sale);
+    }
+
+    @Override
+    @Transactional
+    public void commitSaleStock(Long id) {
+        Sale sale = getSale(id);
+        if (!isPending(sale)) {
+            return;
+        }
+        Organization organization = sale.getOrganization();
+        List<SalesItem> placeholders = salesItemRepository.findBySaleIdAndOrganizationId(
+                id,
+                currentOrganizationService.getOrganizationId()
+        );
+        salesItemRepository.deleteAll(placeholders);
+        for (SalesItem placeholder : placeholders) {
+            Item item = placeholder.getItem();
+            List<BatchAllocation> allocations = getAvailableBatches(item, sale.getWarehouse(), placeholder.getQty());
+            for (BatchAllocation allocation : allocations) {
+                saveAllocatedItem(
+                        sale,
+                        item,
+                        allocation,
+                        placeholder.getUnitPrice(),
+                        placeholder.getDiscountPercent(),
+                        placeholder.getTaxPercent(),
+                        TX_SALE,
+                        organization,
+                        true
+                );
+            }
+        }
+        sale.setStatus(TransactionSupport.STATUS_ACTIVE);
         saleRepository.save(sale);
     }
 
@@ -154,7 +195,8 @@ public class SalesServiceImpl implements SalesService {
             Sale sale,
             SalesRequestDto request,
             String invoiceNo,
-            Organization organization
+            Organization organization,
+            boolean commitStock
     ) {
         Contact customer = support.getActiveCustomer(request.getCustomerId());
         Warehouse warehouse = support.getActiveWarehouse(request.getWarehouseId());
@@ -168,7 +210,9 @@ public class SalesServiceImpl implements SalesService {
 
         for (SalesItemRequestDto itemRequest : request.getItems()) {
             Item item = support.getActiveItem(itemRequest.getItemId());
-            List<BatchAllocation> allocations = getAvailableBatches(item, warehouse, itemRequest.getQuantity());
+            List<BatchAllocation> allocations = commitStock
+                    ? getAvailableBatches(item, warehouse, itemRequest.getQuantity())
+                    : List.of(new BatchAllocation(null, itemRequest.getQuantity()));
             TransactionSupport.LineTotals lineTotals = support.calculateLine(
                     itemRequest.getQuantity(),
                     itemRequest.getUnitPrice(),
@@ -198,7 +242,7 @@ public class SalesServiceImpl implements SalesService {
         sale.setGrandTotal(finalGrandTotal);
         sale.setPaidAmount(paidAmount);
         sale.setDueAmount(support.money(finalGrandTotal.subtract(paidAmount)));
-        sale.setStatus(TransactionSupport.STATUS_ACTIVE);
+        sale.setStatus(commitStock ? TransactionSupport.STATUS_ACTIVE : TransactionSupport.STATUS_PENDING);
         sale.setNotes(request.getNotes());
         return new PreparedSale(sale, items);
     }
@@ -227,44 +271,66 @@ public class SalesServiceImpl implements SalesService {
         return allocations;
     }
 
-    private void saveItemsAndDecreaseStock(
+    private void saveItems(
             Sale sale,
             List<PreparedSalesItem> items,
             String transactionType,
-            Organization organization
+            Organization organization,
+            boolean commitStock
     ) {
         for (PreparedSalesItem preparedItem : items) {
             for (BatchAllocation allocation : preparedItem.allocations()) {
-                TransactionSupport.LineTotals lineTotals = support.calculateLine(
-                        allocation.qty(),
+                saveAllocatedItem(
+                        sale,
+                        preparedItem.item(),
+                        allocation,
                         preparedItem.request().getUnitPrice(),
                         preparedItem.request().getDiscountPercent(),
-                        preparedItem.request().getTaxPercent()
-                );
-                SalesItem salesItem = SalesItem.builder()
-                        .organization(organization)
-                        .sale(sale)
-                        .item(preparedItem.item())
-                        .batch(allocation.batch())
-                        .qty(support.quantity(allocation.qty()))
-                        .unitPrice(support.money(preparedItem.request().getUnitPrice()))
-                        .discountPercent(support.defaultZero(preparedItem.request().getDiscountPercent()))
-                        .discountAmount(lineTotals.discountAmount())
-                        .taxPercent(support.defaultZero(preparedItem.request().getTaxPercent()))
-                        .taxAmount(lineTotals.taxAmount())
-                        .totalAmount(lineTotals.totalAmount())
-                        .build();
-                salesItemRepository.save(salesItem);
-                support.decreaseStock(
-                        preparedItem.item(),
-                        sale.getWarehouse(),
-                        allocation.batch(),
-                        allocation.qty(),
+                        preparedItem.request().getTaxPercent(),
                         transactionType,
-                        sale.getId(),
-                        "Sales invoice " + sale.getInvoiceNo()
+                        organization,
+                        commitStock
                 );
             }
+        }
+    }
+
+    private void saveAllocatedItem(
+            Sale sale,
+            Item item,
+            BatchAllocation allocation,
+            BigDecimal unitPrice,
+            BigDecimal discountPercent,
+            BigDecimal taxPercent,
+            String transactionType,
+            Organization organization,
+            boolean commitStock
+    ) {
+        TransactionSupport.LineTotals lineTotals = support.calculateLine(allocation.qty(), unitPrice, discountPercent, taxPercent);
+        SalesItem salesItem = SalesItem.builder()
+                .organization(organization)
+                .sale(sale)
+                .item(item)
+                .batch(allocation.batch())
+                .qty(support.quantity(allocation.qty()))
+                .unitPrice(support.money(unitPrice))
+                .discountPercent(support.defaultZero(discountPercent))
+                .discountAmount(lineTotals.discountAmount())
+                .taxPercent(support.defaultZero(taxPercent))
+                .taxAmount(lineTotals.taxAmount())
+                .totalAmount(lineTotals.totalAmount())
+                .build();
+        salesItemRepository.save(salesItem);
+        if (commitStock) {
+            support.decreaseStock(
+                    item,
+                    sale.getWarehouse(),
+                    allocation.batch(),
+                    allocation.qty(),
+                    transactionType,
+                    sale.getId(),
+                    "Sales invoice " + sale.getInvoiceNo()
+            );
         }
     }
 
@@ -306,6 +372,10 @@ public class SalesServiceImpl implements SalesService {
         }
     }
 
+    private boolean isPending(Sale sale) {
+        return TransactionSupport.STATUS_PENDING.equals(sale.getStatus());
+    }
+
     private Long optionalId(Long id) {
         return id == null || id <= 0 ? null : id;
     }
@@ -333,6 +403,7 @@ public class SalesServiceImpl implements SalesService {
                 .grandTotal(sale.getGrandTotal())
                 .paidAmount(sale.getPaidAmount())
                 .dueAmount(sale.getDueAmount())
+                .status(sale.getStatus())
                 .build();
     }
 

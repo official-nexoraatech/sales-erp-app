@@ -34,17 +34,12 @@ export const SaleOrderForm: React.FC<Props> = ({ initial, submitText, loading, o
   const navigate = useNavigate();
   const [customerId, setCustomerId] = useState(initial?.customerId || 0);
   const [invoiceDate, setInvoiceDate] = useState(initial?.invoiceDate || new Date().toISOString().slice(0, 10));
-  const [dueDate, setDueDate] = useState('');
   const [warehouseId, setWarehouseId] = useState(initial?.warehouseId || 0);
   const [stateId, setStateId] = useState(initial?.stateId || 0);
   const [salesPersonId] = useState(initial?.salesPersonId || 0);
-  const [orderStatus, setOrderStatus] = useState('PENDING');
   const [selectedItem, setSelectedItem] = useState(0);
   const [notes, setNotes] = useState(initial?.notes || '');
   const [roundOff, setRoundOff] = useState(false);
-  const [amount, setAmount] = useState('');
-  const [paymentType, setPaymentType] = useState('');
-  const [paymentNote, setPaymentNote] = useState('');
   const [showItemModal, setShowItemModal] = useState(false);
   const [lines, setLines] = useState<Line[]>(initial?.lines || []);
 
@@ -113,7 +108,7 @@ export const SaleOrderForm: React.FC<Props> = ({ initial, submitText, loading, o
   return (
     <div className="overflow-hidden rounded-lg bg-white shadow">
       <div className="border-b px-5 py-4">
-        <h1 className="text-xl font-semibold text-gray-900">Sale Order Details</h1>
+        <h1 className="text-xl font-semibold text-gray-900">Bill Details</h1>
       </div>
 
       <div className="grid grid-cols-1 gap-4 p-5 md:grid-cols-3">
@@ -130,24 +125,7 @@ export const SaleOrderForm: React.FC<Props> = ({ initial, submitText, loading, o
         <label className="text-sm text-gray-600">Date
           <input type="date" className={`${inputClass} mt-1`} value={invoiceDate} onChange={(event) => setInvoiceDate(event.target.value)} />
         </label>
-        <label className="text-sm text-gray-600">Due Date
-          <input type="date" className={`${inputClass} mt-1`} value={dueDate} onChange={(event) => setDueDate(event.target.value)} />
-        </label>
-        <label className="text-sm text-gray-600">Order ID
-          <div className="mt-1 flex">
-            <input className={`${inputClass} rounded-r-none`} value="SO/" readOnly />
-            <span className="flex h-10 items-center border-y border-gray-300 px-3">#</span>
-            <input className={`${inputClass} rounded-l-none`} value="1" readOnly />
-          </div>
-        </label>
         <CountryStateSelect stateId={stateId} onStateChange={setStateId} className={inputClass} />
-        <label className="text-sm text-gray-600">Order Status
-          <select className={`${inputClass} mt-1`} value={orderStatus} onChange={(event) => setOrderStatus(event.target.value)}>
-            <option value="PENDING">Pending</option>
-            <option value="APPROVED">Approved</option>
-            <option value="CANCELLED">Cancelled</option>
-          </select>
-        </label>
       </div>
 
       <h2 className="border-y px-5 py-4 text-lg font-semibold">Items</h2>
@@ -219,32 +197,6 @@ export const SaleOrderForm: React.FC<Props> = ({ initial, submitText, loading, o
             <input value={grandTotal.toFixed(2)} readOnly className="w-28 rounded border border-gray-300 px-3 py-2 text-right" />
           </p>
         </div>
-      </div>
-
-      <h2 className="border-y px-5 py-4 text-lg font-semibold">Payment</h2>
-      <div className="grid grid-cols-1 gap-5 p-5 md:grid-cols-2">
-        <label className="text-sm text-gray-600">#1 Amount
-          <div className="mt-1 flex">
-            <input className={`${inputClass} rounded-r-none text-right`} value={amount} onChange={(event) => setAmount(event.target.value)} />
-            <span className="flex h-10 w-8 items-center justify-center rounded-r border border-l-0 border-gray-300">₹</span>
-          </div>
-        </label>
-        <label className="text-sm text-gray-600">Payment Type
-          <div className="mt-1 flex">
-            <select className={`${inputClass} rounded-r-none`} value={paymentType} onChange={(event) => setPaymentType(event.target.value)}>
-              <option value="">Choose one thing</option>
-              <option value="cash">Cash</option>
-              <option value="bank">Bank</option>
-            </select>
-            <button type="button" className="flex h-10 w-9 items-center justify-center rounded-r border border-l-0 border-gray-300 text-blue-500"><CirclePlus size={15} /></button>
-          </div>
-        </label>
-        <label className="text-sm text-gray-600">Payment Note
-          <textarea className="mt-1 h-20 w-full rounded border border-gray-300 p-3" value={paymentNote} onChange={(event) => setPaymentNote(event.target.value)} />
-        </label>
-      </div>
-      <div className="px-5 pb-5">
-        <button type="button" className="text-sm text-blue-600">+ Add Payment Type</button>
       </div>
 
       <div className="flex gap-3 border-t p-5">

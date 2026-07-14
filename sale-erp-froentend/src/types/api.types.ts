@@ -35,6 +35,7 @@ export interface Organization {
   gstNumber?: string;
   address?: OrganizationAddress | string | null;
   status: OrganizationStatus | string | boolean;
+  isSubscribed?: boolean;
   createdAt?: string;
   createdBy?: string;
 }
@@ -46,6 +47,7 @@ export interface OrganizationRequest {
   gstNumber?: string;
   address: OrganizationAddress;
   status: OrganizationStatus;
+  isSubscribed?: boolean;
 }
 
 export interface UpdateOrganizationRequest extends OrganizationRequest {
@@ -108,7 +110,22 @@ export interface ItemListItem {
   trackingType?: string;
   unitName?: string;
   description?: string;
+  imageUrl?: string | null;
 }
+
+export interface ItemCreateResponse {
+  id: number;
+  itemCode: string;
+}
+
+export type ItemImageUploadResponse = string | {
+  imageUrl?: string | null;
+  objectUrl?: string | null;
+  url?: string | null;
+  fileUrl?: string | null;
+  filePath?: string | null;
+  path?: string | null;
+} | null;
 
 export interface ItemRequest {
   itemName: string;
@@ -527,12 +544,14 @@ export interface PurchaseListItem {
   purchaseId: number;
   purchaseNo?: string;
   purchaseCode?: string;
+  supplierId?: number;
   supplierName: string;
   purchaseDate: string;
   grandTotal: number;
   paidAmount?: number;
   dueAmount?: number;
   status?: string;
+  totalQuantity?: number;
 }
 
 export interface PurchaseRequest {

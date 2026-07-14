@@ -25,6 +25,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.time.LocalDate;
+import java.util.List;
 
 @Validated
 @RestController
@@ -51,11 +52,12 @@ public class SalesController {
             @RequestParam(defaultValue = "20") @Positive int size,
             @RequestParam(required = false) String search,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fromDate,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate toDate
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate toDate,
+            @RequestParam(required = false) List<String> status
     ) {
         return ResponseEntity.ok(ApiResponseDto.success(
                 ResponseMessage.SALES_INVOICES_RETRIEVED,
-                salesService.getSales(page, size, search, fromDate, toDate)
+                salesService.getSales(page, size, search, fromDate, toDate, status)
         ));
     }
 

@@ -68,8 +68,9 @@ public class PermissionManagementService {
 
     @Transactional(readOnly = true)
     public Map<String, List<PermissionSummaryResponseDto>> getAllDatabasePermissionsGroupedByName() {
+        BillTopUserDetails userDetails = getCurrentUserDetails();
         Map<String, List<PermissionSummaryResponseDto>> groupedPermissions = new LinkedHashMap<>();
-        permissionRepository.findAllByStatusAndIsDeletedFalseOrderByGroupNameAscNameAsc(Status.ACTIVE)
+        getUserPermissionEntities(currentOrganizationService.getOrganizationId(), userDetails.userId())
                 .forEach(permission -> groupedPermissions
                         .computeIfAbsent(permission.getGroupName(), groupName -> new java.util.ArrayList<>())
                         .add(toSummaryResponse(permission)));
@@ -89,6 +90,13 @@ public class PermissionManagementService {
 
     @Transactional(readOnly = true)
     public List<PermissionResponseDto> getUserPermissionsForOrganization(Long organizationId, Long userId) {
+        return getUserPermissionEntities(organizationId, userId)
+                .stream()
+                .map(this::toResponse)
+                .toList();
+    }
+
+    private List<Permission> getUserPermissionEntities(Long organizationId, Long userId) {
         User user = userRepository.findByIdAndOrganizationIdAndStatusAndIsDeletedFalse(
                         userId,
                         organizationId,
@@ -116,7 +124,6 @@ public class PermissionManagementService {
                     }
                     return left.getName().compareToIgnoreCase(right.getName());
                 })
-                .map(this::toResponse)
                 .toList();
     }
 

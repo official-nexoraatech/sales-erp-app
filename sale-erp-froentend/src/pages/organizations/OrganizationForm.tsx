@@ -38,6 +38,15 @@ export const OrganizationForm: React.FC<OrganizationFormProps> = ({
           <option value="INACTIVE">INACTIVE</option>
         </select>
       </label>
+      <label className="flex items-center gap-2 self-end text-sm text-gray-600">
+        <input
+          type="checkbox"
+          className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-100"
+          checked={form.isSubscribed !== false}
+          onChange={(event) => onChange('isSubscribed', event.target.checked)}
+        />
+        Subscribed
+      </label>
       <label className="text-sm text-gray-600">
         Phone
         <input className={`${inputClass} mt-1`} value={form.phone || ''} onChange={(event) => onChange('phone', event.target.value)} />

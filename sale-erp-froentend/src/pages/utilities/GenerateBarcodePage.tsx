@@ -191,8 +191,10 @@ export const GenerateBarcodePage: React.FC = () => {
   const [search, setSearch] = useState('');
   const [selectedItemId, setSelectedItemId] = useState(0);
   const [selectedItem, setSelectedItem] = useState<ItemListItem | null>(null);
+  const [quantity, setQuantity] = useState(0);
   const [generatedItem, setGeneratedItem] = useState<ItemListItem | null>(null);
   const [generatedType, setGeneratedType] = useState<BarcodeType>('CODE128');
+  const [generatedCount, setGeneratedCount] = useState(0);
   const barcodeSectionRef = useRef<HTMLDivElement | null>(null);
   const debouncedSearch = useDebounce(search);
 
@@ -202,14 +204,15 @@ export const GenerateBarcodePage: React.FC = () => {
   });
 
   const searchResults = items.data?.data?.content || [];
-  const generatedCount = availableBarcodeCount(generatedItem);
   const selectedLabel = labelOptionByValue(labelSize);
 
   const selectItem = (itemId: number) => {
     setSelectedItemId(itemId);
     const item = searchResults.find((entry) => entry.id === itemId) || null;
     setSelectedItem(item);
+    setQuantity(availableBarcodeCount(item));
     setGeneratedItem(null);
+    setGeneratedCount(0);
   };
 
   const generateCode = (type: BarcodeType) => {
@@ -217,12 +220,13 @@ export const GenerateBarcodePage: React.FC = () => {
       toast.error('Select an item first');
       return;
     }
-    if (availableBarcodeCount(selectedItem) <= 0) {
-      toast.error('Selected item has no available quantity');
+    if (quantity <= 0) {
+      toast.error('Enter a quantity greater than 0');
       return;
     }
     setGeneratedType(type);
     setGeneratedItem(selectedItem);
+    setGeneratedCount(quantity);
   };
 
   const printBarcode = () => {
@@ -302,7 +306,7 @@ export const GenerateBarcodePage: React.FC = () => {
             </label>
           </div>
 
-          <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(240px,1fr)_minmax(260px,1fr)]">
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(240px,1fr)_minmax(260px,1fr)_minmax(140px,0.6fr)]">
             <label className="block text-sm text-gray-600">
               Search Item
               <div className="mt-1 flex">
@@ -332,6 +336,21 @@ export const GenerateBarcodePage: React.FC = () => {
                   </option>
                 ))}
               </select>
+            </label>
+            <label className="block text-sm text-gray-600">
+              Quantity
+              <input
+                type="number"
+                min={1}
+                className={`${inputClass} mt-1`}
+                placeholder="Qty"
+                value={quantity === 0 ? '' : quantity}
+                disabled={!selectedItem}
+                onChange={(event) => {
+                  const value = Number(event.target.value);
+                  setQuantity(Number.isFinite(value) && value > 0 ? Math.floor(value) : 0);
+                }}
+              />
             </label>
           </div>
 
@@ -380,7 +399,9 @@ export const GenerateBarcodePage: React.FC = () => {
             setSearch('');
             setSelectedItemId(0);
             setSelectedItem(null);
+            setQuantity(0);
             setGeneratedItem(null);
+            setGeneratedCount(0);
             setGeneratedType(barcodeType);
           }}>Close</Button>
         </div>
@@ -397,7 +418,7 @@ export const GenerateBarcodePage: React.FC = () => {
         <div className="min-h-[220px] bg-white p-5">
           {generatedItem ? (
             <>
-              <p className="mb-4 text-sm font-semibold text-gray-700">Generated {generatedCount} barcode{generatedCount === 1 ? '' : 's'} from available quantity.</p>
+              <p className="mb-4 text-sm font-semibold text-gray-700">Generated {generatedCount} barcode{generatedCount === 1 ? '' : 's'} for the entered quantity.</p>
               <div
                 ref={barcodeSectionRef}
                 className="grid gap-3"

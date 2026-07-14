@@ -17,7 +17,8 @@ public record BillTopUserDetails(
         String password,
         String role,
         List<String> permissions,
-        boolean enabled
+        boolean enabled,
+        boolean organizationSubscribed
 ) implements UserDetails {
 
     private static final String SUPER_ADMIN_ROLE_NAME = "Super Admin";

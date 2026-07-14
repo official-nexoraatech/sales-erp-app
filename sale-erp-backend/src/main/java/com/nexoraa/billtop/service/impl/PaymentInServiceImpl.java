@@ -20,6 +20,7 @@ import com.nexoraa.billtop.repository.SaleRepository;
 import com.nexoraa.billtop.repository.SalesPaymentRepository;
 import com.nexoraa.billtop.security.CurrentOrganizationService;
 import com.nexoraa.billtop.service.PaymentInService;
+import com.nexoraa.billtop.service.SalesService;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -41,6 +42,7 @@ public class PaymentInServiceImpl implements PaymentInService {
     private final TransactionSupport support;
     private final FinanceSupport financeSupport;
     private final CurrentOrganizationService currentOrganizationService;
+    private final SalesService salesService;
 
     public PaymentInServiceImpl(
             PaymentRepository paymentRepository,
@@ -48,7 +50,8 @@ public class PaymentInServiceImpl implements PaymentInService {
             SalesPaymentRepository salesPaymentRepository,
             TransactionSupport support,
             FinanceSupport financeSupport,
-            CurrentOrganizationService currentOrganizationService
+            CurrentOrganizationService currentOrganizationService,
+            SalesService salesService
     ) {
         this.paymentRepository = paymentRepository;
         this.saleRepository = saleRepository;
@@ -56,6 +59,7 @@ public class PaymentInServiceImpl implements PaymentInService {
         this.support = support;
         this.financeSupport = financeSupport;
         this.currentOrganizationService = currentOrganizationService;
+        this.salesService = salesService;
     }
 
     @Override
@@ -194,6 +198,9 @@ public class PaymentInServiceImpl implements PaymentInService {
             }
             if (support.isCancelled(sale.getStatus())) {
                 throw new BadRequestException(ErrorMessage.SALE_ALREADY_CANCELLED, "SALE_ALREADY_CANCELLED");
+            }
+            if (TransactionSupport.STATUS_PENDING.equals(sale.getStatus())) {
+                salesService.commitSaleStock(sale.getId());
             }
             BigDecimal dueAmount = support.defaultZero(sale.getDueAmount());
             if (dueAmount.compareTo(TransactionSupport.ZERO) <= 0) {

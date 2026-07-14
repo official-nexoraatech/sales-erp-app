@@ -22,6 +22,8 @@ import type {
   ExpenseSubCategoryRequest,
   ItemListQuery,
   ItemListItem,
+  ItemCreateResponse,
+  ItemImageUploadResponse,
   ItemRequest,
   ItemStock,
   EmailSendRequest,
@@ -101,6 +103,8 @@ export type {
   ExpenseSubCategoryRequest,
   ItemListItem,
   ItemListQuery,
+  ItemCreateResponse,
+  ItemImageUploadResponse,
   ItemRequest,
   ItemStock,
   EmailSendRequest,
@@ -273,11 +277,18 @@ export const itemApi = {
   getStock: (id: number) =>
     axiosClient.get<ApiResponse<ItemStock>, ApiResponse<ItemStock>>(`/api/v1/items/${id}/stock`),
   create: (payload: ItemRequest) =>
-    axiosClient.post<ApiResponse<void>, ApiResponse<void>>('/api/v1/items', payload),
+    axiosClient.post<ApiResponse<ItemCreateResponse>, ApiResponse<ItemCreateResponse>>('/api/v1/items', payload),
   update: (id: number, payload: ItemRequest) =>
     axiosClient.put<ApiResponse<void>, ApiResponse<void>>(`/api/v1/items/${id}`, payload),
   delete: (id: number) =>
     axiosClient.delete<ApiResponse<void>, ApiResponse<void>>(`/api/v1/items/${id}`),
+  uploadLogo: (id: number, file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return axiosClient.post<ApiResponse<ItemImageUploadResponse>, ApiResponse<ItemImageUploadResponse>>(`/api/v1/items/${id}/logo`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
 };
 
 const normalizeMasterList = (response: ApiResponse<SimpleMaster[] | PageResponse<SimpleMaster>>) => {
@@ -529,6 +540,8 @@ export const purchaseApi = {
     axiosClient.put<ApiResponse<void>, ApiResponse<void>>(`/api/v1/purchases/${id}`, payload),
   cancel: (id: number) =>
     axiosClient.put<ApiResponse<void>, ApiResponse<void>>(`/api/v1/purchases/${id}/cancel`),
+  updateStatus: (id: number, status: string) =>
+    axiosClient.put<ApiResponse<void>, ApiResponse<void>>(`/api/v1/purchases/${id}/status`, { status }),
   delete: (id: number) =>
     axiosClient.delete<ApiResponse<void>, ApiResponse<void>>(`/api/v1/purchases/${id}`),
 };

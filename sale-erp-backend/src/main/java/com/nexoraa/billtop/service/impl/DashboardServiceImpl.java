@@ -64,7 +64,7 @@ public class DashboardServiceImpl implements DashboardService {
     }
 
     @Override
-    @Transactional(readOnly = true)
+    @Transactional(readOnly = false)
     public DashboardSummaryResponseDto getSummary(LocalDate fromDate, LocalDate toDate) {
         LocalDate today = LocalDate.now();
         List<Sale> periodSales = salesBetween(fromDate, toDate);

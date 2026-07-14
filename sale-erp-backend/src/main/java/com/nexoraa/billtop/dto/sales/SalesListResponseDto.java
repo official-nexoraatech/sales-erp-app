@@ -21,4 +21,5 @@ public class SalesListResponseDto {
     private BigDecimal grandTotal;
     private BigDecimal paidAmount;
     private BigDecimal dueAmount;
+    private String status;
 }

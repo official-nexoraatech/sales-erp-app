@@ -82,7 +82,6 @@ export const ItemListPage: React.FC = () => {
   const canUpdate = hasPermission(PERMISSIONS.ITEM_UPDATE) && canUseItemFormLookups;
   const canDelete = hasPermission(PERMISSIONS.ITEM_DELETE);
   const canViewStock = hasPermission(PERMISSIONS.ITEM_STOCK_VIEW);
-  const canImport = hasPermission(PERMISSIONS.ITEM_IMPORT) || hasPermission(PERMISSIONS.ITEM_TEMPLATE_DOWNLOAD);
   const { page, setPage, handlePageChange } = usePagination();
   const [pageSize, setPageSize] = useState(10);
   const [search, setSearch] = useState('');
@@ -162,7 +161,7 @@ export const ItemListPage: React.FC = () => {
       <div className="overflow-hidden rounded-lg bg-white shadow">
         <div className="flex items-center justify-between border-b px-5 py-4">
           <h1 className="text-xl font-semibold uppercase text-gray-900">Item List</h1>
-          {(canCreate || canImport) && <div className="flex gap-2">{canImport && <Button variant="outline" className="min-w-[120px]" onClick={() => navigate('/utilities/import-items')}>Import</Button>}{canCreate && <Button onClick={() => navigate('/items/create')} className="min-w-[145px]">Create Item</Button>}</div>}
+          {canCreate && <div className="flex gap-2">{canCreate && <Button onClick={() => navigate('/items/create')} className="min-w-[145px]">Create Item</Button>}</div>}
         </div>
         <div className="grid grid-cols-1 gap-4 p-5 md:grid-cols-3">
           {canViewCategories && <label className="text-sm text-gray-600">Category<select className="mt-1 h-10 w-full rounded border border-gray-300 px-3" value={categoryId} disabled={categories.isLoading} onChange={(event) => { setCategoryId(Number(event.target.value)); setBrandId(0); setPage(0); }}><option value={0}>{categories.isLoading ? 'Loading categories...' : 'Choose one thing'}</option>{(categories.data?.data?.content || []).map((entry) => <option key={entry.id} value={entry.id}>{entry.name}</option>)}</select></label>}

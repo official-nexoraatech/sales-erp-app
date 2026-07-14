@@ -7,6 +7,7 @@ import com.nexoraa.billtop.dto.purchase.PurchaseCreateResponseDto;
 import com.nexoraa.billtop.dto.purchase.PurchaseDetailResponseDto;
 import com.nexoraa.billtop.dto.purchase.PurchaseListResponseDto;
 import com.nexoraa.billtop.dto.purchase.PurchaseRequestDto;
+import com.nexoraa.billtop.dto.purchase.PurchaseStatusRequestDto;
 import com.nexoraa.billtop.service.PurchaseService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Min;
@@ -25,6 +26,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.time.LocalDate;
+import java.util.List;
 
 @Validated
 @RestController
@@ -53,11 +55,14 @@ public class PurchaseController {
             @RequestParam(defaultValue = "20") @Positive int size,
             @RequestParam(required = false) String search,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fromDate,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate toDate
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate toDate,
+            @RequestParam(required = false) List<String> status,
+            @RequestParam(required = false) Long supplierId,
+            @RequestParam(required = false) Long stateId
     ) {
         return ResponseEntity.ok(ApiResponseDto.success(
                 ResponseMessage.PURCHASES_RETRIEVED,
-                purchaseService.getPurchases(page, size, search, fromDate, toDate)
+                purchaseService.getPurchases(page, size, search, fromDate, toDate, status, supplierId, stateId)
         ));
     }
 
@@ -75,6 +80,15 @@ public class PurchaseController {
             @Valid @RequestBody PurchaseRequestDto request
     ) {
         purchaseService.updatePurchase(id, request);
+        return ResponseEntity.ok(ApiResponseDto.success(ResponseMessage.PURCHASE_UPDATED));
+    }
+
+    @PutMapping("/{id}/status")
+    public ResponseEntity<ApiResponseDto<Void>> setPurchaseStatus(
+            @PathVariable @Positive Long id,
+            @Valid @RequestBody PurchaseStatusRequestDto request
+    ) {
+        purchaseService.setPurchaseStatus(id, request.getStatus());
         return ResponseEntity.ok(ApiResponseDto.success(ResponseMessage.PURCHASE_UPDATED));
     }
 

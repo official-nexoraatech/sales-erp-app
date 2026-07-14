@@ -31,6 +31,10 @@ public class AuthService {
             );
 
             BillTopUserDetails principal = (BillTopUserDetails) authentication.getPrincipal();
+            if (!principal.organizationSubscribed()) {
+                throw new BadRequestException(ErrorMessage.ORGANIZATION_NOT_SUBSCRIBED, "ORGANIZATION_NOT_SUBSCRIBED");
+            }
+
             return LoginResponseDto.builder()
                     .accessToken(jwtService.generateToken(principal))
                     .tokenType("Bearer")
@@ -39,6 +43,8 @@ public class AuthService {
             throw new BadRequestException(ErrorMessage.INVALID_CREDENTIALS, "INVALID_CREDENTIALS");
         } catch (AuthenticationException ex) {
             throw new BadRequestException(ErrorMessage.INVALID_CREDENTIALS, "INVALID_CREDENTIALS");
+        } catch (BadRequestException ex) {
+            throw ex;
         } catch (Exception ex) {
             throw new BadRequestException(ErrorMessage.OPERATION_FAILED, "LOGIN_FAILED");
         }

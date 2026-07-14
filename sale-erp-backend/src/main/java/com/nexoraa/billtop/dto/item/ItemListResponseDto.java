@@ -48,5 +48,6 @@ public class ItemListResponseDto {
     private Long warehouseId;
     private String warehouseName;
     private String description;
+    private String imageUrl;
     private ItemStatus status;
 }

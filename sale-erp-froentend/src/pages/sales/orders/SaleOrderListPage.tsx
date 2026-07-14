@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { Ban, Edit, Eye, Trash2 } from 'lucide-react';
+import { Ban, CreditCard, Edit, Eye, Trash2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { customerApi, salesApi } from '../../../api/endpoints';
@@ -27,6 +27,7 @@ export const SaleOrderListPage: React.FC = () => {
   const canCreate = hasPermission(PERMISSIONS.SALES_CREATE);
   const canUpdate = hasPermission(PERMISSIONS.SALES_UPDATE);
   const canDelete = hasPermission(PERMISSIONS.SALES_DELETE);
+  const canPay = hasPermission(PERMISSIONS.PAYMENT_IN_CREATE);
   const { confirmAction, confirmationDialog } = useConfirmation();
   const { page, setPage, handlePageChange } = usePagination();
   const [pageSize, setPageSize] = useState(10);
@@ -51,6 +52,7 @@ export const SaleOrderListPage: React.FC = () => {
       search: debouncedSearch,
       fromDate: fromDate || undefined,
       toDate: toDate || undefined,
+      status: 'PENDING,ACTIVE',
     }),
   });
 
@@ -86,7 +88,7 @@ export const SaleOrderListPage: React.FC = () => {
     sale.customerName,
     sale.grandTotal,
     sale.dueAmount,
-    sale.dueAmount <= 0 ? 'PAID' : 'DUE',
+    sale.status === 'PENDING' ? 'Pending' : 'Partially Paid',
   ]);
 
   const download = (extension: 'csv' | 'xls') => {
@@ -185,13 +187,14 @@ export const SaleOrderListPage: React.FC = () => {
                     <td className="border p-3">{sale.customerName}</td>
                     <td className="border p-3 font-semibold text-green-600">{formatCurrency(sale.grandTotal)}</td>
                     <td className="border p-3">{formatCurrency(sale.dueAmount)}</td>
-                    <td className="border p-3"><span className={`rounded-full px-3 py-1 text-xs font-semibold ${sale.dueAmount <= 0 ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>{sale.dueAmount <= 0 ? 'PAID' : 'DUE'}</span></td>
+                    <td className="border p-3"><span className={`rounded-full px-3 py-1 text-xs font-semibold ${sale.status === 'PENDING' ? 'bg-gray-100 text-gray-700' : 'bg-amber-100 text-amber-700'}`}>{sale.status === 'PENDING' ? 'Pending' : 'Partially Paid'}</span></td>
                     <td className="border p-3">{user?.userName || 'admin'}</td>
                     <td className="border p-3">{formatDate(sale.invoiceDate)}</td>
                     <td className="border p-3">
                       <div className="flex items-center gap-2">
                         <button onClick={() => navigate(`/sales/orders/${sale.saleId}`)} className="text-blue-600" title="View"><Eye size={17} /></button>
-                        {canUpdate && <button onClick={() => navigate(`/sales/orders/${sale.saleId}/edit`)} className="text-orange-600" title="Edit"><Edit size={17} /></button>}
+                        {canPay && <button onClick={() => navigate(`/sales/payment-in/create?saleId=${sale.saleId}`)} className="text-green-600" title="Add Payment"><CreditCard size={17} /></button>}
+                        {canUpdate && sale.status === 'PENDING' && <button onClick={() => navigate(`/sales/orders/${sale.saleId}/edit`)} className="text-orange-600" title="Edit"><Edit size={17} /></button>}
                         {canDelete && <button onClick={async () => { if (await confirmAction({ title: 'Cancel Sale Order', message: 'Cancel this sale order?', confirmText: 'Cancel', variant: 'danger' })) cancel.mutate(sale.saleId); }} className="text-red-600" title="Cancel"><Ban size={17} /></button>}
                         {canDelete && <button onClick={async () => { if (await confirmAction({ title: 'Delete Sale Order', message: 'Delete this sale order? This cannot be undone.', confirmText: 'Delete', variant: 'danger' })) deleteSale.mutate(sale.saleId); }} className="text-red-600" title="Delete"><Trash2 size={17} /></button>}
                       </div>

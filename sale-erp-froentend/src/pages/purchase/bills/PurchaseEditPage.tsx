@@ -7,13 +7,21 @@ import { queryClient } from '../../../app/queryClient';
 import { Loader } from '../../../components/ui/Loader';
 import { PurchaseForm, type PurchaseSubmitPayload } from './PurchaseForm';
 
-export const PurchaseEditPage: React.FC = () => {
+interface Props {
+  mode?: 'bill' | 'order';
+}
+
+export const PurchaseEditPage: React.FC<Props> = ({ mode = 'bill' }) => {
   const navigate = useNavigate();
+  const listPath = mode === 'order' ? '/purchase/orders' : '/purchase/bills';
   const id = Number(useParams<{ id: string }>().id);
   const purchase = useQuery({ queryKey: ['purchase', id], queryFn: () => purchaseApi.getById(id), enabled: id > 0 });
   const mutation = useMutation({
     mutationFn: async (payload: PurchaseSubmitPayload) => {
-      const { payments = [], ...purchasePayload } = payload;
+      const { payments = [], requestCancel, statusOverride, ...purchasePayload } = payload;
+      if (requestCancel) {
+        return purchaseApi.cancel(id);
+      }
       const response = await purchaseApi.update(id, purchasePayload);
       for (const payment of payments) {
         await paymentOutApi.create({
@@ -26,13 +34,16 @@ export const PurchaseEditPage: React.FC = () => {
           purchaseIds: [id],
         });
       }
+      if (statusOverride) {
+        await purchaseApi.updateStatus(id, statusOverride);
+      }
       return response;
     },
-    onSuccess: () => {
-      toast.success('Purchase updated successfully');
+    onSuccess: (_response, variables) => {
+      toast.success(variables.requestCancel ? 'Purchase cancelled' : 'Purchase updated successfully');
       queryClient.invalidateQueries({ queryKey: ['purchases'] });
       queryClient.invalidateQueries({ queryKey: ['purchase', id] });
-      navigate('/purchase/bills');
+      navigate(listPath);
     },
     onError: (error: any) => toast.error(error?.message || 'Failed to update purchase'),
   });
@@ -49,6 +60,8 @@ export const PurchaseEditPage: React.FC = () => {
     stateId: 0,
     notes: detail.notes || '',
     items: [],
+    purchaseNo: detail.purchaseNo,
+    status: detail.status,
     lines: detail.items.map((item) => ({
       itemId: item.itemId,
       itemName: item.itemName,
@@ -64,8 +77,8 @@ export const PurchaseEditPage: React.FC = () => {
 
   return (
     <div className="space-y-5">
-      <div className="text-sm text-gray-500">Home &gt; Purchase &gt; Purchase Bills &gt; Edit Purchase</div>
-      <PurchaseForm initial={initial} submitText="Update" loading={mutation.isPending} onSubmit={(payload) => mutation.mutate(payload)} onCancel={() => navigate('/purchase/bills')} />
+      <div className="text-sm text-gray-500">Home &gt; Purchase &gt; {mode === 'order' ? 'Purchase Order List &gt; Purchase Order Details' : 'Purchase Bills &gt; Edit Purchase'}</div>
+      <PurchaseForm mode={mode} initial={initial} submitText="Update" loading={mutation.isPending} onSubmit={(payload) => mutation.mutate(payload)} onCancel={() => navigate(listPath)} />
     </div>
   );
 };
