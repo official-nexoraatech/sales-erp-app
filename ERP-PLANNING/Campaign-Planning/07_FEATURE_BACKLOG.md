@@ -1,0 +1,73 @@
+# 07 — Feature Backlog (MoSCoW)
+
+Master task list. Each item references its `FR-xx`/gap source and the phase that delivers it. This is the
+list phase-prompts pull from — keep it updated as items complete (strike through or move to a "Done"
+section per phase in `phase-completions/`).
+
+## Must Have (blocks calling this an "enterprise-grade" platform)
+
+| ID    | Item                                                                                                                | Source   | Phase          |
+| ----- | ------------------------------------------------------------------------------------------------------------------- | -------- | -------------- |
+| MH-01 | Channel-provider adapter interface (refactor existing 4 channels onto it)                                           | FR-B1/B2 | CP-1/CP-2      |
+| MH-02 | Delivery-webhook receivers for MSG91/SendGrid/Meta (real `DELIVERED` status)                                        | FR-I1    | CP-6           |
+| MH-03 | Campaign editing while DRAFT/SCHEDULED + optimistic locking via `version`                                           | FR-D3    | CP-4           |
+| MH-04 | Multi-rule segment builder UI (AND/OR) matching existing backend capability                                         | FR-C1    | CP-3           |
+| MH-05 | Expanded segment targeting fields (purchase history, preferences, geo, store, salesperson)                          | FR-C2    | CP-3           |
+| MH-06 | Reusable/versioned campaign templates                                                                               | FR-D4    | CP-4           |
+| MH-07 | Campaign type taxonomy (tenant-configurable)                                                                        | FR-A1-A3 | CP-4           |
+| MH-08 | Background queue/worker for recipient fan-out (replace in-request batching)                                         | FR-E5    | CP-5           |
+| MH-09 | Recurring campaigns                                                                                                 | FR-E1    | CP-5           |
+| MH-10 | Frequency capping across campaigns                                                                                  | FR-E4    | CP-5           |
+| MH-11 | Trigger-based automation engine (birthday, win-back, abandoned cart, post-purchase, membership renewal, inactivity) | FR-H1/H2 | CP-5           |
+| MH-12 | Approval workflow (optional per tenant)                                                                             | FR-D5    | CP-7           |
+| MH-13 | Granular permissions (create/edit vs approve vs send vs view-analytics)                                             | FR-K3    | CP-7           |
+| MH-14 | Campaign analytics dashboard (funnel, comparison)                                                                   | FR-I4    | CP-6           |
+| MH-15 | Engagement tracking (open/click)                                                                                    | FR-I2    | CP-6           |
+| MH-16 | Media/asset library with channel-aware validation                                                                   | FR-G1/G2 | CP-2           |
+| MH-17 | Customer preference center + guaranteed unsubscribe on every channel                                                | FR-L1/L2 | CP-7           |
+| MH-18 | Personalization token expansion + fail-safe rendering                                                               | FR-F1/F2 | CP-3           |
+| MH-19 | Full lifecycle state machine incl. approval/pause states                                                            | FR-J1    | CP-4/CP-5/CP-7 |
+| MH-20 | Playwright E2E suite covering the full module (extends existing `live-crm.spec.ts`)                                 | —        | CP-9           |
+
+## Should Have (materially improves the platform, not launch-blocking)
+
+| ID    | Item                                                                                               | Source                 | Phase                                   |
+| ----- | -------------------------------------------------------------------------------------------------- | ---------------------- | --------------------------------------- |
+| SH-01 | Draft autosave                                                                                     | FR-D2                  | CP-4                                    |
+| SH-02 | Multi-step campaign builder UX                                                                     | FR-D1                  | CP-4                                    |
+| SH-03 | Conditional/personalized content blocks                                                            | Gap: Campaign Creation | CP-3/CP-4                               |
+| SH-04 | Multi-language content variants                                                                    | FR-D7                  | CP-4                                    |
+| SH-05 | Pause/resume mid-send                                                                              | Gap: Execution         | CP-5                                    |
+| SH-06 | Provider-level throttling/rate limits                                                              | Gap: Execution         | CP-5                                    |
+| SH-07 | Timezone-aware scheduling                                                                          | FR-E2                  | CP-5                                    |
+| SH-08 | Business-hours/send-window enforcement                                                             | FR-E3                  | CP-5                                    |
+| SH-09 | A/B testing (message/subject/image/CTA/send-time)                                                  | FR-I5                  | CP-6                                    |
+| SH-10 | Revenue/coupon-redemption attribution                                                              | FR-I3                  | CP-6                                    |
+| SH-11 | New channel adapters: Push, Web Push, Telegram, Messenger, Instagram, Google Business Messages, QR | FR-B3                  | CP-2 (framework) + incremental adapters |
+| SH-12 | Internal notes/comments on campaigns                                                               | FR-K1                  | CP-7                                    |
+| SH-13 | Visible audit-history tab on campaign detail                                                       | Gap: Audit History     | CP-7                                    |
+| SH-14 | List pagination on Campaigns page                                                                  | Gap: UX                | CP-4                                    |
+| SH-15 | Store/brand-scoped campaigns and reporting                                                         | FR-M1                  | CP-8                                    |
+| SH-16 | Configurable sender identity per tenant                                                            | FR-M2                  | CP-8                                    |
+| SH-17 | Outbound webhooks for campaign lifecycle events                                                    | FR-M3                  | CP-8                                    |
+| SH-18 | Save ad-hoc campaign filter as a segment                                                           | FR-C4                  | CP-3                                    |
+| SH-19 | Product-catalog attachment in campaigns                                                            | FR-G3                  | CP-4                                    |
+| SH-20 | Retry-with-backoff visibility/re-send for partial failures                                         | Gap: Execution         | CP-5                                    |
+
+## Nice to Have (valuable, defer without blocking release)
+
+| ID    | Item                                                                                                | Source            | Phase                     |
+| ----- | --------------------------------------------------------------------------------------------------- | ----------------- | ------------------------- |
+| NH-01 | Template categorization/search                                                                      | Gap: Templates    | CP-4                      |
+| NH-02 | Segment overlap/de-dup preview                                                                      | Gap: Segmentation | CP-3                      |
+| NH-03 | Funnel analysis beyond basic dashboard                                                              | FR-I4             | CP-6                      |
+| NH-04 | Public/external API surface for campaigns                                                           | Gap: Integration  | CP-8                      |
+| NH-05 | Segment membership caching/materialization                                                          | Gap: Performance  | CP-8                      |
+| NH-06 | Table partitioning for very high send volume                                                        | Gap: Performance  | CP-8                      |
+| NH-07 | Additional offline/physical channel adapters (QR/print/signage) — interface only, no implementation | FR-B4             | Documented, not scheduled |
+
+## Explicitly Deferred / Out of Roadmap
+
+- Visual drag-and-drop journey/automation builder (see Non-Goals in `01_VISION_AND_GOALS.md`).
+- Native mobile push SDKs (no mobile app exists in this repo).
+- Full ERP-wide white-labeling (only campaign sender-identity white-labeling is in scope, SH-16).
