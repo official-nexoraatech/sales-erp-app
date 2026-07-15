@@ -103,13 +103,14 @@ transactional), consented (bool), consent_source, consent_recorded_at` — the c
   (`frequency_cap` lives there too).
 
 **CP-7 deviation, documented per this doc's running convention:** the customer preference-center
-**API and UI were not built** this phase — only the schema above shipped. The phase prompt for CP-7 asked to
-flag actual India DPDP Act / TRAI applicability to the user before finalizing the consent-model shape,
-given real legal weight (`R9`). That confirmation has not happened as of CP-7's completion (see
-`phase-completions/CP-7_COMPLETION.md` section 12) — building `GET/PUT /crm/customers/:id/preferences` and
-an unsubscribe-link mechanism on a schema that may need to change once that review happens was judged
-higher-risk than deferring. `GET/PUT /crm/customers/:id/preferences` below is retained as the planned shape
-but is **not yet implemented**.
+**API and UI were not built** in CP-7 itself — only the schema above shipped, pending the DPDP Act/TRAI
+confirmation flagged in `R9`. **Update (CP-9 follow-up session):** the user explicitly decided to ship a
+generic version now rather than wait further — `GET/PUT /customers/:id/preferences` was built (in
+`customer.routes.ts`, alongside the existing `/customers/:id/opt-out` route, not as a standalone
+`/crm/...` route), a "Detailed Consent" admin UI grid was added to `CustomerViewPage.tsx`, and —
+critically — enforcement was wired into `CampaignService.resolveRecipients()` so the preference actually
+affects targeting, not just recording. See `phase-completions/CP-9_FOLLOWUP_COMPLETION.md`. Still not
+built: a customer-facing self-service portal and an automatic unsubscribe-link/pixel mechanism.
 
 ### CP-8 (Enterprise Scale-out)
 
@@ -133,21 +134,22 @@ see the CP-8 completion report section 12 for the specific open questions.
 
 ## API Additions by Phase (illustrative, not exhaustive — finalized per phase)
 
-| Endpoint                                                                                                                           | Phase |
-| ---------------------------------------------------------------------------------------------------------------------------------- | ----- |
-| `POST /crm/media/upload`, `GET /crm/media`, `DELETE /crm/media/:id`                                                                | CP-2  |
-| `PUT /crm/campaigns/:id` (edit while DRAFT/SCHEDULED, version-checked)                                                             | CP-4  |
-| `GET/POST /crm/campaign-templates`                                                                                                 | CP-4  |
-| `GET /crm/campaigns/:id/history`                                                                                                   | CP-4  |
-| `POST /crm/campaigns/:id/pause`, `POST /crm/campaigns/:id/resume`                                                                  | CP-5  |
-| `GET/POST /crm/automation-rules`                                                                                                   | CP-5  |
-| `POST /webhooks/msg91/dlr`, `POST /webhooks/sendgrid/events`, `POST /webhooks/whatsapp/status` (public, signature-verified)        | CP-6  |
-| `GET /crm/campaigns/:id/analytics`, `GET /crm/campaigns/compare`                                                                   | CP-6  |
-| `POST /crm/campaigns/:id/submit-for-approval`, `POST /crm/campaigns/:id/approve`, `POST /crm/campaigns/:id/reject`                 | CP-7  |
-| `GET/POST /crm/campaigns/:id/comments`                                                                                             | CP-7  |
-| `GET/PUT /crm/customers/:id/preferences` (customer preference center) — **planned, not yet implemented, see deviation note above** | CP-7  |
-| `GET/PUT /crm/sender-identity`                                                                                                     | CP-8  |
-| `GET/POST /crm/webhook-subscriptions`, `PUT/DELETE /crm/webhook-subscriptions/:id`                                                 | CP-8  |
+| Endpoint                                                                                                                                                                 | Phase                            |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------- |
+| `POST /crm/media/upload`, `GET /crm/media`, `DELETE /crm/media/:id`                                                                                                      | CP-2                             |
+| `PUT /crm/campaigns/:id` (edit while DRAFT/SCHEDULED, version-checked)                                                                                                   | CP-4                             |
+| `GET/POST /crm/campaign-templates`                                                                                                                                       | CP-4                             |
+| `GET /crm/campaigns/:id/history`                                                                                                                                         | CP-4                             |
+| `POST /crm/campaigns/:id/pause`, `POST /crm/campaigns/:id/resume`                                                                                                        | CP-5                             |
+| `GET/POST /crm/automation-rules`                                                                                                                                         | CP-5                             |
+| `POST /webhooks/msg91/dlr`, `POST /webhooks/sendgrid/events`, `POST /webhooks/whatsapp/status` (public, signature-verified)                                              | CP-6                             |
+| `GET /crm/campaigns/:id/analytics`, `GET /crm/campaigns/compare`                                                                                                         | CP-6                             |
+| `POST /crm/campaigns/:id/submit-for-approval`, `POST /crm/campaigns/:id/approve`, `POST /crm/campaigns/:id/reject`                                                       | CP-7                             |
+| `GET/POST /crm/campaigns/:id/comments`                                                                                                                                   | CP-7                             |
+| `GET/PUT /customers/:id/preferences` (customer preference center) — built in a CP-9 follow-up session, see deviation note above                                          | CP-7 schema / CP-9 follow-up API |
+| `GET/PUT /crm/communication-settings` (approval-required + frequency-cap settings) — built in a CP-9 follow-up session, closing a gap where neither had any route at all | CP-9 follow-up                   |
+| `GET/PUT /crm/sender-identity`                                                                                                                                           | CP-8                             |
+| `GET/POST /crm/webhook-subscriptions`, `PUT/DELETE /crm/webhook-subscriptions/:id`                                                                                       | CP-8                             |
 
 ## Design Constraints Carried Forward
 

@@ -71,7 +71,9 @@ test("LIVE — cross-module regression: an SMS-opted-out customer is excluded fr
     // A plain click, not .uncheck() — the checkbox is a controlled component driven by the
     // customer query result, so its checked state only flips after the opt-out mutation's
     // response invalidates that query, not synchronously with the click event itself.
-    const smsRow = page.getByText('SMS', { exact: true }).locator('..');
+    // .first() disambiguates from the separate "Detailed Consent" grid added later, which also
+    // has an exact-text "SMS" cell (in its own table row, further down the page).
+    const smsRow = page.getByText('SMS', { exact: true }).first().locator('..');
     await smsRow.getByRole('checkbox').click();
     await expect(smsRow.getByRole('checkbox')).not.toBeChecked({ timeout: 10000 });
   });

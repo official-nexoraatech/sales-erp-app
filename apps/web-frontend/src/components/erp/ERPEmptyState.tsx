@@ -40,7 +40,13 @@ const DEFAULTS: Record<EmptyType, { title: string; description: string; icon: Lu
   },
 };
 
-export default function ERPEmptyState({ type = 'no-data', title, description, action, icon }: Props) {
+export default function ERPEmptyState({
+  type = 'no-data',
+  title,
+  description,
+  action,
+  icon,
+}: Props) {
   const defaults = DEFAULTS[type];
   const Icon = icon ?? defaults.icon;
   const ActionIcon = action?.icon;
@@ -50,7 +56,7 @@ export default function ERPEmptyState({ type = 'no-data', title, description, ac
       <div className="w-14 h-14 rounded-2xl bg-surface-raised flex items-center justify-center mb-4">
         <Icon size={28} className="text-disabled" />
       </div>
-      <h3 className="text-base font-semibold text-primary mb-1">{title ?? defaults.title}</h3>
+      <h2 className="text-base font-semibold text-primary mb-1">{title ?? defaults.title}</h2>
       <p className="text-sm text-secondary max-w-sm mb-6">{description ?? defaults.description}</p>
       {action && (
         <Button onClick={action.onClick} size="sm">

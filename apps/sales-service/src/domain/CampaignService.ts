@@ -13,6 +13,7 @@ import {
   tenantSenderIdentity,
   campaignWebhookSubscriptions,
   campaignWebhookDeliveries,
+  customerCommunicationPreferences,
   type Campaign,
   type CampaignAutomationRule,
 } from '@erp/db';
@@ -271,7 +272,48 @@ export class CampaignService {
       throw new ValidationError('Campaign must target either a segmentId or a customerIds list');
     }
 
-    return CampaignService.applyFrequencyCap(ctx, rows);
+    const consentFiltered = await CampaignService.applyGranularConsentFilter(
+      ctx,
+      rows,
+      campaign.channel
+    );
+    return CampaignService.applyFrequencyCap(ctx, consentFiltered);
+  }
+
+  // CP-7 follow-up: excludes any customer who has an explicit customer_communication_preferences
+  // row recording consented=false for (this channel, 'PROMOTIONAL'). Every campaign sent through
+  // this service is a marketing/broadcast message — transactional notifications (order
+  // confirmations, receipts) go through notification-service's own send() path directly, not
+  // through a Campaign row, so 'PROMOTIONAL' is the only category CampaignService ever needs to
+  // check here. A customer with no preference row is treated as consented (unchanged behavior) —
+  // this is additive to, not a replacement for, the binary optOutSms/Whatsapp/Email columns
+  // checked above, which remain the enforced fast-path gate.
+  private static async applyGranularConsentFilter(
+    ctx: PlatformContext,
+    recipients: RecipientRow[],
+    channel: Campaign['channel']
+  ): Promise<RecipientRow[]> {
+    if (recipients.length === 0) return recipients;
+
+    const revoked = await ctx.db.raw
+      .select({ customerId: customerCommunicationPreferences.customerId })
+      .from(customerCommunicationPreferences)
+      .where(
+        and(
+          eq(customerCommunicationPreferences.tenantId, ctx.tenant.tenantId),
+          eq(customerCommunicationPreferences.channel, channel),
+          eq(customerCommunicationPreferences.category, 'PROMOTIONAL'),
+          eq(customerCommunicationPreferences.consented, false),
+          inArray(
+            customerCommunicationPreferences.customerId,
+            recipients.map((r) => r.id)
+          )
+        )
+      );
+    if (revoked.length === 0) return recipients;
+
+    const revokedIds = new Set(revoked.map((r) => r.customerId));
+    return recipients.filter((r) => !revokedIds.has(r.id));
   }
 
   // CP-5 (MH-10): excludes any customer who has already received `maxPerDay` campaigns today,

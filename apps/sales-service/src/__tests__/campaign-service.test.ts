@@ -12,6 +12,7 @@ import {
   customers,
   customerSegments,
   tenantCommunicationSettings,
+  customerCommunicationPreferences,
 } from '@erp/db';
 import { eq } from 'drizzle-orm';
 import type { PlatformContext } from '@erp/sdk';
@@ -1227,6 +1228,53 @@ describe.skipIf(!DB_URL)('CampaignService — integration (CP-1 baseline)', () =
       );
       const [occurrence] = await db.select().from(campaigns).where(eq(campaigns.id, occurrenceId));
       expect(occurrence!.branchId).toBe(branchId);
+    });
+  });
+
+  describe('granular consent enforcement (CP-7 follow-up, applyGranularConsentFilter)', () => {
+    afterAll(async () => {
+      await db
+        .delete(customerCommunicationPreferences)
+        .where(eq(customerCommunicationPreferences.tenantId, TEST_TENANT));
+    });
+
+    it('excludes a customer with an explicit PROMOTIONAL consented=false row for the send channel', async () => {
+      await db.insert(customerCommunicationPreferences).values({
+        tenantId: TEST_TENANT,
+        customerId: optedInCustomerId,
+        channel: 'EMAIL',
+        category: 'PROMOTIONAL',
+        consented: false,
+      });
+
+      const ctx = makeCtx();
+      const rows = await CampaignService.resolveRecipients(ctx, {
+        segmentId: null,
+        customerIds: [optedInCustomerId, branch2CustomerId],
+        channel: 'EMAIL',
+      });
+      expect(rows.map((r) => r.id)).toEqual([branch2CustomerId]);
+    });
+
+    it('does not exclude a customer whose consented=false row is for a different channel', async () => {
+      // The row inserted above is for EMAIL — resolving for SMS must not be affected by it.
+      const ctx = makeCtx();
+      const rows = await CampaignService.resolveRecipients(ctx, {
+        segmentId: null,
+        customerIds: [branch2CustomerId],
+        channel: 'SMS',
+      });
+      expect(rows.map((r) => r.id)).toEqual([branch2CustomerId]);
+    });
+
+    it('treats a customer with no preference row as consented (backward compatibility)', async () => {
+      const ctx = makeCtx();
+      const rows = await CampaignService.resolveRecipients(ctx, {
+        segmentId: null,
+        customerIds: [branch2CustomerId],
+        channel: 'EMAIL',
+      });
+      expect(rows.map((r) => r.id)).toEqual([branch2CustomerId]);
     });
   });
 });

@@ -133,17 +133,19 @@ Campaign-Planning/
 
 ## Status
 
-| Phase                               | Status                                                                                        | Completion Report                      |
-| ----------------------------------- | --------------------------------------------------------------------------------------------- | -------------------------------------- |
-| CP-1 Foundation Hardening           | **Complete** (2026-07-15)                                                                     | `phase-completions/CP-1_COMPLETION.md` |
-| CP-2 Channel Abstraction            | **Complete** (2026-07-15)                                                                     | `phase-completions/CP-2_COMPLETION.md` |
-| CP-3 Segmentation & Personalization | **Complete** (2026-07-15)                                                                     | `phase-completions/CP-3_COMPLETION.md` |
-| CP-4 Campaign Builder 2.0           | **Complete** (2026-07-15)                                                                     | `phase-completions/CP-4_COMPLETION.md` |
-| CP-5 Scheduling & Automation        | **Complete** (2026-07-15)                                                                     | `phase-completions/CP-5_COMPLETION.md` |
-| CP-6 Analytics & A/B Testing        | **Complete** (2026-07-15)                                                                     | `phase-completions/CP-6_COMPLETION.md` |
-| CP-7 Collaboration & Compliance     | **Complete** (2026-07-15)                                                                     | `phase-completions/CP-7_COMPLETION.md` |
-| CP-8 Enterprise Scale-out           | **Complete** (2026-07-15) — 2 items blocked on user input, see report                         | `phase-completions/CP-8_COMPLETION.md` |
-| CP-9 QA & Production Readiness      | **Complete\*** (2026-07-15) — code/tests complete; performance & live E2E blocked, see report | `phase-completions/CP-9_COMPLETION.md` |
+| Phase                               | Status                                                                                                | Completion Report                                                                        |
+| ----------------------------------- | ----------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| CP-1 Foundation Hardening           | **Complete** (2026-07-15)                                                                             | `phase-completions/CP-1_COMPLETION.md`                                                   |
+| CP-2 Channel Abstraction            | **Complete** (2026-07-15)                                                                             | `phase-completions/CP-2_COMPLETION.md`                                                   |
+| CP-3 Segmentation & Personalization | **Complete** (2026-07-15)                                                                             | `phase-completions/CP-3_COMPLETION.md`                                                   |
+| CP-4 Campaign Builder 2.0           | **Complete** (2026-07-15)                                                                             | `phase-completions/CP-4_COMPLETION.md`                                                   |
+| CP-5 Scheduling & Automation        | **Complete** (2026-07-15)                                                                             | `phase-completions/CP-5_COMPLETION.md`                                                   |
+| CP-6 Analytics & A/B Testing        | **Complete** (2026-07-15)                                                                             | `phase-completions/CP-6_COMPLETION.md`                                                   |
+| CP-7 Collaboration & Compliance     | **Complete** (2026-07-15)                                                                             | `phase-completions/CP-7_COMPLETION.md`                                                   |
+| CP-8 Enterprise Scale-out           | **Complete** (2026-07-15) — 2 items blocked on user input, see report                                 | `phase-completions/CP-8_COMPLETION.md`                                                   |
+| CP-9 QA & Production Readiness      | **Complete\*** (2026-07-15) — see follow-up report: verification debt resolved, real NFR-02 gap found | `phase-completions/CP-9_COMPLETION.md` + `phase-completions/CP-9_FOLLOWUP_COMPLETION.md` |
+
+\* CP-9's original report found the platform code-complete but blocked on live verification. A same-day follow-up session (user-confirmed service restarts) resolved that blocker, closed 6 of 7 remaining flagged items (sender-identity/webhook-subscription/consent-center settings UI, `notification_delivery_events` tenant scoping, 3 a11y gaps), and found one new, real, high-priority gap via live measurement — see `CP-9_FOLLOWUP_COMPLETION.md`.
 
 \* All 9 phases are now documented as complete, but the platform is **not yet cleared for production release** — see `phase-completions/CP-9_COMPLETION.md` section 8 (Release Checklist) for the verification-debt blocker and 3 open questions for the user.
 

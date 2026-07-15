@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createDatabaseClient } from '@erp/db';
-import { customers, branches } from '@erp/db';
+import { customers, branches, customerCommunicationPreferences } from '@erp/db';
 import { eq, and } from 'drizzle-orm';
 import { encryptField } from '@erp/utils/server';
 
@@ -30,6 +30,9 @@ describe.skipIf(!DB_URL)('Customer integration', () => {
   });
 
   afterAll(async () => {
+    await db
+      .delete(customerCommunicationPreferences)
+      .where(eq(customerCommunicationPreferences.tenantId, TEST_TENANT));
     await db.delete(customers).where(eq(customers.tenantId, TEST_TENANT));
     await db.delete(branches).where(eq(branches.tenantId, TEST_TENANT));
   });
@@ -123,5 +126,123 @@ describe.skipIf(!DB_URL)('Customer integration', () => {
 
     expect(updated!.displayName).toBe('Updated Customer');
     expect(updated!.version).toBe(1);
+  });
+
+  // CP-7 follow-up: granular consent model (customer_communication_preferences), additive to
+  // the binary optOutSms/Whatsapp/Email flags tested elsewhere — verifies the route's
+  // insert-or-update-on-conflict logic against the table's real unique constraint
+  // (tenant_id, customer_id, channel, category).
+  describe('customer_communication_preferences upsert', () => {
+    it('inserts a new preference row, then updates the same row on a repeat upsert (no duplicate)', async () => {
+      const [customer] = await db
+        .insert(customers)
+        .values({
+          tenantId: TEST_TENANT,
+          branchId,
+          displayName: 'Preferences Test Customer',
+          phone: '9000000010',
+          creditLimit: '0.00',
+          openingBalance: '0.00',
+          createdBy: 1,
+        })
+        .returning();
+
+      const [inserted] = await db
+        .insert(customerCommunicationPreferences)
+        .values({
+          tenantId: TEST_TENANT,
+          customerId: customer!.id,
+          channel: 'EMAIL',
+          category: 'PROMOTIONAL',
+          consented: true,
+          consentSource: 'ADMIN_UPDATE',
+        })
+        .onConflictDoUpdate({
+          target: [
+            customerCommunicationPreferences.tenantId,
+            customerCommunicationPreferences.customerId,
+            customerCommunicationPreferences.channel,
+            customerCommunicationPreferences.category,
+          ],
+          set: { consented: true },
+        })
+        .returning();
+      expect(inserted!.consented).toBe(true);
+
+      const [updated] = await db
+        .insert(customerCommunicationPreferences)
+        .values({
+          tenantId: TEST_TENANT,
+          customerId: customer!.id,
+          channel: 'EMAIL',
+          category: 'PROMOTIONAL',
+          consented: false,
+          consentSource: 'ADMIN_UPDATE',
+        })
+        .onConflictDoUpdate({
+          target: [
+            customerCommunicationPreferences.tenantId,
+            customerCommunicationPreferences.customerId,
+            customerCommunicationPreferences.channel,
+            customerCommunicationPreferences.category,
+          ],
+          set: { consented: false },
+        })
+        .returning();
+      expect(updated!.id).toBe(inserted!.id);
+      expect(updated!.consented).toBe(false);
+
+      const rows = await db
+        .select()
+        .from(customerCommunicationPreferences)
+        .where(eq(customerCommunicationPreferences.customerId, customer!.id));
+      expect(rows).toHaveLength(1);
+    });
+
+    it('keeps independent rows per (channel, category) pair for the same customer', async () => {
+      const [customer] = await db
+        .insert(customers)
+        .values({
+          tenantId: TEST_TENANT,
+          branchId,
+          displayName: 'Multi-Preference Customer',
+          phone: '9000000011',
+          creditLimit: '0.00',
+          openingBalance: '0.00',
+          createdBy: 1,
+        })
+        .returning();
+
+      await db.insert(customerCommunicationPreferences).values([
+        {
+          tenantId: TEST_TENANT,
+          customerId: customer!.id,
+          channel: 'EMAIL',
+          category: 'PROMOTIONAL',
+          consented: false,
+        },
+        {
+          tenantId: TEST_TENANT,
+          customerId: customer!.id,
+          channel: 'EMAIL',
+          category: 'TRANSACTIONAL',
+          consented: true,
+        },
+        {
+          tenantId: TEST_TENANT,
+          customerId: customer!.id,
+          channel: 'SMS',
+          category: 'PROMOTIONAL',
+          consented: false,
+        },
+      ]);
+
+      const rows = await db
+        .select()
+        .from(customerCommunicationPreferences)
+        .where(eq(customerCommunicationPreferences.customerId, customer!.id));
+      expect(rows).toHaveLength(3);
+      expect(rows.find((r) => r.category === 'TRANSACTIONAL')?.consented).toBe(true);
+    });
   });
 });

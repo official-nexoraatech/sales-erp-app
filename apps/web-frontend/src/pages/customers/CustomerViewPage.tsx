@@ -12,6 +12,8 @@ import ERPTabs from '../../components/erp/ERPTabs.js';
 import Button from '../../components/ui/Button.js';
 import Badge from '../../components/ui/Badge.js';
 import Modal from '../../components/ui/Modal.js';
+import Checkbox from '../../components/ui/Checkbox.js';
+import DatePicker from '../../components/ui/DatePicker.js';
 import { formatDate, formatDatetime, formatCurrency } from '../../lib/format.js';
 
 type ActivityType =
@@ -44,6 +46,15 @@ interface Interaction {
   followUpDone?: boolean;
   createdAt: string;
 }
+
+interface PreferenceRow {
+  channel: 'SMS' | 'WHATSAPP' | 'EMAIL' | 'IN_APP';
+  category: 'PROMOTIONAL' | 'TRANSACTIONAL';
+  consented: boolean;
+}
+
+const PREFERENCE_CHANNELS = ['SMS', 'WHATSAPP', 'EMAIL', 'IN_APP'] as const;
+const PREFERENCE_CATEGORIES = ['PROMOTIONAL', 'TRANSACTIONAL'] as const;
 
 const INTERACTION_TYPES = ['VISIT', 'CALL', 'COMPLAINT', 'EMAIL', 'WHATSAPP', 'OTHER'] as const;
 
@@ -106,6 +117,14 @@ export default function CustomerViewPage() {
   });
   const customer = data as Record<string, unknown> | undefined;
 
+  // CP-7 follow-up: granular consent model, additive to the binary opt-out flags above.
+  const { data: prefsData } = useQuery({
+    queryKey: ['customer-preferences', id],
+    queryFn: () => customerApi.listPreferences(Number(id)),
+    enabled: tab === 'details',
+  });
+  const preferences: PreferenceRow[] = (prefsData as { content?: PreferenceRow[] })?.content ?? [];
+
   const { data: timelineData, isFetching: timelineFetching } = useQuery({
     queryKey: ['customer-timeline', id, timelinePage],
     queryFn: () => crmApi.activityTimeline(Number(id), { page: timelinePage, size: 20 }),
@@ -147,6 +166,14 @@ export default function CustomerViewPage() {
       qc.invalidateQueries({ queryKey: ['customers', id] });
     },
     onError: () => toast.error('Failed to update communication preferences'),
+  });
+
+  const savePreferenceMut = useMutation({
+    mutationFn: (pref: PreferenceRow) => customerApi.updatePreferences(Number(id), [pref]),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['customer-preferences', id] });
+    },
+    onError: () => toast.error('Failed to update preference'),
   });
 
   if (isLoading) return <ERPDetailSkeleton />;
@@ -300,27 +327,76 @@ export default function CustomerViewPage() {
                 ).map(({ key, label }) => {
                   const optedOut = Boolean(customer[key]);
                   return (
-                    <label
+                    <div
                       key={key}
                       className="flex items-center justify-between text-sm text-gray-700 dark:text-gray-300"
                     >
                       <span>{label}</span>
-                      <input
-                        type="checkbox"
+                      <Checkbox
                         checked={!optedOut}
                         disabled={!canEditCustomer || optOutMut.isPending}
                         onChange={(e) =>
                           optOutMut.mutate({ [key]: !e.target.checked } as Record<string, boolean>)
                         }
-                        className="h-4 w-4 rounded border-default accent-primary disabled:opacity-50"
                       />
-                    </label>
+                    </div>
                   );
                 })}
               </div>
               <p className="text-xs text-disabled mt-3">
                 Checked = customer receives messages on that channel.
               </p>
+            </div>
+
+            <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
+              <p className="text-xs text-disabled uppercase tracking-wide mb-1">Detailed Consent</p>
+              <p className="text-xs text-disabled mb-3">
+                Finer-grained than the flags above — lets a customer opt out of promotional messages
+                on a channel while still receiving transactional ones (order updates, receipts). The
+                flags above remain the enforced fallback when no row exists here.
+              </p>
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-disabled text-xs">
+                    <th className="pb-2 font-normal">Channel</th>
+                    {PREFERENCE_CATEGORIES.map((cat) => (
+                      <th key={cat} className="pb-2 font-normal text-center">
+                        {cat === 'PROMOTIONAL' ? 'Promotional' : 'Transactional'}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
+                  {PREFERENCE_CHANNELS.map((channel) => (
+                    <tr key={channel}>
+                      <td className="py-2 text-gray-700 dark:text-gray-300">{channel}</td>
+                      {PREFERENCE_CATEGORIES.map((category) => {
+                        const existing = preferences.find(
+                          (p) => p.channel === channel && p.category === category
+                        );
+                        // No row yet = treated as consented (matches the binary flags'
+                        // default-opted-in behavior).
+                        const consented = existing?.consented ?? true;
+                        return (
+                          <td key={category} className="py-2 text-center">
+                            <Checkbox
+                              checked={consented}
+                              disabled={!canEditCustomer || savePreferenceMut.isPending}
+                              onChange={(e) =>
+                                savePreferenceMut.mutate({
+                                  channel,
+                                  category,
+                                  consented: e.target.checked,
+                                })
+                              }
+                            />
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </div>
         </div>
@@ -460,14 +536,10 @@ export default function CustomerViewPage() {
             />
           </div>
           <div>
-            <label className="block text-xs font-medium text-secondary mb-1.5">
-              Follow-up Date (optional)
-            </label>
-            <input
-              type="date"
+            <DatePicker
+              label="Follow-up Date (optional)"
               value={interactionForm.followUpDate}
-              onChange={(e) => setInteractionForm((f) => ({ ...f, followUpDate: e.target.value }))}
-              className="w-full rounded-lg border border-default bg-surface-card text-primary text-sm px-3 py-2"
+              onChange={(v) => setInteractionForm((f) => ({ ...f, followUpDate: v }))}
             />
           </div>
           <div className="flex gap-2 justify-end pt-2">

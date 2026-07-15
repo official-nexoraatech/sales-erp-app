@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { createHash } from 'crypto';
 import type { PlatformContextFactory } from '@erp/sdk';
-import { customers, customersHistory } from '@erp/db';
+import { customers, customersHistory, customerCommunicationPreferences } from '@erp/db';
 import { and, eq, isNull, or, ilike, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { BusinessError, NotFoundError, OptimisticLockError, ValidationError } from '@erp/types';
@@ -72,6 +72,24 @@ const OptOutSchema = z.object({
   optOutEmail: z.boolean().optional(),
 });
 
+// CP-7 follow-up: granular consent model (customer_communication_preferences) — additive to,
+// not a replacement for, the binary optOutSms/Whatsapp/Email flags above, which remain the
+// enforced fast-path gate in every send path (CampaignService.resolveRecipients). This is a
+// generic channel x category consent record; it has not been validated against India's DPDP
+// Act/TRAI-specific requirements (e.g. TRAI's DLT consent-registration mechanics), which is a
+// known, flagged limitation — see the Campaign Management Platform CP-7/CP-9 completion reports.
+const PreferencesSchema = z.object({
+  preferences: z
+    .array(
+      z.object({
+        channel: z.enum(['SMS', 'WHATSAPP', 'EMAIL', 'IN_APP']),
+        category: z.enum(['PROMOTIONAL', 'TRANSACTIONAL']),
+        consented: z.boolean(),
+      })
+    )
+    .min(1),
+});
+
 type AuthedRequest = { auth: { tenantId: number; userId: number; email: string }; ip: string };
 
 function simpleHash(value: string): string {
@@ -98,462 +116,720 @@ export async function customerRoutes(
   const customerCache = new CustomerCacheService();
 
   // ── GET /customers ─────────────────────────────────────────────────────────
-  fastify.get('/customers', { preHandler: [authenticate, requirePermission(PERMISSIONS.CUSTOMER_VIEW)] }, async (request, reply) => {
-    const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-    const ctx = ctxFactory.create({
-      tenantId,
-      userId,
-      correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-    });
-    const query = request.query as {
-      page?: string;
-      size?: string;
-      search?: string;
-      customerType?: string;
-      status?: string;
-      city?: string;
-    };
+  fastify.get(
+    '/customers',
+    { preHandler: [authenticate, requirePermission(PERMISSIONS.CUSTOMER_VIEW)] },
+    async (request, reply) => {
+      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
+      const ctx = ctxFactory.create({
+        tenantId,
+        userId,
+        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
+      });
+      const query = request.query as {
+        page?: string;
+        size?: string;
+        search?: string;
+        customerType?: string;
+        status?: string;
+        city?: string;
+      };
 
-    const page = Math.max(0, parseInt(query.page ?? '0', 10));
-    const size = Math.min(100, parseInt(query.size ?? '20', 10));
+      const page = Math.max(0, parseInt(query.page ?? '0', 10));
+      const size = Math.min(100, parseInt(query.size ?? '20', 10));
 
-    let whereClause = and(eq(customers.tenantId, tenantId), isNull(customers.deletedAt));
-    if (query.customerType) {
-      whereClause = and(whereClause, eq(customers.customerType, query.customerType as 'RETAIL' | 'WHOLESALE' | 'B2B' | 'GOVERNMENT' | 'EXPORT'));
-    }
-    if (query.status) {
-      whereClause = and(whereClause, eq(customers.status, query.status as 'ACTIVE' | 'INACTIVE' | 'BLOCKED'));
-    }
-    if (query.search) {
-      whereClause = and(
-        whereClause,
-        or(
-          ilike(customers.displayName, `%${query.search}%`),
-          ilike(customers.phone, `%${query.search}%`),
-          ilike(customers.email, `%${query.search}%`),
-          ilike(customers.customerCode, `%${query.search}%`)
-        )
-      );
-    }
+      let whereClause = and(eq(customers.tenantId, tenantId), isNull(customers.deletedAt));
+      if (query.customerType) {
+        whereClause = and(
+          whereClause,
+          eq(
+            customers.customerType,
+            query.customerType as 'RETAIL' | 'WHOLESALE' | 'B2B' | 'GOVERNMENT' | 'EXPORT'
+          )
+        );
+      }
+      if (query.status) {
+        whereClause = and(
+          whereClause,
+          eq(customers.status, query.status as 'ACTIVE' | 'INACTIVE' | 'BLOCKED')
+        );
+      }
+      if (query.search) {
+        whereClause = and(
+          whereClause,
+          or(
+            ilike(customers.displayName, `%${query.search}%`),
+            ilike(customers.phone, `%${query.search}%`),
+            ilike(customers.email, `%${query.search}%`),
+            ilike(customers.customerCode, `%${query.search}%`)
+          )
+        );
+      }
 
-    const rows = await ctx.db.raw
-      .select()
-      .from(customers)
-      .where(whereClause)
-      .limit(size)
-      .offset(page * size);
-
-    const [countRow] = await ctx.db.raw
-      .select({ count: sql<number>`count(*)::int` })
-      .from(customers)
-      .where(whereClause);
-
-    return reply.code(200).send({
-      data: { content: rows, totalElements: countRow?.count ?? 0, page, size },
-    });
-  });
-
-  // ── GET /customers/:id ─────────────────────────────────────────────────────
-  fastify.get<{ Params: { id: string } }>('/customers/:id', { preHandler: [authenticate, requirePermission(PERMISSIONS.CUSTOMER_VIEW)] }, async (request, reply) => {
-    const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-    const ctx = ctxFactory.create({
-      tenantId,
-      userId,
-      correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-    });
-    const id = parseInt(request.params.id, 10);
-
-    let customer = await customerCache.getCustomer(ctx.cache, id);
-    if (!customer) {
-      const [row] = await ctx.db.raw
+      const rows = await ctx.db.raw
         .select()
         .from(customers)
-        .where(and(eq(customers.id, id), eq(customers.tenantId, tenantId), isNull(customers.deletedAt)));
+        .where(whereClause)
+        .limit(size)
+        .offset(page * size);
 
-      if (!row) throw new NotFoundError('Customer', id);
-      customer = row;
-      await customerCache.setCustomer(ctx.cache, customer);
+      const [countRow] = await ctx.db.raw
+        .select({ count: sql<number>`count(*)::int` })
+        .from(customers)
+        .where(whereClause);
+
+      return reply.code(200).send({
+        data: { content: rows, totalElements: countRow?.count ?? 0, page, size },
+      });
     }
-    return reply.code(200).send({ data: customer });
-  });
+  );
+
+  // ── GET /customers/:id ─────────────────────────────────────────────────────
+  fastify.get<{ Params: { id: string } }>(
+    '/customers/:id',
+    { preHandler: [authenticate, requirePermission(PERMISSIONS.CUSTOMER_VIEW)] },
+    async (request, reply) => {
+      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
+      const ctx = ctxFactory.create({
+        tenantId,
+        userId,
+        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
+      });
+      const id = parseInt(request.params.id, 10);
+
+      let customer = await customerCache.getCustomer(ctx.cache, id);
+      if (!customer) {
+        const [row] = await ctx.db.raw
+          .select()
+          .from(customers)
+          .where(
+            and(eq(customers.id, id), eq(customers.tenantId, tenantId), isNull(customers.deletedAt))
+          );
+
+        if (!row) throw new NotFoundError('Customer', id);
+        customer = row;
+        await customerCache.setCustomer(ctx.cache, customer);
+      }
+      return reply.code(200).send({ data: customer });
+    }
+  );
 
   // ── GET /customers/:id/statement ──────────────────────────────────────────
-  fastify.get<{ Params: { id: string } }>('/customers/:id/statement', { preHandler: [authenticate, requirePermission(PERMISSIONS.CUSTOMER_VIEW)] }, async (request, reply) => {
-    const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-    const ctx = ctxFactory.create({
-      tenantId,
-      userId,
-      correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-    });
-    const id = parseInt(request.params.id, 10);
-    const [customer] = await ctx.db.raw
-      .select()
-      .from(customers)
-      .where(and(eq(customers.id, id), eq(customers.tenantId, tenantId), isNull(customers.deletedAt)));
-    if (!customer) throw new NotFoundError('Customer', id);
-    // Phase 5 will supply real invoice + payment data
-    return reply.code(200).send({
-      data: {
-        customerId: id,
-        customerName: customer.displayName,
-        openingBalance: customer.openingBalance,
-        transactions: [],
-        closingBalance: customer.openingBalance,
-        _projection: { isStale: true, lagMs: 0 },
-      },
-    });
-  });
+  fastify.get<{ Params: { id: string } }>(
+    '/customers/:id/statement',
+    { preHandler: [authenticate, requirePermission(PERMISSIONS.CUSTOMER_VIEW)] },
+    async (request, reply) => {
+      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
+      const ctx = ctxFactory.create({
+        tenantId,
+        userId,
+        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
+      });
+      const id = parseInt(request.params.id, 10);
+      const [customer] = await ctx.db.raw
+        .select()
+        .from(customers)
+        .where(
+          and(eq(customers.id, id), eq(customers.tenantId, tenantId), isNull(customers.deletedAt))
+        );
+      if (!customer) throw new NotFoundError('Customer', id);
+      // Phase 5 will supply real invoice + payment data
+      return reply.code(200).send({
+        data: {
+          customerId: id,
+          customerName: customer.displayName,
+          openingBalance: customer.openingBalance,
+          transactions: [],
+          closingBalance: customer.openingBalance,
+          _projection: { isStale: true, lagMs: 0 },
+        },
+      });
+    }
+  );
 
   // ── GET /customers/:id/outstanding ───────────────────────────────────────
-  fastify.get<{ Params: { id: string } }>('/customers/:id/outstanding', { preHandler: [authenticate, requirePermission(PERMISSIONS.CUSTOMER_VIEW)] }, async (request, reply) => {
-    const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-    const ctx = ctxFactory.create({
-      tenantId,
-      userId,
-      correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-    });
-    const id = parseInt(request.params.id, 10);
-    const [customer] = await ctx.db.raw
-      .select()
-      .from(customers)
-      .where(and(eq(customers.id, id), eq(customers.tenantId, tenantId), isNull(customers.deletedAt)));
-    if (!customer) throw new NotFoundError('Customer', id);
-    return reply.code(200).send({
-      data: {
-        customerId: id,
-        outstandingAmount: customer.openingBalance,
-        overdueAmount: '0',
-        invoices: [],
-      },
-    });
-  });
+  fastify.get<{ Params: { id: string } }>(
+    '/customers/:id/outstanding',
+    { preHandler: [authenticate, requirePermission(PERMISSIONS.CUSTOMER_VIEW)] },
+    async (request, reply) => {
+      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
+      const ctx = ctxFactory.create({
+        tenantId,
+        userId,
+        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
+      });
+      const id = parseInt(request.params.id, 10);
+      const [customer] = await ctx.db.raw
+        .select()
+        .from(customers)
+        .where(
+          and(eq(customers.id, id), eq(customers.tenantId, tenantId), isNull(customers.deletedAt))
+        );
+      if (!customer) throw new NotFoundError('Customer', id);
+      return reply.code(200).send({
+        data: {
+          customerId: id,
+          outstandingAmount: customer.openingBalance,
+          overdueAmount: '0',
+          invoices: [],
+        },
+      });
+    }
+  );
 
   // ── GET /customers/:id/activity — 360° activity timeline (M9.1) ──────────
   // Aggregates invoices, payments, returns, alterations, loyalty txns and interactions
   // into one chronological feed. Cached in Redis for 60s per (customer, page, size).
-  fastify.get<{ Params: { id: string } }>('/customers/:id/activity', { preHandler: [authenticate, requirePermission(PERMISSIONS.CUSTOMER_VIEW)] }, async (request, reply) => {
-    const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-    const ctx = ctxFactory.create({
-      tenantId,
-      userId,
-      correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-    });
-    const id = parseInt(request.params.id, 10);
-    const query = request.query as { page?: string; size?: string };
-    const page = Math.max(0, parseInt(query.page ?? '0', 10));
-    const size = Math.min(100, parseInt(query.size ?? '20', 10));
+  fastify.get<{ Params: { id: string } }>(
+    '/customers/:id/activity',
+    { preHandler: [authenticate, requirePermission(PERMISSIONS.CUSTOMER_VIEW)] },
+    async (request, reply) => {
+      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
+      const ctx = ctxFactory.create({
+        tenantId,
+        userId,
+        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
+      });
+      const id = parseInt(request.params.id, 10);
+      const query = request.query as { page?: string; size?: string };
+      const page = Math.max(0, parseInt(query.page ?? '0', 10));
+      const size = Math.min(100, parseInt(query.size ?? '20', 10));
 
-    const [customer] = await ctx.db.raw
-      .select()
-      .from(customers)
-      .where(and(eq(customers.id, id), eq(customers.tenantId, tenantId), isNull(customers.deletedAt)));
-    if (!customer) throw new NotFoundError('Customer', id);
+      const [customer] = await ctx.db.raw
+        .select()
+        .from(customers)
+        .where(
+          and(eq(customers.id, id), eq(customers.tenantId, tenantId), isNull(customers.deletedAt))
+        );
+      if (!customer) throw new NotFoundError('Customer', id);
 
-    const cacheKey = `crm:activity:${id}:${page}:${size}`;
-    const cached = await ctx.cache.getJson<{ items: unknown[]; total: number }>(cacheKey);
-    if (cached) {
-      return reply.code(200).send({ data: { customerId: id, page, size, ...cached, _cache: 'HIT' } });
+      const cacheKey = `crm:activity:${id}:${page}:${size}`;
+      const cached = await ctx.cache.getJson<{ items: unknown[]; total: number }>(cacheKey);
+      if (cached) {
+        return reply
+          .code(200)
+          .send({ data: { customerId: id, page, size, ...cached, _cache: 'HIT' } });
+      }
+
+      const { ActivityTimelineService } = await import('../domain/ActivityTimelineService.js');
+      const { items, total } = await ActivityTimelineService.build(
+        ctx.db.raw,
+        tenantId,
+        id,
+        page,
+        size
+      );
+      await ctx.cache.setJson(cacheKey, { items, total }, 60);
+
+      return reply
+        .code(200)
+        .send({ data: { customerId: id, page, size, items, total, _cache: 'MISS' } });
     }
-
-    const { ActivityTimelineService } = await import('../domain/ActivityTimelineService.js');
-    const { items, total } = await ActivityTimelineService.build(ctx.db.raw, tenantId, id, page, size);
-    await ctx.cache.setJson(cacheKey, { items, total }, 60);
-
-    return reply.code(200).send({ data: { customerId: id, page, size, items, total, _cache: 'MISS' } });
-  });
+  );
 
   // ── POST /customers ────────────────────────────────────────────────────────
-  fastify.post('/customers', { preHandler: [authenticate, requirePermission(PERMISSIONS.CUSTOMER_CREATE)] }, async (request, reply) => {
-    const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-    const ctx = ctxFactory.create({
-      tenantId,
-      userId,
-      correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-    });
+  fastify.post(
+    '/customers',
+    { preHandler: [authenticate, requirePermission(PERMISSIONS.CUSTOMER_CREATE)] },
+    async (request, reply) => {
+      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
+      const ctx = ctxFactory.create({
+        tenantId,
+        userId,
+        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
+      });
 
-    const body = CustomerSchema.safeParse(request.body);
-    if (!body.success) throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
+      const body = CustomerSchema.safeParse(request.body);
+      if (!body.success)
+        throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
 
-    // Duplicate detection — warn on same mobile
-    const [dup] = await ctx.db.raw
-      .select()
-      .from(customers)
-      .where(and(eq(customers.phone, body.data.phone), eq(customers.tenantId, tenantId), isNull(customers.deletedAt)));
+      // Duplicate detection — warn on same mobile
+      const [dup] = await ctx.db.raw
+        .select()
+        .from(customers)
+        .where(
+          and(
+            eq(customers.phone, body.data.phone),
+            eq(customers.tenantId, tenantId),
+            isNull(customers.deletedAt)
+          )
+        );
 
-    const warnings: string[] = [];
-    if (dup) {
-      warnings.push(`Another customer with phone ${body.data.phone} already exists (id: ${dup.id})`);
-    }
-
-    // Encrypt GSTIN/PAN (simplified: store plaintext here; real impl uses PlatformContext.encryption)
-    const gstinHash = body.data.gstin ? simpleHash(body.data.gstin) : null;
-    const panHash = body.data.pan ? simpleHash(body.data.pan) : null;
-
-    // Auto-generate customer code
-    const customerCode = `CUST${Date.now()}`;
-
-    let created: typeof customers.$inferSelect | undefined;
-    try {
-      [created] = await ctx.db.raw
-        .insert(customers)
-        .values({
-          tenantId,
-          createdBy: userId,
-          customerCode,
-          ...body.data,
-          gstin: body.data.gstin || null,
-          gstinHash,
-          pan: body.data.pan || null,
-          panHash,
-          creditLimit: String(body.data.creditLimit),
-          openingBalance: String(body.data.openingBalance),
-          clientOperationId: body.data.operationId,
-        } as unknown as typeof customers.$inferInsert)
-        .returning();
-    } catch (err) {
-      // OFFLINE-05: this operationId was already claimed by a prior (or concurrent) sync
-      // of the same offline-queued customer — return the already-committed original
-      // record instead of creating a duplicate.
-      if (isUniqueViolation(err, 'customers_tenant_client_operation_id') && body.data.operationId) {
-        const [existing] = await ctx.db.raw
-          .select()
-          .from(customers)
-          .where(and(eq(customers.tenantId, tenantId), eq(customers.clientOperationId, body.data.operationId)));
-        if (existing) return reply.code(200).send({ data: existing, warnings: [] });
+      const warnings: string[] = [];
+      if (dup) {
+        warnings.push(
+          `Another customer with phone ${body.data.phone} already exists (id: ${dup.id})`
+        );
       }
-      throw err;
+
+      // Encrypt GSTIN/PAN (simplified: store plaintext here; real impl uses PlatformContext.encryption)
+      const gstinHash = body.data.gstin ? simpleHash(body.data.gstin) : null;
+      const panHash = body.data.pan ? simpleHash(body.data.pan) : null;
+
+      // Auto-generate customer code
+      const customerCode = `CUST${Date.now()}`;
+
+      let created: typeof customers.$inferSelect | undefined;
+      try {
+        [created] = await ctx.db.raw
+          .insert(customers)
+          .values({
+            tenantId,
+            createdBy: userId,
+            customerCode,
+            ...body.data,
+            gstin: body.data.gstin || null,
+            gstinHash,
+            pan: body.data.pan || null,
+            panHash,
+            creditLimit: String(body.data.creditLimit),
+            openingBalance: String(body.data.openingBalance),
+            clientOperationId: body.data.operationId,
+          } as unknown as typeof customers.$inferInsert)
+          .returning();
+      } catch (err) {
+        // OFFLINE-05: this operationId was already claimed by a prior (or concurrent) sync
+        // of the same offline-queued customer — return the already-committed original
+        // record instead of creating a duplicate.
+        if (
+          isUniqueViolation(err, 'customers_tenant_client_operation_id') &&
+          body.data.operationId
+        ) {
+          const [existing] = await ctx.db.raw
+            .select()
+            .from(customers)
+            .where(
+              and(
+                eq(customers.tenantId, tenantId),
+                eq(customers.clientOperationId, body.data.operationId)
+              )
+            );
+          if (existing) return reply.code(200).send({ data: existing, warnings: [] });
+        }
+        throw err;
+      }
+
+      if (!created) throw new Error('Customer creation failed unexpectedly');
+      await ctx.events.publish(
+        'customer',
+        created.id,
+        'CUSTOMER_CREATED',
+        created as unknown as Record<string, unknown>
+      );
+      await ctx.audit.log({
+        action: 'CREATE',
+        entityType: 'customer',
+        entityId: created.id,
+        after: created as unknown as Record<string, unknown>,
+      });
+
+      return reply.code(201).send({ data: created, warnings });
     }
-
-    if (!created) throw new Error('Customer creation failed unexpectedly');
-    await ctx.events.publish('customer', created.id, 'CUSTOMER_CREATED', created as unknown as Record<string, unknown>);
-    await ctx.audit.log({ action: 'CREATE', entityType: 'customer', entityId: created.id, after: created as unknown as Record<string, unknown> });
-
-    return reply.code(201).send({ data: created, warnings });
-  });
+  );
 
   // ── PUT /customers/:id ────────────────────────────────────────────────────
-  fastify.put<{ Params: { id: string } }>('/customers/:id', { preHandler: [authenticate, requirePermission(PERMISSIONS.CUSTOMER_EDIT)] }, async (request, reply) => {
-    const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-    const ctx = ctxFactory.create({
-      tenantId,
-      userId,
-      correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-    });
-    const id = parseInt(request.params.id, 10);
+  fastify.put<{ Params: { id: string } }>(
+    '/customers/:id',
+    { preHandler: [authenticate, requirePermission(PERMISSIONS.CUSTOMER_EDIT)] },
+    async (request, reply) => {
+      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
+      const ctx = ctxFactory.create({
+        tenantId,
+        userId,
+        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
+      });
+      const id = parseInt(request.params.id, 10);
 
-    const body = CustomerUpdateSchema.safeParse(request.body);
-    if (!body.success) throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
+      const body = CustomerUpdateSchema.safeParse(request.body);
+      if (!body.success)
+        throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
 
-    const [existing] = await ctx.db.raw
-      .select()
-      .from(customers)
-      .where(and(eq(customers.id, id), eq(customers.tenantId, tenantId), isNull(customers.deletedAt)));
+      const [existing] = await ctx.db.raw
+        .select()
+        .from(customers)
+        .where(
+          and(eq(customers.id, id), eq(customers.tenantId, tenantId), isNull(customers.deletedAt))
+        );
 
-    if (!existing) throw new NotFoundError('Customer', id);
+      if (!existing) throw new NotFoundError('Customer', id);
 
-    const gstinHash = body.data.gstin ? simpleHash(body.data.gstin) : null;
-    const panHash = body.data.pan ? simpleHash(body.data.pan) : null;
+      const gstinHash = body.data.gstin ? simpleHash(body.data.gstin) : null;
+      const panHash = body.data.pan ? simpleHash(body.data.pan) : null;
 
-    let updated: typeof customers.$inferSelect | undefined;
-    await ctx.db.transaction(async (trx) => {
-      await trx.raw.insert(customersHistory).values({
-        customerId: id,
+      let updated: typeof customers.$inferSelect | undefined;
+      await ctx.db.transaction(async (trx) => {
+        await trx.raw.insert(customersHistory).values({
+          customerId: id,
+          tenantId,
+          changedBy: userId,
+          changedAt: new Date(),
+          previousData: existing as unknown as Record<string, unknown>,
+          changeType: 'UPDATE',
+        });
+
+        const [row] = await trx.raw
+          .update(customers)
+          .set({
+            ...body.data,
+            gstin: body.data.gstin || null,
+            gstinHash,
+            pan: body.data.pan || null,
+            panHash,
+            creditLimit: String(body.data.creditLimit),
+            openingBalance: String(body.data.openingBalance),
+            updatedAt: new Date(),
+            version: existing.version + 1,
+          } as unknown as Partial<typeof customers.$inferInsert>)
+          .where(
+            and(
+              eq(customers.id, id),
+              eq(customers.tenantId, tenantId),
+              eq(customers.version, body.data.version)
+            )
+          )
+          .returning();
+
+        if (!row) throw new OptimisticLockError('Customer');
+        updated = row;
+      });
+
+      await customerCache.invalidateCustomer(ctx.cache, id);
+      await ctx.events.publish(
+        'customer',
+        id,
+        'CUSTOMER_UPDATED',
+        updated as unknown as Record<string, unknown>
+      );
+      const changedFields = Object.keys(body.data).filter(
+        (key) =>
+          (existing as Record<string, unknown>)[key] !== (body.data as Record<string, unknown>)[key]
+      );
+      await ctx.audit.log({
+        action: 'UPDATE',
+        entityType: 'customer',
+        entityId: id,
+        before: existing as unknown as Record<string, unknown>,
+        after: updated as unknown as Record<string, unknown>,
+        changedFields,
+        actorEmail: (request as unknown as AuthedRequest).auth.email,
+        ipAddress: (request as unknown as AuthedRequest).ip,
+      });
+
+      return reply.code(200).send({ data: updated });
+    }
+  );
+
+  // ── PATCH /customers/:id/opt-out — Communication channel opt-out (ES-18) ─
+  fastify.patch<{ Params: { id: string } }>(
+    '/customers/:id/opt-out',
+    { preHandler: [authenticate, requirePermission(PERMISSIONS.CUSTOMER_EDIT)] },
+    async (request, reply) => {
+      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
+      const ctx = ctxFactory.create({
+        tenantId,
+        userId,
+        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
+      });
+      const id = parseInt(request.params.id, 10);
+
+      const body = OptOutSchema.safeParse(request.body);
+      if (!body.success)
+        throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
+
+      const [existing] = await ctx.db.raw
+        .select()
+        .from(customers)
+        .where(
+          and(eq(customers.id, id), eq(customers.tenantId, tenantId), isNull(customers.deletedAt))
+        );
+      if (!existing) throw new NotFoundError('Customer', id);
+
+      const [updated] = await ctx.db.raw
+        .update(customers)
+        .set({
+          ...(body.data.optOutSms !== undefined ? { optOutSms: body.data.optOutSms } : {}),
+          ...(body.data.optOutWhatsapp !== undefined
+            ? { optOutWhatsapp: body.data.optOutWhatsapp }
+            : {}),
+          ...(body.data.optOutEmail !== undefined ? { optOutEmail: body.data.optOutEmail } : {}),
+          updatedAt: new Date(),
+        })
+        .where(and(eq(customers.id, id), eq(customers.tenantId, tenantId)))
+        .returning();
+      if (!updated) throw new Error('Opt-out update failed unexpectedly');
+
+      await customerCache.invalidateCustomer(ctx.cache, id);
+      await ctx.audit.log({
+        action: 'UPDATE',
+        entityType: 'customer',
+        entityId: id,
+        before: {
+          optOutSms: existing.optOutSms,
+          optOutWhatsapp: existing.optOutWhatsapp,
+          optOutEmail: existing.optOutEmail,
+        },
+        after: {
+          optOutSms: updated.optOutSms,
+          optOutWhatsapp: updated.optOutWhatsapp,
+          optOutEmail: updated.optOutEmail,
+        },
+      });
+
+      return reply.code(200).send({ data: updated });
+    }
+  );
+
+  // ── GET /customers/:id/preferences — Granular consent (channel x category) ─
+  fastify.get<{ Params: { id: string } }>(
+    '/customers/:id/preferences',
+    { preHandler: [authenticate, requirePermission(PERMISSIONS.CUSTOMER_VIEW)] },
+    async (request, reply) => {
+      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
+      const ctx = ctxFactory.create({
+        tenantId,
+        userId,
+        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
+      });
+      const id = parseInt(request.params.id, 10);
+
+      const [existing] = await ctx.db.raw
+        .select({ id: customers.id })
+        .from(customers)
+        .where(
+          and(eq(customers.id, id), eq(customers.tenantId, tenantId), isNull(customers.deletedAt))
+        );
+      if (!existing) throw new NotFoundError('Customer', id);
+
+      const rows = await ctx.db.raw
+        .select()
+        .from(customerCommunicationPreferences)
+        .where(
+          and(
+            eq(customerCommunicationPreferences.customerId, id),
+            eq(customerCommunicationPreferences.tenantId, tenantId)
+          )
+        );
+
+      return reply.code(200).send({ data: { content: rows, totalElements: rows.length } });
+    }
+  );
+
+  // ── PUT /customers/:id/preferences — Upsert one or more preference rows ────
+  fastify.put<{ Params: { id: string } }>(
+    '/customers/:id/preferences',
+    { preHandler: [authenticate, requirePermission(PERMISSIONS.CUSTOMER_EDIT)] },
+    async (request, reply) => {
+      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
+      const ctx = ctxFactory.create({
+        tenantId,
+        userId,
+        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
+      });
+      const id = parseInt(request.params.id, 10);
+
+      const body = PreferencesSchema.safeParse(request.body);
+      if (!body.success)
+        throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
+
+      const [existingCustomer] = await ctx.db.raw
+        .select({ id: customers.id })
+        .from(customers)
+        .where(
+          and(eq(customers.id, id), eq(customers.tenantId, tenantId), isNull(customers.deletedAt))
+        );
+      if (!existingCustomer) throw new NotFoundError('Customer', id);
+
+      const saved = await Promise.all(
+        body.data.preferences.map(async (pref) => {
+          const [row] = await ctx.db.raw
+            .insert(customerCommunicationPreferences)
+            .values({
+              tenantId,
+              customerId: id,
+              channel: pref.channel,
+              category: pref.category,
+              consented: pref.consented,
+              consentSource: 'ADMIN_UPDATE',
+              consentRecordedAt: new Date(),
+              updatedAt: new Date(),
+            })
+            .onConflictDoUpdate({
+              target: [
+                customerCommunicationPreferences.tenantId,
+                customerCommunicationPreferences.customerId,
+                customerCommunicationPreferences.channel,
+                customerCommunicationPreferences.category,
+              ],
+              set: {
+                consented: pref.consented,
+                consentSource: 'ADMIN_UPDATE',
+                consentRecordedAt: new Date(),
+                updatedAt: new Date(),
+              },
+            })
+            .returning();
+          return row;
+        })
+      );
+
+      await ctx.audit.log({
+        action: 'UPDATE',
+        entityType: 'customer_communication_preferences',
+        entityId: id,
+        after: { preferences: body.data.preferences },
+      });
+
+      return reply.code(200).send({ data: { content: saved, totalElements: saved.length } });
+    }
+  );
+
+  // ── DELETE /customers/:id — Soft delete ──────────────────────────────────
+  fastify.delete<{ Params: { id: string } }>(
+    '/customers/:id',
+    { preHandler: [authenticate, requirePermission(PERMISSIONS.CUSTOMER_DELETE)] },
+    async (request, reply) => {
+      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
+      const ctx = ctxFactory.create({
+        tenantId,
+        userId,
+        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
+      });
+      const id = parseInt(request.params.id, 10);
+
+      const [existing] = await ctx.db.raw
+        .select()
+        .from(customers)
+        .where(
+          and(eq(customers.id, id), eq(customers.tenantId, tenantId), isNull(customers.deletedAt))
+        );
+
+      if (!existing) throw new NotFoundError('Customer', id);
+      // TODO Phase 5: block if customer has outstanding balance
+
+      await ctx.db.raw
+        .update(customers)
+        .set({ deletedAt: new Date(), deletedBy: userId, status: 'INACTIVE' })
+        .where(eq(customers.id, id));
+
+      await customerCache.invalidateCustomer(ctx.cache, id);
+      await ctx.events.publish('customer', id, 'CUSTOMER_DELETED', { id });
+      await ctx.audit.log({
+        action: 'DELETE',
+        entityType: 'customer',
+        entityId: id,
+        before: existing,
+      });
+
+      return reply.code(200).send({ data: { message: 'Customer deleted', id } });
+    }
+  );
+
+  // ── POST /customers/merge — MDG ───────────────────────────────────────────
+  fastify.post(
+    '/customers/merge',
+    { preHandler: [authenticate, requirePermission(PERMISSIONS.CUSTOMER_MERGE)] },
+    async (request, reply) => {
+      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
+      const ctx = ctxFactory.create({
+        tenantId,
+        userId,
+        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
+      });
+      const MergeSchema = z.object({
+        sourceId: z.number().int().positive(),
+        targetId: z.number().int().positive(),
+        keepFields: z.enum(['SOURCE', 'TARGET']).default('TARGET'),
+      });
+      const body = MergeSchema.safeParse(request.body);
+      if (!body.success)
+        throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
+      if (body.data.sourceId === body.data.targetId) {
+        throw new BusinessError('SAME_CUSTOMER', 'Source and target cannot be the same customer');
+      }
+
+      const [source] = await ctx.db.raw
+        .select()
+        .from(customers)
+        .where(
+          and(
+            eq(customers.id, body.data.sourceId),
+            eq(customers.tenantId, tenantId),
+            isNull(customers.deletedAt)
+          )
+        );
+      const [target] = await ctx.db.raw
+        .select()
+        .from(customers)
+        .where(
+          and(
+            eq(customers.id, body.data.targetId),
+            eq(customers.tenantId, tenantId),
+            isNull(customers.deletedAt)
+          )
+        );
+
+      if (!source) throw new NotFoundError('Customer', body.data.sourceId);
+      if (!target) throw new NotFoundError('Customer', body.data.targetId);
+
+      // Archive source before merge
+      await ctx.db.raw.insert(customersHistory).values({
+        customerId: body.data.sourceId,
         tenantId,
         changedBy: userId,
-        changedAt: new Date(),
-        previousData: existing as unknown as Record<string, unknown>,
+        previousData: source as unknown as Record<string, unknown>,
         changeType: 'UPDATE',
       });
 
-      const [row] = await trx.raw
+      // Soft-delete source (all transactions Phase 5+ will re-point to target)
+      await ctx.db.raw
         .update(customers)
-        .set({
-          ...body.data,
-          gstin: body.data.gstin || null,
-          gstinHash,
-          pan: body.data.pan || null,
-          panHash,
-          creditLimit: String(body.data.creditLimit),
-          openingBalance: String(body.data.openingBalance),
-          updatedAt: new Date(),
-          version: existing.version + 1,
-        } as unknown as Partial<typeof customers.$inferInsert>)
-        .where(and(
-          eq(customers.id, id),
-          eq(customers.tenantId, tenantId),
-          eq(customers.version, body.data.version)
-        ))
-        .returning();
+        .set({ deletedAt: new Date(), deletedBy: userId, status: 'INACTIVE' })
+        .where(eq(customers.id, body.data.sourceId));
 
-      if (!row) throw new OptimisticLockError('Customer');
-      updated = row;
-    });
+      await ctx.audit.log({
+        action: 'DELETE',
+        entityType: 'customer',
+        entityId: body.data.sourceId,
+        before: source,
+        metadata: { mergedIntoId: body.data.targetId },
+      });
 
-    await customerCache.invalidateCustomer(ctx.cache, id);
-    await ctx.events.publish('customer', id, 'CUSTOMER_UPDATED', updated as unknown as Record<string, unknown>);
-    const changedFields = Object.keys(body.data).filter(
-      (key) => (existing as Record<string, unknown>)[key] !== (body.data as Record<string, unknown>)[key]
-    );
-    await ctx.audit.log({
-      action: 'UPDATE',
-      entityType: 'customer',
-      entityId: id,
-      before: existing as unknown as Record<string, unknown>,
-      after: updated as unknown as Record<string, unknown>,
-      changedFields,
-      actorEmail: (request as unknown as AuthedRequest).auth.email,
-      ipAddress: (request as unknown as AuthedRequest).ip,
-    });
+      await customerCache.invalidateCustomer(ctx.cache, body.data.sourceId);
 
-    return reply.code(200).send({ data: updated });
-  });
-
-  // ── PATCH /customers/:id/opt-out — Communication channel opt-out (ES-18) ─
-  fastify.patch<{ Params: { id: string } }>('/customers/:id/opt-out', { preHandler: [authenticate, requirePermission(PERMISSIONS.CUSTOMER_EDIT)] }, async (request, reply) => {
-    const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-    const ctx = ctxFactory.create({
-      tenantId,
-      userId,
-      correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-    });
-    const id = parseInt(request.params.id, 10);
-
-    const body = OptOutSchema.safeParse(request.body);
-    if (!body.success) throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
-
-    const [existing] = await ctx.db.raw
-      .select()
-      .from(customers)
-      .where(and(eq(customers.id, id), eq(customers.tenantId, tenantId), isNull(customers.deletedAt)));
-    if (!existing) throw new NotFoundError('Customer', id);
-
-    const [updated] = await ctx.db.raw
-      .update(customers)
-      .set({
-        ...(body.data.optOutSms !== undefined ? { optOutSms: body.data.optOutSms } : {}),
-        ...(body.data.optOutWhatsapp !== undefined ? { optOutWhatsapp: body.data.optOutWhatsapp } : {}),
-        ...(body.data.optOutEmail !== undefined ? { optOutEmail: body.data.optOutEmail } : {}),
-        updatedAt: new Date(),
-      })
-      .where(and(eq(customers.id, id), eq(customers.tenantId, tenantId)))
-      .returning();
-    if (!updated) throw new Error('Opt-out update failed unexpectedly');
-
-    await customerCache.invalidateCustomer(ctx.cache, id);
-    await ctx.audit.log({
-      action: 'UPDATE',
-      entityType: 'customer',
-      entityId: id,
-      before: { optOutSms: existing.optOutSms, optOutWhatsapp: existing.optOutWhatsapp, optOutEmail: existing.optOutEmail },
-      after: { optOutSms: updated.optOutSms, optOutWhatsapp: updated.optOutWhatsapp, optOutEmail: updated.optOutEmail },
-    });
-
-    return reply.code(200).send({ data: updated });
-  });
-
-  // ── DELETE /customers/:id — Soft delete ──────────────────────────────────
-  fastify.delete<{ Params: { id: string } }>('/customers/:id', { preHandler: [authenticate, requirePermission(PERMISSIONS.CUSTOMER_DELETE)] }, async (request, reply) => {
-    const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-    const ctx = ctxFactory.create({
-      tenantId,
-      userId,
-      correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-    });
-    const id = parseInt(request.params.id, 10);
-
-    const [existing] = await ctx.db.raw
-      .select()
-      .from(customers)
-      .where(and(eq(customers.id, id), eq(customers.tenantId, tenantId), isNull(customers.deletedAt)));
-
-    if (!existing) throw new NotFoundError('Customer', id);
-    // TODO Phase 5: block if customer has outstanding balance
-
-    await ctx.db.raw
-      .update(customers)
-      .set({ deletedAt: new Date(), deletedBy: userId, status: 'INACTIVE' })
-      .where(eq(customers.id, id));
-
-    await customerCache.invalidateCustomer(ctx.cache, id);
-    await ctx.events.publish('customer', id, 'CUSTOMER_DELETED', { id });
-    await ctx.audit.log({ action: 'DELETE', entityType: 'customer', entityId: id, before: existing });
-
-    return reply.code(200).send({ data: { message: 'Customer deleted', id } });
-  });
-
-  // ── POST /customers/merge — MDG ───────────────────────────────────────────
-  fastify.post('/customers/merge', { preHandler: [authenticate, requirePermission(PERMISSIONS.CUSTOMER_MERGE)] }, async (request, reply) => {
-    const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-    const ctx = ctxFactory.create({
-      tenantId,
-      userId,
-      correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-    });
-    const MergeSchema = z.object({
-      sourceId: z.number().int().positive(),
-      targetId: z.number().int().positive(),
-      keepFields: z.enum(['SOURCE', 'TARGET']).default('TARGET'),
-    });
-    const body = MergeSchema.safeParse(request.body);
-    if (!body.success) throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
-    if (body.data.sourceId === body.data.targetId) {
-      throw new BusinessError('SAME_CUSTOMER', 'Source and target cannot be the same customer');
+      return reply.code(200).send({
+        data: {
+          message: 'Customers merged',
+          sourceId: body.data.sourceId,
+          targetId: body.data.targetId,
+        },
+      });
     }
-
-    const [source] = await ctx.db.raw
-      .select()
-      .from(customers)
-      .where(and(eq(customers.id, body.data.sourceId), eq(customers.tenantId, tenantId), isNull(customers.deletedAt)));
-    const [target] = await ctx.db.raw
-      .select()
-      .from(customers)
-      .where(and(eq(customers.id, body.data.targetId), eq(customers.tenantId, tenantId), isNull(customers.deletedAt)));
-
-    if (!source) throw new NotFoundError('Customer', body.data.sourceId);
-    if (!target) throw new NotFoundError('Customer', body.data.targetId);
-
-    // Archive source before merge
-    await ctx.db.raw.insert(customersHistory).values({
-      customerId: body.data.sourceId,
-      tenantId,
-      changedBy: userId,
-      previousData: source as unknown as Record<string, unknown>,
-      changeType: 'UPDATE',
-    });
-
-    // Soft-delete source (all transactions Phase 5+ will re-point to target)
-    await ctx.db.raw
-      .update(customers)
-      .set({ deletedAt: new Date(), deletedBy: userId, status: 'INACTIVE' })
-      .where(eq(customers.id, body.data.sourceId));
-
-    await ctx.audit.log({
-      action: 'DELETE',
-      entityType: 'customer',
-      entityId: body.data.sourceId,
-      before: source,
-      metadata: { mergedIntoId: body.data.targetId },
-    });
-
-    await customerCache.invalidateCustomer(ctx.cache, body.data.sourceId);
-
-    return reply.code(200).send({
-      data: { message: 'Customers merged', sourceId: body.data.sourceId, targetId: body.data.targetId },
-    });
-  });
+  );
 
   // ── POST /customers/import — Bulk import ─────────────────────────────────
-  fastify.post('/customers/import', { preHandler: [authenticate, requirePermission(PERMISSIONS.CUSTOMER_CREATE)] }, async (_request, reply) => {
-    // Delegates to Scheduler Service ImportEngine (Phase 1)
-    return reply.code(202).send({
-      data: { message: 'Use POST /imports/upload with entityType=CUSTOMER via scheduler-service' },
-    });
-  });
+  fastify.post(
+    '/customers/import',
+    { preHandler: [authenticate, requirePermission(PERMISSIONS.CUSTOMER_CREATE)] },
+    async (_request, reply) => {
+      // Delegates to Scheduler Service ImportEngine (Phase 1)
+      return reply.code(202).send({
+        data: {
+          message: 'Use POST /imports/upload with entityType=CUSTOMER via scheduler-service',
+        },
+      });
+    }
+  );
 
   // ── GET /customers/export ─────────────────────────────────────────────────
-  fastify.get('/customers/export', { preHandler: [authenticate, requirePermission(PERMISSIONS.EXPORT_CUSTOMER_DATA)] }, async (_request, reply) => {
-    return reply.code(202).send({
-      data: { message: 'Use POST /exports/generate with entityType=CUSTOMER via scheduler-service' },
-    });
-  });
+  fastify.get(
+    '/customers/export',
+    { preHandler: [authenticate, requirePermission(PERMISSIONS.EXPORT_CUSTOMER_DATA)] },
+    async (_request, reply) => {
+      return reply.code(202).send({
+        data: {
+          message: 'Use POST /exports/generate with entityType=CUSTOMER via scheduler-service',
+        },
+      });
+    }
+  );
 }

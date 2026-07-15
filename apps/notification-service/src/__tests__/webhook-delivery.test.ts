@@ -46,6 +46,7 @@ describe.skipIf(!DB_URL)('webhook delivery processing — integration', () => {
   it('recordDeliveryEvent returns true (new) on first insert and false (duplicate) on redelivery', async () => {
     const first = await recordDeliveryEvent(
       db,
+      TEST_TENANT,
       logId,
       'META',
       'wamid.TEST123:DELIVERED',
@@ -55,6 +56,7 @@ describe.skipIf(!DB_URL)('webhook delivery processing — integration', () => {
 
     const redelivered = await recordDeliveryEvent(
       db,
+      TEST_TENANT,
       logId,
       'META',
       'wamid.TEST123:DELIVERED',

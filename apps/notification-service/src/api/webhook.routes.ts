@@ -36,6 +36,7 @@ type DeliveryStatus = 'DELIVERED' | 'FAILED';
 // __tests__/webhook-delivery.test.ts.
 export async function recordDeliveryEvent(
   db: ErpDatabase,
+  tenantId: number,
   notificationLogId: number,
   provider: 'MSG91' | 'SENDGRID' | 'META',
   providerEventId: string,
@@ -43,7 +44,7 @@ export async function recordDeliveryEvent(
 ): Promise<boolean> {
   const [inserted] = await db
     .insert(notificationDeliveryEvents)
-    .values({ notificationLogId, provider, providerEventId, eventType })
+    .values({ tenantId, notificationLogId, provider, providerEventId, eventType })
     .onConflictDoNothing({
       target: [notificationDeliveryEvents.provider, notificationDeliveryEvents.providerEventId],
     })
@@ -137,6 +138,7 @@ export async function webhookRoutes(
 
       const isNew = await recordDeliveryEvent(
         db,
+        logRow.tenantId,
         logRow.id,
         'MSG91',
         `${report.requestId}:${statusUpper}`,
@@ -198,6 +200,7 @@ export async function webhookRoutes(
 
       const isNew = await recordDeliveryEvent(
         db,
+        logRow.tenantId,
         logRow.id,
         'SENDGRID',
         event.sg_event_id,
@@ -259,6 +262,7 @@ export async function webhookRoutes(
 
       const isNew = await recordDeliveryEvent(
         db,
+        logRow.tenantId,
         logRow.id,
         'META',
         `${s.id}:${statusUpper}:${s.timestamp ?? ''}`,

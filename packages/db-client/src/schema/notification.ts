@@ -90,6 +90,9 @@ export const notificationDeliveryEvents = pgTable(
   'notification_delivery_events',
   {
     id: bigserial('id', { mode: 'number' }).primaryKey(),
+    // CP-9 cross-phase consistency fix: every other table in this schema has a direct tenant_id
+    // column; this one only had tenant isolation implicit via a join to notification_log.
+    tenantId: integer('tenant_id').notNull(),
     notificationLogId: integer('notification_log_id').notNull(),
     provider: varchar('provider', { length: 20 }).notNull().$type<'MSG91' | 'SENDGRID' | 'META'>(),
     providerEventId: varchar('provider_event_id', { length: 200 }).notNull(),
@@ -99,6 +102,7 @@ export const notificationDeliveryEvents = pgTable(
   (t) => [
     unique('notification_delivery_events_dedup').on(t.provider, t.providerEventId),
     index('idx_notification_delivery_events_log').on(t.notificationLogId),
+    index('idx_notification_delivery_events_tenant').on(t.tenantId),
   ]
 );
 

@@ -242,6 +242,17 @@ export const customerApi = {
     id: number,
     data: { optOutSms?: boolean; optOutWhatsapp?: boolean; optOutEmail?: boolean }
   ) => apiClient.patch('sales', `/customers/${id}/opt-out`, data),
+
+  // CP-7 follow-up: granular consent model, additive to the binary opt-out flags above
+  listPreferences: (id: number) => apiClient.get('sales', `/customers/${id}/preferences`),
+  updatePreferences: (
+    id: number,
+    preferences: Array<{
+      channel: 'SMS' | 'WHATSAPP' | 'EMAIL' | 'IN_APP';
+      category: 'PROMOTIONAL' | 'TRANSACTIONAL';
+      consented: boolean;
+    }>
+  ) => apiClient.put('sales', `/customers/${id}/preferences`, { preferences }),
 };
 
 // ── Suppliers ─────────────────────────────────────────────────────────────────
@@ -1381,6 +1392,25 @@ export const crmApi = {
     approvalRequired?: boolean;
     maxPerDayFrequencyCap?: number | null;
   }) => apiClient.put('sales', '/crm/communication-settings', data),
+
+  // CP-8: per-tenant/per-channel sender identity
+  listSenderIdentities: () => apiClient.get('sales', '/crm/sender-identity'),
+  saveSenderIdentity: (data: {
+    channel: string;
+    senderName: string;
+    senderAddressOrNumber: string;
+  }) => apiClient.put('sales', '/crm/sender-identity', data),
+
+  // CP-8: outbound webhook subscriptions
+  listWebhookSubscriptions: () => apiClient.get('sales', '/crm/webhook-subscriptions'),
+  createWebhookSubscription: (data: { targetUrl: string; events: string[]; isActive?: boolean }) =>
+    apiClient.post('sales', '/crm/webhook-subscriptions', data),
+  updateWebhookSubscription: (
+    id: number,
+    data: { targetUrl?: string; events?: string[]; isActive?: boolean }
+  ) => apiClient.put('sales', `/crm/webhook-subscriptions/${id}`, data),
+  deleteWebhookSubscription: (id: number) =>
+    apiClient.delete('sales', `/crm/webhook-subscriptions/${id}`),
 
   // CP-4: campaign templates
   listCampaignTemplates: (params?: { channel?: string }) => {

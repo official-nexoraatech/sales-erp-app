@@ -313,6 +313,7 @@ export default function CampaignsPage() {
               setStatusFilter(s);
               setPage(0);
             }}
+            aria-pressed={statusFilter === s}
             className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
               statusFilter === s
                 ? 'bg-primary text-white border-primary'

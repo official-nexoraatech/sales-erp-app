@@ -24,6 +24,7 @@ vi.mock('@erp/db', () => ({
   notificationLog: {},
   tenantSenderIdentity: {},
   campaignWebhookSubscriptions: {},
+  tenantCommunicationSettings: {},
 }));
 
 vi.mock('drizzle-orm', () => ({
@@ -260,6 +261,38 @@ describe('POST /crm/webhook-subscriptions — requirePermission(CRM_WEBHOOK_MANA
       url: '/crm/webhook-subscriptions',
       headers: { Authorization: `Bearer ${token}` },
       payload: { targetUrl: 'https://example.com/webhook', events: ['CAMPAIGN_SENT'] },
+    });
+    expect(res.statusCode).not.toBe(403);
+  });
+});
+
+// Follow-up (settings UI closing the CP-7/CP-8 gap): PUT /crm/communication-settings.
+describe('PUT /crm/communication-settings — requirePermission(CRM_AUTOMATION_MANAGE)', () => {
+  let app: FastifyInstance;
+  beforeAll(async () => {
+    app = Fastify({ logger: false });
+    await crmRoutes(app, mockCtxFactory);
+  });
+  afterAll(() => app.close());
+
+  it('403s a caller with only CRM_CAMPAIGN_CREATE', async () => {
+    const token = await makeToken([PERMISSIONS.CRM_CAMPAIGN_CREATE]);
+    const res = await app.inject({
+      method: 'PUT',
+      url: '/crm/communication-settings',
+      headers: { Authorization: `Bearer ${token}` },
+      payload: { approvalRequired: true },
+    });
+    expect(res.statusCode).toBe(403);
+  });
+
+  it('does not 403 a caller with CRM_AUTOMATION_MANAGE', async () => {
+    const token = await makeToken([PERMISSIONS.CRM_AUTOMATION_MANAGE]);
+    const res = await app.inject({
+      method: 'PUT',
+      url: '/crm/communication-settings',
+      headers: { Authorization: `Bearer ${token}` },
+      payload: { approvalRequired: true },
     });
     expect(res.statusCode).not.toBe(403);
   });
