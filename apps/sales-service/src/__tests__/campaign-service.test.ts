@@ -208,7 +208,7 @@ describe.skipIf(!DB_URL)('CampaignService — integration (CP-1 baseline)', () =
   function makeCtx(): PlatformContext {
     return {
       db: { raw: db },
-      tenant: { tenantId: TEST_TENANT },
+      tenant: { tenantId: TEST_TENANT, userId: 1 },
       events: { publish: async () => undefined },
       audit: { log: async () => undefined },
     } as unknown as PlatformContext;
@@ -486,6 +486,74 @@ describe.skipIf(!DB_URL)('CampaignService — integration (CP-1 baseline)', () =
       await expect(CampaignService.send(ctx, campaign!.id)).rejects.toThrow(
         'Campaign has no matching recipients'
       );
+    });
+  });
+
+  describe('update (CP-4)', () => {
+    async function createCampaign(status: 'DRAFT' | 'SCHEDULED' | 'SENT', scheduledAt?: Date) {
+      const [campaign] = await db
+        .insert(campaigns)
+        .values({
+          tenantId: TEST_TENANT,
+          name: `Edit Test ${status} ${Date.now()}`,
+          customerIds: [optedInCustomerId],
+          channel: 'EMAIL',
+          messageTemplate: 'Hi {{customerName}}',
+          status,
+          scheduledAt,
+          createdBy: 1,
+        })
+        .returning();
+      return campaign!;
+    }
+
+    it('edits a DRAFT campaign, increments version, and writes a history row', async () => {
+      const campaign = await createCampaign('DRAFT');
+      const ctx = makeCtx();
+      const updated = await CampaignService.update(ctx, campaign.id, campaign.version, {
+        name: 'Renamed Campaign',
+        messageTemplate: 'Updated message',
+      });
+      expect(updated.name).toBe('Renamed Campaign');
+      expect(updated.messageTemplate).toBe('Updated message');
+      expect(updated.version).toBe(campaign.version + 1);
+      expect(updated.status).toBe('DRAFT');
+
+      const history = await CampaignService.listHistory(ctx, campaign.id);
+      expect(history[0]?.action).toBe('UPDATE');
+      expect(history[0]?.fromStatus).toBe('DRAFT');
+      expect(history[0]?.toStatus).toBe('DRAFT');
+    });
+
+    it('editing a SCHEDULED campaign resets it to DRAFT and clears scheduledAt', async () => {
+      const campaign = await createCampaign('SCHEDULED', new Date(Date.now() + 3_600_000));
+      const ctx = makeCtx();
+      const updated = await CampaignService.update(ctx, campaign.id, campaign.version, {
+        name: 'Rescoped',
+      });
+      expect(updated.status).toBe('DRAFT');
+      expect(updated.scheduledAt).toBeNull();
+    });
+
+    it('rejects editing a SENT campaign', async () => {
+      const campaign = await createCampaign('SENT');
+      const ctx = makeCtx();
+      await expect(
+        CampaignService.update(ctx, campaign.id, campaign.version, { name: 'x' })
+      ).rejects.toThrow(/Cannot edit campaign in status SENT/);
+    });
+
+    it('throws OptimisticLockError when the expected version is stale', async () => {
+      const campaign = await createCampaign('DRAFT');
+      const ctx = makeCtx();
+      await expect(
+        CampaignService.update(ctx, campaign.id, campaign.version + 1, { name: 'x' })
+      ).rejects.toThrow(/modified by another user/);
+    });
+
+    it('throws NotFoundError for a nonexistent campaign', async () => {
+      const ctx = makeCtx();
+      await expect(CampaignService.update(ctx, 999_999_999, 0, { name: 'x' })).rejects.toThrow();
     });
   });
 

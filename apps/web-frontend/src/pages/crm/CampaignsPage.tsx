@@ -13,7 +13,7 @@ import Button from '../../components/ui/Button.js';
 import Badge from '../../components/ui/Badge.js';
 import { formatDatetime } from '../../lib/format.js';
 import Modal from '../../components/ui/Modal.js';
-import Input from '../../components/ui/Input.js';
+import DateTimePicker from '../../components/ui/DateTimePicker.js';
 
 interface Campaign {
   id: number;
@@ -106,12 +106,19 @@ export default function CampaignsPage() {
   });
   const [scheduleAt, setScheduleAt] = useState('');
   const [expandedId, setExpandedId] = useState<number | null>(null);
+  // CP-4: client-side pagination — GET /crm/campaigns has no server-side page/size params yet
+  // (see CP-4 completion report), so this paginates the already-fetched full list rather than
+  // leaving a long, unpaginated table.
+  const PAGE_SIZE = 20;
+  const [page, setPage] = useState(0);
 
   const { data, isLoading } = useQuery({
     queryKey: ['campaigns', statusFilter],
     queryFn: () => crmApi.listCampaigns(statusFilter ? { status: statusFilter } : undefined),
   });
   const campaigns: Campaign[] = (data as { content?: Campaign[] })?.content ?? [];
+  const pageCount = Math.max(1, Math.ceil(campaigns.length / PAGE_SIZE));
+  const pagedCampaigns = campaigns.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
 
   const sendMut = useMutation({
     mutationFn: (id: number) => crmApi.sendCampaign(id),
@@ -161,7 +168,10 @@ export default function CampaignsPage() {
         {['', 'DRAFT', 'SCHEDULED', 'SENDING', 'SENT', 'CANCELLED', 'FAILED'].map((s) => (
           <button
             key={s}
-            onClick={() => setStatusFilter(s)}
+            onClick={() => {
+              setStatusFilter(s);
+              setPage(0);
+            }}
             className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
               statusFilter === s
                 ? 'bg-primary text-white border-primary'
@@ -192,7 +202,7 @@ export default function CampaignsPage() {
           />
         ) : (
           <div className="divide-y divide-default">
-            {campaigns.map((c) => (
+            {pagedCampaigns.map((c) => (
               <div key={c.id}>
                 <div className="flex items-center gap-4 px-5 py-4 flex-wrap">
                   <div className="flex-1 min-w-0">
@@ -219,6 +229,15 @@ export default function CampaignsPage() {
                     </div>
                   </div>
                   <div className="flex gap-2 shrink-0">
+                    {canCreate && (c.status === 'DRAFT' || c.status === 'SCHEDULED') && (
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => navigate(`/crm/campaigns/${c.id}/edit`)}
+                      >
+                        Edit
+                      </Button>
+                    )}
                     {canSend && c.status === 'DRAFT' && (
                       <>
                         <Button
@@ -274,6 +293,36 @@ export default function CampaignsPage() {
         )}
       </div>
 
+      {campaigns.length > PAGE_SIZE && (
+        <div className="flex items-center justify-between mt-4 text-sm text-secondary">
+          <span>
+            Showing {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, campaigns.length)} of{' '}
+            {campaigns.length}
+          </span>
+          <div className="flex gap-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setPage((p) => Math.max(0, p - 1))}
+              disabled={page === 0}
+            >
+              Previous
+            </Button>
+            <span className="px-2 py-1.5">
+              Page {page + 1} of {pageCount}
+            </span>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))}
+              disabled={page >= pageCount - 1}
+            >
+              Next
+            </Button>
+          </div>
+        </div>
+      )}
+
       {/* Schedule Modal */}
       <Modal
         open={scheduleModal.open}
@@ -281,11 +330,10 @@ export default function CampaignsPage() {
         title="Schedule Campaign"
       >
         <div className="space-y-5">
-          <Input
+          <DateTimePicker
             label="Schedule Date & Time"
-            type="datetime-local"
             value={scheduleAt}
-            onChange={(e) => setScheduleAt(e.target.value)}
+            onChange={setScheduleAt}
           />
           <div className="flex gap-2 justify-end pt-2">
             <Button variant="ghost" onClick={() => setScheduleModal({ open: false, id: 0 })}>

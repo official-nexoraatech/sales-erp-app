@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { useQuery, useMutation } from '@tanstack/react-query';
+import { useNavigate, useParams } from 'react-router-dom';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { crmApi } from '../../api/endpoints.js';
 import { useAuthStore } from '../../store/auth.store.js';
@@ -17,6 +17,18 @@ interface Segment {
   name: string;
   code: string;
   isSystem: boolean;
+}
+interface CampaignTemplate {
+  id: number;
+  name: string;
+  channel: string;
+  campaignType: string | null;
+  messageTemplate: string;
+}
+interface Attachment {
+  id: number;
+  fileName: string;
+  mimeType: string;
 }
 
 const CHANNELS = ['SMS', 'WHATSAPP', 'EMAIL', 'IN_APP'] as const;
@@ -48,8 +60,40 @@ const TEMPLATE_VARS = [
   '{{lastPurchaseAmount}}',
 ];
 
+// CP-4 (Campaign Management Platform initiative): default Clothing-vertical campaign type
+// taxonomy (FR-A1) — tenant-configurable metadata, not an enum, so adding a type later never
+// needs a schema change. Abandoned Cart / automation-only types are deliberately excluded here
+// since they only make sense as automation triggers (CP-5), not a manually-authored campaign.
+const CAMPAIGN_TYPES = [
+  'Promotional',
+  'Loyalty',
+  'Coupon',
+  'Birthday',
+  'Anniversary',
+  'Seasonal',
+  'Festival',
+  'Clearance',
+  'Flash Sale',
+  'New Arrivals',
+  'Product Launch',
+  'Win-Back',
+  'Reactivation',
+  'Feedback / Survey',
+  'Referral',
+  'Event Invitation',
+  'Membership',
+  'VIP',
+  'Educational',
+  'Announcement',
+];
+
 export default function CampaignFormPage() {
   const navigate = useNavigate();
+  const qc = useQueryClient();
+  const { id } = useParams<{ id: string }>();
+  const campaignId = id ? Number(id) : undefined;
+  const isEdit = campaignId !== undefined;
+
   const hasPermission = useAuthStore((s) => s.hasPermission);
   const [form, setForm] = useState({
     name: '',
@@ -57,7 +101,10 @@ export default function CampaignFormPage() {
     messageTemplate: '',
     segmentId: '',
     scheduledAt: '',
+    campaignType: '',
   });
+  const [version, setVersion] = useState<number | null>(null);
+  const [templateId, setTemplateId] = useState('');
   const [previewCount, setPreviewCount] = useState<number | null>(null);
   const [previewMsg, setPreviewMsg] = useState('');
   const [previewFallbacks, setPreviewFallbacks] = useState<string[]>([]);
@@ -68,6 +115,40 @@ export default function CampaignFormPage() {
     enabled: hasPermission(PERMISSIONS.CRM_SEGMENT_VIEW),
   });
   const segments: Segment[] = (segData as { content?: Segment[] })?.content ?? [];
+
+  const { data: templateData } = useQuery({
+    queryKey: ['crm-campaign-templates', form.channel],
+    queryFn: () => crmApi.listCampaignTemplates({ channel: form.channel }),
+  });
+  const templates: CampaignTemplate[] =
+    (templateData as { content?: CampaignTemplate[] })?.content ?? [];
+
+  const { data: existingCampaign, isLoading: campaignLoading } = useQuery({
+    queryKey: ['crm-campaign', campaignId],
+    queryFn: () => crmApi.getCampaign(campaignId as number),
+    enabled: isEdit,
+  });
+
+  const { data: mediaData, refetch: refetchMedia } = useQuery({
+    queryKey: ['crm-campaign-media', campaignId],
+    queryFn: () => crmApi.listCampaignMedia(campaignId as number),
+    enabled: isEdit,
+  });
+  const media: Attachment[] = (mediaData as { data?: Attachment[] })?.data ?? [];
+
+  useEffect(() => {
+    if (!existingCampaign) return;
+    const c = existingCampaign as Record<string, unknown>;
+    setForm({
+      name: (c.name as string) ?? '',
+      channel: (c.channel as Channel) ?? 'WHATSAPP',
+      messageTemplate: (c.messageTemplate as string) ?? '',
+      segmentId: c.segmentId ? String(c.segmentId) : '',
+      scheduledAt: '',
+      campaignType: (c.campaignType as string) ?? '',
+    });
+    setVersion((c.version as number) ?? 0);
+  }, [existingCampaign]);
 
   const warnings = charWarnings(form.channel, form.messageTemplate);
 
@@ -93,6 +174,8 @@ export default function CampaignFormPage() {
         channel: form.channel,
         messageTemplate: form.messageTemplate,
         segmentId: form.segmentId ? Number(form.segmentId) : undefined,
+        campaignType: form.campaignType || undefined,
+        templateId: templateId ? Number(templateId) : undefined,
       })) as { id?: number };
       if (form.scheduledAt && created?.id) {
         await crmApi.scheduleCampaign(created.id, {
@@ -108,6 +191,45 @@ export default function CampaignFormPage() {
     onError: () => toast.error('Failed to create campaign'),
   });
 
+  const updateMut = useMutation({
+    mutationFn: () =>
+      crmApi.updateCampaign(campaignId as number, {
+        version,
+        name: form.name,
+        channel: form.channel,
+        messageTemplate: form.messageTemplate,
+        segmentId: form.segmentId ? Number(form.segmentId) : null,
+        campaignType: form.campaignType || null,
+      }),
+    onSuccess: () => {
+      toast.success('Campaign updated');
+      qc.invalidateQueries({ queryKey: ['crm-campaigns'] });
+      navigate('/crm/campaigns');
+    },
+    onError: () =>
+      toast.error('Failed to update campaign — it may have changed since you loaded it'),
+  });
+
+  const uploadMediaMut = useMutation({
+    mutationFn: (file: File) => crmApi.uploadCampaignMedia(campaignId as number, file),
+    onSuccess: () => {
+      toast.success('Media attached');
+      refetchMedia();
+    },
+    onError: (err: unknown) => {
+      const message =
+        err && typeof err === 'object' && 'message' in err
+          ? String((err as { message: unknown }).message)
+          : 'Failed to attach media';
+      toast.error(message);
+    },
+  });
+
+  const deleteMediaMut = useMutation({
+    mutationFn: (attachmentId: number) => crmApi.deleteAttachment(attachmentId),
+    onSuccess: () => refetchMedia(),
+  });
+
   useEffect(() => {
     setPreviewCount(null);
     setPreviewMsg('');
@@ -117,14 +239,27 @@ export default function CampaignFormPage() {
   const f = <K extends keyof typeof form>(key: K, val: (typeof form)[K]) =>
     setForm((prev) => ({ ...prev, [key]: val }));
 
-  const canSubmit = form.name && form.channel && form.messageTemplate && form.segmentId;
+  const applyTemplate = (id: string) => {
+    setTemplateId(id);
+    const tpl = templates.find((t) => String(t.id) === id);
+    if (tpl) {
+      setForm((prev) => ({
+        ...prev,
+        messageTemplate: tpl.messageTemplate,
+        campaignType: tpl.campaignType ?? prev.campaignType,
+      }));
+    }
+  };
 
-  if (segmentsLoading) {
+  const canSubmit = form.name && form.channel && form.messageTemplate && form.segmentId;
+  const isSaving = createMut.isPending || updateMut.isPending;
+
+  if (segmentsLoading || (isEdit && campaignLoading)) {
     return (
       <div>
         <ERPPageHeader
           variant="detail"
-          title="New Campaign"
+          title={isEdit ? 'Edit Campaign' : 'New Campaign'}
           subtitle="Configure and launch a customer campaign"
           backTo="/crm/campaigns"
         />
@@ -137,7 +272,7 @@ export default function CampaignFormPage() {
     <div>
       <ERPPageHeader
         variant="detail"
-        title="New Campaign"
+        title={isEdit ? 'Edit Campaign' : 'New Campaign'}
         subtitle="Configure and launch a customer campaign"
         backTo="/crm/campaigns"
       />
@@ -194,6 +329,45 @@ export default function CampaignFormPage() {
               </select>
             </div>
 
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-secondary mb-1.5">
+                  Campaign Type (optional)
+                </label>
+                <select
+                  value={form.campaignType}
+                  onChange={(e) => f('campaignType', e.target.value)}
+                  className="w-full rounded-lg border border-default bg-surface-card text-primary text-sm px-3 py-2"
+                >
+                  <option value="">— None —</option>
+                  {CAMPAIGN_TYPES.map((t) => (
+                    <option key={t} value={t}>
+                      {t}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              {!isEdit && (
+                <div>
+                  <label className="block text-xs font-medium text-secondary mb-1.5">
+                    Load from Template (optional)
+                  </label>
+                  <select
+                    value={templateId}
+                    onChange={(e) => applyTemplate(e.target.value)}
+                    className="w-full rounded-lg border border-default bg-surface-card text-primary text-sm px-3 py-2"
+                  >
+                    <option value="">— None —</option>
+                    {templates.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </div>
+
             <div>
               <label className="block text-xs font-medium text-secondary mb-1.5">
                 Message Template
@@ -228,14 +402,55 @@ export default function CampaignFormPage() {
               </div>
             </div>
 
-            <div>
-              <DateTimePicker
-                label="Schedule (optional — leave blank to send manually)"
-                value={form.scheduledAt}
-                onChange={(v) => f('scheduledAt', v)}
-              />
-            </div>
+            {!isEdit && (
+              <div>
+                <DateTimePicker
+                  label="Schedule (optional — leave blank to send manually)"
+                  value={form.scheduledAt}
+                  onChange={(v) => f('scheduledAt', v)}
+                />
+              </div>
+            )}
           </div>
+
+          {isEdit && (
+            <div className="bg-surface-card rounded-xl border border-default p-5 space-y-3">
+              <h2 className="text-sm font-semibold text-secondary uppercase tracking-wide">
+                Media Attachment
+              </h2>
+              <p className="text-xs text-secondary">
+                {form.channel === 'EMAIL' || form.channel === 'WHATSAPP'
+                  ? 'Attach one image, video, or document to include with this campaign.'
+                  : `${form.channel} campaigns cannot include media.`}
+              </p>
+              {media.length > 0 && (
+                <ul className="space-y-1">
+                  {media.map((m) => (
+                    <li
+                      key={m.id}
+                      className="flex items-center justify-between text-sm bg-surface-raised rounded-lg px-3 py-2"
+                    >
+                      <span className="truncate">{m.fileName}</span>
+                      <Button variant="ghost" onClick={() => deleteMediaMut.mutate(m.id)}>
+                        Remove
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {media.length === 0 && (form.channel === 'EMAIL' || form.channel === 'WHATSAPP') && (
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/gif,image/webp,video/mp4,application/pdf"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) uploadMediaMut.mutate(file);
+                  }}
+                  className="text-sm text-secondary"
+                />
+              )}
+            </div>
+          )}
         </div>
 
         {/* Preview panel */}
@@ -308,8 +523,11 @@ export default function CampaignFormPage() {
         <Button variant="secondary" onClick={() => navigate('/crm/campaigns')}>
           Cancel
         </Button>
-        <Button onClick={() => createMut.mutate()} disabled={createMut.isPending || !canSubmit}>
-          {createMut.isPending ? 'Creating…' : 'Create Campaign'}
+        <Button
+          onClick={() => (isEdit ? updateMut.mutate() : createMut.mutate())}
+          disabled={isSaving || !canSubmit}
+        >
+          {isSaving ? 'Saving…' : isEdit ? 'Save Changes' : 'Create Campaign'}
         </Button>
       </ERPStickyFooter>
     </div>

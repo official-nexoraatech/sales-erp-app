@@ -1,6 +1,7 @@
 import { and, desc, eq, inArray, notInArray, sql } from 'drizzle-orm';
 import {
   campaigns,
+  campaignHistory,
   campaignRecipients,
   customers,
   customerSegments,
@@ -11,7 +12,7 @@ import {
 } from '@erp/db';
 import type { PlatformContext } from '@erp/sdk';
 import { createCircuitBreaker } from '@erp/sdk';
-import { BusinessError, NotFoundError, ValidationError } from '@erp/types';
+import { BusinessError, NotFoundError, OptimisticLockError, ValidationError } from '@erp/types';
 import { SegmentService, type SegmentFilterDefinition } from './SegmentService.js';
 
 const SMS_ASCII_LIMIT = 160;
@@ -472,6 +473,83 @@ export class CampaignService {
     return updated;
   }
 
+  // CP-4: campaigns are editable while DRAFT/SCHEDULED, optimistic-locked via `version` (the
+  // same pattern already used by business_seasons/stock_transfers/etc.). Editing a SCHEDULED
+  // campaign resets it to DRAFT and clears scheduledAt — per
+  // ERP-PLANNING/Campaign-Planning/09_CAMPAIGN_LIFECYCLE_AND_WORKFLOW.md, a content/audience
+  // change must be re-confirmed via a fresh schedule() call, not silently kept on the old time.
+  static async update(
+    ctx: PlatformContext,
+    campaignId: number,
+    expectedVersion: number,
+    patch: Partial<
+      Pick<
+        Campaign,
+        | 'name'
+        | 'channel'
+        | 'messageTemplate'
+        | 'segmentId'
+        | 'customerIds'
+        | 'campaignType'
+        | 'templateId'
+      >
+    >
+  ): Promise<Campaign> {
+    const [existing] = await ctx.db.raw
+      .select()
+      .from(campaigns)
+      .where(and(eq(campaigns.id, campaignId), eq(campaigns.tenantId, ctx.tenant.tenantId)));
+    if (!existing) throw new NotFoundError('Campaign', campaignId);
+    if (!['DRAFT', 'SCHEDULED'].includes(existing.status)) {
+      throw new BusinessError(
+        'INVALID_CAMPAIGN_STATE',
+        `Cannot edit campaign in status ${existing.status}`
+      );
+    }
+
+    const resetToDraft = existing.status === 'SCHEDULED';
+
+    const [updated] = await ctx.db.raw
+      .update(campaigns)
+      .set({
+        ...patch,
+        ...(resetToDraft ? { status: 'DRAFT' as const, scheduledAt: null } : {}),
+        updatedAt: new Date(),
+        lastEditedAt: new Date(),
+        version: sql`${campaigns.version} + 1`,
+      })
+      .where(
+        and(
+          eq(campaigns.id, campaignId),
+          eq(campaigns.tenantId, ctx.tenant.tenantId),
+          eq(campaigns.version, expectedVersion)
+        )
+      )
+      .returning();
+
+    if (!updated) throw new OptimisticLockError('Campaign');
+
+    await ctx.db.raw.insert(campaignHistory).values({
+      tenantId: ctx.tenant.tenantId,
+      campaignId,
+      actorId: ctx.tenant.userId,
+      action: 'UPDATE',
+      fromStatus: existing.status,
+      toStatus: updated.status,
+      diff: patch as Record<string, unknown>,
+    });
+
+    await ctx.audit.log({
+      action: 'UPDATE',
+      entityType: 'campaign',
+      entityId: campaignId,
+      before: existing as unknown as Record<string, unknown>,
+      after: updated as unknown as Record<string, unknown>,
+    });
+
+    return updated;
+  }
+
   static async schedule(
     ctx: PlatformContext,
     campaignId: number,
@@ -502,6 +580,16 @@ export class CampaignService {
       .where(eq(campaigns.id, campaignId))
       .returning();
     if (!updated) throw new Error('Campaign schedule failed unexpectedly');
+
+    await ctx.db.raw.insert(campaignHistory).values({
+      tenantId: ctx.tenant.tenantId,
+      campaignId,
+      actorId: ctx.tenant.userId,
+      action: 'SCHEDULE',
+      fromStatus: campaign.status,
+      toStatus: updated.status,
+      diff: { scheduledAt: scheduledAt.toISOString() },
+    });
 
     await ctx.audit.log({
       action: 'SCHEDULE',
@@ -536,6 +624,15 @@ export class CampaignService {
       .where(eq(campaigns.id, campaignId))
       .returning();
     if (!updated) throw new Error('Campaign cancel failed unexpectedly');
+
+    await ctx.db.raw.insert(campaignHistory).values({
+      tenantId: ctx.tenant.tenantId,
+      campaignId,
+      actorId: ctx.tenant.userId,
+      action: 'CANCEL',
+      fromStatus: campaign.status,
+      toStatus: updated.status,
+    });
 
     await ctx.audit.log({ action: 'CANCEL', entityType: 'campaign', entityId: campaignId });
     return updated;
@@ -587,5 +684,19 @@ export class CampaignService {
         )
       )
       .orderBy(campaignRecipients.id);
+  }
+
+  /** CP-4: lifecycle/edit history for a campaign, newest first — backs the History tab (CP-7 UI). */
+  static async listHistory(ctx: PlatformContext, campaignId: number) {
+    return ctx.db.raw
+      .select()
+      .from(campaignHistory)
+      .where(
+        and(
+          eq(campaignHistory.campaignId, campaignId),
+          eq(campaignHistory.tenantId, ctx.tenant.tenantId)
+        )
+      )
+      .orderBy(desc(campaignHistory.createdAt));
   }
 }

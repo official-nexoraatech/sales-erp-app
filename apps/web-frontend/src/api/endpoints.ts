@@ -1155,6 +1155,19 @@ export const leaveApi = {
   },
 };
 
+// Backend has always had full CRUD (apps/hr-service/src/api/employee-loans.routes.ts) but no
+// frontend page or API client entry ever called it — real employee loans (salary advances
+// etc.) were completely unreachable via any UI. Added alongside EmployeeViewPage's new Loans
+// section.
+export const employeeLoanApi = {
+  list: (employeeId: number) =>
+    apiClient.get<unknown[]>('hr', `/employee-loans?employeeId=${employeeId}`),
+  getById: (id: number) => apiClient.get('hr', `/employee-loans/${id}`),
+  create: (data: Record<string, unknown>) => apiClient.post('hr', '/employee-loans', data),
+  updateStatus: (id: number, status: 'CANCELLED' | 'CLOSED') =>
+    apiClient.patch('hr', `/employee-loans/${id}`, { status }),
+};
+
 // ── Phase 8: HR — Payroll ──────────────────────────────────────────────────────
 export const payrollApi = {
   salaryStructures: () => apiClient.get<{ content: unknown[] }>('hr', '/salary-structures'),
@@ -1336,6 +1349,10 @@ export const crmApi = {
   getCampaign: (id: number) => apiClient.get('sales', `/crm/campaigns/${id}`),
   createCampaign: (data: Record<string, unknown>) =>
     apiClient.post('sales', '/crm/campaigns', data),
+  // CP-4: edit a DRAFT/SCHEDULED campaign — data must include `version` for the optimistic lock.
+  updateCampaign: (id: number, data: Record<string, unknown>) =>
+    apiClient.put('sales', `/crm/campaigns/${id}`, data),
+  campaignHistory: (id: number) => apiClient.get('sales', `/crm/campaigns/${id}/history`),
   previewCampaign: (data: Record<string, unknown>) =>
     apiClient.post('sales', '/crm/campaigns/preview', data),
   sendCampaign: (id: number) => apiClient.post('sales', `/crm/campaigns/${id}/send`, {}),
@@ -1345,6 +1362,28 @@ export const crmApi = {
   campaignStats: (id: number) => apiClient.get('sales', `/crm/campaigns/${id}/stats`),
   campaignRecipients: (id: number) => apiClient.get('sales', `/crm/campaigns/${id}/recipients`),
   birthdayStats: () => apiClient.get('sales', '/crm/campaigns/birthday-stats'),
+
+  // CP-4: campaign templates
+  listCampaignTemplates: (params?: { channel?: string }) => {
+    const qs = new URLSearchParams();
+    if (params?.channel) qs.set('channel', params.channel);
+    return apiClient.get('sales', `/crm/campaign-templates?${qs}`);
+  },
+  createCampaignTemplate: (data: Record<string, unknown>) =>
+    apiClient.post('sales', '/crm/campaign-templates', data),
+
+  // CP-4/CP-2: campaign media attachment (reuses the generic /attachments endpoint)
+  listCampaignMedia: (campaignId: number) =>
+    apiClient.get('sales', `/attachments?entityType=CAMPAIGN&entityId=${campaignId}`),
+  uploadCampaignMedia: (campaignId: number, file: File) => {
+    const formData = new FormData();
+    formData.append('entityType', 'CAMPAIGN');
+    formData.append('entityId', String(campaignId));
+    formData.append('file', file);
+    return apiClient.upload('sales', '/attachments', formData);
+  },
+  deleteAttachment: (attachmentId: number) =>
+    apiClient.delete('sales', `/attachments/${attachmentId}`),
 
   // Seasons
   listSeasons: () => apiClient.get('sales', '/crm/seasons'),

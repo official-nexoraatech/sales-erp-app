@@ -69,7 +69,9 @@ export const campaigns = pgTable(
     name: varchar('name', { length: 200 }).notNull(),
     segmentId: integer('segment_id'),
     customerIds: jsonb('customer_ids').$type<number[]>(),
-    channel: varchar('channel', { length: 20 }).notNull().$type<'SMS' | 'WHATSAPP' | 'EMAIL' | 'IN_APP'>(),
+    channel: varchar('channel', { length: 20 })
+      .notNull()
+      .$type<'SMS' | 'WHATSAPP' | 'EMAIL' | 'IN_APP'>(),
     messageTemplate: text('message_template').notNull(),
     status: varchar('status', { length: 20 })
       .notNull()
@@ -86,6 +88,11 @@ export const campaigns = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
     version: integer('version').notNull().default(0),
+    // CP-4 (Campaign Management Platform initiative): campaign type taxonomy (tenant-configurable
+    // metadata, not an enum), optional template linkage, and last-edit timestamp.
+    campaignType: varchar('campaign_type', { length: 50 }),
+    templateId: integer('template_id'),
+    lastEditedAt: timestamp('last_edited_at', { withTimezone: true }),
   },
   (t) => [
     index('idx_campaigns_tenant_status').on(t.tenantId, t.status, t.createdAt),
@@ -115,6 +122,48 @@ export const campaignRecipients = pgTable(
   ]
 );
 
+// ─── Campaign Templates (CP-4) ──────────────────────────────────────────────
+// Reusable, versioned campaign message templates — distinct from notificationTemplates (which
+// backs transactional event notifications, not campaign broadcast authoring).
+export const campaignTemplates = pgTable(
+  'campaign_templates',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    tenantId: integer('tenant_id').notNull(),
+    name: varchar('name', { length: 200 }).notNull(),
+    category: varchar('category', { length: 50 }),
+    campaignType: varchar('campaign_type', { length: 50 }),
+    channel: varchar('channel', { length: 20 })
+      .notNull()
+      .$type<'SMS' | 'WHATSAPP' | 'EMAIL' | 'IN_APP'>(),
+    messageTemplate: text('message_template').notNull(),
+    createdBy: integer('created_by').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    version: integer('version').notNull().default(0),
+  },
+  (t) => [index('idx_campaign_templates_tenant').on(t.tenantId, t.channel)]
+);
+
+// ─── Campaign History (CP-4) ────────────────────────────────────────────────
+// Lifecycle/edit audit trail — who did what to a campaign, when, and (for edits) a diff of what
+// changed.
+export const campaignHistory = pgTable(
+  'campaign_history',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    tenantId: integer('tenant_id').notNull(),
+    campaignId: integer('campaign_id').notNull(),
+    actorId: integer('actor_id').notNull(),
+    action: varchar('action', { length: 30 }).notNull(),
+    fromStatus: varchar('from_status', { length: 20 }),
+    toStatus: varchar('to_status', { length: 20 }),
+    diff: jsonb('diff').$type<Record<string, unknown>>(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index('idx_campaign_history_campaign').on(t.campaignId, t.createdAt)]
+);
+
 // ─── Business Seasons — Festival Planner (M9.7) ────────────────────────────
 export const businessSeasons = pgTable(
   'business_seasons',
@@ -128,7 +177,9 @@ export const businessSeasons = pgTable(
     startDate: timestamp('start_date', { withTimezone: true }).notNull(),
     endDate: timestamp('end_date', { withTimezone: true }).notNull(),
     stockMultiplier: decimal('stock_multiplier', { precision: 5, scale: 2 }).notNull().default('1'),
-    loyaltyMultiplier: decimal('loyalty_multiplier', { precision: 5, scale: 2 }).notNull().default('1'),
+    loyaltyMultiplier: decimal('loyalty_multiplier', { precision: 5, scale: 2 })
+      .notNull()
+      .default('1'),
     salesTarget: decimal('sales_target', { precision: 15, scale: 2 }).notNull().default('0'),
     activeDiscountRuleIds: jsonb('active_discount_rule_ids').$type<number[]>().default([]),
     isActive: boolean('is_active').notNull().default(true),
@@ -151,5 +202,9 @@ export type Campaign = typeof campaigns.$inferSelect;
 export type NewCampaign = typeof campaigns.$inferInsert;
 export type CampaignRecipient = typeof campaignRecipients.$inferSelect;
 export type NewCampaignRecipient = typeof campaignRecipients.$inferInsert;
+export type CampaignTemplate = typeof campaignTemplates.$inferSelect;
+export type NewCampaignTemplate = typeof campaignTemplates.$inferInsert;
+export type CampaignHistory = typeof campaignHistory.$inferSelect;
+export type NewCampaignHistory = typeof campaignHistory.$inferInsert;
 export type BusinessSeason = typeof businessSeasons.$inferSelect;
 export type NewBusinessSeason = typeof businessSeasons.$inferInsert;

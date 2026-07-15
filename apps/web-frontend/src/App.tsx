@@ -21,7 +21,9 @@ const AccountSuspendedPage = lazy(() => import('./pages/AccountSuspendedPage.js'
 const OrganizationPage = lazy(() => import('./pages/settings/OrganizationPage.js'));
 const SsoConfigPage = lazy(() => import('./pages/settings/SsoConfigPage.js'));
 const BranchesPage = lazy(() => import('./pages/settings/BranchesPage.js'));
+const BranchFormPage = lazy(() => import('./pages/settings/BranchFormPage.js'));
 const WarehousesPage = lazy(() => import('./pages/settings/WarehousesPage.js'));
+const WarehouseFormPage = lazy(() => import('./pages/settings/WarehouseFormPage.js'));
 
 // Users
 const UsersPage = lazy(() => import('./pages/users/UsersPage.js'));
@@ -38,11 +40,15 @@ const SupplierFormPage = lazy(() => import('./pages/suppliers/SupplierFormPage.j
 
 // Inventory — Items
 const CategoriesPage = lazy(() => import('./pages/items/CategoriesPage.js'));
+const CategoryFormPage = lazy(() => import('./pages/items/CategoryFormPage.js'));
 const BrandsPage = lazy(() => import('./pages/items/BrandsPage.js'));
+const BrandFormPage = lazy(() => import('./pages/items/BrandFormPage.js'));
 const UnitsPage = lazy(() => import('./pages/items/UnitsPage.js'));
+const UnitFormPage = lazy(() => import('./pages/items/UnitFormPage.js'));
 const ItemsPage = lazy(() => import('./pages/items/ItemsPage.js'));
 const ItemFormPage = lazy(() => import('./pages/items/ItemFormPage.js'));
 const PriceListsPage = lazy(() => import('./pages/items/PriceListsPage.js'));
+const PriceListFormPage = lazy(() => import('./pages/items/PriceListFormPage.js'));
 
 // GST
 const GstConfigPage = lazy(() => import('./pages/gst/GstConfigPage.js'));
@@ -96,7 +102,9 @@ const InvoicesPage = lazy(() => import('./pages/sales/InvoicesPage.js'));
 const InvoiceFormPage = lazy(() => import('./pages/sales/InvoiceFormPage.js'));
 const InvoiceDetailPage = lazy(() => import('./pages/sales/InvoiceDetailPage.js'));
 const PaymentsPage = lazy(() => import('./pages/sales/PaymentsPage.js'));
+const PaymentFormPage = lazy(() => import('./pages/sales/PaymentFormPage.js'));
 const SaleReturnsPage = lazy(() => import('./pages/sales/SaleReturnsPage.js'));
+const SaleReturnFormPage = lazy(() => import('./pages/sales/SaleReturnFormPage.js'));
 const DeliveryChallansPage = lazy(() => import('./pages/sales/DeliveryChallansPage.js'));
 const DeliveryChallanFormPage = lazy(() => import('./pages/sales/DeliveryChallanFormPage.js'));
 const DeliveryChallanDetailPage = lazy(() => import('./pages/sales/DeliveryChallanDetailPage.js'));
@@ -107,8 +115,11 @@ const PurchaseOrderFormPage = lazy(() => import('./pages/purchase/PurchaseOrderF
 const GRNsPage = lazy(() => import('./pages/purchase/GRNsPage.js'));
 const GRNCreatePage = lazy(() => import('./pages/purchase/GRNCreatePage.js'));
 const SupplierPaymentsPage = lazy(() => import('./pages/purchase/SupplierPaymentsPage.js'));
+const SupplierPaymentFormPage = lazy(() => import('./pages/purchase/SupplierPaymentFormPage.js'));
 const PurchaseReturnsPage = lazy(() => import('./pages/purchase/PurchaseReturnsPage.js'));
+const PurchaseReturnFormPage = lazy(() => import('./pages/purchase/PurchaseReturnFormPage.js'));
 const ExpensesPage = lazy(() => import('./pages/purchase/ExpensesPage.js'));
+const ExpenseFormPage = lazy(() => import('./pages/purchase/ExpenseFormPage.js'));
 
 // Inventory — Stock
 const StockLevelsPage = lazy(() => import('./pages/inventory/StockLevelsPage.js'));
@@ -131,13 +142,16 @@ const StockValuationPage = lazy(() => import('./pages/inventory/StockValuationPa
 
 // CRM
 const SegmentsPage = lazy(() => import('./pages/crm/SegmentsPage.js'));
+const SegmentFormPage = lazy(() => import('./pages/crm/SegmentFormPage.js'));
 const CampaignsPage = lazy(() => import('./pages/crm/CampaignsPage.js'));
 const CampaignFormPage = lazy(() => import('./pages/crm/CampaignFormPage.js'));
 const SeasonsPage = lazy(() => import('./pages/crm/SeasonsPage.js'));
+const SeasonFormPage = lazy(() => import('./pages/crm/SeasonFormPage.js'));
 
 // Production — Phase 10
 const JobWorkOrdersPage = lazy(() => import('./pages/production/JobWorkOrdersPage.js'));
 const JobWorkOrderCreatePage = lazy(() => import('./pages/production/JobWorkOrderCreatePage.js'));
+const JobWorkOrderDetailPage = lazy(() => import('./pages/production/JobWorkOrderDetailPage.js'));
 const JobWorkQualityCheckPage = lazy(() => import('./pages/production/JobWorkQualityCheckPage.js'));
 const ConsignmentStockPage = lazy(() => import('./pages/production/ConsignmentStockPage.js'));
 const ConsignmentSettlementsPage = lazy(
@@ -186,6 +200,7 @@ const LeavesPage = lazy(() => import('./pages/hr/LeavesPage.js'));
 const PayrollPage = lazy(() => import('./pages/hr/PayrollPage.js'));
 const PayslipViewPage = lazy(() => import('./pages/hr/PayslipViewPage.js'));
 const HolidayCalendarPage = lazy(() => import('./pages/hr/HolidayCalendarPage.js'));
+const HolidayFormPage = lazy(() => import('./pages/hr/HolidayFormPage.js'));
 const PFChallanPage = lazy(() => import('./pages/hr/PFChallanPage.js'));
 const ESIChallanPage = lazy(() => import('./pages/hr/ESIChallanPage.js'));
 const Form16Page = lazy(() => import('./pages/hr/Form16Page.js'));
@@ -222,8 +237,20 @@ function AccessDenied() {
   );
 }
 
-function PermissionRoute({ permission, element }: { permission: string; element: ReactNode }) {
-  const allowed = useAuthStore((s) => s.hasPermission(permission));
+// Accepts a single permission or an array (ANY match) — several routes are reachable by more
+// than one role-appropriate permission (e.g. PAYMENT_VIEW or PAYMENT_IN_VIEW), mirroring the
+// backend's requireAnyPermission. A single-permission check here was found (via live RBAC E2E
+// testing) to silently re-introduce backend-fixed access gaps at the frontend route-guard layer.
+function PermissionRoute({
+  permission,
+  element,
+}: {
+  permission: string | string[];
+  element: ReactNode;
+}) {
+  const hasPermission = useAuthStore((s) => s.hasPermission);
+  const permissions = Array.isArray(permission) ? permission : [permission];
+  const allowed = permissions.some((p) => hasPermission(p));
   return allowed ? <>{element}</> : <AccessDenied />;
 }
 
@@ -343,12 +370,56 @@ export default function App() {
           }
         />
         <Route
+          path="settings/branches/new"
+          element={
+            <Page>
+              <PermissionRoute
+                permission={PERMISSIONS.BRANCH_MANAGE}
+                element={<BranchFormPage />}
+              />
+            </Page>
+          }
+        />
+        <Route
+          path="settings/branches/:id/edit"
+          element={
+            <Page>
+              <PermissionRoute
+                permission={PERMISSIONS.BRANCH_MANAGE}
+                element={<BranchFormPage />}
+              />
+            </Page>
+          }
+        />
+        <Route
           path="settings/warehouses"
           element={
             <Page>
               <PermissionRoute
                 permission={PERMISSIONS.WAREHOUSE_VIEW}
                 element={<WarehousesPage />}
+              />
+            </Page>
+          }
+        />
+        <Route
+          path="settings/warehouses/new"
+          element={
+            <Page>
+              <PermissionRoute
+                permission={PERMISSIONS.WAREHOUSE_MANAGE}
+                element={<WarehouseFormPage />}
+              />
+            </Page>
+          }
+        />
+        <Route
+          path="settings/warehouses/:id/edit"
+          element={
+            <Page>
+              <PermissionRoute
+                permission={PERMISSIONS.WAREHOUSE_MANAGE}
+                element={<WarehouseFormPage />}
               />
             </Page>
           }
@@ -468,6 +539,28 @@ export default function App() {
           }
         />
         <Route
+          path="inventory/categories/new"
+          element={
+            <Page>
+              <PermissionRoute
+                permission={PERMISSIONS.CATEGORY_CREATE}
+                element={<CategoryFormPage />}
+              />
+            </Page>
+          }
+        />
+        <Route
+          path="inventory/categories/:id/edit"
+          element={
+            <Page>
+              <PermissionRoute
+                permission={PERMISSIONS.CATEGORY_UPDATE}
+                element={<CategoryFormPage />}
+              />
+            </Page>
+          }
+        />
+        <Route
           path="inventory/brands"
           element={
             <Page>
@@ -476,10 +569,42 @@ export default function App() {
           }
         />
         <Route
+          path="inventory/brands/new"
+          element={
+            <Page>
+              <PermissionRoute permission={PERMISSIONS.BRAND_CREATE} element={<BrandFormPage />} />
+            </Page>
+          }
+        />
+        <Route
+          path="inventory/brands/:id/edit"
+          element={
+            <Page>
+              <PermissionRoute permission={PERMISSIONS.BRAND_UPDATE} element={<BrandFormPage />} />
+            </Page>
+          }
+        />
+        <Route
           path="inventory/units"
           element={
             <Page>
               <PermissionRoute permission={PERMISSIONS.UNIT_VIEW} element={<UnitsPage />} />
+            </Page>
+          }
+        />
+        <Route
+          path="inventory/units/new"
+          element={
+            <Page>
+              <PermissionRoute permission={PERMISSIONS.UNIT_CREATE} element={<UnitFormPage />} />
+            </Page>
+          }
+        />
+        <Route
+          path="inventory/units/:id/edit"
+          element={
+            <Page>
+              <PermissionRoute permission={PERMISSIONS.UNIT_UPDATE} element={<UnitFormPage />} />
             </Page>
           }
         />
@@ -515,6 +640,14 @@ export default function App() {
                 permission={PERMISSIONS.PRICE_LIST_VIEW}
                 element={<PriceListsPage />}
               />
+            </Page>
+          }
+        />
+        <Route
+          path="inventory/price-lists/new"
+          element={
+            <Page>
+              <PermissionRoute permission={PERMISSIONS.ITEM_EDIT} element={<PriceListFormPage />} />
             </Page>
           }
         />
@@ -860,7 +993,10 @@ export default function App() {
           path="sales/payments"
           element={
             <Page>
-              <PermissionRoute permission={PERMISSIONS.PAYMENT_VIEW} element={<PaymentsPage />} />
+              <PermissionRoute
+                permission={[PERMISSIONS.PAYMENT_VIEW, PERMISSIONS.PAYMENT_IN_VIEW]}
+                element={<PaymentsPage />}
+              />
             </Page>
           }
         />
@@ -868,7 +1004,10 @@ export default function App() {
           path="sales/payments/new"
           element={
             <Page>
-              <PermissionRoute permission={PERMISSIONS.PAYMENT_CREATE} element={<PaymentsPage />} />
+              <PermissionRoute
+                permission={PERMISSIONS.PAYMENT_CREATE}
+                element={<PaymentFormPage />}
+              />
             </Page>
           }
         />
@@ -879,6 +1018,17 @@ export default function App() {
               <PermissionRoute
                 permission={PERMISSIONS.INVOICE_VIEW}
                 element={<SaleReturnsPage />}
+              />
+            </Page>
+          }
+        />
+        <Route
+          path="sales/returns/new"
+          element={
+            <Page>
+              <PermissionRoute
+                permission={PERMISSIONS.INVOICE_CANCEL}
+                element={<SaleReturnFormPage />}
               />
             </Page>
           }
@@ -965,6 +1115,17 @@ export default function App() {
           }
         />
         <Route
+          path="purchase/payments/new"
+          element={
+            <Page>
+              <PermissionRoute
+                permission={PERMISSIONS.PAYMENT_OUT_CREATE}
+                element={<SupplierPaymentFormPage />}
+              />
+            </Page>
+          }
+        />
+        <Route
           path="purchase/returns"
           element={
             <Page>
@@ -976,10 +1137,32 @@ export default function App() {
           }
         />
         <Route
+          path="purchase/returns/new"
+          element={
+            <Page>
+              <PermissionRoute
+                permission={PERMISSIONS.PURCHASE_RETURN_CREATE}
+                element={<PurchaseReturnFormPage />}
+              />
+            </Page>
+          }
+        />
+        <Route
           path="purchase/expenses"
           element={
             <Page>
               <PermissionRoute permission={PERMISSIONS.EXPENSE_VIEW} element={<ExpensesPage />} />
+            </Page>
+          }
+        />
+        <Route
+          path="purchase/expenses/new"
+          element={
+            <Page>
+              <PermissionRoute
+                permission={PERMISSIONS.EXPENSE_CREATE}
+                element={<ExpenseFormPage />}
+              />
             </Page>
           }
         />
@@ -998,7 +1181,7 @@ export default function App() {
           element={
             <Page>
               <PermissionRoute
-                permission={PERMISSIONS.WAREHOUSE_MANAGE}
+                permission={[PERMISSIONS.WAREHOUSE_MANAGE, PERMISSIONS.STOCK_TRANSFER]}
                 element={<StockTransfersPage />}
               />
             </Page>
@@ -1009,7 +1192,7 @@ export default function App() {
           element={
             <Page>
               <PermissionRoute
-                permission={PERMISSIONS.WAREHOUSE_MANAGE}
+                permission={[PERMISSIONS.WAREHOUSE_MANAGE, PERMISSIONS.STOCK_TRANSFER]}
                 element={<StockTransferFormPage />}
               />
             </Page>
@@ -1020,7 +1203,7 @@ export default function App() {
           element={
             <Page>
               <PermissionRoute
-                permission={PERMISSIONS.WAREHOUSE_MANAGE}
+                permission={[PERMISSIONS.WAREHOUSE_MANAGE, PERMISSIONS.STOCK_TRANSFER]}
                 element={<StockTransferDetailPage />}
               />
             </Page>
@@ -1031,7 +1214,7 @@ export default function App() {
           element={
             <Page>
               <PermissionRoute
-                permission={PERMISSIONS.WAREHOUSE_MANAGE}
+                permission={[PERMISSIONS.WAREHOUSE_MANAGE, PERMISSIONS.STOCK_TRANSFER]}
                 element={<StockTransferReceivePage />}
               />
             </Page>
@@ -1042,7 +1225,7 @@ export default function App() {
           element={
             <Page>
               <PermissionRoute
-                permission={PERMISSIONS.WAREHOUSE_MANAGE}
+                permission={[PERMISSIONS.WAREHOUSE_MANAGE, PERMISSIONS.STOCK_ADJUST]}
                 element={<StockAdjustmentsPage />}
               />
             </Page>
@@ -1053,7 +1236,7 @@ export default function App() {
           element={
             <Page>
               <PermissionRoute
-                permission={PERMISSIONS.WAREHOUSE_MANAGE}
+                permission={[PERMISSIONS.WAREHOUSE_MANAGE, PERMISSIONS.STOCK_ADJUST]}
                 element={<StockAdjustmentFormPage />}
               />
             </Page>
@@ -1114,6 +1297,17 @@ export default function App() {
           }
         />
         <Route
+          path="crm/segments/new"
+          element={
+            <Page>
+              <PermissionRoute
+                permission={PERMISSIONS.CRM_SEGMENT_CREATE}
+                element={<SegmentFormPage />}
+              />
+            </Page>
+          }
+        />
+        <Route
           path="crm/campaigns"
           element={
             <Page>
@@ -1133,10 +1327,43 @@ export default function App() {
           }
         />
         <Route
+          path="crm/campaigns/:id/edit"
+          element={
+            <Page>
+              <PermissionRoute
+                permission={PERMISSIONS.CRM_CAMPAIGN_CREATE}
+                element={<CampaignFormPage />}
+              />
+            </Page>
+          }
+        />
+        <Route
           path="crm/seasons"
           element={
             <Page>
               <PermissionRoute permission={PERMISSIONS.CRM_SEASON_VIEW} element={<SeasonsPage />} />
+            </Page>
+          }
+        />
+        <Route
+          path="crm/seasons/new"
+          element={
+            <Page>
+              <PermissionRoute
+                permission={PERMISSIONS.CRM_SEASON_MANAGE}
+                element={<SeasonFormPage />}
+              />
+            </Page>
+          }
+        />
+        <Route
+          path="crm/seasons/:id/edit"
+          element={
+            <Page>
+              <PermissionRoute
+                permission={PERMISSIONS.CRM_SEASON_MANAGE}
+                element={<SeasonFormPage />}
+              />
             </Page>
           }
         />
@@ -1160,6 +1387,17 @@ export default function App() {
               <PermissionRoute
                 permission={PERMISSIONS.JOB_WORK_CREATE}
                 element={<JobWorkOrderCreatePage />}
+              />
+            </Page>
+          }
+        />
+        <Route
+          path="production/job-work/:id"
+          element={
+            <Page>
+              <PermissionRoute
+                permission={PERMISSIONS.JOB_WORK_VIEW}
+                element={<JobWorkOrderDetailPage />}
               />
             </Page>
           }
@@ -1308,6 +1546,14 @@ export default function App() {
                 permission={PERMISSIONS.HR_MANAGE}
                 element={<HolidayCalendarPage />}
               />
+            </Page>
+          }
+        />
+        <Route
+          path="hr/holidays/new"
+          element={
+            <Page>
+              <PermissionRoute permission={PERMISSIONS.HR_MANAGE} element={<HolidayFormPage />} />
             </Page>
           }
         />
@@ -1469,7 +1715,10 @@ export default function App() {
           path="admin/audit-logs"
           element={
             <Page>
-              <PermissionRoute permission={PERMISSIONS.VIEW_AUDIT_LOG} element={<AuditLogPage />} />
+              <PermissionRoute
+                permission={[PERMISSIONS.VIEW_AUDIT_LOG, PERMISSIONS.AUDIT_LOG_VIEW]}
+                element={<AuditLogPage />}
+              />
             </Page>
           }
         />
