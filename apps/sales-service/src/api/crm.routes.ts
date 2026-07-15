@@ -6,6 +6,7 @@ import {
   customerSegments,
   campaigns,
   campaignTemplates,
+  campaignAutomationRules,
   businessSeasons,
   notificationLog,
 } from '@erp/db';
@@ -94,8 +95,19 @@ const CampaignUpdateSchema = z.object({
   templateId: z.number().int().positive().nullable().optional(),
 });
 
+// CP-5: recurrenceRule is optional — a plain one-time scheduled send omits it entirely, matching
+// today's behavior exactly.
 const CampaignScheduleSchema = z.object({
   scheduledAt: z.string().datetime(),
+  recurrenceRule: z
+    .object({
+      frequency: z.enum(['DAILY', 'WEEKLY', 'MONTHLY']),
+      interval: z.number().int().positive(),
+      endDate: z.string().datetime().optional(),
+      occurrences: z.number().int().positive().optional(),
+    })
+    .optional(),
+  timezone: z.string().max(50).optional(),
 });
 
 const CampaignTemplateSchema = z.object({
@@ -104,6 +116,16 @@ const CampaignTemplateSchema = z.object({
   campaignType: z.string().max(50).optional(),
   channel: z.enum(['SMS', 'WHATSAPP', 'EMAIL', 'IN_APP']),
   messageTemplate: z.string().min(1).max(2000),
+});
+
+// CP-5: trigger-based automation rules
+const AutomationRuleSchema = z.object({
+  triggerType: z.enum(['BIRTHDAY', 'INACTIVITY', 'ANNIVERSARY']),
+  enabled: z.boolean().default(true),
+  channel: z.enum(['SMS', 'WHATSAPP', 'EMAIL', 'IN_APP']),
+  templateId: z.number().int().positive().optional(),
+  messageTemplate: z.string().min(1).max(2000).optional(),
+  conditions: z.record(z.unknown()).optional(),
 });
 
 const SeasonSchema = z.object({
@@ -368,11 +390,9 @@ export async function crmRoutes(
         isSystem: true,
       }));
 
-      return reply
-        .code(200)
-        .send({
-          data: { content: [...prebuilt, ...saved], totalElements: prebuilt.length + saved.length },
-        });
+      return reply.code(200).send({
+        data: { content: [...prebuilt, ...saved], totalElements: prebuilt.length + saved.length },
+      });
     }
   );
 
@@ -861,6 +881,116 @@ export async function crmRoutes(
     }
   );
 
+  // ════════════════════════════════════════════════════════════════════════
+  // CP-5 — Campaign Automation Rules
+  // ════════════════════════════════════════════════════════════════════════
+
+  fastify.post(
+    '/crm/automation-rules',
+    { preHandler: [authenticate, requirePermission(PERMISSIONS.CRM_CAMPAIGN_CREATE)] },
+    async (request, reply) => {
+      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
+      const ctx = ctxFactory.create({
+        tenantId,
+        userId,
+        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
+      });
+
+      const body = AutomationRuleSchema.safeParse(request.body);
+      if (!body.success)
+        throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
+
+      const [created] = await ctx.db.raw
+        .insert(campaignAutomationRules)
+        .values({
+          tenantId,
+          triggerType: body.data.triggerType,
+          enabled: body.data.enabled,
+          channel: body.data.channel,
+          templateId: body.data.templateId,
+          messageTemplate: body.data.messageTemplate,
+          conditions: body.data.conditions,
+          createdBy: userId,
+        })
+        .returning();
+      if (!created) throw new Error('Automation rule creation failed unexpectedly');
+
+      await ctx.audit.log({
+        action: 'CREATE',
+        entityType: 'campaign_automation_rule',
+        entityId: created.id,
+        after: created as unknown as Record<string, unknown>,
+      });
+      return reply.code(201).send({ data: created });
+    }
+  );
+
+  fastify.get(
+    '/crm/automation-rules',
+    { preHandler: [authenticate, requirePermission(PERMISSIONS.CRM_VIEW)] },
+    async (request, reply) => {
+      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
+      const ctx = ctxFactory.create({
+        tenantId,
+        userId,
+        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
+      });
+
+      const rows = await ctx.db.raw
+        .select()
+        .from(campaignAutomationRules)
+        .where(eq(campaignAutomationRules.tenantId, tenantId))
+        .orderBy(sql`trigger_type ASC`);
+      return reply.code(200).send({ data: { content: rows, totalElements: rows.length } });
+    }
+  );
+
+  fastify.put<{ Params: { id: string } }>(
+    '/crm/automation-rules/:id',
+    { preHandler: [authenticate, requirePermission(PERMISSIONS.CRM_CAMPAIGN_CREATE)] },
+    async (request, reply) => {
+      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
+      const ctx = ctxFactory.create({
+        tenantId,
+        userId,
+        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
+      });
+      const id = parseInt(request.params.id, 10);
+
+      const body = AutomationRuleSchema.partial().safeParse(request.body);
+      if (!body.success)
+        throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
+
+      const [existing] = await ctx.db.raw
+        .select()
+        .from(campaignAutomationRules)
+        .where(
+          and(eq(campaignAutomationRules.id, id), eq(campaignAutomationRules.tenantId, tenantId))
+        );
+      if (!existing) throw new NotFoundError('Automation rule', id);
+
+      const [updated] = await ctx.db.raw
+        .update(campaignAutomationRules)
+        .set({
+          ...body.data,
+          updatedAt: new Date(),
+          version: sql`${campaignAutomationRules.version} + 1`,
+        })
+        .where(eq(campaignAutomationRules.id, id))
+        .returning();
+      if (!updated) throw new Error('Automation rule update failed unexpectedly');
+
+      await ctx.audit.log({
+        action: 'UPDATE',
+        entityType: 'campaign_automation_rule',
+        entityId: id,
+        before: existing as unknown as Record<string, unknown>,
+        after: updated as unknown as Record<string, unknown>,
+      });
+      return reply.code(200).send({ data: updated });
+    }
+  );
+
   fastify.post<{ Params: { id: string } }>(
     '/crm/campaigns/:id/send',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.CRM_CAMPAIGN_SEND)] },
@@ -894,7 +1024,25 @@ export async function crmRoutes(
       if (!body.success)
         throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
 
-      const updated = await CampaignService.schedule(ctx, id, new Date(body.data.scheduledAt));
+      const rule = body.data.recurrenceRule
+        ? {
+            frequency: body.data.recurrenceRule.frequency,
+            interval: body.data.recurrenceRule.interval,
+            ...(body.data.recurrenceRule.endDate !== undefined
+              ? { endDate: body.data.recurrenceRule.endDate }
+              : {}),
+            ...(body.data.recurrenceRule.occurrences !== undefined
+              ? { occurrences: body.data.recurrenceRule.occurrences }
+              : {}),
+          }
+        : undefined;
+      const updated = await CampaignService.schedule(
+        ctx,
+        id,
+        new Date(body.data.scheduledAt),
+        rule,
+        body.data.timezone
+      );
       return reply.code(200).send({ data: updated });
     }
   );

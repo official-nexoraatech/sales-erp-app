@@ -4,7 +4,15 @@
 // DATABASE_URL, matching the convention in es18-crm-gaps.test.ts / customer.integration.test.ts.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createDatabaseClient } from '@erp/db';
-import { branches, campaigns, campaignRecipients, customers, customerSegments } from '@erp/db';
+import {
+  branches,
+  campaigns,
+  campaignAutomationRules,
+  campaignRecipients,
+  customers,
+  customerSegments,
+  tenantCommunicationSettings,
+} from '@erp/db';
 import { eq } from 'drizzle-orm';
 import type { PlatformContext } from '@erp/sdk';
 import {
@@ -14,6 +22,8 @@ import {
   mediaTypeFromMime,
   validateMediaForChannel,
   detectFallbackTokens,
+  computeNextFireDate,
+  isSameCalendarDay,
   CampaignService,
 } from '../domain/CampaignService.js';
 
@@ -196,6 +206,42 @@ describe('validateMediaForChannel (CP-2)', () => {
   });
 });
 
+describe('computeNextFireDate (CP-5, MH-09)', () => {
+  const from = new Date('2026-07-15T10:00:00Z');
+
+  it('advances by N days for DAILY', () => {
+    expect(computeNextFireDate({ frequency: 'DAILY', interval: 3 }, from).toISOString()).toBe(
+      new Date('2026-07-18T10:00:00Z').toISOString()
+    );
+  });
+
+  it('advances by N*7 days for WEEKLY', () => {
+    expect(computeNextFireDate({ frequency: 'WEEKLY', interval: 2 }, from).toISOString()).toBe(
+      new Date('2026-07-29T10:00:00Z').toISOString()
+    );
+  });
+
+  it('advances by N months for MONTHLY', () => {
+    expect(computeNextFireDate({ frequency: 'MONTHLY', interval: 1 }, from).toISOString()).toBe(
+      new Date('2026-08-15T10:00:00Z').toISOString()
+    );
+  });
+});
+
+describe('isSameCalendarDay', () => {
+  it('is true for two timestamps on the same UTC calendar day', () => {
+    expect(
+      isSameCalendarDay(new Date('2026-07-15T01:00:00Z'), new Date('2026-07-15T23:00:00Z'))
+    ).toBe(true);
+  });
+
+  it('is false for timestamps on different UTC calendar days', () => {
+    expect(
+      isSameCalendarDay(new Date('2026-07-15T23:59:00Z'), new Date('2026-07-16T00:01:00Z'))
+    ).toBe(false);
+  });
+});
+
 const DB_URL = process.env['DATABASE_URL'];
 
 describe.skipIf(!DB_URL)('CampaignService — integration (CP-1 baseline)', () => {
@@ -264,7 +310,13 @@ describe.skipIf(!DB_URL)('CampaignService — integration (CP-1 baseline)', () =
   afterAll(async () => {
     await db.delete(campaignRecipients).where(eq(campaignRecipients.tenantId, TEST_TENANT));
     await db.delete(campaigns).where(eq(campaigns.tenantId, TEST_TENANT));
+    await db
+      .delete(campaignAutomationRules)
+      .where(eq(campaignAutomationRules.tenantId, TEST_TENANT));
     await db.delete(customerSegments).where(eq(customerSegments.tenantId, TEST_TENANT));
+    await db
+      .delete(tenantCommunicationSettings)
+      .where(eq(tenantCommunicationSettings.tenantId, TEST_TENANT));
     await db.delete(customers).where(eq(customers.tenantId, TEST_TENANT));
     await db.delete(branches).where(eq(branches.tenantId, TEST_TENANT));
   });
@@ -336,6 +388,102 @@ describe.skipIf(!DB_URL)('CampaignService — integration (CP-1 baseline)', () =
         segmentId: segment!.id,
         customerIds: null,
         channel: 'SMS',
+      });
+      expect(rows.map((r) => r.id)).toEqual([optedInCustomerId]);
+    });
+  });
+
+  describe('frequency capping (CP-5, MH-10)', () => {
+    // Scoped cleanup: this block is the only place in the file that writes
+    // tenantCommunicationSettings and pre-dated SENT campaignRecipients rows for
+    // optedInCustomerId — both must be gone before later describe blocks run, or every later
+    // resolveRecipients()/send() call involving optedInCustomerId would be silently frequency-
+    // capped by leftover state from these tests.
+    afterAll(async () => {
+      await db
+        .delete(tenantCommunicationSettings)
+        .where(eq(tenantCommunicationSettings.tenantId, TEST_TENANT));
+      await db.delete(campaignRecipients).where(eq(campaignRecipients.tenantId, TEST_TENANT));
+    });
+
+    it('does not filter anyone when no tenant frequency cap is configured', async () => {
+      const ctx = makeCtx();
+      const rows = await CampaignService.resolveRecipients(ctx, {
+        segmentId: null,
+        customerIds: [optedInCustomerId],
+        channel: 'EMAIL',
+      });
+      expect(rows.map((r) => r.id)).toEqual([optedInCustomerId]);
+    });
+
+    it("excludes a customer who already hit today's cap, across any campaign", async () => {
+      await db
+        .insert(tenantCommunicationSettings)
+        .values({ tenantId: TEST_TENANT, frequencyCap: { maxPerDay: 1 } });
+
+      const [priorCampaign] = await db
+        .insert(campaigns)
+        .values({
+          tenantId: TEST_TENANT,
+          name: `Cap Test Prior ${Date.now()}`,
+          customerIds: [optedInCustomerId],
+          channel: 'EMAIL',
+          messageTemplate: 'Hi',
+          status: 'SENT',
+          createdBy: 1,
+        })
+        .returning();
+      await db.insert(campaignRecipients).values({
+        tenantId: TEST_TENANT,
+        campaignId: priorCampaign!.id,
+        customerId: optedInCustomerId,
+        status: 'SENT',
+        sentAt: new Date(),
+      });
+
+      const ctx = makeCtx();
+      const rows = await CampaignService.resolveRecipients(ctx, {
+        segmentId: null,
+        customerIds: [optedInCustomerId, optedOutSmsCustomerId],
+        channel: 'EMAIL',
+      });
+      expect(rows.map((r) => r.id)).toEqual([optedOutSmsCustomerId]);
+    });
+
+    it('does not count a PENDING/FAILED delivery toward the cap', async () => {
+      // Clears the SENT row the previous test left behind — each test in this block owns its
+      // own campaignRecipients fixture, not a shared one (afterAll does the final sweep).
+      await db.delete(campaignRecipients).where(eq(campaignRecipients.tenantId, TEST_TENANT));
+      await db
+        .update(tenantCommunicationSettings)
+        .set({ frequencyCap: { maxPerDay: 1 } })
+        .where(eq(tenantCommunicationSettings.tenantId, TEST_TENANT));
+
+      const [priorCampaign] = await db
+        .insert(campaigns)
+        .values({
+          tenantId: TEST_TENANT,
+          name: `Cap Test Failed ${Date.now()}`,
+          customerIds: [optedInCustomerId],
+          channel: 'EMAIL',
+          messageTemplate: 'Hi',
+          status: 'SENT',
+          createdBy: 1,
+        })
+        .returning();
+      await db.insert(campaignRecipients).values({
+        tenantId: TEST_TENANT,
+        campaignId: priorCampaign!.id,
+        customerId: optedInCustomerId,
+        status: 'FAILED',
+        sentAt: new Date(),
+      });
+
+      const ctx = makeCtx();
+      const rows = await CampaignService.resolveRecipients(ctx, {
+        segmentId: null,
+        customerIds: [optedInCustomerId],
+        channel: 'EMAIL',
       });
       expect(rows.map((r) => r.id)).toEqual([optedInCustomerId]);
     });
@@ -554,6 +702,217 @@ describe.skipIf(!DB_URL)('CampaignService — integration (CP-1 baseline)', () =
     it('throws NotFoundError for a nonexistent campaign', async () => {
       const ctx = makeCtx();
       await expect(CampaignService.update(ctx, 999_999_999, 0, { name: 'x' })).rejects.toThrow();
+    });
+  });
+
+  describe('dispatchRecurringOccurrence (CP-5, MH-09)', () => {
+    it('creates a concrete occurrence linked to the definition and advances scheduledAt', async () => {
+      const [definition] = await db
+        .insert(campaigns)
+        .values({
+          tenantId: TEST_TENANT,
+          name: 'Weekly Recurring Test',
+          customerIds: [optedInCustomerId],
+          channel: 'IN_APP',
+          messageTemplate: 'Hi {{customerName}}',
+          status: 'SCHEDULED',
+          scheduledAt: new Date('2026-07-15T10:00:00Z'),
+          recurrenceRule: { frequency: 'WEEKLY', interval: 1 },
+          createdBy: 1,
+        })
+        .returning();
+
+      const ctx = makeCtx();
+      const result = await CampaignService.dispatchRecurringOccurrence(ctx, definition!.id);
+      expect(result.seriesEnded).toBe(false);
+
+      const [occurrence] = await db
+        .select()
+        .from(campaigns)
+        .where(eq(campaigns.id, result.occurrenceId));
+      expect(occurrence?.parentRecurringCampaignId).toBe(definition!.id);
+      expect(occurrence?.status).toBe('SENT');
+
+      const [reloadedDefinition] = await db
+        .select()
+        .from(campaigns)
+        .where(eq(campaigns.id, definition!.id));
+      expect(reloadedDefinition?.status).toBe('SCHEDULED');
+      expect(reloadedDefinition?.scheduledAt?.toISOString()).toBe(
+        new Date('2026-07-22T10:00:00Z').toISOString()
+      );
+    });
+
+    it('ends the series (CANCELLED) once the next fire date passes endDate', async () => {
+      const [definition] = await db
+        .insert(campaigns)
+        .values({
+          tenantId: TEST_TENANT,
+          name: 'Ending Recurring Test',
+          customerIds: [optedInCustomerId],
+          channel: 'IN_APP',
+          messageTemplate: 'Hi {{customerName}}',
+          status: 'SCHEDULED',
+          scheduledAt: new Date('2026-07-15T10:00:00Z'),
+          recurrenceRule: { frequency: 'DAILY', interval: 1, endDate: '2026-07-16T00:00:00Z' },
+          createdBy: 1,
+        })
+        .returning();
+
+      const ctx = makeCtx();
+      const result = await CampaignService.dispatchRecurringOccurrence(ctx, definition!.id);
+      expect(result.seriesEnded).toBe(true);
+
+      const [reloadedDefinition] = await db
+        .select()
+        .from(campaigns)
+        .where(eq(campaigns.id, definition!.id));
+      expect(reloadedDefinition?.status).toBe('CANCELLED');
+    });
+
+    it('throws ValidationError for a campaign with no recurrence rule', async () => {
+      const [campaign] = await db
+        .insert(campaigns)
+        .values({
+          tenantId: TEST_TENANT,
+          name: 'Not Recurring',
+          customerIds: [optedInCustomerId],
+          channel: 'IN_APP',
+          messageTemplate: 'Hi',
+          status: 'SCHEDULED',
+          scheduledAt: new Date(Date.now() + 60_000),
+          createdBy: 1,
+        })
+        .returning();
+      const ctx = makeCtx();
+      await expect(CampaignService.dispatchRecurringOccurrence(ctx, campaign!.id)).rejects.toThrow(
+        'Campaign has no recurrence rule'
+      );
+    });
+  });
+
+  describe('fireAutomationRule (CP-5, MH-11)', () => {
+    afterAll(async () => {
+      // Scoped cleanup — mirrors the frequency-capping block's isolation pattern; a customer's
+      // dateOfBirth mutated here must not leak into later describe blocks in this file.
+      await db
+        .update(customers)
+        .set({ dateOfBirth: null })
+        .where(eq(customers.id, optedInCustomerId));
+    });
+
+    it('fires a BIRTHDAY rule for a customer whose birthday is today, creating and sending a campaign', async () => {
+      const todayMonthDay = new Date().toISOString().slice(5, 10); // "MM-DD"
+      await db
+        .update(customers)
+        .set({ dateOfBirth: `1990-${todayMonthDay}` })
+        .where(eq(customers.id, optedInCustomerId));
+
+      const [rule] = await db
+        .insert(campaignAutomationRules)
+        .values({
+          tenantId: TEST_TENANT,
+          triggerType: 'BIRTHDAY',
+          enabled: true,
+          channel: 'IN_APP',
+          messageTemplate: 'Happy Birthday {{customerName}}!',
+          createdBy: 1,
+        })
+        .returning();
+
+      const ctx = makeCtx();
+      const result = await CampaignService.fireAutomationRule(ctx, rule!.id);
+      expect(result).not.toBeNull();
+      expect(result!.recipientCount).toBeGreaterThanOrEqual(1);
+
+      const [campaign] = await db
+        .select()
+        .from(campaigns)
+        .where(eq(campaigns.id, result!.campaignId));
+      expect(campaign?.campaignType).toBe('BIRTHDAY');
+      expect(campaign?.status).toBe('SENT');
+
+      const [reloadedRule] = await db
+        .select()
+        .from(campaignAutomationRules)
+        .where(eq(campaignAutomationRules.id, rule!.id));
+      expect(reloadedRule?.lastFiredAt).not.toBeNull();
+    });
+
+    it('returns null and does not re-fire the same rule twice in one day', async () => {
+      const todayMonthDay = new Date().toISOString().slice(5, 10);
+      await db
+        .update(customers)
+        .set({ dateOfBirth: `1990-${todayMonthDay}` })
+        .where(eq(customers.id, optedInCustomerId));
+
+      const [rule] = await db
+        .insert(campaignAutomationRules)
+        .values({
+          tenantId: TEST_TENANT,
+          triggerType: 'BIRTHDAY',
+          enabled: true,
+          channel: 'IN_APP',
+          messageTemplate: 'Happy Birthday {{customerName}}!',
+          lastFiredAt: new Date(),
+          createdBy: 1,
+        })
+        .returning();
+
+      const ctx = makeCtx();
+      const result = await CampaignService.fireAutomationRule(ctx, rule!.id);
+      expect(result).toBeNull();
+    });
+
+    it('returns null when nobody currently matches the trigger, but still records lastFiredAt', async () => {
+      await db
+        .update(customers)
+        .set({ dateOfBirth: '1990-01-01' })
+        .where(eq(customers.id, optedInCustomerId));
+
+      const [rule] = await db
+        .insert(campaignAutomationRules)
+        .values({
+          tenantId: TEST_TENANT,
+          triggerType: 'BIRTHDAY',
+          enabled: true,
+          channel: 'IN_APP',
+          messageTemplate: 'Happy Birthday {{customerName}}!',
+          createdBy: 1,
+        })
+        .returning();
+
+      const ctx = makeCtx();
+      const result = await CampaignService.fireAutomationRule(ctx, rule!.id);
+      expect(result).toBeNull();
+
+      const [reloadedRule] = await db
+        .select()
+        .from(campaignAutomationRules)
+        .where(eq(campaignAutomationRules.id, rule!.id));
+      expect(reloadedRule?.lastFiredAt).not.toBeNull();
+    });
+
+    it('throws BusinessError for a disabled rule', async () => {
+      const [rule] = await db
+        .insert(campaignAutomationRules)
+        .values({
+          tenantId: TEST_TENANT,
+          triggerType: 'INACTIVITY',
+          enabled: false,
+          channel: 'IN_APP',
+          createdBy: 1,
+        })
+        .returning();
+      const ctx = makeCtx();
+      await expect(CampaignService.fireAutomationRule(ctx, rule!.id)).rejects.toThrow(
+        'Automation rule is disabled'
+      );
+    });
+
+    it('throws NotFoundError for a nonexistent rule', async () => {
+      const ctx = makeCtx();
+      await expect(CampaignService.fireAutomationRule(ctx, 999_999_999)).rejects.toThrow();
     });
   });
 

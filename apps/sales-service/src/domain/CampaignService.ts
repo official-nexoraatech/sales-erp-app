@@ -1,6 +1,7 @@
-import { and, desc, eq, inArray, notInArray, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, notInArray, sql } from 'drizzle-orm';
 import {
   campaigns,
+  campaignAutomationRules,
   campaignHistory,
   campaignRecipients,
   customers,
@@ -8,12 +9,17 @@ import {
   invoices,
   organizationSettings,
   projectionCustomerBalance,
+  tenantCommunicationSettings,
   type Campaign,
+  type CampaignAutomationRule,
 } from '@erp/db';
 import type { PlatformContext } from '@erp/sdk';
 import { createCircuitBreaker } from '@erp/sdk';
 import { BusinessError, NotFoundError, OptimisticLockError, ValidationError } from '@erp/types';
+import { createLogger } from '@erp/logger';
 import { SegmentService, type SegmentFilterDefinition } from './SegmentService.js';
+
+const logger = createLogger({ serviceName: 'sales-service' });
 
 const SMS_ASCII_LIMIT = 160;
 const SMS_UNICODE_LIMIT = 70;
@@ -150,6 +156,42 @@ export function detectFallbackTokens(template: string, vars: CampaignMessageVars
   return hit;
 }
 
+// CP-5 (MH-09): recurring campaigns. A "definition" row has recurrenceRule set and stays in
+// SCHEDULED status indefinitely, with scheduledAt holding its NEXT fire time — the existing
+// dispatch-scheduled poll (status='SCHEDULED' AND scheduledAt<=now) already finds it without a
+// new cron job. Each firing creates its own concrete campaign row (status DRAFT, immediately
+// sent), so each occurrence gets independent recipients/analytics, matching how CP-6's analytics
+// are designed to attribute per-campaign, not per-recurrence-series.
+export interface RecurrenceRule {
+  frequency: 'DAILY' | 'WEEKLY' | 'MONTHLY';
+  interval: number;
+  /** ISO date string. Series stops recurring once the next computed fire date passes this. */
+  endDate?: string;
+  /**
+   * Reserved for occurrence-count-based termination — not yet enforced (see CP-5 completion
+   * report). A rule with only `occurrences` set (no `endDate`) recurs indefinitely today.
+   */
+  occurrences?: number;
+}
+
+export function computeNextFireDate(rule: RecurrenceRule, from: Date): Date {
+  const next = new Date(from);
+  if (rule.frequency === 'DAILY') next.setDate(next.getDate() + rule.interval);
+  else if (rule.frequency === 'WEEKLY') next.setDate(next.getDate() + rule.interval * 7);
+  else next.setMonth(next.getMonth() + rule.interval);
+  return next;
+}
+
+// CP-5 (MH-11): unified trigger-based automation. Folds the birthday case into the same shape as
+// the other triggers, going through this file's normal send() path (opt-out/frequency-cap/media
+// all apply) instead of the special-cased POST /crm/birthday-greetings/send route in
+// internal.routes.ts, which is kept working unchanged for now per
+// ERP-PLANNING/Campaign-Planning/19_MIGRATION_AND_BACKWARD_COMPATIBILITY.md's deprecate-after-
+// verified-equivalent plan, not removed in this phase.
+export function isSameCalendarDay(a: Date, b: Date): boolean {
+  return a.toISOString().slice(0, 10) === b.toISOString().slice(0, 10);
+}
+
 // Maps a campaign channel to the opt-out column that must be false for a customer to
 // receive it. IN_APP has no opt-out flag (it's not a marketing-consent-gated channel).
 export function optOutCondition(channel: Campaign['channel']) {
@@ -166,6 +208,7 @@ export class CampaignService {
     campaign: Pick<Campaign, 'segmentId' | 'customerIds' | 'channel'>
   ): Promise<RecipientRow[]> {
     const optOut = optOutCondition(campaign.channel);
+    let rows: RecipientRow[];
 
     if (campaign.segmentId) {
       const [segment] = await ctx.db.raw
@@ -185,7 +228,7 @@ export class CampaignService {
         filterDefinition: segment.filterDefinition as SegmentFilterDefinition | null,
       });
 
-      return ctx.db.raw
+      rows = await ctx.db.raw
         .select({
           id: customers.id,
           displayName: customers.displayName,
@@ -195,10 +238,8 @@ export class CampaignService {
         })
         .from(customers)
         .where(optOut ? and(segmentWhere, optOut) : segmentWhere);
-    }
-
-    if (campaign.customerIds && campaign.customerIds.length > 0) {
-      return ctx.db.raw
+    } else if (campaign.customerIds && campaign.customerIds.length > 0) {
+      rows = await ctx.db.raw
         .select({
           id: customers.id,
           displayName: customers.displayName,
@@ -214,9 +255,50 @@ export class CampaignService {
             ...(optOut ? [optOut] : [])
           )
         );
+    } else {
+      throw new ValidationError('Campaign must target either a segmentId or a customerIds list');
     }
 
-    throw new ValidationError('Campaign must target either a segmentId or a customerIds list');
+    return CampaignService.applyFrequencyCap(ctx, rows);
+  }
+
+  // CP-5 (MH-10): excludes any customer who has already received `maxPerDay` campaigns today,
+  // across ALL campaigns (manual, scheduled, and automated all go through this same
+  // resolveRecipients() path). A tenant with no configured cap sees no behavior change.
+  private static async applyFrequencyCap(
+    ctx: PlatformContext,
+    recipients: RecipientRow[]
+  ): Promise<RecipientRow[]> {
+    if (recipients.length === 0) return recipients;
+
+    const [settings] = await ctx.db.raw
+      .select({ frequencyCap: tenantCommunicationSettings.frequencyCap })
+      .from(tenantCommunicationSettings)
+      .where(eq(tenantCommunicationSettings.tenantId, ctx.tenant.tenantId));
+    const maxPerDay = settings?.frequencyCap?.maxPerDay;
+    if (!maxPerDay) return recipients;
+
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+
+    const counts = await ctx.db.raw
+      .select({ customerId: campaignRecipients.customerId, count: sql<number>`count(*)::int` })
+      .from(campaignRecipients)
+      .where(
+        and(
+          eq(campaignRecipients.tenantId, ctx.tenant.tenantId),
+          inArray(
+            campaignRecipients.customerId,
+            recipients.map((r) => r.id)
+          ),
+          gte(campaignRecipients.sentAt, todayStart),
+          inArray(campaignRecipients.status, ['SENT', 'DELIVERED'])
+        )
+      )
+      .groupBy(campaignRecipients.customerId);
+
+    const overCap = new Set(counts.filter((c) => c.count >= maxPerDay).map((c) => c.customerId));
+    return recipients.filter((r) => !overCap.has(r.id));
   }
 
   static async previewSample(
@@ -473,6 +555,176 @@ export class CampaignService {
     return updated;
   }
 
+  /**
+   * CP-5: fires one occurrence of a recurring campaign definition — creates a concrete campaign
+   * row (copying the definition's audience/content), sends it through the normal send() path
+   * (so opt-out/frequency-capping/media all apply exactly as they would to a manual campaign),
+   * then advances the definition to its next fire date or ends the series if `endDate` has
+   * passed. A failure sending one occurrence does not stop the series — the definition still
+   * advances, matching the principle that one bad send shouldn't silently break all future ones.
+   */
+  static async dispatchRecurringOccurrence(
+    ctx: PlatformContext,
+    definitionId: number
+  ): Promise<{ occurrenceId: number; seriesEnded: boolean }> {
+    const [definition] = await ctx.db.raw
+      .select()
+      .from(campaigns)
+      .where(and(eq(campaigns.id, definitionId), eq(campaigns.tenantId, ctx.tenant.tenantId)));
+    if (!definition) throw new NotFoundError('Campaign', definitionId);
+    const rule = definition.recurrenceRule as RecurrenceRule | null;
+    if (!rule) throw new ValidationError('Campaign has no recurrence rule');
+
+    const [occurrence] = await ctx.db.raw
+      .insert(campaigns)
+      .values({
+        tenantId: ctx.tenant.tenantId,
+        name: `${definition.name} — ${new Date().toISOString().slice(0, 10)}`,
+        segmentId: definition.segmentId,
+        customerIds: definition.customerIds,
+        channel: definition.channel,
+        messageTemplate: definition.messageTemplate,
+        campaignType: definition.campaignType,
+        templateId: definition.templateId,
+        parentRecurringCampaignId: definitionId,
+        status: 'DRAFT',
+        createdBy: definition.createdBy,
+      })
+      .returning();
+    if (!occurrence) throw new Error('Recurring occurrence creation failed unexpectedly');
+
+    try {
+      await CampaignService.send(ctx, occurrence.id);
+    } catch (err) {
+      logger.warn(
+        {
+          definitionId,
+          occurrenceId: occurrence.id,
+          err: err instanceof Error ? err.message : String(err),
+        },
+        'Recurring campaign occurrence failed to send — series continues'
+      );
+    }
+
+    const currentFireDate = definition.scheduledAt ?? new Date();
+    const next = computeNextFireDate(rule, currentFireDate);
+    const seriesEnded = !!rule.endDate && next.getTime() > new Date(rule.endDate).getTime();
+
+    await ctx.db.raw
+      .update(campaigns)
+      .set(
+        seriesEnded
+          ? {
+              status: 'CANCELLED',
+              cancelledAt: new Date(),
+              updatedAt: new Date(),
+              version: sql`${campaigns.version} + 1`,
+            }
+          : { scheduledAt: next, updatedAt: new Date(), version: sql`${campaigns.version} + 1` }
+      )
+      .where(eq(campaigns.id, definitionId));
+
+    return { occurrenceId: occurrence.id, seriesEnded };
+  }
+
+  // Resolves which customers currently match a trigger — real, data-backed conditions only
+  // (mirrors the exact SQL shape already proven in SegmentService.prebuiltWhere, generalized
+  // where a rule's `conditions` allow tuning, e.g. INACTIVITY's day threshold).
+  private static automationTriggerWhere(
+    ctx: PlatformContext,
+    triggerType: CampaignAutomationRule['triggerType'],
+    conditions: Record<string, unknown> | null
+  ) {
+    const tenantId = ctx.tenant.tenantId;
+    const base = and(eq(customers.tenantId, tenantId), sql`${customers.deletedAt} IS NULL`)!;
+
+    if (triggerType === 'BIRTHDAY') {
+      return and(
+        base,
+        sql`${customers.dateOfBirth} IS NOT NULL AND SUBSTRING(${customers.dateOfBirth} FROM 6 FOR 5) = TO_CHAR(CURRENT_DATE, 'MM-DD')`
+      )!;
+    }
+    if (triggerType === 'ANNIVERSARY') {
+      return and(
+        base,
+        sql`${customers.anniversary} IS NOT NULL AND SUBSTRING(${customers.anniversary} FROM 6 FOR 5) = TO_CHAR(CURRENT_DATE, 'MM-DD')`
+      )!;
+    }
+    // INACTIVITY: no non-draft/cancelled invoice in the last N days (default 60, same as the
+    // existing no-purchase-60-days prebuilt segment) — reuses that exact subquery shape.
+    const inactiveDays =
+      typeof conditions?.['inactiveDays'] === 'number'
+        ? (conditions['inactiveDays'] as number)
+        : 60;
+    const cutoff = new Date(Date.now() - inactiveDays * 24 * 60 * 60 * 1000);
+    return and(
+      base,
+      sql`NOT EXISTS (SELECT 1 FROM invoices i WHERE i.customer_id = ${customers.id} AND i.tenant_id = ${tenantId} AND i.invoice_date >= ${cutoff.toISOString()} AND i.status NOT IN ('DRAFT','CANCELLED'))`
+    )!;
+  }
+
+  /**
+   * CP-5 (MH-11): fires one automation rule if it hasn't already fired today and has at least
+   * one matching customer. Creates a real campaign row (visible in the normal campaign list,
+   * tagged via campaignType = the trigger type) and sends it through the normal send() path.
+   * Returns null (a no-op, not an error) when already fired today or nobody currently matches.
+   */
+  static async fireAutomationRule(
+    ctx: PlatformContext,
+    ruleId: number
+  ): Promise<{ campaignId: number; recipientCount: number } | null> {
+    const [rule] = await ctx.db.raw
+      .select()
+      .from(campaignAutomationRules)
+      .where(
+        and(
+          eq(campaignAutomationRules.id, ruleId),
+          eq(campaignAutomationRules.tenantId, ctx.tenant.tenantId)
+        )
+      );
+    if (!rule) throw new NotFoundError('Automation rule', ruleId);
+    if (!rule.enabled)
+      throw new BusinessError('AUTOMATION_RULE_DISABLED', 'Automation rule is disabled');
+    if (rule.lastFiredAt && isSameCalendarDay(rule.lastFiredAt, new Date())) return null;
+
+    const where = CampaignService.automationTriggerWhere(
+      ctx,
+      rule.triggerType,
+      rule.conditions as Record<string, unknown> | null
+    );
+    const matches = await ctx.db.raw.select({ id: customers.id }).from(customers).where(where);
+
+    await ctx.db.raw
+      .update(campaignAutomationRules)
+      .set({
+        lastFiredAt: new Date(),
+        updatedAt: new Date(),
+        version: sql`${campaignAutomationRules.version} + 1`,
+      })
+      .where(eq(campaignAutomationRules.id, ruleId));
+
+    if (matches.length === 0) return null;
+
+    const [campaign] = await ctx.db.raw
+      .insert(campaigns)
+      .values({
+        tenantId: ctx.tenant.tenantId,
+        name: `[Automated] ${rule.triggerType} — ${new Date().toISOString().slice(0, 10)}`,
+        customerIds: matches.map((m) => m.id),
+        channel: rule.channel,
+        messageTemplate: rule.messageTemplate ?? 'Hi {{customerName}}!',
+        campaignType: rule.triggerType,
+        templateId: rule.templateId,
+        status: 'DRAFT',
+        createdBy: rule.createdBy,
+      })
+      .returning();
+    if (!campaign) throw new Error('Automated campaign creation failed unexpectedly');
+
+    await CampaignService.send(ctx, campaign.id);
+    return { campaignId: campaign.id, recipientCount: matches.length };
+  }
+
   // CP-4: campaigns are editable while DRAFT/SCHEDULED, optimistic-locked via `version` (the
   // same pattern already used by business_seasons/stock_transfers/etc.). Editing a SCHEDULED
   // campaign resets it to DRAFT and clears scheduledAt — per
@@ -550,10 +802,15 @@ export class CampaignService {
     return updated;
   }
 
+  // CP-5: `recurrenceRule` optionally turns this campaign into a recurring definition — the
+  // dispatch-scheduled poll will keep re-firing it (via dispatchRecurringOccurrence) instead of
+  // sending it once.
   static async schedule(
     ctx: PlatformContext,
     campaignId: number,
-    scheduledAt: Date
+    scheduledAt: Date,
+    recurrenceRule?: RecurrenceRule,
+    timezone?: string
   ): Promise<Campaign> {
     if (scheduledAt.getTime() <= Date.now())
       throw new ValidationError('scheduledAt must be in the future');
@@ -574,6 +831,8 @@ export class CampaignService {
       .set({
         status: 'SCHEDULED',
         scheduledAt,
+        ...(recurrenceRule !== undefined ? { recurrenceRule } : {}),
+        ...(timezone !== undefined ? { timezone } : {}),
         updatedAt: new Date(),
         version: sql`${campaigns.version} + 1`,
       })

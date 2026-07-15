@@ -93,10 +93,21 @@ export const campaigns = pgTable(
     campaignType: varchar('campaign_type', { length: 50 }),
     templateId: integer('template_id'),
     lastEditedAt: timestamp('last_edited_at', { withTimezone: true }),
+    // CP-5: recurring-campaign support — a definition row has recurrenceRule set; each firing
+    // creates its own concrete campaign row with parentRecurringCampaignId set.
+    recurrenceRule: jsonb('recurrence_rule').$type<{
+      frequency: 'DAILY' | 'WEEKLY' | 'MONTHLY';
+      interval: number;
+      endDate?: string;
+      occurrences?: number;
+    }>(),
+    timezone: varchar('timezone', { length: 50 }),
+    parentRecurringCampaignId: integer('parent_recurring_campaign_id'),
   },
   (t) => [
     index('idx_campaigns_tenant_status').on(t.tenantId, t.status, t.createdAt),
     index('idx_campaigns_scheduled').on(t.scheduledAt, t.status),
+    index('idx_campaigns_parent_recurring').on(t.parentRecurringCampaignId),
   ]
 );
 
@@ -164,6 +175,51 @@ export const campaignHistory = pgTable(
   (t) => [index('idx_campaign_history_campaign').on(t.campaignId, t.createdAt)]
 );
 
+// ─── Tenant Communication Settings (CP-5) ───────────────────────────────────
+// This phase only populates/enforces frequencyCap; businessHours/quietHours columns exist
+// (nullable) for a later phase to populate without another migration (SH-07/SH-08, deferred).
+export const tenantCommunicationSettings = pgTable(
+  'tenant_communication_settings',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    tenantId: integer('tenant_id').notNull(),
+    frequencyCap: jsonb('frequency_cap').$type<{ maxPerDay?: number }>(),
+    businessHours: jsonb('business_hours').$type<{ startHour: number; endHour: number }>(),
+    quietHours: jsonb('quiet_hours').$type<{ startHour: number; endHour: number }>(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [unique('tenant_communication_settings_tenant_unique').on(t.tenantId)]
+);
+
+// ─── Campaign Automation Rules (CP-5) ───────────────────────────────────────
+// Trigger-based automation — each enabled rule is evaluated by a scheduler-service cron job,
+// which creates a real campaign row per firing (same CampaignService.send() path as a manual
+// campaign) rather than sending outside the campaigns table.
+export const campaignAutomationRules = pgTable(
+  'campaign_automation_rules',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    tenantId: integer('tenant_id').notNull(),
+    triggerType: varchar('trigger_type', { length: 50 })
+      .notNull()
+      .$type<'BIRTHDAY' | 'INACTIVITY' | 'ANNIVERSARY'>(),
+    enabled: boolean('enabled').notNull().default(true),
+    channel: varchar('channel', { length: 20 })
+      .notNull()
+      .$type<'SMS' | 'WHATSAPP' | 'EMAIL' | 'IN_APP'>(),
+    templateId: integer('template_id'),
+    messageTemplate: text('message_template'),
+    conditions: jsonb('conditions').$type<Record<string, unknown>>(),
+    lastFiredAt: timestamp('last_fired_at', { withTimezone: true }),
+    createdBy: integer('created_by').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    version: integer('version').notNull().default(0),
+  },
+  (t) => [index('idx_campaign_automation_rules_tenant').on(t.tenantId, t.enabled, t.triggerType)]
+);
+
 // ─── Business Seasons — Festival Planner (M9.7) ────────────────────────────
 export const businessSeasons = pgTable(
   'business_seasons',
@@ -206,5 +262,9 @@ export type CampaignTemplate = typeof campaignTemplates.$inferSelect;
 export type NewCampaignTemplate = typeof campaignTemplates.$inferInsert;
 export type CampaignHistory = typeof campaignHistory.$inferSelect;
 export type NewCampaignHistory = typeof campaignHistory.$inferInsert;
+export type TenantCommunicationSettings = typeof tenantCommunicationSettings.$inferSelect;
+export type NewTenantCommunicationSettings = typeof tenantCommunicationSettings.$inferInsert;
+export type CampaignAutomationRule = typeof campaignAutomationRules.$inferSelect;
+export type NewCampaignAutomationRule = typeof campaignAutomationRules.$inferInsert;
 export type BusinessSeason = typeof businessSeasons.$inferSelect;
 export type NewBusinessSeason = typeof businessSeasons.$inferInsert;

@@ -379,6 +379,13 @@
       "when": 1787171735804,
       "tag": "0053_cp4_campaign_builder",
       "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1787258135804,
+      "tag": "0054_cp5_scheduling_automation",
+      "breakpoints": true
     }
   ]
 }

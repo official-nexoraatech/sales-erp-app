@@ -139,7 +139,7 @@ Campaign-Planning/
 | CP-2 Channel Abstraction            | **Complete** (2026-07-15) | `phase-completions/CP-2_COMPLETION.md` |
 | CP-3 Segmentation & Personalization | **Complete** (2026-07-15) | `phase-completions/CP-3_COMPLETION.md` |
 | CP-4 Campaign Builder 2.0           | **Complete** (2026-07-15) | `phase-completions/CP-4_COMPLETION.md` |
-| CP-5 Scheduling & Automation        | Not started               | —                                      |
+| CP-5 Scheduling & Automation        | **Complete** (2026-07-15) | `phase-completions/CP-5_COMPLETION.md` |
 | CP-6 Analytics & A/B Testing        | Not started               | —                                      |
 | CP-7 Collaboration & Compliance     | Not started               | —                                      |
 | CP-8 Enterprise Scale-out           | Not started               | —                                      |
