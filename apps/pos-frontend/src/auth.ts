@@ -34,7 +34,9 @@ function forceLogout(): void {
   window.location.href = '/login';
 }
 
-async function callRefreshEndpoint(refreshToken: string): Promise<{ accessToken: string; refreshToken: string } | null> {
+async function callRefreshEndpoint(
+  refreshToken: string
+): Promise<{ accessToken: string; refreshToken: string } | null> {
   try {
     const res = await fetch(`${AUTH_API}/auth/refresh`, {
       method: 'POST',
@@ -71,17 +73,35 @@ function refreshOnce(): Promise<string | null> {
 
 // OFFLINE-05: held sales and offline-created customers need the current tenant/branch to
 // write locally-scoped Dexie records — decodes the already-present JWT rather than adding
-// a new endpoint or auth state just for this.
-export function getAuthClaims(): { tenantId: number; branchIds: number[] } | null {
+// a new endpoint or auth state just for this. Also carries permissions (present on every
+// access token, see apps/auth-service/src/jwt.ts) so pos-frontend can gate routes/actions
+// the same way web-frontend's auth store does, instead of only finding out server-side.
+export function getAuthClaims(): {
+  tenantId: number;
+  branchIds: number[];
+  permissions: string[];
+} | null {
   const token = getAccessToken();
   if (!token) return null;
   try {
-    const payload = JSON.parse(atob(token.split('.')[1]!)) as { tenantId?: number; branchIds?: number[] };
+    const payload = JSON.parse(atob(token.split('.')[1]!)) as {
+      tenantId?: number;
+      branchIds?: number[];
+      permissions?: string[];
+    };
     if (typeof payload.tenantId !== 'number') return null;
-    return { tenantId: payload.tenantId, branchIds: payload.branchIds ?? [] };
+    return {
+      tenantId: payload.tenantId,
+      branchIds: payload.branchIds ?? [],
+      permissions: payload.permissions ?? [],
+    };
   } catch {
     return null;
   }
+}
+
+export function hasPermission(permission: string): boolean {
+  return getAuthClaims()?.permissions.includes(permission) ?? false;
 }
 
 // Proactive check before a sync batch (rather than relying solely on reactive 401s) so a
@@ -103,7 +123,11 @@ export async function ensureFreshToken(): Promise<void> {
 // Wraps fetch to the sales-service (and production-service) APIs: attaches the current
 // access token, and on a 401 refreshes (deduped) and retries the original request exactly
 // once. Falls back to forceLogout() if the refresh token itself is invalid/expired.
-export async function authFetch(input: string, init: RequestInit = {}, isRetry = false): Promise<Response> {
+export async function authFetch(
+  input: string,
+  init: RequestInit = {},
+  isRetry = false
+): Promise<Response> {
   const token = getAccessToken();
   const headers = new Headers(init.headers);
   headers.set('Authorization', `Bearer ${token ?? ''}`);

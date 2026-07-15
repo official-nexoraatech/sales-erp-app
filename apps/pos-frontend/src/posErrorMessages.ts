@@ -22,6 +22,28 @@ function itemName(cart: CartItem[], itemId: unknown): string {
   return cart.find((l) => l.itemId === id)?.itemName ?? `item #${itemId}`;
 }
 
+// Cross-cutting backend error codes that can surface from any endpoint, not just
+// POST /pos/sales — every service's requirePermission()/requireAnyPermission() middleware
+// throws a 403 with code 'FORBIDDEN' and a raw `Missing permission: X` message (see
+// apps/sales-service/src/middleware/authorize.ts). That string is meant for logs/API
+// consumers, not a cashier, so translate it before it ever reaches a toast.
+const GENERIC_ERROR_MESSAGES: Record<string, string> = {
+  FORBIDDEN: "You don't have permission to do this. Ask your manager or admin for access.",
+  PERMISSION_DENIED: "You don't have permission to do this. Ask your manager or admin for access.",
+  UNAUTHORIZED: 'Your session has expired. Please sign in again.',
+};
+
+// Generic counterpart to friendlySaleErrorMessage below, for screens that aren't the
+// sale-submission flow (shift open/close, drawer, customer quick-add). Translates known
+// cross-cutting codes; anything else falls back to the raw backend message rather than a
+// dead end, same convention as friendlySaleErrorMessage.
+export function friendlyErrorMessage(error: BackendError | undefined, fallback: string): string {
+  if (error?.code && GENERIC_ERROR_MESSAGES[error.code]) {
+    return GENERIC_ERROR_MESSAGES[error.code]!;
+  }
+  return error?.message ?? fallback;
+}
+
 // Maps a POST /pos/sales error response to cashier-facing copy. Falls back to the raw
 // backend message for any code not yet mapped here — never a dead end, and safe to grow
 // this table incrementally as new cases come up (see PG-059 for the rest of the rollout).
@@ -90,6 +112,6 @@ export function friendlySaleErrorMessage(
       return `Something in this sale looks invalid${error.message ? `: ${error.message}` : ''}. Please check the cart and try again.`;
 
     default:
-      return error.message ?? 'Sale failed';
+      return friendlyErrorMessage(error, 'Sale failed');
   }
 }

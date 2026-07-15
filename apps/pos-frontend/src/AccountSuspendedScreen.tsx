@@ -1,9 +1,17 @@
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import { ShieldAlert } from 'lucide-react';
+import { clearTokens } from './auth.js';
+import POSButton from './components/pos/POSButton.js';
 
 export default function AccountSuspendedScreen() {
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
   const isClosed = searchParams.get('reason') === 'closed';
+
+  function handleLogout() {
+    clearTokens();
+    navigate('/login', { replace: true });
+  }
 
   return (
     <div className="flex flex-col items-center justify-center min-h-screen gap-4 p-8 text-center bg-surface-page">
@@ -16,6 +24,9 @@ export default function AccountSuspendedScreen() {
           ? 'This organization’s account has been closed and POS checkout is no longer available. Contact your administrator.'
           : 'Your organization’s access has been suspended. Contact your administrator for more information.'}
       </p>
+      <POSButton variant="secondary" onClick={handleLogout}>
+        Logout
+      </POSButton>
     </div>
   );
 }

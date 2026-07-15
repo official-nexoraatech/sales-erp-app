@@ -4,8 +4,10 @@ import toast from 'react-hot-toast';
 import { Wallet } from 'lucide-react';
 import { authFetch } from './auth.js';
 import { getActiveSessionId, clearActiveSessionId, type PosSession } from './session.js';
+import { friendlyErrorMessage } from './posErrorMessages.js';
 import POSInput from './components/pos/POSInput.js';
 import POSButton from './components/pos/POSButton.js';
+import POSLogoutLink from './components/pos/POSLogoutLink.js';
 
 const SALES_API = import.meta.env['VITE_SALES_API_URL'] ?? 'http://localhost:3013/api/v2';
 
@@ -39,8 +41,10 @@ export default function ShiftCloseScreen() {
         body: JSON.stringify({ closingCash: Number(closingCash) }),
       });
       if (!res.ok) {
-        const err = (await res.json().catch(() => ({}))) as { error?: { message?: string } };
-        throw new Error(err.error?.message ?? 'Failed to close shift');
+        const err = (await res.json().catch(() => ({}))) as {
+          error?: { code?: string; message?: string };
+        };
+        throw new Error(friendlyErrorMessage(err.error, 'Failed to close shift'));
       }
       // The close endpoint only returns { expectedCash, cashVariance } — fetch the full
       // row for ShiftSummaryScreen's recap before the session id is cleared.
@@ -61,6 +65,7 @@ export default function ShiftCloseScreen() {
 
   return (
     <div className="flex h-screen items-center justify-center bg-surface-page font-sans">
+      <POSLogoutLink />
       <div className="bg-surface-card rounded-2xl shadow-token-lg p-8 w-full max-w-sm space-y-5">
         <div className="flex flex-col items-center gap-2 text-center">
           <span className="flex items-center justify-center w-12 h-12 rounded-2xl bg-primary-subtle text-brand">

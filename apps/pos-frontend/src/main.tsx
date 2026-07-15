@@ -8,11 +8,13 @@ import POSScreen from './POSScreen.js';
 import LoginScreen from './LoginScreen.js';
 import LookupScreen from './LookupScreen.js';
 import AccountSuspendedScreen from './AccountSuspendedScreen.js';
+import AccessDeniedScreen from './AccessDeniedScreen.js';
 import ShiftOpenScreen from './ShiftOpenScreen.js';
 import ShiftCloseScreen from './ShiftCloseScreen.js';
 import ShiftSummaryScreen from './ShiftSummaryScreen.js';
 import BranchSelectScreen from './BranchSelectScreen.js';
-import { getAccessToken } from './auth.js';
+import { getAccessToken, hasPermission } from './auth.js';
+import { PERMISSIONS } from '@erp/types';
 import { setActiveSessionId, fetchActiveSession } from './session.js';
 import { getSelectedBranch } from './branchStore.js';
 import { ThemeProvider, useTheme } from './context/ThemeContext.js';
@@ -24,6 +26,17 @@ const queryClient = new QueryClient({
 
 function RequireAuth({ children }: { children: ReactElement }) {
   return getAccessToken() ? children : <Navigate to="/login" replace />;
+}
+
+// Every real pos-frontend backend route (shift open/close, sales, drawer — see
+// apps/sales-service/src/api/pos.routes.ts) is gated on POS_MANAGE uniformly, so an
+// authenticated user without it can never do anything useful here. Without this guard,
+// such a user (e.g. an HR Manager who is a valid ERP login but not till staff) could still
+// navigate into any screen and only discover the problem after submitting a form, via a
+// raw "Missing permission: POS_MANAGE" toast with no way to sign out from that screen.
+// Checked right after RequireAuth so it fires before branch-select/shift-open/etc.
+function RequirePermission({ children }: { children: ReactElement }) {
+  return hasPermission(PERMISSIONS.POS_MANAGE) ? children : <AccessDeniedScreen />;
 }
 
 // PG-051 — redirects to /branch-select until a branch/warehouse has been persisted for
@@ -87,7 +100,9 @@ createRoot(root).render(
               path="/branch-select"
               element={
                 <RequireAuth>
-                  <BranchSelectScreen />
+                  <RequirePermission>
+                    <BranchSelectScreen />
+                  </RequirePermission>
                 </RequireAuth>
               }
             />
@@ -95,9 +110,11 @@ createRoot(root).render(
               path="/shift/open"
               element={
                 <RequireAuth>
-                  <RequireBranch>
-                    <ShiftOpenScreen />
-                  </RequireBranch>
+                  <RequirePermission>
+                    <RequireBranch>
+                      <ShiftOpenScreen />
+                    </RequireBranch>
+                  </RequirePermission>
                 </RequireAuth>
               }
             />
@@ -105,9 +122,11 @@ createRoot(root).render(
               path="/shift/close"
               element={
                 <RequireAuth>
-                  <RequireBranch>
-                    <ShiftCloseScreen />
-                  </RequireBranch>
+                  <RequirePermission>
+                    <RequireBranch>
+                      <ShiftCloseScreen />
+                    </RequireBranch>
+                  </RequirePermission>
                 </RequireAuth>
               }
             />
@@ -115,9 +134,11 @@ createRoot(root).render(
               path="/shift/summary"
               element={
                 <RequireAuth>
-                  <RequireBranch>
-                    <ShiftSummaryScreen />
-                  </RequireBranch>
+                  <RequirePermission>
+                    <RequireBranch>
+                      <ShiftSummaryScreen />
+                    </RequireBranch>
+                  </RequirePermission>
                 </RequireAuth>
               }
             />
@@ -125,11 +146,13 @@ createRoot(root).render(
               path="/"
               element={
                 <RequireAuth>
-                  <RequireBranch>
-                    <RequireSession>
-                      <POSScreen />
-                    </RequireSession>
-                  </RequireBranch>
+                  <RequirePermission>
+                    <RequireBranch>
+                      <RequireSession>
+                        <POSScreen />
+                      </RequireSession>
+                    </RequireBranch>
+                  </RequirePermission>
                 </RequireAuth>
               }
             />
@@ -137,9 +160,11 @@ createRoot(root).render(
               path="/lookup"
               element={
                 <RequireAuth>
-                  <RequireBranch>
-                    <LookupScreen />
-                  </RequireBranch>
+                  <RequirePermission>
+                    <RequireBranch>
+                      <LookupScreen />
+                    </RequireBranch>
+                  </RequirePermission>
                 </RequireAuth>
               }
             />
@@ -147,11 +172,13 @@ createRoot(root).render(
               path="*"
               element={
                 <RequireAuth>
-                  <RequireBranch>
-                    <RequireSession>
-                      <POSScreen />
-                    </RequireSession>
-                  </RequireBranch>
+                  <RequirePermission>
+                    <RequireBranch>
+                      <RequireSession>
+                        <POSScreen />
+                      </RequireSession>
+                    </RequireBranch>
+                  </RequirePermission>
                 </RequireAuth>
               }
             />

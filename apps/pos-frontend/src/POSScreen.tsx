@@ -67,7 +67,7 @@ import { POSPaymentPanel } from './components/pos/POSPaymentPanel.js';
 import POSDialog from './components/pos/POSDialog.js';
 import { useTheme } from './context/ThemeContext.js';
 import type { CartItem, POSItem, Customer, CompletedSale } from './components/pos/types.js';
-import { friendlySaleErrorMessage } from './posErrorMessages.js';
+import { friendlySaleErrorMessage, friendlyErrorMessage } from './posErrorMessages.js';
 
 export { SyncStatusPanel } from './components/pos/SyncStatusPanel.js';
 export { StockConflictModal } from './components/pos/StockConflictModal.js';
@@ -839,8 +839,10 @@ export default function POSScreen() {
         body: JSON.stringify(payload),
       });
       if (!res.ok) {
-        const err = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(err.error ?? 'Failed to create customer');
+        const err = (await res.json().catch(() => ({}))) as {
+          error?: { code?: string; message?: string };
+        };
+        throw new Error(friendlyErrorMessage(err.error, 'Failed to create customer'));
       }
       const body = (await res.json()) as { data: Customer };
       return { data: body.data, queued: false };

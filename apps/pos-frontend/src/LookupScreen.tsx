@@ -27,8 +27,8 @@ export default function LookupScreen() {
   // Each tab shows the staleness of the specific store it displays, rather than a single
   // combined timestamp — items and customers sync on independent cursors (referenceSync.ts).
   useEffect(() => {
-    void getSyncMeta(tab === 'items' ? 'catalogItems' : 'customers').then(
-      (meta) => setLastSyncedAt(meta?.lastSyncedAt ?? null)
+    void getSyncMeta(tab === 'items' ? 'catalogItems' : 'customers').then((meta) =>
+      setLastSyncedAt(meta?.lastSyncedAt ?? null)
     );
   }, [tab]);
 
@@ -47,7 +47,12 @@ export default function LookupScreen() {
     const q = query.trim().toLowerCase();
     if (!q) return items.slice(0, 50);
     return items
-      .filter((i) => i.name.toLowerCase().includes(q) || i.barcode?.toLowerCase().includes(q) || i.itemCode?.toLowerCase().includes(q))
+      .filter(
+        (i) =>
+          i.name.toLowerCase().includes(q) ||
+          i.barcode?.toLowerCase().includes(q) ||
+          i.itemCode?.toLowerCase().includes(q)
+      )
       .slice(0, 50);
   }, [items, query]);
 
@@ -63,7 +68,10 @@ export default function LookupScreen() {
     <div className="flex flex-col h-screen bg-surface-page font-sans p-4 gap-4">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <Link to="/" className="flex items-center gap-1 text-xs font-medium text-link hover:text-[var(--text-link-hover)]">
+          <Link
+            to="/"
+            className="flex items-center gap-1 text-xs font-medium text-link hover:text-[var(--text-link-hover)]"
+          >
             <ArrowLeft size={14} />
             Back to POS
           </Link>
@@ -71,7 +79,10 @@ export default function LookupScreen() {
         </div>
         <div className="flex items-center gap-3">
           <ConnectivityDot online={isOnline} pendingCount={0} />
-          <span className="text-xs text-secondary" title="Last successful reference-data sync for this tab">
+          <span
+            className="text-xs text-secondary"
+            title="Last successful reference-data sync for this tab"
+          >
             Last sync: {formatLastSync(lastSyncedAt)}
           </span>
         </div>
@@ -79,13 +90,19 @@ export default function LookupScreen() {
 
       <div className="flex gap-2">
         <button
-          onClick={() => { setTab('items'); setQuery(''); }}
+          onClick={() => {
+            setTab('items');
+            setQuery('');
+          }}
           className={`px-3 py-1.5 text-sm font-medium rounded-lg transition-colors ${tab === 'items' ? 'bg-primary text-primary-fg' : 'bg-surface-card text-secondary hover:bg-surface-raised'}`}
         >
           Items
         </button>
         <button
-          onClick={() => { setTab('customers'); setQuery(''); }}
+          onClick={() => {
+            setTab('customers');
+            setQuery('');
+          }}
           className={`px-3 py-1.5 text-sm font-medium rounded-lg transition-colors ${tab === 'customers' ? 'bg-primary text-primary-fg' : 'bg-surface-card text-secondary hover:bg-surface-raised'}`}
         >
           Customers
@@ -96,66 +113,76 @@ export default function LookupScreen() {
         autoFocus
         value={query}
         onChange={(e) => setQuery(e.target.value)}
-        placeholder={tab === 'items' ? 'Search by name, barcode or item code…' : 'Search by name or phone…'}
+        placeholder={
+          tab === 'items' ? 'Search by name, barcode or item code…' : 'Search by name or phone…'
+        }
         wrapperClassName="max-w-md"
       />
 
       <div className="flex-1 overflow-auto bg-surface-card rounded-xl shadow-token-sm border border-default">
         {tab === 'items' ? (
-          <table className="w-full text-sm">
+          <table className="w-full text-sm border-separate border-spacing-0">
             <thead className="sticky top-0 bg-surface-raised text-left text-xs text-secondary">
               <tr>
-                <th className="p-2">Name</th>
-                <th className="p-2">Barcode</th>
-                <th className="p-2">HSN</th>
-                <th className="p-2">MRP</th>
-                <th className="p-2">Sale Price</th>
-                <th className="p-2">GST%</th>
-                <th className="p-2">Cess%</th>
-                <th className="p-2">Status</th>
+                <th className="p-2 border-b border-r border-default">Name</th>
+                <th className="p-2 border-b border-r border-default">Barcode</th>
+                <th className="p-2 border-b border-r border-default">HSN</th>
+                <th className="p-2 border-b border-r border-default">MRP</th>
+                <th className="p-2 border-b border-r border-default">Sale Price</th>
+                <th className="p-2 border-b border-r border-default">GST%</th>
+                <th className="p-2 border-b border-r border-default">Cess%</th>
+                <th className="p-2 border-b border-default">Status</th>
               </tr>
             </thead>
             <tbody>
               {filteredItems.map((i) => (
-                <tr key={i.id} className="border-t border-default text-primary">
-                  <td className="p-2">{i.name}</td>
-                  <td className="p-2">{i.barcode ?? '-'}</td>
-                  <td className="p-2">{i.hsnCode}</td>
-                  <td className="p-2">{i.mrp ?? '-'}</td>
-                  <td className="p-2">{i.salePrice}</td>
-                  <td className="p-2">{i.gstRate}</td>
-                  <td className="p-2">{i.cessRate}</td>
-                  <td className="p-2">{i.status}</td>
+                <tr key={i.id} className="text-primary hover:bg-surface-raised">
+                  <td className="p-2 border-b border-r border-default">{i.name}</td>
+                  <td className="p-2 border-b border-r border-default">{i.barcode ?? '-'}</td>
+                  <td className="p-2 border-b border-r border-default">{i.hsnCode}</td>
+                  <td className="p-2 border-b border-r border-default">{i.mrp ?? '-'}</td>
+                  <td className="p-2 border-b border-r border-default">{i.salePrice}</td>
+                  <td className="p-2 border-b border-r border-default">{i.gstRate}</td>
+                  <td className="p-2 border-b border-r border-default">{i.cessRate}</td>
+                  <td className="p-2 border-b border-default">{i.status}</td>
                 </tr>
               ))}
               {filteredItems.length === 0 && (
-                <tr><td colSpan={8} className="p-4 text-center text-disabled">No items found</td></tr>
+                <tr>
+                  <td colSpan={8} className="p-4 text-center text-disabled">
+                    No items found
+                  </td>
+                </tr>
               )}
             </tbody>
           </table>
         ) : (
-          <table className="w-full text-sm">
+          <table className="w-full text-sm border-separate border-spacing-0">
             <thead className="sticky top-0 bg-surface-raised text-left text-xs text-secondary">
               <tr>
-                <th className="p-2">Name</th>
-                <th className="p-2">Phone</th>
-                <th className="p-2">Alt Phone</th>
-                <th className="p-2">Email</th>
-                <th className="p-2">Type</th>
+                <th className="p-2 border-b border-r border-default">Name</th>
+                <th className="p-2 border-b border-r border-default">Phone</th>
+                <th className="p-2 border-b border-r border-default">Alt Phone</th>
+                <th className="p-2 border-b border-r border-default">Email</th>
+                <th className="p-2 border-b border-default">Type</th>
               </tr>
             </thead>
             <tbody>
               {filteredCustomers.map((c) => (
-                <tr key={c.id} className="border-t border-default text-primary">
-                  <td className="p-2">{c.displayName}</td>
-                  <td className="p-2">{c.phone}</td>
-                  <td className="p-2">{c.altPhone ?? '-'}</td>
-                  <td className="p-2">{c.email ?? '-'}</td>
-                  <td className="p-2">{c.customerType}</td>
+                <tr key={c.id} className="text-primary hover:bg-surface-raised">
+                  <td className="p-2 border-b border-r border-default">{c.displayName}</td>
+                  <td className="p-2 border-b border-r border-default">{c.phone}</td>
+                  <td className="p-2 border-b border-r border-default">{c.altPhone ?? '-'}</td>
+                  <td className="p-2 border-b border-r border-default">{c.email ?? '-'}</td>
+                  <td className="p-2 border-b border-default">{c.customerType}</td>
                 </tr>
               ))}
               {filteredCustomers.length === 0 && (
-                <tr><td colSpan={5} className="p-4 text-center text-disabled">No customers found</td></tr>
+                <tr>
+                  <td colSpan={5} className="p-4 text-center text-disabled">
+                    No customers found
+                  </td>
+                </tr>
               )}
             </tbody>
           </table>

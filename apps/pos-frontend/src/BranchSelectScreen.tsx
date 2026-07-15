@@ -6,6 +6,7 @@ import { setSelectedBranch } from './branchStore.js';
 import POSButton from './components/pos/POSButton.js';
 import POSCard from './components/pos/POSCard.js';
 import POSInput from './components/pos/POSInput.js';
+import POSLogoutLink from './components/pos/POSLogoutLink.js';
 
 const TENANT_API = import.meta.env['VITE_TENANT_API_URL'] ?? 'http://localhost:3011/api/v2';
 const INVENTORY_API = import.meta.env['VITE_INVENTORY_API_URL'] ?? 'http://localhost:3012/api/v2';
@@ -111,6 +112,7 @@ export default function BranchSelectScreen() {
   if (branchId === null && branches.length > 1) {
     return (
       <div className="flex h-screen items-center justify-center bg-surface-page font-sans p-6">
+        <POSLogoutLink />
         <div className="w-full max-w-sm space-y-4">
           <div className="flex flex-col items-center gap-2 text-center">
             <span className="flex items-center justify-center w-12 h-12 rounded-2xl bg-primary-subtle text-brand">
@@ -156,6 +158,7 @@ export default function BranchSelectScreen() {
   if (warehousesLoaded && (warehouseListFailed || resolvedWarehouseId === null)) {
     return (
       <div className="flex h-screen items-center justify-center bg-surface-page font-sans p-6">
+        <POSLogoutLink />
         <div className="bg-surface-card rounded-2xl shadow-token-lg p-8 w-full max-w-sm space-y-5">
           <div className="flex flex-col items-center gap-2 text-center">
             <span className="flex items-center justify-center w-12 h-12 rounded-2xl bg-primary-subtle text-brand">

@@ -1,7 +1,9 @@
 import { Minus, Plus } from 'lucide-react';
 import type { CartItem } from './types.js';
 
-function round2(n: number) { return Math.round(n * 100) / 100; }
+function round2(n: number) {
+  return Math.round(n * 100) / 100;
+}
 
 interface Props {
   line: CartItem;
@@ -15,7 +17,9 @@ export function POSCartLine({ line, onUpdateQty, onUpdateDiscount }: Props) {
       <div className="flex-1 min-w-0">
         <div className="text-sm font-medium text-primary truncate">{line.itemName}</div>
         <div className="text-xs text-secondary flex items-center gap-1 mt-0.5">
-          <span>₹{line.unitPrice.toFixed(2)} × {line.quantity}</span>
+          <span>
+            ₹{line.unitPrice.toFixed(2)} × {line.quantity}
+          </span>
           <input
             type="number"
             min="0"
@@ -40,10 +44,10 @@ export function POSCartLine({ line, onUpdateQty, onUpdateDiscount }: Props) {
         <input
           type="number"
           min="0"
-          step="0.001"
+          step="1"
           value={line.quantity}
           onChange={(e) => onUpdateQty(line.itemId, parseFloat(e.target.value) || 0)}
-          title="Quantity (supports fractional, e.g. 2.5 metres)"
+          title="Quantity (supports fractional, e.g. 2.5 metres — type it directly)"
           className="w-14 h-9 text-center text-sm font-semibold rounded-lg border border-default bg-surface-card text-primary focus:outline-none focus:border-focus"
         />
         <button
@@ -54,7 +58,9 @@ export function POSCartLine({ line, onUpdateQty, onUpdateDiscount }: Props) {
           <Plus size={15} />
         </button>
       </div>
-      <div className="text-sm font-semibold text-primary w-20 text-right shrink-0">₹{line.lineTotal.toFixed(2)}</div>
+      <div className="text-sm font-semibold text-primary w-20 text-right shrink-0">
+        ₹{line.lineTotal.toFixed(2)}
+      </div>
     </div>
   );
 }
