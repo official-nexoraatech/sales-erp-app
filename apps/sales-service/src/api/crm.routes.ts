@@ -980,6 +980,12 @@ export async function crmRoutes(
         .returning();
       if (!created) throw new Error('Campaign comment creation failed unexpectedly');
 
+      await ctx.audit.log({
+        action: 'CREATE',
+        entityType: 'campaign_comment',
+        entityId: created.id,
+      });
+
       return reply.code(201).send({ data: created });
     }
   );

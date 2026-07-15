@@ -881,6 +881,11 @@ export class CampaignService {
       fromStatus: campaign.status,
       toStatus: updated.status,
     });
+    await ctx.audit.log({
+      action: nextApprovalStatus === 'APPROVED' ? 'AUTO_APPROVE' : 'SUBMIT_FOR_APPROVAL',
+      entityType: 'campaign',
+      entityId: campaignId,
+    });
 
     return updated;
   }

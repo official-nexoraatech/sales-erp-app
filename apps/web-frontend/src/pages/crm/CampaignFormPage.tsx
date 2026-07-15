@@ -355,6 +355,7 @@ export default function CampaignFormPage() {
                 <select
                   value={form.branchId}
                   onChange={(e) => f('branchId', e.target.value)}
+                  aria-label="Branch"
                   className="w-full rounded-lg border border-default bg-surface-card text-primary text-sm px-3 py-2"
                 >
                   <option value="">— All Branches —</option>

@@ -128,14 +128,19 @@ CP-1 ──┬──► CP-2 ──┬──► CP-4 ──┬──► CP-5 ─
 
 _(Mirrors the table in `README.md` — update both when a phase completes.)_
 
-| Phase | Status         | Started    | Completed  | Report                                                                                                   |
-| ----- | -------------- | ---------- | ---------- | -------------------------------------------------------------------------------------------------------- |
-| CP-1  | **Complete**   | 2026-07-15 | 2026-07-15 | `phase-completions/CP-1_COMPLETION.md`                                                                   |
-| CP-2  | **Complete**   | 2026-07-15 | 2026-07-15 | `phase-completions/CP-2_COMPLETION.md`                                                                   |
-| CP-3  | **Complete**   | 2026-07-15 | 2026-07-15 | `phase-completions/CP-3_COMPLETION.md`                                                                   |
-| CP-4  | **Complete**   | 2026-07-15 | 2026-07-15 | `phase-completions/CP-4_COMPLETION.md`                                                                   |
-| CP-5  | **Complete**   | 2026-07-15 | 2026-07-15 | `phase-completions/CP-5_COMPLETION.md`                                                                   |
-| CP-6  | **Complete**   | 2026-07-15 | 2026-07-15 | `phase-completions/CP-6_COMPLETION.md`                                                                   |
-| CP-7  | **Complete**   | 2026-07-15 | 2026-07-15 | `phase-completions/CP-7_COMPLETION.md`                                                                   |
-| CP-8  | **Complete\*** | 2026-07-15 | 2026-07-15 | `phase-completions/CP-8_COMPLETION.md` (\*channel adapters + caching/partitioning blocked on user input) |
-| CP-9  | Not started    | —          | —          | —                                                                                                        |
+| Phase | Status         | Started    | Completed  | Report                                                                                                                                                            |
+| ----- | -------------- | ---------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| CP-1  | **Complete**   | 2026-07-15 | 2026-07-15 | `phase-completions/CP-1_COMPLETION.md`                                                                                                                            |
+| CP-2  | **Complete**   | 2026-07-15 | 2026-07-15 | `phase-completions/CP-2_COMPLETION.md`                                                                                                                            |
+| CP-3  | **Complete**   | 2026-07-15 | 2026-07-15 | `phase-completions/CP-3_COMPLETION.md`                                                                                                                            |
+| CP-4  | **Complete**   | 2026-07-15 | 2026-07-15 | `phase-completions/CP-4_COMPLETION.md`                                                                                                                            |
+| CP-5  | **Complete**   | 2026-07-15 | 2026-07-15 | `phase-completions/CP-5_COMPLETION.md`                                                                                                                            |
+| CP-6  | **Complete**   | 2026-07-15 | 2026-07-15 | `phase-completions/CP-6_COMPLETION.md`                                                                                                                            |
+| CP-7  | **Complete**   | 2026-07-15 | 2026-07-15 | `phase-completions/CP-7_COMPLETION.md`                                                                                                                            |
+| CP-8  | **Complete\*** | 2026-07-15 | 2026-07-15 | `phase-completions/CP-8_COMPLETION.md` (\*channel adapters + caching/partitioning blocked on user input)                                                          |
+| CP-9  | **Complete\*** | 2026-07-15 | 2026-07-15 | `phase-completions/CP-9_COMPLETION.md` (\*performance/live-E2E/cross-browser validation blocked by verification debt — not release-cleared, see report section 8) |
+
+**Initiative status:** all 9 planned phases are documented complete. The platform is code-complete
+and extensively unit/integration-tested but is **not yet cleared for production release** — see
+`phase-completions/CP-9_COMPLETION.md` for the verification-debt blocker and 3 open questions
+handed back to the user (DPDP/TRAI compliance shape, channel-adapter priority, caching need).
