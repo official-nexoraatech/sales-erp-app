@@ -98,6 +98,18 @@ attribution_window_days`.
 transactional), consented (bool), consent_source, consent_recorded_at` — the consent-basis record required
   by `BR-09`, distinct from (and more granular than) the existing binary `customers.opt_out_*` flags, which
   remain the fast-path enforcement gate.
+- `tenant_communication_settings.approval_required` (bool, default false) — reused the existing CP-5 table
+  rather than a new one-row settings table, matching that table's existing per-tenant-singleton shape
+  (`frequency_cap` lives there too).
+
+**CP-7 deviation, documented per this doc's running convention:** the customer preference-center
+**API and UI were not built** this phase — only the schema above shipped. The phase prompt for CP-7 asked to
+flag actual India DPDP Act / TRAI applicability to the user before finalizing the consent-model shape,
+given real legal weight (`R9`). That confirmation has not happened as of CP-7's completion (see
+`phase-completions/CP-7_COMPLETION.md` section 12) — building `GET/PUT /crm/customers/:id/preferences` and
+an unsubscribe-link mechanism on a schema that may need to change once that review happens was judged
+higher-risk than deferring. `GET/PUT /crm/customers/:id/preferences` below is retained as the planned shape
+but is **not yet implemented**.
 
 ### CP-8 (Enterprise Scale-out)
 
@@ -107,19 +119,20 @@ transactional), consented (bool), consent_source, consent_recorded_at` — the c
 
 ## API Additions by Phase (illustrative, not exhaustive — finalized per phase)
 
-| Endpoint                                                                                                                    | Phase |
-| --------------------------------------------------------------------------------------------------------------------------- | ----- |
-| `POST /crm/media/upload`, `GET /crm/media`, `DELETE /crm/media/:id`                                                         | CP-2  |
-| `PUT /crm/campaigns/:id` (edit while DRAFT/SCHEDULED, version-checked)                                                      | CP-4  |
-| `GET/POST /crm/campaign-templates`                                                                                          | CP-4  |
-| `GET /crm/campaigns/:id/history`                                                                                            | CP-4  |
-| `POST /crm/campaigns/:id/pause`, `POST /crm/campaigns/:id/resume`                                                           | CP-5  |
-| `GET/POST /crm/automation-rules`                                                                                            | CP-5  |
-| `POST /webhooks/msg91/dlr`, `POST /webhooks/sendgrid/events`, `POST /webhooks/whatsapp/status` (public, signature-verified) | CP-6  |
-| `GET /crm/campaigns/:id/analytics`, `GET /crm/campaigns/compare`                                                            | CP-6  |
-| `POST /crm/campaigns/:id/approve`, `POST /crm/campaigns/:id/reject`                                                         | CP-7  |
-| `GET/PUT /crm/customers/:id/preferences` (customer preference center)                                                       | CP-7  |
-| `GET/POST /crm/webhook-subscriptions`                                                                                       | CP-8  |
+| Endpoint                                                                                                                           | Phase |
+| ---------------------------------------------------------------------------------------------------------------------------------- | ----- |
+| `POST /crm/media/upload`, `GET /crm/media`, `DELETE /crm/media/:id`                                                                | CP-2  |
+| `PUT /crm/campaigns/:id` (edit while DRAFT/SCHEDULED, version-checked)                                                             | CP-4  |
+| `GET/POST /crm/campaign-templates`                                                                                                 | CP-4  |
+| `GET /crm/campaigns/:id/history`                                                                                                   | CP-4  |
+| `POST /crm/campaigns/:id/pause`, `POST /crm/campaigns/:id/resume`                                                                  | CP-5  |
+| `GET/POST /crm/automation-rules`                                                                                                   | CP-5  |
+| `POST /webhooks/msg91/dlr`, `POST /webhooks/sendgrid/events`, `POST /webhooks/whatsapp/status` (public, signature-verified)        | CP-6  |
+| `GET /crm/campaigns/:id/analytics`, `GET /crm/campaigns/compare`                                                                   | CP-6  |
+| `POST /crm/campaigns/:id/submit-for-approval`, `POST /crm/campaigns/:id/approve`, `POST /crm/campaigns/:id/reject`                 | CP-7  |
+| `GET/POST /crm/campaigns/:id/comments`                                                                                             | CP-7  |
+| `GET/PUT /crm/customers/:id/preferences` (customer preference center) — **planned, not yet implemented, see deviation note above** | CP-7  |
+| `GET/POST /crm/webhook-subscriptions`                                                                                              | CP-8  |
 
 ## Design Constraints Carried Forward
 

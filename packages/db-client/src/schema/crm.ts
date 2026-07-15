@@ -103,6 +103,13 @@ export const campaigns = pgTable(
     }>(),
     timezone: varchar('timezone', { length: 50 }),
     parentRecurringCampaignId: integer('parent_recurring_campaign_id'),
+    // CP-7: approval workflow — optional per tenant (tenantCommunicationSettings.approvalRequired).
+    approvalStatus: varchar('approval_status', { length: 20 }).$type<
+      'PENDING_APPROVAL' | 'APPROVED' | 'REJECTED'
+    >(),
+    approvedBy: integer('approved_by'),
+    approvedAt: timestamp('approved_at', { withTimezone: true }),
+    rejectionReason: text('rejection_reason'),
   },
   (t) => [
     index('idx_campaigns_tenant_status').on(t.tenantId, t.status, t.createdAt),
@@ -193,10 +200,53 @@ export const tenantCommunicationSettings = pgTable(
     frequencyCap: jsonb('frequency_cap').$type<{ maxPerDay?: number }>(),
     businessHours: jsonb('business_hours').$type<{ startHour: number; endHour: number }>(),
     quietHours: jsonb('quiet_hours').$type<{ startHour: number; endHour: number }>(),
+    // CP-7: optional per-tenant approval gate — false (default) preserves today's direct-send
+    // behavior exactly.
+    approvalRequired: boolean('approval_required').notNull().default(false),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => [unique('tenant_communication_settings_tenant_unique').on(t.tenantId)]
+);
+
+// ─── Campaign Comments (CP-7) ────────────────────────────────────────────────
+// Internal notes — never sent to recipients.
+export const campaignComments = pgTable(
+  'campaign_comments',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    tenantId: integer('tenant_id').notNull(),
+    campaignId: integer('campaign_id').notNull(),
+    authorId: integer('author_id').notNull(),
+    body: text('body').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index('idx_campaign_comments_campaign').on(t.campaignId, t.createdAt)]
+);
+
+// ─── Customer Communication Preferences (CP-7) ──────────────────────────────
+// More granular consent model than the existing binary customers.opt_out_sms/whatsapp/email
+// flags, which remain the fast-path enforcement gate and are NOT replaced by this table.
+export const customerCommunicationPreferences = pgTable(
+  'customer_communication_preferences',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    tenantId: integer('tenant_id').notNull(),
+    customerId: integer('customer_id').notNull(),
+    channel: varchar('channel', { length: 20 })
+      .notNull()
+      .$type<'SMS' | 'WHATSAPP' | 'EMAIL' | 'IN_APP'>(),
+    category: varchar('category', { length: 20 })
+      .notNull()
+      .$type<'PROMOTIONAL' | 'TRANSACTIONAL'>(),
+    consented: boolean('consented').notNull().default(true),
+    consentSource: varchar('consent_source', { length: 30 }),
+    consentRecordedAt: timestamp('consent_recorded_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [unique('customer_comm_prefs_unique').on(t.tenantId, t.customerId, t.channel, t.category)]
 );
 
 // ─── Campaign Automation Rules (CP-5) ───────────────────────────────────────
@@ -273,5 +323,10 @@ export type TenantCommunicationSettings = typeof tenantCommunicationSettings.$in
 export type NewTenantCommunicationSettings = typeof tenantCommunicationSettings.$inferInsert;
 export type CampaignAutomationRule = typeof campaignAutomationRules.$inferSelect;
 export type NewCampaignAutomationRule = typeof campaignAutomationRules.$inferInsert;
+export type CampaignComment = typeof campaignComments.$inferSelect;
+export type NewCampaignComment = typeof campaignComments.$inferInsert;
+export type CustomerCommunicationPreference = typeof customerCommunicationPreferences.$inferSelect;
+export type NewCustomerCommunicationPreference =
+  typeof customerCommunicationPreferences.$inferInsert;
 export type BusinessSeason = typeof businessSeasons.$inferSelect;
 export type NewBusinessSeason = typeof businessSeasons.$inferInsert;

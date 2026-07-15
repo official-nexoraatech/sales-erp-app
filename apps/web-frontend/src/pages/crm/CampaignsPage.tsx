@@ -20,6 +20,8 @@ interface Campaign {
   name: string;
   channel: 'SMS' | 'WHATSAPP' | 'EMAIL' | 'IN_APP';
   status: 'DRAFT' | 'SCHEDULED' | 'SENDING' | 'SENT' | 'CANCELLED' | 'FAILED';
+  approvalStatus?: 'PENDING_APPROVAL' | 'APPROVED' | 'REJECTED' | null;
+  rejectionReason?: string | null;
   scheduledAt?: string;
   sentAt?: string;
   totalRecipients?: number;
@@ -27,6 +29,61 @@ interface Campaign {
   deliveredCount?: number;
   failedCount?: number;
   createdAt: string;
+}
+
+interface CampaignHistoryEntry {
+  id: number;
+  action: string;
+  fromStatus: string | null;
+  toStatus: string | null;
+  actorId: number;
+  createdAt: string;
+}
+
+// CP-7: PENDING_APPROVAL/APPROVED/REJECTED badges shown alongside the campaign lifecycle
+// status — only rendered when a tenant has opted into requiring approval (approvalStatus is
+// null for every campaign otherwise, per the migration-backward-compat contract).
+const APPROVAL_COLORS: Record<string, 'green' | 'yellow' | 'red'> = {
+  PENDING_APPROVAL: 'yellow',
+  APPROVED: 'green',
+  REJECTED: 'red',
+};
+
+function HistoryDrilldown({ campaignId }: { campaignId: number }) {
+  const { data, isLoading } = useQuery({
+    queryKey: ['campaign-history', campaignId],
+    queryFn: () => crmApi.campaignHistory(campaignId),
+  });
+  const history = (data as CampaignHistoryEntry[] | undefined) ?? [];
+
+  if (isLoading) return <p className="text-xs text-secondary px-5 py-2">Loading history…</p>;
+  if (history.length === 0)
+    return <p className="text-xs text-secondary px-5 py-2">No history yet.</p>;
+
+  return (
+    <div className="px-5 py-3 bg-surface-subtle max-h-64 overflow-y-auto">
+      <table className="w-full text-xs">
+        <thead>
+          <tr className="text-left text-secondary">
+            <th className="pb-1">Action</th>
+            <th className="pb-1">From</th>
+            <th className="pb-1">To</th>
+            <th className="pb-1">When</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-default">
+          {history.map((h) => (
+            <tr key={h.id}>
+              <td className="py-1">{h.action}</td>
+              <td className="py-1">{h.fromStatus ?? '—'}</td>
+              <td className="py-1">{h.toStatus ?? '—'}</td>
+              <td className="py-1">{formatDatetime(h.createdAt)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
 }
 
 interface CampaignRecipient {
@@ -145,6 +202,7 @@ export default function CampaignsPage() {
   const hasPermission = useAuthStore((s) => s.hasPermission);
   const canCreate = hasPermission(PERMISSIONS.CRM_CAMPAIGN_CREATE);
   const canSend = hasPermission(PERMISSIONS.CRM_CAMPAIGN_SEND);
+  const canApprove = hasPermission(PERMISSIONS.CRM_CAMPAIGN_APPROVE);
 
   const [statusFilter, setStatusFilter] = useState('');
   const [scheduleModal, setScheduleModal] = useState<{ open: boolean; id: number }>({
@@ -152,7 +210,13 @@ export default function CampaignsPage() {
     id: 0,
   });
   const [scheduleAt, setScheduleAt] = useState('');
+  const [rejectModal, setRejectModal] = useState<{ open: boolean; id: number }>({
+    open: false,
+    id: 0,
+  });
+  const [rejectReason, setRejectReason] = useState('');
   const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [historyExpandedId, setHistoryExpandedId] = useState<number | null>(null);
   // CP-4: client-side pagination — GET /crm/campaigns has no server-side page/size params yet
   // (see CP-4 completion report), so this paginates the already-fetched full list rather than
   // leaving a long, unpaginated table.
@@ -195,6 +259,36 @@ export default function CampaignsPage() {
       setScheduleAt('');
     },
     onError: () => toast.error('Failed to schedule campaign'),
+  });
+
+  const submitForApprovalMut = useMutation({
+    mutationFn: (id: number) => crmApi.submitCampaignForApproval(id),
+    onSuccess: () => {
+      toast.success('Campaign submitted for approval');
+      qc.invalidateQueries({ queryKey: ['campaigns'] });
+    },
+    onError: () => toast.error('Failed to submit campaign for approval'),
+  });
+
+  const approveMut = useMutation({
+    mutationFn: (id: number) => crmApi.approveCampaign(id),
+    onSuccess: () => {
+      toast.success('Campaign approved');
+      qc.invalidateQueries({ queryKey: ['campaigns'] });
+    },
+    onError: () => toast.error('Failed to approve campaign'),
+  });
+
+  const rejectMut = useMutation({
+    mutationFn: ({ id, reason }: { id: number; reason: string }) =>
+      crmApi.rejectCampaign(id, reason),
+    onSuccess: () => {
+      toast.success('Campaign rejected');
+      qc.invalidateQueries({ queryKey: ['campaigns'] });
+      setRejectModal({ open: false, id: 0 });
+      setRejectReason('');
+    },
+    onError: () => toast.error('Failed to reject campaign'),
   });
 
   return (
@@ -257,6 +351,12 @@ export default function CampaignsPage() {
                       <p className="text-sm font-semibold text-primary truncate">{c.name}</p>
                       <Badge label={c.status} color={STATUS_COLORS[c.status] ?? 'gray'} />
                       <Badge label={c.channel} color="blue" />
+                      {c.approvalStatus && (
+                        <Badge
+                          label={c.approvalStatus.replace('_', ' ')}
+                          color={APPROVAL_COLORS[c.approvalStatus] ?? 'gray'}
+                        />
+                      )}
                     </div>
                     <div className="flex items-center gap-4 mt-1 text-xs text-secondary">
                       {c.totalRecipients != null && (
@@ -268,12 +368,23 @@ export default function CampaignsPage() {
                           {c.deliveredCount ?? 0} delivered / {c.failedCount ?? 0} failed
                         </button>
                       )}
+                      <button
+                        onClick={() =>
+                          setHistoryExpandedId(historyExpandedId === c.id ? null : c.id)
+                        }
+                        className="underline hover:text-primary"
+                      >
+                        History
+                      </button>
                       {c.scheduledAt && <span>Scheduled: {formatDatetime(c.scheduledAt)}</span>}
                       {c.sentAt && <span>Sent: {formatDatetime(c.sentAt)}</span>}
                       {!c.scheduledAt && !c.sentAt && (
                         <span>Created: {formatDatetime(c.createdAt)}</span>
                       )}
                     </div>
+                    {c.approvalStatus === 'REJECTED' && c.rejectionReason && (
+                      <p className="mt-1 text-xs text-danger">Rejected: {c.rejectionReason}</p>
+                    )}
                   </div>
                   <div className="flex gap-2 shrink-0">
                     {canCreate && (c.status === 'DRAFT' || c.status === 'SCHEDULED') && (
@@ -284,6 +395,40 @@ export default function CampaignsPage() {
                       >
                         Edit
                       </Button>
+                    )}
+                    {canCreate &&
+                      c.status === 'DRAFT' &&
+                      c.approvalStatus !== 'PENDING_APPROVAL' &&
+                      c.approvalStatus !== 'APPROVED' && (
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => submitForApprovalMut.mutate(c.id)}
+                          disabled={submitForApprovalMut.isPending}
+                        >
+                          Submit for Approval
+                        </Button>
+                      )}
+                    {canApprove && c.approvalStatus === 'PENDING_APPROVAL' && (
+                      <>
+                        <Button
+                          size="sm"
+                          onClick={() => approveMut.mutate(c.id)}
+                          disabled={approveMut.isPending}
+                        >
+                          Approve
+                        </Button>
+                        <Button
+                          variant="danger"
+                          size="sm"
+                          onClick={() => {
+                            setRejectModal({ open: true, id: c.id });
+                            setRejectReason('');
+                          }}
+                        >
+                          Reject
+                        </Button>
+                      </>
                     )}
                     {canSend && c.status === 'DRAFT' && (
                       <>
@@ -339,6 +484,7 @@ export default function CampaignsPage() {
                     <RecipientDrilldown campaignId={c.id} />
                   </>
                 )}
+                {historyExpandedId === c.id && <HistoryDrilldown campaignId={c.id} />}
               </div>
             ))}
           </div>
@@ -401,6 +547,40 @@ export default function CampaignsPage() {
               disabled={scheduleMut.isPending || !scheduleAt}
             >
               {scheduleMut.isPending ? 'Scheduling…' : 'Schedule'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Reject Modal */}
+      <Modal
+        open={rejectModal.open}
+        onClose={() => setRejectModal({ open: false, id: 0 })}
+        title="Reject Campaign"
+      >
+        <div className="space-y-5">
+          <div>
+            <label className="block text-sm font-medium text-secondary mb-1.5">
+              Reason for rejection
+            </label>
+            <textarea
+              className="w-full rounded-lg border border-default bg-surface-card px-3 py-2 text-sm"
+              rows={3}
+              value={rejectReason}
+              onChange={(e) => setRejectReason(e.target.value)}
+              placeholder="Explain what needs to change before this campaign can be resubmitted"
+            />
+          </div>
+          <div className="flex gap-2 justify-end pt-2">
+            <Button variant="ghost" onClick={() => setRejectModal({ open: false, id: 0 })}>
+              Cancel
+            </Button>
+            <Button
+              variant="danger"
+              onClick={() => rejectMut.mutate({ id: rejectModal.id, reason: rejectReason })}
+              disabled={rejectMut.isPending || !rejectReason.trim()}
+            >
+              {rejectMut.isPending ? 'Rejecting…' : 'Reject'}
             </Button>
           </div>
         </div>

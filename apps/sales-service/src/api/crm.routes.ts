@@ -7,6 +7,7 @@ import {
   campaigns,
   campaignTemplates,
   campaignAutomationRules,
+  campaignComments,
   businessSeasons,
   notificationLog,
 } from '@erp/db';
@@ -108,6 +109,15 @@ const CampaignScheduleSchema = z.object({
     })
     .optional(),
   timezone: z.string().max(50).optional(),
+});
+
+// CP-7: rejection requires a reason so the campaign owner knows what to fix before resubmitting.
+const CampaignRejectSchema = z.object({
+  reason: z.string().min(1).max(1000),
+});
+
+const CampaignCommentSchema = z.object({
+  body: z.string().min(1).max(2000),
 });
 
 const CampaignTemplateSchema = z.object({
@@ -788,6 +798,131 @@ export async function crmRoutes(
   );
 
   // ════════════════════════════════════════════════════════════════════════
+  // CP-7 — Campaign Approval Workflow
+  // ════════════════════════════════════════════════════════════════════════
+  // Submitting is gated the same as editing a DRAFT (CRM_CAMPAIGN_CREATE); approve/reject require
+  // the separate CRM_CAMPAIGN_APPROVE permission so a tenant can designate specific
+  // approvers distinct from whoever is allowed to author campaigns.
+
+  fastify.post<{ Params: { id: string } }>(
+    '/crm/campaigns/:id/submit-for-approval',
+    { preHandler: [authenticate, requirePermission(PERMISSIONS.CRM_CAMPAIGN_CREATE)] },
+    async (request, reply) => {
+      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
+      const ctx = ctxFactory.create({
+        tenantId,
+        userId,
+        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
+      });
+      const id = parseInt(request.params.id, 10);
+
+      const updated = await CampaignService.submitForApproval(ctx, id);
+      return reply.code(200).send({ data: updated });
+    }
+  );
+
+  fastify.post<{ Params: { id: string } }>(
+    '/crm/campaigns/:id/approve',
+    { preHandler: [authenticate, requirePermission(PERMISSIONS.CRM_CAMPAIGN_APPROVE)] },
+    async (request, reply) => {
+      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
+      const ctx = ctxFactory.create({
+        tenantId,
+        userId,
+        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
+      });
+      const id = parseInt(request.params.id, 10);
+
+      const updated = await CampaignService.approve(ctx, id);
+      return reply.code(200).send({ data: updated });
+    }
+  );
+
+  fastify.post<{ Params: { id: string } }>(
+    '/crm/campaigns/:id/reject',
+    { preHandler: [authenticate, requirePermission(PERMISSIONS.CRM_CAMPAIGN_APPROVE)] },
+    async (request, reply) => {
+      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
+      const ctx = ctxFactory.create({
+        tenantId,
+        userId,
+        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
+      });
+      const id = parseInt(request.params.id, 10);
+
+      const body = CampaignRejectSchema.safeParse(request.body);
+      if (!body.success)
+        throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
+
+      const updated = await CampaignService.reject(ctx, id, body.data.reason);
+      return reply.code(200).send({ data: updated });
+    }
+  );
+
+  // ════════════════════════════════════════════════════════════════════════
+  // CP-7 — Campaign Comments (internal notes, never sent to recipients)
+  // ════════════════════════════════════════════════════════════════════════
+
+  fastify.get<{ Params: { id: string } }>(
+    '/crm/campaigns/:id/comments',
+    { preHandler: [authenticate, requirePermission(PERMISSIONS.CRM_VIEW)] },
+    async (request, reply) => {
+      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
+      const ctx = ctxFactory.create({
+        tenantId,
+        userId,
+        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
+      });
+      const id = parseInt(request.params.id, 10);
+
+      const [campaign] = await ctx.db.raw
+        .select({ id: campaigns.id })
+        .from(campaigns)
+        .where(and(eq(campaigns.id, id), eq(campaigns.tenantId, tenantId)));
+      if (!campaign) throw new NotFoundError('Campaign', id);
+
+      const rows = await ctx.db.raw
+        .select()
+        .from(campaignComments)
+        .where(and(eq(campaignComments.campaignId, id), eq(campaignComments.tenantId, tenantId)))
+        .orderBy(sql`created_at ASC`);
+      return reply.code(200).send({ data: { content: rows, totalElements: rows.length } });
+    }
+  );
+
+  fastify.post<{ Params: { id: string } }>(
+    '/crm/campaigns/:id/comments',
+    { preHandler: [authenticate, requirePermission(PERMISSIONS.CRM_CAMPAIGN_CREATE)] },
+    async (request, reply) => {
+      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
+      const ctx = ctxFactory.create({
+        tenantId,
+        userId,
+        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
+      });
+      const id = parseInt(request.params.id, 10);
+
+      const body = CampaignCommentSchema.safeParse(request.body);
+      if (!body.success)
+        throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
+
+      const [campaign] = await ctx.db.raw
+        .select({ id: campaigns.id })
+        .from(campaigns)
+        .where(and(eq(campaigns.id, id), eq(campaigns.tenantId, tenantId)));
+      if (!campaign) throw new NotFoundError('Campaign', id);
+
+      const [created] = await ctx.db.raw
+        .insert(campaignComments)
+        .values({ tenantId, campaignId: id, authorId: userId, body: body.data.body })
+        .returning();
+      if (!created) throw new Error('Campaign comment creation failed unexpectedly');
+
+      return reply.code(201).send({ data: created });
+    }
+  );
+
+  // ════════════════════════════════════════════════════════════════════════
   // CP-4 — Campaign Templates
   // ════════════════════════════════════════════════════════════════════════
 
@@ -887,7 +1022,9 @@ export async function crmRoutes(
 
   fastify.post(
     '/crm/automation-rules',
-    { preHandler: [authenticate, requirePermission(PERMISSIONS.CRM_CAMPAIGN_CREATE)] },
+    // CP-7: previously reused CRM_CAMPAIGN_CREATE — now its own permission since managing
+    // always-on trigger rules is a distinct responsibility from authoring one-off campaigns.
+    { preHandler: [authenticate, requirePermission(PERMISSIONS.CRM_AUTOMATION_MANAGE)] },
     async (request, reply) => {
       const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
       const ctx = ctxFactory.create({
@@ -947,7 +1084,7 @@ export async function crmRoutes(
 
   fastify.put<{ Params: { id: string } }>(
     '/crm/automation-rules/:id',
-    { preHandler: [authenticate, requirePermission(PERMISSIONS.CRM_CAMPAIGN_CREATE)] },
+    { preHandler: [authenticate, requirePermission(PERMISSIONS.CRM_AUTOMATION_MANAGE)] },
     async (request, reply) => {
       const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
       const ctx = ctxFactory.create({
@@ -1066,7 +1203,9 @@ export async function crmRoutes(
 
   fastify.get<{ Params: { id: string } }>(
     '/crm/campaigns/:id/stats',
-    { preHandler: [authenticate, requirePermission(PERMISSIONS.CRM_VIEW)] },
+    // CP-7: separate from CRM_VIEW so a tenant can grant basic campaign visibility without
+    // exposing delivery/engagement analytics.
+    { preHandler: [authenticate, requirePermission(PERMISSIONS.CRM_CAMPAIGN_ANALYTICS_VIEW)] },
     async (request, reply) => {
       const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
       const ctx = ctxFactory.create({
@@ -1089,7 +1228,7 @@ export async function crmRoutes(
 
   fastify.get<{ Params: { id: string } }>(
     '/crm/campaigns/:id/recipients',
-    { preHandler: [authenticate, requirePermission(PERMISSIONS.CRM_VIEW)] },
+    { preHandler: [authenticate, requirePermission(PERMISSIONS.CRM_CAMPAIGN_ANALYTICS_VIEW)] },
     async (request, reply) => {
       const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
       const ctx = ctxFactory.create({

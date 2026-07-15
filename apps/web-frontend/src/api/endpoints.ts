@@ -1363,6 +1363,18 @@ export const crmApi = {
   campaignRecipients: (id: number) => apiClient.get('sales', `/crm/campaigns/${id}/recipients`),
   birthdayStats: () => apiClient.get('sales', '/crm/campaigns/birthday-stats'),
 
+  // CP-7: approval workflow
+  submitCampaignForApproval: (id: number) =>
+    apiClient.post('sales', `/crm/campaigns/${id}/submit-for-approval`, {}),
+  approveCampaign: (id: number) => apiClient.post('sales', `/crm/campaigns/${id}/approve`, {}),
+  rejectCampaign: (id: number, reason: string) =>
+    apiClient.post('sales', `/crm/campaigns/${id}/reject`, { reason }),
+
+  // CP-7: internal campaign comments (never sent to recipients)
+  listCampaignComments: (id: number) => apiClient.get('sales', `/crm/campaigns/${id}/comments`),
+  createCampaignComment: (id: number, body: string) =>
+    apiClient.post('sales', `/crm/campaigns/${id}/comments`, { body }),
+
   // CP-4: campaign templates
   listCampaignTemplates: (params?: { channel?: string }) => {
     const qs = new URLSearchParams();

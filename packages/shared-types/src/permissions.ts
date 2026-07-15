@@ -240,6 +240,22 @@ export const PERMISSIONS = {
   CRM_VIEW: 'CRM_VIEW',
   CRM_CAMPAIGN_CREATE: 'CRM_CAMPAIGN_CREATE',
   CRM_CAMPAIGN_SEND: 'CRM_CAMPAIGN_SEND',
+  // CP-7 (Campaign Management Platform initiative): distinct from CRM_CAMPAIGN_SEND — approving
+  // a PENDING_APPROVAL campaign is a separate action from sending an already-approved one.
+  // Backfilled for existing tenants' OWNER/ADMIN/SUPER_ADMIN roles in
+  // packages/db-client/migrations/0057_cp7_campaign_approve_permission_backfill.sql (role-defaults
+  // .ts's wildcard only covers NEW tenants provisioned after this constant was added — see the
+  // repo's documented dead-permission-constant pattern before assuming this alone is enough).
+  CRM_CAMPAIGN_APPROVE: 'CRM_CAMPAIGN_APPROVE',
+  // CP-7: gates campaign-level analytics (stats/recipients breakdown) separately from basic
+  // CRM_VIEW, so a tenant can grant campaign visibility without exposing delivery/engagement
+  // numbers. Backfilled alongside CRM_AUTOMATION_MANAGE in
+  // packages/db-client/migrations/0058_cp7_campaign_analytics_automation_permission_backfill.sql.
+  CRM_CAMPAIGN_ANALYTICS_VIEW: 'CRM_CAMPAIGN_ANALYTICS_VIEW',
+  // CP-7: gates creating/editing automation rules (previously reused CRM_CAMPAIGN_CREATE) — a
+  // tenant may want a different set of people managing always-on trigger rules than authoring
+  // one-off campaigns. Backfilled in migration 0058 above.
+  CRM_AUTOMATION_MANAGE: 'CRM_AUTOMATION_MANAGE',
   CRM_LOYALTY_VIEW: 'CRM_LOYALTY_VIEW',
   CRM_LOYALTY_ADJUST: 'CRM_LOYALTY_ADJUST',
   CRM_INTERACTION_VIEW: 'CRM_INTERACTION_VIEW',

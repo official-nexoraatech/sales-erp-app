@@ -957,4 +957,194 @@ describe.skipIf(!DB_URL)('CampaignService — integration (CP-1 baseline)', () =
       expect(recipients).toHaveLength(2);
     });
   });
+
+  describe('approval workflow (CP-7, MH-12)', () => {
+    // Scoped, like the frequency-capping block above: this is the only other place in the file
+    // that writes tenantCommunicationSettings, so it must leave the row absent for any block
+    // that (re-)runs after it — currently none, since this is the last describe block, but kept
+    // for safety if a later phase appends more tests below.
+    afterAll(async () => {
+      await db
+        .delete(tenantCommunicationSettings)
+        .where(eq(tenantCommunicationSettings.tenantId, TEST_TENANT));
+    });
+
+    async function setApprovalRequired(required: boolean) {
+      await db
+        .delete(tenantCommunicationSettings)
+        .where(eq(tenantCommunicationSettings.tenantId, TEST_TENANT));
+      if (required) {
+        await db
+          .insert(tenantCommunicationSettings)
+          .values({ tenantId: TEST_TENANT, approvalRequired: true });
+      }
+    }
+
+    async function createCampaign(status: 'DRAFT' = 'DRAFT') {
+      const [campaign] = await db
+        .insert(campaigns)
+        .values({
+          tenantId: TEST_TENANT,
+          name: `Approval Test ${status} ${Date.now()}-${Math.random()}`,
+          customerIds: [optedInCustomerId],
+          channel: 'EMAIL',
+          messageTemplate: 'Hi {{customerName}}',
+          status,
+          createdBy: 1,
+        })
+        .returning();
+      return campaign!;
+    }
+
+    it('tenantRequiresApproval() defaults to false when no settings row exists', async () => {
+      await setApprovalRequired(false);
+      const ctx = makeCtx();
+      expect(await CampaignService.tenantRequiresApproval(ctx)).toBe(false);
+    });
+
+    it('tenantRequiresApproval() reflects an explicit true row', async () => {
+      await setApprovalRequired(true);
+      const ctx = makeCtx();
+      expect(await CampaignService.tenantRequiresApproval(ctx)).toBe(true);
+    });
+
+    it('submitForApproval() auto-approves when the tenant does not require approval', async () => {
+      await setApprovalRequired(false);
+      const campaign = await createCampaign();
+      const ctx = makeCtx();
+      const updated = await CampaignService.submitForApproval(ctx, campaign.id);
+      expect(updated.approvalStatus).toBe('APPROVED');
+      expect(updated.approvedBy).toBe(1);
+      expect(updated.approvedAt).not.toBeNull();
+
+      const history = await CampaignService.listHistory(ctx, campaign.id);
+      expect(history[0]?.action).toBe('AUTO_APPROVE');
+    });
+
+    it('submitForApproval() moves to PENDING_APPROVAL when the tenant requires approval', async () => {
+      await setApprovalRequired(true);
+      const campaign = await createCampaign();
+      const ctx = makeCtx();
+      const updated = await CampaignService.submitForApproval(ctx, campaign.id);
+      expect(updated.approvalStatus).toBe('PENDING_APPROVAL');
+      expect(updated.approvedBy).toBeNull();
+
+      const history = await CampaignService.listHistory(ctx, campaign.id);
+      expect(history[0]?.action).toBe('SUBMIT_FOR_APPROVAL');
+    });
+
+    it('submitForApproval() rejects a non-DRAFT campaign', async () => {
+      await setApprovalRequired(false);
+      const [sent] = await db
+        .insert(campaigns)
+        .values({
+          tenantId: TEST_TENANT,
+          name: `Approval Test SENT ${Date.now()}`,
+          customerIds: [optedInCustomerId],
+          channel: 'EMAIL',
+          messageTemplate: 'Hi',
+          status: 'SENT',
+          createdBy: 1,
+        })
+        .returning();
+      const ctx = makeCtx();
+      await expect(CampaignService.submitForApproval(ctx, sent!.id)).rejects.toThrow(
+        /Cannot submit campaign in status SENT/
+      );
+    });
+
+    it('approve() transitions PENDING_APPROVAL to APPROVED', async () => {
+      await setApprovalRequired(true);
+      const campaign = await createCampaign();
+      const ctx = makeCtx();
+      await CampaignService.submitForApproval(ctx, campaign.id);
+      const approved = await CampaignService.approve(ctx, campaign.id);
+      expect(approved.approvalStatus).toBe('APPROVED');
+      expect(approved.approvedBy).toBe(1);
+
+      const history = await CampaignService.listHistory(ctx, campaign.id);
+      expect(history[0]?.action).toBe('APPROVE');
+    });
+
+    it('approve() rejects a campaign that is not PENDING_APPROVAL', async () => {
+      await setApprovalRequired(false);
+      const campaign = await createCampaign();
+      const ctx = makeCtx();
+      await expect(CampaignService.approve(ctx, campaign.id)).rejects.toThrow(
+        /Cannot approve a campaign with approvalStatus null/
+      );
+    });
+
+    it('reject() transitions PENDING_APPROVAL to REJECTED with a reason', async () => {
+      await setApprovalRequired(true);
+      const campaign = await createCampaign();
+      const ctx = makeCtx();
+      await CampaignService.submitForApproval(ctx, campaign.id);
+      const rejected = await CampaignService.reject(ctx, campaign.id, 'Wrong discount amount');
+      expect(rejected.approvalStatus).toBe('REJECTED');
+      expect(rejected.rejectionReason).toBe('Wrong discount amount');
+
+      const history = await CampaignService.listHistory(ctx, campaign.id);
+      expect(history[0]?.action).toBe('REJECT');
+    });
+
+    it('reject() rejects a campaign that is not PENDING_APPROVAL', async () => {
+      await setApprovalRequired(false);
+      const campaign = await createCampaign();
+      const ctx = makeCtx();
+      await expect(CampaignService.reject(ctx, campaign.id, 'x')).rejects.toThrow(
+        /Cannot reject a campaign with approvalStatus null/
+      );
+    });
+
+    it('send() is blocked by APPROVAL_REQUIRED when the tenant requires approval and the campaign is not APPROVED', async () => {
+      await setApprovalRequired(true);
+      const campaign = await createCampaign();
+      const ctx = makeCtx();
+      await expect(CampaignService.send(ctx, campaign.id)).rejects.toThrow(
+        'Campaign must be approved before it can be sent'
+      );
+    });
+
+    it('send() succeeds once the campaign is APPROVED, even when the tenant requires approval', async () => {
+      await setApprovalRequired(true);
+      const campaign = await createCampaign();
+      const ctx = makeCtx();
+      await CampaignService.submitForApproval(ctx, campaign.id);
+      await CampaignService.approve(ctx, campaign.id);
+      const sent = await CampaignService.send(ctx, campaign.id);
+      expect(sent.status).toBe('SENT');
+    });
+
+    it('schedule() is blocked by APPROVAL_REQUIRED when the tenant requires approval and the campaign is not APPROVED', async () => {
+      await setApprovalRequired(true);
+      const campaign = await createCampaign();
+      const ctx = makeCtx();
+      await expect(
+        CampaignService.schedule(ctx, campaign.id, new Date(Date.now() + 60_000))
+      ).rejects.toThrow('Campaign must be approved before it can be scheduled');
+    });
+
+    it('does not require approval when the tenant has no settings row (backward compatibility)', async () => {
+      await setApprovalRequired(false);
+      const campaign = await createCampaign();
+      const ctx = makeCtx();
+      const sent = await CampaignService.send(ctx, campaign.id);
+      expect(sent.status).toBe('SENT');
+    });
+
+    it('update() resets approvalStatus back to null on an APPROVED campaign', async () => {
+      await setApprovalRequired(false);
+      const campaign = await createCampaign();
+      const ctx = makeCtx();
+      const approved = await CampaignService.submitForApproval(ctx, campaign.id);
+      expect(approved.approvalStatus).toBe('APPROVED');
+
+      const updated = await CampaignService.update(ctx, campaign.id, approved.version, {
+        name: 'Edited after approval',
+      });
+      expect(updated.approvalStatus).toBeNull();
+      expect(updated.approvedBy).toBeNull();
+    });
+  });
 });

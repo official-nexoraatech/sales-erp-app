@@ -413,6 +413,15 @@ export class CampaignService {
         `Cannot send campaign in status ${campaign.status}`
       );
     }
+    if (
+      (await CampaignService.tenantRequiresApproval(ctx)) &&
+      campaign.approvalStatus !== 'APPROVED'
+    ) {
+      throw new BusinessError(
+        'APPROVAL_REQUIRED',
+        'Campaign must be approved before it can be sent'
+      );
+    }
 
     const recipients = await CampaignService.resolveRecipients(ctx, campaign);
     if (recipients.length === 0) {
@@ -589,6 +598,12 @@ export class CampaignService {
         parentRecurringCampaignId: definitionId,
         status: 'DRAFT',
         createdBy: definition.createdBy,
+        // CP-7: each occurrence of an already-scheduled recurring series is auto-approved — the
+        // series itself was already reviewed/scheduled by whoever set it up; requiring a human to
+        // re-approve every single firing would defeat the point of "recurring".
+        approvalStatus: 'APPROVED',
+        approvedBy: definition.createdBy,
+        approvedAt: new Date(),
       })
       .returning();
     if (!occurrence) throw new Error('Recurring occurrence creation failed unexpectedly');
@@ -717,6 +732,11 @@ export class CampaignService {
         templateId: rule.templateId,
         status: 'DRAFT',
         createdBy: rule.createdBy,
+        // CP-7: auto-approved for the same reason as recurring occurrences — the automation rule
+        // itself was already reviewed/configured by whoever enabled it.
+        approvalStatus: 'APPROVED',
+        approvedBy: rule.createdBy,
+        approvedAt: new Date(),
       })
       .returning();
     if (!campaign) throw new Error('Automated campaign creation failed unexpectedly');
@@ -730,6 +750,146 @@ export class CampaignService {
   // campaign resets it to DRAFT and clears scheduledAt — per
   // ERP-PLANNING/Campaign-Planning/09_CAMPAIGN_LIFECYCLE_AND_WORKFLOW.md, a content/audience
   // change must be re-confirmed via a fresh schedule() call, not silently kept on the old time.
+  // CP-7 (MH-12): whether this tenant requires approval before a campaign may be scheduled/sent.
+  // Defaults to false (no row / approvalRequired=false) — every existing tenant sees no behavior
+  // change unless they explicitly opt in, per 19_MIGRATION_AND_BACKWARD_COMPATIBILITY.md.
+  static async tenantRequiresApproval(ctx: PlatformContext): Promise<boolean> {
+    const [settings] = await ctx.db.raw
+      .select({ approvalRequired: tenantCommunicationSettings.approvalRequired })
+      .from(tenantCommunicationSettings)
+      .where(eq(tenantCommunicationSettings.tenantId, ctx.tenant.tenantId));
+    return settings?.approvalRequired ?? false;
+  }
+
+  /** Submits a DRAFT campaign for approval — auto-approves immediately if the tenant doesn't require it. */
+  static async submitForApproval(ctx: PlatformContext, campaignId: number): Promise<Campaign> {
+    const [campaign] = await ctx.db.raw
+      .select()
+      .from(campaigns)
+      .where(and(eq(campaigns.id, campaignId), eq(campaigns.tenantId, ctx.tenant.tenantId)));
+    if (!campaign) throw new NotFoundError('Campaign', campaignId);
+    if (campaign.status !== 'DRAFT') {
+      throw new BusinessError(
+        'INVALID_CAMPAIGN_STATE',
+        `Cannot submit campaign in status ${campaign.status} for approval`
+      );
+    }
+
+    const requiresApproval = await CampaignService.tenantRequiresApproval(ctx);
+    const nextApprovalStatus = requiresApproval ? 'PENDING_APPROVAL' : 'APPROVED';
+
+    const [updated] = await ctx.db.raw
+      .update(campaigns)
+      .set({
+        approvalStatus: nextApprovalStatus,
+        ...(nextApprovalStatus === 'APPROVED'
+          ? { approvedBy: ctx.tenant.userId, approvedAt: new Date() }
+          : {}),
+        updatedAt: new Date(),
+        version: sql`${campaigns.version} + 1`,
+      })
+      .where(eq(campaigns.id, campaignId))
+      .returning();
+    if (!updated) throw new Error('Campaign approval submission failed unexpectedly');
+
+    await ctx.db.raw.insert(campaignHistory).values({
+      tenantId: ctx.tenant.tenantId,
+      campaignId,
+      actorId: ctx.tenant.userId,
+      action: nextApprovalStatus === 'APPROVED' ? 'AUTO_APPROVE' : 'SUBMIT_FOR_APPROVAL',
+      fromStatus: campaign.status,
+      toStatus: updated.status,
+    });
+
+    return updated;
+  }
+
+  /** Approves a PENDING_APPROVAL campaign — requires CRM_CAMPAIGN_APPROVE at the route level. */
+  static async approve(ctx: PlatformContext, campaignId: number): Promise<Campaign> {
+    const [campaign] = await ctx.db.raw
+      .select()
+      .from(campaigns)
+      .where(and(eq(campaigns.id, campaignId), eq(campaigns.tenantId, ctx.tenant.tenantId)));
+    if (!campaign) throw new NotFoundError('Campaign', campaignId);
+    if (campaign.approvalStatus !== 'PENDING_APPROVAL') {
+      throw new BusinessError(
+        'INVALID_APPROVAL_STATE',
+        `Cannot approve a campaign with approvalStatus ${campaign.approvalStatus ?? 'null'}`
+      );
+    }
+
+    const [updated] = await ctx.db.raw
+      .update(campaigns)
+      .set({
+        approvalStatus: 'APPROVED',
+        approvedBy: ctx.tenant.userId,
+        approvedAt: new Date(),
+        rejectionReason: null,
+        updatedAt: new Date(),
+        version: sql`${campaigns.version} + 1`,
+      })
+      .where(eq(campaigns.id, campaignId))
+      .returning();
+    if (!updated) throw new Error('Campaign approval failed unexpectedly');
+
+    await ctx.db.raw.insert(campaignHistory).values({
+      tenantId: ctx.tenant.tenantId,
+      campaignId,
+      actorId: ctx.tenant.userId,
+      action: 'APPROVE',
+      fromStatus: campaign.status,
+      toStatus: updated.status,
+    });
+    await ctx.audit.log({ action: 'APPROVE', entityType: 'campaign', entityId: campaignId });
+
+    return updated;
+  }
+
+  /** Rejects a PENDING_APPROVAL campaign back to editable — approvalStatus records the reason until the next edit/resubmit. */
+  static async reject(ctx: PlatformContext, campaignId: number, reason: string): Promise<Campaign> {
+    const [campaign] = await ctx.db.raw
+      .select()
+      .from(campaigns)
+      .where(and(eq(campaigns.id, campaignId), eq(campaigns.tenantId, ctx.tenant.tenantId)));
+    if (!campaign) throw new NotFoundError('Campaign', campaignId);
+    if (campaign.approvalStatus !== 'PENDING_APPROVAL') {
+      throw new BusinessError(
+        'INVALID_APPROVAL_STATE',
+        `Cannot reject a campaign with approvalStatus ${campaign.approvalStatus ?? 'null'}`
+      );
+    }
+
+    const [updated] = await ctx.db.raw
+      .update(campaigns)
+      .set({
+        approvalStatus: 'REJECTED',
+        rejectionReason: reason,
+        updatedAt: new Date(),
+        version: sql`${campaigns.version} + 1`,
+      })
+      .where(eq(campaigns.id, campaignId))
+      .returning();
+    if (!updated) throw new Error('Campaign rejection failed unexpectedly');
+
+    await ctx.db.raw.insert(campaignHistory).values({
+      tenantId: ctx.tenant.tenantId,
+      campaignId,
+      actorId: ctx.tenant.userId,
+      action: 'REJECT',
+      fromStatus: campaign.status,
+      toStatus: updated.status,
+      diff: { rejectionReason: reason },
+    });
+    await ctx.audit.log({
+      action: 'REJECT',
+      entityType: 'campaign',
+      entityId: campaignId,
+      after: { reason },
+    });
+
+    return updated;
+  }
+
   static async update(
     ctx: PlatformContext,
     campaignId: number,
@@ -760,12 +920,19 @@ export class CampaignService {
     }
 
     const resetToDraft = existing.status === 'SCHEDULED';
+    // CP-7 (R6, see 20_RISK_ASSESSMENT.md): editing a campaign always clears any prior approval —
+    // otherwise someone could get sign-off on one message and swap in another before it sends.
+    // A campaign with no approvalStatus set (approval never required, or never submitted) is
+    // simply left as-is (null stays null).
+    const resetApproval =
+      existing.approvalStatus === 'APPROVED' || existing.approvalStatus === 'PENDING_APPROVAL';
 
     const [updated] = await ctx.db.raw
       .update(campaigns)
       .set({
         ...patch,
         ...(resetToDraft ? { status: 'DRAFT' as const, scheduledAt: null } : {}),
+        ...(resetApproval ? { approvalStatus: null, approvedBy: null, approvedAt: null } : {}),
         updatedAt: new Date(),
         lastEditedAt: new Date(),
         version: sql`${campaigns.version} + 1`,
@@ -825,6 +992,15 @@ export class CampaignService {
         'INVALID_CAMPAIGN_STATE',
         `Cannot schedule campaign in status ${campaign.status}`
       );
+    if (
+      (await CampaignService.tenantRequiresApproval(ctx)) &&
+      campaign.approvalStatus !== 'APPROVED'
+    ) {
+      throw new BusinessError(
+        'APPROVAL_REQUIRED',
+        'Campaign must be approved before it can be scheduled'
+      );
+    }
 
     const [updated] = await ctx.db.raw
       .update(campaigns)
