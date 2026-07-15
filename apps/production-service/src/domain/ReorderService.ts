@@ -1,4 +1,4 @@
-import { and, eq, sql, lte, inArray } from 'drizzle-orm';
+import { and, eq, sql, lte, inArray, desc } from 'drizzle-orm';
 import {
   items,
   projectionStockLevel,
@@ -19,8 +19,9 @@ export interface ReorderItem {
   currentQty: number;
   reorderLevel: number;
   reorderQty: number;
-  preferredSupplierId?: number | undefined;
-  lastPurchaseRate?: number | undefined;
+  defaultSupplierId?: number | undefined;
+  supplierName?: string | undefined;
+  lastPurchasePrice?: number | undefined;
 }
 
 export interface CreatePOsFromReorderParams {
@@ -36,33 +37,92 @@ export class ReorderService {
   constructor(private db: ErpDatabase) {}
 
   async getReorderRequired(tenantId: number, warehouseId?: number): Promise<ReorderItem[]> {
-    const conditions = [
-      eq(items.tenantId, tenantId),
-      eq(items.trackInventory, true),
-      sql`${items.status} = 'ACTIVE'`,
-      lte(items.availableQty, items.reorderLevel),
-    ];
+    // items.availableQty is a tenant-wide total with no warehouse dimension — the warehouseId
+    // param was accepted but silently never applied to any filter. When a specific warehouse
+    // is requested, compare that warehouse's own projected stock (projectionStockLevel, which
+    // IS warehouse-scoped) against the item's reorder level instead.
+    const rows = warehouseId
+      ? await this.db
+          .select({
+            id: items.id,
+            itemCode: items.itemCode,
+            name: items.name,
+            availableQty: projectionStockLevel.availableQty,
+            reorderLevel: items.reorderLevel,
+            reorderQty: items.reorderQty,
+          })
+          .from(projectionStockLevel)
+          .innerJoin(items, eq(projectionStockLevel.itemId, items.id))
+          .where(
+            and(
+              eq(items.tenantId, tenantId),
+              eq(items.trackInventory, true),
+              sql`${items.status} = 'ACTIVE'`,
+              eq(projectionStockLevel.tenantId, tenantId),
+              eq(projectionStockLevel.warehouseId, warehouseId),
+              lte(projectionStockLevel.availableQty, items.reorderLevel)
+            )
+          )
+      : await this.db
+          .select({
+            id: items.id,
+            itemCode: items.itemCode,
+            name: items.name,
+            availableQty: items.availableQty,
+            reorderLevel: items.reorderLevel,
+            reorderQty: items.reorderQty,
+          })
+          .from(items)
+          .where(
+            and(
+              eq(items.tenantId, tenantId),
+              eq(items.trackInventory, true),
+              sql`${items.status} = 'ACTIVE'`,
+              lte(items.availableQty, items.reorderLevel)
+            )
+          );
 
-    const rows = await this.db
+    if (rows.length === 0) return [];
+
+    // Items have no stored "default supplier" FK — infer one from purchase history (most
+    // recent PO line for that item) instead. Without this, defaultSupplierId/lastPurchasePrice
+    // were always undefined, "Create POs" always filtered every item out, and the one-click
+    // reorder-to-PO feature never actually created anything.
+    const itemIds = rows.map((r) => r.id);
+    const purchaseHistory = await this.db
       .select({
-        id: items.id,
-        itemCode: items.itemCode,
-        name: items.name,
-        availableQty: items.availableQty,
-        reorderLevel: items.reorderLevel,
-        reorderQty: items.reorderQty,
+        itemId: purchaseOrderLines.itemId,
+        supplierId: purchaseOrders.supplierId,
+        supplierName: suppliers.displayName,
+        unitPrice: purchaseOrderLines.unitPrice,
       })
-      .from(items)
-      .where(and(...conditions));
+      .from(purchaseOrderLines)
+      .innerJoin(purchaseOrders, eq(purchaseOrderLines.purchaseOrderId, purchaseOrders.id))
+      .leftJoin(suppliers, eq(purchaseOrders.supplierId, suppliers.id))
+      .where(
+        and(eq(purchaseOrders.tenantId, tenantId), inArray(purchaseOrderLines.itemId, itemIds))
+      )
+      .orderBy(desc(purchaseOrders.poDate));
 
-    return rows.map((row) => ({
-      itemId: row.id,
-      itemCode: row.itemCode,
-      itemName: row.name,
-      currentQty: parseFloat(String(row.availableQty)),
-      reorderLevel: parseFloat(String(row.reorderLevel)),
-      reorderQty: parseFloat(String(row.reorderQty)),
-    }));
+    const lastPurchaseByItem = new Map<number, (typeof purchaseHistory)[number]>();
+    for (const p of purchaseHistory) {
+      if (!lastPurchaseByItem.has(p.itemId)) lastPurchaseByItem.set(p.itemId, p);
+    }
+
+    return rows.map((row) => {
+      const lastPurchase = lastPurchaseByItem.get(row.id);
+      return {
+        itemId: row.id,
+        itemCode: row.itemCode,
+        itemName: row.name,
+        currentQty: parseFloat(String(row.availableQty)),
+        reorderLevel: parseFloat(String(row.reorderLevel)),
+        reorderQty: parseFloat(String(row.reorderQty)),
+        defaultSupplierId: lastPurchase?.supplierId,
+        supplierName: lastPurchase?.supplierName ?? undefined,
+        lastPurchasePrice: lastPurchase ? parseFloat(String(lastPurchase.unitPrice)) : undefined,
+      };
+    });
   }
 
   async createPOsFromReorder(params: CreatePOsFromReorderParams): Promise<number[]> {
@@ -78,7 +138,12 @@ export class ReorderService {
     const supplierIds = [...bySupplier.keys()];
 
     const itemRows = await this.db
-      .select({ id: items.id, gstRate: items.gstRate, hsnCode: items.hsnCode, cessRate: items.cessRate })
+      .select({
+        id: items.id,
+        gstRate: items.gstRate,
+        hsnCode: items.hsnCode,
+        cessRate: items.cessRate,
+      })
       .from(items)
       .where(and(eq(items.tenantId, params.tenantId), inArray(items.id, itemIds)));
     const itemGstById = new Map(itemRows.map((r) => [r.id, r]));
@@ -143,7 +208,11 @@ export class ReorderService {
           })
           .returning({ id: purchaseOrders.id });
 
-        if (!row) throw new BusinessError('PO_CREATE_FAILED', 'Failed to create purchase order from reorder');
+        if (!row)
+          throw new BusinessError(
+            'PO_CREATE_FAILED',
+            'Failed to create purchase order from reorder'
+          );
         const poId = row.id;
         poIds.push(poId);
 

@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { PlatformContextFactory, PlatformContext, PlatformAttachments } from '@erp/sdk';
 import { employees, departments, designations } from '@erp/db';
-import { and, eq, ilike, isNull, or, sql } from 'drizzle-orm';
+import { and, desc, eq, ilike, isNull, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { BusinessError, NotFoundError, ValidationError } from '@erp/types';
 import {
@@ -392,6 +392,12 @@ export async function employeeRoutes(
         })
         .from(employees)
         .where(and(...conditions))
+        // No ordering at all before this fix — Postgres has no obligation to return rows in
+        // insertion order without an ORDER BY, so a newly-created employee could land on
+        // either side of the page-size boundary unpredictably. Reproduced live: a freshly
+        // created employee was invisible in the Attendance page's Employee dropdown (which
+        // only fetches page 0) once the tenant had more than one page of employees.
+        .orderBy(desc(employees.createdAt), desc(employees.id))
         .limit(size)
         .offset(page * size);
 

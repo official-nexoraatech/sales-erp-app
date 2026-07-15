@@ -6,6 +6,7 @@ import Redis from 'ioredis';
 import { createDatabaseClient, createReadReplicaClient, ReplicaRouter } from '@erp/db';
 import {
   HELMET_OPTIONS,
+  CORS_METHODS,
   PERMISSIONS_POLICY,
   registerHealthRoute,
   tenantOrIpKeyGenerator,
@@ -73,6 +74,10 @@ async function bootstrap(): Promise<void> {
 
   const fastify = Fastify({ logger: false, trustProxy: true });
 
+  // Must be registered before any routes/plugins — see auth-service/src/main.ts for why
+  // (setErrorHandler only propagates to encapsulated child contexts that exist when it's set).
+  registerErrorHandler(fastify, 'report-service', logger);
+
   fastify.addHook('onRequest', createCorrelationIdHook());
 
   await fastify.register(helmet, HELMET_OPTIONS);
@@ -80,6 +85,7 @@ async function bootstrap(): Promise<void> {
     void reply.header('Permissions-Policy', PERMISSIONS_POLICY);
   });
   await fastify.register(cors, {
+    methods: CORS_METHODS,
     origin: process.env['ALLOWED_ORIGINS']?.split(',') ?? ['http://localhost:3000'],
     credentials: true,
   });
@@ -120,8 +126,6 @@ async function bootstrap(): Promise<void> {
 
   await analyticsReportsRoutes(fastify, db, redis, reportReplicaRouter);
   await dashboardRoutes(fastify, db, dashboardReplicaRouter);
-
-  registerErrorHandler(fastify, 'report-service', logger);
 
   const scheduledJob = new ScheduledReportJob(db, logger, redis);
 

@@ -54,9 +54,17 @@ export async function grnRoutes(
       const ctx = ctxFactory.create({
         tenantId: req.auth.tenantId,
         userId: req.auth.userId,
-        correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
       });
-      const q = req.query as { status?: string; supplierId?: string; poId?: string; search?: string; page?: string; pageSize?: string };
+      const q = req.query as {
+        status?: string;
+        supplierId?: string;
+        poId?: string;
+        search?: string;
+        page?: string;
+        pageSize?: string;
+      };
       const page = Math.max(1, parseInt(q.page ?? '1', 10));
       const pageSize = Math.min(100, parseInt(q.pageSize ?? '20', 10));
       const offset = (page - 1) * pageSize;
@@ -71,7 +79,7 @@ export async function grnRoutes(
         .select()
         .from(grns)
         .where(and(...conditions))
-        .orderBy(desc(grns.grnDate))
+        .orderBy(desc(grns.grnDate), desc(grns.id))
         .limit(pageSize)
         .offset(offset);
 
@@ -80,7 +88,9 @@ export async function grnRoutes(
         .from(grns)
         .where(and(...conditions));
 
-      return reply.send({ data: { content: rows, totalElements: countRow?.count ?? 0, page, pageSize } });
+      return reply.send({
+        data: { content: rows, totalElements: countRow?.count ?? 0, page, pageSize },
+      });
     },
   });
 
@@ -91,7 +101,8 @@ export async function grnRoutes(
       const ctx = ctxFactory.create({
         tenantId: req.auth.tenantId,
         userId: req.auth.userId,
-        correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
       });
       const svc = new GRNService(ctx.db.raw);
       const id = await svc.create({
@@ -102,7 +113,9 @@ export async function grnRoutes(
         supplierId: body.supplierId,
         grnDate: new Date(body.grnDate),
         supplierInvoiceNumber: body.supplierInvoiceNumber,
-        supplierInvoiceDate: body.supplierInvoiceDate ? new Date(body.supplierInvoiceDate) : undefined,
+        supplierInvoiceDate: body.supplierInvoiceDate
+          ? new Date(body.supplierInvoiceDate)
+          : undefined,
         lines: body.lines,
         notes: body.notes,
         createdBy: req.auth.userId,
@@ -135,7 +148,8 @@ export async function grnRoutes(
       const ctx = ctxFactory.create({
         tenantId: req.auth.tenantId,
         userId: req.auth.userId,
-        correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
       });
       const svc = new GRNService(ctx.db.raw);
       const data = await svc.getWithLines(parseInt(id, 10), req.auth.tenantId);
@@ -151,7 +165,8 @@ export async function grnRoutes(
       const ctx = ctxFactory.create({
         tenantId: req.auth.tenantId,
         userId: req.auth.userId,
-        correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
       });
       const svc = new GRNService(ctx.db.raw);
       await svc.approve(parseInt(id, 10), req.auth.tenantId, req.auth.userId, body.grnNumber);
@@ -167,7 +182,8 @@ export async function grnRoutes(
       const ctx = ctxFactory.create({
         tenantId: req.auth.tenantId,
         userId: req.auth.userId,
-        correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
       });
       const svc = new GRNService(ctx.db.raw);
       await svc.reject(parseInt(id, 10), req.auth.tenantId, req.auth.userId, body.reason);

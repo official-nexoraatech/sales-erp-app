@@ -401,7 +401,12 @@ export const projectionStockLevel = pgTable(
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => [
-    unique('proj_stock_unique').on(t.tenantId, t.itemId, t.warehouseId, t.variantId),
+    // NULLS NOT DISTINCT — without it, Postgres treats two NULL variantIds as non-conflicting,
+    // so every non-variant item/warehouse pair silently accumulated duplicate rows on every
+    // projection rebuild instead of being upserted (see migration 0052).
+    unique('proj_stock_unique')
+      .on(t.tenantId, t.itemId, t.warehouseId, t.variantId)
+      .nullsNotDistinct(),
     index('idx_psl_tenant_item').on(t.tenantId, t.itemId),
     index('idx_psl_warehouse').on(t.warehouseId, t.tenantId),
     index('idx_psl_below_reorder').on(t.tenantId, t.availableQty),

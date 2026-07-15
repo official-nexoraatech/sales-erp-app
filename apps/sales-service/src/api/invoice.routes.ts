@@ -1,7 +1,14 @@
 /* global crypto, process, fetch, Buffer */
 import type { FastifyInstance } from 'fastify';
 import type { PlatformContextFactory } from '@erp/sdk';
-import { invoices, invoiceHistory, customers, organizationSettings, einvoiceData, items } from '@erp/db';
+import {
+  invoices,
+  invoiceHistory,
+  customers,
+  organizationSettings,
+  einvoiceData,
+  items,
+} from '@erp/db';
 import { and, desc, eq, ilike, inArray, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import QRCode from 'qrcode';
@@ -10,7 +17,6 @@ import { getBranchScope } from '@erp/sdk';
 import { authenticate } from '../middleware/authenticate.js';
 import { requirePermission } from '../middleware/authorize.js';
 import { InvoiceService } from '../domain/InvoiceService.js';
-import type { InvoiceLineInput } from '../domain/InvoiceService.js';
 import { InvoiceNotificationService } from '../domain/InvoiceNotificationService.js';
 import { sendError } from './http-errors.js';
 
@@ -37,10 +43,10 @@ const CreateInvoiceSchema = z.object({
   deliveryChallanId: z.number().int().positive().optional(),
   placeOfSupply: z.string().length(2),
   sellerStateCode: z.string().length(2),
-  invoiceDate: z.string().datetime().refine(
-    (val) => new Date(val).getTime() <= Date.now(),
-    'Invoice date cannot be in the future'
-  ),
+  invoiceDate: z
+    .string()
+    .datetime()
+    .refine((val) => new Date(val).getTime() <= Date.now(), 'Invoice date cannot be in the future'),
   dueDate: z.string().datetime(),
   paymentTerms: z.string().max(50).optional(),
   lines: z.array(InvoiceLineSchema).min(1),
@@ -68,8 +74,19 @@ export async function invoiceRoutes(
   fastify.get('/invoices', {
     preHandler: requirePermission(PERMISSIONS.INVOICE_VIEW),
     handler: async (req, reply) => {
-      const ctx = ctxFactory.create({ tenantId: req.auth.tenantId, userId: req.auth.userId, correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID() });
-      const q = req.query as { search?: string; status?: string; customerId?: string; page?: string; pageSize?: string };
+      const ctx = ctxFactory.create({
+        tenantId: req.auth.tenantId,
+        userId: req.auth.userId,
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+      });
+      const q = req.query as {
+        search?: string;
+        status?: string;
+        customerId?: string;
+        page?: string;
+        pageSize?: string;
+      };
       const page = Math.max(1, parseInt(q.page ?? '1', 10));
       const pageSize = Math.min(100, parseInt(q.pageSize ?? '20', 10));
       const offset = (page - 1) * pageSize;
@@ -88,7 +105,10 @@ export async function invoiceRoutes(
         .select()
         .from(invoices)
         .where(and(...conditions))
-        .orderBy(desc(invoices.invoiceDate))
+        // invoiceDate alone ties for every invoice created the same day (the common case once
+        // daily volume exceeds one page) — Postgres doesn't guarantee stable ordering among
+        // ties, so without a secondary key the newest invoice can unpredictably land past page 1.
+        .orderBy(desc(invoices.invoiceDate), desc(invoices.id))
         .limit(pageSize)
         .offset(offset);
 
@@ -97,7 +117,9 @@ export async function invoiceRoutes(
         .from(invoices)
         .where(and(...conditions));
 
-      return reply.send({ data: { content: rows, totalElements: countRow?.count ?? 0, page, pageSize } });
+      return reply.send({
+        data: { content: rows, totalElements: countRow?.count ?? 0, page, pageSize },
+      });
     },
   });
 
@@ -106,14 +128,35 @@ export async function invoiceRoutes(
     handler: async (req, reply) => {
       const body = CreateInvoiceSchema.parse(req.body);
 
-      if (body.overrideCreditLimit && !req.auth.permissions.includes(PERMISSIONS.CREDIT_LIMIT_OVERRIDE)) {
-        return sendError(reply, 403, 'PERMISSION_DENIED', `Forbidden — missing permission: ${PERMISSIONS.CREDIT_LIMIT_OVERRIDE}`);
+      if (
+        body.overrideCreditLimit &&
+        !req.auth.permissions.includes(PERMISSIONS.CREDIT_LIMIT_OVERRIDE)
+      ) {
+        return sendError(
+          reply,
+          403,
+          'PERMISSION_DENIED',
+          `Forbidden — missing permission: ${PERMISSIONS.CREDIT_LIMIT_OVERRIDE}`
+        );
       }
-      if (body.overridePriceFloor && !req.auth.permissions.includes(PERMISSIONS.PRICE_FLOOR_OVERRIDE)) {
-        return sendError(reply, 403, 'PERMISSION_DENIED', `Forbidden — missing permission: ${PERMISSIONS.PRICE_FLOOR_OVERRIDE}`);
+      if (
+        body.overridePriceFloor &&
+        !req.auth.permissions.includes(PERMISSIONS.PRICE_FLOOR_OVERRIDE)
+      ) {
+        return sendError(
+          reply,
+          403,
+          'PERMISSION_DENIED',
+          `Forbidden — missing permission: ${PERMISSIONS.PRICE_FLOOR_OVERRIDE}`
+        );
       }
 
-      const ctx = ctxFactory.create({ tenantId: req.auth.tenantId, userId: req.auth.userId, correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID() });
+      const ctx = ctxFactory.create({
+        tenantId: req.auth.tenantId,
+        userId: req.auth.userId,
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+      });
       const svc = new InvoiceService(ctx.db.raw);
 
       const id = await svc.create({
@@ -149,7 +192,10 @@ export async function invoiceRoutes(
       // PG-028: durable usage-metering event, alongside the existing erp_invoice_create_total
       // Prometheus counter (main.ts onResponse hook) — that counter is the real-time ops view,
       // this event feeds the durable per-tenant usage_events/usage_summary rollup.
-      await ctx.events.publish('invoice', id, 'USAGE_INVOICE_CREATED', { invoiceId: id, customerId: body.customerId });
+      await ctx.events.publish('invoice', id, 'USAGE_INVOICE_CREATED', {
+        invoiceId: id,
+        customerId: body.customerId,
+      });
 
       return reply.code(201).send({ data: { id } });
     },
@@ -159,7 +205,12 @@ export async function invoiceRoutes(
     preHandler: requirePermission(PERMISSIONS.INVOICE_VIEW),
     handler: async (req, reply) => {
       const { id } = req.params as { id: string };
-      const ctx = ctxFactory.create({ tenantId: req.auth.tenantId, userId: req.auth.userId, correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID() });
+      const ctx = ctxFactory.create({
+        tenantId: req.auth.tenantId,
+        userId: req.auth.userId,
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+      });
       const svc = new InvoiceService(ctx.db.raw);
       const data = await svc.getWithLines(parseInt(id, 10), req.auth.tenantId);
       return reply.send({ data });
@@ -171,7 +222,12 @@ export async function invoiceRoutes(
     handler: async (req, reply) => {
       const { id } = req.params as { id: string };
       const body = ConfirmSchema.parse(req.body);
-      const ctx = ctxFactory.create({ tenantId: req.auth.tenantId, userId: req.auth.userId, correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID() });
+      const ctx = ctxFactory.create({
+        tenantId: req.auth.tenantId,
+        userId: req.auth.userId,
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+      });
       const svc = new InvoiceService(ctx.db.raw);
       await svc.confirm(parseInt(id, 10), req.auth.tenantId, body.invoiceNumber, req.auth.userId);
       await ctx.audit.log({
@@ -194,7 +250,12 @@ export async function invoiceRoutes(
     handler: async (req, reply) => {
       const { id } = req.params as { id: string };
       const body = CancelSchema.parse(req.body);
-      const ctx = ctxFactory.create({ tenantId: req.auth.tenantId, userId: req.auth.userId, correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID() });
+      const ctx = ctxFactory.create({
+        tenantId: req.auth.tenantId,
+        userId: req.auth.userId,
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+      });
       const svc = new InvoiceService(ctx.db.raw);
       await svc.cancel(parseInt(id, 10), req.auth.tenantId, req.auth.userId, body.reason);
       await ctx.audit.log({
@@ -215,14 +276,21 @@ export async function invoiceRoutes(
     handler: async (req, reply) => {
       const { id } = req.params as { id: string };
       const invoiceId = parseInt(id, 10);
-      const ctx = ctxFactory.create({ tenantId: req.auth.tenantId, userId: req.auth.userId, correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID() });
+      const ctx = ctxFactory.create({
+        tenantId: req.auth.tenantId,
+        userId: req.auth.userId,
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+      });
       const svc = new InvoiceService(ctx.db.raw);
       const invoice = await svc.getWithLines(invoiceId, req.auth.tenantId);
 
       const [customer] = await ctx.db.raw
         .select()
         .from(customers)
-        .where(and(eq(customers.id, invoice.customerId), eq(customers.tenantId, req.auth.tenantId)));
+        .where(
+          and(eq(customers.id, invoice.customerId), eq(customers.tenantId, req.auth.tenantId))
+        );
       const [org] = await ctx.db.raw
         .select()
         .from(organizationSettings)
@@ -230,11 +298,16 @@ export async function invoiceRoutes(
       const [einvoice] = await ctx.db.raw
         .select()
         .from(einvoiceData)
-        .where(and(eq(einvoiceData.invoiceId, invoiceId), eq(einvoiceData.tenantId, req.auth.tenantId)));
+        .where(
+          and(eq(einvoiceData.invoiceId, invoiceId), eq(einvoiceData.tenantId, req.auth.tenantId))
+        );
 
       const itemIds = [...new Set(invoice.lines.map((l) => l.itemId))];
       const itemRows = itemIds.length
-        ? await ctx.db.raw.select({ id: items.id, name: items.name }).from(items).where(inArray(items.id, itemIds))
+        ? await ctx.db.raw
+            .select({ id: items.id, name: items.name })
+            .from(items)
+            .where(inArray(items.id, itemIds))
         : [];
       const itemNameById = new Map(itemRows.map((i) => [i.id, i.name]));
 
@@ -303,7 +376,8 @@ export async function invoiceRoutes(
         headers: { 'Content-Type': 'application/json', 'x-internal-key': internalKey },
         body: JSON.stringify({ documentType: 'TAX_INVOICE', data }),
       });
-      if (!res.ok) throw new BusinessError('PDF_GENERATION_FAILED', 'Failed to generate invoice PDF');
+      if (!res.ok)
+        throw new BusinessError('PDF_GENERATION_FAILED', 'Failed to generate invoice PDF');
       const buffer = Buffer.from(await res.arrayBuffer());
 
       return reply
@@ -318,10 +392,20 @@ export async function invoiceRoutes(
     preHandler: requirePermission(PERMISSIONS.INVOICE_CREATE),
     handler: async (req, reply) => {
       const { id } = req.params as { id: string };
-      const ctx = ctxFactory.create({ tenantId: req.auth.tenantId, userId: req.auth.userId, correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID() });
+      const ctx = ctxFactory.create({
+        tenantId: req.auth.tenantId,
+        userId: req.auth.userId,
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+      });
       const svc = new InvoiceService(ctx.db.raw);
       const invoiceNumber = `INV-${req.auth.tenantId}-${Date.now()}`;
-      const newId = await svc.duplicate(parseInt(id, 10), req.auth.tenantId, req.auth.userId, invoiceNumber);
+      const newId = await svc.duplicate(
+        parseInt(id, 10),
+        req.auth.tenantId,
+        req.auth.userId,
+        invoiceNumber
+      );
       return reply.code(201).send({ data: { id: newId } });
     },
   });
@@ -330,14 +414,23 @@ export async function invoiceRoutes(
     preHandler: requirePermission(PERMISSIONS.INVOICE_VIEW),
     handler: async (req, reply) => {
       const { id } = req.params as { id: string };
-      const ctx = ctxFactory.create({ tenantId: req.auth.tenantId, userId: req.auth.userId, correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID() });
+      const ctx = ctxFactory.create({
+        tenantId: req.auth.tenantId,
+        userId: req.auth.userId,
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+      });
       const history = await ctx.db.raw
         .select()
         .from(invoiceHistory)
-        .where(and(eq(invoiceHistory.invoiceId, parseInt(id, 10)), eq(invoiceHistory.tenantId, req.auth.tenantId)))
+        .where(
+          and(
+            eq(invoiceHistory.invoiceId, parseInt(id, 10)),
+            eq(invoiceHistory.tenantId, req.auth.tenantId)
+          )
+        )
         .orderBy(desc(invoiceHistory.createdAt));
       return reply.send({ data: history });
     },
   });
-
 }

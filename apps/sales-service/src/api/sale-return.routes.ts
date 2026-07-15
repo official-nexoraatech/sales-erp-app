@@ -57,7 +57,7 @@ export async function saleReturnRoutes(
         .select()
         .from(saleReturns)
         .where(eq(saleReturns.tenantId, req.auth.tenantId))
-        .orderBy(desc(saleReturns.returnDate))
+        .orderBy(desc(saleReturns.returnDate), desc(saleReturns.id))
         .limit(pageSize)
         .offset((page - 1) * pageSize);
 

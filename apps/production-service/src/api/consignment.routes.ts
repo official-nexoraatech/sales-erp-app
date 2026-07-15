@@ -45,7 +45,8 @@ export async function consignmentRoutes(
       const ctx = ctxFactory.create({
         tenantId: req.auth.tenantId,
         userId: req.auth.userId,
-        correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
       });
       const svc = new ConsignmentService(ctx.db.raw);
       const id = await svc.receive({
@@ -72,10 +73,14 @@ export async function consignmentRoutes(
       const ctx = ctxFactory.create({
         tenantId: req.auth.tenantId,
         userId: req.auth.userId,
-        correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
       });
       const svc = new ConsignmentService(ctx.db.raw);
-      const data = await svc.listStock(req.auth.tenantId, q.supplierId ? parseInt(q.supplierId, 10) : undefined);
+      const data = await svc.listStock(
+        req.auth.tenantId,
+        q.supplierId ? parseInt(q.supplierId, 10) : undefined
+      );
       return reply.send({ data });
     },
   });
@@ -87,10 +92,14 @@ export async function consignmentRoutes(
       const ctx = ctxFactory.create({
         tenantId: req.auth.tenantId,
         userId: req.auth.userId,
-        correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
       });
       const svc = new ConsignmentService(ctx.db.raw);
-      const data = await svc.listSettlements(req.auth.tenantId, q.supplierId ? parseInt(q.supplierId, 10) : undefined);
+      const data = await svc.listSettlements(
+        req.auth.tenantId,
+        q.supplierId ? parseInt(q.supplierId, 10) : undefined
+      );
       return reply.send({ data });
     },
   });
@@ -102,17 +111,22 @@ export async function consignmentRoutes(
       const ctx = ctxFactory.create({
         tenantId: req.auth.tenantId,
         userId: req.auth.userId,
-        correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
       });
       const svc = new ConsignmentService(ctx.db.raw);
+      // Same auto-numbering convention as job-work/invoice/quotation routes — settlementNumber
+      // was never set anywhere, so every settlement was permanently blank in the list.
+      const settlementNumber = `CS-${req.auth.tenantId}-${Date.now()}`;
       const id = await svc.createSettlement(
         req.auth.tenantId,
+        settlementNumber,
         body.supplierId,
         new Date(body.periodFrom),
         new Date(body.periodTo),
         req.auth.userId
       );
-      return reply.code(201).send({ data: { id } });
+      return reply.code(201).send({ data: { id, settlementNumber } });
     },
   });
 
@@ -124,7 +138,8 @@ export async function consignmentRoutes(
       const ctx = ctxFactory.create({
         tenantId: req.auth.tenantId,
         userId: req.auth.userId,
-        correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
       });
       const svc = new ConsignmentService(ctx.db.raw);
       await svc.settle(parseInt(id, 10), req.auth.tenantId, body.paymentReference, req.auth.userId);
@@ -140,10 +155,16 @@ export async function consignmentRoutes(
       const ctx = ctxFactory.create({
         tenantId: req.auth.tenantId,
         userId: req.auth.userId,
-        correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
       });
       const svc = new ConsignmentService(ctx.db.raw);
-      await svc.returnToSupplier(parseInt(id, 10), req.auth.tenantId, body.returnQty, req.auth.userId);
+      await svc.returnToSupplier(
+        parseInt(id, 10),
+        req.auth.tenantId,
+        body.returnQty,
+        req.auth.userId
+      );
       return reply.send({ data: { success: true } });
     },
   });

@@ -40,9 +40,15 @@ export async function purchaseReturnRoutes(
       const ctx = ctxFactory.create({
         tenantId: req.auth.tenantId,
         userId: req.auth.userId,
-        correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
       });
-      const q = req.query as { status?: string; supplierId?: string; page?: string; pageSize?: string };
+      const q = req.query as {
+        status?: string;
+        supplierId?: string;
+        page?: string;
+        pageSize?: string;
+      };
       const page = Math.max(1, parseInt(q.page ?? '1', 10));
       const pageSize = Math.min(100, parseInt(q.pageSize ?? '20', 10));
       const offset = (page - 1) * pageSize;
@@ -55,7 +61,7 @@ export async function purchaseReturnRoutes(
         .select()
         .from(purchaseReturns)
         .where(and(...conditions))
-        .orderBy(desc(purchaseReturns.returnDate))
+        .orderBy(desc(purchaseReturns.returnDate), desc(purchaseReturns.id))
         .limit(pageSize)
         .offset(offset);
 
@@ -64,7 +70,9 @@ export async function purchaseReturnRoutes(
         .from(purchaseReturns)
         .where(and(...conditions));
 
-      return reply.send({ data: { content: rows, totalElements: countRow?.count ?? 0, page, pageSize } });
+      return reply.send({
+        data: { content: rows, totalElements: countRow?.count ?? 0, page, pageSize },
+      });
     },
   });
 
@@ -75,7 +83,8 @@ export async function purchaseReturnRoutes(
       const ctx = ctxFactory.create({
         tenantId: req.auth.tenantId,
         userId: req.auth.userId,
-        correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
       });
       const svc = new PurchaseReturnService(ctx.db.raw);
       const id = await svc.create({
@@ -121,7 +130,8 @@ export async function purchaseReturnRoutes(
       const ctx = ctxFactory.create({
         tenantId: req.auth.tenantId,
         userId: req.auth.userId,
-        correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
       });
       const svc = new PurchaseReturnService(ctx.db.raw);
       const debitNoteId = await svc.approve(parseInt(id, 10), req.auth.tenantId, req.auth.userId);
@@ -135,9 +145,15 @@ export async function purchaseReturnRoutes(
       const ctx = ctxFactory.create({
         tenantId: req.auth.tenantId,
         userId: req.auth.userId,
-        correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
       });
-      const q = req.query as { supplierId?: string; status?: string; page?: string; pageSize?: string };
+      const q = req.query as {
+        supplierId?: string;
+        status?: string;
+        page?: string;
+        pageSize?: string;
+      };
       const page = Math.max(1, parseInt(q.page ?? '1', 10));
       const pageSize = Math.min(100, parseInt(q.pageSize ?? '20', 10));
       const offset = (page - 1) * pageSize;
@@ -150,7 +166,7 @@ export async function purchaseReturnRoutes(
         .select()
         .from(debitNotes)
         .where(and(...conditions))
-        .orderBy(desc(debitNotes.issueDate))
+        .orderBy(desc(debitNotes.issueDate), desc(debitNotes.id))
         .limit(pageSize)
         .offset(offset);
 
@@ -159,7 +175,9 @@ export async function purchaseReturnRoutes(
         .from(debitNotes)
         .where(and(...conditions));
 
-      return reply.send({ data: { content: rows, totalElements: countRow?.count ?? 0, page, pageSize } });
+      return reply.send({
+        data: { content: rows, totalElements: countRow?.count ?? 0, page, pageSize },
+      });
     },
   });
 }

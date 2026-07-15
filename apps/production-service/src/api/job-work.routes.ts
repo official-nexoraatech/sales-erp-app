@@ -29,11 +29,15 @@ const CreateJobWorkSchema = z.object({
 });
 
 const QualityCheckSchema = z.object({
-  entries: z.array(z.object({
-    pieceNumber: z.number().int().positive(),
-    result: z.enum(['PASS', 'FAIL', 'REWORK']),
-    defectNotes: z.string().max(500).optional(),
-  })).min(1),
+  entries: z
+    .array(
+      z.object({
+        pieceNumber: z.number().int().positive(),
+        result: z.enum(['PASS', 'FAIL', 'REWORK']),
+        defectNotes: z.string().max(500).optional(),
+      })
+    )
+    .min(1),
 });
 
 const CompleteSchema = z.object({
@@ -55,11 +59,17 @@ export async function jobWorkRoutes(
   fastify.get('/job-work-orders', {
     preHandler: requirePermission(PERMISSIONS.JOB_WORK_VIEW),
     handler: async (req, reply) => {
-      const q = req.query as { status?: string; supplierId?: string; page?: string; pageSize?: string };
+      const q = req.query as {
+        status?: string;
+        supplierId?: string;
+        page?: string;
+        pageSize?: string;
+      };
       const ctx = ctxFactory.create({
         tenantId: req.auth.tenantId,
         userId: req.auth.userId,
-        correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
       });
       const svc = new JobWorkOrderService(ctx.db.raw);
       const listParams: { status?: string; supplierId?: number; page: number; pageSize: number } = {
@@ -79,7 +89,8 @@ export async function jobWorkRoutes(
       const ctx = ctxFactory.create({
         tenantId: req.auth.tenantId,
         userId: req.auth.userId,
-        correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
       });
       const svc = new JobWorkOrderService(ctx.db.raw);
       const rows = await svc.listInProgress(req.auth.tenantId);
@@ -93,7 +104,8 @@ export async function jobWorkRoutes(
       const ctx = ctxFactory.create({
         tenantId: req.auth.tenantId,
         userId: req.auth.userId,
-        correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
       });
       const svc = new JobWorkOrderService(ctx.db.raw);
       const stats = await svc.getDashboardStats(req.auth.tenantId);
@@ -108,11 +120,17 @@ export async function jobWorkRoutes(
       const ctx = ctxFactory.create({
         tenantId: req.auth.tenantId,
         userId: req.auth.userId,
-        correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
       });
       const svc = new JobWorkOrderService(ctx.db.raw);
+      // Same auto-numbering convention as invoice/quotation routes (INV-/QT-{tenantId}-{ts}) —
+      // orderNumber was never set anywhere in the create path, so every job work order was
+      // permanently blank in the list, detail, and QC pages.
+      const orderNumber = `JWO-${req.auth.tenantId}-${Date.now()}`;
       const id = await svc.create({
         tenantId: req.auth.tenantId,
+        orderNumber,
         supplierId: body.supplierId,
         branchId: body.branchId,
         warehouseId: body.warehouseId,
@@ -126,7 +144,7 @@ export async function jobWorkRoutes(
         notes: body.notes,
         createdBy: req.auth.userId,
       });
-      return reply.code(201).send({ data: { id } });
+      return reply.code(201).send({ data: { id, orderNumber } });
     },
   });
 
@@ -137,7 +155,8 @@ export async function jobWorkRoutes(
       const ctx = ctxFactory.create({
         tenantId: req.auth.tenantId,
         userId: req.auth.userId,
-        correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
       });
       const svc = new JobWorkOrderService(ctx.db.raw);
       const data = await svc.getWithDetails(parseInt(id, 10), req.auth.tenantId);
@@ -152,7 +171,8 @@ export async function jobWorkRoutes(
       const ctx = ctxFactory.create({
         tenantId: req.auth.tenantId,
         userId: req.auth.userId,
-        correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
       });
       const svc = new JobWorkOrderService(ctx.db.raw);
       await svc.issueMaterials(parseInt(id, 10), req.auth.tenantId, req.auth.userId);
@@ -167,7 +187,8 @@ export async function jobWorkRoutes(
       const ctx = ctxFactory.create({
         tenantId: req.auth.tenantId,
         userId: req.auth.userId,
-        correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
       });
       const svc = new JobWorkOrderService(ctx.db.raw);
       await svc.startQualityCheck(parseInt(id, 10), req.auth.tenantId, req.auth.userId);
@@ -183,10 +204,16 @@ export async function jobWorkRoutes(
       const ctx = ctxFactory.create({
         tenantId: req.auth.tenantId,
         userId: req.auth.userId,
-        correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
       });
       const svc = new JobWorkOrderService(ctx.db.raw);
-      await svc.submitQualityChecks(parseInt(id, 10), req.auth.tenantId, req.auth.userId, body.entries);
+      await svc.submitQualityChecks(
+        parseInt(id, 10),
+        req.auth.tenantId,
+        req.auth.userId,
+        body.entries
+      );
       return reply.send({ data: { success: true } });
     },
   });
@@ -199,7 +226,8 @@ export async function jobWorkRoutes(
       const ctx = ctxFactory.create({
         tenantId: req.auth.tenantId,
         userId: req.auth.userId,
-        correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
       });
       const svc = new JobWorkOrderService(ctx.db.raw);
       await svc.complete(parseInt(id, 10), req.auth.tenantId, {
@@ -221,7 +249,8 @@ export async function jobWorkRoutes(
       const ctx = ctxFactory.create({
         tenantId: req.auth.tenantId,
         userId: req.auth.userId,
-        correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
       });
       const svc = new JobWorkOrderService(ctx.db.raw);
       await svc.cancel(parseInt(id, 10), req.auth.tenantId, req.auth.userId, body.reason);

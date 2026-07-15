@@ -1,6 +1,14 @@
 /* global Buffer */
 import type { ErpDatabase } from '@erp/db';
-import { tenants, roles, rolePermissions, users, featureFlags, branches } from '@erp/db';
+import {
+  tenants,
+  roles,
+  rolePermissions,
+  users,
+  featureFlags,
+  branches,
+  organizationSettings,
+} from '@erp/db';
 import { createLogger } from '@erp/logger';
 import { eq, and } from 'drizzle-orm';
 import argon2 from 'argon2';
@@ -42,6 +50,7 @@ const ALL_PROVISION_STEPS = [
   'RUN_MIGRATIONS',
   'SEED_ROLES_PERMISSIONS',
   'CREATE_ADMIN_USER',
+  'SEED_ORG_SETTINGS',
   'CONFIGURE_S3',
   'CREATE_ES_INDICES',
   'SET_FEATURE_FLAGS',
@@ -141,6 +150,23 @@ export class TenantProvisioner {
         provisioningSteps: completedSteps,
       })
       .where(eq(tenants.id, tenantId));
+
+    // ── STEP 5b: Seed baseline organization settings ────────────────────────
+    // GET /organization 404s until a row exists — confirmed live: every fresh tenant hit
+    // this on every single page load (org name blank in the sidebar, branding sync silently
+    // failing) until someone manually visited Settings > Organization to create the row via
+    // PUT's upsert. Seed a baseline row from what the signup form already collected instead
+    // of leaving a real gap between "tenant provisioned" and "first settings save".
+    logger.info({ tenantId }, 'Seeding baseline organization settings');
+    await this.db.insert(organizationSettings).values({
+      tenantId,
+      orgName: input.name,
+      createdBy: adminUserId,
+      ...(input.orgSettings?.timezone ? { timezone: input.orgSettings.timezone } : {}),
+      ...(input.orgSettings?.currency ? { currency: input.orgSettings.currency } : {}),
+      ...(input.orgSettings?.country ? { country: input.orgSettings.country } : {}),
+    });
+    markStep('SEED_ORG_SETTINGS');
 
     // ── STEP 6: Configure S3 prefix ─────────────────────────────────────────
     const s3Prefix = `tenants/${tenantId}`;

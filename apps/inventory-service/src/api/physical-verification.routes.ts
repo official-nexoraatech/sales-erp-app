@@ -14,12 +14,14 @@ const CreateSchema = z.object({
 });
 
 const CountUpdateSchema = z.object({
-  counts: z.array(
-    z.object({
-      lineId: z.number().int().positive(),
-      physicalQty: z.number().nonnegative(),
-    })
-  ).min(1),
+  counts: z
+    .array(
+      z.object({
+        lineId: z.number().int().positive(),
+        physicalQty: z.number().nonnegative(),
+      })
+    )
+    .min(1),
 });
 
 export async function physicalVerificationRoutes(
@@ -42,14 +44,16 @@ export async function physicalVerificationRoutes(
         .select()
         .from(physicalVerifications)
         .where(eq(physicalVerifications.tenantId, request.auth.tenantId))
-        .orderBy(desc(physicalVerifications.createdAt))
+        .orderBy(desc(physicalVerifications.createdAt), desc(physicalVerifications.id))
         .limit(limit as number)
         .offset(offset);
       const [countRow] = await ctx.db.raw
         .select({ count: sql<number>`count(*)::int` })
         .from(physicalVerifications)
         .where(eq(physicalVerifications.tenantId, request.auth.tenantId));
-      return reply.code(200).send({ data: { content: rows, totalElements: countRow?.count ?? 0, page, limit } });
+      return reply
+        .code(200)
+        .send({ data: { content: rows, totalElements: countRow?.count ?? 0, page, limit } });
     }
   );
 
@@ -161,11 +165,7 @@ export async function physicalVerificationRoutes(
       });
       const { id } = request.params as { id: string };
       const svc = new PhysicalVerificationService(ctx.db.raw);
-      const verif = await svc.approve(
-        parseInt(id, 10),
-        request.auth.tenantId,
-        request.auth.userId
-      );
+      const verif = await svc.approve(parseInt(id, 10), request.auth.tenantId, request.auth.userId);
       return reply.code(200).send({ data: verif });
     }
   );

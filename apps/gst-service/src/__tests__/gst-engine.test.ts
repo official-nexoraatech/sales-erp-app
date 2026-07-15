@@ -11,7 +11,11 @@ import { GSTCalculator } from '../domain/GSTCalculator.js';
 
 describe('GSTCalculator.compute', () => {
   it('1. intra-state 18% GST on ₹10,000 → CGST 900 + SGST 900 + IGST 0 + Cess 0', () => {
-    const result = GSTCalculator.compute({ taxableAmount: 10000, gstRate: 18, isInterstate: false });
+    const result = GSTCalculator.compute({
+      taxableAmount: 10000,
+      gstRate: 18,
+      isInterstate: false,
+    });
     expect(result.cgstAmount).toBe(900);
     expect(result.sgstAmount).toBe(900);
     expect(result.igstAmount).toBe(0);
@@ -26,13 +30,21 @@ describe('GSTCalculator.compute', () => {
   });
 
   it('3. intra-state with 3% cess → Cess = round(10000 * 3 / 100) = 300', () => {
-    const result = GSTCalculator.compute({ taxableAmount: 10000, gstRate: 18, cessRate: 3, isInterstate: false });
+    const result = GSTCalculator.compute({
+      taxableAmount: 10000,
+      gstRate: 18,
+      cessRate: 3,
+      isInterstate: false,
+    });
     expect(result.cessAmount).toBe(300);
   });
 });
 
 // ── GSTR-9 (Tests 5, 6, 7) ──────────────────────────────────────────────────────
-type Cond = { type: 'and'; args: Cond[] } | { type: 'eq'; col: string; val: unknown } | { type: 'inArray'; col: string; vals: unknown[] };
+type Cond =
+  | { type: 'and'; args: Cond[] }
+  | { type: 'eq'; col: string; val: unknown }
+  | { type: 'inArray'; col: string; vals: unknown[] };
 
 vi.mock('drizzle-orm', () => ({
   and: (...args: Cond[]) => ({ type: 'and', args }),
@@ -88,8 +100,20 @@ describe('GSTR9Engine.generateGSTR9', () => {
   it('5. table 4 taxable outward supplies matches confirmed invoices', async () => {
     const { GSTR9Engine } = await import('../domain/GSTR9Engine.js');
     const rows = [
-      ledgerRow({ tenantId: 1, entryType: 'SALES_INVOICE', taxableAmount: '1000', cgstAmount: '90', sgstAmount: '90' }),
-      ledgerRow({ tenantId: 1, entryType: 'SALES_INVOICE', taxableAmount: '2000', cgstAmount: '180', sgstAmount: '180' }),
+      ledgerRow({
+        tenantId: 1,
+        entryType: 'SALES_INVOICE',
+        taxableAmount: '1000',
+        cgstAmount: '90',
+        sgstAmount: '90',
+      }),
+      ledgerRow({
+        tenantId: 1,
+        entryType: 'SALES_INVOICE',
+        taxableAmount: '2000',
+        cgstAmount: '180',
+        sgstAmount: '180',
+      }),
     ];
     const result = await GSTR9Engine.generateGSTR9(makeDb(rows) as never, 1, FY);
     expect(result.table4.taxableValue).toBe(3000);
@@ -100,8 +124,22 @@ describe('GSTR9Engine.generateGSTR9', () => {
   it('6. table 6 ITC sum matches confirmed vendor invoices (ordinary + RCM split)', async () => {
     const { GSTR9Engine } = await import('../domain/GSTR9Engine.js');
     const rows = [
-      ledgerRow({ tenantId: 1, entryType: 'PURCHASE', taxableAmount: '5000', cgstAmount: '450', sgstAmount: '450', rcmApplicable: false }),
-      ledgerRow({ tenantId: 1, entryType: 'PURCHASE', taxableAmount: '1000', cgstAmount: '90', sgstAmount: '90', rcmApplicable: true }),
+      ledgerRow({
+        tenantId: 1,
+        entryType: 'PURCHASE',
+        taxableAmount: '5000',
+        cgstAmount: '450',
+        sgstAmount: '450',
+        rcmApplicable: false,
+      }),
+      ledgerRow({
+        tenantId: 1,
+        entryType: 'PURCHASE',
+        taxableAmount: '1000',
+        cgstAmount: '90',
+        sgstAmount: '90',
+        rcmApplicable: true,
+      }),
     ];
     const result = await GSTR9Engine.generateGSTR9(makeDb(rows) as never, 1, FY);
     expect(result.table6.inwardSupplies.cgst).toBe(450);
@@ -111,9 +149,24 @@ describe('GSTR9Engine.generateGSTR9', () => {
 
   it('7. tenant isolation — GSTR-9 for tenant A returns zero tenant B data', async () => {
     const { GSTR9Engine } = await import('../domain/GSTR9Engine.js');
+    // Table 4's taxable/nil split keys off actual tax charged (cgst+sgst+igst), not the
+    // gst_rate column — real gst_ledger rows never populate gst_rate (see GSTR9Engine's own
+    // comment), so a fixture row needs real tax amounts to land in table4, same as production.
     const rows = [
-      ledgerRow({ tenantId: 1, entryType: 'SALES_INVOICE', taxableAmount: '1000' }),
-      ledgerRow({ tenantId: 2, entryType: 'SALES_INVOICE', taxableAmount: '99999' }),
+      ledgerRow({
+        tenantId: 1,
+        entryType: 'SALES_INVOICE',
+        taxableAmount: '1000',
+        cgstAmount: '90',
+        sgstAmount: '90',
+      }),
+      ledgerRow({
+        tenantId: 2,
+        entryType: 'SALES_INVOICE',
+        taxableAmount: '99999',
+        cgstAmount: '8999.91',
+        sgstAmount: '8999.91',
+      }),
     ];
     const result = await GSTR9Engine.generateGSTR9(makeDb(rows) as never, 1, FY);
     expect(result.table4.taxableValue).toBe(1000);
@@ -138,12 +191,18 @@ describe('GSTR9Engine.generateGSTR9 — Table 9 tax paid (PG-040)', () => {
       filingRow({
         period: '2025-04',
         status: 'FILED',
-        filingData: { cashRequired: { igst: 100, cgst: 50, sgst: 50 }, itcUtilized: { igst: 10, cgst: 5, sgst: 5 } },
+        filingData: {
+          cashRequired: { igst: 100, cgst: 50, sgst: 50 },
+          itcUtilized: { igst: 10, cgst: 5, sgst: 5 },
+        },
       }),
       filingRow({
         period: '2025-05',
         status: 'LATE_FILED',
-        filingData: { cashRequired: { igst: 200, cgst: 0, sgst: 0 }, itcUtilized: { igst: 0, cgst: 0, sgst: 0 } },
+        filingData: {
+          cashRequired: { igst: 200, cgst: 0, sgst: 0 },
+          itcUtilized: { igst: 0, cgst: 0, sgst: 0 },
+        },
       }),
     ];
     const result = await GSTR9Engine.generateGSTR9(makeDb(rows) as never, 1, FY);
@@ -173,7 +232,10 @@ describe('GSTR9Engine.generateGSTR9 — Table 9 tax paid (PG-040)', () => {
       filingRow({
         period,
         status: 'FILED',
-        filingData: { cashRequired: { igst: 10, cgst: 10, sgst: 10 }, itcUtilized: { igst: 1, cgst: 1, sgst: 1 } },
+        filingData: {
+          cashRequired: { igst: 10, cgst: 10, sgst: 10 },
+          itcUtilized: { igst: 1, cgst: 1, sgst: 1 },
+        },
       })
     );
     const result = await GSTR9Engine.generateGSTR9(makeDb(rows) as never, 1, FY);

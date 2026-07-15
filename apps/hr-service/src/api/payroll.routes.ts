@@ -334,31 +334,50 @@ export async function payrollRoutes(
       let totalDeductions = 0;
       let totalNet = 0;
       const ptStateCache = new Map<number | null, string | null>();
+      // One employee missing a salary structure (very realistic — a new hire not yet set up)
+      // used to throw out of the loop entirely, aborting every other employee's slip and
+      // leaving the run stuck in CALCULATING forever with no UI path to retry (Calculate only
+      // shows for DRAFT/CALCULATED). Skip-and-report instead, same as any real bulk-process UX.
+      const skipped: Array<{ employeeId: number; reason: string }> = [];
 
       for (const emp of activeEmployees) {
-        const slip = await PayrollEngine.computeSlip(
-          ctx.db,
-          tenantId,
-          emp.id,
-          run.periodMonth,
-          run.periodYear,
-          run.workingDays,
-          ptStateCache
-        );
-        await PayrollEngine.upsertSlip(ctx.db, tenantId, id, slip);
-        totalGross += slip.grossSalary;
-        totalDeductions += slip.totalDeductions;
-        totalNet += slip.netSalary;
+        try {
+          const slip = await PayrollEngine.computeSlip(
+            ctx.db,
+            tenantId,
+            emp.id,
+            run.periodMonth,
+            run.periodYear,
+            run.workingDays,
+            ptStateCache
+          );
+          await PayrollEngine.upsertSlip(ctx.db, tenantId, id, slip);
+          totalGross += slip.grossSalary;
+          totalDeductions += slip.totalDeductions;
+          totalNet += slip.netSalary;
+        } catch (err) {
+          skipped.push({
+            employeeId: emp.id,
+            reason: err instanceof Error ? err.message : 'Unknown error',
+          });
+        }
       }
+
+      const processedCount = activeEmployees.length - skipped.length;
+      const notes =
+        skipped.length > 0
+          ? `Skipped ${skipped.length} employee(s): ${skipped.map((s) => `#${s.employeeId} (${s.reason})`).join('; ')}`
+          : undefined;
 
       await ctx.db.raw
         .update(payrollRuns)
         .set({
           status: 'CALCULATED',
-          totalEmployees: activeEmployees.length,
+          totalEmployees: processedCount,
           totalGross: String(Math.round(totalGross * 100) / 100),
           totalDeductions: String(Math.round(totalDeductions * 100) / 100),
           totalNet: String(Math.round(totalNet * 100) / 100),
+          notes,
           updatedAt: new Date(),
         })
         .where(eq(payrollRuns.id, id));
@@ -367,14 +386,22 @@ export async function payrollRoutes(
         action: 'UPDATE',
         entityType: 'payroll_run',
         entityId: id,
-        metadata: { action: 'CALCULATE', employeeCount: activeEmployees.length },
+        metadata: {
+          action: 'CALCULATE',
+          employeeCount: processedCount,
+          skippedCount: skipped.length,
+        },
       });
 
       return reply.code(200).send({
         data: {
-          message: 'Payroll calculated',
+          message:
+            skipped.length > 0
+              ? `Payroll calculated — ${skipped.length} employee(s) skipped (see notes)`
+              : 'Payroll calculated',
           payrollRunId: id,
-          employeeCount: activeEmployees.length,
+          employeeCount: processedCount,
+          skipped,
           totalNet,
         },
       });

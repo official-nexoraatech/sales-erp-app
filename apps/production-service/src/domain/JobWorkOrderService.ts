@@ -1,4 +1,4 @@
-import { and, eq, sql, desc, gte } from 'drizzle-orm';
+import { and, eq, sql, desc, gte, getTableColumns } from 'drizzle-orm';
 import {
   jobWorkOrders,
   jobWorkOrderMaterials,
@@ -6,6 +6,7 @@ import {
   jobWorkOrderHistory,
   inventoryLedger,
   items,
+  suppliers,
   outboxEvents,
 } from '@erp/db';
 import type { ErpDatabase } from '@erp/db';
@@ -14,6 +15,7 @@ import { ulid } from 'ulid';
 
 export interface CreateJobWorkOrderParams {
   tenantId: number;
+  orderNumber: string;
   supplierId: number;
   branchId: number;
   warehouseId: number;
@@ -62,6 +64,7 @@ export class JobWorkOrderService {
         .insert(jobWorkOrders)
         .values({
           tenantId: params.tenantId,
+          orderNumber: params.orderNumber,
           status: 'DRAFT',
           supplierId: params.supplierId,
           branchId: params.branchId,
@@ -79,7 +82,8 @@ export class JobWorkOrderService {
         })
         .returning({ id: jobWorkOrders.id });
 
-      if (!row) throw new BusinessError('JOB_WORK_CREATE_FAILED', 'Failed to create job work order');
+      if (!row)
+        throw new BusinessError('JOB_WORK_CREATE_FAILED', 'Failed to create job work order');
       const orderId = row.id;
 
       if (params.materials.length > 0) {
@@ -127,7 +131,10 @@ export class JobWorkOrderService {
         .where(and(eq(jobWorkOrders.id, id), eq(jobWorkOrders.tenantId, tenantId)));
       if (!order) throw new NotFoundError('JobWorkOrder', id);
       if (order.status !== 'DRAFT')
-        throw new BusinessError('INVALID_STATUS', `Cannot issue materials for order in status ${order.status}`);
+        throw new BusinessError(
+          'INVALID_STATUS',
+          `Cannot issue materials for order in status ${order.status}`
+        );
 
       const materials = await trx
         .select()
@@ -222,7 +229,10 @@ export class JobWorkOrderService {
         .where(and(eq(jobWorkOrders.id, id), eq(jobWorkOrders.tenantId, tenantId)));
       if (!order) throw new NotFoundError('JobWorkOrder', id);
       if (!['MATERIAL_ISSUED', 'IN_PROGRESS'].includes(order.status))
-        throw new BusinessError('INVALID_STATUS', `Cannot start QC for order in status ${order.status}`);
+        throw new BusinessError(
+          'INVALID_STATUS',
+          `Cannot start QC for order in status ${order.status}`
+        );
 
       await trx
         .update(jobWorkOrders)
@@ -281,14 +291,15 @@ export class JobWorkOrderService {
         .where(and(eq(jobWorkOrders.id, id), eq(jobWorkOrders.tenantId, tenantId)));
       if (!order) throw new NotFoundError('JobWorkOrder', id);
       if (!['QUALITY_CHECK', 'MATERIAL_ISSUED', 'IN_PROGRESS'].includes(order.status))
-        throw new BusinessError('INVALID_STATUS', `Cannot complete order in status ${order.status}`);
+        throw new BusinessError(
+          'INVALID_STATUS',
+          `Cannot complete order in status ${order.status}`
+        );
 
       const materialsCost = parseFloat(String(order.materialsCost));
       const jobWorkCharges = parseFloat(String(order.jobWorkCharges));
       const finishedGoodsCost =
-        params.receivedQty > 0
-          ? (materialsCost + jobWorkCharges) / params.receivedQty
-          : 0;
+        params.receivedQty > 0 ? (materialsCost + jobWorkCharges) / params.receivedQty : 0;
 
       // Add received finished goods to stock
       if (params.receivedQty > 0) {
@@ -468,32 +479,48 @@ export class JobWorkOrderService {
 
   async getWithDetails(id: number, tenantId: number): Promise<unknown> {
     const [order] = await this.db
-      .select()
+      .select({
+        ...getTableColumns(jobWorkOrders),
+        supplierName: suppliers.displayName,
+        outputItemName: items.name,
+      })
       .from(jobWorkOrders)
+      .leftJoin(suppliers, eq(jobWorkOrders.supplierId, suppliers.id))
+      .leftJoin(items, eq(jobWorkOrders.outputItemId, items.id))
       .where(and(eq(jobWorkOrders.id, id), eq(jobWorkOrders.tenantId, tenantId)));
     if (!order) throw new NotFoundError('JobWorkOrder', id);
 
     const materials = await this.db
-      .select()
+      .select({
+        ...getTableColumns(jobWorkOrderMaterials),
+        itemName: items.name,
+      })
       .from(jobWorkOrderMaterials)
+      .leftJoin(items, eq(jobWorkOrderMaterials.itemId, items.id))
       .where(eq(jobWorkOrderMaterials.jobWorkOrderId, id));
 
     const qualityChecks = await this.db
       .select()
       .from(jobWorkOrderQualityChecks)
-      .where(and(eq(jobWorkOrderQualityChecks.jobWorkOrderId, id), eq(jobWorkOrderQualityChecks.tenantId, tenantId)));
+      .where(
+        and(
+          eq(jobWorkOrderQualityChecks.jobWorkOrderId, id),
+          eq(jobWorkOrderQualityChecks.tenantId, tenantId)
+        )
+      );
 
     const history = await this.db
       .select()
       .from(jobWorkOrderHistory)
-      .where(and(eq(jobWorkOrderHistory.jobWorkOrderId, id), eq(jobWorkOrderHistory.tenantId, tenantId)))
+      .where(
+        and(eq(jobWorkOrderHistory.jobWorkOrderId, id), eq(jobWorkOrderHistory.tenantId, tenantId))
+      )
       .orderBy(desc(jobWorkOrderHistory.createdAt));
 
     return { ...order, materials, qualityChecks, history };
   }
 
   async listInProgress(tenantId: number): Promise<unknown[]> {
-    const today = new Date();
     return this.db
       .select()
       .from(jobWorkOrders)
@@ -514,11 +541,19 @@ export class JobWorkOrderService {
     if (filters.status) conditions.push(eq(jobWorkOrders.status, filters.status as never));
     if (filters.supplierId) conditions.push(eq(jobWorkOrders.supplierId, filters.supplierId));
 
+    // The list page displays supplierName/outputItemName with a "—" fallback — they were
+    // never actually populated (plain select(), no join), so every row silently showed "—".
     return this.db
-      .select()
+      .select({
+        ...getTableColumns(jobWorkOrders),
+        supplierName: suppliers.displayName,
+        outputItemName: items.name,
+      })
       .from(jobWorkOrders)
+      .leftJoin(suppliers, eq(jobWorkOrders.supplierId, suppliers.id))
+      .leftJoin(items, eq(jobWorkOrders.outputItemId, items.id))
       .where(and(...conditions))
-      .orderBy(desc(jobWorkOrders.orderDate))
+      .orderBy(desc(jobWorkOrders.orderDate), desc(jobWorkOrders.id))
       .limit(filters.pageSize)
       .offset((filters.page - 1) * filters.pageSize);
   }

@@ -6,6 +6,7 @@ import rateLimit from '@fastify/rate-limit';
 import {
   PlatformContextFactory,
   HELMET_OPTIONS,
+  CORS_METHODS,
   PERMISSIONS_POLICY,
   registerHealthRoute,
   tenantOrIpKeyGenerator,
@@ -65,6 +66,10 @@ async function bootstrap(): Promise<void> {
 
   const fastify = Fastify({ logger: false, trustProxy: true });
 
+  // Must be registered before any routes/plugins — see auth-service/src/main.ts for why
+  // (setErrorHandler only propagates to encapsulated child contexts that exist when it's set).
+  registerErrorHandler(fastify, 'purchase-service', logger);
+
   fastify.addHook('onRequest', createCorrelationIdHook());
 
   await fastify.register(multipart, { limits: { fileSize: 10 * 1024 * 1024 } });
@@ -73,6 +78,7 @@ async function bootstrap(): Promise<void> {
     void reply.header('Permissions-Policy', PERMISSIONS_POLICY);
   });
   await fastify.register(cors, {
+    methods: CORS_METHODS,
     origin: process.env['ALLOWED_ORIGINS']?.split(',') ?? ['http://localhost:3000'],
     credentials: true,
   });
@@ -109,8 +115,6 @@ async function bootstrap(): Promise<void> {
     },
     { prefix: '/api/v2' }
   );
-
-  registerErrorHandler(fastify, 'purchase-service', logger);
 
   const address = await fastify.listen({ port, host: '0.0.0.0' });
   logger.info({ address }, 'Purchase service started');

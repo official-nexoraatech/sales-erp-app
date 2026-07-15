@@ -66,7 +66,7 @@ export type {
   Upcaster,
 } from './schema-registry.js';
 
-export { HELMET_OPTIONS, PERMISSIONS_POLICY } from './http-security.js';
+export { HELMET_OPTIONS, PERMISSIONS_POLICY, CORS_METHODS } from './http-security.js';
 
 export { registerErrorHandler } from './error-handler.js';
 export type { ErrorHandlerApp, ErrorHandlerLogger } from './error-handler.js';

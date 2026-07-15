@@ -2,6 +2,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
+import type * as ErpTypes from '@erp/types';
 
 vi.mock('@erp/db', () => ({
   auditLog: { __name: 'audit_log' },
@@ -14,14 +15,20 @@ vi.mock('@erp/db', () => ({
 // keys (VIEW_AUDIT_LOG, FEATURE_FLAG_VIEW/UPDATE) resolve to undefined under
 // vitest even though the real compiled dist used at runtime is fine. Same class
 // of issue as the documented @erp/db barrel-export quirk — worked around the
-// same way, by mocking the module directly.
-vi.mock('@erp/types', () => ({
-  PERMISSIONS: {
-    VIEW_AUDIT_LOG: 'VIEW_AUDIT_LOG',
-    FEATURE_FLAG_VIEW: 'FEATURE_FLAG_VIEW',
-    FEATURE_FLAG_UPDATE: 'FEATURE_FLAG_UPDATE',
-  },
-}));
+// same way, by overriding just PERMISSIONS via importOriginal, which keeps every
+// other real export (ERPError, BusinessError, etc.) intact — feature-flags.routes.ts
+// pulls in @erp/sdk's idempotency.ts transitively, which needs a real ERPError class.
+vi.mock('@erp/types', async (importOriginal) => {
+  const actual = await importOriginal<typeof ErpTypes>();
+  return {
+    ...actual,
+    PERMISSIONS: {
+      VIEW_AUDIT_LOG: 'VIEW_AUDIT_LOG',
+      FEATURE_FLAG_VIEW: 'FEATURE_FLAG_VIEW',
+      FEATURE_FLAG_UPDATE: 'FEATURE_FLAG_UPDATE',
+    },
+  };
+});
 
 vi.mock('drizzle-orm', () => ({
   eq: vi.fn((a: unknown, b: unknown) => ({ type: 'eq', a, b })),
@@ -75,7 +82,9 @@ async function buildApp(
 
 describe('ES-20 — admin route permission guards', () => {
   it('GET /admin/audit-logs without VIEW_AUDIT_LOG → 403', async () => {
-    const db = { select: vi.fn().mockReturnValue({ from: vi.fn().mockReturnValue(chainable([])) }) };
+    const db = {
+      select: vi.fn().mockReturnValue({ from: vi.fn().mockReturnValue(chainable([])) }),
+    };
     const app = await buildApp([], db);
 
     const res = await app.inject({ method: 'GET', url: '/admin/audit-logs' });
@@ -87,7 +96,8 @@ describe('ES-20 — admin route permission guards', () => {
   it('GET /admin/audit-logs with VIEW_AUDIT_LOG → 200 with paginated content', async () => {
     const rows = [{ id: 1, entityType: 'invoice', action: 'CREATE' }];
     const db = {
-      select: vi.fn()
+      select: vi
+        .fn()
         .mockReturnValueOnce({ from: vi.fn().mockReturnValue(chainable(rows)) })
         .mockReturnValueOnce({ from: vi.fn().mockReturnValue(chainable([{ total: 1 }])) }),
     };

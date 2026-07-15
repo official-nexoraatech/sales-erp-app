@@ -120,7 +120,16 @@ export class ReportsEngine {
     asOf: string,
     _branchId?: number
   ): Promise<TrialBalanceReport> {
-    const asOfDate = asOf ? new Date(asOf) : new Date();
+    // A bare "YYYY-MM-DD" string parses as UTC MIDNIGHT (start of day) — used as an upper-bound
+    // cutoff that excludes every transaction posted later that same day, i.e. virtually
+    // everything, since real activity happens during business hours. getProfitLoss/getCashFlow
+    // already correctly append end-of-day time to their `to` bound; this sibling never did,
+    // so "Trial Balance as of today" (the default view, and the scheduler's daily snapshot job)
+    // showed zero activity for the entire current day, every day. Reproduced live: 196 real
+    // financial_entries rows for a tenant, 0 of them visible in any account's period totals.
+    const asOfDate = asOf
+      ? new Date(asOf.includes('T') ? asOf : `${asOf}T23:59:59.999Z`)
+      : new Date();
     const asOfISO = asOfDate.toISOString();
 
     // Get all accounts with their period debits and credits
@@ -400,7 +409,10 @@ export class ReportsEngine {
     asOf: string,
     _branchId?: number
   ): Promise<BalanceSheetReport> {
-    const asOfDate = asOf ? new Date(asOf) : new Date();
+    // Same bare-date-parses-as-midnight bug as getTrialBalance — see that function's comment.
+    const asOfDate = asOf
+      ? new Date(asOf.includes('T') ? asOf : `${asOf}T23:59:59.999Z`)
+      : new Date();
 
     const rows = (await db.raw.execute(sql`
       SELECT
@@ -462,9 +474,46 @@ export class ReportsEngine {
     const liabilities = rows.filter((r) => r.account_type === 'LIABILITY').map(toSection);
     const equity = rows.filter((r) => r.account_type === 'EQUITY').map(toSection);
 
+    // Revenue/expense accounts only roll into Retained Earnings via a formal year-end close
+    // (FinancialYearService.close()) — during an open year (i.e. always, until that runs), the
+    // raw trial balance is structurally guaranteed to be off by exactly the current period's
+    // unclosed net profit/loss, since that P&L has nowhere to live in the balance sheet yet.
+    // Every real accounting package computes a "Current Year Earnings" equity line on the fly
+    // for this exact reason — without it, "Balance Sheet as of today" would show isBalanced:
+    // false for literally every tenant with any P&L activity since their last formal close,
+    // which for a small business is effectively always. Confirmed live: -831,688.79 unexplained
+    // imbalance exactly matching this period's unclosed net loss.
+    const [openFy] = (await db.raw.execute(sql`
+      SELECT start_date FROM financial_years
+      WHERE tenant_id = ${tenantId} AND status != 'CLOSED' AND start_date <= ${asOfDate.toISOString().substring(0, 10)}
+      ORDER BY start_date DESC LIMIT 1
+    `)) as Array<{ start_date: string }>;
+
+    let equityWithCurrentEarnings = equity;
+    if (openFy) {
+      const pl = await ReportsEngine.getProfitLoss(
+        db,
+        tenantId,
+        openFy.start_date,
+        asOfDate.toISOString().substring(0, 10)
+      );
+      if (Math.abs(pl.netProfit) > 0.01) {
+        equityWithCurrentEarnings = [
+          ...equity,
+          {
+            accountId: 0,
+            accountCode: '3090',
+            accountName: 'Current Year Earnings',
+            accountSubType: 'RETAINED_EARNINGS',
+            balance: pl.netProfit,
+          },
+        ];
+      }
+    }
+
     const totalAssets = assets.reduce((s, l) => s + l.balance, 0);
     const totalLiabilities = liabilities.reduce((s, l) => s + l.balance, 0);
-    const totalEquity = equity.reduce((s, l) => s + l.balance, 0);
+    const totalEquity = equityWithCurrentEarnings.reduce((s, l) => s + l.balance, 0);
     const totalLiabilitiesAndEquity = totalLiabilities + totalEquity;
     const isBalanced = Math.abs(totalAssets - totalLiabilitiesAndEquity) <= 0.01;
 
@@ -478,7 +527,7 @@ export class ReportsEngine {
       totalAssets,
       liabilities,
       totalLiabilities,
-      equity,
+      equity: equityWithCurrentEarnings,
       totalEquity,
       totalLiabilitiesAndEquity,
       isBalanced,

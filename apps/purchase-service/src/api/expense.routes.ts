@@ -16,7 +16,15 @@ const ExpenseLineSchema = z.object({
 });
 
 const CreateExpenseSchema = z.object({
-  expenseType: z.enum(['RENT', 'ELECTRICITY', 'SALARY', 'FREIGHT', 'MARKETING', 'MAINTENANCE', 'MISC']),
+  expenseType: z.enum([
+    'RENT',
+    'ELECTRICITY',
+    'SALARY',
+    'FREIGHT',
+    'MARKETING',
+    'MAINTENANCE',
+    'MISC',
+  ]),
   supplierId: z.number().int().positive().optional(),
   branchId: z.number().int().positive(),
   expenseDate: z.string().datetime(),
@@ -51,9 +59,15 @@ export async function expenseRoutes(
       const ctx = ctxFactory.create({
         tenantId: req.auth.tenantId,
         userId: req.auth.userId,
-        correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
       });
-      const q = req.query as { status?: string; expenseType?: string; page?: string; pageSize?: string };
+      const q = req.query as {
+        status?: string;
+        expenseType?: string;
+        page?: string;
+        pageSize?: string;
+      };
       const page = Math.max(1, parseInt(q.page ?? '1', 10));
       const pageSize = Math.min(100, parseInt(q.pageSize ?? '20', 10));
       const offset = (page - 1) * pageSize;
@@ -66,7 +80,7 @@ export async function expenseRoutes(
         .select()
         .from(expenses)
         .where(and(...conditions))
-        .orderBy(desc(expenses.expenseDate))
+        .orderBy(desc(expenses.expenseDate), desc(expenses.id))
         .limit(pageSize)
         .offset(offset);
 
@@ -75,7 +89,9 @@ export async function expenseRoutes(
         .from(expenses)
         .where(and(...conditions));
 
-      return reply.send({ data: { content: rows, totalElements: countRow?.count ?? 0, page, pageSize } });
+      return reply.send({
+        data: { content: rows, totalElements: countRow?.count ?? 0, page, pageSize },
+      });
     },
   });
 
@@ -86,7 +102,8 @@ export async function expenseRoutes(
       const ctx = ctxFactory.create({
         tenantId: req.auth.tenantId,
         userId: req.auth.userId,
-        correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
       });
       const svc = new ExpenseService(ctx.db.raw);
       const id = await svc.create({
@@ -113,7 +130,8 @@ export async function expenseRoutes(
       const ctx = ctxFactory.create({
         tenantId: req.auth.tenantId,
         userId: req.auth.userId,
-        correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
       });
       const svc = new ExpenseService(ctx.db.raw);
       const data = await svc.getWithLines(parseInt(id, 10), req.auth.tenantId);
@@ -129,7 +147,8 @@ export async function expenseRoutes(
       const ctx = ctxFactory.create({
         tenantId: req.auth.tenantId,
         userId: req.auth.userId,
-        correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
       });
       const svc = new ExpenseService(ctx.db.raw);
       await svc.update(parseInt(id, 10), req.auth.tenantId, req.auth.userId, {
@@ -148,7 +167,8 @@ export async function expenseRoutes(
       const ctx = ctxFactory.create({
         tenantId: req.auth.tenantId,
         userId: req.auth.userId,
-        correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
       });
       const svc = new ExpenseService(ctx.db.raw);
       await svc.submit(parseInt(id, 10), req.auth.tenantId, req.auth.userId);
@@ -163,7 +183,8 @@ export async function expenseRoutes(
       const ctx = ctxFactory.create({
         tenantId: req.auth.tenantId,
         userId: req.auth.userId,
-        correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
       });
       const svc = new ExpenseService(ctx.db.raw);
       await svc.approve(parseInt(id, 10), req.auth.tenantId, req.auth.userId);
@@ -179,7 +200,8 @@ export async function expenseRoutes(
       const ctx = ctxFactory.create({
         tenantId: req.auth.tenantId,
         userId: req.auth.userId,
-        correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
       });
       const svc = new ExpenseService(ctx.db.raw);
       await svc.pay(parseInt(id, 10), req.auth.tenantId, req.auth.userId, {

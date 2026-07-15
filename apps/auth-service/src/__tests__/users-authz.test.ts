@@ -77,7 +77,13 @@ beforeAll(async () => {
 });
 
 function tokenFor(opts: { sub: string; tenantId: number; permissions: string[] }): Promise<string> {
-  return signAccessToken({ sub: opts.sub, tenantId: opts.tenantId, email: 'test@testco.com', roles: [], permissions: opts.permissions });
+  return signAccessToken({
+    sub: opts.sub,
+    tenantId: opts.tenantId,
+    email: 'test@testco.com',
+    roles: [],
+    permissions: opts.permissions,
+  });
 }
 
 // Mirrors the eq/and/inArray mocks above: every predicate is a no-op stand-in, so
@@ -107,7 +113,10 @@ function makeFakeDb() {
     insert: (table: unknown) => ({
       values: (val: Record<string, unknown> | Record<string, unknown>[]) => {
         const rows = rowsFor(table);
-        const inserted = (Array.isArray(val) ? val : [val]).map((v, i) => ({ id: rows.length + i + 1, ...v }));
+        const inserted = (Array.isArray(val) ? val : [val]).map((v, i) => ({
+          id: rows.length + i + 1,
+          ...v,
+        }));
         rows.push(...inserted);
         return Object.assign(Promise.resolve(inserted), { returning: async () => inserted });
       },
@@ -163,7 +172,12 @@ describe('ES-21 — users.ts route permission guards (C3)', () => {
     const app = await buildApp(db);
     const token = await tokenFor({ sub: '1', tenantId: 1, permissions: [] });
 
-    const res = await app.inject({ method: method as 'GET', url, headers: { Authorization: `Bearer ${token}` }, payload: {} });
+    const res = await app.inject({
+      method: method as 'GET',
+      url,
+      headers: { Authorization: `Bearer ${token}` },
+      payload: {},
+    });
 
     expect(res.statusCode).toBe(403);
     await app.close();
@@ -179,7 +193,11 @@ describe('ES-21 — users.ts route permission guards (C3)', () => {
     await app.close();
   });
 
-  it('POST /users/:id/reset-password with USER_MANAGE but the wrong current password → 401', async () => {
+  it('POST /users/:id/reset-password with USER_MANAGE but the wrong current password → 422', async () => {
+    // Not 401 — that status collides with the frontend apiClient's token-refresh interceptor,
+    // which treats any 401 on an authenticated request as "session expired" and transparently
+    // retries after refreshing tokens, silently swallowing this specific business-logic error.
+    // BusinessError's default (422) matches every other validation/business-rule failure.
     mockArgon2Verify.mockResolvedValueOnce(false); // caller's own current password check fails
     const { db, store } = makeFakeDb();
     store.users.push({ id: 1, tenantId: 1, passwordHash: '$argon2id$caller-hash' });
@@ -193,7 +211,7 @@ describe('ES-21 — users.ts route permission guards (C3)', () => {
       payload: { currentPassword: 'WrongPassword!23', newPassword: 'BrandNewPassword!23' },
     });
 
-    expect(res.statusCode).toBe(401);
+    expect(res.statusCode).toBe(422);
     await app.close();
   });
 
@@ -263,7 +281,11 @@ describe('ES-21 — users.ts route permission guards (C3)', () => {
     store.roles.push({ id: 11, tenantId: 1, name: 'CASHIER' });
     store.rolePermissions.push({ roleId: 11, permission: 'INVOICE_VIEW' });
     const app = await buildApp(db);
-    const token = await tokenFor({ sub: '1', tenantId: 1, permissions: ['USER_CREATE', 'INVOICE_VIEW'] });
+    const token = await tokenFor({
+      sub: '1',
+      tenantId: 1,
+      permissions: ['USER_CREATE', 'INVOICE_VIEW'],
+    });
 
     const res = await app.inject({
       method: 'POST',

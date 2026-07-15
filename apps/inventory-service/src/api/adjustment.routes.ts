@@ -78,7 +78,7 @@ export async function adjustmentRoutes(
         .select()
         .from(stockAdjustments)
         .where(whereClause)
-        .orderBy(desc(stockAdjustments.createdAt))
+        .orderBy(desc(stockAdjustments.createdAt), desc(stockAdjustments.id))
         .limit(limit as number)
         .offset(offset);
 

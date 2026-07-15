@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { eq, and, gte, sql, desc, lt } from 'drizzle-orm';
+import { eq, and, sql, desc } from 'drizzle-orm';
 import { items, warehouses, inventoryLedger, projectionStockLevel } from '@erp/db';
 import { PERMISSIONS } from '@erp/types';
 import type { PlatformContextFactory } from '@erp/sdk';
@@ -27,12 +27,18 @@ export async function stockRoutes(
     const expected = process.env['INTERNAL_API_KEY'] ?? '';
     const keyBuffer = Buffer.from(apiKey);
     const expectedBuffer = Buffer.from(expected);
-    const matches = !!expected && keyBuffer.length === expectedBuffer.length && timingSafeEqual(keyBuffer, expectedBuffer);
+    const matches =
+      !!expected &&
+      keyBuffer.length === expectedBuffer.length &&
+      timingSafeEqual(keyBuffer, expectedBuffer);
     if (!matches) {
-      return reply.code(401).send({ error: { code: 'UNAUTHORIZED', message: 'Invalid internal API key' } });
+      return reply
+        .code(401)
+        .send({ error: { code: 'UNAUTHORIZED', message: 'Invalid internal API key' } });
     }
     const dbUrl = process.env['DATABASE_URL'];
-    if (!dbUrl) return reply.code(500).send({ error: { code: 'NO_DB', message: 'No DATABASE_URL' } });
+    if (!dbUrl)
+      return reply.code(500).send({ error: { code: 'NO_DB', message: 'No DATABASE_URL' } });
     const db = createDatabaseClient({ url: dbUrl });
     const result = await runReconciliation(db);
     return reply.code(200).send({ data: result });
@@ -66,13 +72,21 @@ export async function stockRoutes(
           warehouseName: warehouses.name,
         })
         .from(projectionStockLevel)
-        .innerJoin(items, and(eq(items.id, projectionStockLevel.itemId), eq(items.tenantId, projectionStockLevel.tenantId)))
+        .innerJoin(
+          items,
+          and(
+            eq(items.id, projectionStockLevel.itemId),
+            eq(items.tenantId, projectionStockLevel.tenantId)
+          )
+        )
         .innerJoin(warehouses, eq(warehouses.id, projectionStockLevel.warehouseId))
         .where(eq(projectionStockLevel.tenantId, request.auth.tenantId))
         .$dynamic();
 
       if (query.warehouseId) {
-        baseQuery = baseQuery.where(eq(projectionStockLevel.warehouseId, query.warehouseId)) as typeof baseQuery;
+        baseQuery = baseQuery.where(
+          eq(projectionStockLevel.warehouseId, query.warehouseId)
+        ) as typeof baseQuery;
       }
 
       if (query.belowReorder) {
@@ -86,21 +100,33 @@ export async function stockRoutes(
       let countQuery = ctx.db.raw
         .select({ count: sql<number>`count(*)::int` })
         .from(projectionStockLevel)
-        .innerJoin(items, and(eq(items.id, projectionStockLevel.itemId), eq(items.tenantId, projectionStockLevel.tenantId)))
+        .innerJoin(
+          items,
+          and(
+            eq(items.id, projectionStockLevel.itemId),
+            eq(items.tenantId, projectionStockLevel.tenantId)
+          )
+        )
         .innerJoin(warehouses, eq(warehouses.id, projectionStockLevel.warehouseId))
         .where(eq(projectionStockLevel.tenantId, request.auth.tenantId))
         .$dynamic();
 
       if (query.warehouseId) {
-        countQuery = countQuery.where(eq(projectionStockLevel.warehouseId, query.warehouseId)) as typeof countQuery;
+        countQuery = countQuery.where(
+          eq(projectionStockLevel.warehouseId, query.warehouseId)
+        ) as typeof countQuery;
       }
       if (query.belowReorder) {
-        countQuery = countQuery.where(sql`${projectionStockLevel.availableQty} <= ${items.reorderLevel}`) as typeof countQuery;
+        countQuery = countQuery.where(
+          sql`${projectionStockLevel.availableQty} <= ${items.reorderLevel}`
+        ) as typeof countQuery;
       }
 
       const [countRow] = await countQuery;
 
-      return reply.code(200).send({ data: { content: rows, totalElements: countRow?.count ?? 0, page, limit } });
+      return reply
+        .code(200)
+        .send({ data: { content: rows, totalElements: countRow?.count ?? 0, page, limit } });
     }
   );
 
@@ -152,7 +178,11 @@ export async function stockRoutes(
 
       const { itemId } = request.params as { itemId: string };
       const id = parseInt(itemId, 10);
-      const { page = 1, limit = 50, warehouseId } = request.query as {
+      const {
+        page = 1,
+        limit = 50,
+        warehouseId,
+      } = request.query as {
         page?: number;
         limit?: number;
         warehouseId?: number;
@@ -163,12 +193,9 @@ export async function stockRoutes(
         .select()
         .from(inventoryLedger)
         .where(
-          and(
-            eq(inventoryLedger.itemId, id),
-            eq(inventoryLedger.tenantId, request.auth.tenantId)
-          )
+          and(eq(inventoryLedger.itemId, id), eq(inventoryLedger.tenantId, request.auth.tenantId))
         )
-        .orderBy(desc(inventoryLedger.createdAt))
+        .orderBy(desc(inventoryLedger.createdAt), desc(inventoryLedger.id))
         .$dynamic();
 
       if (warehouseId) {

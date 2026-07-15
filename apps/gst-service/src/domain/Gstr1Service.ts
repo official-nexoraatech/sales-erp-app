@@ -1,4 +1,4 @@
-import { eq, and, sql } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import type { TenantScopedDatabase } from '@erp/sdk';
 import { gstLedger } from '@erp/db';
 import { createLogger } from '@erp/logger';
@@ -60,7 +60,16 @@ export interface Gstr1Section {
   cdnur: Gstr1B2BEntry[];
   exp: Gstr1B2BEntry[];
   hsn: { data: Gstr1HsnEntry[] };
-  doc: { docDet: { docNum: number; from: string; to: string; totnum: number; cancel: number; net: number }[] }[];
+  doc: {
+    docDet: {
+      docNum: number;
+      from: string;
+      to: string;
+      totnum: number;
+      cancel: number;
+      net: number;
+    }[];
+  }[];
 }
 
 export class Gstr1Service {
@@ -130,7 +139,11 @@ export class Gstr1Service {
     for (const e of b2cEntries) {
       const val = n(e.grandTotal);
       const key = `${e.placeOfSupply}|${n(e.gstRate)}`;
-      if (val > B2CS_THRESHOLD) {
+      // B2CS ("Small"): invoice value <= 2.5L, aggregated by state+rate. B2CL ("Large"):
+      // invoice value > 2.5L, listed per-invoice. This was inverted — every normal, small
+      // retail sale (the overwhelming majority of B2C invoices) was being misfiled into B2CL
+      // instead of B2CS, corrupting real GSTR-1 filings.
+      if (val <= B2CS_THRESHOLD) {
         const existing = b2csMap.get(key);
         if (existing) {
           existing.taxableValue += n(e.taxableAmount);
@@ -312,8 +325,9 @@ export class Gstr1Service {
     return {
       gstin,
       fp: period,
-      gt: section.b2b.reduce((s, e) => s + e.invoiceValue, 0) +
-           section.b2cs.reduce((s, e) => s + e.taxableValue, 0),
+      gt:
+        section.b2b.reduce((s, e) => s + e.invoiceValue, 0) +
+        section.b2cs.reduce((s, e) => s + e.taxableValue, 0),
       cur_gt: 0,
       b2b: Gstr1Service.groupB2bByGstin(section.b2b),
       b2cs: section.b2cs,
@@ -365,7 +379,9 @@ export class Gstr1Service {
         errors.push(`Invalid GSTIN on invoice ${entry.invoiceNumber}: ${entry.gstin}`);
       }
     }
-    const allInvNumbers = [...section.b2b, ...section.b2cl.flatMap((s) => s.inv)].map((e) => e.invoiceNumber);
+    const allInvNumbers = [...section.b2b, ...section.b2cl.flatMap((s) => s.inv)].map(
+      (e) => e.invoiceNumber
+    );
     const unique = new Set(allInvNumbers);
     if (unique.size !== allInvNumbers.length) {
       errors.push('Duplicate invoice numbers detected in GSTR-1');

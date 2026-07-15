@@ -42,9 +42,17 @@ export async function handleInvoiceConfirmed(
   const grandTotal = n(p.grandTotal) || taxableAmount + totalGst;
 
   const isInterstate = p.sellerStateCode !== p.placeOfSupply;
+  // INVOICE_CONFIRMED never actually carries a gstRate field (confirmed: sales-service's
+  // payload only has the raw amounts) — p.gstRate was always undefined, so gst_rate was NULL
+  // on every real row. Derive it from the tax actually charged instead of leaving it null;
+  // GSTR-1/GSTR-9 both read this field (rate display, B2CS grouping, taxable-vs-nil split).
+  const derivedGstRate =
+    p.gstRate ?? (taxableAmount > 0 ? ((totalGst - cessAmount) / taxableAmount) * 100 : 0);
 
   // Period = YYYY-MM from invoiceDate or event createdAt
-  const documentDate = p.invoiceDate ? p.invoiceDate.substring(0, 10) : new Date().toISOString().substring(0, 10);
+  const documentDate = p.invoiceDate
+    ? p.invoiceDate.substring(0, 10)
+    : new Date().toISOString().substring(0, 10);
   const periodMonth = documentDate.substring(0, 7);
 
   try {
@@ -65,7 +73,7 @@ export async function handleInvoiceConfirmed(
       totalGst: String(totalGst),
       grandTotal: String(grandTotal),
       itcEligible: false,
-      gstRate: p.gstRate ? String(p.gstRate) : null,
+      gstRate: String(derivedGstRate),
       hsnCode: p.hsnCode ?? null,
       rcmApplicable: p.rcmApplicable ?? false,
       sourceEventId: event.eventId,

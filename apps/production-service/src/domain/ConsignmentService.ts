@@ -1,8 +1,10 @@
-import { and, eq, sql, desc, inArray } from 'drizzle-orm';
+import { and, eq, sql, desc, getTableColumns } from 'drizzle-orm';
 import {
   consignmentStocks,
   consignmentSettlements,
   items,
+  suppliers,
+  warehouses,
   outboxEvents,
   inventoryLedger,
 } from '@erp/db';
@@ -55,7 +57,11 @@ export class ConsignmentService {
         })
         .returning({ id: consignmentStocks.id });
 
-      if (!row) throw new BusinessError('CONSIGNMENT_CREATE_FAILED', 'Failed to record consignment receipt');
+      if (!row)
+        throw new BusinessError(
+          'CONSIGNMENT_CREATE_FAILED',
+          'Failed to record consignment receipt'
+        );
 
       await trx.insert(outboxEvents).values({
         eventId: ulid(),
@@ -152,7 +158,10 @@ export class ConsignmentService {
           .returning({ availableQty: items.availableQty });
 
         if (itemResult.length === 0) {
-          throw new BusinessError('INSUFFICIENT_STOCK', `Item ${itemId} has insufficient main warehouse stock to fulfill consignment sale`);
+          throw new BusinessError(
+            'INSUFFICIENT_STOCK',
+            `Item ${itemId} has insufficient main warehouse stock to fulfill consignment sale`
+          );
         }
 
         const afterQty = parseFloat(String(itemResult[0]!.availableQty ?? '0'));
@@ -176,15 +185,24 @@ export class ConsignmentService {
       }
 
       if (remaining > 0) {
-        throw new BusinessError('INSUFFICIENT_CONSIGNMENT', 'Insufficient consignment stock to fulfill sale', {
-          requested: soldQty,
-          shortfall: remaining,
-        });
+        throw new BusinessError(
+          'INSUFFICIENT_CONSIGNMENT',
+          'Insufficient consignment stock to fulfill sale',
+          {
+            requested: soldQty,
+            shortfall: remaining,
+          }
+        );
       }
     });
   }
 
-  async returnToSupplier(id: number, tenantId: number, returnQty: number, userId: number): Promise<void> {
+  async returnToSupplier(
+    id: number,
+    tenantId: number,
+    returnQty: number,
+    userId: number
+  ): Promise<void> {
     await this.db.transaction(async (trx) => {
       const [stock] = await trx
         .select()
@@ -194,7 +212,10 @@ export class ConsignmentService {
 
       const available = parseFloat(String(stock.availableQty));
       if (returnQty > available)
-        throw new BusinessError('INVALID_RETURN_QTY', `Cannot return ${returnQty} — only ${available} available`);
+        throw new BusinessError(
+          'INVALID_RETURN_QTY',
+          `Cannot return ${returnQty} — only ${available} available`
+        );
 
       // ES-23 [L1]: atomic check-and-deduct, mirroring the fix already applied to
       // recordSale() in this same file — the WHERE guard re-checks availableQty
@@ -238,12 +259,19 @@ export class ConsignmentService {
     });
   }
 
-  async settle(id: number, tenantId: number, paymentReference: string, userId: number): Promise<void> {
+  async settle(
+    id: number,
+    tenantId: number,
+    paymentReference: string,
+    userId: number
+  ): Promise<void> {
     await this.db.transaction(async (trx) => {
       const [settlement] = await trx
         .select()
         .from(consignmentSettlements)
-        .where(and(eq(consignmentSettlements.id, id), eq(consignmentSettlements.tenantId, tenantId)));
+        .where(
+          and(eq(consignmentSettlements.id, id), eq(consignmentSettlements.tenantId, tenantId))
+        );
       if (!settlement) throw new NotFoundError('ConsignmentSettlement', id);
       if (settlement.status !== 'PENDING')
         throw new BusinessError('ALREADY_SETTLED', 'Settlement is not in PENDING status');
@@ -257,7 +285,9 @@ export class ConsignmentService {
           paymentReference,
           updatedAt: new Date(),
         })
-        .where(and(eq(consignmentSettlements.id, id), eq(consignmentSettlements.tenantId, tenantId)));
+        .where(
+          and(eq(consignmentSettlements.id, id), eq(consignmentSettlements.tenantId, tenantId))
+        );
 
       await trx.insert(outboxEvents).values({
         eventId: ulid(),
@@ -283,11 +313,21 @@ export class ConsignmentService {
     ];
     if (supplierId) conditions.push(eq(consignmentStocks.supplierId, supplierId));
 
+    // The list page displays supplierName/itemName/warehouseName with a "—" fallback — they
+    // were never actually populated (plain select(), no join).
     return this.db
-      .select()
+      .select({
+        ...getTableColumns(consignmentStocks),
+        supplierName: suppliers.displayName,
+        itemName: items.name,
+        warehouseName: warehouses.name,
+      })
       .from(consignmentStocks)
+      .leftJoin(suppliers, eq(consignmentStocks.supplierId, suppliers.id))
+      .leftJoin(items, eq(consignmentStocks.itemId, items.id))
+      .leftJoin(warehouses, eq(consignmentStocks.warehouseId, warehouses.id))
       .where(and(...conditions))
-      .orderBy(desc(consignmentStocks.receivedDate));
+      .orderBy(desc(consignmentStocks.receivedDate), desc(consignmentStocks.id));
   }
 
   async listSettlements(tenantId: number, supplierId?: number): Promise<unknown[]> {
@@ -295,14 +335,19 @@ export class ConsignmentService {
     if (supplierId) conditions.push(eq(consignmentSettlements.supplierId, supplierId));
 
     return this.db
-      .select()
+      .select({
+        ...getTableColumns(consignmentSettlements),
+        supplierName: suppliers.displayName,
+      })
       .from(consignmentSettlements)
+      .leftJoin(suppliers, eq(consignmentSettlements.supplierId, suppliers.id))
       .where(and(...conditions))
-      .orderBy(desc(consignmentSettlements.createdAt));
+      .orderBy(desc(consignmentSettlements.createdAt), desc(consignmentSettlements.id));
   }
 
   async createSettlement(
     tenantId: number,
+    settlementNumber: string,
     supplierId: number,
     periodFrom: Date,
     periodTo: Date,
@@ -335,6 +380,7 @@ export class ConsignmentService {
         .insert(consignmentSettlements)
         .values({
           tenantId,
+          settlementNumber,
           supplierId,
           periodFrom,
           periodTo,

@@ -6,6 +6,7 @@ import Redis from 'ioredis';
 import { Kafka } from 'kafkajs';
 import {
   HELMET_OPTIONS,
+  CORS_METHODS,
   PERMISSIONS_POLICY,
   registerHealthRoute,
   tenantOrIpKeyGenerator,
@@ -125,12 +126,16 @@ async function bootstrap(): Promise<void> {
   const metricsHandler = await createMetricsHandler('scheduler-service');
 
   const fastify = Fastify({ logger: false, trustProxy: true });
+  // Must be registered before any routes/plugins — see auth-service/src/main.ts for why
+  // (setErrorHandler only propagates to encapsulated child contexts that exist when it's set).
+  registerErrorHandler(fastify, 'scheduler-service', logger);
   fastify.addHook('onRequest', createCorrelationIdHook());
   await fastify.register(helmet, HELMET_OPTIONS);
   fastify.addHook('onSend', async (_request, reply) => {
     void reply.header('Permissions-Policy', PERMISSIONS_POLICY);
   });
   await fastify.register(cors, {
+    methods: CORS_METHODS,
     origin: process.env['ALLOWED_ORIGINS']?.split(',') ?? ['http://localhost:3000'],
     credentials: true,
   });
@@ -170,8 +175,6 @@ async function bootstrap(): Promise<void> {
 
   await registerSchedulerRoutes(fastify);
   await fastify.register(registerSchedulerRoutes, { prefix: '/api/v2' });
-
-  registerErrorHandler(fastify, 'scheduler-service', logger);
 
   const gracefulShutdown = async (): Promise<void> => {
     await usageConsumer.stop();

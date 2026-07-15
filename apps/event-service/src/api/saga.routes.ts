@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { PlatformContextFactory, SagaOrchestrator } from '@erp/sdk';
 import { sagaLog } from '@erp/db';
-import { and, eq, sql, desc, gte } from 'drizzle-orm';
+import { and, eq, sql, desc } from 'drizzle-orm';
 import { z } from 'zod';
 import { PERMISSIONS } from '@erp/types';
 import { authenticate } from '../middleware/authenticate.js';
@@ -25,7 +25,11 @@ export async function sagaRoutes(
   fastify.get('/admin/sagas/summary', {
     preHandler: requirePermission(PERMISSIONS.SAGA_VIEW),
     handler: async (request, reply) => {
-      const ctx = ctxFactory.create({ tenantId: request.auth.tenantId, userId: request.auth.userId, correlationId: (request.headers['x-correlation-id'] as string) ?? 'system' });
+      const ctx = ctxFactory.create({
+        tenantId: request.auth.tenantId,
+        userId: request.auth.userId,
+        correlationId: (request.headers['x-correlation-id'] as string) ?? 'system',
+      });
       const db = ctx.db.raw;
 
       const statusCounts = await db.execute(
@@ -51,10 +55,12 @@ export async function sagaRoutes(
         byStatus[row.status] = parseInt(row.count, 10);
       }
 
-      const byType = (typeCounts as unknown as Array<{ saga_type: string; count: string }>).map((r) => ({
-        sagaType: r.saga_type,
-        count: parseInt(r.count, 10),
-      }));
+      const byType = (typeCounts as unknown as Array<{ saga_type: string; count: string }>).map(
+        (r) => ({
+          sagaType: r.saga_type,
+          count: parseInt(r.count, 10),
+        })
+      );
 
       const stalled = parseInt((stalledRows[0] as { count: string }).count, 10);
       const recent = recentRows[0] as { count: string; avg_duration_ms: number | null };
@@ -77,11 +83,21 @@ export async function sagaRoutes(
     handler: async (request, reply) => {
       const parsed = SagaListSchema.safeParse(request.query);
       if (!parsed.success) {
-        return reply.code(400).send({ error: { code: 'VALIDATION_ERROR', message: 'Invalid query params', details: parsed.error.flatten() } });
+        return reply.code(400).send({
+          error: {
+            code: 'VALIDATION_ERROR',
+            message: 'Invalid query params',
+            details: parsed.error.flatten(),
+          },
+        });
       }
 
       const { status, sagaType, page, size } = parsed.data;
-      const ctx = ctxFactory.create({ tenantId: request.auth.tenantId, userId: request.auth.userId, correlationId: (request.headers['x-correlation-id'] as string) ?? 'system' });
+      const ctx = ctxFactory.create({
+        tenantId: request.auth.tenantId,
+        userId: request.auth.userId,
+        correlationId: (request.headers['x-correlation-id'] as string) ?? 'system',
+      });
       const db = ctx.db.raw;
 
       const conditions = [eq(sagaLog.tenantId, request.auth.tenantId)];
@@ -92,7 +108,7 @@ export async function sagaRoutes(
         .select()
         .from(sagaLog)
         .where(and(...conditions))
-        .orderBy(desc(sagaLog.updatedAt))
+        .orderBy(desc(sagaLog.updatedAt), desc(sagaLog.id))
         .limit(size)
         .offset((page - 1) * size);
 
@@ -113,7 +129,11 @@ export async function sagaRoutes(
     preHandler: requirePermission(PERMISSIONS.SAGA_VIEW),
     handler: async (request, reply) => {
       const { id } = request.params;
-      const ctx = ctxFactory.create({ tenantId: request.auth.tenantId, userId: request.auth.userId, correlationId: (request.headers['x-correlation-id'] as string) ?? 'system' });
+      const ctx = ctxFactory.create({
+        tenantId: request.auth.tenantId,
+        userId: request.auth.userId,
+        correlationId: (request.headers['x-correlation-id'] as string) ?? 'system',
+      });
       const db = ctx.db.raw;
 
       const rows = await db
@@ -144,7 +164,9 @@ export async function sagaRoutes(
       const { id } = request.params;
       const result = await registeredOrchestrator.retry(id, request.auth.tenantId);
 
-      return reply.code(200).send({ data: { ...result, message: `Saga retry completed with status: ${result.status}` } });
+      return reply.code(200).send({
+        data: { ...result, message: `Saga retry completed with status: ${result.status}` },
+      });
     },
   });
 

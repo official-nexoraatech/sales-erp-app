@@ -7,6 +7,7 @@ import { PERMISSIONS } from '@erp/types';
 import { authenticate } from '../middleware/authenticate.js';
 import { requirePermission } from '../middleware/authorize.js';
 import { DeliveryChallanService } from '../domain/DeliveryChallanService.js';
+import type { ChallanLineInput } from '../domain/DeliveryChallanService.js';
 
 const ChallanLineSchema = z.object({
   itemId: z.number().int().positive(),
@@ -37,20 +38,31 @@ export async function deliveryChallanRoutes(
   fastify.get('/delivery-challans', {
     preHandler: requirePermission(PERMISSIONS.INVOICE_VIEW),
     handler: async (req, reply) => {
-      const ctx = ctxFactory.create({ tenantId: req.auth.tenantId, userId: req.auth.userId, correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID() });
-      const q = req.query as { status?: string; customerId?: string; page?: string; pageSize?: string };
+      const ctx = ctxFactory.create({
+        tenantId: req.auth.tenantId,
+        userId: req.auth.userId,
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+      });
+      const q = req.query as {
+        status?: string;
+        customerId?: string;
+        page?: string;
+        pageSize?: string;
+      };
       const page = Math.max(1, parseInt(q.page ?? '1', 10));
       const pageSize = Math.min(100, parseInt(q.pageSize ?? '20', 10));
 
       const conditions = [eq(deliveryChallans.tenantId, req.auth.tenantId)];
       if (q.status) conditions.push(eq(deliveryChallans.status, q.status as never));
-      if (q.customerId) conditions.push(eq(deliveryChallans.customerId, parseInt(q.customerId, 10)));
+      if (q.customerId)
+        conditions.push(eq(deliveryChallans.customerId, parseInt(q.customerId, 10)));
 
       const rows = await ctx.db.raw
         .select()
         .from(deliveryChallans)
         .where(and(...conditions))
-        .orderBy(desc(deliveryChallans.challanDate))
+        .orderBy(desc(deliveryChallans.challanDate), desc(deliveryChallans.id))
         .limit(pageSize)
         .offset((page - 1) * pageSize);
 
@@ -59,7 +71,9 @@ export async function deliveryChallanRoutes(
         .from(deliveryChallans)
         .where(and(...conditions));
 
-      return reply.send({ data: { content: rows, totalElements: countRow?.count ?? 0, page, pageSize } });
+      return reply.send({
+        data: { content: rows, totalElements: countRow?.count ?? 0, page, pageSize },
+      });
     },
   });
 
@@ -67,7 +81,12 @@ export async function deliveryChallanRoutes(
     preHandler: requirePermission(PERMISSIONS.INVOICE_CREATE),
     handler: async (req, reply) => {
       const body = CreateChallanSchema.parse(req.body);
-      const ctx = ctxFactory.create({ tenantId: req.auth.tenantId, userId: req.auth.userId, correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID() });
+      const ctx = ctxFactory.create({
+        tenantId: req.auth.tenantId,
+        userId: req.auth.userId,
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+      });
       const svc = new DeliveryChallanService(ctx.db.raw);
       const challanNumber = `DC-${req.auth.tenantId}-${Date.now()}`;
 
@@ -79,7 +98,7 @@ export async function deliveryChallanRoutes(
         challanNumber,
         challanDate: new Date(body.challanDate),
         deliveryAddress: body.deliveryAddress,
-        lines: body.lines as import('../domain/DeliveryChallanService.js').ChallanLineInput[],
+        lines: body.lines as ChallanLineInput[],
         notes: body.notes,
         createdBy: req.auth.userId,
       } as Parameters<typeof svc.create>[0]);
@@ -92,7 +111,12 @@ export async function deliveryChallanRoutes(
     preHandler: requirePermission(PERMISSIONS.INVOICE_VIEW),
     handler: async (req, reply) => {
       const { id } = req.params as { id: string };
-      const ctx = ctxFactory.create({ tenantId: req.auth.tenantId, userId: req.auth.userId, correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID() });
+      const ctx = ctxFactory.create({
+        tenantId: req.auth.tenantId,
+        userId: req.auth.userId,
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+      });
       const svc = new DeliveryChallanService(ctx.db.raw);
       const data = await svc.getWithLines(parseInt(id, 10), req.auth.tenantId);
       return reply.send({ data });
@@ -103,7 +127,12 @@ export async function deliveryChallanRoutes(
     preHandler: requirePermission(PERMISSIONS.INVOICE_CREATE),
     handler: async (req, reply) => {
       const { id } = req.params as { id: string };
-      const ctx = ctxFactory.create({ tenantId: req.auth.tenantId, userId: req.auth.userId, correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID() });
+      const ctx = ctxFactory.create({
+        tenantId: req.auth.tenantId,
+        userId: req.auth.userId,
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+      });
       const svc = new DeliveryChallanService(ctx.db.raw);
       await svc.dispatch(parseInt(id, 10), req.auth.tenantId, req.auth.userId);
       return reply.send({ success: true });
@@ -114,7 +143,12 @@ export async function deliveryChallanRoutes(
     preHandler: requirePermission(PERMISSIONS.INVOICE_CREATE),
     handler: async (req, reply) => {
       const { id } = req.params as { id: string };
-      const ctx = ctxFactory.create({ tenantId: req.auth.tenantId, userId: req.auth.userId, correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID() });
+      const ctx = ctxFactory.create({
+        tenantId: req.auth.tenantId,
+        userId: req.auth.userId,
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+      });
       const svc = new DeliveryChallanService(ctx.db.raw);
       const result = await svc.convertToInvoice(parseInt(id, 10), req.auth.tenantId);
       // Returns challan lines as invoice creation seed data — caller handles invoice creation

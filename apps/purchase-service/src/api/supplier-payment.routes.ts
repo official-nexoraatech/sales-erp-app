@@ -24,9 +24,9 @@ const CreateSupplierPaymentSchema = z.object({
 });
 
 const AllocateSchema = z.object({
-  allocations: z.array(
-    z.object({ grnId: z.number().int().positive(), amount: z.number().positive() })
-  ).min(1),
+  allocations: z
+    .array(z.object({ grnId: z.number().int().positive(), amount: z.number().positive() }))
+    .min(1),
 });
 
 const BounceSchema = z.object({
@@ -45,22 +45,29 @@ export async function supplierPaymentRoutes(
       const ctx = ctxFactory.create({
         tenantId: req.auth.tenantId,
         userId: req.auth.userId,
-        correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
       });
-      const q = req.query as { supplierId?: string; status?: string; page?: string; pageSize?: string };
+      const q = req.query as {
+        supplierId?: string;
+        status?: string;
+        page?: string;
+        pageSize?: string;
+      };
       const page = Math.max(1, parseInt(q.page ?? '1', 10));
       const pageSize = Math.min(100, parseInt(q.pageSize ?? '20', 10));
       const offset = (page - 1) * pageSize;
 
       const conditions = [eq(supplierPayments.tenantId, req.auth.tenantId)];
-      if (q.supplierId) conditions.push(eq(supplierPayments.supplierId, parseInt(q.supplierId, 10)));
+      if (q.supplierId)
+        conditions.push(eq(supplierPayments.supplierId, parseInt(q.supplierId, 10)));
       if (q.status) conditions.push(eq(supplierPayments.status, q.status as never));
 
       const rows = await ctx.db.raw
         .select()
         .from(supplierPayments)
         .where(and(...conditions))
-        .orderBy(desc(supplierPayments.paymentDate))
+        .orderBy(desc(supplierPayments.paymentDate), desc(supplierPayments.id))
         .limit(pageSize)
         .offset(offset);
 
@@ -69,7 +76,9 @@ export async function supplierPaymentRoutes(
         .from(supplierPayments)
         .where(and(...conditions));
 
-      return reply.send({ data: { content: rows, totalElements: countRow?.count ?? 0, page, pageSize } });
+      return reply.send({
+        data: { content: rows, totalElements: countRow?.count ?? 0, page, pageSize },
+      });
     },
   });
 
@@ -80,7 +89,8 @@ export async function supplierPaymentRoutes(
       const ctx = ctxFactory.create({
         tenantId: req.auth.tenantId,
         userId: req.auth.userId,
-        correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
       });
       const svc = new SupplierPaymentService(ctx.db.raw);
       const id = await svc.create({
@@ -111,7 +121,8 @@ export async function supplierPaymentRoutes(
       const ctx = ctxFactory.create({
         tenantId: req.auth.tenantId,
         userId: req.auth.userId,
-        correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
       });
       const svc = new SupplierPaymentService(ctx.db.raw);
       await svc.allocate(parseInt(id, 10), req.auth.tenantId, body.allocations, req.auth.userId);
@@ -127,7 +138,8 @@ export async function supplierPaymentRoutes(
       const ctx = ctxFactory.create({
         tenantId: req.auth.tenantId,
         userId: req.auth.userId,
-        correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
       });
       const svc = new SupplierPaymentService(ctx.db.raw);
       await svc.bounceCheque(parseInt(id, 10), req.auth.tenantId, body.reason);
@@ -142,7 +154,8 @@ export async function supplierPaymentRoutes(
       const ctx = ctxFactory.create({
         tenantId: req.auth.tenantId,
         userId: req.auth.userId,
-        correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
       });
       const svc = new SupplierPaymentService(ctx.db.raw);
       const data = await svc.getOutstanding(parseInt(id, 10), req.auth.tenantId);
@@ -157,7 +170,8 @@ export async function supplierPaymentRoutes(
       const ctx = ctxFactory.create({
         tenantId: req.auth.tenantId,
         userId: req.auth.userId,
-        correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
       });
       const svc = new SupplierPaymentService(ctx.db.raw);
       const data = await svc.getStatement(parseInt(id, 10), req.auth.tenantId);

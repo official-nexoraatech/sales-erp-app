@@ -67,7 +67,7 @@ export async function quotationRoutes(
         .select()
         .from(quotations)
         .where(and(...conditions))
-        .orderBy(desc(quotations.createdAt))
+        .orderBy(desc(quotations.createdAt), desc(quotations.id))
         .limit(pageSize)
         .offset(offset);
 

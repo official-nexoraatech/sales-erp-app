@@ -4,7 +4,7 @@ import { and, eq, gt, ilike, isNull, lte, or, sql, type SQL } from 'drizzle-orm'
 import { users, tenants, refreshTokens, securityAuditLog } from '@erp/db';
 import type { ErpDatabase } from '@erp/db';
 import * as argon2 from 'argon2';
-import { PERMISSIONS, ERPError, NotFoundError, ValidationError } from '@erp/types';
+import { PERMISSIONS, BusinessError, NotFoundError, ValidationError } from '@erp/types';
 import { requirePermission } from '../middleware/authorize.js';
 import { inetParam } from '../db-helpers.js';
 import { sanitizeUser } from './users.js';
@@ -110,7 +110,14 @@ export async function adminUsersRoutes(fastify: FastifyInstance, db: ErpDatabase
         body.data.currentPassword
       );
       if (!operatorPasswordValid) {
-        throw new ERPError('INVALID_CURRENT_PASSWORD', 'Your current password is incorrect', 401);
+        // 401 here would collide with the frontend apiClient's token-refresh interceptor,
+        // which treats ANY 401 on an authenticated request as "session expired" and
+        // transparently retries after refreshing tokens — silently adding a wasted round
+        // trip before the real "wrong password" error ever reaches the user, and risking
+        // an unwanted full logout if the refresh token happens to be invalid. This is a
+        // business-logic validation failure, not a session/auth failure — 422 like every
+        // other BusinessError in this codebase.
+        throw new BusinessError('INVALID_CURRENT_PASSWORD', 'Your current password is incorrect');
       }
 
       const [targetUser] = await db

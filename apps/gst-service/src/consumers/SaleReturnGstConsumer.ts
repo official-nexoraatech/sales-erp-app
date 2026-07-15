@@ -42,8 +42,13 @@ export async function handleSaleReturnApproved(
   const grandTotal = n(p.grandTotal) || taxableAmount + totalGst;
 
   const isInterstate = p.sellerStateCode !== p.placeOfSupply;
-  const documentDate = p.creditNoteDate ? p.creditNoteDate.substring(0, 10) : new Date().toISOString().substring(0, 10);
+  const documentDate = p.creditNoteDate
+    ? p.creditNoteDate.substring(0, 10)
+    : new Date().toISOString().substring(0, 10);
   const periodMonth = documentDate.substring(0, 7);
+  // Same gstRate-never-populated gap as InvoiceGstConsumer — derive from actual tax charged.
+  const derivedGstRate =
+    p.gstRate ?? (taxableAmount > 0 ? ((totalGst - cessAmount) / taxableAmount) * 100 : 0);
 
   try {
     await GstLedgerService.insertEntry(db, event.tenantId, {
@@ -63,7 +68,7 @@ export async function handleSaleReturnApproved(
       totalGst: String(totalGst),
       grandTotal: String(grandTotal),
       itcEligible: false,
-      gstRate: p.gstRate ? String(p.gstRate) : null,
+      gstRate: String(derivedGstRate),
       hsnCode: p.hsnCode ?? null,
       rcmApplicable: false,
       sourceEventId: event.eventId,
@@ -72,9 +77,15 @@ export async function handleSaleReturnApproved(
       branchId: p.branchId ?? null,
     });
 
-    logger.info({ returnId: p.returnId, creditNoteNumber: p.creditNoteNumber }, 'GST ledger: SALE_RETURN credit note recorded');
+    logger.info(
+      { returnId: p.returnId, creditNoteNumber: p.creditNoteNumber },
+      'GST ledger: SALE_RETURN credit note recorded'
+    );
   } catch (err) {
-    logger.error({ err, returnId: p.returnId }, 'GST ledger: failed to record SALE_RETURN_APPROVED');
+    logger.error(
+      { err, returnId: p.returnId },
+      'GST ledger: failed to record SALE_RETURN_APPROVED'
+    );
     throw err;
   }
 }

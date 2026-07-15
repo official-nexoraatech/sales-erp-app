@@ -44,6 +44,10 @@ export async function buildGateway(
 
   const fastify = Fastify({ logger: false, trustProxy: true });
 
+  // Must be registered before any routes/plugins — see auth-service/src/main.ts for why
+  // (setErrorHandler only propagates to encapsulated child contexts that exist when it's set).
+  registerErrorHandler(fastify, 'api-gateway', logger);
+
   fastify.addHook('onRequest', createCorrelationIdHook());
 
   await fastify.register(helmet, HELMET_OPTIONS);
@@ -92,8 +96,6 @@ export async function buildGateway(
       },
     });
   }
-
-  registerErrorHandler(fastify, 'api-gateway', logger);
 
   return fastify;
 }

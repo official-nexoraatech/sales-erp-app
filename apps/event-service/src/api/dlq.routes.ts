@@ -27,7 +27,11 @@ export async function dlqRoutes(
   fastify.get('/admin/dlq/summary', {
     preHandler: requirePermission(PERMISSIONS.DLQ_VIEW),
     handler: async (request, reply) => {
-      const ctx = ctxFactory.create({ tenantId: request.auth.tenantId, userId: request.auth.userId, correlationId: (request.headers['x-correlation-id'] as string) ?? 'system' });
+      const ctx = ctxFactory.create({
+        tenantId: request.auth.tenantId,
+        userId: request.auth.userId,
+        correlationId: (request.headers['x-correlation-id'] as string) ?? 'system',
+      });
       const db = ctx.db.raw;
 
       const rows = await db.execute(
@@ -35,7 +39,11 @@ export async function dlqRoutes(
       );
 
       const topics: Record<string, Record<string, number>> = {};
-      for (const row of rows as unknown as Array<{ topic: string; status: string; count: string }>) {
+      for (const row of rows as unknown as Array<{
+        topic: string;
+        status: string;
+        count: string;
+      }>) {
         if (!topics[row.topic]) topics[row.topic] = {};
         topics[row.topic]![row.status] = parseInt(row.count, 10);
       }
@@ -58,19 +66,29 @@ export async function dlqRoutes(
     handler: async (request, reply) => {
       const parsed = PaginationSchema.safeParse(request.query);
       if (!parsed.success) {
-        return reply.code(400).send({ error: { code: 'VALIDATION_ERROR', message: 'Invalid query params', details: parsed.error.flatten() } });
+        return reply.code(400).send({
+          error: {
+            code: 'VALIDATION_ERROR',
+            message: 'Invalid query params',
+            details: parsed.error.flatten(),
+          },
+        });
       }
 
       const { topic } = request.params;
       const { page, size } = parsed.data;
-      const ctx = ctxFactory.create({ tenantId: request.auth.tenantId, userId: request.auth.userId, correlationId: (request.headers['x-correlation-id'] as string) ?? 'system' });
+      const ctx = ctxFactory.create({
+        tenantId: request.auth.tenantId,
+        userId: request.auth.userId,
+        correlationId: (request.headers['x-correlation-id'] as string) ?? 'system',
+      });
       const db = ctx.db.raw;
 
       const rows = await db
         .select()
         .from(dlqItems)
         .where(eq(dlqItems.topic, topic))
-        .orderBy(desc(dlqItems.createdAt))
+        .orderBy(desc(dlqItems.createdAt), desc(dlqItems.id))
         .limit(size)
         .offset((page - 1) * size);
 
@@ -95,7 +113,11 @@ export async function dlqRoutes(
         return reply.code(400).send({ error: { code: 'VALIDATION_ERROR', message: 'Invalid id' } });
       }
 
-      const ctx = ctxFactory.create({ tenantId: request.auth.tenantId, userId: request.auth.userId, correlationId: (request.headers['x-correlation-id'] as string) ?? 'system' });
+      const ctx = ctxFactory.create({
+        tenantId: request.auth.tenantId,
+        userId: request.auth.userId,
+        correlationId: (request.headers['x-correlation-id'] as string) ?? 'system',
+      });
       const db = ctx.db.raw;
 
       const rows = await db
@@ -105,7 +127,9 @@ export async function dlqRoutes(
         .limit(1);
 
       if (!rows[0]) {
-        return reply.code(404).send({ error: { code: 'NOT_FOUND', message: 'DLQ item not found' } });
+        return reply
+          .code(404)
+          .send({ error: { code: 'NOT_FOUND', message: 'DLQ item not found' } });
       }
 
       return reply.code(200).send({ data: rows[0] });
@@ -117,7 +141,11 @@ export async function dlqRoutes(
     preHandler: requirePermission(PERMISSIONS.DLQ_MANAGE),
     handler: async (request, reply) => {
       const { topic } = request.params;
-      const ctx = ctxFactory.create({ tenantId: request.auth.tenantId, userId: request.auth.userId, correlationId: (request.headers['x-correlation-id'] as string) ?? 'system' });
+      const ctx = ctxFactory.create({
+        tenantId: request.auth.tenantId,
+        userId: request.auth.userId,
+        correlationId: (request.headers['x-correlation-id'] as string) ?? 'system',
+      });
       const db = ctx.db.raw;
 
       const pending = await db
@@ -145,7 +173,11 @@ export async function dlqRoutes(
           failed += 1;
           await db
             .update(dlqItems)
-            .set({ retryCount: row.retryCount + 1, lastRetriedAt: new Date(), updatedAt: new Date() })
+            .set({
+              retryCount: row.retryCount + 1,
+              lastRetriedAt: new Date(),
+              updatedAt: new Date(),
+            })
             .where(eq(dlqItems.id, row.id));
           logger.warn(
             { id: row.id, topic: row.topic, err: err instanceof Error ? err.message : String(err) },
@@ -169,12 +201,18 @@ export async function dlqRoutes(
         return reply.code(400).send({ error: { code: 'VALIDATION_ERROR', message: 'Invalid id' } });
       }
 
-      const ctx = ctxFactory.create({ tenantId: request.auth.tenantId, userId: request.auth.userId, correlationId: (request.headers['x-correlation-id'] as string) ?? 'system' });
+      const ctx = ctxFactory.create({
+        tenantId: request.auth.tenantId,
+        userId: request.auth.userId,
+        correlationId: (request.headers['x-correlation-id'] as string) ?? 'system',
+      });
       const db = ctx.db.raw;
 
       const rows = await db.select().from(dlqItems).where(eq(dlqItems.id, id)).limit(1);
       if (!rows[0]) {
-        return reply.code(404).send({ error: { code: 'NOT_FOUND', message: 'DLQ item not found' } });
+        return reply
+          .code(404)
+          .send({ error: { code: 'NOT_FOUND', message: 'DLQ item not found' } });
       }
 
       await db

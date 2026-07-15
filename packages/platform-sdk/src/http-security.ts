@@ -37,3 +37,12 @@ export const HELMET_OPTIONS = {
 
 /** Value for the Permissions-Policy response header (not set by @fastify/helmet). */
 export const PERMISSIONS_POLICY = 'camera=(), microphone=(), geolocation=()';
+
+/**
+ * @fastify/cors defaults `methods` to 'GET,HEAD,POST' only (the CORS-spec "simple methods"
+ * list) — every service in this app registered @fastify/cors without overriding it, so every
+ * real-browser PUT/PATCH/DELETE request was silently blocked at the CORS preflight stage,
+ * application-wide, for every edit-in-place endpoint. Discovered via live E2E testing (Physical
+ * Verification's "Save Counts" PUT). Spread this into every @fastify/cors registration's options.
+ */
+export const CORS_METHODS: string[] = ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE'];

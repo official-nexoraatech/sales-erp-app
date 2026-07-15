@@ -97,7 +97,8 @@ export class GSTR9Engine {
       .where(and(eq(gstLedger.tenantId, tenantId), inArray(gstLedger.periodMonth, periods)));
 
     const n = (v: unknown): number => Number(v ?? 0);
-    const sum = (r: GstLedgerRow[], col: AmountCol): number => r.reduce((acc, row) => acc + n(row[col]), 0);
+    const sum = (r: GstLedgerRow[], col: AmountCol): number =>
+      r.reduce((acc, row) => acc + n(row[col]), 0);
 
     const sales = rows.filter((r) => r.entryType === 'SALES_INVOICE');
     const creditNotes = rows.filter((r) => r.entryType === 'CREDIT_NOTE');
@@ -105,10 +106,21 @@ export class GSTR9Engine {
     const purchaseReturns = rows.filter((r) => r.entryType === 'PURCHASE_RETURN');
 
     // ── Table 4 — Taxable outward supplies (net of credit notes) ──────────────
-    const taxableSales = sales.filter((r) => n(r.gstRate) > 0);
-    const taxableCreditNotes = creditNotes.filter((r) => n(r.gstRate) > 0);
+    // gst_rate on gst_ledger rows is never actually populated by the producers that write
+    // SALES_INVOICE/CREDIT_NOTE entries (confirmed live: NULL on every real row despite
+    // correct non-zero cgst/sgst/igst amounts) — filtering on it here misclassified 100% of
+    // real taxable revenue as table 5 (nil-rated/exempt), which would make GSTR-9 report zero
+    // taxable supply value for a business that actually charged and collected real GST, a
+    // serious inconsistency against its own GSTR-1/3B figures. Use the actual tax charged as
+    // the classification signal instead — robust regardless of whether gst_rate is populated.
+    const hasTax = (r: GstLedgerRow): boolean =>
+      n(r.cgstAmount) + n(r.sgstAmount) + n(r.igstAmount) > 0;
+    const taxableSales = sales.filter(hasTax);
+    const taxableCreditNotes = creditNotes.filter(hasTax);
     const table4: GSTR9Table4 = {
-      taxableValue: round2(sum(taxableSales, 'taxableAmount') - sum(taxableCreditNotes, 'taxableAmount')),
+      taxableValue: round2(
+        sum(taxableSales, 'taxableAmount') - sum(taxableCreditNotes, 'taxableAmount')
+      ),
       cgst: round2(sum(taxableSales, 'cgstAmount') - sum(taxableCreditNotes, 'cgstAmount')),
       sgst: round2(sum(taxableSales, 'sgstAmount') - sum(taxableCreditNotes, 'sgstAmount')),
       igst: round2(sum(taxableSales, 'igstAmount') - sum(taxableCreditNotes, 'igstAmount')),
@@ -118,7 +130,7 @@ export class GSTR9Engine {
     table4.total = round2(table4.cgst + table4.sgst + table4.igst + table4.cess);
 
     // ── Table 5 — Nil-rated / exempt / non-GST outward supplies ────────────────
-    const nilSales = sales.filter((r) => n(r.gstRate) === 0);
+    const nilSales = sales.filter((r) => !hasTax(r));
     const table5: GSTR9Table5 = { taxableValue: round2(sum(nilSales, 'taxableAmount')) };
 
     // ── Table 6 — ITC availed, split ordinary inward supplies vs RCM ──────────

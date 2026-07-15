@@ -2,6 +2,18 @@ import { createLogger } from '@erp/logger';
 
 const logger = createLogger({ serviceName: 'search-service' });
 
+// customers/suppliers/employees are published to their CREATED/UPDATED outbox events as raw
+// DB rows, whose display-name column is `displayName` (see packages/db-client schema) — but
+// every ENTITY_MAPPINGS text field and the multi_match query below search on `name`. Without
+// this alias those three entities index fine (doc_as_upsert never fails) but are permanently
+// unsearchable by the one field a real user actually types into the search box.
+function normalizeDocumentFields(document: Record<string, unknown>): Record<string, unknown> {
+  if (document.name === undefined && typeof document.displayName === 'string') {
+    return { ...document, name: document.displayName };
+  }
+  return document;
+}
+
 // Entities indexed in Elasticsearch per §4.9
 export type SearchEntity =
   | 'customer'
@@ -555,7 +567,7 @@ export class SearchEngine {
     const index = this.indexName(tenantId, entity);
     const result = await this.esRequest('POST', `/${index}/_update/${id}`, {
       doc: {
-        ...document,
+        ...normalizeDocumentFields(document),
         tenantId: String(tenantId),
         _indexed_at: new Date().toISOString(),
       },
@@ -576,7 +588,11 @@ export class SearchEngine {
     const index = this.indexName(tenantId, entity);
     const body = documents.flatMap(({ id, doc }) => [
       { index: { _index: index, _id: id } },
-      { ...doc, tenantId: String(tenantId), _indexed_at: new Date().toISOString() },
+      {
+        ...normalizeDocumentFields(doc),
+        tenantId: String(tenantId),
+        _indexed_at: new Date().toISOString(),
+      },
     ]);
 
     const result = await this.esRequest(

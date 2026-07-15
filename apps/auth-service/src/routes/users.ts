@@ -4,13 +4,7 @@ import { users, roles, userRoles, userBranches, rolePermissions } from '@erp/db'
 import { and, eq, ne, inArray } from 'drizzle-orm';
 import { z } from 'zod';
 import * as argon2 from 'argon2';
-import {
-  BusinessError,
-  ERPError,
-  NotFoundError,
-  PermissionError,
-  ValidationError,
-} from '@erp/types';
+import { BusinessError, NotFoundError, PermissionError, ValidationError } from '@erp/types';
 import { PERMISSIONS } from '@erp/types';
 import type { PlatformContextFactory } from '@erp/sdk';
 import { authenticate } from '../middleware/authenticate.js';
@@ -331,7 +325,9 @@ export async function userRoutes(
         body.data.currentPassword
       );
       if (!callerPasswordValid) {
-        throw new ERPError('INVALID_CURRENT_PASSWORD', 'Your current password is incorrect', 401);
+        // 401 collides with the frontend apiClient's token-refresh interceptor (see the
+        // matching fix in admin-users.routes.ts) — 422 like every other BusinessError.
+        throw new BusinessError('INVALID_CURRENT_PASSWORD', 'Your current password is incorrect');
       }
 
       const [existing] = await ctx.db.raw

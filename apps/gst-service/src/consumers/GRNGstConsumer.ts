@@ -59,9 +59,18 @@ export async function handleGRNApproved(
   const totalGst = cgstAmount + sgstAmount + igstAmount + cessAmount;
   const grandTotal = n(p.grandTotal) || taxableAmount + totalGst;
 
-  const isInterstate = !!(p.sellerStateCode && p.placeOfSupply && p.sellerStateCode !== p.placeOfSupply);
-  const documentDate = p.grnDate ? p.grnDate.substring(0, 10) : new Date().toISOString().substring(0, 10);
+  const isInterstate = !!(
+    p.sellerStateCode &&
+    p.placeOfSupply &&
+    p.sellerStateCode !== p.placeOfSupply
+  );
+  const documentDate = p.grnDate
+    ? p.grnDate.substring(0, 10)
+    : new Date().toISOString().substring(0, 10);
   const periodMonth = documentDate.substring(0, 7);
+  // Same gstRate-never-populated gap as InvoiceGstConsumer — derive from actual tax charged.
+  const derivedGstRate =
+    p.gstRate ?? (taxableAmount > 0 ? ((totalGst - cessAmount) / taxableAmount) * 100 : 0);
 
   try {
     await GstLedgerService.insertEntry(db, event.tenantId, {
@@ -83,7 +92,7 @@ export async function handleGRNApproved(
       // ITC eligibility: default true unless supplier hasn't filed or item is blocked
       itcEligible: p.itcEligible !== false,
       itcReversalReason: p.itcReversalReason ?? null,
-      gstRate: p.gstRate ? String(p.gstRate) : null,
+      gstRate: String(derivedGstRate),
       rcmApplicable: p.rcmApplicable ?? false,
       sourceEventId: event.eventId,
       sourceDocumentId: p.grnId,
@@ -113,9 +122,16 @@ export async function handlePurchaseReturnApproved(
   const totalGst = cgstAmount + sgstAmount + igstAmount + cessAmount;
   const grandTotal = n(p.grandTotal) || taxableAmount + totalGst;
 
-  const isInterstate = !!(p.sellerStateCode && p.placeOfSupply && p.sellerStateCode !== p.placeOfSupply);
-  const documentDate = p.returnDate ? p.returnDate.substring(0, 10) : new Date().toISOString().substring(0, 10);
+  const isInterstate = !!(
+    p.sellerStateCode &&
+    p.placeOfSupply &&
+    p.sellerStateCode !== p.placeOfSupply
+  );
+  const documentDate = p.returnDate
+    ? p.returnDate.substring(0, 10)
+    : new Date().toISOString().substring(0, 10);
   const periodMonth = documentDate.substring(0, 7);
+  const derivedGstRate = taxableAmount > 0 ? ((totalGst - cessAmount) / taxableAmount) * 100 : 0;
 
   try {
     await GstLedgerService.insertEntry(db, event.tenantId, {
@@ -135,6 +151,7 @@ export async function handlePurchaseReturnApproved(
       totalGst: String(totalGst),
       grandTotal: String(grandTotal),
       itcEligible: false,
+      gstRate: String(derivedGstRate),
       sourceEventId: event.eventId,
       sourceDocumentId: p.returnId,
       sourceDocumentType: 'PURCHASE_RETURN',
@@ -142,7 +159,10 @@ export async function handlePurchaseReturnApproved(
 
     logger.info({ returnId: p.returnId }, 'GST ledger: PURCHASE_RETURN_APPROVED recorded');
   } catch (err) {
-    logger.error({ err, returnId: p.returnId }, 'GST ledger: failed to record PURCHASE_RETURN_APPROVED');
+    logger.error(
+      { err, returnId: p.returnId },
+      'GST ledger: failed to record PURCHASE_RETURN_APPROVED'
+    );
     throw err;
   }
 }

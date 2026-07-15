@@ -65,9 +65,16 @@ export async function purchaseOrderRoutes(
       const ctx = ctxFactory.create({
         tenantId: req.auth.tenantId,
         userId: req.auth.userId,
-        correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
       });
-      const q = req.query as { search?: string; status?: string; supplierId?: string; page?: string; pageSize?: string };
+      const q = req.query as {
+        search?: string;
+        status?: string;
+        supplierId?: string;
+        page?: string;
+        pageSize?: string;
+      };
       const page = Math.max(1, parseInt(q.page ?? '1', 10));
       const pageSize = Math.min(100, parseInt(q.pageSize ?? '20', 10));
       const offset = (page - 1) * pageSize;
@@ -81,7 +88,7 @@ export async function purchaseOrderRoutes(
         .select()
         .from(purchaseOrders)
         .where(and(...conditions))
-        .orderBy(desc(purchaseOrders.poDate))
+        .orderBy(desc(purchaseOrders.poDate), desc(purchaseOrders.id))
         .limit(pageSize)
         .offset(offset);
 
@@ -90,7 +97,9 @@ export async function purchaseOrderRoutes(
         .from(purchaseOrders)
         .where(and(...conditions));
 
-      return reply.send({ data: { content: rows, totalElements: countRow?.count ?? 0, page, pageSize } });
+      return reply.send({
+        data: { content: rows, totalElements: countRow?.count ?? 0, page, pageSize },
+      });
     },
   });
 
@@ -101,7 +110,8 @@ export async function purchaseOrderRoutes(
       const ctx = ctxFactory.create({
         tenantId: req.auth.tenantId,
         userId: req.auth.userId,
-        correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
       });
       const svc = new PurchaseOrderService(ctx.db.raw);
       const id = await svc.create({
@@ -110,7 +120,9 @@ export async function purchaseOrderRoutes(
         warehouseId: body.warehouseId,
         supplierId: body.supplierId,
         poDate: new Date(body.poDate),
-        expectedDeliveryDate: body.expectedDeliveryDate ? new Date(body.expectedDeliveryDate) : undefined,
+        expectedDeliveryDate: body.expectedDeliveryDate
+          ? new Date(body.expectedDeliveryDate)
+          : undefined,
         placeOfSupply: body.placeOfSupply,
         sellerStateCode: body.sellerStateCode,
         lines: body.lines,
@@ -128,7 +140,8 @@ export async function purchaseOrderRoutes(
       const ctx = ctxFactory.create({
         tenantId: req.auth.tenantId,
         userId: req.auth.userId,
-        correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
       });
       const svc = new PurchaseOrderService(ctx.db.raw);
       const rows = await svc.getPendingDelivery(req.auth.tenantId);
@@ -143,7 +156,8 @@ export async function purchaseOrderRoutes(
       const ctx = ctxFactory.create({
         tenantId: req.auth.tenantId,
         userId: req.auth.userId,
-        correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
       });
       const svc = new PurchaseOrderService(ctx.db.raw);
       const data = await svc.getWithLines(parseInt(id, 10), req.auth.tenantId);
@@ -159,12 +173,15 @@ export async function purchaseOrderRoutes(
       const ctx = ctxFactory.create({
         tenantId: req.auth.tenantId,
         userId: req.auth.userId,
-        correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
       });
       const svc = new PurchaseOrderService(ctx.db.raw);
       await svc.update(parseInt(id, 10), req.auth.tenantId, req.auth.userId, {
         notes: body.notes,
-        expectedDeliveryDate: body.expectedDeliveryDate ? new Date(body.expectedDeliveryDate) : undefined,
+        expectedDeliveryDate: body.expectedDeliveryDate
+          ? new Date(body.expectedDeliveryDate)
+          : undefined,
       });
       return reply.send({ success: true });
     },
@@ -177,7 +194,8 @@ export async function purchaseOrderRoutes(
       const ctx = ctxFactory.create({
         tenantId: req.auth.tenantId,
         userId: req.auth.userId,
-        correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
       });
       const svc = new PurchaseOrderService(ctx.db.raw);
       await svc.submit(parseInt(id, 10), req.auth.tenantId, req.auth.userId);
@@ -191,17 +209,29 @@ export async function purchaseOrderRoutes(
       const { id } = req.params as { id: string };
       const body = ApproveSchema.parse(req.body);
 
-      if (body.overrideCreditLimit && !req.auth.permissions.includes(PERMISSIONS.CREDIT_LIMIT_OVERRIDE)) {
-        return reply.code(403).send({ error: `Forbidden — missing permission: ${PERMISSIONS.CREDIT_LIMIT_OVERRIDE}` });
+      if (
+        body.overrideCreditLimit &&
+        !req.auth.permissions.includes(PERMISSIONS.CREDIT_LIMIT_OVERRIDE)
+      ) {
+        return reply
+          .code(403)
+          .send({ error: `Forbidden — missing permission: ${PERMISSIONS.CREDIT_LIMIT_OVERRIDE}` });
       }
 
       const ctx = ctxFactory.create({
         tenantId: req.auth.tenantId,
         userId: req.auth.userId,
-        correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
       });
       const svc = new PurchaseOrderService(ctx.db.raw);
-      await svc.approve(parseInt(id, 10), req.auth.tenantId, req.auth.userId, body.poNumber, body.overrideCreditLimit);
+      await svc.approve(
+        parseInt(id, 10),
+        req.auth.tenantId,
+        req.auth.userId,
+        body.poNumber,
+        body.overrideCreditLimit
+      );
       return reply.send({ success: true });
     },
   });
@@ -214,10 +244,17 @@ export async function purchaseOrderRoutes(
       const ctx = ctxFactory.create({
         tenantId: req.auth.tenantId,
         userId: req.auth.userId,
-        correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
       });
       const svc = new PurchaseOrderService(ctx.db.raw);
-      await svc.amend(parseInt(id, 10), req.auth.tenantId, req.auth.userId, body.amendments, body.reason);
+      await svc.amend(
+        parseInt(id, 10),
+        req.auth.tenantId,
+        req.auth.userId,
+        body.amendments,
+        body.reason
+      );
       return reply.send({ success: true });
     },
   });
@@ -230,7 +267,8 @@ export async function purchaseOrderRoutes(
       const ctx = ctxFactory.create({
         tenantId: req.auth.tenantId,
         userId: req.auth.userId,
-        correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
       });
       const svc = new PurchaseOrderService(ctx.db.raw);
       await svc.cancel(parseInt(id, 10), req.auth.tenantId, req.auth.userId, body.reason);
@@ -245,7 +283,8 @@ export async function purchaseOrderRoutes(
       const ctx = ctxFactory.create({
         tenantId: req.auth.tenantId,
         userId: req.auth.userId,
-        correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
       });
       const svc = new PurchaseOrderService(ctx.db.raw);
       const newId = await svc.duplicate(parseInt(id, 10), req.auth.tenantId, req.auth.userId);
@@ -260,13 +299,22 @@ export async function purchaseOrderRoutes(
       const ctx = ctxFactory.create({
         tenantId: req.auth.tenantId,
         userId: req.auth.userId,
-        correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
       });
       const [po] = await ctx.db.raw
         .select({ pdfUrl: purchaseOrders.pdfUrl })
         .from(purchaseOrders)
-        .where(and(eq(purchaseOrders.id, parseInt(id, 10)), eq(purchaseOrders.tenantId, req.auth.tenantId)));
-      if (!po) return reply.code(404).send({ error: { code: 'NOT_FOUND', message: 'Purchase order not found' } });
+        .where(
+          and(
+            eq(purchaseOrders.id, parseInt(id, 10)),
+            eq(purchaseOrders.tenantId, req.auth.tenantId)
+          )
+        );
+      if (!po)
+        return reply
+          .code(404)
+          .send({ error: { code: 'NOT_FOUND', message: 'Purchase order not found' } });
       return reply.send({ data: { pdfUrl: po.pdfUrl ?? null } });
     },
   });
@@ -278,7 +326,8 @@ export async function purchaseOrderRoutes(
       const ctx = ctxFactory.create({
         tenantId: req.auth.tenantId,
         userId: req.auth.userId,
-        correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
       });
       const history = await ctx.db.raw
         .select()

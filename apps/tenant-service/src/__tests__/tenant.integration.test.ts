@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import { createDatabaseClient } from '@erp/db';
-import { tenants, roles, users, branches } from '@erp/db';
+import { tenants, roles, users, branches, organizationSettings } from '@erp/db';
 import { eq } from 'drizzle-orm';
 import type { StorageClient } from '@erp/sdk';
 import { TenantProvisioner } from '../domain/TenantProvisioner.js';
@@ -31,6 +31,9 @@ describe.skipIf(!DB_URL)('Tenant provisioning integration', () => {
     await db.execute(`DELETE FROM user_roles WHERE tenant_id = ${provisionedTenantId}`);
     await db.execute(`DELETE FROM user_branches WHERE tenant_id = ${provisionedTenantId}`);
     await db.execute(`DELETE FROM role_permissions WHERE tenant_id = ${provisionedTenantId}`);
+    await db
+      .delete(organizationSettings)
+      .where(eq(organizationSettings.tenantId, provisionedTenantId));
     await db.delete(users).where(eq(users.tenantId, provisionedTenantId));
     await db.delete(roles).where(eq(roles.tenantId, provisionedTenantId));
     await db.delete(branches).where(eq(branches.tenantId, provisionedTenantId));
@@ -72,6 +75,18 @@ describe.skipIf(!DB_URL)('Tenant provisioning integration', () => {
     expect(adminUser).toBeDefined();
     expect(adminUser!.tenantId).toBe(result.tenantId);
     expect(adminUser!.isActive).toBe(true);
+
+    // QA session (2026-07-12): GET /organization 404s until this row exists — confirmed live
+    // against a freshly provisioned tenant that provisioning never created it. Regression
+    // guard: a baseline row must exist immediately after provisioning, seeded from the
+    // signup form's own `name`, not requiring a manual Settings visit first.
+    const [org] = await db
+      .select()
+      .from(organizationSettings)
+      .where(eq(organizationSettings.tenantId, result.tenantId));
+    expect(org).toBeDefined();
+    expect(org!.orgName).toBe('Test Cloth Co.');
+    expect(org!.createdBy).toBe(result.adminUserId);
   });
 
   it('can suspend and activate a tenant', async () => {

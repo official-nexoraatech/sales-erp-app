@@ -15,6 +15,7 @@ import { loadConfigWithSecrets } from '@erp/config';
 import type { ERPEventPayload } from '@erp/types';
 import {
   HELMET_OPTIONS,
+  CORS_METHODS,
   PERMISSIONS_POLICY,
   registerHealthRoute,
   tenantOrIpKeyGenerator,
@@ -117,12 +118,16 @@ async function bootstrap(): Promise<void> {
   logger.info({ topicCount: SEARCH_SYNC_TOPICS.length }, 'Search-sync Kafka consumer started');
 
   const fastify = Fastify({ logger: false, trustProxy: true });
+  // Must be registered before any routes/plugins — see auth-service/src/main.ts for why
+  // (setErrorHandler only propagates to encapsulated child contexts that exist when it's set).
+  registerErrorHandler(fastify, 'search-service', logger);
   fastify.addHook('onRequest', createCorrelationIdHook());
   await fastify.register(helmet, HELMET_OPTIONS);
   fastify.addHook('onSend', async (_request, reply) => {
     void reply.header('Permissions-Policy', PERMISSIONS_POLICY);
   });
   await fastify.register(cors, {
+    methods: CORS_METHODS,
     origin: process.env['ALLOWED_ORIGINS']?.split(',') ?? ['http://localhost:3000'],
     credentials: true,
   });
@@ -165,8 +170,6 @@ async function bootstrap(): Promise<void> {
 
   await registerSearchRoutes(fastify);
   await fastify.register(registerSearchRoutes, { prefix: '/api/v2' });
-
-  registerErrorHandler(fastify, 'search-service', logger);
 
   process.on('SIGTERM', () => {
     fastify.close(() => process.exit(0));

@@ -5,7 +5,6 @@ import {
   projectionStockLevel,
   stockAdjustments,
   stockAdjustmentLines,
-  items,
 } from '@erp/db';
 import { ERPError } from '@erp/types';
 import type { ErpDatabase } from '@erp/db';
@@ -42,7 +41,7 @@ export class PhysicalVerificationService {
     return verif!;
   }
 
-  async startCounting(id: number, tenantId: number, userId: number) {
+  async startCounting(id: number, tenantId: number, _userId: number) {
     const verif = await this.get(id, tenantId);
     if (verif.status !== 'DRAFT') {
       throw new ERPError('INVALID_STATUS', 'Verification must be DRAFT to start counting', 409);
@@ -100,7 +99,11 @@ export class PhysicalVerificationService {
   ) {
     const verif = await this.get(id, tenantId);
     if (verif.status !== 'COUNTING') {
-      throw new ERPError('INVALID_STATUS', 'Verification must be in COUNTING status to update counts', 409);
+      throw new ERPError(
+        'INVALID_STATUS',
+        'Verification must be in COUNTING status to update counts',
+        409
+      );
     }
 
     for (const c of counts) {
@@ -120,6 +123,13 @@ export class PhysicalVerificationService {
     }
   }
 
+  // There is no separate "list lines to count" endpoint — this is the only route the frontend's
+  // COUNTING-stage table has to populate itself with (see PhysicalVerificationDetailPage.tsx).
+  // Filtering to physicalQty IS NOT NULL made it a real chicken-and-egg bug: a fresh
+  // verification has every line's physicalQty NULL until counted, so the table rendered zero
+  // rows and there was no way to ever enter a count in the first place. approve()'s own query
+  // (which genuinely only needs counted, non-zero-variance lines to build an adjustment) has
+  // its own separate filter and is unaffected by this change.
   async getVariances(id: number, tenantId: number) {
     await this.get(id, tenantId);
     return this.db
@@ -128,8 +138,7 @@ export class PhysicalVerificationService {
       .where(
         and(
           eq(physicalVerificationLines.verificationId, id),
-          eq(physicalVerificationLines.tenantId, tenantId),
-          sql`${physicalVerificationLines.physicalQty} IS NOT NULL`
+          eq(physicalVerificationLines.tenantId, tenantId)
         )
       );
   }
@@ -137,7 +146,11 @@ export class PhysicalVerificationService {
   async approve(id: number, tenantId: number, userId: number) {
     const verif = await this.get(id, tenantId);
     if (verif.status !== 'COUNTING') {
-      throw new ERPError('INVALID_STATUS', 'Verification must be in COUNTING status to approve', 409);
+      throw new ERPError(
+        'INVALID_STATUS',
+        'Verification must be in COUNTING status to approve',
+        409
+      );
     }
 
     const lines = await this.db
@@ -230,9 +243,7 @@ export class PhysicalVerificationService {
     const [verif] = await this.db
       .select()
       .from(physicalVerifications)
-      .where(
-        and(eq(physicalVerifications.id, id), eq(physicalVerifications.tenantId, tenantId))
-      );
+      .where(and(eq(physicalVerifications.id, id), eq(physicalVerifications.tenantId, tenantId)));
     if (!verif) throw new ERPError('VERIFICATION_NOT_FOUND', 'Verification not found', 404);
     return verif;
   }

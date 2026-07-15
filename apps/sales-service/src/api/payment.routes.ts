@@ -69,7 +69,7 @@ export async function paymentRoutes(
         .select()
         .from(payments)
         .where(and(...conditions))
-        .orderBy(desc(payments.paymentDate))
+        .orderBy(desc(payments.paymentDate), desc(payments.id))
         .limit(pageSize)
         .offset((page - 1) * pageSize);
 

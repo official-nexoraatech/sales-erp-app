@@ -5,6 +5,7 @@ import rateLimit from '@fastify/rate-limit';
 import Redis from 'ioredis';
 import {
   HELMET_OPTIONS,
+  CORS_METHODS,
   PERMISSIONS_POLICY,
   registerHealthRoute,
   tenantOrIpKeyGenerator,
@@ -102,6 +103,17 @@ async function bootstrap(): Promise<void> {
     trustProxy: true,
   });
 
+  // Must be registered before any routes/plugins — Fastify's setErrorHandler only propagates
+  // to encapsulated child contexts (every fastify.register() call, including the /api/v2
+  // prefix wrapper and the protected-routes sub-scope below) that exist AT THE TIME it's set.
+  // This was previously called at the end of bootstrap, after every route was already
+  // registered, so it silently never applied to any of them — every ERPError/ValidationError/
+  // BusinessError thrown anywhere in this service fell through to Fastify's own generic
+  // default error formatting (flat {statusCode, error: <HTTP reason phrase>, message}) instead
+  // of this handler's {error: {code, message, details}} shape, discarding the real, specific,
+  // actionable error message on every single validation/business-rule failure.
+  registerErrorHandler(fastify, 'auth-service', logger);
+
   fastify.addHook('onRequest', createCorrelationIdHook());
 
   await fastify.register(helmet, HELMET_OPTIONS);
@@ -110,6 +122,7 @@ async function bootstrap(): Promise<void> {
   });
 
   await fastify.register(cors, {
+    methods: CORS_METHODS,
     origin: process.env['ALLOWED_ORIGINS']?.split(',') ?? ['http://localhost:3000'],
     credentials: true,
   });
@@ -170,8 +183,6 @@ async function bootstrap(): Promise<void> {
 
   await registerAuthRoutes(fastify);
   await fastify.register(registerAuthRoutes, { prefix: '/api/v2' });
-
-  registerErrorHandler(fastify, 'auth-service', logger);
 
   const address = await fastify.listen({ port: config.port, host: '0.0.0.0' });
   logger.info({ address }, 'Auth service started');

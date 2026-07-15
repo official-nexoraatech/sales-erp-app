@@ -82,7 +82,7 @@ export async function transferRoutes(
         .select()
         .from(stockTransfers)
         .where(whereClause)
-        .orderBy(desc(stockTransfers.createdAt))
+        .orderBy(desc(stockTransfers.createdAt), desc(stockTransfers.id))
         .limit(limit as number)
         .offset(offset);
 
