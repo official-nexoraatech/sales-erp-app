@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { crmApi } from '../../api/endpoints.js';
+import { crmApi, branchApi } from '../../api/endpoints.js';
 import { useAuthStore } from '../../store/auth.store.js';
 import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
@@ -17,6 +17,11 @@ interface Segment {
   name: string;
   code: string;
   isSystem: boolean;
+}
+interface Branch {
+  id: number;
+  name: string;
+  code: string;
 }
 interface CampaignTemplate {
   id: number;
@@ -102,6 +107,7 @@ export default function CampaignFormPage() {
     segmentId: '',
     scheduledAt: '',
     campaignType: '',
+    branchId: '',
   });
   const [version, setVersion] = useState<number | null>(null);
   const [templateId, setTemplateId] = useState('');
@@ -115,6 +121,15 @@ export default function CampaignFormPage() {
     enabled: hasPermission(PERMISSIONS.CRM_SEGMENT_VIEW),
   });
   const segments: Segment[] = (segData as { content?: Segment[] })?.content ?? [];
+
+  // CP-8 (Campaign Management Platform initiative): store/branch-scoped campaigns. A tenant with
+  // only one branch (the common case today) sees this as a single, harmless option — leaving it
+  // unselected keeps a campaign tenant-wide exactly as before this phase.
+  const { data: branchData } = useQuery({
+    queryKey: ['branches-for-campaign'],
+    queryFn: () => branchApi.list({ size: 100 }),
+  });
+  const branchOptions: Branch[] = (branchData as { content?: Branch[] })?.content ?? [];
 
   const { data: templateData } = useQuery({
     queryKey: ['crm-campaign-templates', form.channel],
@@ -146,6 +161,7 @@ export default function CampaignFormPage() {
       segmentId: c.segmentId ? String(c.segmentId) : '',
       scheduledAt: '',
       campaignType: (c.campaignType as string) ?? '',
+      branchId: c.branchId ? String(c.branchId) : '',
     });
     setVersion((c.version as number) ?? 0);
   }, [existingCampaign]);
@@ -176,6 +192,7 @@ export default function CampaignFormPage() {
         segmentId: form.segmentId ? Number(form.segmentId) : undefined,
         campaignType: form.campaignType || undefined,
         templateId: templateId ? Number(templateId) : undefined,
+        branchId: form.branchId ? Number(form.branchId) : undefined,
       })) as { id?: number };
       if (form.scheduledAt && created?.id) {
         await crmApi.scheduleCampaign(created.id, {
@@ -200,6 +217,7 @@ export default function CampaignFormPage() {
         messageTemplate: form.messageTemplate,
         segmentId: form.segmentId ? Number(form.segmentId) : null,
         campaignType: form.campaignType || null,
+        branchId: form.branchId ? Number(form.branchId) : null,
       }),
     onSuccess: () => {
       toast.success('Campaign updated');
@@ -328,6 +346,26 @@ export default function CampaignFormPage() {
                 ))}
               </select>
             </div>
+
+            {branchOptions.length > 1 && (
+              <div>
+                <label className="block text-xs font-medium text-secondary mb-1.5">
+                  Branch (optional — leave blank for a tenant-wide campaign)
+                </label>
+                <select
+                  value={form.branchId}
+                  onChange={(e) => f('branchId', e.target.value)}
+                  className="w-full rounded-lg border border-default bg-surface-card text-primary text-sm px-3 py-2"
+                >
+                  <option value="">— All Branches —</option>
+                  {branchOptions.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.name} ({b.code})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>

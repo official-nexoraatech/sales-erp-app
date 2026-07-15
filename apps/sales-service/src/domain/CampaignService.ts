@@ -10,6 +10,9 @@ import {
   organizationSettings,
   projectionCustomerBalance,
   tenantCommunicationSettings,
+  tenantSenderIdentity,
+  campaignWebhookSubscriptions,
+  campaignWebhookDeliveries,
   type Campaign,
   type CampaignAutomationRule,
 } from '@erp/db';
@@ -205,9 +208,15 @@ export class CampaignService {
   /** Resolves the customer rows a campaign should target — either a saved segment or an explicit id list. */
   static async resolveRecipients(
     ctx: PlatformContext,
-    campaign: Pick<Campaign, 'segmentId' | 'customerIds' | 'channel'>
+    campaign: Pick<Campaign, 'segmentId' | 'customerIds' | 'channel'> & {
+      branchId?: number | null | undefined;
+    }
   ): Promise<RecipientRow[]> {
     const optOut = optOutCondition(campaign.channel);
+    // CP-8: a branch-scoped campaign only ever targets customers whose own branchId matches —
+    // undefined/null branchId (the default for every campaign before this phase) targets the
+    // whole tenant, unchanged.
+    const branchFilter = campaign.branchId ? eq(customers.branchId, campaign.branchId) : undefined;
     let rows: RecipientRow[];
 
     if (campaign.segmentId) {
@@ -237,7 +246,9 @@ export class CampaignService {
           loyaltyPoints: customers.loyaltyPoints,
         })
         .from(customers)
-        .where(optOut ? and(segmentWhere, optOut) : segmentWhere);
+        .where(
+          and(segmentWhere, ...(optOut ? [optOut] : []), ...(branchFilter ? [branchFilter] : []))
+        );
     } else if (campaign.customerIds && campaign.customerIds.length > 0) {
       rows = await ctx.db.raw
         .select({
@@ -252,7 +263,8 @@ export class CampaignService {
           and(
             eq(customers.tenantId, ctx.tenant.tenantId),
             inArray(customers.id, campaign.customerIds),
-            ...(optOut ? [optOut] : [])
+            ...(optOut ? [optOut] : []),
+            ...(branchFilter ? [branchFilter] : [])
           )
         );
     } else {
@@ -306,7 +318,8 @@ export class CampaignService {
     segmentId: number | undefined,
     customerIds: number[] | undefined,
     messageTemplate: string,
-    channel: Campaign['channel']
+    channel: Campaign['channel'],
+    branchId?: number
   ): Promise<{
     recipientCount: number;
     sampleMessage: string | null;
@@ -317,6 +330,7 @@ export class CampaignService {
       segmentId: segmentId ?? null,
       customerIds: customerIds ?? null,
       channel,
+      branchId,
     });
     const [org] = await ctx.db.raw
       .select({ orgName: organizationSettings.orgName })
@@ -434,6 +448,20 @@ export class CampaignService {
       .where(eq(organizationSettings.tenantId, ctx.tenant.tenantId));
     const shopName = org?.orgName ?? 'Our Store';
     const media = await CampaignService.getPrimaryMedia(ctx, campaignId);
+    // CP-8: per-tenant sender identity override — only EmailChannelProvider currently honors it
+    // (see ChannelDeliveryParams.senderOverride for why SMS/WhatsApp don't).
+    const [senderIdentity] = await ctx.db.raw
+      .select({
+        senderName: tenantSenderIdentity.senderName,
+        senderAddressOrNumber: tenantSenderIdentity.senderAddressOrNumber,
+      })
+      .from(tenantSenderIdentity)
+      .where(
+        and(
+          eq(tenantSenderIdentity.tenantId, ctx.tenant.tenantId),
+          eq(tenantSenderIdentity.channel, campaign.channel)
+        )
+      );
 
     await ctx.db.raw
       .update(campaigns)
@@ -498,6 +526,14 @@ export class CampaignService {
                 ...(campaign.channel !== 'EMAIL' ? { recipientPhone: recipient.phone } : {}),
                 ...(recipient.email ? { recipientEmail: recipient.email } : {}),
                 ...(media ? { mediaUrl: media.mediaUrl, mediaType: media.mediaType } : {}),
+                ...(senderIdentity
+                  ? {
+                      senderOverride: {
+                        name: senderIdentity.senderName,
+                        addressOrNumber: senderIdentity.senderAddressOrNumber,
+                      },
+                    }
+                  : {}),
                 body,
               })
             );
@@ -560,8 +596,51 @@ export class CampaignService {
       entityId: campaignId,
       after: { sentCount, failedCount },
     });
+    await CampaignService.enqueueWebhookDeliveries(ctx, 'CAMPAIGN_SENT', campaignId, {
+      campaignId,
+      name: updated.name,
+      channel: updated.channel,
+      totalRecipients: recipients.length,
+      sentCount,
+      failedCount,
+      sentAt: updated.sentAt,
+    });
 
     return updated;
+  }
+
+  // CP-8: enqueues one PENDING delivery row per active subscription whose `events` list
+  // includes eventType — a cheap synchronous INSERT (no outbound I/O), matching the CP-6
+  // decision to keep third-party-dependent latency off the campaign-send critical path.
+  // WebhookDispatchWorker (a separate poll loop, modeled on event-service's OutboxRelayWorker)
+  // is what actually performs the HTTP POST, asynchronously.
+  private static async enqueueWebhookDeliveries(
+    ctx: PlatformContext,
+    eventType: string,
+    campaignId: number,
+    payload: Record<string, unknown>
+  ): Promise<void> {
+    const subscriptions = await ctx.db.raw
+      .select({ id: campaignWebhookSubscriptions.id, events: campaignWebhookSubscriptions.events })
+      .from(campaignWebhookSubscriptions)
+      .where(
+        and(
+          eq(campaignWebhookSubscriptions.tenantId, ctx.tenant.tenantId),
+          eq(campaignWebhookSubscriptions.isActive, true)
+        )
+      );
+    const matching = subscriptions.filter((s) => s.events.includes(eventType));
+    if (matching.length === 0) return;
+
+    await ctx.db.raw.insert(campaignWebhookDeliveries).values(
+      matching.map((s) => ({
+        tenantId: ctx.tenant.tenantId,
+        subscriptionId: s.id,
+        eventType,
+        campaignId,
+        payload,
+      }))
+    );
   }
 
   /**
@@ -596,6 +675,8 @@ export class CampaignService {
         campaignType: definition.campaignType,
         templateId: definition.templateId,
         parentRecurringCampaignId: definitionId,
+        // CP-8: each occurrence inherits the recurring definition's branch scope, if any.
+        branchId: definition.branchId,
         status: 'DRAFT',
         createdBy: definition.createdBy,
         // CP-7: each occurrence of an already-scheduled recurring series is auto-approved — the
@@ -904,6 +985,7 @@ export class CampaignService {
         | 'customerIds'
         | 'campaignType'
         | 'templateId'
+        | 'branchId'
       >
     >
   ): Promise<Campaign> {
@@ -1070,6 +1152,12 @@ export class CampaignService {
     });
 
     await ctx.audit.log({ action: 'CANCEL', entityType: 'campaign', entityId: campaignId });
+    await CampaignService.enqueueWebhookDeliveries(ctx, 'CAMPAIGN_CANCELLED', campaignId, {
+      campaignId,
+      name: updated.name,
+      channel: updated.channel,
+      cancelledAt: updated.cancelledAt,
+    });
     return updated;
   }
 

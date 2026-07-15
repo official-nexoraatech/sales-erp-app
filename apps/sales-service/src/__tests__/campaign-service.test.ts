@@ -248,8 +248,10 @@ describe.skipIf(!DB_URL)('CampaignService — integration (CP-1 baseline)', () =
   let db: ReturnType<typeof createDatabaseClient>;
   const TEST_TENANT = 900_301 + Math.floor(Math.random() * 1000);
   let branchId: number;
+  let branchId2: number;
   let optedInCustomerId: number;
   let optedOutSmsCustomerId: number;
+  let branch2CustomerId: number;
 
   function makeCtx(): PlatformContext {
     return {
@@ -305,6 +307,37 @@ describe.skipIf(!DB_URL)('CampaignService — integration (CP-1 baseline)', () =
       })
       .returning();
     optedOutSmsCustomerId = optedOut!.id;
+
+    // CP-8: a second branch + a customer belonging only to it, for branch-scoping tests.
+    const [branch2] = await db
+      .insert(branches)
+      .values({
+        tenantId: TEST_TENANT,
+        name: 'Test Branch 2',
+        code: 'BR2',
+        isHeadOffice: false,
+        isActive: true,
+        createdBy: 1,
+      })
+      .returning();
+    branchId2 = branch2!.id;
+
+    const [branch2Customer] = await db
+      .insert(customers)
+      .values({
+        tenantId: TEST_TENANT,
+        branchId: branchId2,
+        // Deliberately doesn't contain "Customer" — the pre-existing segment test above
+        // ("resolves recipients from a saved custom segment...") filters on
+        // displayName contains 'Customer', and this row must not accidentally match it.
+        displayName: 'Branch 2 Shopper',
+        phone: '9000000103',
+        creditLimit: '0',
+        openingBalance: '0',
+        createdBy: 1,
+      })
+      .returning();
+    branch2CustomerId = branch2Customer!.id;
   });
 
   afterAll(async () => {
@@ -1145,6 +1178,55 @@ describe.skipIf(!DB_URL)('CampaignService — integration (CP-1 baseline)', () =
       });
       expect(updated.approvalStatus).toBeNull();
       expect(updated.approvedBy).toBeNull();
+    });
+  });
+
+  describe('branch scoping (CP-8, FR-M1)', () => {
+    it('resolveRecipients targets everyone tenant-wide when branchId is unset (backward compatibility)', async () => {
+      const ctx = makeCtx();
+      const rows = await CampaignService.resolveRecipients(ctx, {
+        segmentId: null,
+        customerIds: [optedInCustomerId, branch2CustomerId],
+        channel: 'EMAIL',
+      });
+      expect(rows.map((r) => r.id).sort()).toEqual([optedInCustomerId, branch2CustomerId].sort());
+    });
+
+    it('resolveRecipients excludes customers outside the campaign branchId when set', async () => {
+      const ctx = makeCtx();
+      const rows = await CampaignService.resolveRecipients(ctx, {
+        segmentId: null,
+        customerIds: [optedInCustomerId, branch2CustomerId],
+        channel: 'EMAIL',
+        branchId,
+      });
+      expect(rows.map((r) => r.id)).toEqual([optedInCustomerId]);
+    });
+
+    it("dispatchRecurringOccurrence() inherits the parent recurring definition's branchId", async () => {
+      const [definition] = await db
+        .insert(campaigns)
+        .values({
+          tenantId: TEST_TENANT,
+          name: `Branch Recurring ${Date.now()}`,
+          customerIds: [optedInCustomerId],
+          channel: 'EMAIL',
+          messageTemplate: 'Hi',
+          status: 'SCHEDULED',
+          branchId,
+          scheduledAt: new Date(Date.now() + 60_000),
+          recurrenceRule: { frequency: 'DAILY', interval: 1 },
+          createdBy: 1,
+        })
+        .returning();
+
+      const ctx = makeCtx();
+      const { occurrenceId } = await CampaignService.dispatchRecurringOccurrence(
+        ctx,
+        definition!.id
+      );
+      const [occurrence] = await db.select().from(campaigns).where(eq(campaigns.id, occurrenceId));
+      expect(occurrence!.branchId).toBe(branchId);
     });
   });
 });

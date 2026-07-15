@@ -39,6 +39,10 @@ const SendRawInternalSchema = z.object({
   // service's CampaignService) and passed through to whichever channel adapter supports media.
   mediaUrl: z.string().url().optional(),
   mediaType: z.enum(['image', 'video', 'document']).optional(),
+  // CP-8: tenant_sender_identity override resolved by the caller (sales-service).
+  senderOverride: z
+    .object({ name: z.string().optional(), addressOrNumber: z.string().optional() })
+    .optional(),
 });
 
 function requireInternalKey(
@@ -137,6 +141,7 @@ export async function notificationRoutes(
       idempotencyKey,
       mediaUrl,
       mediaType,
+      senderOverride,
       ...rest
     } = body.data;
     const result = await engine.sendRaw({
@@ -147,6 +152,7 @@ export async function notificationRoutes(
       ...(idempotencyKey !== undefined ? { idempotencyKey } : {}),
       ...(mediaUrl !== undefined ? { mediaUrl } : {}),
       ...(mediaType !== undefined ? { mediaType } : {}),
+      ...(senderOverride !== undefined ? { senderOverride } : {}),
     });
     return reply.code(200).send({ data: result });
   });

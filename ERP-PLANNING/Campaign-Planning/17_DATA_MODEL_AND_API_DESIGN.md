@@ -116,6 +116,20 @@ but is **not yet implemented**.
 - `campaigns` new nullable column: `branch_id` (store scoping, `FR-M1`).
 - `tenant_sender_identity`: `id, tenant_id, channel, sender_name, sender_address_or_number` (`FR-M2`).
 - `campaign_webhook_subscriptions`: `id, tenant_id, target_url, events (jsonb), secret` (`FR-M3`).
+- `campaign_webhook_deliveries` (not in the original plan, added during implementation): `id, tenant_id,
+subscription_id, event_type, campaign_id, payload (jsonb), status, attempt_count, last_error, created_at,
+sent_at` — the per-subscriber delivery queue/log `WebhookDispatchWorker` polls, modeled on
+  event-service's `OutboxRelayWorker` (`FOR UPDATE SKIP LOCKED`, retry/dead-letter). Needed because
+  `outbox_events`/Kafka doesn't cleanly express per-subscription HTTP retry state.
+
+**CP-8 deviation, documented per this doc's running convention:** sender-identity override (`FR-M2`) is
+only wired to real outbound delivery for **EMAIL** — SMS (MSG91) and WhatsApp (Meta) sender identity
+requires provider-side business/DLT registration that a database row can't substitute for; both channels
+accept and store a configured identity but currently ignore it at send time. See
+`phase-completions/CP-8_COMPLETION.md` section 13. Additional channel adapters (`FR-M4`-adjacent, originally
+CP-8 scope item 4) and segment-membership caching/partitioning (scope item 5) were **not started** —
+both are gated by the phase's own rules on explicit user confirmation, which did not happen this session;
+see the CP-8 completion report section 12 for the specific open questions.
 
 ## API Additions by Phase (illustrative, not exhaustive — finalized per phase)
 
@@ -132,7 +146,8 @@ but is **not yet implemented**.
 | `POST /crm/campaigns/:id/submit-for-approval`, `POST /crm/campaigns/:id/approve`, `POST /crm/campaigns/:id/reject`                 | CP-7  |
 | `GET/POST /crm/campaigns/:id/comments`                                                                                             | CP-7  |
 | `GET/PUT /crm/customers/:id/preferences` (customer preference center) — **planned, not yet implemented, see deviation note above** | CP-7  |
-| `GET/POST /crm/webhook-subscriptions`                                                                                              | CP-8  |
+| `GET/PUT /crm/sender-identity`                                                                                                     | CP-8  |
+| `GET/POST /crm/webhook-subscriptions`, `PUT/DELETE /crm/webhook-subscriptions/:id`                                                 | CP-8  |
 
 ## Design Constraints Carried Forward
 

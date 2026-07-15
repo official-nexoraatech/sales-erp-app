@@ -45,6 +45,8 @@ export interface SendRawInput {
   /** CP-2: signed URL to a media asset attached to the sending campaign, if any. */
   mediaUrl?: string;
   mediaType?: 'image' | 'video' | 'document';
+  /** CP-8: tenant_sender_identity override — see ChannelDeliveryParams for support notes. */
+  senderOverride?: { name?: string | undefined; addressOrNumber?: string | undefined };
 }
 
 // ES-26 (M8): dedup key for a caller retry landing on an already-recently-sent notification.
@@ -320,6 +322,7 @@ export class NotificationEngine {
         ...(input.subject !== undefined ? { subject: input.subject } : {}),
         ...(input.mediaUrl !== undefined ? { mediaUrl: input.mediaUrl } : {}),
         ...(input.mediaType !== undefined ? { mediaType: input.mediaType } : {}),
+        ...(input.senderOverride !== undefined ? { senderOverride: input.senderOverride } : {}),
         body: input.body,
         tenantId: input.tenantId,
       },

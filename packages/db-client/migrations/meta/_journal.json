@@ -414,6 +414,20 @@
       "when": 1787603735804,
       "tag": "0058_cp7_campaign_analytics_automation_permission_backfill",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1787690135804,
+      "tag": "0059_cp8_enterprise_scaleout",
+      "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1787776535804,
+      "tag": "0060_cp8_sender_identity_webhook_permission_backfill",
+      "breakpoints": true
     }
   ]
 }

@@ -31,6 +31,7 @@ import {
 } from '@erp/logger';
 import { loadConfigWithSecrets } from '@erp/config';
 import { handleNotificationDeliveryUpdated } from './consumers/NotificationDeliveryConsumer.js';
+import { WebhookDispatchWorker } from './domain/WebhookDispatchWorker.js';
 import { customerRoutes } from './api/customer.routes.js';
 import { supplierRoutes } from './api/supplier.routes.js';
 import { quotationRoutes } from './api/quotation.routes.js';
@@ -113,6 +114,12 @@ async function bootstrap(): Promise<void> {
     (tenantId: number) => new TenantScopedDatabase(tenantId, consumerDb)
   );
   logger.info({}, 'Sales-service Kafka consumers started');
+
+  // CP-8: outbound campaign-lifecycle webhook dispatcher — see WebhookDispatchWorker.ts. Reuses
+  // the same dedicated consumerDb pool as the Kafka consumer above rather than opening a third
+  // connection pool for what is, structurally, the same kind of background poll-worker.
+  const webhookDispatchWorker = new WebhookDispatchWorker({ db: consumerDb });
+  webhookDispatchWorker.start();
 
   const fastify = Fastify({ logger: false, trustProxy: true });
 

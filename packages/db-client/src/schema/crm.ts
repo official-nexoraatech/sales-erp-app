@@ -110,11 +110,16 @@ export const campaigns = pgTable(
     approvedBy: integer('approved_by'),
     approvedAt: timestamp('approved_at', { withTimezone: true }),
     rejectionReason: text('rejection_reason'),
+    // CP-8: store/branch scoping. Null = tenant-wide (every campaign before this phase, and any
+    // tenant that doesn't use branch scoping) — a non-null value restricts both who can
+    // create/view it (getBranchScope) and which customers it can target (resolveRecipients).
+    branchId: integer('branch_id'),
   },
   (t) => [
     index('idx_campaigns_tenant_status').on(t.tenantId, t.status, t.createdAt),
     index('idx_campaigns_scheduled').on(t.scheduledAt, t.status),
     index('idx_campaigns_parent_recurring').on(t.parentRecurringCampaignId),
+    index('idx_campaigns_branch').on(t.branchId, t.tenantId),
   ]
 );
 
@@ -277,6 +282,65 @@ export const campaignAutomationRules = pgTable(
   (t) => [index('idx_campaign_automation_rules_tenant').on(t.tenantId, t.enabled, t.triggerType)]
 );
 
+// ─── Tenant Sender Identity (CP-8) ──────────────────────────────────────────
+// Per-tenant/per-channel sender identity — falls back to the env-configured global default
+// (MSG91/SendGrid/Meta credentials) when a tenant has not configured one for a given channel.
+export const tenantSenderIdentity = pgTable(
+  'tenant_sender_identity',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    tenantId: integer('tenant_id').notNull(),
+    channel: varchar('channel', { length: 20 })
+      .notNull()
+      .$type<'SMS' | 'WHATSAPP' | 'EMAIL' | 'IN_APP'>(),
+    senderName: varchar('sender_name', { length: 200 }).notNull(),
+    senderAddressOrNumber: varchar('sender_address_or_number', { length: 200 }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [unique('tenant_sender_identity_unique').on(t.tenantId, t.channel)]
+);
+
+// ─── Campaign Webhook Subscriptions + Deliveries (CP-8) ─────────────────────
+// Outbound webhooks for third-party CRM/marketing tools — fires on campaign lifecycle events
+// (CAMPAIGN_SENT, CAMPAIGN_CANCELLED). See WebhookDispatchService/WebhookDispatchWorker.
+export const campaignWebhookSubscriptions = pgTable(
+  'campaign_webhook_subscriptions',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    tenantId: integer('tenant_id').notNull(),
+    targetUrl: text('target_url').notNull(),
+    events: jsonb('events').$type<string[]>().notNull(),
+    secret: varchar('secret', { length: 200 }).notNull(),
+    isActive: boolean('is_active').notNull().default(true),
+    createdBy: integer('created_by').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index('idx_campaign_webhook_subscriptions_tenant').on(t.tenantId, t.isActive)]
+);
+
+export const campaignWebhookDeliveries = pgTable(
+  'campaign_webhook_deliveries',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    tenantId: integer('tenant_id').notNull(),
+    subscriptionId: integer('subscription_id').notNull(),
+    eventType: varchar('event_type', { length: 50 }).notNull(),
+    campaignId: integer('campaign_id').notNull(),
+    payload: jsonb('payload').$type<Record<string, unknown>>().notNull(),
+    status: varchar('status', { length: 20 })
+      .notNull()
+      .default('PENDING')
+      .$type<'PENDING' | 'SENT' | 'FAILED'>(),
+    attemptCount: integer('attempt_count').notNull().default(0),
+    lastError: text('last_error'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    sentAt: timestamp('sent_at', { withTimezone: true }),
+  },
+  (t) => [index('idx_campaign_webhook_deliveries_status').on(t.status, t.createdAt)]
+);
+
 // ─── Business Seasons — Festival Planner (M9.7) ────────────────────────────
 export const businessSeasons = pgTable(
   'business_seasons',
@@ -330,3 +394,9 @@ export type NewCustomerCommunicationPreference =
   typeof customerCommunicationPreferences.$inferInsert;
 export type BusinessSeason = typeof businessSeasons.$inferSelect;
 export type NewBusinessSeason = typeof businessSeasons.$inferInsert;
+export type TenantSenderIdentity = typeof tenantSenderIdentity.$inferSelect;
+export type NewTenantSenderIdentity = typeof tenantSenderIdentity.$inferInsert;
+export type CampaignWebhookSubscription = typeof campaignWebhookSubscriptions.$inferSelect;
+export type NewCampaignWebhookSubscription = typeof campaignWebhookSubscriptions.$inferInsert;
+export type CampaignWebhookDelivery = typeof campaignWebhookDeliveries.$inferSelect;
+export type NewCampaignWebhookDelivery = typeof campaignWebhookDeliveries.$inferInsert;

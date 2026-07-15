@@ -256,6 +256,11 @@ export const PERMISSIONS = {
   // tenant may want a different set of people managing always-on trigger rules than authoring
   // one-off campaigns. Backfilled in migration 0058 above.
   CRM_AUTOMATION_MANAGE: 'CRM_AUTOMATION_MANAGE',
+  // CP-8: manage per-tenant/per-channel sender identity (tenant_sender_identity) and outbound
+  // webhook subscriptions for third-party CRM/marketing tools. Backfilled for existing tenants
+  // in packages/db-client/migrations/0060_cp8_sender_identity_webhook_permission_backfill.sql.
+  CRM_SENDER_IDENTITY_MANAGE: 'CRM_SENDER_IDENTITY_MANAGE',
+  CRM_WEBHOOK_MANAGE: 'CRM_WEBHOOK_MANAGE',
   CRM_LOYALTY_VIEW: 'CRM_LOYALTY_VIEW',
   CRM_LOYALTY_ADJUST: 'CRM_LOYALTY_ADJUST',
   CRM_INTERACTION_VIEW: 'CRM_INTERACTION_VIEW',

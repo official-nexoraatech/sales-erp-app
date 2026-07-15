@@ -1,5 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { PlatformContextFactory } from '@erp/sdk';
+import { getBranchScope } from '@erp/sdk';
+import { randomBytes } from 'node:crypto';
 import {
   customers,
   customerInteractions,
@@ -10,9 +12,11 @@ import {
   campaignComments,
   businessSeasons,
   notificationLog,
+  tenantSenderIdentity,
+  campaignWebhookSubscriptions,
 } from '@erp/db';
 import type { ErpDatabase } from '@erp/db';
-import { and, eq, gte, isNull, lte, sql } from 'drizzle-orm';
+import { and, eq, gte, inArray, isNull, lte, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import {
   BusinessError,
@@ -32,7 +36,20 @@ import {
 import { CampaignService, checkChannelLimits } from '../domain/CampaignService.js';
 import { HealthScoringService } from '../domain/HealthScoringService.js';
 
-type AuthedRequest = { auth: { tenantId: number; userId: number } };
+type AuthedRequest = {
+  auth: { tenantId: number; userId: number; permissions: string[]; branchIds: number[] };
+};
+
+// CP-8: a client-submitted branchId must fall within the caller's own JWT branchIds (or they
+// hold BRANCH_SCOPE_BYPASS) — mirrors pos.routes.ts's branchInScope() exactly, since campaigns
+// (like POS sales) are created via a body-supplied branchId rather than scoped via query filter.
+function branchInScope(
+  auth: { permissions: string[]; branchIds: number[] },
+  branchId: number
+): boolean {
+  const scope = getBranchScope(auth);
+  return scope === 'all' || scope.includes(branchId);
+}
 
 const InteractionSchema = z.object({
   type: z.enum(['VISIT', 'CALL', 'COMPLAINT', 'EMAIL', 'WHATSAPP', 'OTHER']),
@@ -81,6 +98,8 @@ const CampaignCreateSchema = z.object({
   // campaign was authored from.
   campaignType: z.string().max(50).optional(),
   templateId: z.number().int().positive().optional(),
+  // CP-8: store/branch scoping — omitted or absent means tenant-wide (today's behavior).
+  branchId: z.number().int().positive().optional(),
 });
 
 // CP-4: every field optional except `version` (required for the optimistic-lock check) — a
@@ -88,6 +107,7 @@ const CampaignCreateSchema = z.object({
 const CampaignUpdateSchema = z.object({
   version: z.number().int().min(0),
   name: z.string().min(2).max(200).optional(),
+  branchId: z.number().int().positive().nullable().optional(),
   segmentId: z.number().int().positive().nullable().optional(),
   customerIds: z.array(z.number().int().positive()).nullable().optional(),
   channel: z.enum(['SMS', 'WHATSAPP', 'EMAIL', 'IN_APP']).optional(),
@@ -118,6 +138,20 @@ const CampaignRejectSchema = z.object({
 
 const CampaignCommentSchema = z.object({
   body: z.string().min(1).max(2000),
+});
+
+// CP-8: per-tenant/per-channel sender identity — upsert, one row per (tenant, channel).
+const SenderIdentitySchema = z.object({
+  channel: z.enum(['SMS', 'WHATSAPP', 'EMAIL', 'IN_APP']),
+  senderName: z.string().min(1).max(200),
+  senderAddressOrNumber: z.string().min(1).max(200),
+});
+
+// CP-8: outbound webhook subscriptions for third-party CRM/marketing tools.
+const WebhookSubscriptionSchema = z.object({
+  targetUrl: z.string().url(),
+  events: z.array(z.enum(['CAMPAIGN_SENT', 'CAMPAIGN_CANCELLED'])).min(1),
+  isActive: z.boolean().default(true),
 });
 
 const CampaignTemplateSchema = z.object({
@@ -615,7 +649,8 @@ export async function crmRoutes(
     '/crm/campaigns',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.CRM_CAMPAIGN_CREATE)] },
     async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
+      const auth = (request as unknown as AuthedRequest).auth;
+      const { tenantId, userId } = auth;
       const ctx = ctxFactory.create({
         tenantId,
         userId,
@@ -628,6 +663,12 @@ export async function crmRoutes(
       if (!body.data.segmentId && (!body.data.customerIds || body.data.customerIds.length === 0)) {
         throw new ValidationError(
           'Campaign requires either segmentId or a non-empty customerIds list'
+        );
+      }
+      if (body.data.branchId !== undefined && !branchInScope(auth, body.data.branchId)) {
+        throw new BusinessError(
+          'BRANCH_OUT_OF_SCOPE',
+          'branchId is outside your assigned branches'
         );
       }
 
@@ -644,6 +685,7 @@ export async function crmRoutes(
           messageTemplate: body.data.messageTemplate,
           campaignType: body.data.campaignType,
           templateId: body.data.templateId,
+          branchId: body.data.branchId,
           createdBy: userId,
         })
         .returning();
@@ -654,7 +696,8 @@ export async function crmRoutes(
         body.data.segmentId,
         body.data.customerIds,
         body.data.messageTemplate,
-        body.data.channel
+        body.data.channel,
+        body.data.branchId
       );
       await ctx.audit.log({
         action: 'CREATE',
@@ -679,7 +722,8 @@ export async function crmRoutes(
     '/crm/campaigns',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.CRM_VIEW)] },
     async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
+      const auth = (request as unknown as AuthedRequest).auth;
+      const { tenantId, userId } = auth;
       const ctx = ctxFactory.create({
         tenantId,
         userId,
@@ -687,21 +731,26 @@ export async function crmRoutes(
       });
       const query = request.query as { status?: string };
 
-      let where = eq(campaigns.tenantId, tenantId);
+      const conditions = [eq(campaigns.tenantId, tenantId)];
       if (query.status) {
-        where = and(
-          where,
+        conditions.push(
           eq(
             campaigns.status,
             query.status as 'DRAFT' | 'SCHEDULED' | 'SENDING' | 'SENT' | 'CANCELLED' | 'FAILED'
           )
-        )!;
+        );
+      }
+      // CP-8: a branch-scoped caller sees tenant-wide campaigns (branchId IS NULL) plus any
+      // scoped to one of their own branches — mirrors invoices.routes.ts's getBranchScope use.
+      const branchScope = getBranchScope(auth);
+      if (branchScope !== 'all') {
+        conditions.push(or(isNull(campaigns.branchId), inArray(campaigns.branchId, branchScope))!);
       }
 
       const rows = await ctx.db.raw
         .select()
         .from(campaigns)
-        .where(where)
+        .where(and(...conditions))
         .orderBy(sql`created_at DESC`);
       return reply.code(200).send({ data: { content: rows, totalElements: rows.length } });
     }
@@ -711,7 +760,8 @@ export async function crmRoutes(
     '/crm/campaigns/:id',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.CRM_VIEW)] },
     async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
+      const auth = (request as unknown as AuthedRequest).auth;
+      const { tenantId, userId } = auth;
       const ctx = ctxFactory.create({
         tenantId,
         userId,
@@ -724,6 +774,9 @@ export async function crmRoutes(
         .from(campaigns)
         .where(and(eq(campaigns.id, id), eq(campaigns.tenantId, tenantId)));
       if (!campaign) throw new NotFoundError('Campaign', id);
+      if (campaign.branchId && !branchInScope(auth, campaign.branchId)) {
+        throw new NotFoundError('Campaign', id);
+      }
 
       return reply.code(200).send({ data: campaign });
     }
@@ -736,7 +789,8 @@ export async function crmRoutes(
     '/crm/campaigns/:id',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.CRM_CAMPAIGN_CREATE)] },
     async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
+      const auth = (request as unknown as AuthedRequest).auth;
+      const { tenantId, userId } = auth;
       const ctx = ctxFactory.create({
         tenantId,
         userId,
@@ -750,6 +804,7 @@ export async function crmRoutes(
       const {
         version,
         name,
+        branchId,
         segmentId,
         customerIds,
         channel,
@@ -757,8 +812,15 @@ export async function crmRoutes(
         campaignType,
         templateId,
       } = body.data;
+      if (branchId !== undefined && branchId !== null && !branchInScope(auth, branchId)) {
+        throw new BusinessError(
+          'BRANCH_OUT_OF_SCOPE',
+          'branchId is outside your assigned branches'
+        );
+      }
       const patch = {
         ...(name !== undefined ? { name } : {}),
+        ...(branchId !== undefined ? { branchId } : {}),
         ...(segmentId !== undefined ? { segmentId } : {}),
         ...(customerIds !== undefined ? { customerIds } : {}),
         ...(channel !== undefined ? { channel } : {}),
@@ -1457,6 +1519,238 @@ export async function crmRoutes(
       });
 
       return reply.code(200).send({ data: updated });
+    }
+  );
+
+  // ════════════════════════════════════════════════════════════════════════
+  // CP-8 — Tenant Sender Identity
+  // ════════════════════════════════════════════════════════════════════════
+
+  fastify.get(
+    '/crm/sender-identity',
+    { preHandler: [authenticate, requirePermission(PERMISSIONS.CRM_SENDER_IDENTITY_MANAGE)] },
+    async (request, reply) => {
+      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
+      const ctx = ctxFactory.create({
+        tenantId,
+        userId,
+        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
+      });
+      const rows = await ctx.db.raw
+        .select()
+        .from(tenantSenderIdentity)
+        .where(eq(tenantSenderIdentity.tenantId, tenantId));
+      return reply.code(200).send({ data: { content: rows, totalElements: rows.length } });
+    }
+  );
+
+  // Upsert — one row per (tenant, channel). A tenant configures each channel independently by
+  // calling this once per channel; there is no separate create-vs-update distinction from the
+  // caller's perspective.
+  fastify.put(
+    '/crm/sender-identity',
+    { preHandler: [authenticate, requirePermission(PERMISSIONS.CRM_SENDER_IDENTITY_MANAGE)] },
+    async (request, reply) => {
+      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
+      const ctx = ctxFactory.create({
+        tenantId,
+        userId,
+        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
+      });
+
+      const body = SenderIdentitySchema.safeParse(request.body);
+      if (!body.success)
+        throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
+
+      const [existing] = await ctx.db.raw
+        .select({ id: tenantSenderIdentity.id })
+        .from(tenantSenderIdentity)
+        .where(
+          and(
+            eq(tenantSenderIdentity.tenantId, tenantId),
+            eq(tenantSenderIdentity.channel, body.data.channel)
+          )
+        );
+
+      const [saved] = existing
+        ? await ctx.db.raw
+            .update(tenantSenderIdentity)
+            .set({
+              senderName: body.data.senderName,
+              senderAddressOrNumber: body.data.senderAddressOrNumber,
+              updatedAt: new Date(),
+            })
+            .where(eq(tenantSenderIdentity.id, existing.id))
+            .returning()
+        : await ctx.db.raw
+            .insert(tenantSenderIdentity)
+            .values({
+              tenantId,
+              channel: body.data.channel,
+              senderName: body.data.senderName,
+              senderAddressOrNumber: body.data.senderAddressOrNumber,
+            })
+            .returning();
+      if (!saved) throw new Error('Sender identity save failed unexpectedly');
+
+      await ctx.audit.log({
+        action: existing ? 'UPDATE' : 'CREATE',
+        entityType: 'tenant_sender_identity',
+        entityId: saved.id,
+        after: saved as unknown as Record<string, unknown>,
+      });
+
+      return reply.code(200).send({ data: saved });
+    }
+  );
+
+  // ════════════════════════════════════════════════════════════════════════
+  // CP-8 — Outbound Webhook Subscriptions
+  // ════════════════════════════════════════════════════════════════════════
+
+  fastify.get(
+    '/crm/webhook-subscriptions',
+    { preHandler: [authenticate, requirePermission(PERMISSIONS.CRM_WEBHOOK_MANAGE)] },
+    async (request, reply) => {
+      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
+      const ctx = ctxFactory.create({
+        tenantId,
+        userId,
+        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
+      });
+      const rows = await ctx.db.raw
+        .select({
+          id: campaignWebhookSubscriptions.id,
+          targetUrl: campaignWebhookSubscriptions.targetUrl,
+          events: campaignWebhookSubscriptions.events,
+          isActive: campaignWebhookSubscriptions.isActive,
+          createdAt: campaignWebhookSubscriptions.createdAt,
+          // secret is deliberately never returned after creation — same principle as an API key,
+          // shown once at creation time only.
+        })
+        .from(campaignWebhookSubscriptions)
+        .where(eq(campaignWebhookSubscriptions.tenantId, tenantId))
+        .orderBy(sql`created_at DESC`);
+      return reply.code(200).send({ data: { content: rows, totalElements: rows.length } });
+    }
+  );
+
+  fastify.post(
+    '/crm/webhook-subscriptions',
+    { preHandler: [authenticate, requirePermission(PERMISSIONS.CRM_WEBHOOK_MANAGE)] },
+    async (request, reply) => {
+      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
+      const ctx = ctxFactory.create({
+        tenantId,
+        userId,
+        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
+      });
+
+      const body = WebhookSubscriptionSchema.safeParse(request.body);
+      if (!body.success)
+        throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
+
+      const secret = randomBytes(32).toString('hex');
+      const [created] = await ctx.db.raw
+        .insert(campaignWebhookSubscriptions)
+        .values({
+          tenantId,
+          targetUrl: body.data.targetUrl,
+          events: body.data.events,
+          isActive: body.data.isActive,
+          secret,
+          createdBy: userId,
+        })
+        .returning();
+      if (!created) throw new Error('Webhook subscription creation failed unexpectedly');
+
+      await ctx.audit.log({
+        action: 'CREATE',
+        entityType: 'campaign_webhook_subscription',
+        entityId: created.id,
+      });
+
+      // The secret is only ever returned in this create response — the caller must store it now.
+      return reply.code(201).send({ data: created });
+    }
+  );
+
+  fastify.put<{ Params: { id: string } }>(
+    '/crm/webhook-subscriptions/:id',
+    { preHandler: [authenticate, requirePermission(PERMISSIONS.CRM_WEBHOOK_MANAGE)] },
+    async (request, reply) => {
+      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
+      const ctx = ctxFactory.create({
+        tenantId,
+        userId,
+        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
+      });
+      const id = parseInt(request.params.id, 10);
+
+      const body = WebhookSubscriptionSchema.partial().safeParse(request.body);
+      if (!body.success)
+        throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
+
+      const [existing] = await ctx.db.raw
+        .select({ id: campaignWebhookSubscriptions.id })
+        .from(campaignWebhookSubscriptions)
+        .where(
+          and(
+            eq(campaignWebhookSubscriptions.id, id),
+            eq(campaignWebhookSubscriptions.tenantId, tenantId)
+          )
+        );
+      if (!existing) throw new NotFoundError('Webhook subscription', id);
+
+      const [updated] = await ctx.db.raw
+        .update(campaignWebhookSubscriptions)
+        .set({ ...body.data, updatedAt: new Date() })
+        .where(eq(campaignWebhookSubscriptions.id, id))
+        .returning();
+      if (!updated) throw new Error('Webhook subscription update failed unexpectedly');
+
+      await ctx.audit.log({
+        action: 'UPDATE',
+        entityType: 'campaign_webhook_subscription',
+        entityId: id,
+      });
+      return reply.code(200).send({ data: updated });
+    }
+  );
+
+  fastify.delete<{ Params: { id: string } }>(
+    '/crm/webhook-subscriptions/:id',
+    { preHandler: [authenticate, requirePermission(PERMISSIONS.CRM_WEBHOOK_MANAGE)] },
+    async (request, reply) => {
+      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
+      const ctx = ctxFactory.create({
+        tenantId,
+        userId,
+        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
+      });
+      const id = parseInt(request.params.id, 10);
+
+      const [existing] = await ctx.db.raw
+        .select({ id: campaignWebhookSubscriptions.id })
+        .from(campaignWebhookSubscriptions)
+        .where(
+          and(
+            eq(campaignWebhookSubscriptions.id, id),
+            eq(campaignWebhookSubscriptions.tenantId, tenantId)
+          )
+        );
+      if (!existing) throw new NotFoundError('Webhook subscription', id);
+
+      await ctx.db.raw
+        .delete(campaignWebhookSubscriptions)
+        .where(eq(campaignWebhookSubscriptions.id, id));
+
+      await ctx.audit.log({
+        action: 'DELETE',
+        entityType: 'campaign_webhook_subscription',
+        entityId: id,
+      });
+      return reply.code(204).send();
     }
   );
 }

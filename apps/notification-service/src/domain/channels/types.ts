@@ -14,6 +14,15 @@ export interface ChannelDeliveryParams {
   /** Signed URL to a media asset (image/video/document) to attach, if the campaign has one. */
   mediaUrl?: string;
   mediaType?: 'image' | 'video' | 'document';
+  /**
+   * CP-8: per-tenant sender identity override (tenant_sender_identity), falling back to the
+   * provider's env-configured default when absent/not provided. Only EmailChannelProvider
+   * currently honors this — SMS/WhatsApp sender identity requires provider-side business/DLT
+   * registration (MSG91 sender ID approval, Meta WhatsApp Business phone number verification)
+   * that can't be satisfied by simply overriding a string per send, so those two providers
+   * accept but currently ignore it. See CP-8 completion report.
+   */
+  senderOverride?: { name?: string | undefined; addressOrNumber?: string | undefined };
 }
 
 export interface ChannelDeliveryResult {

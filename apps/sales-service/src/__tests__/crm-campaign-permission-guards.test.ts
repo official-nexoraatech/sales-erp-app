@@ -22,14 +22,18 @@ vi.mock('@erp/db', () => ({
   campaignComments: {},
   businessSeasons: {},
   notificationLog: {},
+  tenantSenderIdentity: {},
+  campaignWebhookSubscriptions: {},
 }));
 
 vi.mock('drizzle-orm', () => ({
   and: vi.fn(() => '__and__'),
   eq: vi.fn(() => '__eq__'),
   gte: vi.fn(() => '__gte__'),
+  inArray: vi.fn(() => '__inArray__'),
   isNull: vi.fn(() => '__isNull__'),
   lte: vi.fn(() => '__lte__'),
+  or: vi.fn(() => '__or__'),
   sql: vi.fn(() => '__sql__'),
 }));
 
@@ -185,6 +189,77 @@ describe('POST /crm/automation-rules — requirePermission(CRM_AUTOMATION_MANAGE
       url: '/crm/automation-rules',
       headers: { Authorization: `Bearer ${token}` },
       payload: { triggerType: 'BIRTHDAY', channel: 'SMS', messageTemplate: 'Hi' },
+    });
+    expect(res.statusCode).not.toBe(403);
+  });
+});
+
+// CP-8 (Campaign Management Platform initiative): two more new granular CRM permissions.
+describe('PUT /crm/sender-identity — requirePermission(CRM_SENDER_IDENTITY_MANAGE)', () => {
+  let app: FastifyInstance;
+  beforeAll(async () => {
+    app = Fastify({ logger: false });
+    await crmRoutes(app, mockCtxFactory);
+  });
+  afterAll(() => app.close());
+
+  it('403s a caller with only CRM_CAMPAIGN_CREATE', async () => {
+    const token = await makeToken([PERMISSIONS.CRM_CAMPAIGN_CREATE]);
+    const res = await app.inject({
+      method: 'PUT',
+      url: '/crm/sender-identity',
+      headers: { Authorization: `Bearer ${token}` },
+      payload: {
+        channel: 'EMAIL',
+        senderName: 'Style Hub',
+        senderAddressOrNumber: 'promo@stylehub.example',
+      },
+    });
+    expect(res.statusCode).toBe(403);
+  });
+
+  it('does not 403 a caller with CRM_SENDER_IDENTITY_MANAGE', async () => {
+    const token = await makeToken([PERMISSIONS.CRM_SENDER_IDENTITY_MANAGE]);
+    const res = await app.inject({
+      method: 'PUT',
+      url: '/crm/sender-identity',
+      headers: { Authorization: `Bearer ${token}` },
+      payload: {
+        channel: 'EMAIL',
+        senderName: 'Style Hub',
+        senderAddressOrNumber: 'promo@stylehub.example',
+      },
+    });
+    expect(res.statusCode).not.toBe(403);
+  });
+});
+
+describe('POST /crm/webhook-subscriptions — requirePermission(CRM_WEBHOOK_MANAGE)', () => {
+  let app: FastifyInstance;
+  beforeAll(async () => {
+    app = Fastify({ logger: false });
+    await crmRoutes(app, mockCtxFactory);
+  });
+  afterAll(() => app.close());
+
+  it('403s a caller with only CRM_CAMPAIGN_APPROVE', async () => {
+    const token = await makeToken([PERMISSIONS.CRM_CAMPAIGN_APPROVE]);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/crm/webhook-subscriptions',
+      headers: { Authorization: `Bearer ${token}` },
+      payload: { targetUrl: 'https://example.com/webhook', events: ['CAMPAIGN_SENT'] },
+    });
+    expect(res.statusCode).toBe(403);
+  });
+
+  it('does not 403 a caller with CRM_WEBHOOK_MANAGE', async () => {
+    const token = await makeToken([PERMISSIONS.CRM_WEBHOOK_MANAGE]);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/crm/webhook-subscriptions',
+      headers: { Authorization: `Bearer ${token}` },
+      payload: { targetUrl: 'https://example.com/webhook', events: ['CAMPAIGN_SENT'] },
     });
     expect(res.statusCode).not.toBe(403);
   });

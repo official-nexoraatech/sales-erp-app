@@ -126,6 +126,36 @@ describe('EmailChannelProvider', () => {
   it('supports media', () => {
     expect(new EmailChannelProvider('k', 'a@b.com').supportsMedia).toBe(true);
   });
+
+  // CP-8 (Campaign Management Platform initiative): tenant_sender_identity override.
+  it('uses the senderOverride address/name instead of the env-configured default when provided', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, headers: new Map() });
+    vi.stubGlobal('fetch', fetchMock);
+    const provider = new EmailChannelProvider('sg-key', 'noreply@erp.local');
+    await provider.send({
+      email: 'a@b.com',
+      body: '<p>Hello</p>',
+      tenantId: 1,
+      senderOverride: { name: 'Style Hub', addressOrNumber: 'promo@stylehub.example' },
+    });
+
+    const [, options] = fetchMock.mock.calls[0] as [string, { body: string }];
+    const body = JSON.parse(options.body);
+    expect(body.from.email).toBe('promo@stylehub.example');
+    expect(body.from.name).toBe('Style Hub');
+  });
+
+  it('falls back to the env-configured default when no senderOverride is provided', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, headers: new Map() });
+    vi.stubGlobal('fetch', fetchMock);
+    const provider = new EmailChannelProvider('sg-key', 'noreply@erp.local');
+    await provider.send({ email: 'a@b.com', body: '<p>Hello</p>', tenantId: 1 });
+
+    const [, options] = fetchMock.mock.calls[0] as [string, { body: string }];
+    const body = JSON.parse(options.body);
+    expect(body.from.email).toBe('noreply@erp.local');
+    expect(body.from.name).toBeUndefined();
+  });
 });
 
 describe('WhatsAppChannelProvider', () => {

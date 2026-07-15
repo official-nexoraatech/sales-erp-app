@@ -38,7 +38,10 @@ export class EmailChannelProvider implements ChannelProvider {
       },
       body: JSON.stringify({
         personalizations: [{ to: [{ email: to }] }],
-        from: { email: this.fromEmail },
+        from: {
+          email: params.senderOverride?.addressOrNumber ?? this.fromEmail,
+          ...(params.senderOverride?.name ? { name: params.senderOverride.name } : {}),
+        },
         subject: params.subject ?? 'Notification',
         content: [{ type: 'text/html', value: html }],
       }),
