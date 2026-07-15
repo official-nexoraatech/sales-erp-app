@@ -348,12 +348,7 @@ export default function CampaignsPage() {
                 <div className="flex items-center gap-4 px-5 py-4 flex-wrap">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <button
-                        onClick={() => navigate(`/crm/campaigns/${c.id}`)}
-                        className="text-sm font-semibold text-primary truncate underline-offset-2 hover:underline text-left"
-                      >
-                        {c.name}
-                      </button>
+                      <p className="text-sm font-semibold text-primary truncate">{c.name}</p>
                       <Badge label={c.status} color={STATUS_COLORS[c.status] ?? 'gray'} />
                       <Badge label={c.channel} color="blue" />
                       {c.approvalStatus && (
