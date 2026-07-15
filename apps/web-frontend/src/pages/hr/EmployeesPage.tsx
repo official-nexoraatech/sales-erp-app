@@ -8,8 +8,10 @@ import { useDebounce } from '../../hooks/useDebounce.js';
 import { useAuthStore } from '../../store/auth.store.js';
 import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
-import ERPDataGrid, { type ERPColumnDef } from '../../components/erp/ERPDataGrid.js';
-import ERPDropdownMenu, { type ERPMenuItem } from '../../components/erp/ERPDropdownMenu.js';
+import ERPDataGrid, {
+  type ERPColumnDef,
+  type ERPRowAction,
+} from '../../components/erp/ERPDataGrid.js';
 import Button from '../../components/ui/Button.js';
 import Badge from '../../components/ui/Badge.js';
 import Input from '../../components/ui/Input.js';
@@ -115,23 +117,25 @@ export default function EmployeesPage() {
         <Badge variant={r.status === 'ACTIVE' ? 'success' : 'default'}>{r.status}</Badge>
       ),
     },
+  ];
+
+  const rowActions: ERPRowAction<Employee>[] = [
     {
-      key: 'actions',
-      header: '',
-      align: 'right',
-      render: (r) => {
-        const items: ERPMenuItem[] = [
-          { label: 'View', icon: Eye, onClick: () => navigate(`/hr/employees/${r.id}`) },
-        ];
-        if (hasPermission(PERMISSIONS.EMPLOYEE_UPDATE))
-          items.push({
+      label: 'View',
+      icon: Eye,
+      type: 'view',
+      onClick: (r: Employee) => navigate(`/hr/employees/${r.id}`),
+    },
+    ...(hasPermission(PERMISSIONS.EMPLOYEE_UPDATE)
+      ? [
+          {
             label: 'Edit',
             icon: Pencil,
-            onClick: () => navigate(`/hr/employees/${r.id}/edit`),
-          });
-        return <ERPDropdownMenu items={items} />;
-      },
-    },
+            type: 'edit' as const,
+            onClick: (r: Employee) => navigate(`/hr/employees/${r.id}/edit`),
+          },
+        ]
+      : []),
   ];
 
   return (
@@ -196,6 +200,7 @@ export default function EmployeesPage() {
           setPageSize(size);
           setPage(1);
         }}
+        actions={rowActions}
       />
 
       <DepartmentDesignationModal

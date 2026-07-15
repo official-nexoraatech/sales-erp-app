@@ -5,6 +5,8 @@ import ERPDataGrid, { type ERPColumnDef } from '../../components/erp/ERPDataGrid
 import ERPErrorBoundary from '../../components/erp/ERPErrorBoundary.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
 import { apAgingApi, type AgingRow } from '../../api/endpoints.js';
+import DatePicker from '../../components/ui/DatePicker.js';
+import Button from '../../components/ui/Button.js';
 
 function fmt(n: number): string {
   return new Intl.NumberFormat('en-IN', {
@@ -17,11 +19,41 @@ function fmt(n: number): string {
 
 const COLUMNS: ERPColumnDef<AgingRow>[] = [
   { key: 'supplierName', header: 'Supplier Name', render: (r) => r.supplierName ?? '—' },
-  { key: 'days0to30', header: '0–30 Days (₹)', align: 'right', mono: true, render: (r) => fmt(Number(r.days0to30)) },
-  { key: 'days31to60', header: '31–60 Days (₹)', align: 'right', mono: true, render: (r) => fmt(Number(r.days31to60)) },
-  { key: 'days61to90', header: '61–90 Days (₹)', align: 'right', mono: true, render: (r) => fmt(Number(r.days61to90)) },
-  { key: 'days90plus', header: '90+ Days (₹)', align: 'right', mono: true, render: (r) => fmt(Number(r.days90plus)) },
-  { key: 'totalOutstanding', header: 'Total Outstanding (₹)', align: 'right', mono: true, render: (r) => fmt(Number(r.totalOutstanding)) },
+  {
+    key: 'days0to30',
+    header: '0–30 Days (₹)',
+    align: 'right',
+    mono: true,
+    render: (r) => fmt(Number(r.days0to30)),
+  },
+  {
+    key: 'days31to60',
+    header: '31–60 Days (₹)',
+    align: 'right',
+    mono: true,
+    render: (r) => fmt(Number(r.days31to60)),
+  },
+  {
+    key: 'days61to90',
+    header: '61–90 Days (₹)',
+    align: 'right',
+    mono: true,
+    render: (r) => fmt(Number(r.days61to90)),
+  },
+  {
+    key: 'days90plus',
+    header: '90+ Days (₹)',
+    align: 'right',
+    mono: true,
+    render: (r) => fmt(Number(r.days90plus)),
+  },
+  {
+    key: 'totalOutstanding',
+    header: 'Total Outstanding (₹)',
+    align: 'right',
+    mono: true,
+    render: (r) => fmt(Number(r.totalOutstanding)),
+  },
 ];
 
 function totals(rows: AgingRow[]) {
@@ -41,9 +73,18 @@ function exportCsv(rows: AgingRow[], asOf: string) {
   const header = 'Supplier Name,0-30 Days,31-60 Days,61-90 Days,90+ Days,Total Outstanding';
   const t = totals(rows);
   const lines = rows.map((r) =>
-    [r.supplierName ?? '', r.days0to30, r.days31to60, r.days61to90, r.days90plus, r.totalOutstanding].join(',')
+    [
+      r.supplierName ?? '',
+      r.days0to30,
+      r.days31to60,
+      r.days61to90,
+      r.days90plus,
+      r.totalOutstanding,
+    ].join(',')
   );
-  lines.push(['TOTAL', t.days0to30, t.days31to60, t.days61to90, t.days90plus, t.totalOutstanding].join(','));
+  lines.push(
+    ['TOTAL', t.days0to30, t.days31to60, t.days61to90, t.days90plus, t.totalOutstanding].join(',')
+  );
   const csv = [header, ...lines].join('\n');
   const blob = new Blob([csv], { type: 'text/csv' });
   const url = URL.createObjectURL(blob);
@@ -86,26 +127,21 @@ export default function ApAgingPage() {
           title="AP Aging Summary"
           subtitle="Supplier outstanding payables by overdue period"
           actions={
-            <button
+            <Button
+              variant="outline"
+              size="sm"
               onClick={() => exportCsv(rows, asOf)}
               disabled={rows.length === 0}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-default rounded-lg text-secondary hover:text-primary hover:bg-surface-raised transition-colors disabled:opacity-40"
             >
-              <Download size={13} /> Export CSV
-            </button>
+              <Download size={14} /> Export CSV
+            </Button>
           }
         />
 
         {/* Filter bar */}
         <div className="flex flex-wrap gap-3 p-4 bg-surface-card border border-default rounded-xl">
           <div>
-            <label className="block text-xs font-medium text-secondary mb-1">As of Date</label>
-            <input
-              type="date"
-              value={asOf}
-              onChange={(e) => setAsOf(e.target.value)}
-              className="text-sm border border-default rounded-lg px-3 py-1.5 bg-surface-card text-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
-            />
+            <DatePicker label="As of Date" value={asOf} onChange={setAsOf} />
           </div>
           <div>
             <label className="block text-xs font-medium text-secondary mb-1">Supplier ID</label>

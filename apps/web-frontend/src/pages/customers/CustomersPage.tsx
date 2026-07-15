@@ -10,8 +10,11 @@ import { useAuthStore } from '../../store/auth.store.js';
 import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
 import ERPEmptyState from '../../components/erp/ERPEmptyState.js';
-import ERPDataGrid, { type ERPColumnDef } from '../../components/erp/ERPDataGrid.js';
-import ERPDropdownMenu, { type ERPMenuItem } from '../../components/erp/ERPDropdownMenu.js';
+import ERPDataGrid, {
+  type ERPColumnDef,
+  type ERPRowAction,
+} from '../../components/erp/ERPDataGrid.js';
+import ERPStatusBadge from '../../components/erp/ERPStatusBadge.js';
 import Button from '../../components/ui/Button.js';
 import Badge from '../../components/ui/Badge.js';
 import Input from '../../components/ui/Input.js';
@@ -47,10 +50,18 @@ export default function CustomersPage() {
   const page = toNumber(urlState.page, 1);
   const pageSize = toNumber(urlState.size, 50);
 
-  function setStatus(v: string): void { setUrlState({ status: v, page: '1' }); }
-  function setCustomerType(v: string): void { setUrlState({ type: v, page: '1' }); }
-  function setPage(p: number): void { setUrlState({ page: String(p) }); }
-  function setPageSize(s: number): void { setUrlState({ size: String(s), page: '1' }); }
+  function setStatus(v: string): void {
+    setUrlState({ status: v, page: '1' });
+  }
+  function setCustomerType(v: string): void {
+    setUrlState({ type: v, page: '1' });
+  }
+  function setPage(p: number): void {
+    setUrlState({ page: String(p) });
+  }
+  function setPageSize(s: number): void {
+    setUrlState({ size: String(s), page: '1' });
+  }
 
   // Only the debounced value hits the URL — syncing on every keystroke would thrash
   // history/URL updates during typing (ERP-PLANNING/02_ERP_NAVIGATION_ARCHITECTURE.md §17).
@@ -61,31 +72,49 @@ export default function CustomersPage() {
   // racing to patch the same URL in the same tick — see useUrlParam.ts's doc comment.
   const isFirstSearchRun = useRef(true);
   useEffect(() => {
-    if (isFirstSearchRun.current) { isFirstSearchRun.current = false; return; }
+    if (isFirstSearchRun.current) {
+      isFirstSearchRun.current = false;
+      return;
+    }
     setUrlState({ q: debouncedSearch, page: '1' });
   }, [debouncedSearch]);
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ['customers', debouncedSearch, status, customerType, page, pageSize],
-    queryFn: () => customerApi.list({ search: debouncedSearch || undefined, status: status || undefined, customerType: customerType || undefined, page: page - 1, size: pageSize }),
+    queryFn: () =>
+      customerApi.list({
+        search: debouncedSearch || undefined,
+        status: status || undefined,
+        customerType: customerType || undefined,
+        page: page - 1,
+        size: pageSize,
+      }),
   });
 
-  const customers: Customer[] = (data as Record<string, unknown>)?.content as Customer[] ?? [];
-  const totalElements = (data as Record<string, unknown>)?.totalElements as number ?? 0;
+  const customers: Customer[] = ((data as Record<string, unknown>)?.content as Customer[]) ?? [];
+  const totalElements = ((data as Record<string, unknown>)?.totalElements as number) ?? 0;
 
   const deleteMutation = useMutation({
     mutationFn: (id: number) => customerApi.delete(id),
-    onSuccess: () => { toast.success('Customer deactivated'); qc.invalidateQueries({ queryKey: ['customers'] }); },
+    onSuccess: () => {
+      toast.success('Customer deactivated');
+      qc.invalidateQueries({ queryKey: ['customers'] });
+    },
     onError: (err: Error) => toast.error(err.message),
   });
 
   const columns: ERPColumnDef<Customer>[] = [
     { key: 'customerCode', header: 'Code', mono: true, sortable: true, hideable: false },
     {
-      key: 'displayName', header: 'Name', sortable: true,
+      key: 'displayName',
+      header: 'Name',
+      sortable: true,
       render: (r) => (
         <div>
-          <button onClick={() => navigate(`/customers/${r.id}`)} className="font-medium text-link hover:underline">
+          <button
+            onClick={() => navigate(`/customers/${r.id}`)}
+            className="font-medium text-link hover:underline"
+          >
             {r.displayName}
           </button>
           {r.phone && <p className="text-xs text-secondary">{r.phone}</p>}
@@ -94,33 +123,54 @@ export default function CustomersPage() {
     },
     { key: 'gstin', header: 'GSTIN', mono: true },
     {
-      key: 'customerType', header: 'Type',
+      key: 'customerType',
+      header: 'Type',
       render: (r) => <Badge variant="info">{r.customerType}</Badge>,
     },
     {
-      key: 'status', header: 'Status', sortable: true,
-      render: (r) => (
-        <Badge variant={r.status === 'ACTIVE' ? 'success' : r.status === 'BLOCKED' ? 'danger' : 'default'}>{r.status}</Badge>
-      ),
+      key: 'status',
+      header: 'Status',
+      sortable: true,
+      render: (r) => <ERPStatusBadge status={r.status} />,
     },
     { key: 'creditLimit', header: 'Credit Limit', align: 'right' },
-    {
-      key: 'actions', header: '', align: 'right',
-      render: (r) => {
-        const items: ERPMenuItem[] = [{ label: 'View', icon: Eye, onClick: () => navigate(`/customers/${r.id}`) }];
-        if (canEditCustomer) items.push({ label: 'Edit', icon: Pencil, onClick: () => navigate(`/customers/${r.id}/edit`) });
-        if (canDeleteCustomer) items.push({ label: 'Delete', icon: Trash2, variant: 'danger', onClick: () => deleteMutation.mutate(r.id) });
-        return <ERPDropdownMenu items={items} />;
-      },
-    },
+  ];
+
+  const rowActions: ERPRowAction<Customer>[] = [
+    { icon: Eye, label: 'View', type: 'view', onClick: (r) => navigate(`/customers/${r.id}`) },
+    ...(canEditCustomer
+      ? [
+          {
+            icon: Pencil,
+            label: 'Edit',
+            type: 'edit' as const,
+            onClick: (r: Customer) => navigate(`/customers/${r.id}/edit`),
+          },
+        ]
+      : []),
+    ...(canDeleteCustomer
+      ? [
+          {
+            icon: Trash2,
+            label: 'Delete',
+            type: 'delete' as const,
+            onClick: (r: Customer) => deleteMutation.mutate(r.id),
+          },
+        ]
+      : []),
   ];
 
   return (
     <div>
-      <ERPPageHeader variant="list"
+      <ERPPageHeader
+        variant="list"
         title="Customers"
         subtitle="Manage your customer database."
-        actions={canCreateCustomer ? <Button onClick={() => navigate('/customers/new')}>+ New Customer</Button> : undefined}
+        actions={
+          canCreateCustomer ? (
+            <Button onClick={() => navigate('/customers/new')}>+ New Customer</Button>
+          ) : undefined
+        }
       />
 
       <div className="flex gap-3 mb-4">
@@ -131,15 +181,29 @@ export default function CustomersPage() {
           onChange={(e) => setSearch(e.target.value)}
           className="max-w-xs"
         />
-        <Select aria-label="Filter by status" value={status} onChange={(e) => setStatus(e.target.value)} className="w-36">
+        <Select
+          aria-label="Filter by status"
+          value={status}
+          onChange={(e) => setStatus(e.target.value)}
+          className="w-36"
+        >
           <option value="">All Statuses</option>
           <option value="ACTIVE">Active</option>
           <option value="INACTIVE">Inactive</option>
           <option value="BLOCKED">Blocked</option>
         </Select>
-        <Select aria-label="Filter by customer type" value={customerType} onChange={(e) => setCustomerType(e.target.value)} className="w-40">
+        <Select
+          aria-label="Filter by customer type"
+          value={customerType}
+          onChange={(e) => setCustomerType(e.target.value)}
+          className="w-40"
+        >
           <option value="">All Types</option>
-          {CUSTOMER_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+          {CUSTOMER_TYPES.map((t) => (
+            <option key={t} value={t}>
+              {t}
+            </option>
+          ))}
         </Select>
       </div>
 
@@ -155,6 +219,9 @@ export default function CustomersPage() {
           pagination={{ page, pageSize, total: totalElements }}
           onPageChange={setPage}
           onPageSizeChange={setPageSize}
+          actions={rowActions}
+          enableExport
+          exportFilename="customers"
         />
       )}
     </div>

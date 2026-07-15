@@ -7,8 +7,10 @@ import { userApi, adminSecurityApi } from '../../api/endpoints.js';
 import { useAuthStore, type AuthUser } from '../../store/auth.store.js';
 import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
-import ERPDataGrid, { type ERPColumnDef } from '../../components/erp/ERPDataGrid.js';
-import ERPDropdownMenu, { type ERPMenuItem } from '../../components/erp/ERPDropdownMenu.js';
+import ERPDataGrid, {
+  type ERPColumnDef,
+  type ERPRowAction,
+} from '../../components/erp/ERPDataGrid.js';
 import ImpersonateConfirmDialog from '../../components/erp/ImpersonateConfirmDialog.js';
 import Button from '../../components/ui/Button.js';
 import Badge from '../../components/ui/Badge.js';
@@ -150,44 +152,51 @@ export default function UsersPage() {
         );
       },
     },
-    {
-      key: 'actions',
-      header: '',
-      align: 'right',
-      render: (r) => {
-        const isLocked = !!r.lockedUntil && new Date(r.lockedUntil) > new Date();
-        const items: ERPMenuItem[] = [];
-        if (canUpdateUser)
-          items.push({
-            label: 'Edit',
+  ];
+
+  const rowActions: ERPRowAction<User>[] = [
+    ...(canUpdateUser
+      ? [
+          {
             icon: Pencil,
-            onClick: () => navigate(`/users/${r.id}/edit`),
-          });
-        if (canManageUser && r.id !== currentUserId) {
-          if (isLocked)
-            items.push({
-              label: 'Unlock',
-              icon: Unlock,
-              onClick: () => unlockMutation.mutate(r.id),
-            });
-          else items.push({ label: 'Lock', icon: Lock, onClick: () => lockMutation.mutate(r.id) });
-        }
-        if (canImpersonate)
-          items.push({
-            label: 'Impersonate',
-            icon: UserCog,
-            onClick: () => setImpersonateTarget(r),
-          });
-        if (canDeleteUser)
-          items.push({
-            label: 'Deactivate',
+            label: 'Edit',
+            type: 'edit' as const,
+            onClick: (r: User) => navigate(`/users/${r.id}/edit`),
+          },
+        ]
+      : []),
+    ...(canManageUser
+      ? [
+          {
+            icon: Unlock,
+            label: 'Unlock',
+            onClick: (r: User) => unlockMutation.mutate(r.id),
+            hidden: (r: User) =>
+              r.id === currentUserId || !(r.lockedUntil && new Date(r.lockedUntil) > new Date()),
+          },
+          {
+            icon: Lock,
+            label: 'Lock',
+            onClick: (r: User) => lockMutation.mutate(r.id),
+            hidden: (r: User) =>
+              r.id === currentUserId ||
+              Boolean(r.lockedUntil && new Date(r.lockedUntil) > new Date()),
+          },
+        ]
+      : []),
+    ...(canImpersonate
+      ? [{ icon: UserCog, label: 'Impersonate', onClick: (r: User) => setImpersonateTarget(r) }]
+      : []),
+    ...(canDeleteUser
+      ? [
+          {
             icon: UserX,
-            variant: 'danger',
-            onClick: () => deleteMutation.mutate(r.id),
-          });
-        return items.length > 0 ? <ERPDropdownMenu items={items} /> : null;
-      },
-    },
+            label: 'Deactivate',
+            type: 'delete' as const,
+            onClick: (r: User) => deleteMutation.mutate(r.id),
+          },
+        ]
+      : []),
   ];
 
   return (
@@ -202,7 +211,13 @@ export default function UsersPage() {
           ) : undefined
         }
       />
-      <ERPDataGrid columns={columns} data={users} isLoading={isLoading} rowKey="id" />
+      <ERPDataGrid
+        columns={columns}
+        data={users}
+        isLoading={isLoading}
+        rowKey="id"
+        actions={rowActions}
+      />
 
       <ImpersonateConfirmDialog
         open={impersonateTarget !== null}

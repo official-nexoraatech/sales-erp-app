@@ -8,12 +8,17 @@ import { cva, type VariantProps } from 'class-variance-authority';
  */
 export const inputVariants = cva(
   [
-    'w-full min-w-0 rounded-xl text-primary',
+    // rounded-md (--radius-md, 6px) — enterprise forms use a subtle corner, not the
+    // rounded-xl/12px pill-ish radius the rest of the app's cards/buttons use.
+    'w-full min-w-0 rounded-md text-primary',
     'border',
     'transition-[color,background-color,border-color,box-shadow] duration-150 ease-out',
     'outline-none',
     'placeholder:text-placeholder placeholder:font-normal',
     'disabled:cursor-not-allowed disabled:opacity-50 disabled:bg-surface-subtle disabled:text-disabled',
+    // readOnly must read as distinctly non-editable without looking disabled (still
+    // selectable/copyable, just not editable) — a muted background is the differentiator.
+    'read-only:bg-surface-subtle read-only:cursor-default',
   ],
   {
     variants: {

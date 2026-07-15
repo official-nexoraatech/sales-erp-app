@@ -5,6 +5,7 @@ import { auditLogApi } from '../../api/endpoints.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
 import { ERPTableSkeleton } from '../../components/erp/ERPSkeleton.js';
 import ERPEmptyState from '../../components/erp/ERPEmptyState.js';
+import Button from '../../components/ui/Button.js';
 import { formatDate } from '../../lib/format.js';
 
 interface AuditLogRow {
@@ -46,14 +47,20 @@ export default function AuditLogPage() {
       />
 
       <div className="card p-4">
-        <label className="block text-xs font-medium text-secondary mb-1">Entity Type</label>
+        <label
+          htmlFor="audit-log-entity-type"
+          className="block text-xs font-medium text-secondary mb-1"
+        >
+          Entity Type
+        </label>
         <select
+          id="audit-log-entity-type"
           value={entity}
           onChange={(e) => {
             setEntity(e.target.value);
             setPage(0);
           }}
-          className="w-64 px-3 py-2 rounded-lg border border-border bg-surface text-primary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+          className="w-64 px-3 py-2 rounded-lg border border-default bg-surface-card text-primary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
         >
           {ENTITY_TYPES.map((t) => (
             <option key={t} value={t}>
@@ -162,20 +169,22 @@ export default function AuditLogPage() {
             Page {page + 1} of {Math.ceil(totalElements / size)}
           </span>
           <div className="flex gap-2">
-            <button
-              className="px-3 py-1.5 rounded-lg border border-default disabled:opacity-50"
+            <Button
+              variant="outline"
+              size="sm"
               disabled={page === 0}
               onClick={() => setPage((p) => Math.max(0, p - 1))}
             >
               Previous
-            </button>
-            <button
-              className="px-3 py-1.5 rounded-lg border border-default disabled:opacity-50"
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
               disabled={(page + 1) * size >= totalElements}
               onClick={() => setPage((p) => p + 1)}
             >
               Next
-            </button>
+            </Button>
           </div>
         </div>
       )}

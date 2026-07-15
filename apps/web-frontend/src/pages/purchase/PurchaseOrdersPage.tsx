@@ -8,8 +8,10 @@ import { useDebounce } from '../../hooks/useDebounce.js';
 import { useAuthStore } from '../../store/auth.store.js';
 import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
-import ERPDataGrid, { type ERPColumnDef } from '../../components/erp/ERPDataGrid.js';
-import ERPDropdownMenu, { type ERPMenuItem } from '../../components/erp/ERPDropdownMenu.js';
+import ERPDataGrid, {
+  type ERPColumnDef,
+  type ERPRowAction,
+} from '../../components/erp/ERPDataGrid.js';
 import ERPDrawer from '../../components/erp/ERPDrawer.js';
 import AttachmentSection from '../../components/erp/AttachmentSection.js';
 import Button from '../../components/ui/Button.js';
@@ -151,55 +153,71 @@ export default function PurchaseOrdersPage() {
       sortable: true,
       render: (r) => <Badge variant={STATUS_COLORS[r.status] ?? 'default'}>{r.status}</Badge>,
     },
-    {
-      key: 'actions',
-      header: '',
-      align: 'right',
-      render: (r) => {
-        const items: ERPMenuItem[] = [];
-        if (canCreatePO && r.status === 'DRAFT')
-          items.push({ label: 'Submit', icon: Send, onClick: () => submitMutation.mutate(r.id) });
-        if (canApprovePO && r.status === 'SUBMITTED')
-          items.push({
+  ];
+
+  const rowActions: ERPRowAction<PurchaseOrder>[] = [
+    ...(canCreatePO
+      ? [
+          {
+            label: 'Submit',
+            icon: Send,
+            onClick: (r: PurchaseOrder) => submitMutation.mutate(r.id),
+            hidden: (r: PurchaseOrder) => r.status !== 'DRAFT',
+          },
+        ]
+      : []),
+    ...(canApprovePO
+      ? [
+          {
             label: 'Approve',
             icon: CheckCircle2,
-            onClick: () => {
+            onClick: (r: PurchaseOrder) => {
               setApproveId(r.id);
               setPoNumber('');
             },
-          });
-        if (canCreateGRN && ['APPROVED', 'PARTIALLY_RECEIVED'].includes(r.status)) {
-          items.push({
+            hidden: (r: PurchaseOrder) => r.status !== 'SUBMITTED',
+          },
+        ]
+      : []),
+    ...(canCreateGRN
+      ? [
+          {
             label: 'Receive',
             icon: PackageCheck,
-            onClick: () => navigate(`/purchase/grns/new?poId=${r.id}`),
-          });
-        }
-        items.push({
-          label: 'Attachments',
-          icon: Paperclip,
-          onClick: () => setAttachmentsForId(r.id),
-        });
-        if (canCreatePO)
-          items.push({
+            onClick: (r: PurchaseOrder) => navigate(`/purchase/grns/new?poId=${r.id}`),
+            hidden: (r: PurchaseOrder) => !['APPROVED', 'PARTIALLY_RECEIVED'].includes(r.status),
+          },
+        ]
+      : []),
+    {
+      label: 'Attachments',
+      icon: Paperclip,
+      onClick: (r: PurchaseOrder) => setAttachmentsForId(r.id),
+    },
+    ...(canCreatePO
+      ? [
+          {
             label: 'Duplicate',
             icon: Copy,
-            onClick: () => duplicateMutation.mutate(r.id),
-          });
-        if (canCancelPO && ['DRAFT', 'SUBMITTED'].includes(r.status)) {
-          items.push({
+            type: 'duplicate' as const,
+            onClick: (r: PurchaseOrder) => duplicateMutation.mutate(r.id),
+          },
+        ]
+      : []),
+    ...(canCancelPO
+      ? [
+          {
             label: 'Cancel',
             icon: Ban,
-            variant: 'danger',
-            onClick: () => {
+            type: 'delete' as const,
+            onClick: (r: PurchaseOrder) => {
               setCancelId(r.id);
               setCancelReason('');
             },
-          });
-        }
-        return <ERPDropdownMenu items={items} />;
-      },
-    },
+            hidden: (r: PurchaseOrder) => !['DRAFT', 'SUBMITTED'].includes(r.status),
+          },
+        ]
+      : []),
   ];
 
   return (
@@ -243,6 +261,7 @@ export default function PurchaseOrdersPage() {
           setPageSize(size);
           setPage(1);
         }}
+        actions={rowActions}
       />
 
       <Modal

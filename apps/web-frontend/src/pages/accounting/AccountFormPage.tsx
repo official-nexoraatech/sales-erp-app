@@ -10,9 +10,11 @@ import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
 import { ERPFormSkeleton } from '../../components/erp/ERPSkeleton.js';
 import ERPFormSection from '../../components/erp/ERPFormSection.js';
+import ERPStickyFooter from '../../components/erp/ERPStickyFooter.js';
 import Input from '../../components/ui/Input.js';
 import Select from '../../components/ui/Select.js';
 import Button from '../../components/ui/Button.js';
+import Checkbox from '../../components/ui/Checkbox.js';
 import {
   accountFormSchema,
   ACCOUNT_TYPES,
@@ -95,7 +97,11 @@ export default function AccountFormPage() {
   if (isEdit && isLoading) {
     return (
       <div>
-        <ERPPageHeader variant="list" title="Edit Account" />
+        <ERPPageHeader
+          variant="detail"
+          title="Edit Account"
+          backTo="/accounting/chart-of-accounts"
+        />
         <ERPFormSkeleton />
       </div>
     );
@@ -103,7 +109,11 @@ export default function AccountFormPage() {
 
   return (
     <div>
-      <ERPPageHeader variant="list" title={isEdit ? 'Edit Account' : 'New Account'} />
+      <ERPPageHeader
+        variant="detail"
+        title={isEdit ? 'Edit Account' : 'New Account'}
+        backTo="/accounting/chart-of-accounts"
+      />
 
       <form
         onSubmit={handleSubmit((d) => mutation.mutate(d as unknown as Record<string, unknown>))}
@@ -186,14 +196,8 @@ export default function AccountFormPage() {
           columns={2}
         >
           <div className="flex items-center gap-6 sm:col-span-2">
-            <label className="flex items-center gap-2 text-sm text-primary">
-              <input type="checkbox" {...register('isCash')} className="rounded border-default" />
-              Cash Account
-            </label>
-            <label className="flex items-center gap-2 text-sm text-primary">
-              <input type="checkbox" {...register('isBank')} className="rounded border-default" />
-              Bank Account
-            </label>
+            <Checkbox label="Cash Account" {...register('isCash')} />
+            <Checkbox label="Bank Account" {...register('isBank')} />
           </div>
           {isBank && (
             <>
@@ -209,10 +213,7 @@ export default function AccountFormPage() {
           )}
         </ERPFormSection>
 
-        <div className="flex gap-3">
-          <Button type="submit" loading={isSubmitting || mutation.isPending}>
-            {isEdit ? 'Update' : 'Create'} Account
-          </Button>
+        <ERPStickyFooter>
           <Button
             variant="secondary"
             type="button"
@@ -220,7 +221,10 @@ export default function AccountFormPage() {
           >
             Cancel
           </Button>
-        </div>
+          <Button type="submit" loading={isSubmitting || mutation.isPending}>
+            {isEdit ? 'Update' : 'Create'} Account
+          </Button>
+        </ERPStickyFooter>
       </form>
     </div>
   );

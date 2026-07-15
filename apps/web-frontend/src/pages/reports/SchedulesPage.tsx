@@ -6,6 +6,8 @@ import { useAuthStore } from '../../store/auth.store.js';
 import { PERMISSIONS } from '../../constants/permissions.js';
 import { ERPCardSkeleton } from '../../components/erp/ERPSkeleton.js';
 import ERPEmptyState from '../../components/erp/ERPEmptyState.js';
+import TagsInput from '../../components/ui/TagsInput.js';
+import Button from '../../components/ui/Button.js';
 
 interface Schedule {
   id: number;
@@ -36,7 +38,7 @@ export default function SchedulesPage() {
   const [reportSlug, setReportSlug] = useState('');
   const [format, setFormat] = useState<'PDF' | 'EXCEL' | 'CSV'>('EXCEL');
   const [cronExpression, setCronExpression] = useState('0 7 * * *');
-  const [recipients, setRecipients] = useState('');
+  const [recipients, setRecipients] = useState<string[]>([]);
 
   const { data: schedules, isLoading } = useQuery({
     queryKey: ['report-schedules'],
@@ -50,7 +52,7 @@ export default function SchedulesPage() {
   });
 
   const allReports: ReportDef[] = reportsData
-    ? Object.values(reportsData.grouped).flat() as ReportDef[]
+    ? (Object.values(reportsData.grouped).flat() as ReportDef[])
     : [];
 
   const createMutation = useMutation({
@@ -59,7 +61,7 @@ export default function SchedulesPage() {
       void qc.invalidateQueries({ queryKey: ['report-schedules'] });
       setShowForm(false);
       setReportSlug('');
-      setRecipients('');
+      setRecipients([]);
     },
   });
 
@@ -70,12 +72,12 @@ export default function SchedulesPage() {
 
   function handleCreate(e: React.FormEvent) {
     e.preventDefault();
-    if (!reportSlug || !cronExpression || !recipients.trim()) return;
+    if (!reportSlug || !cronExpression || recipients.length === 0) return;
     createMutation.mutate({
       reportSlug,
       format,
       cronExpression,
-      recipients: recipients.split(',').map((r) => r.trim()).filter(Boolean),
+      recipients,
     });
   }
 
@@ -90,21 +92,23 @@ export default function SchedulesPage() {
           </h1>
           <p className="text-sm text-secondary mt-0.5">Automate report delivery via email</p>
         </div>
-        <button
-          onClick={() => setShowForm((v) => !v)}
-          className="flex items-center gap-2 px-4 py-2 bg-primary text-white text-sm font-medium rounded-lg hover:bg-primary/90 transition-colors"
-        >
-          <Plus size={15} /> New Schedule
-        </button>
+        <Button variant="primary" onClick={() => setShowForm((v) => !v)}>
+          <Plus size={16} /> New Schedule
+        </Button>
       </div>
 
       {/* Create form */}
       {showForm && (
-        <form onSubmit={handleCreate} className="bg-surface-card border border-default rounded-xl p-5 space-y-4">
+        <form
+          onSubmit={handleCreate}
+          className="bg-surface-card border border-default rounded-xl p-5 space-y-4"
+        >
           <h3 className="text-sm font-semibold text-primary">New Schedule</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-medium text-secondary mb-1">Report <span className="text-error">*</span></label>
+              <label className="block text-xs font-medium text-secondary mb-1">
+                Report <span className="text-error">*</span>
+              </label>
               <select
                 required
                 value={reportSlug}
@@ -113,7 +117,9 @@ export default function SchedulesPage() {
               >
                 <option value="">Select a report</option>
                 {allReports.map((r) => (
-                  <option key={r.slug} value={r.slug}>{r.name}</option>
+                  <option key={r.slug} value={r.slug}>
+                    {r.name}
+                  </option>
                 ))}
               </select>
             </div>
@@ -130,7 +136,9 @@ export default function SchedulesPage() {
               </select>
             </div>
             <div>
-              <label className="block text-xs font-medium text-secondary mb-1">Schedule (Cron)</label>
+              <label className="block text-xs font-medium text-secondary mb-1">
+                Schedule (Cron)
+              </label>
               <div className="flex gap-2">
                 <input
                   required
@@ -154,32 +162,22 @@ export default function SchedulesPage() {
               </div>
             </div>
             <div>
-              <label className="block text-xs font-medium text-secondary mb-1">Recipients (comma-separated) <span className="text-error">*</span></label>
-              <input
+              <TagsInput
+                label="Recipients"
                 required
-                type="text"
                 value={recipients}
-                onChange={(e) => setRecipients(e.target.value)}
-                placeholder="user@company.com, manager@company.com"
-                className="w-full text-sm border border-default rounded-lg px-3 py-2 bg-surface-card text-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
+                onChange={setRecipients}
+                placeholder="user@company.com"
               />
             </div>
           </div>
           <div className="flex justify-end gap-2 pt-2">
-            <button
-              type="button"
-              onClick={() => setShowForm(false)}
-              className="px-4 py-2 text-sm text-secondary hover:text-primary border border-default rounded-lg transition-colors"
-            >
+            <Button type="button" variant="secondary" onClick={() => setShowForm(false)}>
               Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={createMutation.isPending}
-              className="px-4 py-2 text-sm font-medium bg-primary text-white rounded-lg hover:bg-primary/90 disabled:opacity-60 transition-colors"
-            >
-              {createMutation.isPending ? 'Creating...' : 'Create Schedule'}
-            </button>
+            </Button>
+            <Button type="submit" variant="primary" loading={createMutation.isPending}>
+              Create Schedule
+            </Button>
           </div>
           {createMutation.isError && (
             <p className="text-error text-sm">{(createMutation.error as Error).message}</p>
@@ -190,7 +188,9 @@ export default function SchedulesPage() {
       {/* Schedules list */}
       {isLoading && (
         <div className="space-y-3">
-          {Array.from({ length: 3 }).map((_, i) => <ERPCardSkeleton key={i} lines={2} />)}
+          {Array.from({ length: 3 }).map((_, i) => (
+            <ERPCardSkeleton key={i} lines={2} />
+          ))}
         </div>
       )}
 
@@ -208,15 +208,26 @@ export default function SchedulesPage() {
           const def = allReports.find((r) => r.slug === schedule.reportSlug);
           const recipientsArr = schedule.recipients as unknown as string[];
           return (
-            <div key={schedule.id} className="bg-surface-card border border-default rounded-xl p-4 flex items-start justify-between gap-4">
+            <div
+              key={schedule.id}
+              className="bg-surface-card border border-default rounded-xl p-4 flex items-start justify-between gap-4"
+            >
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 mb-1">
-                  <span className={`w-2 h-2 rounded-full shrink-0 ${schedule.active ? 'bg-success' : 'bg-surface-raised'}`} />
-                  <p className="text-sm font-semibold text-primary">{def?.name ?? schedule.reportSlug}</p>
-                  <span className="text-xs px-1.5 py-0.5 rounded bg-surface-raised text-secondary">{schedule.format}</span>
+                  <span
+                    className={`w-2 h-2 rounded-full shrink-0 ${schedule.active ? 'bg-success' : 'bg-surface-raised'}`}
+                  />
+                  <p className="text-sm font-semibold text-primary">
+                    {def?.name ?? schedule.reportSlug}
+                  </p>
+                  <span className="text-xs px-1.5 py-0.5 rounded bg-surface-raised text-secondary">
+                    {schedule.format}
+                  </span>
                 </div>
                 <div className="flex items-center gap-4 text-xs text-secondary">
-                  <span className="flex items-center gap-1"><Clock size={11} /> <code className="font-mono">{schedule.cronExpression}</code></span>
+                  <span className="flex items-center gap-1">
+                    <Clock size={11} /> <code className="font-mono">{schedule.cronExpression}</code>
+                  </span>
                   <span className="flex items-center gap-1">
                     <Mail size={11} /> {recipientsArr.join(', ')}
                   </span>

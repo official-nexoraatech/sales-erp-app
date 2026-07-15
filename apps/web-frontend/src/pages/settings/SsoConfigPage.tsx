@@ -11,6 +11,7 @@ import Input from '../../components/ui/Input.js';
 import Select from '../../components/ui/Select.js';
 import PasswordInput from '../../components/ui/PasswordInput.js';
 import Button from '../../components/ui/Button.js';
+import Checkbox from '../../components/ui/Checkbox.js';
 import { ERPFormSkeleton } from '../../components/erp/ERPSkeleton.js';
 
 const PROVIDER_OPTIONS = [
@@ -48,7 +49,12 @@ export default function SsoConfigPage() {
 
   const config = data as Record<string, unknown> | null | undefined;
 
-  const { register, handleSubmit, reset, formState: { errors, isDirty, isSubmitting } } = useForm<SsoConfigForm>({
+  const {
+    register,
+    handleSubmit,
+    reset,
+    formState: { errors, isDirty, isSubmitting },
+  } = useForm<SsoConfigForm>({
     defaultValues: { provider: 'GENERIC_OIDC', enabled: false, bypassLocalMfa: false },
   });
 
@@ -92,7 +98,12 @@ export default function SsoConfigPage() {
 
       <form onSubmit={handleSubmit(onSubmit)} className="max-w-2xl space-y-5" noValidate>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <Select label="Identity Provider" {...register('provider', { required: 'Required' })} options={PROVIDER_OPTIONS} error={errors.provider?.message} />
+          <Select
+            label="Identity Provider"
+            {...register('provider', { required: 'Required' })}
+            options={PROVIDER_OPTIONS}
+            error={errors.provider?.message}
+          />
           <Input
             label="Issuer URL"
             placeholder="https://your-org.okta.com"
@@ -101,7 +112,11 @@ export default function SsoConfigPage() {
           />
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <Input label="Client ID" {...register('clientId', { required: 'Required' })} error={errors.clientId?.message} />
+          <Input
+            label="Client ID"
+            {...register('clientId', { required: 'Required' })}
+            error={errors.clientId?.message}
+          />
           <PasswordInput
             label="Client Secret"
             placeholder={config ? 'Leave blank to keep existing secret' : 'Required'}
@@ -111,19 +126,20 @@ export default function SsoConfigPage() {
         </div>
 
         <div className="border-t border-default pt-5 space-y-3">
-          <label className="flex items-center gap-2 text-sm text-primary">
-            <input type="checkbox" {...register('enabled')} className="rounded border-default" />
-            Enable SSO login for this tenant
-          </label>
-          <label className="flex items-center gap-2 text-sm text-primary">
-            <input type="checkbox" {...register('bypassLocalMfa')} className="rounded border-default" />
-            Skip this app's TOTP 2FA for SSO logins (the IdP is trusted to enforce its own MFA)
-          </label>
+          <Checkbox label="Enable SSO login for this tenant" {...register('enabled')} />
+          <Checkbox
+            label="Skip this app's TOTP 2FA for SSO logins (the IdP is trusted to enforce its own MFA)"
+            {...register('bypassLocalMfa')}
+          />
         </div>
 
         {canManage && (
           <div className="flex items-center gap-3 pt-2">
-            <Button type="submit" loading={isSubmitting || saveMutation.isPending} disabled={!isDirty}>
+            <Button
+              type="submit"
+              loading={isSubmitting || saveMutation.isPending}
+              disabled={!isDirty}
+            >
               Save Changes
             </Button>
             {config && (
@@ -132,7 +148,11 @@ export default function SsoConfigPage() {
                 variant="danger-outline"
                 disabled={removeMutation.isPending}
                 onClick={() => {
-                  if (window.confirm('Remove SSO configuration for this tenant? Users will no longer be able to sign in via SSO.')) {
+                  if (
+                    window.confirm(
+                      'Remove SSO configuration for this tenant? Users will no longer be able to sign in via SSO.'
+                    )
+                  ) {
                     removeMutation.mutate();
                   }
                 }}

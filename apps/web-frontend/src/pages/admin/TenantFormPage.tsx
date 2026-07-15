@@ -7,6 +7,7 @@ import toast from 'react-hot-toast';
 import { adminTenantApi } from '../../api/endpoints.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
 import ERPFormSection from '../../components/erp/ERPFormSection.js';
+import ERPStickyFooter from '../../components/erp/ERPStickyFooter.js';
 import Input from '../../components/ui/Input.js';
 import Select from '../../components/ui/Select.js';
 import Button from '../../components/ui/Button.js';
@@ -76,7 +77,7 @@ export default function TenantFormPage() {
   if (created) {
     return (
       <div>
-        <ERPPageHeader variant="list" title="Tenant Created" />
+        <ERPPageHeader variant="detail" title="Tenant Created" backTo="/admin/tenants" />
         <ERPFormSection
           title="Give these to the client"
           description="They'll need all three to log in — the Tenant ID isn't shown anywhere else once you leave this page, so copy it now."
@@ -100,9 +101,9 @@ export default function TenantFormPage() {
             </div>
           </div>
         </ERPFormSection>
-        <div className="flex gap-3 mt-6">
+        <ERPStickyFooter>
           <Button onClick={() => navigate('/admin/tenants')}>Back to Tenants</Button>
-        </div>
+        </ERPStickyFooter>
       </div>
     );
   }
@@ -110,9 +111,10 @@ export default function TenantFormPage() {
   return (
     <div>
       <ERPPageHeader
-        variant="list"
+        variant="detail"
         title="New Tenant"
         subtitle="Provision a new organization and its first Owner account."
+        backTo="/admin/tenants"
       />
 
       <form onSubmit={handleSubmit((d) => mutation.mutate(d))} className="space-y-6" noValidate>
@@ -204,14 +206,14 @@ export default function TenantFormPage() {
           />
         </ERPFormSection>
 
-        <div className="flex gap-3">
-          <Button type="submit" loading={isSubmitting || mutation.isPending}>
-            Create Tenant
-          </Button>
+        <ERPStickyFooter>
           <Button variant="secondary" type="button" onClick={() => navigate('/admin/tenants')}>
             Cancel
           </Button>
-        </div>
+          <Button type="submit" loading={isSubmitting || mutation.isPending}>
+            Create Tenant
+          </Button>
+        </ERPStickyFooter>
       </form>
     </div>
   );

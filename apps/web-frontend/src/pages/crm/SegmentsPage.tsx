@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import toast from 'react-hot-toast';
+import { useNavigate } from 'react-router-dom';
+import { useQuery, useMutation } from '@tanstack/react-query';
 import { crmApi } from '../../api/endpoints.js';
 import { useAuthStore } from '../../store/auth.store.js';
 import { PERMISSIONS } from '../../constants/permissions.js';
@@ -9,8 +9,6 @@ import { ERPCardSkeleton } from '../../components/erp/ERPSkeleton.js';
 import ERPEmptyState from '../../components/erp/ERPEmptyState.js';
 import Button from '../../components/ui/Button.js';
 import Badge from '../../components/ui/Badge.js';
-import Modal from '../../components/ui/Modal.js';
-import Input from '../../components/ui/Input.js';
 
 interface Segment {
   id: number;
@@ -38,32 +36,13 @@ const PREBUILT_CODES = [
   { code: 'new-customers-this-month', label: 'New Customers This Month' },
 ];
 
-const SEGMENT_FIELDS = [
-  'customerType',
-  'status',
-  'creditLimit',
-  'loyaltyPoints',
-  'openingBalance',
-  'healthSegment',
-  'healthScore',
-];
-const OPERATORS = ['eq', 'neq', 'gt', 'gte', 'lt', 'lte', 'contains'];
-
 export default function SegmentsPage() {
-  const qc = useQueryClient();
+  const navigate = useNavigate();
   const hasPermission = useAuthStore((s) => s.hasPermission);
   const canCreate = hasPermission(PERMISSIONS.CRM_SEGMENT_CREATE);
 
-  const [createOpen, setCreateOpen] = useState(false);
   const [previewCode, setPreviewCode] = useState<string | null>(null);
   const [previewCount, setPreviewCount] = useState<number | null>(null);
-  const [form, setForm] = useState({
-    name: '',
-    description: '',
-    field: 'status',
-    operator: 'eq',
-    value: '',
-  });
 
   const { data: segData, isLoading: segmentsLoading } = useQuery({
     queryKey: ['crm-segments'],
@@ -78,37 +57,12 @@ export default function SegmentsPage() {
   const health = healthData as HealthCounts | undefined;
 
   const previewMut = useMutation({
-    mutationFn: (code: string) =>
-      crmApi.previewSegment(
-        PREBUILT_CODES.some((p) => p.code === code)
-          ? { segmentCode: code }
-          : {
-              rules: [{ field: form.field, operator: form.operator, value: form.value }],
-              logic: 'AND',
-            }
-      ),
+    mutationFn: (code: string) => crmApi.previewSegment({ segmentCode: code }),
     onSuccess: (res, code) => {
       const d = res as Record<string, unknown>;
       setPreviewCount((d?.matchingCount as number) ?? 0);
       setPreviewCode(code);
     },
-  });
-
-  const createMut = useMutation({
-    mutationFn: () =>
-      crmApi.createSegment({
-        name: form.name,
-        description: form.description,
-        rules: [{ field: form.field, operator: form.operator, value: form.value }],
-        logic: 'AND',
-      }),
-    onSuccess: () => {
-      toast.success('Segment created');
-      qc.invalidateQueries({ queryKey: ['crm-segments'] });
-      setCreateOpen(false);
-      setForm({ name: '', description: '', field: 'status', operator: 'eq', value: '' });
-    },
-    onError: () => toast.error('Failed to create segment'),
   });
 
   const exportSegment = (idOrCode: string | number) => {
@@ -129,7 +83,9 @@ export default function SegmentsPage() {
         title="Customer Segments"
         subtitle="Pre-built and custom segments for targeted campaigns"
         actions={
-          canCreate ? <Button onClick={() => setCreateOpen(true)}>+ New Segment</Button> : undefined
+          canCreate ? (
+            <Button onClick={() => navigate('/crm/segments/new')}>+ New Segment</Button>
+          ) : undefined
         }
       />
 
@@ -218,7 +174,7 @@ export default function SegmentsPage() {
             title="No custom segments yet"
             description="Custom filter-based segments you create will appear here."
             {...(canCreate
-              ? { action: { label: '+ New Segment', onClick: () => setCreateOpen(true) } }
+              ? { action: { label: '+ New Segment', onClick: () => navigate('/crm/segments/new') } }
               : {})}
           />
         ) : (
@@ -245,68 +201,6 @@ export default function SegmentsPage() {
           </div>
         )}
       </div>
-
-      {/* Create Segment Modal */}
-      <Modal open={createOpen} onClose={() => setCreateOpen(false)} title="New Custom Segment">
-        <div className="space-y-4">
-          <Input
-            label="Segment Name"
-            required
-            value={form.name}
-            onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-          />
-          <Input
-            label="Description (optional)"
-            value={form.description}
-            onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
-          />
-          <div>
-            <p className="text-xs font-semibold text-secondary mb-2 uppercase tracking-wide">
-              Filter Rule
-            </p>
-            <div className="flex gap-2 flex-wrap">
-              <select
-                value={form.field}
-                onChange={(e) => setForm((f) => ({ ...f, field: e.target.value }))}
-                className="flex-1 rounded-lg border border-default bg-surface-card text-primary text-sm px-3 py-2"
-              >
-                {SEGMENT_FIELDS.map((f) => (
-                  <option key={f} value={f}>
-                    {f}
-                  </option>
-                ))}
-              </select>
-              <select
-                value={form.operator}
-                onChange={(e) => setForm((f) => ({ ...f, operator: e.target.value }))}
-                className="w-28 rounded-lg border border-default bg-surface-card text-primary text-sm px-3 py-2"
-              >
-                {OPERATORS.map((o) => (
-                  <option key={o} value={o}>
-                    {o}
-                  </option>
-                ))}
-              </select>
-              <Input
-                placeholder="Value"
-                value={form.value}
-                onChange={(e) => setForm((f) => ({ ...f, value: e.target.value }))}
-              />
-            </div>
-          </div>
-          <div className="flex gap-2 justify-end pt-2">
-            <Button variant="ghost" onClick={() => setCreateOpen(false)}>
-              Cancel
-            </Button>
-            <Button
-              onClick={() => createMut.mutate()}
-              disabled={createMut.isPending || !form.name || !form.value}
-            >
-              {createMut.isPending ? 'Creating…' : 'Create'}
-            </Button>
-          </div>
-        </div>
-      </Modal>
     </div>
   );
 }

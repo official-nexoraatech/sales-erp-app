@@ -8,8 +8,10 @@ import { useDebounce } from '../../hooks/useDebounce.js';
 import { useAuthStore } from '../../store/auth.store.js';
 import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
-import ERPDataGrid, { type ERPColumnDef } from '../../components/erp/ERPDataGrid.js';
-import ERPDropdownMenu, { type ERPMenuItem } from '../../components/erp/ERPDropdownMenu.js';
+import ERPDataGrid, {
+  type ERPColumnDef,
+  type ERPRowAction,
+} from '../../components/erp/ERPDataGrid.js';
 import Button from '../../components/ui/Button.js';
 import Badge from '../../components/ui/Badge.js';
 import Input from '../../components/ui/Input.js';
@@ -133,38 +135,47 @@ export default function InvoicesPage() {
       sortable: true,
       render: (r) => <Badge variant={STATUS_COLORS[r.status] ?? 'default'}>{r.status}</Badge>,
     },
+  ];
+
+  const rowActions: ERPRowAction<Invoice>[] = [
     {
-      key: 'actions',
-      header: '',
-      align: 'right',
-      render: (r) => {
-        const items: ERPMenuItem[] = [
-          { label: 'View', icon: Eye, onClick: () => navigate(`/sales/invoices/${r.id}`) },
-        ];
-        if (canCreateInvoice)
-          items.push({
+      label: 'View',
+      icon: Eye,
+      type: 'view',
+      onClick: (r: Invoice) => navigate(`/sales/invoices/${r.id}`),
+    },
+    ...(canCreateInvoice
+      ? [
+          {
             label: 'Duplicate',
             icon: Copy,
-            onClick: () => duplicateMutation.mutate(r.id),
-          });
-        if (canCreatePayment && ['CONFIRMED', 'PARTIALLY_PAID'].includes(r.status)) {
-          items.push({
+            type: 'duplicate' as const,
+            onClick: (r: Invoice) => duplicateMutation.mutate(r.id),
+          },
+        ]
+      : []),
+    ...(canCreatePayment
+      ? [
+          {
             label: 'Record Payment',
             icon: IndianRupee,
-            onClick: () => navigate(`/sales/payments/new?invoiceId=${r.id}`),
-          });
-        }
-        if (canCancelInvoice && r.status === 'DRAFT') {
-          items.push({
+            onClick: (r: Invoice) => navigate(`/sales/payments/new?invoiceId=${r.id}`),
+            hidden: (r: Invoice) => !['CONFIRMED', 'PARTIALLY_PAID'].includes(r.status),
+          },
+        ]
+      : []),
+    ...(canCancelInvoice
+      ? [
+          {
             label: 'Cancel',
             icon: Ban,
-            variant: 'danger',
-            onClick: () => cancelMutation.mutate({ id: r.id, reason: 'Cancelled by user' }),
-          });
-        }
-        return <ERPDropdownMenu items={items} />;
-      },
-    },
+            type: 'delete' as const,
+            onClick: (r: Invoice) =>
+              cancelMutation.mutate({ id: r.id, reason: 'Cancelled by user' }),
+            hidden: (r: Invoice) => r.status !== 'DRAFT',
+          },
+        ]
+      : []),
   ];
 
   return (
@@ -204,6 +215,7 @@ export default function InvoicesPage() {
           setPageSize(size);
           setPage(1);
         }}
+        actions={rowActions}
       />
     </div>
   );

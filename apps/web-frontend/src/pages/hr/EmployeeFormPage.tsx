@@ -10,15 +10,27 @@ import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
 import ERPFormSection from '../../components/erp/ERPFormSection.js';
 import ERPTabs from '../../components/erp/ERPTabs.js';
+import ERPStickyFooter from '../../components/erp/ERPStickyFooter.js';
 import { ERPFormSkeleton } from '../../components/erp/ERPSkeleton.js';
 import Input from '../../components/ui/Input.js';
 import Select from '../../components/ui/Select.js';
 import Button from '../../components/ui/Button.js';
-import { employeeFormSchema, EMPLOYMENT_TYPES, type EmployeeFormData } from '../../schemas/employee.schema.js';
+import Checkbox from '../../components/ui/Checkbox.js';
+import {
+  employeeFormSchema,
+  EMPLOYMENT_TYPES,
+  type EmployeeFormData,
+} from '../../schemas/employee.schema.js';
 import { useDirtyFormGuard } from '../../hooks/useDirtyFormGuard.js';
 
-interface Department { id: number; name: string; }
-interface Designation { id: number; name: string; }
+interface Department {
+  id: number;
+  name: string;
+}
+interface Designation {
+  id: number;
+  name: string;
+}
 
 const TABS = ['Basic', 'Employment', 'Bank & Tax'] as const;
 
@@ -44,15 +56,32 @@ export default function EmployeeFormPage() {
     queryFn: () => employeeApi.getById(Number(id)),
     enabled: isEdit,
   });
-  const employee = (empData as Record<string, unknown>)?.data as Record<string, unknown> | undefined ?? (empData as Record<string, unknown>);
+  const employee =
+    ((empData as Record<string, unknown>)?.data as Record<string, unknown> | undefined) ??
+    (empData as Record<string, unknown>);
 
-  const { data: deptData } = useQuery({ queryKey: ['departments'], queryFn: () => departmentApi.list(), enabled: hasPermission(PERMISSIONS.EMPLOYEE_VIEW) });
-  const departments: Department[] = ((deptData as Record<string, unknown>)?.content as Department[]) ?? [];
+  const { data: deptData } = useQuery({
+    queryKey: ['departments'],
+    queryFn: () => departmentApi.list(),
+    enabled: hasPermission(PERMISSIONS.EMPLOYEE_VIEW),
+  });
+  const departments: Department[] =
+    ((deptData as Record<string, unknown>)?.content as Department[]) ?? [];
 
-  const { data: desigData } = useQuery({ queryKey: ['designations'], queryFn: () => designationApi.list(), enabled: hasPermission(PERMISSIONS.EMPLOYEE_VIEW) });
-  const designations: Designation[] = ((desigData as Record<string, unknown>)?.content as Designation[]) ?? [];
+  const { data: desigData } = useQuery({
+    queryKey: ['designations'],
+    queryFn: () => designationApi.list(),
+    enabled: hasPermission(PERMISSIONS.EMPLOYEE_VIEW),
+  });
+  const designations: Designation[] =
+    ((desigData as Record<string, unknown>)?.content as Designation[]) ?? [];
 
-  const { register, handleSubmit, reset, formState: { errors, isSubmitting, isDirty } } = useForm<EmployeeFormData>({
+  const {
+    register,
+    handleSubmit,
+    reset,
+    formState: { errors, isSubmitting, isDirty },
+  } = useForm<EmployeeFormData>({
     resolver: zodResolver(employeeFormSchema),
     defaultValues: { employmentType: 'FULL_TIME', pfApplicable: true, esiApplicable: true },
   });
@@ -79,11 +108,23 @@ export default function EmployeeFormPage() {
     mutation.mutate(payload);
   }
 
-  if (isLoadingEmployee) return <ERPFormSkeleton />;
+  if (isLoadingEmployee) {
+    return (
+      <div>
+        <ERPPageHeader variant="detail" title="Edit Employee" backTo="/hr/employees" />
+        <ERPFormSkeleton />
+      </div>
+    );
+  }
 
   return (
     <div>
-      <ERPPageHeader variant="list" title={isEdit ? 'Edit Employee' : 'New Employee'} subtitle="Full employee record — salary data is encrypted at rest." />
+      <ERPPageHeader
+        variant="detail"
+        title={isEdit ? 'Edit Employee' : 'New Employee'}
+        subtitle="Full employee record — salary data is encrypted at rest."
+        backTo="/hr/employees"
+      />
 
       <ERPTabs
         className="mb-5"
@@ -95,17 +136,37 @@ export default function EmployeeFormPage() {
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-6" noValidate>
         {tab === 'Basic' && (
           <ERPFormSection title="Basic Information" columns={2}>
-            <Input label="First Name" required {...register('firstName')} error={errors.firstName?.message} />
-            <Input label="Last Name" required {...register('lastName')} error={errors.lastName?.message} />
+            <Input
+              label="First Name"
+              required
+              {...register('firstName')}
+              error={errors.firstName?.message}
+            />
+            <Input
+              label="Last Name"
+              required
+              {...register('lastName')}
+              error={errors.lastName?.message}
+            />
             <Input label="Phone" required {...register('phone')} error={errors.phone?.message} />
-            <Input label="Email" type="email" {...register('email')} error={errors.email?.message} />
+            <Input
+              label="Email"
+              type="email"
+              {...register('email')}
+              error={errors.email?.message}
+            />
             <Select label="Gender" {...register('gender')} error={errors.gender?.message}>
               <option value="">Select…</option>
               <option value="MALE">Male</option>
               <option value="FEMALE">Female</option>
               <option value="OTHER">Other</option>
             </Select>
-            <Input label="Date of Birth" type="date" {...register('dateOfBirth')} error={errors.dateOfBirth?.message} />
+            <Input
+              label="Date of Birth"
+              type="date"
+              {...register('dateOfBirth')}
+              error={errors.dateOfBirth?.message}
+            />
             <Input
               label="Aadhaar (last 4 digits only)"
               maxLength={4}
@@ -118,17 +179,48 @@ export default function EmployeeFormPage() {
 
         {tab === 'Employment' && (
           <ERPFormSection title="Employment Details" columns={2}>
-            <Select label="Employment Type" required {...register('employmentType')} error={errors.employmentType?.message}>
-              {EMPLOYMENT_TYPES.map((t) => <option key={t} value={t}>{EMPLOYMENT_TYPE_LABELS[t]}</option>)}
+            <Select
+              label="Employment Type"
+              required
+              {...register('employmentType')}
+              error={errors.employmentType?.message}
+            >
+              {EMPLOYMENT_TYPES.map((t) => (
+                <option key={t} value={t}>
+                  {EMPLOYMENT_TYPE_LABELS[t]}
+                </option>
+              ))}
             </Select>
-            <Input label="Joining Date" type="date" required {...register('joiningDate')} error={errors.joiningDate?.message} />
-            <Select label="Department" {...register('departmentId')} error={errors.departmentId?.message}>
+            <Input
+              label="Joining Date"
+              type="date"
+              required
+              {...register('joiningDate')}
+              error={errors.joiningDate?.message}
+            />
+            <Select
+              label="Department"
+              {...register('departmentId')}
+              error={errors.departmentId?.message}
+            >
               <option value="">Select…</option>
-              {departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+              {departments.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.name}
+                </option>
+              ))}
             </Select>
-            <Select label="Designation" {...register('designationId')} error={errors.designationId?.message}>
+            <Select
+              label="Designation"
+              {...register('designationId')}
+              error={errors.designationId?.message}
+            >
               <option value="">Select…</option>
-              {designations.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+              {designations.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.name}
+                </option>
+              ))}
             </Select>
           </ERPFormSection>
         )}
@@ -136,7 +228,13 @@ export default function EmployeeFormPage() {
         {tab === 'Bank & Tax' && (
           <>
             <ERPFormSection title="Sensitive — encrypted at rest (AES-256-GCM)" columns={2}>
-              <Input label="PAN" placeholder="ABCDE1234F" wrapperClassName="sm:col-span-2" {...register('pan')} error={errors.pan?.message} />
+              <Input
+                label="PAN"
+                placeholder="ABCDE1234F"
+                wrapperClassName="sm:col-span-2"
+                {...register('pan')}
+                error={errors.pan?.message}
+              />
               <Input label="Bank Name" {...register('bankName')} error={errors.bankName?.message} />
               <Input label="IFSC Code" {...register('bankIfsc')} error={errors.bankIfsc?.message} />
               <Input
@@ -156,25 +254,28 @@ export default function EmployeeFormPage() {
                 {...register('uan')}
                 error={errors.uan?.message}
               />
-              <Input label="ESI Number" maxLength={17} {...register('esiNumber')} error={errors.esiNumber?.message} />
+              <Input
+                label="ESI Number"
+                maxLength={17}
+                {...register('esiNumber')}
+                error={errors.esiNumber?.message}
+              />
               <div className="flex items-center gap-6 sm:col-span-2">
-                <label className="flex items-center gap-2 text-sm text-secondary">
-                  <input type="checkbox" {...register('pfApplicable')} className="rounded border-default" />
-                  PF Applicable
-                </label>
-                <label className="flex items-center gap-2 text-sm text-secondary">
-                  <input type="checkbox" {...register('esiApplicable')} className="rounded border-default" />
-                  ESI Applicable
-                </label>
+                <Checkbox label="PF Applicable" {...register('pfApplicable')} />
+                <Checkbox label="ESI Applicable" {...register('esiApplicable')} />
               </div>
             </ERPFormSection>
           </>
         )}
 
-        <div className="flex gap-3">
-          <Button type="submit" loading={isSubmitting || mutation.isPending}>{isEdit ? 'Update' : 'Create'} Employee</Button>
-          <Button variant="secondary" type="button" onClick={() => navigate('/hr/employees')}>Cancel</Button>
-        </div>
+        <ERPStickyFooter>
+          <Button variant="secondary" type="button" onClick={() => navigate('/hr/employees')}>
+            Cancel
+          </Button>
+          <Button type="submit" loading={isSubmitting || mutation.isPending}>
+            {isEdit ? 'Update' : 'Create'} Employee
+          </Button>
+        </ERPStickyFooter>
       </form>
     </div>
   );

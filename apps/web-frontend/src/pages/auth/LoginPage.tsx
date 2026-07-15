@@ -12,6 +12,7 @@ import { NAV_GROUPS, getFirstAccessiblePath } from '../../lib/navigation.js';
 import Input from '../../components/ui/Input.js';
 import PasswordInput from '../../components/ui/PasswordInput.js';
 import Button from '../../components/ui/Button.js';
+import Checkbox from '../../components/ui/Checkbox.js';
 import AuthLayout from '../../components/auth/AuthLayout.js';
 
 const REMEMBER_KEY = 'erp_remembered_login';
@@ -25,15 +26,34 @@ function readRememberedLogin(): { tenantId: number; email: string } | null {
   }
 }
 
-function FormAlert({ message, tone = 'danger', onDismiss }: { message: string; tone?: 'danger' | 'warning'; onDismiss: () => void }) {
-  const toneClasses = tone === 'warning'
-    ? 'border-warning bg-warning-bg text-warning-fg'
-    : 'border-danger bg-danger-bg text-danger-fg';
+function FormAlert({
+  message,
+  tone = 'danger',
+  onDismiss,
+}: {
+  message: string;
+  tone?: 'danger' | 'warning';
+  onDismiss: () => void;
+}) {
+  const toneClasses =
+    tone === 'warning'
+      ? 'border-warning bg-warning-bg text-warning-fg'
+      : 'border-danger bg-danger-bg text-danger-fg';
   return (
-    <div role="alert" className={`flex items-start gap-2 rounded-lg border px-3 py-2.5 text-sm ${toneClasses}`}>
-      <AlertCircle className={`h-4 w-4 shrink-0 mt-0.5 ${tone === 'warning' ? 'text-warning' : 'text-danger'}`} />
+    <div
+      role="alert"
+      className={`flex items-start gap-2 rounded-lg border px-3 py-2.5 text-sm ${toneClasses}`}
+    >
+      <AlertCircle
+        className={`h-4 w-4 shrink-0 mt-0.5 ${tone === 'warning' ? 'text-warning' : 'text-danger'}`}
+      />
       <p className="flex-1">{message}</p>
-      <button type="button" onClick={onDismiss} aria-label="Dismiss" className="shrink-0 opacity-70 hover:opacity-100">
+      <button
+        type="button"
+        onClick={onDismiss}
+        aria-label="Dismiss"
+        className="shrink-0 opacity-70 hover:opacity-100"
+      >
         <X className="h-4 w-4" />
       </button>
     </div>
@@ -59,7 +79,10 @@ type ForgotFormData = z.infer<typeof forgotSchema>;
 function loginErrorMessage(err: unknown): { message: string; tone: 'danger' | 'warning' } {
   if (err instanceof ApiError) {
     if (err.statusCode === 429) {
-      return { message: err.message || 'Too many attempts. Please try again later.', tone: 'warning' };
+      return {
+        message: err.message || 'Too many attempts. Please try again later.',
+        tone: 'warning',
+      };
     }
     return { message: err.message || 'Login failed. Please try again.', tone: 'danger' };
   }
@@ -72,14 +95,22 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [mfaToken, setMfaToken] = useState<string | null>(null);
   const [view, setView] = useState<'login' | 'forgot' | 'forgot-sent'>('login');
-  const [formError, setFormError] = useState<{ message: string; tone: 'danger' | 'warning' } | null>(null);
+  const [formError, setFormError] = useState<{
+    message: string;
+    tone: 'danger' | 'warning';
+  } | null>(null);
   const [mfaError, setMfaError] = useState<string | null>(null);
   const [forgotError, setForgotError] = useState<string | null>(null);
   const [capsLockOn, setCapsLockOn] = useState(false);
   const [rememberMe, setRememberMe] = useState(() => readRememberedLogin() !== null);
 
   const remembered = readRememberedLogin();
-  const { register, handleSubmit, formState: { errors }, getValues } = useForm<FormData>({
+  const {
+    register,
+    handleSubmit,
+    formState: { errors },
+    getValues,
+  } = useForm<FormData>({
     resolver: zodResolver(schema),
     defaultValues: { tenantId: remembered?.tenantId ?? 1, email: remembered?.email ?? '' },
   });
@@ -118,10 +149,17 @@ export default function LoginPage() {
     setLoading(true);
     setFormError(null);
     try {
-      const res = await authApi.login({ email: data.email, password: data.password, tenantId: data.tenantId });
+      const res = await authApi.login({
+        email: data.email,
+        password: data.password,
+        tenantId: data.tenantId,
+      });
 
       if (rememberMe) {
-        localStorage.setItem(REMEMBER_KEY, JSON.stringify({ tenantId: data.tenantId, email: data.email }));
+        localStorage.setItem(
+          REMEMBER_KEY,
+          JSON.stringify({ tenantId: data.tenantId, email: data.email })
+        );
       } else {
         localStorage.removeItem(REMEMBER_KEY);
       }
@@ -161,7 +199,9 @@ export default function LoginPage() {
       await authApi.forgotPassword(data);
       setView('forgot-sent');
     } catch (err: unknown) {
-      setForgotError(err instanceof Error ? err.message : 'Something went wrong. Please try again.');
+      setForgotError(
+        err instanceof Error ? err.message : 'Something went wrong. Please try again.'
+      );
     } finally {
       setLoading(false);
     }
@@ -172,7 +212,9 @@ export default function LoginPage() {
       <AuthLayout>
         <div className="text-center mb-8">
           <h1 className="text-2xl font-bold text-primary">Two-Factor Verification</h1>
-          <p className="text-sm text-secondary mt-1">Enter the code from your authenticator app, or a backup code</p>
+          <p className="text-sm text-secondary mt-1">
+            Enter the code from your authenticator app, or a backup code
+          </p>
         </div>
 
         <form onSubmit={mfaForm.handleSubmit(onMfaSubmit)} className="space-y-4">
@@ -212,7 +254,11 @@ export default function LoginPage() {
           <p className="text-sm text-secondary mb-6">
             If an account exists for that email, we&apos;ve sent a link to reset your password.
           </p>
-          <Button variant="secondary" className="w-full justify-center" onClick={() => setView('login')}>
+          <Button
+            variant="secondary"
+            className="w-full justify-center"
+            onClick={() => setView('login')}
+          >
             <ArrowLeft className="h-4 w-4" /> Back to login
           </Button>
         </div>
@@ -232,11 +278,15 @@ export default function LoginPage() {
             <ArrowLeft className="h-4 w-4" /> Back to login
           </button>
           <h1 className="text-2xl font-bold text-primary">Reset your password</h1>
-          <p className="text-sm text-secondary mt-1">Enter your tenant ID and email — we&apos;ll send you a reset link.</p>
+          <p className="text-sm text-secondary mt-1">
+            Enter your tenant ID and email — we&apos;ll send you a reset link.
+          </p>
         </div>
 
         <form onSubmit={forgotForm.handleSubmit(onForgotSubmit)} className="space-y-4">
-          {forgotError && <FormAlert message={forgotError} onDismiss={() => setForgotError(null)} />}
+          {forgotError && (
+            <FormAlert message={forgotError} onDismiss={() => setForgotError(null)} />
+          )}
           <Input
             label="Tenant ID"
             type="number"
@@ -275,7 +325,11 @@ export default function LoginPage() {
 
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
         {formError && (
-          <FormAlert message={formError.message} tone={formError.tone} onDismiss={() => setFormError(null)} />
+          <FormAlert
+            message={formError.message}
+            tone={formError.tone}
+            onDismiss={() => setFormError(null)}
+          />
         )}
         <Input
           label="Tenant ID"
@@ -299,7 +353,12 @@ export default function LoginPage() {
             </label>
             <button
               type="button"
-              onClick={() => { setForgotError(null); forgotForm.setValue('email', getValues('email')); forgotForm.setValue('tenantId', getValues('tenantId')); setView('forgot'); }}
+              onClick={() => {
+                setForgotError(null);
+                forgotForm.setValue('email', getValues('email'));
+                forgotForm.setValue('tenantId', getValues('tenantId'));
+                setView('forgot');
+              }}
               className="text-sm text-brand hover:underline"
             >
               Forgot password?
@@ -322,15 +381,11 @@ export default function LoginPage() {
           )}
         </div>
 
-        <label className="flex items-center gap-2 text-sm text-secondary select-none">
-          <input
-            type="checkbox"
-            checked={rememberMe}
-            onChange={(e) => setRememberMe(e.target.checked)}
-            className="h-4 w-4 rounded border-default text-brand focus:ring-border-focus"
-          />
-          Remember me on this device
-        </label>
+        <Checkbox
+          label="Remember me on this device"
+          checked={rememberMe}
+          onChange={(e) => setRememberMe(e.target.checked)}
+        />
 
         <Button type="submit" className="w-full justify-center" loading={loading} size="lg">
           Sign In

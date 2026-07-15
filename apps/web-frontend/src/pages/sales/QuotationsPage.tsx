@@ -8,8 +8,10 @@ import { useDebounce } from '../../hooks/useDebounce.js';
 import { useAuthStore } from '../../store/auth.store.js';
 import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
-import ERPDataGrid, { type ERPColumnDef } from '../../components/erp/ERPDataGrid.js';
-import ERPDropdownMenu, { type ERPMenuItem } from '../../components/erp/ERPDropdownMenu.js';
+import ERPDataGrid, {
+  type ERPColumnDef,
+  type ERPRowAction,
+} from '../../components/erp/ERPDataGrid.js';
 import Button from '../../components/ui/Button.js';
 import Badge from '../../components/ui/Badge.js';
 import Input from '../../components/ui/Input.js';
@@ -129,30 +131,56 @@ export default function QuotationsPage() {
       sortable: true,
       render: (r) => <Badge variant={STATUS_COLORS[r.status] ?? 'default'}>{r.status}</Badge>,
     },
+  ];
+
+  const rowActions: ERPRowAction<Quotation>[] = [
     {
-      key: 'actions',
-      header: '',
-      align: 'right',
-      render: (r) => {
-        const items: ERPMenuItem[] = [
-          { label: 'View', icon: Eye, onClick: () => navigate(`/sales/quotations/${r.id}`) },
-        ];
-        if (canCreateQuotation && r.status === 'DRAFT')
-          items.push({ label: 'Send', icon: Send, onClick: () => sendMutation.mutate(r.id) });
-        if (canConvertQuotation && ['SENT', 'VIEWED'].includes(r.status)) {
-          items.push({ label: 'Accept', icon: Check, onClick: () => acceptMutation.mutate(r.id) });
-          items.push({ label: 'Reject', icon: X, onClick: () => rejectMutation.mutate(r.id) });
-        }
-        if (canConvertQuotation && r.status === 'ACCEPTED') {
-          items.push({
+      label: 'View',
+      icon: Eye,
+      type: 'view',
+      onClick: (r: Quotation) => navigate(`/sales/quotations/${r.id}`),
+    },
+    ...(canCreateQuotation
+      ? [
+          {
+            label: 'Send',
+            icon: Send,
+            onClick: (r: Quotation) => sendMutation.mutate(r.id),
+            hidden: (r: Quotation) => r.status !== 'DRAFT',
+          },
+        ]
+      : []),
+    ...(canConvertQuotation
+      ? [
+          {
+            label: 'Accept',
+            icon: Check,
+            onClick: (r: Quotation) => acceptMutation.mutate(r.id),
+            hidden: (r: Quotation) => !['SENT', 'VIEWED'].includes(r.status),
+          },
+        ]
+      : []),
+    ...(canConvertQuotation
+      ? [
+          {
+            label: 'Reject',
+            icon: X,
+            type: 'delete' as const,
+            onClick: (r: Quotation) => rejectMutation.mutate(r.id),
+            hidden: (r: Quotation) => !['SENT', 'VIEWED'].includes(r.status),
+          },
+        ]
+      : []),
+    ...(canConvertQuotation
+      ? [
+          {
             label: 'Convert to Invoice',
             icon: ArrowRightLeft,
-            onClick: () => convertMutation.mutate(r.id),
-          });
-        }
-        return <ERPDropdownMenu items={items} />;
-      },
-    },
+            onClick: (r: Quotation) => convertMutation.mutate(r.id),
+            hidden: (r: Quotation) => r.status !== 'ACCEPTED',
+          },
+        ]
+      : []),
   ];
 
   return (
@@ -192,6 +220,7 @@ export default function QuotationsPage() {
           setPageSize(size);
           setPage(1);
         }}
+        actions={rowActions}
       />
     </div>
   );

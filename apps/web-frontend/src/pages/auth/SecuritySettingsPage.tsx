@@ -8,6 +8,7 @@ import { useAuthStore } from '../../store/auth.store.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
 import Input from '../../components/ui/Input.js';
 import Button from '../../components/ui/Button.js';
+import OTPInput from '../../components/ui/OTPInput.js';
 import { ERPFormSkeleton } from '../../components/erp/ERPSkeleton.js';
 import ERPEmptyState from '../../components/erp/ERPEmptyState.js';
 import { formatDate } from '../../lib/format.js';
@@ -37,7 +38,7 @@ export default function SecuritySettingsPage() {
     setUser({ ...user, ...(me as object) } as Parameters<typeof setUser>[0]);
   }
 
-  const confirmForm = useForm<{ code: string }>();
+  const [confirmCode, setConfirmCode] = useState('');
   const disableForm = useForm<{ code: string; password: string }>();
 
   const { data: sessionsData, isLoading: sessionsLoading } = useQuery({
@@ -58,7 +59,7 @@ export default function SecuritySettingsPage() {
     onSuccess: async () => {
       toast.success('Two-factor authentication enabled');
       setEnrollment(null);
-      confirmForm.reset();
+      setConfirmCode('');
       await refreshUser();
     },
     onError: (err: Error) => toast.error(err.message),
@@ -161,17 +162,23 @@ export default function SecuritySettingsPage() {
             </div>
 
             <form
-              onSubmit={confirmForm.handleSubmit((d) => confirmMutation.mutate(d.code))}
+              onSubmit={(e) => {
+                e.preventDefault();
+                confirmMutation.mutate(confirmCode);
+              }}
               className="flex items-end gap-3"
             >
-              <div className="flex-1">
-                <Input
-                  label="Confirmation Code"
-                  placeholder="123456"
-                  {...confirmForm.register('code', { required: true })}
-                />
-              </div>
-              <Button type="submit" loading={confirmMutation.isPending}>
+              <OTPInput
+                label="Confirmation Code"
+                value={confirmCode}
+                onChange={setConfirmCode}
+                onComplete={(code) => confirmMutation.mutate(code)}
+              />
+              <Button
+                type="submit"
+                loading={confirmMutation.isPending}
+                disabled={confirmCode.length !== 6}
+              >
                 Confirm
               </Button>
             </form>

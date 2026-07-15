@@ -10,12 +10,12 @@
 
 :root {
   /* ── Brand ──────────────────────────────────────────────────────────────── */
-  --brand-primary: #4f46e5;
-  --brand-primary-hover: #4338ca;
-  --brand-primary-active: #3730a3;
+  --brand-primary: #2563eb;
+  --brand-primary-hover: #1d4ed8;
+  --brand-primary-active: #1e40af;
   --brand-primary-foreground: #ffffff;
-  --brand-primary-subtle: #eef2ff;
-  --brand-primary-subtle-foreground: #3730a3;
+  --brand-primary-subtle: #eff6ff;
+  --brand-primary-subtle-foreground: #1e3a8a;
   --brand-secondary: #7c3aed;
   --brand-accent: #f59e0b;
 
@@ -33,13 +33,13 @@
   --text-disabled: #9ca3af;
   --text-inverse: #ffffff;
   --text-placeholder: #9ca3af;
-  --text-link: #4f46e5;
-  --text-link-hover: #4338ca;
+  --text-link: #2563eb;
+  --text-link-hover: #1d4ed8;
 
   /* ── Border ─────────────────────────────────────────────────────────────── */
   --border-default: #e5e7eb;
   --border-strong: #d1d5db;
-  --border-focus: #4f46e5;
+  --border-focus: #2563eb;
   --border-error: #ef4444;
 
   /* ── Semantic — Success ─────────────────────────────────────────────────── */
@@ -181,11 +181,11 @@
 /* ── Dark Mode Overrides ─────────────────────────────────────────────────── */
 .dark {
   /* Brand */
-  --brand-primary: #6366f1;
-  --brand-primary-hover: #818cf8;
-  --brand-primary-active: #a5b4fc;
-  --brand-primary-subtle: #1e1b4b;
-  --brand-primary-subtle-foreground: #c7d2fe;
+  --brand-primary: #60a5fa;
+  --brand-primary-hover: #93c5fd;
+  --brand-primary-active: #bfdbfe;
+  --brand-primary-subtle: #0c1a3d;
+  --brand-primary-subtle-foreground: #bfdbfe;
 
   /* Surface */
   --surface-page: #0f172a;
@@ -201,13 +201,13 @@
   --text-disabled: #475569;
   --text-inverse: #0f172a;
   --text-placeholder: #475569;
-  --text-link: #818cf8;
-  --text-link-hover: #a5b4fc;
+  --text-link: #60a5fa;
+  --text-link-hover: #93c5fd;
 
   /* Border */
   --border-default: #334155;
   --border-strong: #475569;
-  --border-focus: #6366f1;
+  --border-focus: #60a5fa;
   --border-error: #f87171;
 
   /* Semantic — Success */
@@ -263,19 +263,19 @@
   --text-disabled: #a3a3a3;
   --text-inverse: #000000;
   --text-placeholder: #a3a3a3;
-  --text-link: #a5b4fc;
-  --text-link-hover: #c7d2fe;
+  --text-link: #bfdbfe;
+  --text-link-hover: #dbeafe;
 
   --border-default: #ffffff;
   --border-strong: #ffffff;
-  --border-focus: #818cf8;
+  --border-focus: #93c5fd;
   --border-error: #fca5a5;
 
-  --brand-primary: #818cf8;
-  --brand-primary-hover: #a5b4fc;
-  --brand-primary-active: #c7d2fe;
+  --brand-primary: #93c5fd;
+  --brand-primary-hover: #bfdbfe;
+  --brand-primary-active: #dbeafe;
   --brand-primary-foreground: #000000;
-  --brand-primary-subtle: #1e1b4b;
+  --brand-primary-subtle: #0c1a3d;
   --brand-primary-subtle-foreground: #ffffff;
 
   --color-success-foreground: #bbf7d0;

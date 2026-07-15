@@ -14,11 +14,13 @@ import {
 import { useAuthStore } from '../../store/auth.store.js';
 import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
+import ERPStickyFooter from '../../components/erp/ERPStickyFooter.js';
 import ERPTextarea from '../../components/erp/ERPTextarea.js';
 import ERPAsyncSelect, { type AsyncSelectOption } from '../../components/erp/ERPAsyncSelect.js';
 import Button from '../../components/ui/Button.js';
 import Input from '../../components/ui/Input.js';
 import Select from '../../components/ui/Select.js';
+import Checkbox from '../../components/ui/Checkbox.js';
 import { INDIAN_STATES } from '../../lib/indianStates.js';
 import { createSearchLoadOptions } from '../../lib/searchSelectOptions.js';
 import { friendlyApiErrorMessage } from '../../lib/errorMessages.js';
@@ -213,9 +215,10 @@ export default function InvoiceFormPage() {
         content?: Array<{
           id: number;
           name: string;
-          gstRate?: number;
+          gstRate?: string;
           hsnCode?: string;
           minSalePrice?: string;
+          salePrice?: string;
         }>;
       }
     )?.content ?? [];
@@ -241,16 +244,22 @@ export default function InvoiceFormPage() {
     { subtotal: 0, discount: 0, taxable: 0, cgst: 0, sgst: 0, igst: 0, grand: 0 }
   );
 
-  const addItem = (item: { id: number; name: string; gstRate?: number; hsnCode?: string }) => {
+  const addItem = (item: {
+    id: number;
+    name: string;
+    gstRate?: string;
+    hsnCode?: string;
+    salePrice?: string;
+  }) => {
     setLines((prev) => [
       ...prev,
       {
         itemId: item.id,
         itemName: item.name,
         quantity: 1,
-        unitPrice: 0,
+        unitPrice: item.salePrice ? parseFloat(item.salePrice) : 0,
         discountPct: 0,
-        gstRate: item.gstRate ?? 18,
+        gstRate: item.gstRate ? parseFloat(item.gstRate) : 18,
         hsnCode: item.hsnCode ?? '',
         taxableAmount: 0,
         lineTotal: 0,
@@ -316,7 +325,12 @@ export default function InvoiceFormPage() {
 
   return (
     <div>
-      <ERPPageHeader variant="list" title="New Invoice" subtitle="Create a new sales invoice" />
+      <ERPPageHeader
+        variant="detail"
+        title="New Invoice"
+        subtitle="Create a new sales invoice"
+        backTo="/sales/invoices"
+      />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
         <ERPAsyncSelect
@@ -533,38 +547,30 @@ export default function InvoiceFormPage() {
       {(canOverrideCreditLimit || canOverridePriceFloor) && (
         <div className="mb-6 space-y-2">
           {canOverrideCreditLimit && (
-            <label className="flex items-center gap-2 text-sm text-secondary select-none">
-              <input
-                type="checkbox"
-                checked={overrideCreditLimit}
-                onChange={(e) => setOverrideCreditLimit(e.target.checked)}
-                className="h-4 w-4 rounded border-default text-brand focus:ring-border-focus"
-              />
-              Override customer credit limit if exceeded
-            </label>
+            <Checkbox
+              label="Override customer credit limit if exceeded"
+              checked={overrideCreditLimit}
+              onChange={(e) => setOverrideCreditLimit(e.target.checked)}
+            />
           )}
           {canOverridePriceFloor && (
-            <label className="flex items-center gap-2 text-sm text-secondary select-none">
-              <input
-                type="checkbox"
-                checked={overridePriceFloor}
-                onChange={(e) => setOverridePriceFloor(e.target.checked)}
-                className="h-4 w-4 rounded border-default text-brand focus:ring-border-focus"
-              />
-              Override minimum sale price if a line is below floor
-            </label>
+            <Checkbox
+              label="Override minimum sale price if a line is below floor"
+              checked={overridePriceFloor}
+              onChange={(e) => setOverridePriceFloor(e.target.checked)}
+            />
           )}
         </div>
       )}
 
-      <div className="flex justify-end gap-3">
-        <Button variant="ghost" onClick={() => navigate('/sales/invoices')}>
+      <ERPStickyFooter>
+        <Button variant="secondary" onClick={() => navigate('/sales/invoices')}>
           Cancel
         </Button>
         <Button isLoading={createMutation.isPending} onClick={handleSubmit}>
           Save as Draft
         </Button>
-      </div>
+      </ERPStickyFooter>
     </div>
   );
 }

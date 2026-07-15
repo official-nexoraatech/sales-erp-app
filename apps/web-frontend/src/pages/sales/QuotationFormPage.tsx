@@ -6,6 +6,7 @@ import { quotationApi, itemApi, branchApi } from '../../api/endpoints.js';
 import { useAuthStore } from '../../store/auth.store.js';
 import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
+import ERPStickyFooter from '../../components/erp/ERPStickyFooter.js';
 import ERPTextarea from '../../components/erp/ERPTextarea.js';
 import ERPAsyncSelect, { type AsyncSelectOption } from '../../components/erp/ERPAsyncSelect.js';
 import Button from '../../components/ui/Button.js';
@@ -82,9 +83,10 @@ export default function QuotationFormPage() {
         content?: Array<{
           id: number;
           name: string;
-          gstRate?: number;
+          gstRate?: string;
           hsnCode?: string;
           minSalePrice?: string;
+          salePrice?: string;
         }>;
       }
     )?.content ?? [];
@@ -108,16 +110,22 @@ export default function QuotationFormPage() {
     { subtotal: 0, discount: 0, taxable: 0, cgst: 0, sgst: 0, igst: 0, grand: 0 }
   );
 
-  const addItem = (item: { id: number; name: string; gstRate?: number; hsnCode?: string }) => {
+  const addItem = (item: {
+    id: number;
+    name: string;
+    gstRate?: string;
+    hsnCode?: string;
+    salePrice?: string;
+  }) => {
     setLines((prev) => [
       ...prev,
       {
         itemId: item.id,
         itemName: item.name,
         quantity: 1,
-        unitPrice: 0,
+        unitPrice: item.salePrice ? parseFloat(item.salePrice) : 0,
         discountPct: 0,
-        gstRate: item.gstRate ?? 18,
+        gstRate: item.gstRate ? parseFloat(item.gstRate) : 18,
         hsnCode: item.hsnCode ?? '',
         taxableAmount: 0,
         lineTotal: 0,
@@ -179,9 +187,10 @@ export default function QuotationFormPage() {
   return (
     <div>
       <ERPPageHeader
-        variant="list"
+        variant="detail"
         title="New Quotation"
         subtitle="Create a new customer quotation"
+        backTo="/sales/quotations"
       />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
@@ -386,14 +395,14 @@ export default function QuotationFormPage() {
         />
       </div>
 
-      <div className="flex justify-end gap-3">
-        <Button variant="ghost" onClick={() => navigate('/sales/quotations')}>
+      <ERPStickyFooter>
+        <Button variant="secondary" onClick={() => navigate('/sales/quotations')}>
           Cancel
         </Button>
         <Button isLoading={createMutation.isPending} onClick={handleSubmit}>
           Save as Draft
         </Button>
-      </div>
+      </ERPStickyFooter>
     </div>
   );
 }

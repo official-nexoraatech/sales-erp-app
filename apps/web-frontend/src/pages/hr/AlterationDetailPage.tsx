@@ -69,7 +69,9 @@ export default function AlterationDetailPage() {
 
   const { data: empData } = useQuery({
     queryKey: ['employees-all'],
-    queryFn: () => employeeApi.list(),
+    // queryKey says "all" but the backend defaults to page 0/size 20 with no explicit size —
+    // any tenant past 20 employees silently lost everyone after that from this dropdown.
+    queryFn: () => employeeApi.list({ size: 100 }),
     enabled: hasPermission(PERMISSIONS.EMPLOYEE_VIEW),
   });
   const employees: Employee[] = ((empData as Record<string, unknown>)?.content as Employee[]) ?? [];

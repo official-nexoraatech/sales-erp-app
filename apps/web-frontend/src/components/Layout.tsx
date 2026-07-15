@@ -20,6 +20,7 @@ import { NAV_GROUPS, filterNavGroups, findNavItemByPath, type NavItem } from '..
 import ERPBreadcrumb from './erp/ERPBreadcrumb.js';
 import ERPConfirmModal from './erp/ERPConfirmModal.js';
 import ERPCommandPalette from './erp/ERPCommandPalette.js';
+import ERPDropdownMenu, { type ERPMenuItem } from './erp/ERPDropdownMenu.js';
 import BranchSwitcher from './erp/BranchSwitcher.js';
 import QuickCreateMenu from './erp/QuickCreateMenu.js';
 import AppearanceMenu from './erp/AppearanceMenu.js';
@@ -67,6 +68,7 @@ function NavItemLeaf({ item, collapsed }: { item: NavItem; collapsed: boolean })
 
 function NavGroupItem({ item, collapsed }: { item: NavItem; collapsed: boolean }) {
   const location = useLocation();
+  const navigate = useNavigate();
   const isChildActive = useMemo(
     () => item.children?.some((child) => isPathActive(location.pathname, child.path)) ?? false,
     [item.children, location.pathname]
@@ -84,64 +86,88 @@ function NavGroupItem({ item, collapsed }: { item: NavItem; collapsed: boolean }
     return <NavItemLeaf item={item} collapsed={collapsed} />;
   }
 
+  const activeIndicator = isChildActive && (
+    <span className="absolute left-0 top-1/2 h-4 w-0.5 -translate-y-1/2 rounded-full bg-sidebar-active" />
+  );
+
+  // Collapsed rail: the inline accordion below has nowhere to render, so a click opens this
+  // group's children as a flyout menu anchored to the icon instead — the sidebar itself never
+  // expands just to reach a sub-item (that's a deliberate, explicit "expand" click on the
+  // toggle button, not an incidental side effect of navigating).
+  if (collapsed) {
+    const menuItems: ERPMenuItem[] = item.children.map((child) => ({
+      label: child.label,
+      icon: child.icon,
+      onClick: () => navigate(child.path),
+    }));
+    return (
+      <ERPDropdownMenu
+        items={menuItems}
+        align="left"
+        ariaLabel={item.label}
+        triggerTitle={item.label}
+        triggerClassName={`group relative w-full flex items-center justify-center px-0 py-2.5 rounded-lg text-sm font-medium transition-colors duration-150 ${
+          isChildActive
+            ? 'bg-sidebar-item-active text-sidebar-active'
+            : 'text-sidebar hover:bg-sidebar-item-hover'
+        }`}
+        trigger={
+          <>
+            {activeIndicator}
+            <Icon size={16} className="shrink-0" />
+          </>
+        }
+      />
+    );
+  }
+
   return (
     <div>
       <button
         onClick={() => setOpen((o) => !o)}
-        title={collapsed ? item.label : undefined}
         aria-expanded={open}
-        className={`group relative w-full flex items-center gap-3 rounded-lg text-sm font-medium transition-colors duration-150 ${
-          collapsed ? 'justify-center px-0 py-2.5' : 'px-3 py-2'
-        } ${
+        className={`group relative w-full flex items-center gap-3 rounded-lg text-sm font-medium transition-colors duration-150 px-3 py-2 ${
           isChildActive
             ? 'bg-sidebar-item-active text-sidebar-active'
             : 'text-sidebar hover:bg-sidebar-item-hover'
         }`}
       >
-        {isChildActive && (
-          <span className="absolute left-0 top-1/2 h-4 w-0.5 -translate-y-1/2 rounded-full bg-sidebar-active" />
-        )}
+        {activeIndicator}
         <Icon size={16} className="shrink-0" />
-        {!collapsed && (
-          <>
-            <span className="flex-1 text-left truncate">{item.label}</span>
-            <ChevronRight
-              size={14}
-              className={`text-sidebar-muted transition-transform duration-200 ease-out shrink-0 ${open ? 'rotate-90' : ''}`}
-            />
-          </>
-        )}
+        <span className="flex-1 text-left truncate">{item.label}</span>
+        <ChevronRight
+          size={14}
+          className={`text-sidebar-muted transition-transform duration-200 ease-out shrink-0 ${open ? 'rotate-90' : ''}`}
+        />
       </button>
-      {!collapsed && (
-        <div
-          className="grid overflow-hidden transition-[grid-template-rows] duration-200 ease-out"
-          style={{ gridTemplateRows: open ? '1fr' : '0fr' }}
-        >
-          <div className="min-h-0 overflow-hidden">
-            <div className="ml-[19px] mt-1 mb-0.5 space-y-0.5 border-l border-sidebar-border pl-3">
-              {item.children.map((child) => {
-                const ChildIcon = child.icon;
-                return (
-                  <NavLink
-                    key={child.path}
-                    to={child.path}
-                    className={({ isActive }) =>
-                      `flex items-center gap-2 px-2 py-1.5 rounded-md text-[13px] leading-tight transition-colors duration-150 ${
-                        isActive
-                          ? 'text-sidebar-active font-semibold bg-sidebar-item-active'
-                          : 'text-sidebar-muted hover:text-sidebar hover:bg-sidebar-item-hover'
-                      }`
-                    }
-                  >
-                    <ChildIcon size={14} className="shrink-0" />
-                    <span className="truncate">{child.label}</span>
-                  </NavLink>
-                );
-              })}
-            </div>
+      <div
+        className="grid overflow-hidden transition-[grid-template-rows] duration-200 ease-out"
+        style={{ gridTemplateRows: open ? '1fr' : '0fr' }}
+      >
+        <div className="min-h-0 overflow-hidden">
+          <div className="ml-[19px] mt-1 mb-0.5 space-y-0.5 border-l border-sidebar-border pl-3">
+            {item.children.map((child) => {
+              const ChildIcon = child.icon;
+              return (
+                <NavLink
+                  key={child.path}
+                  to={child.path}
+                  className={({ isActive }) =>
+                    `flex items-center gap-2 px-2 py-1.5 rounded-md text-[13px] leading-tight transition-colors duration-150 ${
+                      isActive
+                        ? 'text-sidebar-active font-semibold bg-sidebar-item-active'
+                        : 'text-sidebar-muted hover:text-sidebar hover:bg-sidebar-item-hover'
+                    }`
+                  }
+                >
+                  <ChildIcon size={14} className="shrink-0" />
+                  <span className="truncate">{child.label}</span>
+                </NavLink>
+              );
+            })}
           </div>
         </div>
-      )}
+      </div>
     </div>
   );
 }
@@ -163,11 +189,13 @@ export default function Layout() {
   const isMobile = useMediaQuery(BREAKPOINTS.mobile);
   const isTablet = useMediaQuery(BREAKPOINTS.tablet);
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
-  const [sidebarHovering, setSidebarHovering] = useState(false);
+  // Tablet has no persistent collapsed/expanded preference (it's always icon-only by default),
+  // so a click on the toggle button "peeks" the full sidebar as a temporary overlay instead —
+  // desktop's collapsed rail has no equivalent peek; reaching a sub-item there opens a small
+  // flyout menu (see NavGroupItem) rather than expanding the whole sidebar.
   const [tabletExpanded, setTabletExpanded] = useState(false);
   const effectiveCollapsed = isTablet ? true : sidebarCollapsed;
-  const overlayExpanded =
-    !isMobile && effectiveCollapsed && (sidebarHovering || (isTablet && tabletExpanded));
+  const overlayExpanded = !isMobile && effectiveCollapsed && isTablet && tabletExpanded;
   const showLabels = isMobile || !effectiveCollapsed || overlayExpanded;
 
   useEffect(() => {
@@ -350,8 +378,6 @@ export default function Layout() {
 
         {/* Sidebar */}
         <aside
-          onMouseEnter={() => !isMobile && effectiveCollapsed && setSidebarHovering(true)}
-          onMouseLeave={() => setSidebarHovering(false)}
           className={`flex flex-col bg-sidebar border-r border-sidebar transition-all duration-200 shrink-0 ${
             isMobile
               ? `fixed inset-y-0 left-0 z-[var(--z-modal)] w-60 transform ${mobileDrawerOpen ? 'translate-x-0' : '-translate-x-full'}`

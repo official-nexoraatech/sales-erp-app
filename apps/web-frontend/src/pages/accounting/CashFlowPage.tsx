@@ -3,10 +3,13 @@ import { useQuery } from '@tanstack/react-query';
 import { reportsApi } from '../../api/endpoints.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
 import { ERPTableSkeleton } from '../../components/erp/ERPSkeleton.js';
+import DatePicker from '../../components/ui/DatePicker.js';
 import { formatCurrency } from '../../lib/format.js';
 
+// Backend (CashFlowReport, apps/accounting-service/src/domain/ReportsEngine.ts) sends
+// { label, amount } — this was "description", so every activity row rendered a blank label.
 interface CashActivity {
-  description: string;
+  label: string;
   amount: number;
 }
 
@@ -46,7 +49,7 @@ function ActivitySection({
           <tbody>
             {activities.map((a, i) => (
               <tr key={i} className="border-b border-gray-100 dark:border-gray-700">
-                <td className="px-4 py-2 pl-6 text-secondary">{a.description}</td>
+                <td className="px-4 py-2 pl-6 text-secondary">{a.label}</td>
                 <td
                   className={`px-4 py-2 text-right font-mono ${a.amount < 0 ? 'text-red-500 dark:text-red-400' : 'text-green-600 dark:text-green-400'}`}
                 >
@@ -102,19 +105,9 @@ export default function CashFlowPage() {
         subtitle="Direct method — operating, investing, financing"
         actions={
           <div className="flex flex-wrap items-center gap-3">
-            <input
-              type="date"
-              value={fromDate}
-              onChange={(e) => setFromDate(e.target.value)}
-              className="border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-1.5 text-sm bg-white dark:bg-gray-800 text-primary"
-            />
+            <DatePicker value={fromDate} onChange={setFromDate} />
             <span className="text-secondary text-sm">to</span>
-            <input
-              type="date"
-              value={toDate}
-              onChange={(e) => setToDate(e.target.value)}
-              className="border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-1.5 text-sm bg-white dark:bg-gray-800 text-primary"
-            />
+            <DatePicker value={toDate} onChange={setToDate} />
           </div>
         }
       />

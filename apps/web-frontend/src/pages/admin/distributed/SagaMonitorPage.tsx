@@ -205,7 +205,7 @@ export default function SagaMonitorPage() {
           onClick={() => setSelectedSaga(null)}
         >
           <div
-            className="bg-surface rounded-xl shadow-xl max-w-2xl w-full max-h-[80vh] overflow-y-auto p-6"
+            className="bg-surface-card rounded-xl shadow-xl max-w-2xl w-full max-h-[80vh] overflow-y-auto p-6"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between mb-4">

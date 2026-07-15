@@ -12,6 +12,7 @@ import {
 import { useAuthStore } from '../../store/auth.store.js';
 import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
+import ERPStickyFooter from '../../components/erp/ERPStickyFooter.js';
 import ERPTextarea from '../../components/erp/ERPTextarea.js';
 import Button from '../../components/ui/Button.js';
 import Input from '../../components/ui/Input.js';
@@ -132,9 +133,10 @@ export default function DeliveryChallanFormPage() {
   return (
     <div>
       <ERPPageHeader
-        variant="list"
+        variant="detail"
         title="New Delivery Challan"
         subtitle="Record goods dispatched to a customer before invoicing"
+        backTo="/sales/delivery-challans"
       />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
@@ -294,14 +296,14 @@ export default function DeliveryChallanFormPage() {
         />
       </div>
 
-      <div className="flex justify-end gap-3">
-        <Button variant="ghost" onClick={() => navigate('/sales/delivery-challans')}>
+      <ERPStickyFooter>
+        <Button variant="secondary" onClick={() => navigate('/sales/delivery-challans')}>
           Cancel
         </Button>
         <Button isLoading={createMutation.isPending} onClick={handleSubmit}>
           Save as Draft
         </Button>
-      </div>
+      </ERPStickyFooter>
     </div>
   );
 }

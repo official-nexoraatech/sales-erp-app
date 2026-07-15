@@ -9,17 +9,19 @@ import { ERPTableSkeleton } from '../../../components/erp/ERPSkeleton.js';
 import ERPEmptyState from '../../../components/erp/ERPEmptyState.js';
 import Button from '../../../components/ui/Button.js';
 import Badge from '../../../components/ui/Badge.js';
-import { formatDate } from '../../../lib/format.js';
 
+// GET /schema-registry/catalog's real response shape (event-service's schema-registry.routes.ts)
+// only ever has these 5 fields — id/registeredAt don't exist, registeredBy is the registering
+// user's email (a string), not a numeric id. The interface previously declared id/version/
+// schema/registeredAt/registeredBy(number), none of which matched, so every row's Version and
+// Registered columns rendered blank and the detail modal's JSON view showed `undefined`.
 interface SchemaEntry {
-  id: number;
   eventType: string;
-  version: number;
-  schema: Record<string, unknown>;
+  schemaVersion: number;
+  jsonSchema: Record<string, unknown>;
   compatibilityMode: string;
-  description: string | null;
-  registeredAt: string;
-  registeredBy: number | null;
+  description?: string;
+  registeredBy: string;
 }
 
 const COMPAT_VARIANT: Record<string, 'default' | 'success' | 'info' | 'warning'> = {
@@ -133,16 +135,16 @@ export default function SchemaRegistryPage() {
                     Description
                   </th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-secondary uppercase">
-                    Registered
+                    Registered By
                   </th>
                   <th className="px-4 py-3" />
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
                 {schemas.map((s) => (
-                  <tr key={s.id} className="hover:bg-surface-hover">
+                  <tr key={`${s.eventType}-${s.schemaVersion}`} className="hover:bg-surface-hover">
                     <td className="px-4 py-3 font-medium text-primary">{s.eventType}</td>
-                    <td className="px-4 py-3 text-secondary">v{s.version}</td>
+                    <td className="px-4 py-3 text-secondary">v{s.schemaVersion}</td>
                     <td className="px-4 py-3">
                       <Badge variant={COMPAT_VARIANT[s.compatibilityMode] ?? 'default'}>
                         {s.compatibilityMode}
@@ -151,7 +153,7 @@ export default function SchemaRegistryPage() {
                     <td className="px-4 py-3 text-secondary truncate max-w-[200px]">
                       {s.description ?? '—'}
                     </td>
-                    <td className="px-4 py-3 text-secondary">{formatDate(s.registeredAt)}</td>
+                    <td className="px-4 py-3 text-secondary">{s.registeredBy}</td>
                     <td className="px-4 py-3">
                       <Button size="sm" variant="ghost" onClick={() => setSelectedSchema(s)}>
                         View
@@ -194,23 +196,23 @@ export default function SchemaRegistryPage() {
           }}
         >
           <div
-            className="bg-surface rounded-xl shadow-xl max-w-2xl w-full max-h-[80vh] overflow-y-auto p-6"
+            className="bg-surface-card rounded-xl shadow-xl max-w-2xl w-full max-h-[80vh] overflow-y-auto p-6"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-semibold text-primary">
-                {selectedSchema.eventType} v{selectedSchema.version}
+                {selectedSchema.eventType} v{selectedSchema.schemaVersion}
               </h3>
               <Badge variant={COMPAT_VARIANT[selectedSchema.compatibilityMode] ?? 'default'}>
                 {selectedSchema.compatibilityMode}
               </Badge>
             </div>
             <pre className="bg-surface-hover rounded p-4 text-xs overflow-x-auto mb-4">
-              {JSON.stringify(selectedSchema.schema, null, 2)}
+              {JSON.stringify(selectedSchema.jsonSchema, null, 2)}
             </pre>
 
             {hasPermission(PERMISSIONS.SCHEMA_REGISTRY_MANAGE) && (
-              <div className="border-t border-border pt-4">
+              <div className="border-t border-default pt-4">
                 <h4 className="text-sm font-semibold text-primary mb-2">
                   Check Payload Compatibility
                 </h4>
@@ -219,7 +221,7 @@ export default function SchemaRegistryPage() {
                   onChange={(e) => setCheckPayload(e.target.value)}
                   rows={4}
                   placeholder='{"field": "value"}'
-                  className="w-full px-3 py-2 rounded-lg border border-border bg-surface text-primary text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary/30 mb-2"
+                  className="w-full px-3 py-2 rounded-lg border border-default bg-surface-card text-primary text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary/30 mb-2"
                 />
                 {checkResult && (
                   <div
@@ -270,7 +272,7 @@ export default function SchemaRegistryPage() {
           onClick={() => setShowRegister(false)}
         >
           <div
-            className="bg-surface rounded-xl shadow-xl max-w-xl w-full p-6"
+            className="bg-surface-card rounded-xl shadow-xl max-w-xl w-full p-6"
             onClick={(e) => e.stopPropagation()}
           >
             <h3 className="text-lg font-semibold text-primary mb-4">Register Schema</h3>
@@ -282,7 +284,7 @@ export default function SchemaRegistryPage() {
                   value={form.eventType}
                   onChange={(e) => setForm((f) => ({ ...f, eventType: e.target.value }))}
                   placeholder="INVOICE_CONFIRMED"
-                  className="w-full px-3 py-2 rounded-lg border border-border bg-surface text-primary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+                  className="w-full px-3 py-2 rounded-lg border border-default bg-surface-card text-primary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
                 />
               </div>
               <div className="grid grid-cols-2 gap-3">
@@ -293,7 +295,7 @@ export default function SchemaRegistryPage() {
                     min={1}
                     value={form.version}
                     onChange={(e) => setForm((f) => ({ ...f, version: e.target.value }))}
-                    className="w-full px-3 py-2 rounded-lg border border-border bg-surface text-primary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+                    className="w-full px-3 py-2 rounded-lg border border-default bg-surface-card text-primary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
                   />
                 </div>
                 <div>
@@ -303,7 +305,7 @@ export default function SchemaRegistryPage() {
                   <select
                     value={form.compatibilityMode}
                     onChange={(e) => setForm((f) => ({ ...f, compatibilityMode: e.target.value }))}
-                    className="w-full px-3 py-2 rounded-lg border border-border bg-surface text-primary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+                    className="w-full px-3 py-2 rounded-lg border border-default bg-surface-card text-primary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
                   >
                     {COMPATIBILITY_MODES.map((m) => (
                       <option key={m} value={m}>
@@ -319,7 +321,7 @@ export default function SchemaRegistryPage() {
                   value={form.schema}
                   onChange={(e) => setForm((f) => ({ ...f, schema: e.target.value }))}
                   rows={6}
-                  className="w-full px-3 py-2 rounded-lg border border-border bg-surface text-primary text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary/30"
+                  className="w-full px-3 py-2 rounded-lg border border-default bg-surface-card text-primary text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary/30"
                 />
               </div>
               <div>
@@ -329,7 +331,7 @@ export default function SchemaRegistryPage() {
                   value={form.description}
                   onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
                   placeholder="Optional description"
-                  className="w-full px-3 py-2 rounded-lg border border-border bg-surface text-primary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+                  className="w-full px-3 py-2 rounded-lg border border-default bg-surface-card text-primary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
                 />
               </div>
             </div>

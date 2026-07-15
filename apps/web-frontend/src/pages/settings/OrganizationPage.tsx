@@ -11,6 +11,7 @@ import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
 import Input from '../../components/ui/Input.js';
 import Select from '../../components/ui/Select.js';
 import Button from '../../components/ui/Button.js';
+import ColorPicker from '../../components/ui/ColorPicker.js';
 import { ERPFormSkeleton } from '../../components/erp/ERPSkeleton.js';
 import { broadcastTenantThemeChange } from '../../components/erp/TenantThemeSync.js';
 
@@ -52,13 +53,51 @@ export default function OrganizationPage() {
     },
   });
 
-  const org = (data as Record<string, unknown> | undefined);
+  const org = data as Record<string, unknown> | undefined;
 
-  const { register, handleSubmit, reset, formState: { errors, isDirty, isSubmitting } } = useForm<OrgForm>({});
+  const {
+    register,
+    handleSubmit,
+    reset,
+    formState: { errors, isDirty, isSubmitting },
+  } = useForm<OrgForm>({});
 
   useEffect(() => {
     if (org) reset(org as unknown as OrgForm);
   }, [org, reset]);
+
+  // GET returns `null` for every optional field a tenant hasn't set yet (gstin, pan, tan, cin,
+  // address, bankDetails, invoiceFooter, termsAndConditions) — react-hook-form round-trips those
+  // straight back on submit (as `null` for top-level fields, or as an all-blank-string object for
+  // nested `address.*`, since RHF can't seed nested leaf defaults from a `null` parent). The
+  // backend's Zod schema treats optional fields as `undefined`-or-valid, not `null`-or-valid, so
+  // saving Legal Name alone on a freshly provisioned tenant 422'd on every other untouched field.
+  function sanitizeOrgPayload(d: Record<string, unknown>): Record<string, unknown> {
+    const payload = { ...d };
+    for (const key of [
+      'legalName',
+      'gstin',
+      'pan',
+      'tan',
+      'cin',
+      'invoiceFooter',
+      'termsAndConditions',
+    ]) {
+      if (payload[key] === null || payload[key] === '') delete payload[key];
+    }
+    const address = payload['address'] as Record<string, unknown> | null | undefined;
+    if (!address || Object.values(address).every((v) => !v)) {
+      delete payload['address'];
+    }
+    if (payload['bankDetails'] === null) delete payload['bankDetails'];
+    const themeConfig = payload['themeConfig'] as Record<string, unknown> | undefined;
+    if (themeConfig) {
+      for (const key of ['brandPrimary', 'brandSecondary', 'brandAccent', 'fontSans']) {
+        if (themeConfig[key] === '') delete themeConfig[key];
+      }
+    }
+    return payload;
+  }
 
   const mutation = useMutation({
     mutationFn: (payload: Record<string, unknown>) => organizationApi.update(payload),
@@ -74,11 +113,26 @@ export default function OrganizationPage() {
 
   return (
     <div>
-      <ERPPageHeader variant="list" title="Organization Settings" subtitle="Update your business details and registration information." />
+      <ERPPageHeader
+        variant="list"
+        title="Organization Settings"
+        subtitle="Update your business details and registration information."
+      />
 
-      <form onSubmit={handleSubmit((d) => mutation.mutate(d as unknown as Record<string, unknown>))} className="max-w-2xl space-y-5" noValidate>
+      <form
+        onSubmit={handleSubmit((d) =>
+          mutation.mutate(sanitizeOrgPayload(d as unknown as Record<string, unknown>))
+        )}
+        className="max-w-2xl space-y-5"
+        noValidate
+      >
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <Input label="Organization Name" required {...register('orgName', { required: 'Required' })} error={errors.orgName?.message} />
+          <Input
+            label="Organization Name"
+            required
+            {...register('orgName', { required: 'Required' })}
+            error={errors.orgName?.message}
+          />
           <Input label="Legal Name" {...register('legalName')} error={errors.legalName?.message} />
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -109,20 +163,13 @@ export default function OrganizationPage() {
             with no reload — see TenantThemeSync. */}
         <div className="border-t border-default pt-5">
           <h2 className="text-sm font-semibold text-primary mb-1">Branding</h2>
-          <p className="text-xs text-secondary mb-4">Applies instantly, app-wide, to every user of this tenant.</p>
+          <p className="text-xs text-secondary mb-4">
+            Applies instantly, app-wide, to every user of this tenant.
+          </p>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
-            <div>
-              <label htmlFor="theme-brand-primary" className="block text-xs font-medium text-secondary mb-1">Primary Color</label>
-              <input id="theme-brand-primary" type="color" {...register('themeConfig.brandPrimary')} className="w-full h-10 rounded-lg border border-default cursor-pointer" />
-            </div>
-            <div>
-              <label htmlFor="theme-brand-secondary" className="block text-xs font-medium text-secondary mb-1">Secondary Color</label>
-              <input id="theme-brand-secondary" type="color" {...register('themeConfig.brandSecondary')} className="w-full h-10 rounded-lg border border-default cursor-pointer" />
-            </div>
-            <div>
-              <label htmlFor="theme-brand-accent" className="block text-xs font-medium text-secondary mb-1">Accent Color</label>
-              <input id="theme-brand-accent" type="color" {...register('themeConfig.brandAccent')} className="w-full h-10 rounded-lg border border-default cursor-pointer" />
-            </div>
+            <ColorPicker label="Primary Color" {...register('themeConfig.brandPrimary')} />
+            <ColorPicker label="Secondary Color" {...register('themeConfig.brandSecondary')} />
+            <ColorPicker label="Accent Color" {...register('themeConfig.brandAccent')} />
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-md">
             <Select label="Font" {...register('themeConfig.fontSans')}>

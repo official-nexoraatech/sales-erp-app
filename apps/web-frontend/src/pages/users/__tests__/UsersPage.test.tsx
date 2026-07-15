@@ -33,7 +33,14 @@ function renderPage() {
 
 const SAMPLE_ROWS = {
   content: [
-    { id: 1, firstName: 'Priya', lastName: 'Shah', email: 'priya@test.com', isActive: true, roles: ['SALES_MANAGER'] },
+    {
+      id: 1,
+      firstName: 'Priya',
+      lastName: 'Shah',
+      email: 'priya@test.com',
+      isActive: true,
+      roles: ['SALES_MANAGER'],
+    },
   ],
 };
 
@@ -59,22 +66,36 @@ describe('UsersPage', () => {
 
   it('hides the Impersonate action without IMPERSONATE_USER', async () => {
     useAuthStore.setState({
-      user: { id: 9, tenantId: 1, email: 'admin@test.com', firstName: 'A', lastName: 'D', roles: ['ADMIN'], branchIds: [], permissions: ['USER_UPDATE'] },
+      user: {
+        id: 9,
+        tenantId: 1,
+        email: 'admin@test.com',
+        firstName: 'A',
+        lastName: 'D',
+        roles: ['ADMIN'],
+        branchIds: [],
+        permissions: ['USER_UPDATE'],
+      },
     });
     listMock.mockResolvedValue(SAMPLE_ROWS);
 
     renderPage();
 
     expect(await screen.findByText('Priya Shah')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'More actions' }));
-    expect(screen.queryByRole('menuitem', { name: 'Impersonate' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Impersonate' })).not.toBeInTheDocument();
   });
 
   it('shows the Impersonate action and confirmation dialog with target details when permitted', async () => {
     useAuthStore.setState({
       user: {
-        id: 9, tenantId: 1, email: 'admin@test.com', firstName: 'A', lastName: 'D',
-        roles: ['ADMIN'], branchIds: [], permissions: ['IMPERSONATE_USER'],
+        id: 9,
+        tenantId: 1,
+        email: 'admin@test.com',
+        firstName: 'A',
+        lastName: 'D',
+        roles: ['ADMIN'],
+        branchIds: [],
+        permissions: ['IMPERSONATE_USER'],
       },
       accessToken: 'admin-token',
       refreshToken: 'admin-refresh',
@@ -84,8 +105,7 @@ describe('UsersPage', () => {
     renderPage();
 
     expect(await screen.findByText('Priya Shah')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'More actions' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Impersonate' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Impersonate' }));
 
     // Scope assertions to the dialog — "Priya Shah" etc. also appear in the underlying table row.
     const dialog = screen.getByRole('dialog');
@@ -96,15 +116,23 @@ describe('UsersPage', () => {
 
     // Reason is required — confirm stays disabled until something is typed.
     expect(within(dialog).getByRole('button', { name: 'Start impersonating' })).toBeDisabled();
-    fireEvent.change(within(dialog).getByLabelText(/Reason/), { target: { value: 'Debugging a permission report' } });
+    fireEvent.change(within(dialog).getByLabelText(/Reason/), {
+      target: { value: 'Debugging a permission report' },
+    });
     expect(within(dialog).getByRole('button', { name: 'Start impersonating' })).not.toBeDisabled();
   });
 
   it('starts an impersonation session (stashing the real session) on confirm', async () => {
     useAuthStore.setState({
       user: {
-        id: 9, tenantId: 1, email: 'admin@test.com', firstName: 'A', lastName: 'D',
-        roles: ['ADMIN'], branchIds: [], permissions: ['IMPERSONATE_USER'],
+        id: 9,
+        tenantId: 1,
+        email: 'admin@test.com',
+        firstName: 'A',
+        lastName: 'D',
+        roles: ['ADMIN'],
+        branchIds: [],
+        permissions: ['IMPERSONATE_USER'],
       },
       accessToken: 'admin-token',
       refreshToken: 'admin-refresh',
@@ -113,19 +141,29 @@ describe('UsersPage', () => {
     const expSeconds = Math.floor(Date.now() / 1000) + 3600;
     impersonateMock.mockResolvedValue({
       accessToken: fakeImpersonationToken({
-        exp: expSeconds, tenantId: 1, roles: ['SALES_MANAGER'], permissions: ['CUSTOMER_VIEW'], branchIds: [2],
+        exp: expSeconds,
+        tenantId: 1,
+        roles: ['SALES_MANAGER'],
+        permissions: ['CUSTOMER_VIEW'],
+        branchIds: [2],
       }),
     });
 
     renderPage();
 
     expect(await screen.findByText('Priya Shah')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'More actions' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Impersonate' }));
-    fireEvent.change(screen.getByLabelText(/Reason/), { target: { value: 'Reproduce a support ticket' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Impersonate' }));
+    fireEvent.change(screen.getByLabelText(/Reason/), {
+      target: { value: 'Reproduce a support ticket' },
+    });
     fireEvent.click(screen.getByRole('button', { name: 'Start impersonating' }));
 
-    await waitFor(() => expect(impersonateMock).toHaveBeenCalledWith({ targetUserId: 1, reason: 'Reproduce a support ticket' }));
+    await waitFor(() =>
+      expect(impersonateMock).toHaveBeenCalledWith({
+        targetUserId: 1,
+        reason: 'Reproduce a support ticket',
+      })
+    );
 
     await waitFor(() => {
       const state = useAuthStore.getState();
@@ -138,7 +176,16 @@ describe('UsersPage', () => {
 
   it('has no axe accessibility violations with data loaded', async () => {
     useAuthStore.setState({
-      user: { id: 9, tenantId: 1, email: 'admin@test.com', firstName: 'A', lastName: 'D', roles: ['ADMIN'], branchIds: [], permissions: [] },
+      user: {
+        id: 9,
+        tenantId: 1,
+        email: 'admin@test.com',
+        firstName: 'A',
+        lastName: 'D',
+        roles: ['ADMIN'],
+        branchIds: [],
+        permissions: [],
+      },
     });
     listMock.mockResolvedValue(SAMPLE_ROWS);
 

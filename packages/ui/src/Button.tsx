@@ -5,7 +5,9 @@ import { cn } from './cn.js';
 
 export const buttonVariants = cva(
   [
-    'inline-flex items-center justify-center gap-1.5 font-medium rounded-xl',
+    // rounded-md (6px) — matches inputVariants.ts's radius so buttons and inputs on the
+    // same form read as one consistent enterprise corner treatment, not two different ones.
+    'inline-flex items-center justify-center gap-1.5 font-medium rounded-md',
     'transition-[color,background-color,border-color,box-shadow,transform] duration-150 ease-out',
     'active:scale-[0.98]',
     'focus-visible:outline-none focus-visible:shadow-[var(--shadow-focus)]',

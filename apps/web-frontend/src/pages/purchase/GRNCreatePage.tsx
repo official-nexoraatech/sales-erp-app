@@ -6,6 +6,7 @@ import { purchaseOrderApi, grnApi, warehouseApi } from '../../api/endpoints.js';
 import { useAuthStore } from '../../store/auth.store.js';
 import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
+import ERPStickyFooter from '../../components/erp/ERPStickyFooter.js';
 import Button from '../../components/ui/Button.js';
 import Input from '../../components/ui/Input.js';
 import Select from '../../components/ui/Select.js';
@@ -26,6 +27,7 @@ interface PODetail {
   id: number;
   poNumber: string | null;
   supplierId: number;
+  branchId: number;
   warehouseId: number;
   lines: POLine[];
 }
@@ -33,7 +35,7 @@ interface PODetail {
 interface GRNLineInput {
   purchaseOrderLineId: number;
   itemId: number;
-  description: string;
+  description?: string;
   receivedQty: number;
   grnRate: number;
   gstRate: number;
@@ -120,7 +122,7 @@ export default function GRNCreatePage() {
       .map((l) => ({
         purchaseOrderLineId: l.id,
         itemId: l.itemId,
-        description: l.description,
+        description: l.description ?? undefined,
         receivedQty: parseFloat(lineInputs[l.id]!.receivedQty),
         grnRate: parseFloat(lineInputs[l.id]!.grnRate),
         gstRate: parseFloat(l.gstRate),
@@ -136,8 +138,11 @@ export default function GRNCreatePage() {
     createMutation.mutate({
       purchaseOrderId: po.id,
       supplierId: po.supplierId,
+      branchId: po.branchId,
       warehouseId: Number(warehouseId),
-      receivedDate: new Date(grnDate).toISOString(),
+      // Backend field is `grnDate`, not `receivedDate` — was silently 500ing on every GRN
+      // creation ("Required" on both branchId and grnDate) until this fix.
+      grnDate: new Date(grnDate).toISOString(),
       supplierInvoiceNumber: supplierInvoiceNumber || undefined,
       supplierInvoiceDate: supplierInvoiceDate
         ? new Date(supplierInvoiceDate).toISOString()
@@ -150,9 +155,10 @@ export default function GRNCreatePage() {
   return (
     <div>
       <ERPPageHeader
-        variant="list"
+        variant="detail"
         title="Create Goods Receipt Note"
         subtitle="Record goods received against a purchase order"
+        backTo="/purchase/grns"
       />
 
       {/* PO selector */}
@@ -334,8 +340,8 @@ export default function GRNCreatePage() {
         </div>
       )}
 
-      <div className="flex justify-end gap-3 mt-4">
-        <Button variant="ghost" onClick={() => navigate('/purchase/grns')}>
+      <ERPStickyFooter>
+        <Button variant="secondary" onClick={() => navigate('/purchase/grns')}>
           Cancel
         </Button>
         {po && (
@@ -343,7 +349,7 @@ export default function GRNCreatePage() {
             Create GRN
           </Button>
         )}
-      </div>
+      </ERPStickyFooter>
     </div>
   );
 }

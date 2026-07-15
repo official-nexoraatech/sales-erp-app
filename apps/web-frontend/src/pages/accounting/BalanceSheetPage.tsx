@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { reportsApi } from '../../api/endpoints.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
 import { ERPTableSkeleton } from '../../components/erp/ERPSkeleton.js';
+import DatePicker from '../../components/ui/DatePicker.js';
 import { formatCurrency } from '../../lib/format.js';
 
 interface BSAccountRow {
@@ -79,13 +80,7 @@ export default function BalanceSheetPage() {
         subtitle="Assets = Liabilities + Equity"
         actions={
           <div className="flex flex-wrap items-center gap-3">
-            <label className="text-sm text-secondary">As of</label>
-            <input
-              type="date"
-              value={asOfDate}
-              onChange={(e) => setAsOfDate(e.target.value)}
-              className="border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-1.5 text-sm bg-white dark:bg-gray-800 text-primary"
-            />
+            <DatePicker label="As of" value={asOfDate} onChange={setAsOfDate} />
           </div>
         }
       />

@@ -8,8 +8,10 @@ import { adminTenantApi } from '../../api/endpoints.js';
 import { useAuthStore } from '../../store/auth.store.js';
 import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
-import ERPDataGrid, { type ERPColumnDef } from '../../components/erp/ERPDataGrid.js';
-import ERPDropdownMenu, { type ERPMenuItem } from '../../components/erp/ERPDropdownMenu.js';
+import ERPDataGrid, {
+  type ERPColumnDef,
+  type ERPRowAction,
+} from '../../components/erp/ERPDataGrid.js';
 import Modal from '../../components/ui/Modal.js';
 import Input from '../../components/ui/Input.js';
 import Button from '../../components/ui/Button.js';
@@ -99,45 +101,37 @@ export default function TenantsPage() {
       sortable: true,
       render: (r) => new Date(r.createdAt).toLocaleDateString(),
     },
-    {
-      key: 'actions',
-      header: '',
-      align: 'right',
-      render: (r) => {
-        if (!canManage) return null;
-        const items: ERPMenuItem[] = [];
-        items.push({
+  ];
+
+  const rowActions: ERPRowAction<Tenant>[] = canManage
+    ? [
+        {
           label: 'Manage Users',
           icon: Users,
-          onClick: () => navigate(`/admin/tenants/${r.id}/users`),
-        });
-        if (r.status === 'ACTIVE') {
-          items.push({
-            label: 'Suspend',
-            icon: Ban,
-            variant: 'danger',
-            onClick: () => openReasonDialog('suspend', r),
-          });
-        }
-        if (r.status === 'SUSPENDED') {
-          items.push({
-            label: 'Activate',
-            icon: CheckCircle,
-            onClick: () => activateMutation.mutate(r.id),
-          });
-        }
-        if (r.status !== 'CLOSED') {
-          items.push({
-            label: 'Close',
-            icon: XCircle,
-            variant: 'danger',
-            onClick: () => openReasonDialog('close', r),
-          });
-        }
-        return items.length > 0 ? <ERPDropdownMenu items={items} /> : null;
-      },
-    },
-  ];
+          onClick: (r: Tenant) => navigate(`/admin/tenants/${r.id}/users`),
+        },
+        {
+          label: 'Suspend',
+          icon: Ban,
+          type: 'delete',
+          onClick: (r: Tenant) => openReasonDialog('suspend', r),
+          hidden: (r: Tenant) => r.status !== 'ACTIVE',
+        },
+        {
+          label: 'Activate',
+          icon: CheckCircle,
+          onClick: (r: Tenant) => activateMutation.mutate(r.id),
+          hidden: (r: Tenant) => r.status !== 'SUSPENDED',
+        },
+        {
+          label: 'Close',
+          icon: XCircle,
+          type: 'delete',
+          onClick: (r: Tenant) => openReasonDialog('close', r),
+          hidden: (r: Tenant) => r.status === 'CLOSED',
+        },
+      ]
+    : [];
 
   return (
     <div>
@@ -151,7 +145,13 @@ export default function TenantsPage() {
           ) : undefined
         }
       />
-      <ERPDataGrid columns={columns} data={tenantsList} isLoading={isLoading} rowKey="id" />
+      <ERPDataGrid
+        columns={columns}
+        data={tenantsList}
+        isLoading={isLoading}
+        rowKey="id"
+        actions={rowActions}
+      />
 
       <Modal
         open={!!dialog}

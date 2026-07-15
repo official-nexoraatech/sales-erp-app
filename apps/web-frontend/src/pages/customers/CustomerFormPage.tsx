@@ -4,19 +4,23 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { customerApi, gstApi, branchApi } from '../../api/endpoints.js';
+import { customerApi, branchApi } from '../../api/endpoints.js';
 import { useAuthStore } from '../../store/auth.store.js';
 import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
 import { ERPFormSkeleton } from '../../components/erp/ERPSkeleton.js';
 import ERPFormSection from '../../components/erp/ERPFormSection.js';
+import ERPStickyFooter from '../../components/erp/ERPStickyFooter.js';
 import ERPGSTINInput from '../../components/erp/ERPGSTINInput.js';
 import Input from '../../components/ui/Input.js';
 import Select from '../../components/ui/Select.js';
 import Button from '../../components/ui/Button.js';
-import { GSTIN_REGEX as GSTIN_RE } from '@erp/types';
 import { INDIAN_STATES } from '../../lib/indianStates.js';
-import { customerFormSchema, CUSTOMER_TYPES, type CustomerFormData } from '../../schemas/customer.schema.js';
+import {
+  customerFormSchema,
+  CUSTOMER_TYPES,
+  type CustomerFormData,
+} from '../../schemas/customer.schema.js';
 import { useDirtyFormGuard } from '../../hooks/useDirtyFormGuard.js';
 
 const CUSTOMER_TYPE_LABELS: Record<(typeof CUSTOMER_TYPES)[number], string> = {
@@ -34,19 +38,30 @@ export default function CustomerFormPage() {
   const hasPermission = useAuthStore((s) => s.hasPermission);
   const userBranchIds = useAuthStore((s) => s.user?.branchIds) ?? [];
   const isEdit = !!id;
-  const [gstinStatus, setGstinStatus] = useState<'idle' | 'valid' | 'invalid'>('idle');
+  const [, setGstinStatus] = useState<'idle' | 'valid' | 'invalid'>('idle');
 
   const { data: customerData, isLoading: customerLoading } = useQuery({
     queryKey: ['customers', id],
     queryFn: () => customerApi.getById(Number(id)),
     enabled: isEdit,
   });
-  const customer = (customerData as Record<string, unknown> | undefined);
+  const customer = customerData as Record<string, unknown> | undefined;
 
-  const { data: branchData } = useQuery({ queryKey: ['branches'], queryFn: () => branchApi.list(), enabled: hasPermission(PERMISSIONS.BRANCH_VIEW) });
+  const { data: branchData } = useQuery({
+    queryKey: ['branches'],
+    queryFn: () => branchApi.list(),
+    enabled: hasPermission(PERMISSIONS.BRANCH_VIEW),
+  });
   const branches = (branchData as { content?: unknown[] })?.content ?? [];
 
-  const { register, handleSubmit, reset, watch, setValue, formState: { errors, isSubmitting, isDirty } } = useForm<CustomerFormData>({
+  const {
+    register,
+    handleSubmit,
+    reset,
+    watch,
+    setValue,
+    formState: { errors, isSubmitting, isDirty },
+  } = useForm<CustomerFormData>({
     resolver: zodResolver(customerFormSchema),
   });
   useDirtyFormGuard(isDirty);
@@ -62,16 +77,6 @@ export default function CustomerFormPage() {
   }, [isEdit, userBranchIds, setValue]);
 
   const gstinValue = watch('gstin');
-
-  async function validateGstin(gstin: string) {
-    if (!gstin || !GSTIN_RE.test(gstin)) { setGstinStatus('invalid'); return; }
-    try {
-      await gstApi.validateHsn(gstin);
-      setGstinStatus('valid');
-    } catch {
-      setGstinStatus('invalid');
-    }
-  }
 
   const mutation = useMutation({
     mutationFn: (d: Record<string, unknown>) =>
@@ -106,7 +111,7 @@ export default function CustomerFormPage() {
   if (isEdit && customerLoading) {
     return (
       <div>
-        <ERPPageHeader variant="list" title="Edit Customer" />
+        <ERPPageHeader variant="detail" title="Edit Customer" backTo="/customers" />
         <ERPFormSkeleton />
       </div>
     );
@@ -114,18 +119,45 @@ export default function CustomerFormPage() {
 
   return (
     <div>
-      <ERPPageHeader variant="list" title={isEdit ? 'Edit Customer' : 'New Customer'} />
+      <ERPPageHeader
+        variant="detail"
+        title={isEdit ? 'Edit Customer' : 'New Customer'}
+        backTo="/customers"
+      />
 
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-6" noValidate>
         <ERPFormSection title="Customer Details" columns={2}>
-          <Input label="Display Name" required {...register('displayName')} error={errors.displayName?.message} />
-          <Select label="Customer Type" required {...register('customerType')} error={errors.customerType?.message}>
+          <Input
+            label="Display Name"
+            required
+            {...register('displayName')}
+            error={errors.displayName?.message}
+          />
+          <Select
+            label="Customer Type"
+            required
+            {...register('customerType')}
+            error={errors.customerType?.message}
+          >
             <option value="">Select…</option>
-            {CUSTOMER_TYPES.map((t) => <option key={t} value={t}>{CUSTOMER_TYPE_LABELS[t]}</option>)}
+            {CUSTOMER_TYPES.map((t) => (
+              <option key={t} value={t}>
+                {CUSTOMER_TYPE_LABELS[t]}
+              </option>
+            ))}
           </Select>
-          <Select label="Branch" required {...register('branchId')} error={errors.branchId?.message}>
+          <Select
+            label="Branch"
+            required
+            {...register('branchId')}
+            error={errors.branchId?.message}
+          >
             <option value="">Select branch…</option>
-            {(branches as Record<string, unknown>[]).map((b) => <option key={b.id as number} value={b.id as number}>{b.name as string}</option>)}
+            {(branches as Record<string, unknown>[]).map((b) => (
+              <option key={b.id as number} value={b.id as number}>
+                {b.name as string}
+              </option>
+            ))}
           </Select>
           <Input label="Phone" required {...register('phone')} error={errors.phone?.message} />
           <Input label="Email" type="email" {...register('email')} error={errors.email?.message} />
@@ -148,11 +180,28 @@ export default function CustomerFormPage() {
         </ERPFormSection>
 
         <ERPFormSection title="Billing Address" columns={2}>
-          <Input label="Address Line 1" wrapperClassName="sm:col-span-2" {...register('billingAddress.addressLine1' as keyof CustomerFormData)} error={errors['billingAddress.addressLine1' as keyof CustomerFormData]?.message} />
-          <Input label="City" {...register('billingAddress.city' as keyof CustomerFormData)} error={errors['billingAddress.city' as keyof CustomerFormData]?.message} />
-          <Select label="State" {...register('billingAddress.state' as keyof CustomerFormData)} error={errors['billingAddress.state' as keyof CustomerFormData]?.message}>
+          <Input
+            label="Address Line 1"
+            wrapperClassName="sm:col-span-2"
+            {...register('billingAddress.addressLine1' as keyof CustomerFormData)}
+            error={errors['billingAddress.addressLine1' as keyof CustomerFormData]?.message}
+          />
+          <Input
+            label="City"
+            {...register('billingAddress.city' as keyof CustomerFormData)}
+            error={errors['billingAddress.city' as keyof CustomerFormData]?.message}
+          />
+          <Select
+            label="State"
+            {...register('billingAddress.state' as keyof CustomerFormData)}
+            error={errors['billingAddress.state' as keyof CustomerFormData]?.message}
+          >
             <option value="">Select state…</option>
-            {INDIAN_STATES.map((s) => <option key={s.code} value={s.name}>{s.name}</option>)}
+            {INDIAN_STATES.map((s) => (
+              <option key={s.code} value={s.name}>
+                {s.name}
+              </option>
+            ))}
           </Select>
           <Input
             label="PIN Code"
@@ -162,15 +211,36 @@ export default function CustomerFormPage() {
         </ERPFormSection>
 
         <ERPFormSection title="Credit Terms" columns={3}>
-          <Input label="Credit Limit (₹)" type="number" step="0.01" {...register('creditLimit')} error={errors.creditLimit?.message} />
-          <Input label="Credit Days" type="number" {...register('creditDays')} error={errors.creditDays?.message} />
-          <Input label="Opening Balance (₹)" type="number" step="0.01" {...register('openingBalance')} error={errors.openingBalance?.message} />
+          <Input
+            label="Credit Limit (₹)"
+            type="number"
+            step="0.01"
+            {...register('creditLimit')}
+            error={errors.creditLimit?.message}
+          />
+          <Input
+            label="Credit Days"
+            type="number"
+            {...register('creditDays')}
+            error={errors.creditDays?.message}
+          />
+          <Input
+            label="Opening Balance (₹)"
+            type="number"
+            step="0.01"
+            {...register('openingBalance')}
+            error={errors.openingBalance?.message}
+          />
         </ERPFormSection>
 
-        <div className="flex gap-3">
-          <Button type="submit" loading={isSubmitting || mutation.isPending}>{isEdit ? 'Update' : 'Create'} Customer</Button>
-          <Button variant="secondary" type="button" onClick={() => navigate('/customers')}>Cancel</Button>
-        </div>
+        <ERPStickyFooter>
+          <Button variant="secondary" type="button" onClick={() => navigate('/customers')}>
+            Cancel
+          </Button>
+          <Button type="submit" loading={isSubmitting || mutation.isPending}>
+            {isEdit ? 'Update' : 'Create'} Customer
+          </Button>
+        </ERPStickyFooter>
       </form>
     </div>
   );

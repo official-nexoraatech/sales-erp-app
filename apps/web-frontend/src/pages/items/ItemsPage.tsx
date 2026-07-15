@@ -9,8 +9,10 @@ import { useAuthStore } from '../../store/auth.store.js';
 import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
 import ERPEmptyState from '../../components/erp/ERPEmptyState.js';
-import ERPDataGrid, { type ERPColumnDef } from '../../components/erp/ERPDataGrid.js';
-import ERPDropdownMenu, { type ERPMenuItem } from '../../components/erp/ERPDropdownMenu.js';
+import ERPDataGrid, {
+  type ERPColumnDef,
+  type ERPRowAction,
+} from '../../components/erp/ERPDataGrid.js';
 import Button from '../../components/ui/Button.js';
 import Badge from '../../components/ui/Badge.js';
 import Input from '../../components/ui/Input.js';
@@ -153,34 +155,38 @@ export default function ItemsPage() {
         </Badge>
       ),
     },
-    {
-      key: 'actions',
-      header: '',
-      align: 'right',
-      render: (r) => {
-        const items: ERPMenuItem[] = [];
-        if (canEditItem)
-          items.push({
-            label: 'Edit',
+  ];
+
+  const rowActions: ERPRowAction<Item>[] = [
+    ...(canEditItem
+      ? [
+          {
             icon: Pencil,
-            onClick: () => navigate(`/inventory/items/${r.id}/edit`),
-          });
-        if (canEditItem)
-          items.push({
-            label: 'Generate Barcode',
+            label: 'Edit',
+            type: 'edit' as const,
+            onClick: (r: Item) => navigate(`/inventory/items/${r.id}/edit`),
+          },
+        ]
+      : []),
+    ...(canEditItem
+      ? [
+          {
             icon: Barcode,
-            onClick: () => generateBarcodeMutation.mutate(r.id),
-          });
-        if (canDeleteItem)
-          items.push({
-            label: 'Delete',
+            label: 'Generate Barcode',
+            onClick: (r: Item) => generateBarcodeMutation.mutate(r.id),
+          },
+        ]
+      : []),
+    ...(canDeleteItem
+      ? [
+          {
             icon: Trash2,
-            variant: 'danger',
-            onClick: () => deleteMutation.mutate(r.id),
-          });
-        return items.length > 0 ? <ERPDropdownMenu items={items} /> : null;
-      },
-    },
+            label: 'Delete',
+            type: 'delete' as const,
+            onClick: (r: Item) => deleteMutation.mutate(r.id),
+          },
+        ]
+      : []),
   ];
 
   return (
@@ -245,6 +251,7 @@ export default function ItemsPage() {
             setPageSize(size);
             setPage(1);
           }}
+          actions={rowActions}
         />
       )}
     </div>

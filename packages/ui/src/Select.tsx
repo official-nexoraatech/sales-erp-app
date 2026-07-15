@@ -15,6 +15,8 @@ export interface SelectProps
     Pick<InputVariants, 'size' | 'variant'> {
   label?: string | undefined;
   error?: string | undefined;
+  success?: string | undefined;
+  warning?: string | undefined;
   hint?: string | undefined;
   options?: SelectOption[];
   placeholder?: string;
@@ -35,6 +37,8 @@ const Select = forwardRef<HTMLSelectElement, SelectProps>(
     {
       label,
       error,
+      success,
+      warning,
       hint,
       options,
       placeholder,
@@ -53,6 +57,15 @@ const Select = forwardRef<HTMLSelectElement, SelectProps>(
     const inputId = externalId ?? uid;
     const errorId = `${inputId}-error`;
     const hintId = `${inputId}-hint`;
+    const state: NonNullable<InputVariants['state']> = error
+      ? 'error'
+      : warning
+        ? 'warning'
+        : success
+          ? 'success'
+          : 'default';
+    const message = error ?? warning ?? success ?? hint;
+    const messageId = error ? errorId : message ? hintId : undefined;
 
     return (
       <div className={cn('flex flex-col gap-1.5', wrapperClassName)}>
@@ -74,9 +87,9 @@ const Select = forwardRef<HTMLSelectElement, SelectProps>(
             id={inputId}
             required={required}
             aria-invalid={Boolean(error)}
-            aria-describedby={error ? errorId : hint ? hintId : undefined}
+            aria-describedby={messageId}
             className={cn(
-              inputVariants({ size, variant, state: error ? 'error' : 'default' }),
+              inputVariants({ size, variant, state }),
               'appearance-none pr-10 cursor-pointer',
               className
             )}
@@ -100,14 +113,19 @@ const Select = forwardRef<HTMLSelectElement, SelectProps>(
           />
         </div>
 
-        {error && (
-          <p id={errorId} role="alert" className="text-xs text-danger">
-            {error}
-          </p>
-        )}
-        {!error && hint && (
-          <p id={hintId} className="text-xs text-secondary">
-            {hint}
+        {message && (
+          <p
+            id={messageId}
+            role={error ? 'alert' : undefined}
+            className={cn(
+              'text-xs',
+              error && 'text-danger',
+              warning && !error && 'text-warning',
+              success && !error && !warning && 'text-success',
+              !error && !warning && !success && 'text-secondary'
+            )}
+          >
+            {message}
           </p>
         )}
       </div>

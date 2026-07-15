@@ -10,8 +10,10 @@ import { adminUserApi, adminTenantApi } from '../../api/endpoints.js';
 import { useDebounce } from '../../hooks/useDebounce.js';
 import { useUrlParams, toNumber } from '../../hooks/useUrlParam.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
-import ERPDataGrid, { type ERPColumnDef } from '../../components/erp/ERPDataGrid.js';
-import ERPDropdownMenu, { type ERPMenuItem } from '../../components/erp/ERPDropdownMenu.js';
+import ERPDataGrid, {
+  type ERPColumnDef,
+  type ERPRowAction,
+} from '../../components/erp/ERPDataGrid.js';
 import Modal from '../../components/ui/Modal.js';
 import PasswordInput from '../../components/ui/PasswordInput.js';
 import Button from '../../components/ui/Button.js';
@@ -148,17 +150,10 @@ export default function AdminTenantUsersPage() {
         );
       },
     },
-    {
-      key: 'actions',
-      header: '',
-      align: 'right',
-      render: (r) => {
-        const items: ERPMenuItem[] = [
-          { label: 'Reset Password', icon: KeyRound, onClick: () => openResetDialog(r) },
-        ];
-        return <ERPDropdownMenu items={items} />;
-      },
-    },
+  ];
+
+  const rowActions: ERPRowAction<TenantUser>[] = [
+    { icon: KeyRound, label: 'Reset Password', onClick: (r) => openResetDialog(r) },
   ];
 
   return (
@@ -203,6 +198,7 @@ export default function AdminTenantUsersPage() {
         pagination={{ page, pageSize, total: totalElements }}
         onPageChange={setPage}
         onPageSizeChange={setPageSize}
+        actions={rowActions}
       />
 
       <Modal

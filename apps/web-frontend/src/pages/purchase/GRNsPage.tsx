@@ -8,8 +8,10 @@ import { useAuthStore } from '../../store/auth.store.js';
 import { useDebounce } from '../../hooks/useDebounce.js';
 import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
-import ERPDataGrid, { type ERPColumnDef } from '../../components/erp/ERPDataGrid.js';
-import ERPDropdownMenu, { type ERPMenuItem } from '../../components/erp/ERPDropdownMenu.js';
+import ERPDataGrid, {
+  type ERPColumnDef,
+  type ERPRowAction,
+} from '../../components/erp/ERPDataGrid.js';
 import ERPDrawer from '../../components/erp/ERPDrawer.js';
 import AttachmentSection from '../../components/erp/AttachmentSection.js';
 import Button from '../../components/ui/Button.js';
@@ -31,6 +33,7 @@ interface GRN {
 }
 
 const STATUS_COLORS: Record<string, 'default' | 'success' | 'warning' | 'danger'> = {
+  DRAFT: 'default',
   PENDING_APPROVAL: 'warning',
   APPROVED: 'success',
   REJECTED: 'danger',
@@ -140,38 +143,47 @@ export default function GRNsPage() {
         <Badge variant={STATUS_COLORS[r.status] ?? 'default'}>{r.status.replace('_', ' ')}</Badge>
       ),
     },
-    {
-      key: 'actions',
-      header: '',
-      align: 'right',
-      render: (r) => {
-        const items: ERPMenuItem[] = [];
-        if (canApproveGRN && r.status === 'PENDING_APPROVAL') {
-          items.push({
+  ];
+
+  // Backend's approve()/reject() explicitly accept DRAFT as well as PENDING_APPROVAL
+  // (GRNService.ts lines 237/488) — a zero-price-variance GRN (the common case) is
+  // created straight into DRAFT, never PENDING_APPROVAL, so this row-action condition
+  // being PENDING_APPROVAL-only meant a DRAFT GRN had no UI path to ever be approved:
+  // stock was never posted and item cost (WACC) was never updated. Confirmed live —
+  // every GRN created in this session's testing sat in DRAFT with zero inventory_ledger
+  // rows and waccCost stuck at 0.00, despite real receipts against real POs.
+  const rowActions: ERPRowAction<GRN>[] = [
+    ...(canApproveGRN
+      ? [
+          {
             label: 'Approve',
             icon: CheckCircle2,
-            onClick: () => {
+            onClick: (r: GRN) => {
               setApproveId(r.id);
               setGrnNumber('');
             },
-          });
-          items.push({
+            hidden: (r: GRN) => !['DRAFT', 'PENDING_APPROVAL'].includes(r.status),
+          },
+        ]
+      : []),
+    ...(canApproveGRN
+      ? [
+          {
             label: 'Reject',
             icon: XCircle,
-            variant: 'danger',
-            onClick: () => {
+            type: 'delete' as const,
+            onClick: (r: GRN) => {
               setRejectId(r.id);
               setRejectReason('');
             },
-          });
-        }
-        items.push({
-          label: 'Attachments',
-          icon: Paperclip,
-          onClick: () => setAttachmentsForId(r.id),
-        });
-        return <ERPDropdownMenu items={items} />;
-      },
+            hidden: (r: GRN) => !['DRAFT', 'PENDING_APPROVAL'].includes(r.status),
+          },
+        ]
+      : []),
+    {
+      label: 'Attachments',
+      icon: Paperclip,
+      onClick: (r: GRN) => setAttachmentsForId(r.id),
     },
   ];
 
@@ -197,7 +209,7 @@ export default function GRNsPage() {
         </div>
         <Select value={status} onChange={(e) => setStatus(e.target.value)} className="w-48">
           <option value="">All Statuses</option>
-          {['PENDING_APPROVAL', 'APPROVED', 'REJECTED'].map((s) => (
+          {['DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED'].map((s) => (
             <option key={s} value={s}>
               {s.replace('_', ' ')}
             </option>
@@ -216,6 +228,7 @@ export default function GRNsPage() {
           setPageSize(size);
           setPage(1);
         }}
+        actions={rowActions}
       />
 
       <Modal isOpen={approveId !== null} onClose={() => setApproveId(null)} title="Approve GRN">

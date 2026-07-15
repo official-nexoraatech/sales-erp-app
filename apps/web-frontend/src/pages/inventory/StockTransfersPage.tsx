@@ -2,11 +2,13 @@ import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { Eye, CheckCircle2, Truck, PackageCheck } from 'lucide-react';
+import { Eye, Send, CheckCircle2, Truck, PackageCheck } from 'lucide-react';
 import { stockTransferApi } from '../../api/endpoints.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
-import ERPDataGrid, { type ERPColumnDef } from '../../components/erp/ERPDataGrid.js';
-import ERPDropdownMenu, { type ERPMenuItem } from '../../components/erp/ERPDropdownMenu.js';
+import ERPDataGrid, {
+  type ERPColumnDef,
+  type ERPRowAction,
+} from '../../components/erp/ERPDataGrid.js';
 import Button from '../../components/ui/Button.js';
 import Badge from '../../components/ui/Badge.js';
 import Select from '../../components/ui/Select.js';
@@ -62,6 +64,19 @@ export default function StockTransfersPage() {
   const transfers: Transfer[] = ((data as Record<string, unknown>)?.content as Transfer[]) ?? [];
   const totalElements = ((data as Record<string, unknown>)?.totalElements as number) ?? 0;
 
+  // A transfer is created as DRAFT (see StockTransferService.create) and the backend already
+  // exposes POST /stock-transfers/:id/submit (stockTransferApi.submit) to move it to SUBMITTED
+  // — but until this fix, no page anywhere in the app ever called it, so every transfer was
+  // permanently stuck in DRAFT (Approve only ever appears for SUBMITTED). Found via live E2E.
+  const submitMutation = useMutation({
+    mutationFn: (id: number) => stockTransferApi.submit(id),
+    onSuccess: () => {
+      toast.success('Transfer submitted for approval');
+      qc.invalidateQueries({ queryKey: ['stock-transfers'] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
   const approveMutation = useMutation({
     mutationFn: (id: number) => stockTransferApi.approve(id),
     onSuccess: () => {
@@ -90,35 +105,38 @@ export default function StockTransfersPage() {
     },
     { key: 'notes', header: 'Notes', render: (r) => r.notes ?? '–' },
     { key: 'createdAt', header: 'Created', sortable: true, render: (r) => formatDate(r.createdAt) },
+  ];
+
+  const rowActions: ERPRowAction<Transfer>[] = [
     {
-      key: 'actions',
-      header: '',
-      align: 'right',
-      render: (r) => {
-        const items: ERPMenuItem[] = [
-          { label: 'View', icon: Eye, onClick: () => navigate(`/inventory/transfers/${r.id}`) },
-        ];
-        if (r.status === 'SUBMITTED')
-          items.push({
-            label: 'Approve',
-            icon: CheckCircle2,
-            onClick: () => approveMutation.mutate(r.id),
-          });
-        if (r.status === 'APPROVED')
-          items.push({
-            label: 'Dispatch',
-            icon: Truck,
-            onClick: () => dispatchMutation.mutate(r.id),
-          });
-        if (r.status === 'DISPATCHED' || r.status === 'IN_TRANSIT') {
-          items.push({
-            label: 'Receive',
-            icon: PackageCheck,
-            onClick: () => navigate(`/inventory/transfers/${r.id}/receive`),
-          });
-        }
-        return <ERPDropdownMenu items={items} />;
-      },
+      label: 'View',
+      icon: Eye,
+      type: 'view',
+      onClick: (r: Transfer) => navigate(`/inventory/transfers/${r.id}`),
+    },
+    {
+      label: 'Submit',
+      icon: Send,
+      onClick: (r: Transfer) => submitMutation.mutate(r.id),
+      hidden: (r: Transfer) => r.status !== 'DRAFT',
+    },
+    {
+      label: 'Approve',
+      icon: CheckCircle2,
+      onClick: (r: Transfer) => approveMutation.mutate(r.id),
+      hidden: (r: Transfer) => r.status !== 'SUBMITTED',
+    },
+    {
+      label: 'Dispatch',
+      icon: Truck,
+      onClick: (r: Transfer) => dispatchMutation.mutate(r.id),
+      hidden: (r: Transfer) => r.status !== 'APPROVED',
+    },
+    {
+      label: 'Receive',
+      icon: PackageCheck,
+      onClick: (r: Transfer) => navigate(`/inventory/transfers/${r.id}/receive`),
+      hidden: (r: Transfer) => !(r.status === 'DISPATCHED' || r.status === 'IN_TRANSIT'),
     },
   ];
 
@@ -169,6 +187,7 @@ export default function StockTransfersPage() {
           setPageSize(size);
           setPage(1);
         }}
+        actions={rowActions}
       />
     </div>
   );

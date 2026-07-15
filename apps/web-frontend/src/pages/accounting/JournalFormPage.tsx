@@ -5,6 +5,7 @@ import toast from 'react-hot-toast';
 import { journalApi, accountApi, costCenterApi } from '../../api/endpoints.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
 import ERPTextarea from '../../components/erp/ERPTextarea.js';
+import ERPStickyFooter from '../../components/erp/ERPStickyFooter.js';
 import Button from '../../components/ui/Button.js';
 import { formatCurrency } from '../../lib/format.js';
 import type { ApiError } from '../../api/client.js';
@@ -107,9 +108,10 @@ export default function JournalFormPage() {
   return (
     <div>
       <ERPPageHeader
-        variant="list"
+        variant="detail"
         title="New Manual Journal"
         subtitle="Post a balanced double-entry journal"
+        backTo="/accounting/journals"
       />
 
       <div className="mb-6">
@@ -235,14 +237,14 @@ export default function JournalFormPage() {
         </div>
       </div>
 
-      <div className="flex justify-end gap-3">
-        <Button variant="ghost" onClick={() => navigate('/accounting/journals')}>
+      <ERPStickyFooter>
+        <Button variant="secondary" onClick={() => navigate('/accounting/journals')}>
           Cancel
         </Button>
         <Button isLoading={createMutation.isPending} disabled={!isBalanced} onClick={handleSubmit}>
           Post Journal
         </Button>
-      </div>
+      </ERPStickyFooter>
     </div>
   );
 }

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { holidayApi } from '../../api/endpoints.js';
@@ -10,9 +11,7 @@ import { ERPTableSkeleton } from '../../components/erp/ERPSkeleton.js';
 import ERPEmptyState from '../../components/erp/ERPEmptyState.js';
 import Button from '../../components/ui/Button.js';
 import Input from '../../components/ui/Input.js';
-import Select from '../../components/ui/Select.js';
 import Badge from '../../components/ui/Badge.js';
-import Modal from '../../components/ui/Modal.js';
 
 interface Holiday {
   id: string;
@@ -29,13 +28,10 @@ const TYPE_VARIANT: Record<string, 'default' | 'info' | 'warning'> = {
 };
 
 export default function HolidayCalendarPage() {
+  const navigate = useNavigate();
   const qc = useQueryClient();
   const hasPermission = useAuthStore((s) => s.hasPermission);
   const [year, setYear] = useState(new Date().getFullYear());
-  const [addOpen, setAddOpen] = useState(false);
-  const [name, setName] = useState('');
-  const [holidayDate, setHolidayDate] = useState('');
-  const [holidayType, setHolidayType] = useState<'NATIONAL' | 'STATE' | 'OPTIONAL'>('NATIONAL');
 
   const { data, isLoading } = useQuery({
     queryKey: ['holidays', year],
@@ -43,19 +39,6 @@ export default function HolidayCalendarPage() {
   });
 
   const holidays: Holiday[] = (data?.content as Holiday[]) ?? [];
-
-  const createMutation = useMutation({
-    mutationFn: () => holidayApi.create({ name, holidayDate, holidayType }),
-    onSuccess: () => {
-      toast.success('Holiday added');
-      qc.invalidateQueries({ queryKey: ['holidays'] });
-      setAddOpen(false);
-      setName('');
-      setHolidayDate('');
-      setHolidayType('NATIONAL');
-    },
-    onError: (e: Error) => toast.error(e.message),
-  });
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => holidayApi.delete(id),
@@ -104,7 +87,7 @@ export default function HolidayCalendarPage() {
                   >
                     Seed 2026-27
                   </Button>
-                  <Button onClick={() => setAddOpen(true)}>+ Add Holiday</Button>
+                  <Button onClick={() => navigate('/hr/holidays/new')}>+ Add Holiday</Button>
                 </>
               )}
             </div>
@@ -119,7 +102,7 @@ export default function HolidayCalendarPage() {
             title={`No holidays found for ${year}`}
             description="Add a holiday or seed the default calendar for this year."
             {...(canManage
-              ? { action: { label: '+ Add Holiday', onClick: () => setAddOpen(true) } }
+              ? { action: { label: '+ Add Holiday', onClick: () => navigate('/hr/holidays/new') } }
               : {})}
           />
         ) : (
@@ -165,44 +148,6 @@ export default function HolidayCalendarPage() {
             </table>
           </div>
         )}
-
-        <Modal open={addOpen} onClose={() => setAddOpen(false)} title="Add Holiday" size="sm">
-          <div className="space-y-4">
-            <Input
-              label="Holiday Name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. Diwali"
-            />
-            <Input
-              label="Date"
-              type="date"
-              value={holidayDate}
-              onChange={(e) => setHolidayDate(e.target.value)}
-            />
-            <Select
-              label="Type"
-              value={holidayType}
-              onChange={(e) => setHolidayType(e.target.value as 'NATIONAL' | 'STATE' | 'OPTIONAL')}
-            >
-              <option value="NATIONAL">National</option>
-              <option value="STATE">State</option>
-              <option value="OPTIONAL">Optional</option>
-            </Select>
-            <div className="flex justify-end gap-3 pt-2">
-              <Button variant="secondary" onClick={() => setAddOpen(false)}>
-                Cancel
-              </Button>
-              <Button
-                onClick={() => createMutation.mutate()}
-                loading={createMutation.isPending}
-                disabled={!name || !holidayDate}
-              >
-                Add
-              </Button>
-            </div>
-          </div>
-        </Modal>
       </div>
     </ERPErrorBoundary>
   );

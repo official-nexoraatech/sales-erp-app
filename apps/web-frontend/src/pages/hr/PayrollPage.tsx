@@ -68,7 +68,9 @@ export default function PayrollPage() {
 
   const { data: empData } = useQuery({
     queryKey: ['employees-all'],
-    queryFn: () => employeeApi.list(),
+    // queryKey says "all" but the backend defaults to page 0/size 20 with no explicit size —
+    // any tenant past 20 employees silently lost everyone after that from this dropdown.
+    queryFn: () => employeeApi.list({ size: 100 }),
     enabled: hasPermission(PERMISSIONS.EMPLOYEE_VIEW),
   });
   const employees: Employee[] = ((empData as Record<string, unknown>)?.content as Employee[]) ?? [];
@@ -92,8 +94,22 @@ export default function PayrollPage() {
 
   const calculateMutation = useMutation({
     mutationFn: (id: number) => payrollApi.calculate(id),
-    onSuccess: () => {
-      toast.success('Payroll calculated');
+    onSuccess: (res) => {
+      // Backend now skips (rather than aborts on) an individual employee whose salary/data
+      // is incomplete — surface that instead of a blanket "success" that hides it. Without
+      // this, an admin has no way to know payroll silently excluded someone this month.
+      const skipped =
+        (res as { skipped?: Array<{ employeeId: number; reason: string }> })?.skipped ?? [];
+      if (skipped.length > 0) {
+        toast.error(
+          `Payroll calculated, but ${skipped.length} employee(s) were skipped: ${skipped
+            .map((s) => `#${s.employeeId}`)
+            .join(', ')}. Check the run notes for details.`,
+          { duration: 8000 }
+        );
+      } else {
+        toast.success('Payroll calculated');
+      }
       qc.invalidateQueries({ queryKey: ['payroll-runs'] });
     },
     onError: (e: Error) => toast.error(e.message),
@@ -199,7 +215,15 @@ export default function PayrollPage() {
                     <td className="px-4 py-3 text-right">
                       <div className="flex gap-2 justify-end">
                         {hasPermission(PERMISSIONS.PAYROLL_PROCESS) &&
-                          (run.status === 'DRAFT' || run.status === 'CALCULATED') && (
+                          // The backend only rejects recalculation once APPROVED/DISBURSED —
+                          // CALCULATING is included here as a recovery path: it should be
+                          // transient, but a run could only ever get stuck there (with no way
+                          // to retry) if the backend calculate step failed after flipping the
+                          // status but before completing, which is exactly what happened before
+                          // per-employee errors were made non-fatal (see payroll.routes.ts).
+                          (run.status === 'DRAFT' ||
+                            run.status === 'CALCULATED' ||
+                            run.status === 'CALCULATING') && (
                             <Button
                               size="sm"
                               variant="secondary"

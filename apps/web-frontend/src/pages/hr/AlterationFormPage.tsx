@@ -5,11 +5,17 @@ import toast from 'react-hot-toast';
 import { alterationApi } from '../../api/endpoints.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
 import ERPFormSection from '../../components/erp/ERPFormSection.js';
+import ERPStickyFooter from '../../components/erp/ERPStickyFooter.js';
 import Input from '../../components/ui/Input.js';
 import Button from '../../components/ui/Button.js';
 import { formatCurrency } from '../../lib/format.js';
 
-interface LineItem { description: string; quantity: number; rate: number; amount: number; }
+interface LineItem {
+  description: string;
+  quantity: number;
+  rate: number;
+  amount: number;
+}
 
 export default function AlterationFormPage() {
   const navigate = useNavigate();
@@ -20,7 +26,9 @@ export default function AlterationFormPage() {
   const [receivedDate, setReceivedDate] = useState(new Date().toISOString().slice(0, 10));
   const [promisedDate, setPromisedDate] = useState('');
   const [advanceAmount, setAdvanceAmount] = useState(0);
-  const [items, setItems] = useState<LineItem[]>([{ description: '', quantity: 1, rate: 0, amount: 0 }]);
+  const [items, setItems] = useState<LineItem[]>([
+    { description: '', quantity: 1, rate: 0, amount: 0 },
+  ]);
 
   const totalAmount = items.reduce((s, i) => s + i.amount, 0);
   const balanceDue = Math.max(0, totalAmount - advanceAmount);
@@ -44,11 +52,15 @@ export default function AlterationFormPage() {
   }
 
   const createMutation = useMutation({
-    mutationFn: () => alterationApi.create({
-      customerName, customerPhone, receivedDate, promisedDate,
-      items: items.filter((i) => i.description.trim()),
-      advanceAmount,
-    }),
+    mutationFn: () =>
+      alterationApi.create({
+        customerName,
+        customerPhone,
+        receivedDate,
+        promisedDate,
+        items: items.filter((i) => i.description.trim()),
+        advanceAmount,
+      }),
     onSuccess: () => {
       toast.success('Alteration order received');
       qc.invalidateQueries({ queryKey: ['alterations'] });
@@ -59,20 +71,45 @@ export default function AlterationFormPage() {
 
   return (
     <div>
-      <ERPPageHeader variant="list" title="Receive Alteration Order" subtitle="Counter screen — capture customer, items, and assign a tailor next." />
+      <ERPPageHeader
+        variant="detail"
+        title="Receive Alteration Order"
+        subtitle="Counter screen — capture customer, items, and assign a tailor next."
+        backTo="/hr/alterations"
+      />
 
       <div className="space-y-6">
         <ERPFormSection title="Customer Details" columns={2}>
-          <Input label="Customer Name" required value={customerName} onChange={(e) => setCustomerName(e.target.value)} />
+          <Input
+            label="Customer Name"
+            required
+            value={customerName}
+            onChange={(e) => setCustomerName(e.target.value)}
+          />
           <Input
             label="Customer Phone"
             required
             value={customerPhone}
             onChange={(e) => setCustomerPhone(e.target.value)}
-            error={customerPhone.length > 0 && customerPhone.length < 10 ? 'Phone must be at least 10 digits' : undefined}
+            error={
+              customerPhone.length > 0 && customerPhone.length < 10
+                ? 'Phone must be at least 10 digits'
+                : undefined
+            }
           />
-          <Input label="Received Date" type="date" value={receivedDate} onChange={(e) => setReceivedDate(e.target.value)} />
-          <Input label="Promised Date" type="date" required value={promisedDate} onChange={(e) => setPromisedDate(e.target.value)} />
+          <Input
+            label="Received Date"
+            type="date"
+            value={receivedDate}
+            onChange={(e) => setReceivedDate(e.target.value)}
+          />
+          <Input
+            label="Promised Date"
+            type="date"
+            required
+            value={promisedDate}
+            onChange={(e) => setPromisedDate(e.target.value)}
+          />
         </ERPFormSection>
 
         <div className="bg-surface-card rounded-xl border border-default p-4">
@@ -80,36 +117,82 @@ export default function AlterationFormPage() {
           <div className="space-y-3">
             {items.map((item, idx) => (
               <div key={idx} className="grid grid-cols-12 gap-2 items-end">
-                <Input label="Description" wrapperClassName="col-span-6" value={item.description} onChange={(e) => updateItem(idx, { description: e.target.value })} />
-                <Input label="Qty" type="number" wrapperClassName="col-span-2" value={item.quantity} onChange={(e) => updateItem(idx, { quantity: Number(e.target.value) })} />
-                <Input label="Rate" type="number" wrapperClassName="col-span-2" value={item.rate} onChange={(e) => updateItem(idx, { rate: Number(e.target.value) })} />
-                <div className="col-span-1 text-sm font-mono pb-2">{formatCurrency(item.amount)}</div>
-                <Button type="button" variant="danger-outline" size="sm" className="col-span-1" onClick={() => removeItem(idx)}>×</Button>
+                <Input
+                  label="Description"
+                  wrapperClassName="col-span-6"
+                  value={item.description}
+                  onChange={(e) => updateItem(idx, { description: e.target.value })}
+                />
+                <Input
+                  label="Qty"
+                  type="number"
+                  wrapperClassName="col-span-2"
+                  value={item.quantity}
+                  onChange={(e) => updateItem(idx, { quantity: Number(e.target.value) })}
+                />
+                <Input
+                  label="Rate"
+                  type="number"
+                  wrapperClassName="col-span-2"
+                  value={item.rate}
+                  onChange={(e) => updateItem(idx, { rate: Number(e.target.value) })}
+                />
+                <div className="col-span-1 text-sm font-mono pb-2">
+                  {formatCurrency(item.amount)}
+                </div>
+                <Button
+                  type="button"
+                  variant="danger-outline"
+                  size="sm"
+                  className="col-span-1"
+                  onClick={() => removeItem(idx)}
+                >
+                  ×
+                </Button>
               </div>
             ))}
           </div>
-          <Button type="button" variant="secondary" size="sm" className="mt-3" onClick={addItem}>+ Add Item</Button>
+          <Button type="button" variant="secondary" size="sm" className="mt-3" onClick={addItem}>
+            + Add Item
+          </Button>
         </div>
 
         <div className="grid grid-cols-2 gap-4">
-          <Input label="Advance Amount (₹)" type="number" value={advanceAmount} onChange={(e) => setAdvanceAmount(Number(e.target.value))} />
+          <Input
+            label="Advance Amount (₹)"
+            type="number"
+            value={advanceAmount}
+            onChange={(e) => setAdvanceAmount(Number(e.target.value))}
+          />
           <div className="flex flex-col justify-end">
-            <p className="text-sm text-secondary">Total: <span className="font-mono font-semibold">{formatCurrency(totalAmount)}</span></p>
-            <p className="text-sm text-secondary">Balance Due: <span className="font-mono font-semibold">{formatCurrency(balanceDue)}</span></p>
+            <p className="text-sm text-secondary">
+              Total: <span className="font-mono font-semibold">{formatCurrency(totalAmount)}</span>
+            </p>
+            <p className="text-sm text-secondary">
+              Balance Due:{' '}
+              <span className="font-mono font-semibold">{formatCurrency(balanceDue)}</span>
+            </p>
           </div>
         </div>
-
-        <div className="flex gap-3 pt-2">
-          <Button
-            onClick={() => createMutation.mutate()}
-            loading={createMutation.isPending}
-            disabled={!customerName || customerPhone.length < 10 || !promisedDate || items.every((i) => !i.description.trim())}
-          >
-            Receive Order
-          </Button>
-          <Button variant="secondary" onClick={() => navigate('/hr/alterations')}>Cancel</Button>
-        </div>
       </div>
+
+      <ERPStickyFooter>
+        <Button variant="secondary" onClick={() => navigate('/hr/alterations')}>
+          Cancel
+        </Button>
+        <Button
+          onClick={() => createMutation.mutate()}
+          loading={createMutation.isPending}
+          disabled={
+            !customerName ||
+            customerPhone.length < 10 ||
+            !promisedDate ||
+            items.every((i) => !i.description.trim())
+          }
+        >
+          Receive Order
+        </Button>
+      </ERPStickyFooter>
     </div>
   );
 }

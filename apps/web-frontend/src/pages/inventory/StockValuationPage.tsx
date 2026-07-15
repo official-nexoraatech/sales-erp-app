@@ -6,6 +6,8 @@ import ERPErrorBoundary from '../../components/erp/ERPErrorBoundary.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
 import Badge from '../../components/ui/Badge.js';
 import Select from '../../components/ui/Select.js';
+import DatePicker from '../../components/ui/DatePicker.js';
+import Button from '../../components/ui/Button.js';
 import { stockValuationApi, warehouseApi, type StockValuationRow } from '../../api/endpoints.js';
 import { useAuthStore } from '../../store/auth.store.js';
 import { PERMISSIONS } from '../../constants/permissions.js';
@@ -114,13 +116,14 @@ export default function StockValuationPage() {
           title="Stock Valuation Report"
           subtitle="Current stock value by item (FIFO / WACC costing)"
           actions={
-            <button
+            <Button
+              variant="outline"
+              size="sm"
               onClick={() => exportCsv(rows, totalStockValue, asOf)}
               disabled={rows.length === 0}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-default rounded-lg text-secondary hover:text-primary hover:bg-surface-raised transition-colors disabled:opacity-40"
             >
-              <Download size={13} /> Export CSV
-            </button>
+              <Download size={14} /> Export CSV
+            </Button>
           }
         />
 
@@ -137,13 +140,7 @@ export default function StockValuationPage() {
             />
           </div>
           <div>
-            <label className="block text-xs font-medium text-secondary mb-1">As of Date</label>
-            <input
-              type="date"
-              value={asOf}
-              onChange={(e) => setAsOf(e.target.value)}
-              className="text-sm border border-default rounded-lg px-3 py-1.5 bg-surface-card text-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
-            />
+            <DatePicker label="As of Date" value={asOf} onChange={setAsOf} />
           </div>
         </div>
 

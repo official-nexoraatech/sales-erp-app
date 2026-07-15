@@ -2,11 +2,18 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { productionApi, supplierApi, itemApi, warehouseApi, branchApi } from '../../api/endpoints.js';
+import {
+  productionApi,
+  supplierApi,
+  itemApi,
+  warehouseApi,
+  branchApi,
+} from '../../api/endpoints.js';
 import { useAuthStore } from '../../store/auth.store.js';
 import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
 import { ERPFormSkeleton } from '../../components/erp/ERPSkeleton.js';
+import ERPStickyFooter from '../../components/erp/ERPStickyFooter.js';
 import Button from '../../components/ui/Button.js';
 import Input from '../../components/ui/Input.js';
 import Select from '../../components/ui/Select.js';
@@ -40,14 +47,16 @@ export default function JobWorkOrderCreatePage() {
     queryFn: () => supplierApi.list(),
     enabled: hasPermission(PERMISSIONS.SUPPLIER_VIEW),
   });
-  const suppliers = ((suppliersData as Record<string, unknown>)?.content as { id: number; name: string }[]) ?? [];
+  const suppliers =
+    ((suppliersData as Record<string, unknown>)?.content as { id: number; name: string }[]) ?? [];
 
   const { data: branchesData } = useQuery({
     queryKey: ['branches'],
     queryFn: () => branchApi.list(),
     enabled: hasPermission(PERMISSIONS.BRANCH_VIEW),
   });
-  const branches = ((branchesData as Record<string, unknown>)?.content as { id: number; name: string }[]) ?? [];
+  const branches =
+    ((branchesData as Record<string, unknown>)?.content as { id: number; name: string }[]) ?? [];
 
   const userBranchIds = useAuthStore((s) => s.user?.branchIds) ?? [];
   useEffect(() => {
@@ -59,7 +68,8 @@ export default function JobWorkOrderCreatePage() {
     queryFn: () => itemApi.list(),
     enabled: hasPermission(PERMISSIONS.ITEM_VIEW),
   });
-  const items = ((itemsData as Record<string, unknown>)?.content as { id: number; name: string }[]) ?? [];
+  const items =
+    ((itemsData as Record<string, unknown>)?.content as { id: number; name: string }[]) ?? [];
 
   const { data: warehousesData, isLoading: warehousesLoading } = useQuery({
     queryKey: ['warehouses-list'],
@@ -79,7 +89,10 @@ export default function JobWorkOrderCreatePage() {
   });
 
   function addMaterial() {
-    setMaterials((prev) => [...prev, { itemId: '', requiredQty: '', unitCost: '', warehouseId: '' }]);
+    setMaterials((prev) => [
+      ...prev,
+      { itemId: '', requiredQty: '', unitCost: '', warehouseId: '' },
+    ]);
   }
 
   function removeMaterial(idx: number) {
@@ -116,7 +129,12 @@ export default function JobWorkOrderCreatePage() {
   if (suppliersLoading || itemsLoading || warehousesLoading) {
     return (
       <div className="max-w-3xl">
-        <ERPPageHeader variant="detail" title="New Job Work Order" subtitle="Create an outsourced stitching or processing order." backTo="/production/job-work" />
+        <ERPPageHeader
+          variant="detail"
+          title="New Job Work Order"
+          subtitle="Create an outsourced stitching or processing order."
+          backTo="/production/job-work"
+        />
         <ERPFormSkeleton />
       </div>
     );
@@ -124,37 +142,106 @@ export default function JobWorkOrderCreatePage() {
 
   return (
     <div className="max-w-3xl">
-      <ERPPageHeader variant="detail" title="New Job Work Order" subtitle="Create an outsourced stitching or processing order." backTo="/production/job-work" />
+      <ERPPageHeader
+        variant="detail"
+        title="New Job Work Order"
+        subtitle="Create an outsourced stitching or processing order."
+        backTo="/production/job-work"
+      />
 
       <form onSubmit={handleSubmit} className="space-y-6">
         <div className="bg-surface-card rounded-xl border border-default p-6 space-y-4">
           <h3 className="font-semibold text-primary">Order Details</h3>
           <div className="grid grid-cols-2 gap-4">
-            <Select label="Supplier" required value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>
+            <Select
+              label="Supplier"
+              required
+              value={supplierId}
+              onChange={(e) => setSupplierId(e.target.value)}
+            >
               <option value="">Select supplier</option>
-              {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+              {suppliers.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
             </Select>
-            <Select label="Branch" required value={branchId} onChange={(e) => setBranchId(e.target.value)}>
+            <Select
+              label="Branch"
+              required
+              value={branchId}
+              onChange={(e) => setBranchId(e.target.value)}
+            >
               <option value="">Select branch</option>
-              {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+              {branches.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.name}
+                </option>
+              ))}
             </Select>
-            <Select label="Output Warehouse" required value={warehouseId} onChange={(e) => setWarehouseId(e.target.value)}>
+            <Select
+              label="Output Warehouse"
+              required
+              value={warehouseId}
+              onChange={(e) => setWarehouseId(e.target.value)}
+            >
               <option value="">Select warehouse</option>
-              {warehouses.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
+              {warehouses.map((w) => (
+                <option key={w.id} value={w.id}>
+                  {w.name}
+                </option>
+              ))}
             </Select>
-            <Select label="Output Item" required value={outputItemId} onChange={(e) => setOutputItemId(e.target.value)}>
+            <Select
+              label="Output Item"
+              required
+              value={outputItemId}
+              onChange={(e) => setOutputItemId(e.target.value)}
+            >
               <option value="">Select item</option>
-              {items.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
+              {items.map((i) => (
+                <option key={i.id} value={i.id}>
+                  {i.name}
+                </option>
+              ))}
             </Select>
-            <Input label="Ordered Qty" required type="number" min="0.01" step="0.01" value={orderedQty} onChange={(e) => setOrderedQty(e.target.value)} />
-            <Input label="Job Work Rate (per unit)" required type="number" min="0" step="0.01" value={jobWorkRate} onChange={(e) => setJobWorkRate(e.target.value)} />
-            <Input label="Order Date" required type="date" value={orderDate} onChange={(e) => setOrderDate(e.target.value)} />
-            <Input label="Expected Completion" required type="date" value={expectedDate} onChange={(e) => setExpectedDate(e.target.value)} />
+            <Input
+              label="Ordered Qty"
+              required
+              type="number"
+              min="0.01"
+              step="0.01"
+              value={orderedQty}
+              onChange={(e) => setOrderedQty(e.target.value)}
+            />
+            <Input
+              label="Job Work Rate (per unit)"
+              required
+              type="number"
+              min="0"
+              step="0.01"
+              value={jobWorkRate}
+              onChange={(e) => setJobWorkRate(e.target.value)}
+            />
+            <Input
+              label="Order Date"
+              required
+              type="date"
+              value={orderDate}
+              onChange={(e) => setOrderDate(e.target.value)}
+            />
+            <Input
+              label="Expected Completion"
+              required
+              type="date"
+              value={expectedDate}
+              onChange={(e) => setExpectedDate(e.target.value)}
+            />
           </div>
           <div>
             <label className="block text-xs font-medium text-secondary mb-1">Notes</label>
             <textarea
-              className="w-full border border-default rounded-lg px-3 py-2 text-sm bg-surface focus:ring-2 focus:ring-primary/30 focus:border-primary outline-none"
+              className="w-full border border-default rounded-lg px-3 py-2 text-sm bg-surface-card focus:ring-2 focus:ring-primary/30 focus:border-primary outline-none"
               rows={2}
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
@@ -165,38 +252,72 @@ export default function JobWorkOrderCreatePage() {
         <div className="bg-surface-card rounded-xl border border-default p-6 space-y-4">
           <div className="flex items-center justify-between">
             <h3 className="font-semibold text-primary">Materials Required</h3>
-            <Button type="button" variant="outline" size="sm" onClick={addMaterial}>+ Add Material</Button>
+            <Button type="button" variant="outline" size="sm" onClick={addMaterial}>
+              + Add Material
+            </Button>
           </div>
           {materials.map((m, idx) => (
             <div key={idx} className="grid grid-cols-5 gap-3 items-end">
               <div className="col-span-2">
-                <label className="block text-xs text-secondary mb-1">Item</label>
-                <Select value={m.itemId} onChange={(e) => updateMaterial(idx, 'itemId', e.target.value)}>
+                <Select
+                  label="Item"
+                  value={m.itemId}
+                  onChange={(e) => updateMaterial(idx, 'itemId', e.target.value)}
+                >
                   <option value="">Select item</option>
-                  {items.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
+                  {items.map((i) => (
+                    <option key={i.id} value={i.id}>
+                      {i.name}
+                    </option>
+                  ))}
                 </Select>
               </div>
               <div>
-                <label className="block text-xs text-secondary mb-1">Required Qty</label>
-                <Input type="number" min="0.01" step="0.01" value={m.requiredQty} onChange={(e) => updateMaterial(idx, 'requiredQty', e.target.value)} />
+                <Input
+                  label="Required Qty"
+                  type="number"
+                  min="0.01"
+                  step="0.01"
+                  value={m.requiredQty}
+                  onChange={(e) => updateMaterial(idx, 'requiredQty', e.target.value)}
+                />
               </div>
               <div>
-                <label className="block text-xs text-secondary mb-1">Unit Cost</label>
-                <Input type="number" min="0" step="0.01" value={m.unitCost} onChange={(e) => updateMaterial(idx, 'unitCost', e.target.value)} />
+                <Input
+                  label="Unit Cost"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={m.unitCost}
+                  onChange={(e) => updateMaterial(idx, 'unitCost', e.target.value)}
+                />
               </div>
               <div>
-                <Button type="button" variant="danger-outline" size="sm" onClick={() => removeMaterial(idx)}>Remove</Button>
+                <Button
+                  type="button"
+                  variant="danger-outline"
+                  size="sm"
+                  onClick={() => removeMaterial(idx)}
+                >
+                  Remove
+                </Button>
               </div>
             </div>
           ))}
         </div>
 
-        <div className="flex gap-3">
+        <ERPStickyFooter>
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => navigate('/production/job-work')}
+          >
+            Cancel
+          </Button>
           <Button type="submit" disabled={createMutation.isPending}>
             {createMutation.isPending ? 'Creating…' : 'Create Order'}
           </Button>
-          <Button type="button" variant="outline" onClick={() => navigate('/production/job-work')}>Cancel</Button>
-        </div>
+        </ERPStickyFooter>
       </form>
     </div>
   );

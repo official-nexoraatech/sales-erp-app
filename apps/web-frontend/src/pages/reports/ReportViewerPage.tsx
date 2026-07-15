@@ -6,6 +6,7 @@ import { ArrowLeft, Download, RefreshCw, ChevronDown } from 'lucide-react';
 import { reportsEngineApi, type ReportRunPending } from '../../api/endpoints.js';
 import { ERPDetailSkeleton } from '../../components/erp/ERPSkeleton.js';
 import ERPEmptyState from '../../components/erp/ERPEmptyState.js';
+import Button from '../../components/ui/Button.js';
 
 interface ParamDef {
   key: string;
@@ -194,28 +195,31 @@ export default function ReportViewerPage() {
           </div>
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          <button
+          <Button
+            variant="outline"
+            size="sm"
             onClick={() => downloadMutation.mutate('CSV')}
             disabled={downloadMutation.isPending}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-default rounded-lg text-secondary hover:text-primary hover:bg-surface-raised transition-colors"
           >
-            <Download size={13} /> CSV
-          </button>
-          <button
+            <Download size={14} /> CSV
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
             onClick={() => downloadMutation.mutate('EXCEL')}
             disabled={downloadMutation.isPending}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-default rounded-lg text-secondary hover:text-primary hover:bg-surface-raised transition-colors"
           >
-            <Download size={13} /> Excel
-          </button>
-          <button
+            <Download size={14} /> Excel
+          </Button>
+          <Button
+            variant="primary"
+            size="sm"
             onClick={() => runMutation.mutate()}
             disabled={isRunning}
-            className="flex items-center gap-1.5 px-4 py-1.5 text-sm font-medium bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-60"
           >
-            <RefreshCw size={13} className={isRunning ? 'animate-spin' : ''} />
+            <RefreshCw size={14} className={isRunning ? 'animate-spin' : ''} />
             {isRunning ? 'Running...' : 'Run Report'}
-          </button>
+          </Button>
         </div>
       </div>
 

@@ -29,7 +29,7 @@ const Radio = forwardRef<HTMLInputElement, RadioProps>(
             disabled={disabled}
             aria-describedby={descId}
             className={cn(
-              'peer h-4.5 w-4.5 appearance-none rounded-full border border-strong bg-surface-card transition-colors duration-150 ease-out',
+              'peer h-5 w-5 appearance-none rounded-full border border-strong bg-surface-card transition-colors duration-150 ease-out',
               'checked:border-[5px] checked:border-brand',
               'focus-visible:outline-none focus-visible:shadow-[var(--shadow-focus)]',
               'disabled:cursor-not-allowed',

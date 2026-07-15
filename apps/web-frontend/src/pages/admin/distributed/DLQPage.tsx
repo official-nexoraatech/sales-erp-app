@@ -88,7 +88,11 @@ export default function DLQPage() {
 
   return (
     <div className="space-y-6">
-      <ERPPageHeader variant="list" title="Dead Letter Queue" subtitle="Inspect and replay failed Kafka messages" />
+      <ERPPageHeader
+        variant="list"
+        title="Dead Letter Queue"
+        subtitle="Inspect and replay failed Kafka messages"
+      />
 
       {/* Summary cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -117,18 +121,26 @@ export default function DLQPage() {
           {summaryLoading ? (
             <ERPCardSkeleton lines={4} />
           ) : summary.length === 0 ? (
-            <ERPEmptyState type="no-data" title="No DLQ topics found" description="Failed Kafka messages will appear here grouped by topic." />
+            <ERPEmptyState
+              type="no-data"
+              title="No DLQ topics found"
+              description="Failed Kafka messages will appear here grouped by topic."
+            />
           ) : (
             summary.map((row) => (
               <button
                 key={row.topic}
                 onClick={() => setSelectedTopic(row.topic)}
                 className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${
-                  selectedTopic === row.topic ? 'bg-primary text-white' : 'hover:bg-surface-hover text-primary'
+                  selectedTopic === row.topic
+                    ? 'bg-primary text-white'
+                    : 'hover:bg-surface-hover text-primary'
                 }`}
               >
                 <span className="block font-medium truncate">{row.topic}</span>
-                {row.pending > 0 && <span className="text-xs opacity-75">{row.pending} pending</span>}
+                {row.pending > 0 && (
+                  <span className="text-xs opacity-75">{row.pending} pending</span>
+                )}
               </button>
             ))
           )}
@@ -157,17 +169,25 @@ export default function DLQPage() {
                 {itemsLoading ? (
                   <ERPCardSkeleton lines={3} />
                 ) : items.length === 0 ? (
-                  <ERPEmptyState type="no-results" title="No items in this topic" description="This topic currently has no dead-letter items." />
+                  <ERPEmptyState
+                    type="no-results"
+                    title="No items in this topic"
+                    description="This topic currently has no dead-letter items."
+                  />
                 ) : (
                   items.map((item) => (
                     <button
                       key={item.id}
                       onClick={() => setSelectedItem(item)}
-                      className="w-full text-left px-3 py-3 rounded-lg border border-border hover:bg-surface-hover transition-colors"
+                      className="w-full text-left px-3 py-3 rounded-lg border border-default hover:bg-surface-hover transition-colors"
                     >
                       <div className="flex items-center justify-between mb-1">
-                        <span className="text-xs font-mono text-secondary">offset: {item.offset}</span>
-                        <Badge variant={STATUS_VARIANT[item.status] ?? 'default'}>{item.status}</Badge>
+                        <span className="text-xs font-mono text-secondary">
+                          offset: {item.offset}
+                        </span>
+                        <Badge variant={STATUS_VARIANT[item.status] ?? 'default'}>
+                          {item.status}
+                        </Badge>
                       </div>
                       <p className="text-sm text-primary truncate">{item.errorMessage}</p>
                       <div className="flex items-center gap-4 mt-1 text-xs text-secondary">
@@ -185,33 +205,74 @@ export default function DLQPage() {
 
       {/* Item detail modal */}
       {selectedItem && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setSelectedItem(null)}>
-          <div className="bg-surface rounded-xl shadow-xl max-w-2xl w-full max-h-[80vh] overflow-y-auto p-6" onClick={(e) => e.stopPropagation()}>
+        <div
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+          onClick={() => setSelectedItem(null)}
+        >
+          <div
+            className="bg-surface-card rounded-xl shadow-xl max-w-2xl w-full max-h-[80vh] overflow-y-auto p-6"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-semibold text-primary">DLQ Item #{selectedItem.id}</h3>
-              <Badge variant={STATUS_VARIANT[selectedItem.status] ?? 'default'}>{selectedItem.status}</Badge>
+              <Badge variant={STATUS_VARIANT[selectedItem.status] ?? 'default'}>
+                {selectedItem.status}
+              </Badge>
             </div>
             <dl className="space-y-3 text-sm">
-              <div><dt className="text-secondary">Topic</dt><dd className="font-mono text-primary">{selectedItem.topic}</dd></div>
-              <div><dt className="text-secondary">Offset</dt><dd className="font-mono text-primary">{selectedItem.offset}</dd></div>
-              <div><dt className="text-secondary">Error</dt><dd className="text-danger">{selectedItem.errorMessage}</dd></div>
-              <div><dt className="text-secondary">Retry Count</dt><dd className="text-primary">{selectedItem.retryCount}</dd></div>
-              <div><dt className="text-secondary">Created</dt><dd className="text-primary">{formatDate(selectedItem.createdAt)}</dd></div>
+              <div>
+                <dt className="text-secondary">Topic</dt>
+                <dd className="font-mono text-primary">{selectedItem.topic}</dd>
+              </div>
+              <div>
+                <dt className="text-secondary">Offset</dt>
+                <dd className="font-mono text-primary">{selectedItem.offset}</dd>
+              </div>
+              <div>
+                <dt className="text-secondary">Error</dt>
+                <dd className="text-danger">{selectedItem.errorMessage}</dd>
+              </div>
+              <div>
+                <dt className="text-secondary">Retry Count</dt>
+                <dd className="text-primary">{selectedItem.retryCount}</dd>
+              </div>
+              <div>
+                <dt className="text-secondary">Created</dt>
+                <dd className="text-primary">{formatDate(selectedItem.createdAt)}</dd>
+              </div>
               <div>
                 <dt className="text-secondary mb-1">Payload</dt>
-                <dd><pre className="bg-surface-hover rounded p-3 text-xs overflow-x-auto">{JSON.stringify(selectedItem.payload, null, 2)}</pre></dd>
+                <dd>
+                  <pre className="bg-surface-hover rounded p-3 text-xs overflow-x-auto">
+                    {JSON.stringify(selectedItem.payload, null, 2)}
+                  </pre>
+                </dd>
               </div>
             </dl>
             {hasPermission(PERMISSIONS.DLQ_MANAGE) && selectedItem.status === 'PENDING' && (
               <div className="flex gap-2 mt-4">
-                <Button variant="danger" size="sm" loading={discardMutation.isPending} onClick={() => discardMutation.mutate(selectedItem.id)}>
+                <Button
+                  variant="danger"
+                  size="sm"
+                  loading={discardMutation.isPending}
+                  onClick={() => discardMutation.mutate(selectedItem.id)}
+                >
                   Discard
                 </Button>
-                <Button variant="secondary" size="sm" onClick={() => setSelectedItem(null)}>Close</Button>
+                <Button variant="secondary" size="sm" onClick={() => setSelectedItem(null)}>
+                  Close
+                </Button>
               </div>
             )}
             {(selectedItem.status !== 'PENDING' || !hasPermission(PERMISSIONS.DLQ_MANAGE)) && (
-              <Button variant="secondary" size="sm" className="mt-4" onClick={() => setSelectedItem(null)}>Close</Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                className="mt-4"
+                onClick={() => setSelectedItem(null)}
+              >
+                Close
+              </Button>
             )}
           </div>
         </div>

@@ -7,6 +7,7 @@ import { useAuthStore } from '../../store/auth.store.js';
 import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
 import ERPFormSection from '../../components/erp/ERPFormSection.js';
+import ERPStickyFooter from '../../components/erp/ERPStickyFooter.js';
 import Button from '../../components/ui/Button.js';
 import Input from '../../components/ui/Input.js';
 import Select from '../../components/ui/Select.js';
@@ -18,8 +19,16 @@ interface TransferLine {
   unitCost?: number;
 }
 
-interface Warehouse { id: number; name: string; }
-interface Item { id: number; name: string; itemCode?: string; purchasePrice?: string; }
+interface Warehouse {
+  id: number;
+  name: string;
+}
+interface Item {
+  id: number;
+  name: string;
+  itemCode?: string;
+  purchasePrice?: string;
+}
 
 export default function StockTransferFormPage() {
   const navigate = useNavigate();
@@ -30,7 +39,11 @@ export default function StockTransferFormPage() {
   const [lines, setLines] = useState<TransferLine[]>([]);
   const [itemSearch, setItemSearch] = useState('');
 
-  const { data: whData } = useQuery({ queryKey: ['warehouses'], queryFn: () => warehouseApi.list(), enabled: hasPermission(PERMISSIONS.WAREHOUSE_VIEW) });
+  const { data: whData } = useQuery({
+    queryKey: ['warehouses'],
+    queryFn: () => warehouseApi.list(),
+    enabled: hasPermission(PERMISSIONS.WAREHOUSE_VIEW),
+  });
   const { data: itemData } = useQuery({
     queryKey: ['items', itemSearch],
     queryFn: () => itemApi.list({ search: itemSearch || undefined }),
@@ -52,9 +65,18 @@ export default function StockTransferFormPage() {
 
   function addLine(item: Item) {
     if (lines.find((l) => l.itemId === item.id)) return;
+    // Backend requires unitCost to be omitted or > 0 — a truthy-string check on purchasePrice
+    // ("0.00" is truthy) prefilled 0 for any item without a recorded purchase price, which
+    // always failed creation with a 500 (same bug found+fixed in StockAdjustmentFormPage.tsx).
+    const purchasePrice = item.purchasePrice ? parseFloat(item.purchasePrice) : 0;
     setLines((prev) => [
       ...prev,
-      { itemId: item.id, itemName: item.name, requestedQty: 1, ...(item.purchasePrice ? { unitCost: parseFloat(item.purchasePrice) } : {}) },
+      {
+        itemId: item.id,
+        itemName: item.name,
+        requestedQty: 1,
+        ...(purchasePrice > 0 ? { unitCost: purchasePrice } : {}),
+      },
     ]);
     setItemSearch('');
   }
@@ -68,21 +90,39 @@ export default function StockTransferFormPage() {
   }
 
   function handleSubmit(): void {
-    if (!fromWarehouseId || !toWarehouseId) { toast.error('Select both warehouses'); return; }
-    if (fromWarehouseId === toWarehouseId) { toast.error('Source and destination must differ'); return; }
-    if (lines.length === 0) { toast.error('Add at least one item'); return; }
+    if (!fromWarehouseId || !toWarehouseId) {
+      toast.error('Select both warehouses');
+      return;
+    }
+    if (fromWarehouseId === toWarehouseId) {
+      toast.error('Source and destination must differ');
+      return;
+    }
+    if (lines.length === 0) {
+      toast.error('Add at least one item');
+      return;
+    }
 
     createMutation.mutate({
       fromWarehouseId: Number(fromWarehouseId),
       toWarehouseId: Number(toWarehouseId),
       notes: notes || undefined,
-      lines: lines.map((l) => ({ itemId: l.itemId, requestedQty: l.requestedQty, unitCost: l.unitCost })),
+      lines: lines.map((l) => ({
+        itemId: l.itemId,
+        requestedQty: l.requestedQty,
+        unitCost: l.unitCost,
+      })),
     });
   }
 
   return (
     <div>
-      <ERPPageHeader variant="list" title="New Stock Transfer" subtitle="Move items between warehouses" />
+      <ERPPageHeader
+        variant="detail"
+        title="New Stock Transfer"
+        subtitle="Move items between warehouses"
+        backTo="/inventory/transfers"
+      />
 
       <div className="space-y-6">
         <ERPFormSection title="Transfer Details" columns={2}>
@@ -91,16 +131,28 @@ export default function StockTransferFormPage() {
             required
             value={fromWarehouseId}
             onChange={(e) => setFromWarehouseId(e.target.value)}
-            options={[{ value: '', label: 'Select source...' }, ...warehouses.map((w) => ({ value: String(w.id), label: w.name }))]}
+            options={[
+              { value: '', label: 'Select source...' },
+              ...warehouses.map((w) => ({ value: String(w.id), label: w.name })),
+            ]}
           />
           <Select
             label="To Warehouse"
             required
             value={toWarehouseId}
             onChange={(e) => setToWarehouseId(e.target.value)}
-            options={[{ value: '', label: 'Select destination...' }, ...warehouses.map((w) => ({ value: String(w.id), label: w.name }))]}
+            options={[
+              { value: '', label: 'Select destination...' },
+              ...warehouses.map((w) => ({ value: String(w.id), label: w.name })),
+            ]}
           />
-          <Input label="Notes" wrapperClassName="sm:col-span-2" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Optional transfer notes" />
+          <Input
+            label="Notes"
+            wrapperClassName="sm:col-span-2"
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            placeholder="Optional transfer notes"
+          />
         </ERPFormSection>
 
         <div className="bg-surface-card rounded-xl border border-default p-4">
@@ -120,7 +172,9 @@ export default function StockTransferFormPage() {
                   onClick={() => addLine(item)}
                 >
                   <span className="font-medium">{item.name}</span>
-                  {item.itemCode && <span className="ml-2 text-secondary font-mono text-xs">{item.itemCode}</span>}
+                  {item.itemCode && (
+                    <span className="ml-2 text-secondary font-mono text-xs">{item.itemCode}</span>
+                  )}
                 </button>
               ))}
             </div>
@@ -147,7 +201,9 @@ export default function StockTransferFormPage() {
                       min="0.001"
                       step="0.001"
                       value={line.requestedQty}
-                      onChange={(e) => updateLine(idx, 'requestedQty', parseFloat(e.target.value) || 0)}
+                      onChange={(e) =>
+                        updateLine(idx, 'requestedQty', parseFloat(e.target.value) || 0)
+                      }
                       className="w-28 rounded border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm px-2 py-1"
                     />
                   </td>
@@ -163,19 +219,28 @@ export default function StockTransferFormPage() {
                     />
                   </td>
                   <td className="py-2">
-                    <button onClick={() => removeLine(idx)} className="text-danger hover:text-danger">✕</button>
+                    <button
+                      onClick={() => removeLine(idx)}
+                      className="text-danger hover:text-danger"
+                    >
+                      ✕
+                    </button>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
         )}
-
-        <div className="flex justify-end gap-3">
-          <Button variant="ghost" onClick={() => navigate('/inventory/transfers')}>Cancel</Button>
-          <Button onClick={handleSubmit} isLoading={createMutation.isPending}>Create Transfer</Button>
-        </div>
       </div>
+
+      <ERPStickyFooter>
+        <Button variant="secondary" onClick={() => navigate('/inventory/transfers')}>
+          Cancel
+        </Button>
+        <Button onClick={handleSubmit} isLoading={createMutation.isPending}>
+          Create Transfer
+        </Button>
+      </ERPStickyFooter>
     </div>
   );
 }

@@ -7,8 +7,10 @@ import { deliveryChallanApi } from '../../api/endpoints.js';
 import { useAuthStore } from '../../store/auth.store.js';
 import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
-import ERPDataGrid, { type ERPColumnDef } from '../../components/erp/ERPDataGrid.js';
-import ERPDropdownMenu, { type ERPMenuItem } from '../../components/erp/ERPDropdownMenu.js';
+import ERPDataGrid, {
+  type ERPColumnDef,
+  type ERPRowAction,
+} from '../../components/erp/ERPDataGrid.js';
 import Button from '../../components/ui/Button.js';
 import Badge from '../../components/ui/Badge.js';
 import { formatDate, formatCurrency } from '../../lib/format.js';
@@ -43,12 +45,16 @@ export default function DeliveryChallansPage() {
     staleTime: 30_000,
   });
 
-  const rows: DeliveryChallan[] = (data as Record<string, unknown>)?.content as DeliveryChallan[] ?? [];
-  const totalElements = (data as Record<string, unknown>)?.totalElements as number ?? 0;
+  const rows: DeliveryChallan[] =
+    ((data as Record<string, unknown>)?.content as DeliveryChallan[]) ?? [];
+  const totalElements = ((data as Record<string, unknown>)?.totalElements as number) ?? 0;
 
   const dispatchMutation = useMutation({
     mutationFn: (id: number) => deliveryChallanApi.dispatch(id),
-    onSuccess: () => { toast.success('Challan dispatched'); qc.invalidateQueries({ queryKey: ['delivery-challans'] }); },
+    onSuccess: () => {
+      toast.success('Challan dispatched');
+      qc.invalidateQueries({ queryKey: ['delivery-challans'] });
+    },
     onError: (e: Error) => toast.error(e.message),
   });
 
@@ -64,31 +70,73 @@ export default function DeliveryChallansPage() {
   const columns: ERPColumnDef<DeliveryChallan>[] = [
     { key: 'challanNumber', header: 'Challan #', mono: true, sortable: true },
     { key: 'customerId', header: 'Customer' },
-    { key: 'challanDate', header: 'Date', sortable: true, render: (r) => formatDate(r.challanDate) },
-    { key: 'subtotal', header: 'Value', align: 'right', sortable: true, render: (r) => formatCurrency(parseFloat(r.subtotal)) },
-    { key: 'status', header: 'Status', sortable: true, render: (r) => <Badge variant={STATUS_COLORS[r.status] ?? 'default'}>{r.status}</Badge> },
     {
-      key: 'actions',
-      header: '',
+      key: 'challanDate',
+      header: 'Date',
+      sortable: true,
+      render: (r) => formatDate(r.challanDate),
+    },
+    {
+      key: 'subtotal',
+      header: 'Value',
       align: 'right',
-      render: (r) => {
-        const items: ERPMenuItem[] = [{ label: 'View', icon: Eye, onClick: () => navigate(`/sales/delivery-challans/${r.id}`) }];
-        if (canCreateChallan && r.status === 'DRAFT') items.push({ label: 'Dispatch', icon: Truck, onClick: () => dispatchMutation.mutate(r.id) });
-        if (canCreateChallan && ['DRAFT', 'DISPATCHED'].includes(r.status)) {
-          items.push({ label: 'Convert to Invoice', icon: ArrowRightLeft, onClick: () => convertMutation.mutate(r.id) });
-        }
-        if (r.convertedInvoiceId) {
-          items.push({ label: 'View Invoice', icon: FileText, onClick: () => navigate(`/sales/invoices/${r.convertedInvoiceId}`) });
-        }
-        return <ERPDropdownMenu items={items} />;
-      },
+      sortable: true,
+      render: (r) => formatCurrency(parseFloat(r.subtotal)),
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      sortable: true,
+      render: (r) => <Badge variant={STATUS_COLORS[r.status] ?? 'default'}>{r.status}</Badge>,
+    },
+  ];
+
+  const rowActions: ERPRowAction<DeliveryChallan>[] = [
+    {
+      label: 'View',
+      icon: Eye,
+      type: 'view',
+      onClick: (r: DeliveryChallan) => navigate(`/sales/delivery-challans/${r.id}`),
+    },
+    ...(canCreateChallan
+      ? [
+          {
+            label: 'Dispatch',
+            icon: Truck,
+            onClick: (r: DeliveryChallan) => dispatchMutation.mutate(r.id),
+            hidden: (r: DeliveryChallan) => r.status !== 'DRAFT',
+          },
+        ]
+      : []),
+    ...(canCreateChallan
+      ? [
+          {
+            label: 'Convert to Invoice',
+            icon: ArrowRightLeft,
+            onClick: (r: DeliveryChallan) => convertMutation.mutate(r.id),
+            hidden: (r: DeliveryChallan) => !['DRAFT', 'DISPATCHED'].includes(r.status),
+          },
+        ]
+      : []),
+    {
+      label: 'View Invoice',
+      icon: FileText,
+      type: 'view',
+      onClick: (r: DeliveryChallan) => navigate(`/sales/invoices/${r.convertedInvoiceId}`),
+      hidden: (r: DeliveryChallan) => !r.convertedInvoiceId,
     },
   ];
 
   return (
     <div>
-      <ERPPageHeader variant="list" title="Delivery Challans" subtitle="Manage goods dispatched before invoicing">
-        {canCreateChallan && <Button onClick={() => navigate('/sales/delivery-challans/new')}>+ New Challan</Button>}
+      <ERPPageHeader
+        variant="list"
+        title="Delivery Challans"
+        subtitle="Manage goods dispatched before invoicing"
+      >
+        {canCreateChallan && (
+          <Button onClick={() => navigate('/sales/delivery-challans/new')}>+ New Challan</Button>
+        )}
       </ERPPageHeader>
 
       <ERPDataGrid
@@ -98,7 +146,11 @@ export default function DeliveryChallansPage() {
         rowKey="id"
         pagination={{ page, pageSize, total: totalElements }}
         onPageChange={setPage}
-        onPageSizeChange={(size) => { setPageSize(size); setPage(1); }}
+        onPageSizeChange={(size) => {
+          setPageSize(size);
+          setPage(1);
+        }}
+        actions={rowActions}
       />
     </div>
   );

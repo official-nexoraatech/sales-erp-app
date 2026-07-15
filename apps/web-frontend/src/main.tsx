@@ -37,7 +37,11 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
             <App />
           </ConfirmProvider>
           <Toaster
-            position="top-right"
+            // ERPPageHeader consistently places action buttons (Send/Accept/Convert/Confirm,
+            // etc.) top-right of the content area — a top-right toast sits directly on top of
+            // them for its whole visible duration, silently swallowing the next real click.
+            // Found via live E2E testing: Send -> Accept in quick succession blocked every time.
+            position="bottom-right"
             toastOptions={{
               duration: 4000,
               style: {

@@ -7,6 +7,7 @@ import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
 import ERPDataGrid, { type ERPColumnDef } from '../../components/erp/ERPDataGrid.js';
 import Select from '../../components/ui/Select.js';
 import Badge from '../../components/ui/Badge.js';
+import Checkbox from '../../components/ui/Checkbox.js';
 
 interface StockRow {
   itemId: number;
@@ -124,15 +125,13 @@ export default function StockLevelsPage() {
             ]}
           />
         </div>
-        <label className="flex items-center gap-2 cursor-pointer mt-5">
-          <input
-            type="checkbox"
+        <div className="mt-5">
+          <Checkbox
+            label="Show only low stock items"
             checked={belowReorder}
             onChange={(e) => setBelowReorder(e.target.checked)}
-            className="rounded border-default"
           />
-          <span className="text-sm text-primary">Show only low stock items</span>
-        </label>
+        </div>
       </div>
 
       <ERPDataGrid

@@ -202,7 +202,7 @@ export default function Combobox<T extends ComboboxOption = ComboboxOption>({
       <div ref={containerRef} className="relative">
         <div
           className={cn(
-            'flex items-center rounded-xl border bg-surface-card transition-[border-color,box-shadow] duration-150 ease-out',
+            'flex items-center rounded-md border bg-surface-card transition-[border-color,box-shadow] duration-150 ease-out',
             error
               ? 'border-error focus-within:shadow-[var(--shadow-focus-error)]'
               : 'border-default hover:border-strong focus-within:border-focus focus-within:shadow-[var(--shadow-focus)]',
@@ -232,7 +232,16 @@ export default function Combobox<T extends ComboboxOption = ComboboxOption>({
             }}
             onKeyDown={handleKeyDown}
             onFocus={() => setIsOpen(true)}
-            className="h-[var(--input-height-md)] flex-1 min-w-0 bg-transparent px-2.5 text-base text-primary placeholder:text-placeholder outline-none disabled:cursor-not-allowed"
+            className={cn(
+              'flex-1 min-w-0 bg-transparent px-2.5 text-primary placeholder:text-placeholder outline-none disabled:cursor-not-allowed',
+              size === 'sm'
+                ? 'h-[var(--input-height-sm)] text-sm'
+                : size === 'lg'
+                  ? 'h-[var(--input-height-lg)] text-base'
+                  : size === 'xl'
+                    ? 'h-[var(--input-height-xl)] text-lg'
+                    : 'h-[var(--input-height-md)] text-base'
+            )}
           />
           {isLoading && (
             <Loader2

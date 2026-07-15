@@ -5,6 +5,7 @@ import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
 import ERPEmptyState from '../../components/erp/ERPEmptyState.js';
 import { ERPTableSkeleton } from '../../components/erp/ERPSkeleton.js';
 import ERPDataGrid, { type ERPColumnDef } from '../../components/erp/ERPDataGrid.js';
+import MonthPicker from '../../components/ui/MonthPicker.js';
 import { formatCurrency } from '../../lib/format.js';
 
 interface LiabilityData {
@@ -29,7 +30,9 @@ interface Q26Data {
 
 export default function TDSPage() {
   const now = new Date();
-  const [period, setPeriod] = useState(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`);
+  const [period, setPeriod] = useState(
+    `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+  );
   const [year, setYear] = useState(now.getFullYear());
   const [quarter, setQuarter] = useState<1 | 2 | 3 | 4>(1);
 
@@ -43,15 +46,28 @@ export default function TDSPage() {
     queryFn: () => tdsApi.get26Q({ year, quarter }),
   });
 
-  const liability: LiabilityData | undefined = (liabData as LiabilityData);
-  const q26: Q26Data | undefined = (q26Data as Q26Data);
+  const liability: LiabilityData | undefined = liabData as LiabilityData;
+  const q26: Q26Data | undefined = q26Data as Q26Data;
 
   const q26Columns: ERPColumnDef<Q26Row>[] = [
     { key: 'pan', header: 'PAN', mono: true, className: 'text-xs' },
     { key: 'supplierName', header: 'Supplier' },
     { key: 'section', header: 'Section', className: 'text-secondary' },
-    { key: 'grossAmount', header: 'Gross Amount', align: 'right', mono: true, render: (row) => formatCurrency(row.grossAmount) },
-    { key: 'tdsAmount', header: 'TDS Amount', align: 'right', mono: true, className: 'text-danger', render: (row) => formatCurrency(row.tdsAmount) },
+    {
+      key: 'grossAmount',
+      header: 'Gross Amount',
+      align: 'right',
+      mono: true,
+      render: (row) => formatCurrency(row.grossAmount),
+    },
+    {
+      key: 'tdsAmount',
+      header: 'TDS Amount',
+      align: 'right',
+      mono: true,
+      className: 'text-danger',
+      render: (row) => formatCurrency(row.tdsAmount),
+    },
     { key: 'dateOfPayment', header: 'Date', className: 'text-secondary text-xs' },
   ];
 
@@ -67,19 +83,16 @@ export default function TDSPage() {
       <div className="bg-surface-card rounded-xl border border-default p-4">
         <div className="flex flex-wrap items-center gap-4 mb-4">
           <h3 className="font-semibold text-primary">Monthly Liability</h3>
-          <input
-            type="month"
-            value={period}
-            onChange={(e) => setPeriod(e.target.value)}
-            className="border border-default rounded-lg px-3 py-1.5 text-sm bg-surface-card text-primary outline-none focus:border-focus focus:ring-2 focus:ring-inset focus:ring-focus"
-          />
+          <MonthPicker label="Period" value={period} onChange={setPeriod} />
         </div>
         {liabLoading ? (
           <ERPTableSkeleton rows={2} />
         ) : liability ? (
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div className="bg-danger-bg rounded-xl p-4 text-center">
-              <div className="text-2xl font-bold text-danger">{formatCurrency(liability.totalLiability)}</div>
+              <div className="text-2xl font-bold text-danger">
+                {formatCurrency(liability.totalLiability)}
+              </div>
               <div className="text-sm text-secondary mt-1">TDS Payable for {period}</div>
             </div>
             <div className="bg-info-bg rounded-xl p-4 text-center">
@@ -87,7 +100,9 @@ export default function TDSPage() {
               <div className="text-sm text-secondary mt-1">Pending TDS Entries</div>
             </div>
             <div className="bg-surface-subtle rounded-xl p-4 flex items-center justify-center">
-              <div className="text-sm text-secondary text-center">Deposit TDS by 7th of next month to avoid interest u/s 201(1A)</div>
+              <div className="text-sm text-secondary text-center">
+                Deposit TDS by 7th of next month to avoid interest u/s 201(1A)
+              </div>
             </div>
           </div>
         ) : null}
@@ -122,13 +137,26 @@ export default function TDSPage() {
           data={q26?.entries ?? []}
           isLoading={q26Loading}
           rowKey={(r) => `${r.pan}-${r.section}-${r.dateOfPayment}`}
-          emptyState={<ERPEmptyState type="no-results" title="No TDS deductions in this quarter" description="Try selecting a different year or quarter." />}
+          emptyState={
+            <ERPEmptyState
+              type="no-results"
+              title="No TDS deductions in this quarter"
+              description="Try selecting a different year or quarter."
+            />
+          }
           footer={
-            q26 && q26.entries.length > 0 && (
+            q26 &&
+            q26.entries.length > 0 && (
               <>
-                <td colSpan={3} className="px-4 py-3 text-primary">Total</td>
-                <td className="px-4 py-3 text-right font-mono text-primary">{formatCurrency(q26.entries.reduce((s, r) => s + r.grossAmount, 0))}</td>
-                <td className="px-4 py-3 text-right font-mono text-danger">{formatCurrency(q26.entries.reduce((s, r) => s + r.tdsAmount, 0))}</td>
+                <td colSpan={3} className="px-4 py-3 text-primary">
+                  Total
+                </td>
+                <td className="px-4 py-3 text-right font-mono text-primary">
+                  {formatCurrency(q26.entries.reduce((s, r) => s + r.grossAmount, 0))}
+                </td>
+                <td className="px-4 py-3 text-right font-mono text-danger">
+                  {formatCurrency(q26.entries.reduce((s, r) => s + r.tdsAmount, 0))}
+                </td>
                 <td />
               </>
             )

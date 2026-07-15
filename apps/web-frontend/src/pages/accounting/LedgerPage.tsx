@@ -5,6 +5,8 @@ import { journalApi } from '../../api/endpoints.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
 import ERPEmptyState from '../../components/erp/ERPEmptyState.js';
 import { ERPTableSkeleton } from '../../components/erp/ERPSkeleton.js';
+import DatePicker from '../../components/ui/DatePicker.js';
+import Button from '../../components/ui/Button.js';
 import { formatCurrency, formatDatetime } from '../../lib/format.js';
 
 interface LedgerTx {
@@ -63,27 +65,23 @@ export default function LedgerPage() {
 
       <div className="flex flex-wrap gap-4">
         <div className="flex items-center gap-2">
-          <label className="text-sm text-secondary">From</label>
-          <input
-            type="date"
+          <DatePicker
+            label="From"
             value={fromDate}
-            onChange={(e) => {
-              setFromDate(e.target.value);
+            onChange={(v) => {
+              setFromDate(v);
               setPage(0);
             }}
-            className="border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-1.5 text-sm bg-white dark:bg-gray-800 text-primary"
           />
         </div>
         <div className="flex items-center gap-2">
-          <label className="text-sm text-secondary">To</label>
-          <input
-            type="date"
+          <DatePicker
+            label="To"
             value={toDate}
-            onChange={(e) => {
-              setToDate(e.target.value);
+            onChange={(v) => {
+              setToDate(v);
               setPage(0);
             }}
-            className="border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-1.5 text-sm bg-white dark:bg-gray-800 text-primary"
           />
         </div>
         {ledger && (
@@ -144,20 +142,22 @@ export default function LedgerPage() {
           <div className="flex items-center justify-between px-4 py-3 border-t border-gray-200 dark:border-gray-700">
             <span className="text-sm text-secondary">Page {page + 1}</span>
             <div className="flex gap-2">
-              <button
+              <Button
+                variant="outline"
+                size="sm"
                 disabled={page === 0}
                 onClick={() => setPage((p) => p - 1)}
-                className="px-3 py-1 text-sm rounded border border-gray-300 dark:border-gray-600 disabled:opacity-40"
               >
                 Prev
-              </button>
-              <button
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
                 disabled={(page + 1) * 50 >= (ledger?.totalElements ?? 0)}
                 onClick={() => setPage((p) => p + 1)}
-                className="px-3 py-1 text-sm rounded border border-gray-300 dark:border-gray-600 disabled:opacity-40"
               >
                 Next
-              </button>
+              </Button>
             </div>
           </div>
         )}

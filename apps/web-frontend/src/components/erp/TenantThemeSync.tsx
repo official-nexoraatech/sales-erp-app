@@ -3,7 +3,8 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { organizationApi } from '../../api/endpoints.js';
 import { useAuthStore } from '../../store/auth.store.js';
 import { ApiError } from '../../api/client.js';
-import { shiftLightness } from '../../lib/colorShade.js';
+import { shiftLightness, setLightness } from '../../lib/colorShade.js';
+import { useTheme } from '../../context/ThemeContext.js';
 
 interface ThemeConfig {
   brandPrimary?: string;
@@ -14,9 +15,19 @@ interface ThemeConfig {
 }
 
 const CHANNEL_NAME = 'nexoraa-tenant-theme';
-const BRAND_VARS = ['--brand-primary', '--brand-primary-hover', '--brand-primary-active', '--brand-primary-subtle', '--brand-secondary', '--brand-accent', '--font-sans'] as const;
+const BRAND_VARS = [
+  '--brand-primary',
+  '--brand-primary-hover',
+  '--brand-primary-active',
+  '--brand-primary-subtle',
+  '--brand-secondary',
+  '--brand-accent',
+  '--font-sans',
+  '--sidebar-bg',
+  '--sidebar-border',
+] as const;
 
-function applyThemeConfig(config: ThemeConfig | undefined): void {
+function applyThemeConfig(config: ThemeConfig | undefined, isHighContrast: boolean): void {
   const html = document.documentElement;
   const root = html.style;
   // Always start from a clean slate — a tenant that removes an override (empty string
@@ -26,15 +37,30 @@ function applyThemeConfig(config: ThemeConfig | undefined): void {
   html.removeAttribute('data-radius-scale');
   if (!config) return;
 
+  // High-contrast mode's .hc palette is specifically chosen to guarantee WCAG AAA
+  // contrast against a pure-black surface — but these are inline `style` properties, so
+  // by CSS specificity they'd still out-rank .hc's class-selector overrides. A tenant
+  // brand color picked for light/dark (e.g. black, or anything low-contrast on black)
+  // would then silently make brand-colored "selected" UI invisible in HC mode. HC users
+  // opted into accessibility guarantees that must not depend on a tenant's color choice.
+  if (isHighContrast) return;
+
   if (config.brandPrimary) {
     root.setProperty('--brand-primary', config.brandPrimary);
     root.setProperty('--brand-primary-hover', shiftLightness(config.brandPrimary, -8));
     root.setProperty('--brand-primary-active', shiftLightness(config.brandPrimary, -15));
     root.setProperty('--brand-primary-subtle', shiftLightness(config.brandPrimary, 42));
+    // Sidebar chrome follows the tenant's brand hue but is pinned to an absolute
+    // lightness (not shifted relative to the input) — it must stay a consistently dark
+    // panel whether the tenant's brand color is pastel-light or already near-black, since
+    // the fixed light sidebar text/icon tokens depend on that darkness for contrast.
+    root.setProperty('--sidebar-bg', setLightness(config.brandPrimary, 20));
+    root.setProperty('--sidebar-border', setLightness(config.brandPrimary, 34));
   }
   if (config.brandSecondary) root.setProperty('--brand-secondary', config.brandSecondary);
   if (config.brandAccent) root.setProperty('--brand-accent', config.brandAccent);
-  if (config.fontSans) root.setProperty('--font-sans', `'${config.fontSans}', system-ui, sans-serif`);
+  if (config.fontSans)
+    root.setProperty('--font-sans', `'${config.fontSans}', system-ui, sans-serif`);
   // 'default' needs no attribute — packages/design-tokens/tokens.css's --radius-multiplier
   // already defaults to 1 with no [data-radius-scale] selector required.
   if (config.radiusScale && config.radiusScale !== 'default') {
@@ -50,6 +76,7 @@ function applyThemeConfig(config: ThemeConfig | undefined): void {
  */
 export default function TenantThemeSync(): null {
   const isAuthenticated = useAuthStore((s) => !!s.accessToken);
+  const { mode } = useTheme();
   const qc = useQueryClient();
   const channelRef = useRef<BroadcastChannel | null>(null);
 
@@ -69,8 +96,8 @@ export default function TenantThemeSync(): null {
 
   useEffect(() => {
     const themeConfig = (data as { themeConfig?: ThemeConfig } | null)?.themeConfig;
-    applyThemeConfig(themeConfig);
-  }, [data]);
+    applyThemeConfig(themeConfig, mode === 'hc');
+  }, [data, mode]);
 
   // Cross-tab sync: when a Settings save invalidates ['organization'] in one tab, that
   // tab's own useQuery re-fetches and re-applies automatically — this channel is only for

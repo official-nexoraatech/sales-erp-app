@@ -6,6 +6,7 @@ import toast from 'react-hot-toast';
 import { useAuthStore } from '../../store/auth.store.js';
 import { PERMISSIONS } from '../../constants/permissions.js';
 import { ERPCardSkeleton } from '../../components/erp/ERPSkeleton.js';
+import Button from '../../components/ui/Button.js';
 
 function getCurrentFy(): string {
   const now = new Date();
@@ -14,7 +15,11 @@ function getCurrentFy(): string {
 }
 
 function formatCurrency(val: unknown): string {
-  return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 2 }).format(Number(val ?? 0));
+  return new Intl.NumberFormat('en-IN', {
+    style: 'currency',
+    currency: 'INR',
+    maximumFractionDigits: 2,
+  }).format(Number(val ?? 0));
 }
 
 interface AmountCardProps {
@@ -29,7 +34,10 @@ function AmountCard({ title, rows, total }: AmountCardProps) {
       <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">{title}</h3>
       <div className="space-y-1.5">
         {rows.map((r) => (
-          <div key={r.label} className="flex justify-between text-sm text-gray-600 dark:text-gray-400">
+          <div
+            key={r.label}
+            className="flex justify-between text-sm text-gray-600 dark:text-gray-400"
+          >
             <span>{r.label}</span>
             <span className="font-mono">{formatCurrency(r.value)}</span>
           </div>
@@ -91,8 +99,11 @@ export function GSTR9Page() {
   const rcm = table6?.rcm as Record<string, unknown> | undefined;
   const table6Total = table6?.total as Record<string, unknown> | undefined;
 
-  const calendar = ((calendarData as { calendar?: Record<string, unknown>[] } | undefined)?.calendar) ?? [];
-  const unfiled = calendar.filter((e) => e.status !== 'FILED' && e.status !== 'LATE_FILED' && e.status !== 'NIL_FILED');
+  const calendar =
+    (calendarData as { calendar?: Record<string, unknown>[] } | undefined)?.calendar ?? [];
+  const unfiled = calendar.filter(
+    (e) => e.status !== 'FILED' && e.status !== 'LATE_FILED' && e.status !== 'NIL_FILED'
+  );
   const filingReady = calendar.length > 0 && unfiled.length === 0;
 
   return (
@@ -106,19 +117,21 @@ export function GSTR9Page() {
           </div>
         </div>
         {canFileGstr9 && (
-          <button
+          <Button
+            variant="primary"
             onClick={() => exportMutation.mutate()}
             disabled={exportMutation.isPending || !result}
-            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50"
           >
-            <Download className="w-4 h-4" />
+            <Download size={16} />
             Download JSON
-          </button>
+          </Button>
         )}
       </div>
 
       <div>
-        <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Financial Year</label>
+        <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
+          Financial Year
+        </label>
         <input
           type="text"
           value={year}
@@ -131,23 +144,30 @@ export function GSTR9Page() {
 
       {/* Prepare Filing status */}
       {calendar.length > 0 && (
-        <div className={`flex items-start gap-3 rounded-xl border px-4 py-3 ${
-          filingReady
-            ? 'border-green-300 dark:border-green-700 bg-green-50 dark:bg-green-900/20'
-            : 'border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/20'
-        }`}>
+        <div
+          className={`flex items-start gap-3 rounded-xl border px-4 py-3 ${
+            filingReady
+              ? 'border-green-300 dark:border-green-700 bg-green-50 dark:bg-green-900/20'
+              : 'border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/20'
+          }`}
+        >
           {filingReady ? (
             <CheckCircle className="w-5 h-5 text-green-600 dark:text-green-400 shrink-0 mt-0.5" />
           ) : (
             <AlertTriangle className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
           )}
           <div className="text-sm">
-            <p className={`font-medium ${filingReady ? 'text-green-800 dark:text-green-300' : 'text-amber-800 dark:text-amber-300'}`}>
-              {filingReady ? 'Ready to prepare filing' : `${unfiled.length} GSTR-1 / GSTR-3B return(s) not yet filed for ${year}`}
+            <p
+              className={`font-medium ${filingReady ? 'text-green-800 dark:text-green-300' : 'text-amber-800 dark:text-amber-300'}`}
+            >
+              {filingReady
+                ? 'Ready to prepare filing'
+                : `${unfiled.length} GSTR-1 / GSTR-3B return(s) not yet filed for ${year}`}
             </p>
             {!filingReady && (
               <p className="text-amber-700 dark:text-amber-400 mt-0.5">
-                File all monthly GSTR-1 and GSTR-3B returns for the year before filing GSTR-9. See the GST Compliance Calendar.
+                File all monthly GSTR-1 and GSTR-3B returns for the year before filing GSTR-9. See
+                the GST Compliance Calendar.
               </p>
             )}
           </div>
@@ -164,7 +184,9 @@ export function GSTR9Page() {
           <ERPCardSkeleton lines={4} />
         </div>
       ) : !result ? (
-        <div className="py-12 text-center text-sm text-gray-400 dark:text-gray-500">No data for selected year</div>
+        <div className="py-12 text-center text-sm text-gray-400 dark:text-gray-500">
+          No data for selected year
+        </div>
       ) : (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <AmountCard
@@ -199,7 +221,14 @@ export function GSTR9Page() {
               { label: 'SGST', value: rcm?.sgst },
               { label: 'Cess', value: rcm?.cess },
             ]}
-            total={table6Total ? Number(table6Total.igst ?? 0) + Number(table6Total.cgst ?? 0) + Number(table6Total.sgst ?? 0) + Number(table6Total.cess ?? 0) : undefined}
+            total={
+              table6Total
+                ? Number(table6Total.igst ?? 0) +
+                  Number(table6Total.cgst ?? 0) +
+                  Number(table6Total.sgst ?? 0) +
+                  Number(table6Total.cess ?? 0)
+                : undefined
+            }
           />
           <AmountCard
             title="Table 7 — ITC Reversed"
@@ -241,7 +270,8 @@ export function GSTR9Page() {
               Table 9 reflects {12 - unfiledPeriods.length} of 12 filed periods
             </p>
             <p className="text-amber-700 dark:text-amber-400 mt-0.5">
-              {unfiledPeriods.length} period(s) not yet filed (or filed before real tax-paid tracking was in place) are excluded: {unfiledPeriods.join(', ')}.
+              {unfiledPeriods.length} period(s) not yet filed (or filed before real tax-paid
+              tracking was in place) are excluded: {unfiledPeriods.join(', ')}.
             </p>
           </div>
         </div>

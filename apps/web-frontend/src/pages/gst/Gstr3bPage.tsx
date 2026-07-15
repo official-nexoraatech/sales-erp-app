@@ -6,6 +6,8 @@ import toast from 'react-hot-toast';
 import { useAuthStore } from '../../store/auth.store.js';
 import { PERMISSIONS } from '../../constants/permissions.js';
 import { ERPCardSkeleton } from '../../components/erp/ERPSkeleton.js';
+import MonthPicker from '../../components/ui/MonthPicker.js';
+import Button from '../../components/ui/Button.js';
 
 function getCurrentPeriod(): string {
   const now = new Date();
@@ -115,27 +117,19 @@ export function Gstr3bPage() {
           </div>
         </div>
         {canFileGstr3b && (
-          <button
+          <Button
+            variant="primary"
             onClick={() => exportMutation.mutate()}
             disabled={exportMutation.isPending || !result}
-            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50"
           >
-            <Download className="w-4 h-4" />
+            <Download size={16} />
             Export JSON
-          </button>
+          </Button>
         )}
       </div>
 
       <div>
-        <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
-          Period
-        </label>
-        <input
-          type="month"
-          value={period}
-          onChange={(e) => setPeriod(e.target.value)}
-          className="px-3 py-2 text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
-        />
+        <MonthPicker label="Period" value={period} onChange={setPeriod} />
       </div>
 
       {isLoading ? (

@@ -8,6 +8,8 @@ export interface TextareaProps
     Pick<InputVariants, 'size' | 'variant'> {
   label?: string | undefined;
   error?: string | undefined;
+  success?: string | undefined;
+  warning?: string | undefined;
   hint?: string | undefined;
   wrapperClassName?: string;
   maxLength?: number;
@@ -19,6 +21,8 @@ const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
     {
       label,
       error,
+      success,
+      warning,
       hint,
       wrapperClassName = '',
       className = '',
@@ -39,6 +43,15 @@ const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
     const errId = `${inputId}-error`;
     const hintId = `${inputId}-hint`;
     const count = typeof value === 'string' ? value.length : undefined;
+    const state: NonNullable<InputVariants['state']> = error
+      ? 'error'
+      : warning
+        ? 'warning'
+        : success
+          ? 'success'
+          : 'default';
+    const message = error ?? warning ?? success ?? hint;
+    const messageId = error ? errId : message ? hintId : undefined;
 
     return (
       <div className={cn('flex flex-col gap-1.5', wrapperClassName)}>
@@ -62,9 +75,9 @@ const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
           value={value}
           maxLength={maxLength}
           aria-invalid={Boolean(error)}
-          aria-describedby={error ? errId : hint ? hintId : undefined}
+          aria-describedby={messageId}
           className={cn(
-            inputVariants({ size, variant, state: error ? 'error' : 'default' }),
+            inputVariants({ size, variant, state }),
             'h-auto resize-y py-2.5 leading-relaxed',
             className
           )}
@@ -72,14 +85,19 @@ const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
 
         <div className="flex items-start justify-between gap-2">
           <div>
-            {error && (
-              <p id={errId} role="alert" className="text-xs text-danger">
-                {error}
-              </p>
-            )}
-            {!error && hint && (
-              <p id={hintId} className="text-xs text-secondary">
-                {hint}
+            {message && (
+              <p
+                id={messageId}
+                role={error ? 'alert' : undefined}
+                className={cn(
+                  'text-xs',
+                  error && 'text-danger',
+                  warning && !error && 'text-warning',
+                  success && !error && !warning && 'text-success',
+                  !error && !warning && !success && 'text-secondary'
+                )}
+              >
+                {message}
               </p>
             )}
           </div>

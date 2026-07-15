@@ -9,12 +9,16 @@ import { useAuthStore } from '../../store/auth.store.js';
 import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
 import ERPFormSection from '../../components/erp/ERPFormSection.js';
+import ERPStickyFooter from '../../components/erp/ERPStickyFooter.js';
 import Input from '../../components/ui/Input.js';
 import Select from '../../components/ui/Select.js';
 import Button from '../../components/ui/Button.js';
 import { buildUserFormSchema, type UserFormData } from '../../schemas/user.schema.js';
 
-interface Role { id: number; name: string; }
+interface Role {
+  id: number;
+  name: string;
+}
 
 export default function UserFormPage() {
   const { id } = useParams<{ id?: string }>();
@@ -28,16 +32,29 @@ export default function UserFormPage() {
     queryFn: () => userApi.getById(Number(id)),
     enabled: isEdit,
   });
-  const user = (userData as Record<string, unknown> | undefined);
+  const user = userData as Record<string, unknown> | undefined;
 
-  const { data: roleData } = useQuery({ queryKey: ['roles'], queryFn: () => roleApi.list(), enabled: hasPermission(PERMISSIONS.ROLE_VIEW) });
+  const { data: roleData } = useQuery({
+    queryKey: ['roles'],
+    queryFn: () => roleApi.list(),
+    enabled: hasPermission(PERMISSIONS.ROLE_VIEW),
+  });
   const roles = ((roleData as Record<string, unknown> | undefined)?.['content'] ?? []) as Role[];
 
-  const { data: branchData } = useQuery({ queryKey: ['branches'], queryFn: () => branchApi.list(), enabled: hasPermission(PERMISSIONS.BRANCH_VIEW) });
+  const { data: branchData } = useQuery({
+    queryKey: ['branches'],
+    queryFn: () => branchApi.list(),
+    enabled: hasPermission(PERMISSIONS.BRANCH_VIEW),
+  });
   const branches = (branchData as { content?: unknown[] })?.content ?? [];
 
   const schema = useMemo(() => buildUserFormSchema(isEdit), [isEdit]);
-  const { register, handleSubmit, reset, formState: { errors, isSubmitting } } = useForm<UserFormData>({
+  const {
+    register,
+    handleSubmit,
+    reset,
+    formState: { errors, isSubmitting },
+  } = useForm<UserFormData>({
     resolver: zodResolver(schema),
   });
 
@@ -45,12 +62,16 @@ export default function UserFormPage() {
     if (user) {
       const roleIds = (user['roleIds'] as number[] | undefined) ?? [];
       const firstRoleId = roleIds[0];
-      reset({ ...(user as unknown as UserFormData), ...(firstRoleId !== undefined ? { roleId: firstRoleId } : {}) });
+      reset({
+        ...(user as unknown as UserFormData),
+        ...(firstRoleId !== undefined ? { roleId: firstRoleId } : {}),
+      });
     }
   }, [user, reset]);
 
   const mutation = useMutation({
-    mutationFn: (d: Record<string, unknown>) => isEdit ? userApi.update(Number(id), d) : userApi.create(d),
+    mutationFn: (d: Record<string, unknown>) =>
+      isEdit ? userApi.update(Number(id), d) : userApi.create(d),
     onSuccess: () => {
       toast.success(isEdit ? 'User updated' : 'User created');
       qc.invalidateQueries({ queryKey: ['users'] });
@@ -75,16 +96,34 @@ export default function UserFormPage() {
 
   return (
     <div>
-      <ERPPageHeader variant="list"
+      <ERPPageHeader
+        variant="detail"
         title={isEdit ? 'Edit User' : 'New User'}
         subtitle={isEdit ? 'Update user details and access.' : 'Create a new staff account.'}
+        backTo="/users"
       />
 
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-6" noValidate>
         <ERPFormSection title="User Details" columns={2}>
-          <Input label="First Name" required {...register('firstName')} error={errors.firstName?.message} />
-          <Input label="Last Name" required {...register('lastName')} error={errors.lastName?.message} />
-          <Input label="Email" type="email" required {...register('email')} error={errors.email?.message} />
+          <Input
+            label="First Name"
+            required
+            {...register('firstName')}
+            error={errors.firstName?.message}
+          />
+          <Input
+            label="Last Name"
+            required
+            {...register('lastName')}
+            error={errors.lastName?.message}
+          />
+          <Input
+            label="Email"
+            type="email"
+            required
+            {...register('email')}
+            error={errors.email?.message}
+          />
           <Input label="Phone" {...register('phone')} error={errors.phone?.message} />
           {!isEdit && (
             <Input
@@ -101,18 +140,34 @@ export default function UserFormPage() {
         <ERPFormSection title="Access" columns={2}>
           <Select label="Role" required {...register('roleId')} error={errors.roleId?.message}>
             <option value="">Select role…</option>
-            {roles.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+            {roles.map((r) => (
+              <option key={r.id} value={r.id}>
+                {r.name}
+              </option>
+            ))}
           </Select>
-          <Select label="Primary Branch" {...register('primaryBranchId')} error={errors.primaryBranchId?.message}>
+          <Select
+            label="Primary Branch"
+            {...register('primaryBranchId')}
+            error={errors.primaryBranchId?.message}
+          >
             <option value="">Select branch…</option>
-            {(branches as Record<string, unknown>[]).map((b) => <option key={b.id as number} value={b.id as number}>{b.name as string}</option>)}
+            {(branches as Record<string, unknown>[]).map((b) => (
+              <option key={b.id as number} value={b.id as number}>
+                {b.name as string}
+              </option>
+            ))}
           </Select>
         </ERPFormSection>
 
-        <div className="flex gap-3">
-          <Button type="submit" loading={isSubmitting || mutation.isPending}>{isEdit ? 'Update' : 'Create'} User</Button>
-          <Button variant="secondary" type="button" onClick={() => navigate('/users')}>Cancel</Button>
-        </div>
+        <ERPStickyFooter>
+          <Button variant="secondary" type="button" onClick={() => navigate('/users')}>
+            Cancel
+          </Button>
+          <Button type="submit" loading={isSubmitting || mutation.isPending}>
+            {isEdit ? 'Update' : 'Create'} User
+          </Button>
+        </ERPStickyFooter>
       </form>
     </div>
   );

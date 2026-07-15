@@ -5,6 +5,7 @@ import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
 import Badge from '../../components/ui/Badge.js';
 import ERPDataGrid, { type ERPColumnDef } from '../../components/erp/ERPDataGrid.js';
 import ERPEmptyState from '../../components/erp/ERPEmptyState.js';
+import DatePicker from '../../components/ui/DatePicker.js';
 import { formatCurrency } from '../../lib/format.js';
 
 interface TBRow {
@@ -12,17 +13,17 @@ interface TBRow {
   accountCode: string;
   accountName: string;
   accountType: string;
-  openingDebit: number;
-  openingCredit: number;
-  periodDebit: number;
-  periodCredit: number;
+  openingBalance: number;
+  openingBalanceType: 'DEBIT' | 'CREDIT';
+  periodDebits: number;
+  periodCredits: number;
   closingDebit: number;
   closingCredit: number;
 }
 
 interface TBData {
-  asOfDate: string;
-  rows: TBRow[];
+  asOf: string;
+  lines: TBRow[];
   totalDebits: number;
   totalCredits: number;
   isBalanced: boolean;
@@ -57,28 +58,28 @@ export default function TrialBalancePage() {
       header: 'Opening DR',
       align: 'right',
       mono: true,
-      render: (row) => formatCurrency(row.openingDebit),
+      render: (row) => formatCurrency(row.openingBalanceType === 'DEBIT' ? row.openingBalance : 0),
     },
     {
       key: 'openingCredit',
       header: 'Opening CR',
       align: 'right',
       mono: true,
-      render: (row) => formatCurrency(row.openingCredit),
+      render: (row) => formatCurrency(row.openingBalanceType === 'CREDIT' ? row.openingBalance : 0),
     },
     {
       key: 'periodDebit',
       header: 'Period DR',
       align: 'right',
       mono: true,
-      render: (row) => formatCurrency(row.periodDebit),
+      render: (row) => formatCurrency(row.periodDebits),
     },
     {
       key: 'periodCredit',
       header: 'Period CR',
       align: 'right',
       mono: true,
-      render: (row) => formatCurrency(row.periodCredit),
+      render: (row) => formatCurrency(row.periodCredits),
     },
     {
       key: 'closingDebit',
@@ -106,16 +107,7 @@ export default function TrialBalancePage() {
         subtitle="Debit and credit totals by account"
         actions={
           <div className="flex flex-wrap items-center gap-3">
-            <label htmlFor="tb-as-of-date" className="text-sm text-secondary">
-              As of
-            </label>
-            <input
-              id="tb-as-of-date"
-              type="date"
-              value={asOfDate}
-              onChange={(e) => setAsOfDate(e.target.value)}
-              className="px-3 py-1.5 text-sm rounded-lg border border-default bg-surface-card text-primary outline-none focus:border-focus focus:ring-2 focus:ring-inset focus:ring-focus"
-            />
+            <DatePicker label="As of" value={asOfDate} onChange={setAsOfDate} />
           </div>
         }
       />
@@ -135,7 +127,7 @@ export default function TrialBalancePage() {
 
       <ERPDataGrid
         columns={columns}
-        data={tb?.rows ?? []}
+        data={tb?.lines ?? []}
         isLoading={isLoading}
         rowKey="accountId"
         emptyState={

@@ -57,6 +57,11 @@
   .border-primary     { border-color: var(--brand-primary); }
   .border-brand       { border-color: var(--brand-primary); }
 
+  /* ── Accent (purple) — row-action "Duplicate" color, reusing --brand-secondary rather
+     than a new one-off hex, since tokens.css already defines that exact purple. ────── */
+  .text-accent-purple      { color: var(--brand-secondary); }
+  .bg-accent-purple-subtle { background-color: color-mix(in srgb, var(--brand-secondary) 12%, transparent); }
+
   /* ── Semantic — Success ─────────────────────────────────────────────────── */
   .text-success       { color: var(--color-success); }
   .bg-success-bg      { background-color: var(--color-success-bg); }
@@ -119,6 +124,13 @@
 @keyframes sidebarFlyoutIn {
   from { opacity: 0; transform: translateX(-4px); }
   to   { opacity: 1; transform: translateX(0); }
+}
+
+/* 5b. ERPDataGrid `enablePrint` — scopes window.print() to just the table container. */
+@media print {
+  body * { visibility: hidden; }
+  .erp-print-area, .erp-print-area * { visibility: visible; }
+  .erp-print-area { position: absolute; left: 0; top: 0; width: 100%; }
 }
 
 /* 6. Base styles */

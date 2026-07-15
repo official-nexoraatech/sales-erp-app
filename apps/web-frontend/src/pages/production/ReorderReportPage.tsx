@@ -33,7 +33,11 @@ export default function ReorderReportPage() {
     enabled: hasPermission(PERMISSIONS.WAREHOUSE_VIEW),
   });
   const warehouses =
-    ((warehousesData as Record<string, unknown>)?.content as { id: number; name: string }[]) ?? [];
+    ((warehousesData as Record<string, unknown>)?.content as {
+      id: number;
+      name: string;
+      branchId: number;
+    }[]) ?? [];
 
   const { data, isLoading, refetch } = useQuery({
     queryKey: ['reorder-required', warehouseId],
@@ -80,9 +84,16 @@ export default function ReorderReportPage() {
       toast.error('Please select a warehouse');
       return;
     }
+    // Was hardcoded to 1 — only "worked" for tenants whose first-ever branch happened to get
+    // global id 1. Derive the real branch from the warehouse being ordered into instead.
+    const branchId = warehouses.find((w) => w.id === wId)?.branchId;
+    if (!branchId) {
+      toast.error('Could not resolve a branch for the selected warehouse');
+      return;
+    }
 
     createPOMutation.mutate({
-      branchId: 1,
+      branchId,
       warehouseId: wId,
       placeOfSupply: '27',
       items: selectedItems

@@ -5,8 +5,10 @@ import toast from 'react-hot-toast';
 import { Send, CheckCircle2 } from 'lucide-react';
 import { stockAdjustmentApi } from '../../api/endpoints.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
-import ERPDataGrid, { type ERPColumnDef } from '../../components/erp/ERPDataGrid.js';
-import ERPDropdownMenu, { type ERPMenuItem } from '../../components/erp/ERPDropdownMenu.js';
+import ERPDataGrid, {
+  type ERPColumnDef,
+  type ERPRowAction,
+} from '../../components/erp/ERPDataGrid.js';
 import Button from '../../components/ui/Button.js';
 import Badge from '../../components/ui/Badge.js';
 import Select from '../../components/ui/Select.js';
@@ -37,50 +39,82 @@ export default function StockAdjustmentsPage() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
 
-  useEffect(() => { setPage(1); }, [status]);
+  useEffect(() => {
+    setPage(1);
+  }, [status]);
 
   const { data, isLoading } = useQuery({
     queryKey: ['stock-adjustments', status, page, pageSize],
     queryFn: () => stockAdjustmentApi.list({ status: status || undefined, page, limit: pageSize }),
   });
 
-  const adjustments: Adjustment[] = (data as Record<string, unknown>)?.content as Adjustment[] ?? [];
-  const totalElements = (data as Record<string, unknown>)?.totalElements as number ?? 0;
+  const adjustments: Adjustment[] =
+    ((data as Record<string, unknown>)?.content as Adjustment[]) ?? [];
+  const totalElements = ((data as Record<string, unknown>)?.totalElements as number) ?? 0;
 
   const approveMutation = useMutation({
     mutationFn: (id: number) => stockAdjustmentApi.approve(id),
-    onSuccess: () => { toast.success('Adjustment approved — stock updated'); qc.invalidateQueries({ queryKey: ['stock-adjustments'] }); },
+    onSuccess: () => {
+      toast.success('Adjustment approved — stock updated');
+      qc.invalidateQueries({ queryKey: ['stock-adjustments'] });
+    },
     onError: (e: Error) => toast.error(e.message),
   });
 
   const submitMutation = useMutation({
     mutationFn: (id: number) => stockAdjustmentApi.submit(id),
-    onSuccess: () => { toast.success('Adjustment submitted'); qc.invalidateQueries({ queryKey: ['stock-adjustments'] }); },
+    onSuccess: () => {
+      toast.success('Adjustment submitted');
+      qc.invalidateQueries({ queryKey: ['stock-adjustments'] });
+    },
     onError: (e: Error) => toast.error(e.message),
   });
 
   const columns: ERPColumnDef<Adjustment>[] = [
     { key: 'adjustmentNumber', header: 'Number', mono: true, sortable: true },
-    { key: 'adjustmentType', header: 'Type', render: (r) => <Badge variant="default">{r.adjustmentType}</Badge> },
-    { key: 'status', header: 'Status', sortable: true, render: (r) => <Badge variant={STATUS_COLORS[r.status] ?? 'default'}>{r.status}</Badge> },
-    { key: 'totalValue', header: 'Value', align: 'right', sortable: true, render: (r) => formatCurrency(parseFloat(r.totalValue)) },
-    { key: 'createdAt', header: 'Date', sortable: true, render: (r) => formatDate(r.createdAt) },
     {
-      key: 'actions',
-      header: '',
+      key: 'adjustmentType',
+      header: 'Type',
+      render: (r) => <Badge variant="default">{r.adjustmentType}</Badge>,
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      sortable: true,
+      render: (r) => <Badge variant={STATUS_COLORS[r.status] ?? 'default'}>{r.status}</Badge>,
+    },
+    {
+      key: 'totalValue',
+      header: 'Value',
       align: 'right',
-      render: (r) => {
-        const items: ERPMenuItem[] = [];
-        if (r.status === 'DRAFT') items.push({ label: 'Submit', icon: Send, onClick: () => submitMutation.mutate(r.id) });
-        if (r.status === 'SUBMITTED' || r.status === 'PENDING_APPROVAL') items.push({ label: 'Approve', icon: CheckCircle2, onClick: () => approveMutation.mutate(r.id) });
-        return items.length > 0 ? <ERPDropdownMenu items={items} /> : null;
-      },
+      sortable: true,
+      render: (r) => formatCurrency(parseFloat(r.totalValue)),
+    },
+    { key: 'createdAt', header: 'Date', sortable: true, render: (r) => formatDate(r.createdAt) },
+  ];
+
+  const rowActions: ERPRowAction<Adjustment>[] = [
+    {
+      label: 'Submit',
+      icon: Send,
+      onClick: (r: Adjustment) => submitMutation.mutate(r.id),
+      hidden: (r: Adjustment) => r.status !== 'DRAFT',
+    },
+    {
+      label: 'Approve',
+      icon: CheckCircle2,
+      onClick: (r: Adjustment) => approveMutation.mutate(r.id),
+      hidden: (r: Adjustment) => !(r.status === 'SUBMITTED' || r.status === 'PENDING_APPROVAL'),
     },
   ];
 
   return (
     <div>
-      <ERPPageHeader variant="list" title="Stock Adjustments" subtitle="Record inventory discrepancies and corrections">
+      <ERPPageHeader
+        variant="list"
+        title="Stock Adjustments"
+        subtitle="Record inventory discrepancies and corrections"
+      >
         <Button onClick={() => navigate('/inventory/adjustments/new')}>+ New Adjustment</Button>
       </ERPPageHeader>
 
@@ -107,7 +141,11 @@ export default function StockAdjustmentsPage() {
         rowKey="id"
         pagination={{ page, pageSize, total: totalElements }}
         onPageChange={setPage}
-        onPageSizeChange={(size) => { setPageSize(size); setPage(1); }}
+        onPageSizeChange={(size) => {
+          setPageSize(size);
+          setPage(1);
+        }}
+        actions={rowActions}
       />
     </div>
   );

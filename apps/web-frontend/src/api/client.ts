@@ -28,6 +28,19 @@ export function notificationServiceUrl(): string {
   return BASE_URLS['notification']!;
 }
 
+// Every service's requirePermission()/requireAnyPermission() middleware throws a 403 with
+// code 'FORBIDDEN' and a raw `Missing permission: X` message meant for logs/API consumers
+// (see apps/sales-service/src/middleware/authorize.ts and its near-identical copies across
+// the other services). Translated once here so every one of this app's ~200 ad hoc
+// `toast.error(err.message)` call sites gets user-facing copy for free, instead of needing
+// each site individually updated.
+const FRIENDLY_ERROR_MESSAGES: Record<string, string> = {
+  FORBIDDEN:
+    "You don't have permission to do this. Contact your administrator if you think this is a mistake.",
+  PERMISSION_DENIED:
+    "You don't have permission to do this. Contact your administrator if you think this is a mistake.",
+};
+
 export class ApiError extends Error {
   constructor(
     public readonly code: string,
@@ -137,7 +150,11 @@ async function request<T>(
     throw new ApiError('UNAUTHENTICATED', 'Session expired', 401);
   }
 
-  const data = await response.json();
+  // A 204 No Content response (used by several DELETE routes, e.g. SSO config removal,
+  // cost centers, roles, attachments) has no body — calling .json() on it throws
+  // "Unexpected end of JSON input", which every caller then saw as a failed mutation
+  // even though the request actually succeeded server-side.
+  const data = response.status === 204 ? null : await response.json();
 
   if (!response.ok) {
     // auth-service sends `{ error: 'some message' }` (a plain string), while every
@@ -161,13 +178,13 @@ async function request<T>(
 
     throw new ApiError(
       err.code ?? 'UNKNOWN',
-      err.message ?? 'Request failed',
+      (err.code && FRIENDLY_ERROR_MESSAGES[err.code]) || err.message || 'Request failed',
       response.status,
       err.details
     );
   }
 
-  return data.data as T;
+  return (data === null ? null : data.data) as T;
 }
 
 export const apiClient = {

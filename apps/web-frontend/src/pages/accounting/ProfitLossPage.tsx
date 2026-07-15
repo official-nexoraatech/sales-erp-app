@@ -6,6 +6,7 @@ import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
 import { ERPTableSkeleton } from '../../components/erp/ERPSkeleton.js';
 import Button from '../../components/ui/Button.js';
+import DatePicker from '../../components/ui/DatePicker.js';
 import { formatCurrency } from '../../lib/format.js';
 
 interface CostCenterOption {
@@ -26,18 +27,21 @@ interface PLByCostCenterLine {
   netProfit: number;
 }
 
+// Matches ReportsEngine.ProfitLossReport (apps/accounting-service/src/domain/ReportsEngine.ts)
+// — every field here except netProfit previously had a name that didn't exist on the real
+// response (revenue/salesReturns/netRevenue/cogs/opEx/otherIncome/financialCharges), so the
+// whole statement rendered formatCurrency(undefined) for everything but the bottom line.
 interface PLData {
-  fromDate: string;
-  toDate: string;
-  revenue: number;
-  salesReturns: number;
-  netRevenue: number;
-  cogs: number;
+  from: string;
+  to: string;
+  totalRevenue: number;
+  totalContraRevenue: number;
+  totalCogs: number;
   grossProfit: number;
-  opEx: number;
+  totalOperatingExpenses: number;
   operatingProfit: number;
-  otherIncome: number;
-  financialCharges: number;
+  totalOtherIncome: number;
+  totalFinancialCharges: number;
   netProfit: number;
 }
 
@@ -121,19 +125,9 @@ export default function ProfitLossPage() {
         subtitle="Income and expense summary"
         actions={
           <div className="flex flex-wrap items-center gap-3">
-            <input
-              type="date"
-              value={fromDate}
-              onChange={(e) => setFromDate(e.target.value)}
-              className="border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-1.5 text-sm bg-white dark:bg-gray-800 text-primary"
-            />
+            <DatePicker value={fromDate} onChange={setFromDate} />
             <span className="text-secondary text-sm">to</span>
-            <input
-              type="date"
-              value={toDate}
-              onChange={(e) => setToDate(e.target.value)}
-              className="border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-1.5 text-sm bg-white dark:bg-gray-800 text-primary"
-            />
+            <DatePicker value={toDate} onChange={setToDate} />
           </div>
         }
       />
@@ -231,18 +225,18 @@ export default function ProfitLossPage() {
               </tr>
             </thead>
             <tbody>
-              <PLRow label="Revenue from Operations" amount={pl.revenue} bold />
-              <PLRow label="Less: Sales Returns" amount={-pl.salesReturns} indent={1} />
+              <PLRow label="Revenue from Operations" amount={pl.totalRevenue} bold />
+              <PLRow label="Less: Sales Returns" amount={-pl.totalContraRevenue} indent={1} />
               <PLRow
                 label="Net Revenue"
-                amount={pl.netRevenue}
+                amount={pl.totalRevenue - pl.totalContraRevenue}
                 bold
-                highlight={pl.netRevenue >= 0 ? 'profit' : 'loss'}
+                highlight={pl.totalRevenue - pl.totalContraRevenue >= 0 ? 'profit' : 'loss'}
               />
               <tr>
                 <td colSpan={2} className="h-2" />
               </tr>
-              <PLRow label="Cost of Goods Sold (COGS)" amount={pl.cogs} bold />
+              <PLRow label="Cost of Goods Sold (COGS)" amount={pl.totalCogs} bold />
               <PLRow
                 label="Gross Profit"
                 amount={pl.grossProfit}
@@ -252,7 +246,7 @@ export default function ProfitLossPage() {
               <tr>
                 <td colSpan={2} className="h-2" />
               </tr>
-              <PLRow label="Operating Expenses" amount={pl.opEx} bold />
+              <PLRow label="Operating Expenses" amount={pl.totalOperatingExpenses} bold />
               <PLRow
                 label="Operating Profit (EBIT)"
                 amount={pl.operatingProfit}
@@ -262,8 +256,8 @@ export default function ProfitLossPage() {
               <tr>
                 <td colSpan={2} className="h-2" />
               </tr>
-              <PLRow label="Other Income" amount={pl.otherIncome} indent={1} />
-              <PLRow label="Financial Charges" amount={-pl.financialCharges} indent={1} />
+              <PLRow label="Other Income" amount={pl.totalOtherIncome} indent={1} />
+              <PLRow label="Financial Charges" amount={-pl.totalFinancialCharges} indent={1} />
               <tr>
                 <td colSpan={2} className="h-px bg-gray-200 dark:bg-gray-600" />
               </tr>

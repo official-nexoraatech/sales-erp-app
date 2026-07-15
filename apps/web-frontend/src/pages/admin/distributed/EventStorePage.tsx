@@ -8,6 +8,7 @@ import ERPPageHeader from '../../../components/erp/ERPPageHeader.js';
 import { ERPTableSkeleton } from '../../../components/erp/ERPSkeleton.js';
 import ERPEmptyState from '../../../components/erp/ERPEmptyState.js';
 import Button from '../../../components/ui/Button.js';
+import DatePicker from '../../../components/ui/DatePicker.js';
 import { formatDate } from '../../../lib/format.js';
 
 interface EventRecord {
@@ -86,7 +87,7 @@ export default function EventStorePage() {
             <select
               value={filters.aggregateType}
               onChange={(e) => setFilters((f) => ({ ...f, aggregateType: e.target.value }))}
-              className="w-full px-3 py-2 rounded-lg border border-border bg-surface text-primary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+              className="w-full px-3 py-2 rounded-lg border border-default bg-surface-card text-primary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
             >
               {AGGREGATE_TYPES.map((t) => (
                 <option key={t} value={t}>
@@ -102,7 +103,7 @@ export default function EventStorePage() {
               value={filters.aggregateId}
               onChange={(e) => setFilters((f) => ({ ...f, aggregateId: e.target.value }))}
               placeholder="e.g. 42"
-              className="w-full px-3 py-2 rounded-lg border border-border bg-surface text-primary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+              className="w-full px-3 py-2 rounded-lg border border-default bg-surface-card text-primary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
             />
           </div>
           <div>
@@ -110,7 +111,7 @@ export default function EventStorePage() {
             <select
               value={filters.eventType}
               onChange={(e) => setFilters((f) => ({ ...f, eventType: e.target.value }))}
-              className="w-full px-3 py-2 rounded-lg border border-border bg-surface text-primary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+              className="w-full px-3 py-2 rounded-lg border border-default bg-surface-card text-primary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
             >
               {EVENT_TYPES.map((t) => (
                 <option key={t} value={t}>
@@ -120,21 +121,17 @@ export default function EventStorePage() {
             </select>
           </div>
           <div>
-            <label className="block text-xs font-medium text-secondary mb-1">From</label>
-            <input
-              type="date"
+            <DatePicker
+              label="From"
               value={filters.from}
-              onChange={(e) => setFilters((f) => ({ ...f, from: e.target.value }))}
-              className="w-full px-3 py-2 rounded-lg border border-border bg-surface text-primary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+              onChange={(v) => setFilters((f) => ({ ...f, from: v }))}
             />
           </div>
           <div>
-            <label className="block text-xs font-medium text-secondary mb-1">To</label>
-            <input
-              type="date"
+            <DatePicker
+              label="To"
               value={filters.to}
-              onChange={(e) => setFilters((f) => ({ ...f, to: e.target.value }))}
-              className="w-full px-3 py-2 rounded-lg border border-border bg-surface text-primary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+              onChange={(v) => setFilters((f) => ({ ...f, to: v }))}
             />
           </div>
         </div>
@@ -154,7 +151,7 @@ export default function EventStorePage() {
                 value={replayTarget.type}
                 onChange={(e) => setReplayTarget((t) => ({ ...t, type: e.target.value }))}
                 placeholder="INVOICE"
-                className="w-40 px-3 py-2 rounded-lg border border-border bg-surface text-primary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+                className="w-40 px-3 py-2 rounded-lg border border-default bg-surface-card text-primary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
               />
             </div>
             <div>
@@ -164,7 +161,7 @@ export default function EventStorePage() {
                 value={replayTarget.id}
                 onChange={(e) => setReplayTarget((t) => ({ ...t, id: e.target.value }))}
                 placeholder="42"
-                className="w-32 px-3 py-2 rounded-lg border border-border bg-surface text-primary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+                className="w-32 px-3 py-2 rounded-lg border border-default bg-surface-card text-primary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
               />
             </div>
             <Button
@@ -252,7 +249,7 @@ export default function EventStorePage() {
           onClick={() => setSelectedEvent(null)}
         >
           <div
-            className="bg-surface rounded-xl shadow-xl max-w-2xl w-full max-h-[80vh] overflow-y-auto p-6"
+            className="bg-surface-card rounded-xl shadow-xl max-w-2xl w-full max-h-[80vh] overflow-y-auto p-6"
             onClick={(e) => e.stopPropagation()}
           >
             <h3 className="text-lg font-semibold text-primary mb-4">{selectedEvent.eventType}</h3>
