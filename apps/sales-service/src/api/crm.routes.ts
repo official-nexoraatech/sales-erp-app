@@ -14,6 +14,7 @@ import {
   notificationLog,
   tenantSenderIdentity,
   campaignWebhookSubscriptions,
+  tenantCommunicationSettings,
 } from '@erp/db';
 import type { ErpDatabase } from '@erp/db';
 import { and, eq, gte, inArray, isNull, lte, or, sql } from 'drizzle-orm';
@@ -152,6 +153,15 @@ const WebhookSubscriptionSchema = z.object({
   targetUrl: z.string().url(),
   events: z.array(z.enum(['CAMPAIGN_SENT', 'CAMPAIGN_CANCELLED'])).min(1),
   isActive: z.boolean().default(true),
+});
+
+// CP-7/CP-5 follow-up: tenant_communication_settings had no route at all until now — approval
+// (CP-7) and frequency capping (CP-5) were both "opt-in per tenant" in the domain logic but had
+// no way for a tenant to actually opt in short of a direct DB write. All fields optional so a
+// caller can flip just one without re-sending the whole settings object.
+const CommunicationSettingsSchema = z.object({
+  approvalRequired: z.boolean().optional(),
+  maxPerDayFrequencyCap: z.number().int().positive().nullable().optional(),
 });
 
 const CampaignTemplateSchema = z.object({
@@ -1525,6 +1535,102 @@ export async function crmRoutes(
       });
 
       return reply.code(200).send({ data: updated });
+    }
+  );
+
+  // ════════════════════════════════════════════════════════════════════════
+  // CP-5/CP-7 follow-up — Tenant Communication Settings (approval + frequency cap)
+  // ════════════════════════════════════════════════════════════════════════
+  // Gated on CRM_AUTOMATION_MANAGE — the closest existing "manage tenant-wide campaign
+  // behavior" permission (this table already held frequencyCap since CP-5); not worth a new
+  // permission constant + backfill migration for a single settings surface.
+
+  fastify.get(
+    '/crm/communication-settings',
+    { preHandler: [authenticate, requirePermission(PERMISSIONS.CRM_AUTOMATION_MANAGE)] },
+    async (request, reply) => {
+      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
+      const ctx = ctxFactory.create({
+        tenantId,
+        userId,
+        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
+      });
+
+      const [settings] = await ctx.db.raw
+        .select()
+        .from(tenantCommunicationSettings)
+        .where(eq(tenantCommunicationSettings.tenantId, tenantId));
+
+      return reply.code(200).send({
+        data: {
+          approvalRequired: settings?.approvalRequired ?? false,
+          maxPerDayFrequencyCap: settings?.frequencyCap?.maxPerDay ?? null,
+        },
+      });
+    }
+  );
+
+  fastify.put(
+    '/crm/communication-settings',
+    { preHandler: [authenticate, requirePermission(PERMISSIONS.CRM_AUTOMATION_MANAGE)] },
+    async (request, reply) => {
+      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
+      const ctx = ctxFactory.create({
+        tenantId,
+        userId,
+        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
+      });
+
+      const body = CommunicationSettingsSchema.safeParse(request.body);
+      if (!body.success)
+        throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
+
+      const [existing] = await ctx.db.raw
+        .select()
+        .from(tenantCommunicationSettings)
+        .where(eq(tenantCommunicationSettings.tenantId, tenantId));
+
+      const nextFrequencyCap =
+        body.data.maxPerDayFrequencyCap !== undefined
+          ? body.data.maxPerDayFrequencyCap === null
+            ? null
+            : { maxPerDay: body.data.maxPerDayFrequencyCap }
+          : (existing?.frequencyCap ?? null);
+
+      const [saved] = existing
+        ? await ctx.db.raw
+            .update(tenantCommunicationSettings)
+            .set({
+              ...(body.data.approvalRequired !== undefined
+                ? { approvalRequired: body.data.approvalRequired }
+                : {}),
+              frequencyCap: nextFrequencyCap,
+              updatedAt: new Date(),
+            })
+            .where(eq(tenantCommunicationSettings.id, existing.id))
+            .returning()
+        : await ctx.db.raw
+            .insert(tenantCommunicationSettings)
+            .values({
+              tenantId,
+              approvalRequired: body.data.approvalRequired ?? false,
+              frequencyCap: nextFrequencyCap,
+            })
+            .returning();
+      if (!saved) throw new Error('Communication settings save failed unexpectedly');
+
+      await ctx.audit.log({
+        action: existing ? 'UPDATE' : 'CREATE',
+        entityType: 'tenant_communication_settings',
+        entityId: saved.id,
+      });
+
+      return reply.code(200).send({
+        data: {
+          approvalRequired: saved.approvalRequired,
+          maxPerDayFrequencyCap: saved.frequencyCap?.maxPerDay ?? null,
+        },
+      });
     }
   );
 

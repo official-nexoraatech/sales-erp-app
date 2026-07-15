@@ -1375,6 +1375,13 @@ export const crmApi = {
   createCampaignComment: (id: number, body: string) =>
     apiClient.post('sales', `/crm/campaigns/${id}/comments`, { body }),
 
+  // CP-5/CP-7 follow-up: tenant-wide approval-required + frequency-cap settings
+  getCommunicationSettings: () => apiClient.get('sales', '/crm/communication-settings'),
+  updateCommunicationSettings: (data: {
+    approvalRequired?: boolean;
+    maxPerDayFrequencyCap?: number | null;
+  }) => apiClient.put('sales', '/crm/communication-settings', data),
+
   // CP-4: campaign templates
   listCampaignTemplates: (params?: { channel?: string }) => {
     const qs = new URLSearchParams();

@@ -146,6 +146,7 @@ const SegmentFormPage = lazy(() => import('./pages/crm/SegmentFormPage.js'));
 const CampaignsPage = lazy(() => import('./pages/crm/CampaignsPage.js'));
 const CampaignFormPage = lazy(() => import('./pages/crm/CampaignFormPage.js'));
 const CampaignDetailPage = lazy(() => import('./pages/crm/CampaignDetailPage.js'));
+const CampaignSettingsPage = lazy(() => import('./pages/crm/CampaignSettingsPage.js'));
 const SeasonsPage = lazy(() => import('./pages/crm/SeasonsPage.js'));
 const SeasonFormPage = lazy(() => import('./pages/crm/SeasonFormPage.js'));
 
@@ -1332,6 +1333,17 @@ export default function App() {
           element={
             <Page>
               <PermissionRoute permission={PERMISSIONS.CRM_VIEW} element={<CampaignDetailPage />} />
+            </Page>
+          }
+        />
+        <Route
+          path="crm/campaign-settings"
+          element={
+            <Page>
+              <PermissionRoute
+                permission={PERMISSIONS.CRM_AUTOMATION_MANAGE}
+                element={<CampaignSettingsPage />}
+              />
             </Page>
           }
         />

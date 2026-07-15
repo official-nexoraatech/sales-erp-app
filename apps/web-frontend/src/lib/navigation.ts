@@ -63,6 +63,7 @@ import {
   Globe,
   Flag,
   Fingerprint,
+  Settings,
 } from 'lucide-react';
 import type { ComponentType } from 'react';
 import { PERMISSIONS, type Permission } from '../constants/permissions.js';
@@ -163,6 +164,12 @@ export const NAV_GROUPS: NavGroup[] = [
             path: '/crm/seasons',
             icon: CalendarRange,
             permission: PERMISSIONS.CRM_SEASON_VIEW,
+          },
+          {
+            label: 'Campaign Settings',
+            path: '/crm/campaign-settings',
+            icon: Settings,
+            permission: PERMISSIONS.CRM_AUTOMATION_MANAGE,
           },
         ],
       },
