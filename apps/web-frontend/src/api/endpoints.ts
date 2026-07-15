@@ -1391,6 +1391,7 @@ export const crmApi = {
   updateCommunicationSettings: (data: {
     approvalRequired?: boolean;
     maxPerDayFrequencyCap?: number | null;
+    notificationRateLimitPerMinute?: number | null;
   }) => apiClient.put('sales', '/crm/communication-settings', data),
 
   // CP-8: per-tenant/per-channel sender identity

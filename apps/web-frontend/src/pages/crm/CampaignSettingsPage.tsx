@@ -13,7 +13,10 @@ import Modal from '../../components/ui/Modal.js';
 interface CommunicationSettings {
   approvalRequired: boolean;
   maxPerDayFrequencyCap: number | null;
+  notificationRateLimitPerMinute: number | null;
 }
+
+const PLATFORM_DEFAULT_RATE_LIMIT = 200;
 
 interface SenderIdentity {
   id: number;
@@ -42,12 +45,18 @@ function ApprovalSection() {
 
   const [approvalRequired, setApprovalRequired] = useState(false);
   const [frequencyCap, setFrequencyCap] = useState('');
+  const [rateLimit, setRateLimit] = useState('');
 
   useEffect(() => {
     if (!settings) return;
     setApprovalRequired(settings.approvalRequired);
     setFrequencyCap(
       settings.maxPerDayFrequencyCap != null ? String(settings.maxPerDayFrequencyCap) : ''
+    );
+    setRateLimit(
+      settings.notificationRateLimitPerMinute != null
+        ? String(settings.notificationRateLimitPerMinute)
+        : ''
     );
   }, [settings]);
 
@@ -56,6 +65,7 @@ function ApprovalSection() {
       crmApi.updateCommunicationSettings({
         approvalRequired,
         maxPerDayFrequencyCap: frequencyCap ? Number(frequencyCap) : null,
+        notificationRateLimitPerMinute: rateLimit ? Number(rateLimit) : null,
       }),
     onSuccess: () => toast.success('Campaign settings saved'),
     onError: () => toast.error('Failed to save campaign settings'),
@@ -89,6 +99,24 @@ function ApprovalSection() {
           Applies across every campaign combined — a customer who already received this many
           messages today from any campaign is skipped, not just capped per-campaign. Leave blank for
           no limit.
+        </p>
+      </div>
+      <div>
+        <Input
+          label={`Notification send rate limit, per minute (optional — platform default is ${PLATFORM_DEFAULT_RATE_LIMIT}/minute)`}
+          type="number"
+          min={1}
+          value={rateLimit}
+          onChange={(e) => setRateLimit(e.target.value)}
+          placeholder={`Default (${PLATFORM_DEFAULT_RATE_LIMIT}/minute)`}
+        />
+        <p className="text-xs text-secondary mt-1.5">
+          Caps how many recipients this tenant's campaigns can send to per minute. Every tenant
+          shares this cap independently — one tenant's large campaign can never affect another
+          tenant's send throughput. Raise this for a tenant that regularly sends to more than{' '}
+          {PLATFORM_DEFAULT_RATE_LIMIT} recipients in a single campaign; recipients beyond the limit
+          are marked failed with a clear "rate limit exceeded" reason and are not retried
+          automatically yet.
         </p>
       </div>
       <div className="flex justify-end pt-2">

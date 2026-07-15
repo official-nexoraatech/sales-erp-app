@@ -208,6 +208,10 @@ export const tenantCommunicationSettings = pgTable(
     // CP-7: optional per-tenant approval gate — false (default) preserves today's direct-send
     // behavior exactly.
     approvalRequired: boolean('approval_required').notNull().default(false),
+    // CP-9 follow-up: per-tenant override of notification-service's default 200/min internal
+    // send rate limit — null means "use the platform default", so every tenant that hasn't
+    // explicitly configured one sees no behavior change.
+    notificationRateLimitPerMinute: integer('notification_rate_limit_per_minute'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },

@@ -162,6 +162,9 @@ const WebhookSubscriptionSchema = z.object({
 const CommunicationSettingsSchema = z.object({
   approvalRequired: z.boolean().optional(),
   maxPerDayFrequencyCap: z.number().int().positive().nullable().optional(),
+  // CP-9 follow-up (R14): overrides notification-service's default 200/min internal send rate
+  // limit for this tenant specifically — null/omitted uses the platform default.
+  notificationRateLimitPerMinute: z.number().int().positive().nullable().optional(),
 });
 
 const CampaignTemplateSchema = z.object({
@@ -1565,6 +1568,7 @@ export async function crmRoutes(
         data: {
           approvalRequired: settings?.approvalRequired ?? false,
           maxPerDayFrequencyCap: settings?.frequencyCap?.maxPerDay ?? null,
+          notificationRateLimitPerMinute: settings?.notificationRateLimitPerMinute ?? null,
         },
       });
     }
@@ -1604,6 +1608,9 @@ export async function crmRoutes(
               ...(body.data.approvalRequired !== undefined
                 ? { approvalRequired: body.data.approvalRequired }
                 : {}),
+              ...(body.data.notificationRateLimitPerMinute !== undefined
+                ? { notificationRateLimitPerMinute: body.data.notificationRateLimitPerMinute }
+                : {}),
               frequencyCap: nextFrequencyCap,
               updatedAt: new Date(),
             })
@@ -1614,6 +1621,7 @@ export async function crmRoutes(
             .values({
               tenantId,
               approvalRequired: body.data.approvalRequired ?? false,
+              notificationRateLimitPerMinute: body.data.notificationRateLimitPerMinute ?? null,
               frequencyCap: nextFrequencyCap,
             })
             .returning();
@@ -1629,6 +1637,7 @@ export async function crmRoutes(
         data: {
           approvalRequired: saved.approvalRequired,
           maxPerDayFrequencyCap: saved.frequencyCap?.maxPerDay ?? null,
+          notificationRateLimitPerMinute: saved.notificationRateLimitPerMinute ?? null,
         },
       });
     }

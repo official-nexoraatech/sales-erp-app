@@ -4,6 +4,7 @@
 // recipient. Fixed by adding requirePermission(NOTIFICATION_SEND).
 import { describe, it, expect, vi } from 'vitest';
 import Fastify from 'fastify';
+import type Redis from 'ioredis';
 import type * as ErpTypes from '@erp/types';
 import type { ErpDatabase } from '@erp/db';
 import type { NotificationServiceConfig } from '../config.js';
@@ -41,7 +42,7 @@ function authHeader(auth: { tenantId: number; permissions: string[] }): Record<s
 describe('ES-33 — POST /notifications/send requires NOTIFICATION_SEND', () => {
   it('authenticated but missing NOTIFICATION_SEND → 403', async () => {
     const app = Fastify({ logger: false });
-    await notificationRoutes(app, {} as ErpDatabase, {} as NotificationServiceConfig);
+    await notificationRoutes(app, {} as ErpDatabase, {} as NotificationServiceConfig, {} as Redis);
 
     const res = await app.inject({
       method: 'POST',

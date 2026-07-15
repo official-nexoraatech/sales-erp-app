@@ -35,13 +35,19 @@ async function sendRawNotification(
   notificationUrl: string,
   internalKey: string,
   body: string
-): Promise<{ httpOk: boolean; json: { data?: { status?: string; logId?: number } } }> {
+): Promise<{
+  httpOk: boolean;
+  json: { data?: { status?: string; logId?: number }; error?: { code?: string; message?: string } };
+}> {
   const res = await fetch(`${notificationUrl}/notifications/send-raw-internal`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-internal-key': internalKey },
     body,
   });
-  const json = (await res.json()) as { data?: { status?: string; logId?: number } };
+  const json = (await res.json()) as {
+    data?: { status?: string; logId?: number };
+    error?: { code?: string; message?: string };
+  };
   return { httpOk: res.ok, json };
 }
 
@@ -580,6 +586,10 @@ export class CampaignService {
               })
             );
             const ok = httpOk && json.data?.status === 'SENT';
+            const failureMessage =
+              json.error?.code === 'TENANT_RATE_LIMIT_EXCEEDED'
+                ? "Rate limit exceeded — see Campaign Settings to raise this tenant's notification send limit"
+                : (json.error?.message ?? 'Delivery failed');
 
             if (recipientRow) {
               await ctx.db.raw
@@ -588,7 +598,7 @@ export class CampaignService {
                   status: ok ? 'SENT' : 'FAILED',
                   notificationLogId: json.data?.logId ?? null,
                   sentAt: new Date(),
-                  errorMessage: ok ? null : 'Delivery failed',
+                  errorMessage: ok ? null : failureMessage,
                 })
                 .where(eq(campaignRecipients.id, recipientRow.id));
             }

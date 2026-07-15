@@ -1,6 +1,12 @@
 import type { FastifyInstance } from 'fastify';
+import type Redis from 'ioredis';
 import type { ErpDatabase } from '@erp/db';
-import { notificationLog, notificationPreferences, notificationTemplates } from '@erp/db';
+import {
+  notificationLog,
+  notificationPreferences,
+  notificationTemplates,
+  tenantCommunicationSettings,
+} from '@erp/db';
 import { eq, and, desc } from 'drizzle-orm';
 import { z } from 'zod';
 import { ValidationError, PERMISSIONS } from '@erp/types';
@@ -9,6 +15,10 @@ import { NotificationEngine } from '../domain/NotificationEngine.js';
 import type { NotificationServiceConfig } from '../config.js';
 import { authenticate, authenticateStream } from '../middleware/authenticate.js';
 import { requirePermission } from '../middleware/authorize.js';
+import {
+  checkTenantNotificationRateLimit,
+  DEFAULT_NOTIFICATION_RATE_LIMIT_PER_MINUTE,
+} from '../domain/tenantRateLimit.js';
 
 const SendSchema = z.object({
   eventType: z.string().min(1),
@@ -78,7 +88,8 @@ type AuthedRequest = { auth: { tenantId: number; userId?: number } };
 export async function notificationRoutes(
   fastify: FastifyInstance,
   db: ErpDatabase,
-  config: NotificationServiceConfig
+  config: NotificationServiceConfig,
+  redis: Redis
 ): Promise<void> {
   const engine = new NotificationEngine(db, config);
 
@@ -128,34 +139,67 @@ export async function notificationRoutes(
   });
 
   // ── POST /notifications/send-raw-internal — Send pre-rendered body (CRM campaigns) ─
-  fastify.post('/notifications/send-raw-internal', async (request, reply) => {
-    if (!requireInternalKey(request as never, reply as never)) return;
-    const body = SendRawInternalSchema.safeParse(request.body);
-    if (!body.success)
-      throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
+  // config.rateLimit: false exempts this route from the global @fastify/rate-limit plugin
+  // registered in main.ts. That plugin is IP-keyed here (request.auth is never populated for an
+  // x-internal-key route), so every tenant's campaign sends share ONE combined 200/min budget
+  // from sales-service's host IP — leaving it enabled would silently cap all tenants combined
+  // at 200/min regardless of the per-tenant check below, reintroducing the exact R14 bug.
+  fastify.post(
+    '/notifications/send-raw-internal',
+    { config: { rateLimit: false } },
+    async (request, reply) => {
+      if (!requireInternalKey(request as never, reply as never)) return;
+      const body = SendRawInternalSchema.safeParse(request.body);
+      if (!body.success)
+        throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
 
-    const {
-      recipientPhone,
-      recipientEmail,
-      subject,
-      idempotencyKey,
-      mediaUrl,
-      mediaType,
-      senderOverride,
-      ...rest
-    } = body.data;
-    const result = await engine.sendRaw({
-      ...rest,
-      ...(recipientPhone !== undefined ? { recipientPhone } : {}),
-      ...(recipientEmail !== undefined ? { recipientEmail } : {}),
-      ...(subject !== undefined ? { subject } : {}),
-      ...(idempotencyKey !== undefined ? { idempotencyKey } : {}),
-      ...(mediaUrl !== undefined ? { mediaUrl } : {}),
-      ...(mediaType !== undefined ? { mediaType } : {}),
-      ...(senderOverride !== undefined ? { senderOverride } : {}),
-    });
-    return reply.code(200).send({ data: result });
-  });
+      // CP-9 follow-up (R14): this route is called once per campaign recipient by
+      // CampaignService.send() and is authenticated via x-internal-key, not a JWT — the global
+      // @fastify/rate-limit plugin's tenantOrIpKeyGenerator can't key it by tenant (request.auth
+      // is never populated here), so without this check every tenant's campaign sends would share
+      // one IP-keyed budget. This is a genuinely per-tenant, per-tenant-configurable check instead.
+      const [settings] = await db
+        .select({ limit: tenantCommunicationSettings.notificationRateLimitPerMinute })
+        .from(tenantCommunicationSettings)
+        .where(eq(tenantCommunicationSettings.tenantId, body.data.tenantId));
+      const limit = settings?.limit ?? DEFAULT_NOTIFICATION_RATE_LIMIT_PER_MINUTE;
+      const rateLimitResult = await checkTenantNotificationRateLimit(
+        redis,
+        body.data.tenantId,
+        limit
+      );
+      if (!rateLimitResult.allowed) {
+        return reply.code(429).send({
+          error: {
+            code: 'TENANT_RATE_LIMIT_EXCEEDED',
+            message: `Notification rate limit exceeded for this tenant (${limit}/minute). Configure a higher limit in Campaign Settings if this tenant needs more throughput.`,
+          },
+        });
+      }
+
+      const {
+        recipientPhone,
+        recipientEmail,
+        subject,
+        idempotencyKey,
+        mediaUrl,
+        mediaType,
+        senderOverride,
+        ...rest
+      } = body.data;
+      const result = await engine.sendRaw({
+        ...rest,
+        ...(recipientPhone !== undefined ? { recipientPhone } : {}),
+        ...(recipientEmail !== undefined ? { recipientEmail } : {}),
+        ...(subject !== undefined ? { subject } : {}),
+        ...(idempotencyKey !== undefined ? { idempotencyKey } : {}),
+        ...(mediaUrl !== undefined ? { mediaUrl } : {}),
+        ...(mediaType !== undefined ? { mediaType } : {}),
+        ...(senderOverride !== undefined ? { senderOverride } : {}),
+      });
+      return reply.code(200).send({ data: result });
+    }
+  );
 
   // ── POST /notifications/templates/seed-crm — Seed CRM domain templates ───
   fastify.post('/notifications/templates/seed-crm', async (request, reply) => {

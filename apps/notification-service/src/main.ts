@@ -41,8 +41,10 @@ async function bootstrap(): Promise<void> {
   initTenantStatusEnforcement(db);
   const metricsHandler = await createMetricsHandler('notification-service');
 
-  // Dedicated to tenant-status pub/sub invalidation only — this service otherwise has
-  // no Redis-backed caching or rate-limiting (see the rate-limit registration below).
+  // Tenant-status pub/sub invalidation, and (CP-9 follow-up) the per-tenant notification
+  // rate-limit counter used by /notifications/send-raw-internal — see domain/tenantRateLimit.ts.
+  // The global @fastify/rate-limit plugin below is a separate, IP-or-JWT-tenant-keyed limiter
+  // for the rest of this service's routes.
   const redis = new Redis(config.redisUrl, { maxRetriesPerRequest: null, enableReadyCheck: false });
   redis.on('error', (err: Error) => {
     logger.error({ err: err.message }, 'Redis connection error in notification-service');
@@ -87,10 +89,10 @@ async function bootstrap(): Promise<void> {
 
   // PG-010: dual-registered — unprefixed (legacy, deprecation window) and under /api/v2
   // (baseline convention) — until web-frontend/pos-frontend fully migrate to /api/v2.
-  await notificationRoutes(fastify, db, config);
+  await notificationRoutes(fastify, db, config, redis);
   await fastify.register(
     async (sub) => {
-      await notificationRoutes(sub, db, config);
+      await notificationRoutes(sub, db, config, redis);
     },
     { prefix: '/api/v2' }
   );
