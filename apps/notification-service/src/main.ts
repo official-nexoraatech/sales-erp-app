@@ -6,6 +6,7 @@ import Redis from 'ioredis';
 import { createDatabaseClient } from '@erp/db';
 import {
   HELMET_OPTIONS,
+  CORS_METHODS,
   PERMISSIONS_POLICY,
   registerHealthRoute,
   tenantOrIpKeyGenerator,
@@ -23,6 +24,7 @@ import {
 } from '@erp/logger';
 import { loadNotificationConfig } from './config.js';
 import { notificationRoutes } from './api/notification.routes.js';
+import { webhookRoutes } from './api/webhook.routes.js';
 
 initializeTelemetry({ serviceName: 'notification-service' });
 
@@ -49,6 +51,10 @@ async function bootstrap(): Promise<void> {
 
   const fastify = Fastify({ logger: false, trustProxy: true });
 
+  // Must be registered before any routes/plugins — see auth-service/src/main.ts for why
+  // (setErrorHandler only propagates to encapsulated child contexts that exist when it's set).
+  registerErrorHandler(fastify, 'notification-service', logger);
+
   fastify.addHook('onRequest', createCorrelationIdHook());
 
   await fastify.register(helmet, HELMET_OPTIONS);
@@ -56,6 +62,7 @@ async function bootstrap(): Promise<void> {
     void reply.header('Permissions-Policy', PERMISSIONS_POLICY);
   });
   await fastify.register(cors, {
+    methods: CORS_METHODS,
     origin: process.env['ALLOWED_ORIGINS']?.split(',') ?? ['http://localhost:3000'],
     credentials: true,
   });
@@ -88,7 +95,11 @@ async function bootstrap(): Promise<void> {
     { prefix: '/api/v2' }
   );
 
-  registerErrorHandler(fastify, 'notification-service', logger);
+  // CP-6: public-facing delivery-status webhooks (MSG91/SendGrid/Meta) — registered in its own
+  // encapsulated sub-plugin so its raw-body content-type parser doesn't affect the routes above.
+  await fastify.register(async (sub) => {
+    await webhookRoutes(sub, db, config);
+  });
 
   const address = await fastify.listen({ port: config.port, host: '0.0.0.0' });
   logger.info({ address }, 'Notification service started');

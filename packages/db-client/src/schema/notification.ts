@@ -82,6 +82,26 @@ export const notificationLog = pgTable(
   ]
 );
 
+// ─── Delivery-webhook idempotency (CP-6) ───────────────────────────────────
+// Source-level dedup for provider delivery-status webhooks (MSG91/SendGrid/Meta) — a provider
+// redelivering the same event must not double-process. Enforced via
+// INSERT ... ON CONFLICT (provider, provider_event_id) DO NOTHING at the application layer.
+export const notificationDeliveryEvents = pgTable(
+  'notification_delivery_events',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    notificationLogId: integer('notification_log_id').notNull(),
+    provider: varchar('provider', { length: 20 }).notNull().$type<'MSG91' | 'SENDGRID' | 'META'>(),
+    providerEventId: varchar('provider_event_id', { length: 200 }).notNull(),
+    eventType: varchar('event_type', { length: 30 }).notNull(),
+    receivedAt: timestamp('received_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    unique('notification_delivery_events_dedup').on(t.provider, t.providerEventId),
+    index('idx_notification_delivery_events_log').on(t.notificationLogId),
+  ]
+);
+
 // ─── Per-user notification preferences ────────────────────────────────────
 export const notificationPreferences = pgTable(
   'notification_preferences',
@@ -110,4 +130,6 @@ export type NotificationTemplate = typeof notificationTemplates.$inferSelect;
 export type NewNotificationTemplate = typeof notificationTemplates.$inferInsert;
 export type NotificationLogEntry = typeof notificationLog.$inferSelect;
 export type NewNotificationLogEntry = typeof notificationLog.$inferInsert;
+export type NotificationDeliveryEvent = typeof notificationDeliveryEvents.$inferSelect;
+export type NewNotificationDeliveryEvent = typeof notificationDeliveryEvents.$inferInsert;
 export type NotificationPreference = typeof notificationPreferences.$inferSelect;

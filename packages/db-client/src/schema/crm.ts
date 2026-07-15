@@ -126,6 +126,13 @@ export const campaignRecipients = pgTable(
     errorMessage: text('error_message'),
     sentAt: timestamp('sent_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    // CP-6: engagement/attribution timestamps. Only deliveredAt is populated this phase (via the
+    // webhook -> outbox -> consumer path); opened/clicked/converted are reserved for later CP-6
+    // scope (click/open tracking, revenue attribution — deferred, see CP-6 completion report).
+    deliveredAt: timestamp('delivered_at', { withTimezone: true }),
+    openedAt: timestamp('opened_at', { withTimezone: true }),
+    clickedAt: timestamp('clicked_at', { withTimezone: true }),
+    convertedAt: timestamp('converted_at', { withTimezone: true }),
   },
   (t) => [
     index('idx_campaign_recipients_campaign').on(t.campaignId, t.status),

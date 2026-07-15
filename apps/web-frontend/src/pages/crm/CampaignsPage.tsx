@@ -38,6 +38,53 @@ interface CampaignRecipient {
   sentAt?: string | null;
 }
 
+// CP-6 (Campaign Management Platform initiative): a simple visual funnel using real data —
+// deliveredCount is now populated by the delivery-webhook -> Kafka consumer sync path (see
+// apps/sales-service/src/consumers/NotificationDeliveryConsumer.ts) instead of always being 0.
+// A full analytics dashboard (cross-campaign comparison, open/click tracking, A/B testing) is
+// out of scope for this phase — see the CP-6 completion report.
+function DeliveryFunnel({ campaign }: { campaign: Campaign }) {
+  const total = campaign.totalRecipients ?? 0;
+  if (total === 0) return null;
+  const sent = campaign.sentCount ?? 0;
+  const delivered = campaign.deliveredCount ?? 0;
+  const failed = campaign.failedCount ?? 0;
+  const pending = Math.max(0, total - sent - failed);
+
+  const stages: Array<{ label: string; value: number; color: string }> = [
+    { label: 'Sent', value: sent, color: 'bg-blue-500' },
+    { label: 'Delivered', value: delivered, color: 'bg-success' },
+    { label: 'Failed', value: failed, color: 'bg-danger' },
+    { label: 'Pending', value: pending, color: 'bg-surface-raised' },
+  ];
+
+  return (
+    <div className="px-5 py-3 border-b border-default">
+      <p className="text-xs font-semibold text-secondary uppercase tracking-wide mb-2">
+        Delivery Funnel
+      </p>
+      <div className="flex h-2 rounded-full overflow-hidden bg-surface-raised">
+        {stages.map((s) => (
+          <div
+            key={s.label}
+            className={s.color}
+            style={{ width: `${total > 0 ? (s.value / total) * 100 : 0}%` }}
+            title={`${s.label}: ${s.value}`}
+          />
+        ))}
+      </div>
+      <div className="flex gap-4 mt-2 flex-wrap">
+        {stages.map((s) => (
+          <span key={s.label} className="text-xs text-secondary">
+            <span className={`inline-block w-2 h-2 rounded-full mr-1 ${s.color}`} />
+            {s.label}: {s.value}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function RecipientDrilldown({ campaignId }: { campaignId: number }) {
   const { data, isLoading } = useQuery({
     queryKey: ['campaign-recipients', campaignId],
@@ -286,7 +333,12 @@ export default function CampaignsPage() {
                     )}
                   </div>
                 </div>
-                {expandedId === c.id && <RecipientDrilldown campaignId={c.id} />}
+                {expandedId === c.id && (
+                  <>
+                    <DeliveryFunnel campaign={c} />
+                    <RecipientDrilldown campaignId={c.id} />
+                  </>
+                )}
               </div>
             ))}
           </div>

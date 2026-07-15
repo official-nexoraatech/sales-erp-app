@@ -4,9 +4,13 @@ import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import multipart from '@fastify/multipart';
 import rateLimit from '@fastify/rate-limit';
+import { Kafka } from 'kafkajs';
 import {
   PlatformContextFactory,
+  TenantScopedDatabase,
+  type EventHandler,
   HELMET_OPTIONS,
+  CORS_METHODS,
   PERMISSIONS_POLICY,
   registerHealthRoute,
   tenantOrIpKeyGenerator,
@@ -14,6 +18,7 @@ import {
   initTenantStatusEnforcement,
   registerErrorHandler,
 } from '@erp/sdk';
+import { createDatabaseClient } from '@erp/db';
 import {
   createLogger,
   createMetricsHandler,
@@ -25,6 +30,7 @@ import {
   createCorrelationIdHook,
 } from '@erp/logger';
 import { loadConfigWithSecrets } from '@erp/config';
+import { handleNotificationDeliveryUpdated } from './consumers/NotificationDeliveryConsumer.js';
 import { customerRoutes } from './api/customer.routes.js';
 import { supplierRoutes } from './api/supplier.routes.js';
 import { quotationRoutes } from './api/quotation.routes.js';
@@ -74,7 +80,45 @@ async function bootstrap(): Promise<void> {
   ctxFactory.subscribeTenantStatusInvalidations();
   initTenantStatusEnforcement(ctxFactory.rawDb);
 
+  // ── Kafka event consumers (CP-6: sales-service's first) ────────────────────
+  // Syncs delivery-webhook outcomes from notification-service onto campaign_recipients — see
+  // consumers/NotificationDeliveryConsumer.ts. Modeled directly on gst-service's main.ts, the
+  // clearest existing example of a service's first Kafka consumer registration.
+  const kafka = new Kafka({
+    clientId: 'sales-service-consumer',
+    brokers: (process.env['KAFKA_BROKERS'] ?? 'localhost:29092').split(','),
+  });
+  const consumerDb = createDatabaseClient({ url: config.databaseUrl, maxConnections: 3 });
+
+  const eventDispatcher: EventHandler = async (event, db) => {
+    switch (event.eventType) {
+      case 'NOTIFICATION_DELIVERY_UPDATED':
+        await handleNotificationDeliveryUpdated(event, db);
+        break;
+      default:
+        logger.warn(
+          { eventType: event.eventType },
+          'Unhandled event type in sales-service consumer'
+        );
+    }
+  };
+
+  const salesTopics = ['erp.notification.delivery.updated'];
+
+  const { PlatformEventConsumer } = await import('@erp/sdk');
+  const eventConsumer = new PlatformEventConsumer(kafka, 'sales-service-group', 'sales-service');
+  await eventConsumer.subscribe(
+    salesTopics,
+    eventDispatcher,
+    (tenantId: number) => new TenantScopedDatabase(tenantId, consumerDb)
+  );
+  logger.info({}, 'Sales-service Kafka consumers started');
+
   const fastify = Fastify({ logger: false, trustProxy: true });
+
+  // Must be registered before any routes/plugins — see auth-service/src/main.ts for why
+  // (setErrorHandler only propagates to encapsulated child contexts that exist when it's set).
+  registerErrorHandler(fastify, 'sales-service', logger);
 
   fastify.addHook('onRequest', createCorrelationIdHook());
 
@@ -84,6 +128,7 @@ async function bootstrap(): Promise<void> {
     void reply.header('Permissions-Policy', PERMISSIONS_POLICY);
   });
   await fastify.register(cors, {
+    methods: CORS_METHODS,
     origin: process.env['ALLOWED_ORIGINS']?.split(',') ?? ['http://localhost:3000'],
     credentials: true,
   });
@@ -181,8 +226,6 @@ async function bootstrap(): Promise<void> {
     },
     { prefix: '/api/v2' }
   );
-
-  registerErrorHandler(fastify, 'sales-service', logger);
 
   const address = await fastify.listen({ port, host: '0.0.0.0' });
   logger.info({ address }, 'Sales service started');
