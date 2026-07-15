@@ -1,9 +1,10 @@
-import { and, eq, inArray, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, notInArray, sql } from 'drizzle-orm';
 import {
   campaigns,
   campaignRecipients,
   customers,
   customerSegments,
+  invoices,
   organizationSettings,
   projectionCustomerBalance,
   type Campaign,
@@ -95,22 +96,57 @@ export function validateMediaForChannel(
   }
 }
 
-export function renderCampaignMessage(
-  template: string,
-  vars: {
-    customerName: string;
-    balance: number;
-    loyaltyPoints: number;
-    shopName: string;
-    customField?: string;
-  }
-): string {
+// CP-3 (Campaign Management Platform initiative): expanded token set beyond the original
+// customerName/balance/loyaltyPoints/shopName/customField — lastPurchaseDate/lastPurchaseAmount
+// are sourced from the customer's most recent non-draft/non-cancelled invoice (see
+// getLastPurchase()). A missing value (e.g. a customer with no purchase history) renders the
+// token's configured fallback rather than a broken "{{token}}" literal — see TOKEN_FALLBACKS and
+// detectFallbackTokens() for the preview-time warning half of this (FR-F2).
+export interface CampaignMessageVars {
+  customerName: string;
+  balance: number;
+  loyaltyPoints: number;
+  shopName: string;
+  customField?: string;
+  lastPurchaseDate?: string;
+  lastPurchaseAmount?: number;
+}
+
+const TOKEN_FALLBACKS = {
+  customField: '',
+  lastPurchaseDate: 'no purchases yet',
+  lastPurchaseAmount: '0.00',
+} as const;
+
+export function renderCampaignMessage(template: string, vars: CampaignMessageVars): string {
   return template
     .replace(/{{\s*customerName\s*}}/g, vars.customerName)
     .replace(/{{\s*balance\s*}}/g, vars.balance.toFixed(2))
     .replace(/{{\s*loyaltyPoints\s*}}/g, String(vars.loyaltyPoints))
     .replace(/{{\s*shopName\s*}}/g, vars.shopName)
-    .replace(/{{\s*customField\s*}}/g, vars.customField ?? '');
+    .replace(/{{\s*customField\s*}}/g, vars.customField ?? TOKEN_FALLBACKS.customField)
+    .replace(
+      /{{\s*lastPurchaseDate\s*}}/g,
+      vars.lastPurchaseDate ?? TOKEN_FALLBACKS.lastPurchaseDate
+    )
+    .replace(
+      /{{\s*lastPurchaseAmount\s*}}/g,
+      vars.lastPurchaseAmount !== undefined
+        ? vars.lastPurchaseAmount.toFixed(2)
+        : TOKEN_FALLBACKS.lastPurchaseAmount
+    );
+}
+
+/** FR-F2: which tokens present in the template would render a fallback value for this recipient. */
+export function detectFallbackTokens(template: string, vars: CampaignMessageVars): string[] {
+  const hit: string[] = [];
+  if (/{{\s*customField\s*}}/.test(template) && vars.customField === undefined)
+    hit.push('customField');
+  if (/{{\s*lastPurchaseDate\s*}}/.test(template) && vars.lastPurchaseDate === undefined)
+    hit.push('lastPurchaseDate');
+  if (/{{\s*lastPurchaseAmount\s*}}/.test(template) && vars.lastPurchaseAmount === undefined)
+    hit.push('lastPurchaseAmount');
+  return hit;
 }
 
 // Maps a campaign channel to the opt-out column that must be false for a customer to
@@ -188,7 +224,12 @@ export class CampaignService {
     customerIds: number[] | undefined,
     messageTemplate: string,
     channel: Campaign['channel']
-  ): Promise<{ recipientCount: number; sampleMessage: string | null; warnings: string[] }> {
+  ): Promise<{
+    recipientCount: number;
+    sampleMessage: string | null;
+    warnings: string[];
+    fallbackWarnings: string[];
+  }> {
     const recipients = await CampaignService.resolveRecipients(ctx, {
       segmentId: segmentId ?? null,
       customerIds: customerIds ?? null,
@@ -201,20 +242,28 @@ export class CampaignService {
     const shopName = org?.orgName ?? 'Our Store';
 
     let sampleMessage: string | null = null;
+    let fallbackWarnings: string[] = [];
     if (recipients[0]) {
       const balance = await CampaignService.getBalance(ctx, recipients[0].id);
-      sampleMessage = renderCampaignMessage(messageTemplate, {
+      const lastPurchase = await CampaignService.getLastPurchase(ctx, recipients[0].id);
+      const vars: CampaignMessageVars = {
         customerName: recipients[0].displayName,
         balance,
         loyaltyPoints: recipients[0].loyaltyPoints,
         shopName,
-      });
+        ...(lastPurchase
+          ? { lastPurchaseDate: lastPurchase.date, lastPurchaseAmount: lastPurchase.amount }
+          : {}),
+      };
+      sampleMessage = renderCampaignMessage(messageTemplate, vars);
+      fallbackWarnings = detectFallbackTokens(messageTemplate, vars);
     }
 
     return {
       recipientCount: recipients.length,
       sampleMessage,
       warnings: sampleMessage ? checkChannelLimits('SMS', sampleMessage) : [],
+      fallbackWarnings,
     };
   }
 
@@ -244,6 +293,28 @@ export class CampaignService {
         )
       );
     return bal ? parseFloat(bal.currentBalance) : 0;
+  }
+
+  // CP-3: backs the {{lastPurchaseDate}}/{{lastPurchaseAmount}} personalization tokens —
+  // most recent non-draft/non-cancelled invoice for the customer, or null if they have none yet.
+  private static async getLastPurchase(
+    ctx: PlatformContext,
+    customerId: number
+  ): Promise<{ date: string; amount: number } | null> {
+    const [row] = await ctx.db.raw
+      .select({ invoiceDate: invoices.invoiceDate, grandTotal: invoices.grandTotal })
+      .from(invoices)
+      .where(
+        and(
+          eq(invoices.customerId, customerId),
+          eq(invoices.tenantId, ctx.tenant.tenantId),
+          notInArray(invoices.status, ['DRAFT', 'CANCELLED'])
+        )
+      )
+      .orderBy(desc(invoices.invoiceDate))
+      .limit(1);
+    if (!row) return null;
+    return { date: row.invoiceDate.toISOString().slice(0, 10), amount: parseFloat(row.grandTotal) };
   }
 
   /** Immediate dispatch — renders + sends to every resolved recipient via notification-service. */
@@ -284,6 +355,9 @@ export class CampaignService {
 
     const notificationUrl = process.env['NOTIFICATION_SERVICE_URL'] ?? 'http://localhost:3014';
     const internalKey = process.env['INTERNAL_API_KEY'] ?? '';
+    // CP-3: only pay for the extra per-recipient invoice lookup when the template actually
+    // references one of the purchase-history tokens.
+    const needsLastPurchase = /{{\s*lastPurchase(Date|Amount)\s*}}/.test(campaign.messageTemplate);
 
     let sentCount = 0;
     let failedCount = 0;
@@ -298,11 +372,17 @@ export class CampaignService {
       const results = await Promise.all(
         batch.map(async (recipient) => {
           const balance = await CampaignService.getBalance(ctx, recipient.id);
+          const lastPurchase = needsLastPurchase
+            ? await CampaignService.getLastPurchase(ctx, recipient.id)
+            : null;
           const body = renderCampaignMessage(campaign.messageTemplate, {
             customerName: recipient.displayName,
             balance,
             loyaltyPoints: recipient.loyaltyPoints,
             shopName,
+            ...(lastPurchase
+              ? { lastPurchaseDate: lastPurchase.date, lastPurchaseAmount: lastPurchase.amount }
+              : {}),
           });
 
           const [recipientRow] = await ctx.db.raw

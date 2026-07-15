@@ -83,6 +83,16 @@ describe.skipIf(!DB_URL)('SegmentService — integration (CP-1 baseline)', () =>
         openingBalance: '0',
         loyaltyPoints: 6000,
         customerType: 'RETAIL',
+        gender: 'FEMALE',
+        billingAddress: {
+          line1: '1 MG Road',
+          city: 'Pune',
+          state: 'Maharashtra',
+          stateCode: '27',
+          pincode: '411001',
+          country: 'IN',
+        },
+        customFields: { preferredBrand: 'Levis' },
         createdBy: 1,
       },
       {
@@ -94,6 +104,16 @@ describe.skipIf(!DB_URL)('SegmentService — integration (CP-1 baseline)', () =>
         openingBalance: '0',
         loyaltyPoints: 100,
         customerType: 'RETAIL',
+        gender: 'MALE',
+        billingAddress: {
+          line1: '2 FC Road',
+          city: 'Mumbai',
+          state: 'Maharashtra',
+          stateCode: '27',
+          pincode: '400001',
+          country: 'IN',
+        },
+        customFields: { preferredBrand: 'Nike' },
         createdBy: 1,
       },
       {
@@ -205,5 +225,83 @@ describe.skipIf(!DB_URL)('SegmentService — integration (CP-1 baseline)', () =>
         filterDefinition: null,
       })
     ).rejects.toThrow();
+  });
+
+  // CP-3: expanded field whitelist — store scoping, geography, and tenant-defined custom
+  // attributes (reusing customers.customFields jsonb, not a new table).
+  it('matches on the newly-whitelisted branchId column', async () => {
+    const def: SegmentFilterDefinition = {
+      rules: [{ field: 'branchId', operator: 'eq', value: branchId }],
+      logic: 'AND',
+    };
+    const where = SegmentService.customWhere(TEST_TENANT, def);
+    const count = await SegmentService.countMatching(db, where);
+    expect(count).toBe(3);
+  });
+
+  it('matches on gender', async () => {
+    const def: SegmentFilterDefinition = {
+      rules: [{ field: 'gender', operator: 'eq', value: 'FEMALE' }],
+      logic: 'AND',
+    };
+    const where = SegmentService.customWhere(TEST_TENANT, def);
+    const { rows } = await SegmentService.listMatching(db, where, 0, 50);
+    expect(rows.map((r) => r.displayName)).toEqual(['Gold Customer']);
+  });
+
+  it('matches on a jsonb-derived geographic field (city)', async () => {
+    const def: SegmentFilterDefinition = {
+      rules: [{ field: 'city', operator: 'eq', value: 'Pune' }],
+      logic: 'AND',
+    };
+    const where = SegmentService.customWhere(TEST_TENANT, def);
+    const { rows } = await SegmentService.listMatching(db, where, 0, 50);
+    expect(rows.map((r) => r.displayName)).toEqual(['Gold Customer']);
+  });
+
+  it('matches on a jsonb-derived geographic field with contains', async () => {
+    const def: SegmentFilterDefinition = {
+      rules: [{ field: 'state', operator: 'contains', value: 'maha' }],
+      logic: 'OR',
+    };
+    const where = SegmentService.customWhere(TEST_TENANT, def);
+    const count = await SegmentService.countMatching(db, where);
+    expect(count).toBe(2); // Gold + Regular, both in Maharashtra; Wholesale has no address
+  });
+
+  it('matches on a tenant-defined custom attribute (customField:<key>)', async () => {
+    const def: SegmentFilterDefinition = {
+      rules: [{ field: 'customField:preferredBrand', operator: 'eq', value: 'Nike' }],
+      logic: 'AND',
+    };
+    const where = SegmentService.customWhere(TEST_TENANT, def);
+    const { rows } = await SegmentService.listMatching(db, where, 0, 50);
+    expect(rows.map((r) => r.displayName)).toEqual(['Regular Customer']);
+  });
+
+  it('throws ValidationError for a customField rule with no key', () => {
+    const def: SegmentFilterDefinition = {
+      rules: [{ field: 'customField:', operator: 'eq', value: 'x' }],
+      logic: 'AND',
+    };
+    expect(() => SegmentService.customWhere(TEST_TENANT, def)).toThrow(ValidationError);
+  });
+
+  it('matches on the computed orderCount purchase-history aggregate (zero purchases for all seeded customers)', async () => {
+    const def: SegmentFilterDefinition = {
+      rules: [{ field: 'orderCount', operator: 'eq', value: 0 }],
+      logic: 'AND',
+    };
+    const where = SegmentService.customWhere(TEST_TENANT, def);
+    const count = await SegmentService.countMatching(db, where);
+    expect(count).toBe(3);
+  });
+
+  it('rejects the contains operator on a computed numeric field', () => {
+    const def: SegmentFilterDefinition = {
+      rules: [{ field: 'lifetimeValue', operator: 'contains', value: '5' }],
+      logic: 'AND',
+    };
+    expect(() => SegmentService.customWhere(TEST_TENANT, def)).toThrow(ValidationError);
   });
 });

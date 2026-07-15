@@ -39,9 +39,42 @@ const FIELD_COLUMNS = {
   displayName: customers.displayName,
   phone: customers.phone,
   email: customers.email,
+  // CP-3 (Campaign Management Platform initiative): store-scoped targeting + a couple of
+  // previously-unlisted flat columns.
+  branchId: customers.branchId,
+  gender: customers.gender,
+  anniversary: customers.anniversary,
 } as const;
 
 type FieldKey = keyof typeof FIELD_COLUMNS;
+
+// CP-3: purchase-behavior aggregates, scoped per-tenant, matching the exact subquery shape
+// already used by prebuiltWhere's 'high-value'/'overdue-30'/'no-purchase-60-days' cases — kept
+// as raw SQL fragments (not a query builder join) for the same reason those are: a single
+// correlated scalar subquery per customer row, no join fan-out.
+const COMPUTED_NUMERIC_FIELDS: Record<string, (tenantId: number) => SQL> = {
+  daysSinceLastPurchase: (tenantId) =>
+    sql`EXTRACT(DAY FROM (now() - (SELECT MAX(i.invoice_date) FROM invoices i WHERE i.customer_id = ${customers.id} AND i.tenant_id = ${tenantId} AND i.status NOT IN ('DRAFT','CANCELLED'))))`,
+  orderCount: (tenantId) =>
+    sql`(SELECT COUNT(*) FROM invoices i WHERE i.customer_id = ${customers.id} AND i.tenant_id = ${tenantId} AND i.status NOT IN ('DRAFT','CANCELLED'))`,
+  averageOrderValue: (tenantId) =>
+    sql`(SELECT COALESCE(AVG(i.grand_total), 0) FROM invoices i WHERE i.customer_id = ${customers.id} AND i.tenant_id = ${tenantId} AND i.status NOT IN ('DRAFT','CANCELLED'))`,
+  lifetimeValue: (tenantId) =>
+    sql`(SELECT COALESCE(SUM(i.grand_total), 0) FROM invoices i WHERE i.customer_id = ${customers.id} AND i.tenant_id = ${tenantId} AND i.status NOT IN ('DRAFT','CANCELLED'))`,
+};
+
+// CP-3: geographic targeting — customers.billingAddress is jsonb, not flat columns, so these
+// read via ->> (jsonb-to-text) rather than a direct column reference.
+const JSON_TEXT_FIELDS: Record<string, SQL> = {
+  city: sql`(${customers.billingAddress}->>'city')`,
+  state: sql`(${customers.billingAddress}->>'state')`,
+  pincode: sql`(${customers.billingAddress}->>'pincode')`,
+};
+
+// CP-3: tenant-defined custom attributes — reuses the customers.customFields jsonb column that
+// already exists on the table (no new schema needed) rather than a separate key/value table.
+// Rule field syntax: "customField:<key>", e.g. "customField:preferredBrand".
+const CUSTOM_FIELD_PREFIX = 'customField:';
 
 export class SegmentService {
   static isPrebuilt(code: string): code is PrebuiltSegmentCode {
@@ -96,32 +129,118 @@ export class SegmentService {
     const base = and(eq(customers.tenantId, tenantId), sql`${customers.deletedAt} IS NULL`) as SQL;
     if (!def.rules.length) return base;
 
-    const conditions = def.rules.map((rule) => SegmentService.buildCondition(rule));
+    const conditions = def.rules.map((rule) => SegmentService.buildCondition(tenantId, rule));
     const combined = (def.logic === 'OR' ? or(...conditions) : and(...conditions)) as SQL;
     return and(base, combined) as SQL;
   }
 
-  private static buildCondition(rule: SegmentFilterRule): SQL {
+  private static buildCondition(tenantId: number, rule: SegmentFilterRule): SQL {
+    if (rule.field.startsWith(CUSTOM_FIELD_PREFIX)) {
+      const key = rule.field.slice(CUSTOM_FIELD_PREFIX.length);
+      if (!key)
+        throw new ValidationError(
+          'customField rule requires a key, e.g. "customField:preferredBrand"'
+        );
+      return SegmentService.compareText(
+        sql`(${customers.customFields}->>${key})`,
+        rule.operator,
+        rule.value
+      );
+    }
+
+    const jsonField = JSON_TEXT_FIELDS[rule.field];
+    if (jsonField) {
+      return SegmentService.compareText(jsonField, rule.operator, rule.value);
+    }
+
+    const computedField = COMPUTED_NUMERIC_FIELDS[rule.field];
+    if (computedField) {
+      return SegmentService.compareNumeric(computedField(tenantId), rule.operator, rule.value);
+    }
+
     const col = FIELD_COLUMNS[rule.field as FieldKey];
     if (!col) throw new ValidationError(`Unsupported segment field: ${rule.field}`);
+    return SegmentService.compareColumn(col, rule.operator, rule.value);
+  }
 
-    switch (rule.operator) {
+  private static compareColumn(
+    col: (typeof FIELD_COLUMNS)[FieldKey],
+    operator: SegmentFilterRule['operator'],
+    value: unknown
+  ): SQL {
+    switch (operator) {
       case 'eq':
-        return eq(col, rule.value as never);
+        return eq(col, value as never);
       case 'neq':
-        return ne(col, rule.value as never);
+        return ne(col, value as never);
       case 'gt':
-        return gt(col, rule.value as never);
+        return gt(col, value as never);
       case 'gte':
-        return gte(col, rule.value as never);
+        return gte(col, value as never);
       case 'lt':
-        return lt(col, rule.value as never);
+        return lt(col, value as never);
       case 'lte':
-        return lte(col, rule.value as never);
+        return lte(col, value as never);
       case 'contains':
-        return ilike(col, `%${String(rule.value)}%`);
+        return ilike(col, `%${String(value)}%`);
       default:
-        throw new ValidationError(`Unsupported segment operator: ${rule.operator}`);
+        throw new ValidationError(`Unsupported segment operator: ${operator}`);
+    }
+  }
+
+  // CP-3: comparison against a raw SQL text expression (jsonb ->> field, custom attributes) —
+  // value is always bound as a parameter via the sql tagged template, never string-concatenated.
+  private static compareText(
+    expr: SQL,
+    operator: SegmentFilterRule['operator'],
+    value: unknown
+  ): SQL {
+    const text = String(value);
+    switch (operator) {
+      case 'eq':
+        return sql`${expr} = ${text}`;
+      case 'neq':
+        return sql`${expr} != ${text}`;
+      case 'gt':
+        return sql`${expr} > ${text}`;
+      case 'gte':
+        return sql`${expr} >= ${text}`;
+      case 'lt':
+        return sql`${expr} < ${text}`;
+      case 'lte':
+        return sql`${expr} <= ${text}`;
+      case 'contains':
+        return sql`${expr} ILIKE ${`%${text}%`}`;
+      default:
+        throw new ValidationError(`Unsupported segment operator: ${operator}`);
+    }
+  }
+
+  // CP-3: comparison against a raw SQL numeric expression (purchase-history aggregates).
+  private static compareNumeric(
+    expr: SQL,
+    operator: SegmentFilterRule['operator'],
+    value: unknown
+  ): SQL {
+    if (operator === 'contains') {
+      throw new ValidationError('contains is not supported for numeric fields');
+    }
+    const num = Number(value);
+    switch (operator) {
+      case 'eq':
+        return sql`${expr} = ${num}`;
+      case 'neq':
+        return sql`${expr} != ${num}`;
+      case 'gt':
+        return sql`${expr} > ${num}`;
+      case 'gte':
+        return sql`${expr} >= ${num}`;
+      case 'lt':
+        return sql`${expr} < ${num}`;
+      case 'lte':
+        return sql`${expr} <= ${num}`;
+      default:
+        throw new ValidationError(`Unsupported segment operator: ${operator}`);
     }
   }
 

@@ -13,6 +13,7 @@ import {
   optOutCondition,
   mediaTypeFromMime,
   validateMediaForChannel,
+  detectFallbackTokens,
   CampaignService,
 } from '../domain/CampaignService.js';
 
@@ -71,6 +72,59 @@ describe('renderCampaignMessage', () => {
   it('leaves unrecognized tokens untouched', () => {
     const out = renderCampaignMessage('{{unknownToken}}', vars);
     expect(out).toBe('{{unknownToken}}');
+  });
+
+  // CP-3: purchase-history tokens
+  it('substitutes lastPurchaseDate/lastPurchaseAmount when present', () => {
+    const out = renderCampaignMessage(
+      'Last order: {{lastPurchaseDate}} for {{lastPurchaseAmount}}',
+      {
+        ...vars,
+        lastPurchaseDate: '2026-06-01',
+        lastPurchaseAmount: 999.9,
+      }
+    );
+    expect(out).toBe('Last order: 2026-06-01 for 999.90');
+  });
+
+  it('falls back to a friendly message when lastPurchaseDate/Amount are missing (FR-F2)', () => {
+    const out = renderCampaignMessage(
+      'Last order: {{lastPurchaseDate}} for {{lastPurchaseAmount}}',
+      vars
+    );
+    expect(out).toBe('Last order: no purchases yet for 0.00');
+  });
+});
+
+describe('detectFallbackTokens (CP-3, FR-F2)', () => {
+  const vars = { customerName: 'Ramesh', balance: 0, loyaltyPoints: 0, shopName: 'Shop' };
+
+  it('reports no fallbacks when the template uses no personalization tokens', () => {
+    expect(detectFallbackTokens('Hi there!', vars)).toEqual([]);
+  });
+
+  it('reports customField as a fallback hit when the template uses it and the value is missing', () => {
+    expect(detectFallbackTokens('Note: {{customField}}', vars)).toEqual(['customField']);
+  });
+
+  it('does not report customField when a value is present', () => {
+    expect(detectFallbackTokens('Note: {{customField}}', { ...vars, customField: 'VIP' })).toEqual(
+      []
+    );
+  });
+
+  it('reports lastPurchaseDate and lastPurchaseAmount independently', () => {
+    expect(detectFallbackTokens('{{lastPurchaseDate}} / {{lastPurchaseAmount}}', vars)).toEqual([
+      'lastPurchaseDate',
+      'lastPurchaseAmount',
+    ]);
+    expect(
+      detectFallbackTokens('{{lastPurchaseDate}}', { ...vars, lastPurchaseDate: '2026-01-01' })
+    ).toEqual([]);
+  });
+
+  it('does not report a token that is not used in the template even if the value is missing', () => {
+    expect(detectFallbackTokens('Hi {{customerName}}', vars)).toEqual([]);
   });
 });
 
@@ -312,6 +366,31 @@ describe.skipIf(!DB_URL)('CampaignService — integration (CP-1 baseline)', () =
       );
       expect(result.recipientCount).toBe(0);
       expect(result.sampleMessage).toBeNull();
+    });
+
+    it('flags lastPurchaseDate as a fallback for a customer with no purchase history (CP-3, FR-F2)', async () => {
+      const ctx = makeCtx();
+      const result = await CampaignService.previewSample(
+        ctx,
+        undefined,
+        [optedInCustomerId],
+        'Hi {{customerName}}, last order {{lastPurchaseDate}}',
+        'EMAIL'
+      );
+      expect(result.sampleMessage).toBe('Hi Opted In Customer, last order no purchases yet');
+      expect(result.fallbackWarnings).toContain('lastPurchaseDate');
+    });
+
+    it('reports no fallback warnings when the template uses no personalization tokens beyond customerName', async () => {
+      const ctx = makeCtx();
+      const result = await CampaignService.previewSample(
+        ctx,
+        undefined,
+        [optedInCustomerId],
+        'Hi {{customerName}}!',
+        'EMAIL'
+      );
+      expect(result.fallbackWarnings).toEqual([]);
     });
   });
 

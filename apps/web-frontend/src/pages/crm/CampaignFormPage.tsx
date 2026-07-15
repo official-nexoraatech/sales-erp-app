@@ -7,10 +7,17 @@ import { useAuthStore } from '../../store/auth.store.js';
 import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
 import { ERPFormSkeleton } from '../../components/erp/ERPSkeleton.js';
+import ERPStickyFooter from '../../components/erp/ERPStickyFooter.js';
 import Button from '../../components/ui/Button.js';
 import Input from '../../components/ui/Input.js';
+import DateTimePicker from '../../components/ui/DateTimePicker.js';
 
-interface Segment { id: number; name: string; code: string; isSystem: boolean; }
+interface Segment {
+  id: number;
+  name: string;
+  code: string;
+  isSystem: boolean;
+}
 
 const CHANNELS = ['SMS', 'WHATSAPP', 'EMAIL', 'IN_APP'] as const;
 type Channel = (typeof CHANNELS)[number];
@@ -21,13 +28,25 @@ const SMS_UNICODE_LIMIT = 70;
 function charWarnings(channel: Channel, message: string): string[] {
   const warnings: string[] = [];
   if (channel === 'SMS') {
-    if (message.length > SMS_LIMIT) warnings.push(`SMS exceeds ${SMS_LIMIT} chars — may split into ${Math.ceil(message.length / SMS_LIMIT)} messages`);
-    else if (message.length > SMS_UNICODE_LIMIT && /[^\x00-\x7F]/.test(message)) warnings.push(`Unicode SMS truncates at ${SMS_UNICODE_LIMIT} chars`);
+    if (message.length > SMS_LIMIT)
+      warnings.push(
+        `SMS exceeds ${SMS_LIMIT} chars — may split into ${Math.ceil(message.length / SMS_LIMIT)} messages`
+      );
+    // eslint-disable-next-line no-control-regex
+    else if (message.length > SMS_UNICODE_LIMIT && /[^\x00-\x7F]/.test(message))
+      warnings.push(`Unicode SMS truncates at ${SMS_UNICODE_LIMIT} chars`);
   }
   return warnings;
 }
 
-const TEMPLATE_VARS = ['{{customerName}}', '{{balance}}', '{{loyaltyPoints}}', '{{shopName}}'];
+const TEMPLATE_VARS = [
+  '{{customerName}}',
+  '{{balance}}',
+  '{{loyaltyPoints}}',
+  '{{shopName}}',
+  '{{lastPurchaseDate}}',
+  '{{lastPurchaseAmount}}',
+];
 
 export default function CampaignFormPage() {
   const navigate = useNavigate();
@@ -41,8 +60,13 @@ export default function CampaignFormPage() {
   });
   const [previewCount, setPreviewCount] = useState<number | null>(null);
   const [previewMsg, setPreviewMsg] = useState('');
+  const [previewFallbacks, setPreviewFallbacks] = useState<string[]>([]);
 
-  const { data: segData, isLoading: segmentsLoading } = useQuery({ queryKey: ['crm-segments'], queryFn: () => crmApi.listSegments(), enabled: hasPermission(PERMISSIONS.CRM_SEGMENT_VIEW) });
+  const { data: segData, isLoading: segmentsLoading } = useQuery({
+    queryKey: ['crm-segments'],
+    queryFn: () => crmApi.listSegments(),
+    enabled: hasPermission(PERMISSIONS.CRM_SEGMENT_VIEW),
+  });
   const segments: Segment[] = (segData as { content?: Segment[] })?.content ?? [];
 
   const warnings = charWarnings(form.channel, form.messageTemplate);
@@ -55,22 +79,25 @@ export default function CampaignFormPage() {
         channel: form.channel,
       }),
     onSuccess: (res) => {
-      const d = (res as Record<string, unknown>);
-      setPreviewCount(d?.recipientCount as number ?? 0);
-      setPreviewMsg(d?.sampleMessage as string ?? '');
+      const d = res as Record<string, unknown>;
+      setPreviewCount((d?.recipientCount as number) ?? 0);
+      setPreviewMsg((d?.sampleMessage as string) ?? '');
+      setPreviewFallbacks((d?.fallbackWarnings as string[]) ?? []);
     },
   });
 
   const createMut = useMutation({
     mutationFn: async () => {
-      const created = await crmApi.createCampaign({
+      const created = (await crmApi.createCampaign({
         name: form.name,
         channel: form.channel,
         messageTemplate: form.messageTemplate,
         segmentId: form.segmentId ? Number(form.segmentId) : undefined,
-      }) as { id?: number };
+      })) as { id?: number };
       if (form.scheduledAt && created?.id) {
-        await crmApi.scheduleCampaign(created.id, { scheduledAt: new Date(form.scheduledAt).toISOString() });
+        await crmApi.scheduleCampaign(created.id, {
+          scheduledAt: new Date(form.scheduledAt).toISOString(),
+        });
       }
       return created;
     },
@@ -84,9 +111,10 @@ export default function CampaignFormPage() {
   useEffect(() => {
     setPreviewCount(null);
     setPreviewMsg('');
+    setPreviewFallbacks([]);
   }, [form.segmentId, form.messageTemplate]);
 
-  const f = <K extends keyof typeof form>(key: K, val: typeof form[K]) =>
+  const f = <K extends keyof typeof form>(key: K, val: (typeof form)[K]) =>
     setForm((prev) => ({ ...prev, [key]: val }));
 
   const canSubmit = form.name && form.channel && form.messageTemplate && form.segmentId;
@@ -94,7 +122,12 @@ export default function CampaignFormPage() {
   if (segmentsLoading) {
     return (
       <div>
-        <ERPPageHeader variant="list" title="New Campaign" subtitle="Configure and launch a customer campaign" />
+        <ERPPageHeader
+          variant="detail"
+          title="New Campaign"
+          subtitle="Configure and launch a customer campaign"
+          backTo="/crm/campaigns"
+        />
         <ERPFormSkeleton />
       </div>
     );
@@ -103,29 +136,26 @@ export default function CampaignFormPage() {
   return (
     <div>
       <ERPPageHeader
-        variant="list"
+        variant="detail"
         title="New Campaign"
         subtitle="Configure and launch a customer campaign"
-        actions={
-          <div className="flex gap-2">
-            <Button variant="ghost" onClick={() => navigate('/crm/campaigns')}>Cancel</Button>
-            <Button
-              onClick={() => createMut.mutate()}
-              disabled={createMut.isPending || !canSubmit}
-            >
-              {createMut.isPending ? 'Creating…' : 'Create Campaign'}
-            </Button>
-          </div>
-        }
+        backTo="/crm/campaigns"
       />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Main form */}
         <div className="lg:col-span-2 space-y-5">
           <div className="bg-surface-card rounded-xl border border-default p-5 space-y-4">
-            <h2 className="text-sm font-semibold text-secondary uppercase tracking-wide">Campaign Details</h2>
+            <h2 className="text-sm font-semibold text-secondary uppercase tracking-wide">
+              Campaign Details
+            </h2>
 
-            <Input label="Campaign Name" value={form.name} onChange={(e) => f('name', e.target.value)} placeholder="e.g. Diwali Sale 2025" />
+            <Input
+              label="Campaign Name"
+              value={form.name}
+              onChange={(e) => f('name', e.target.value)}
+              placeholder="e.g. Diwali Sale 2025"
+            />
 
             <div>
               <label className="block text-xs font-medium text-secondary mb-1.5">Channel</label>
@@ -147,7 +177,9 @@ export default function CampaignFormPage() {
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-secondary mb-1.5">Target Segment</label>
+              <label className="block text-xs font-medium text-secondary mb-1.5">
+                Target Segment
+              </label>
               <select
                 value={form.segmentId}
                 onChange={(e) => f('segmentId', e.target.value)}
@@ -155,13 +187,17 @@ export default function CampaignFormPage() {
               >
                 <option value="">— Select a segment —</option>
                 {segments.map((s) => (
-                  <option key={s.id} value={s.id}>{s.name} ({s.code})</option>
+                  <option key={s.id} value={s.id}>
+                    {s.name} ({s.code})
+                  </option>
                 ))}
               </select>
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-secondary mb-1.5">Message Template</label>
+              <label className="block text-xs font-medium text-secondary mb-1.5">
+                Message Template
+              </label>
               <div className="mb-1.5 flex gap-1.5 flex-wrap">
                 {TEMPLATE_VARS.map((v) => (
                   <button
@@ -181,19 +217,22 @@ export default function CampaignFormPage() {
                 className="w-full rounded-lg border border-default bg-surface-card text-primary text-sm px-3 py-2 resize-y"
               />
               <div className="flex items-center justify-between mt-1">
-                <span className="text-xs text-secondary">{form.messageTemplate.length} characters</span>
+                <span className="text-xs text-secondary">
+                  {form.messageTemplate.length} characters
+                </span>
                 {warnings.map((w) => (
-                  <span key={w} className="text-xs text-warning font-medium">{w}</span>
+                  <span key={w} className="text-xs text-warning font-medium">
+                    {w}
+                  </span>
                 ))}
               </div>
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-secondary mb-1.5">Schedule (optional — leave blank to send manually)</label>
-              <Input
-                type="datetime-local"
+              <DateTimePicker
+                label="Schedule (optional — leave blank to send manually)"
                 value={form.scheduledAt}
-                onChange={(e) => f('scheduledAt', e.target.value)}
+                onChange={(v) => f('scheduledAt', v)}
               />
             </div>
           </div>
@@ -202,7 +241,9 @@ export default function CampaignFormPage() {
         {/* Preview panel */}
         <div className="space-y-4">
           <div className="bg-surface-card rounded-xl border border-default p-5">
-            <h2 className="text-sm font-semibold text-secondary uppercase tracking-wide mb-3">Preview</h2>
+            <h2 className="text-sm font-semibold text-secondary uppercase tracking-wide mb-3">
+              Preview
+            </h2>
             <Button
               variant="secondary"
               onClick={() => previewMut.mutate()}
@@ -220,7 +261,20 @@ export default function CampaignFormPage() {
                 {previewMsg && (
                   <div>
                     <p className="text-xs font-medium text-secondary mb-1.5">Sample message</p>
-                    <div className="rounded-lg bg-surface-raised p-3 text-sm text-primary whitespace-pre-wrap">{previewMsg}</div>
+                    <div className="rounded-lg bg-surface-raised p-3 text-sm text-primary whitespace-pre-wrap">
+                      {previewMsg}
+                    </div>
+                  </div>
+                )}
+                {previewFallbacks.length > 0 && (
+                  <div className="rounded-lg bg-warning/10 border border-warning/30 p-3">
+                    <p className="text-xs font-semibold text-warning mb-1">
+                      Missing data for this recipient
+                    </p>
+                    <p className="text-xs text-secondary">
+                      {previewFallbacks.join(', ')} will show a placeholder value for recipients
+                      without this data.
+                    </p>
                   </div>
                 )}
               </div>
@@ -228,13 +282,17 @@ export default function CampaignFormPage() {
           </div>
 
           <div className="bg-surface-card rounded-xl border border-default p-4">
-            <p className="text-xs font-semibold text-secondary uppercase tracking-wide mb-2">Template Variables</p>
+            <p className="text-xs font-semibold text-secondary uppercase tracking-wide mb-2">
+              Template Variables
+            </p>
             <ul className="space-y-1">
               {[
                 ['{{customerName}}', 'Customer display name'],
                 ['{{balance}}', 'Account balance'],
                 ['{{loyaltyPoints}}', 'Loyalty points balance'],
                 ['{{shopName}}', 'Your shop name'],
+                ['{{lastPurchaseDate}}', "Customer's last purchase date"],
+                ['{{lastPurchaseAmount}}', "Customer's last purchase amount"],
               ].map(([v, d]) => (
                 <li key={v} className="flex items-start gap-2 text-xs">
                   <code className="font-mono text-brand">{v}</code>
@@ -245,6 +303,15 @@ export default function CampaignFormPage() {
           </div>
         </div>
       </div>
+
+      <ERPStickyFooter>
+        <Button variant="secondary" onClick={() => navigate('/crm/campaigns')}>
+          Cancel
+        </Button>
+        <Button onClick={() => createMut.mutate()} disabled={createMut.isPending || !canSubmit}>
+          {createMut.isPending ? 'Creating…' : 'Create Campaign'}
+        </Button>
+      </ERPStickyFooter>
     </div>
   );
 }
