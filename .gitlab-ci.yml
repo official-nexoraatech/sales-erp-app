@@ -98,5 +98,4 @@ deploy:
       echo 'Cleaning unused images' &&
       docker image prune -f
       "
-
-      
+  
