@@ -20,6 +20,11 @@ export async function loadAuthConfig() {
       process.env['FORGOT_PASSWORD_RATE_LIMIT_WINDOW_MS'] ?? '900000',
       10
     ),
+    lookupTenantsRateLimitMax: parseInt(process.env['LOOKUP_TENANTS_RATE_LIMIT_MAX'] ?? '20', 10),
+    lookupTenantsRateLimitWindowMs: parseInt(
+      process.env['LOOKUP_TENANTS_RATE_LIMIT_WINDOW_MS'] ?? '300000',
+      10
+    ),
     accountLockoutAttempts: parseInt(process.env['ACCOUNT_LOCKOUT_ATTEMPTS'] ?? '5', 10),
     accountLockoutDurationMs: parseInt(process.env['ACCOUNT_LOCKOUT_DURATION_MS'] ?? '900000', 10),
     ipLoginFailThreshold: parseInt(process.env['IP_LOGIN_FAIL_THRESHOLD'] ?? '5', 10),

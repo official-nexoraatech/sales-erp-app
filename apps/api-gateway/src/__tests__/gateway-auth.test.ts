@@ -46,7 +46,9 @@ describe('gatewayAuthPreHandler', () => {
   it('returns 401 when Authorization header is missing on a non-exempt path', async () => {
     const response = await app.inject({ method: 'GET', url: '/api/sales/api/v2/invoices' });
     expect(response.statusCode).toBe(401);
-    expect(response.json()).toEqual({ error: { code: 'UNAUTHENTICATED', message: expect.any(String) } });
+    expect(response.json()).toEqual({
+      error: { code: 'UNAUTHENTICATED', message: expect.any(String) },
+    });
   });
 
   it('returns 401 for a malformed Authorization header (no Bearer prefix)', async () => {
@@ -82,7 +84,7 @@ describe('gatewayAuthPreHandler', () => {
     expect(response.statusCode).toBe(401);
   });
 
-  it('injects x-tenant-id derived from a valid token and proceeds', async () => {
+  it('allows a request through with a valid token and does not inject an x-tenant-id header', async () => {
     const token = await signToken({ sub: '42', tenantId: 7 });
     const response = await app.inject({
       method: 'GET',
@@ -90,6 +92,8 @@ describe('gatewayAuthPreHandler', () => {
       headers: { authorization: `Bearer ${token}` },
     });
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual({ tenantHeader: '7' });
+    // Deliberately not propagated — see gateway-auth.ts's header comment. Downstream
+    // services re-derive tenantId from the JWT itself, not from a gateway-set header.
+    expect(response.json()).toEqual({ tenantHeader: undefined });
   });
 });

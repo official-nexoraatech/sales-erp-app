@@ -4,7 +4,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import toast from 'react-hot-toast';
-import { AlertCircle, X, ArrowLeft, CheckCircle2 } from 'lucide-react';
+import { AlertCircle, X, ArrowLeft, CheckCircle2, Building2 } from 'lucide-react';
 import { authApi, mfaApi } from '../../api/endpoints.js';
 import { ApiError } from '../../api/client.js';
 import { useAuthStore } from '../../store/auth.store.js';
@@ -14,13 +14,20 @@ import PasswordInput from '../../components/ui/PasswordInput.js';
 import Button from '../../components/ui/Button.js';
 import Checkbox from '../../components/ui/Checkbox.js';
 import AuthLayout from '../../components/auth/AuthLayout.js';
+import BrandMark from '../../components/marketing/BrandMark.js';
 
 const REMEMBER_KEY = 'erp_remembered_login';
 
-function readRememberedLogin(): { tenantId: number; email: string } | null {
+interface RememberedLogin {
+  tenantId: number;
+  email: string;
+  orgName?: string;
+}
+
+function readRememberedLogin(): RememberedLogin | null {
   try {
     const raw = localStorage.getItem(REMEMBER_KEY);
-    return raw ? (JSON.parse(raw) as { tenantId: number; email: string }) : null;
+    return raw ? (JSON.parse(raw) as RememberedLogin) : null;
   } catch {
     return null;
   }
@@ -60,12 +67,20 @@ function FormAlert({
   );
 }
 
-const schema = z.object({
+const emailSchema = z.object({ email: z.string().email('Invalid email') });
+type EmailFormData = z.infer<typeof emailSchema>;
+
+const passwordSchema = z.object({ password: z.string().min(1, 'Required') });
+type PasswordFormData = z.infer<typeof passwordSchema>;
+
+// Manual fallback — the original combined form, kept as an escape hatch for anyone the
+// org-lookup step doesn't work for (lookup outage, an account the lookup can't see yet).
+const manualSchema = z.object({
   tenantId: z.coerce.number().int().positive('Required'),
   email: z.string().email('Invalid email'),
   password: z.string().min(1, 'Required'),
 });
-type FormData = z.infer<typeof schema>;
+type ManualFormData = z.infer<typeof manualSchema>;
 
 const mfaSchema = z.object({ code: z.string().min(6, 'Enter the 6-digit code or a backup code') });
 type MfaFormData = z.infer<typeof mfaSchema>;
@@ -75,6 +90,8 @@ const forgotSchema = z.object({
   email: z.string().email('Invalid email'),
 });
 type ForgotFormData = z.infer<typeof forgotSchema>;
+
+type TenantOption = { tenantId: number; name: string; slug: string };
 
 function loginErrorMessage(err: unknown): { message: string; tone: 'danger' | 'warning' } {
   if (err instanceof ApiError) {
@@ -92,9 +109,13 @@ function loginErrorMessage(err: unknown): { message: string; tone: 'danger' | 'w
 export default function LoginPage() {
   const navigate = useNavigate();
   const { setTokens, setUser } = useAuthStore();
+  const remembered = readRememberedLogin();
+
   const [loading, setLoading] = useState(false);
   const [mfaToken, setMfaToken] = useState<string | null>(null);
-  const [view, setView] = useState<'login' | 'forgot' | 'forgot-sent'>('login');
+  const [view, setView] = useState<
+    'email' | 'org-select' | 'password' | 'manual' | 'forgot' | 'forgot-sent'
+  >(remembered ? 'password' : 'email');
   const [formError, setFormError] = useState<{
     message: string;
     tone: 'danger' | 'warning';
@@ -102,23 +123,30 @@ export default function LoginPage() {
   const [mfaError, setMfaError] = useState<string | null>(null);
   const [forgotError, setForgotError] = useState<string | null>(null);
   const [capsLockOn, setCapsLockOn] = useState(false);
-  const [rememberMe, setRememberMe] = useState(() => readRememberedLogin() !== null);
+  const [rememberMe, setRememberMe] = useState(remembered !== null);
 
-  const remembered = readRememberedLogin();
-  const {
-    register,
-    handleSubmit,
-    formState: { errors },
-    getValues,
-  } = useForm<FormData>({
-    resolver: zodResolver(schema),
-    defaultValues: { tenantId: remembered?.tenantId ?? 1, email: remembered?.email ?? '' },
+  const [orgOptions, setOrgOptions] = useState<TenantOption[]>([]);
+  const [resolvedEmail, setResolvedEmail] = useState<string | null>(remembered?.email ?? null);
+  const [resolvedTenantId, setResolvedTenantId] = useState<number | null>(
+    remembered?.tenantId ?? null
+  );
+  const [resolvedOrgName, setResolvedOrgName] = useState<string | null>(
+    remembered?.orgName ?? null
+  );
+
+  const emailForm = useForm<EmailFormData>({
+    resolver: zodResolver(emailSchema),
+    defaultValues: { email: remembered?.email ?? '' },
   });
-
+  const passwordForm = useForm<PasswordFormData>({ resolver: zodResolver(passwordSchema) });
+  const manualForm = useForm<ManualFormData>({
+    resolver: zodResolver(manualSchema),
+    defaultValues: { tenantId: 1, email: '' },
+  });
   const mfaForm = useForm<MfaFormData>({ resolver: zodResolver(mfaSchema) });
   const forgotForm = useForm<ForgotFormData>({
     resolver: zodResolver(forgotSchema),
-    defaultValues: { tenantId: remembered?.tenantId ?? 1, email: remembered?.email ?? '' },
+    defaultValues: { tenantId: 1, email: '' },
   });
 
   function handlePasswordKeyEvent(e: KeyboardEvent<HTMLInputElement>) {
@@ -145,21 +173,14 @@ export default function LoginPage() {
     navigate(firstPath ?? '/no-access');
   }
 
-  async function onSubmit(data: FormData) {
+  async function performLogin(email: string, tenantId: number, password: string, orgName?: string) {
     setLoading(true);
     setFormError(null);
     try {
-      const res = await authApi.login({
-        email: data.email,
-        password: data.password,
-        tenantId: data.tenantId,
-      });
+      const res = await authApi.login({ email, password, tenantId });
 
       if (rememberMe) {
-        localStorage.setItem(
-          REMEMBER_KEY,
-          JSON.stringify({ tenantId: data.tenantId, email: data.email })
-        );
+        localStorage.setItem(REMEMBER_KEY, JSON.stringify({ tenantId, email, orgName }));
       } else {
         localStorage.removeItem(REMEMBER_KEY);
       }
@@ -176,6 +197,64 @@ export default function LoginPage() {
     } finally {
       setLoading(false);
     }
+  }
+
+  async function onEmailSubmit(data: EmailFormData) {
+    setLoading(true);
+    setFormError(null);
+    try {
+      const res = await authApi.lookupTenants({ email: data.email });
+      if (res.tenants.length === 0) {
+        setFormError({
+          message: "We couldn't find a workspace for that email.",
+          tone: 'danger',
+        });
+        return;
+      }
+      setResolvedEmail(data.email);
+      if (res.tenants.length === 1) {
+        setResolvedTenantId(res.tenants[0]!.tenantId);
+        setResolvedOrgName(res.tenants[0]!.name);
+        setView('password');
+      } else {
+        setOrgOptions(res.tenants);
+        setView('org-select');
+      }
+    } catch (err: unknown) {
+      setFormError(loginErrorMessage(err));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function onSelectOrg(tenant: TenantOption) {
+    setResolvedTenantId(tenant.tenantId);
+    setResolvedOrgName(tenant.name);
+    setFormError(null);
+    setView('password');
+  }
+
+  async function onPasswordSubmit(data: PasswordFormData) {
+    if (resolvedTenantId === null || !resolvedEmail) return;
+    await performLogin(
+      resolvedEmail,
+      resolvedTenantId,
+      data.password,
+      resolvedOrgName ?? undefined
+    );
+  }
+
+  async function onManualSubmit(data: ManualFormData) {
+    await performLogin(data.email, data.tenantId, data.password);
+  }
+
+  function resetToEmailStep() {
+    setResolvedEmail(null);
+    setResolvedTenantId(null);
+    setResolvedOrgName(null);
+    setFormError(null);
+    passwordForm.reset();
+    setView('email');
   }
 
   async function onMfaSubmit(data: MfaFormData) {
@@ -205,6 +284,13 @@ export default function LoginPage() {
     } finally {
       setLoading(false);
     }
+  }
+
+  function goToForgot(defaults: { tenantId: number; email: string }) {
+    setForgotError(null);
+    forgotForm.setValue('email', defaults.email);
+    forgotForm.setValue('tenantId', defaults.tenantId);
+    setView('forgot');
   }
 
   if (mfaToken) {
@@ -257,7 +343,7 @@ export default function LoginPage() {
           <Button
             variant="secondary"
             className="w-full justify-center"
-            onClick={() => setView('login')}
+            onClick={() => setView(resolvedTenantId !== null ? 'password' : 'email')}
           >
             <ArrowLeft className="h-4 w-4" /> Back to login
           </Button>
@@ -272,7 +358,7 @@ export default function LoginPage() {
         <div className="mb-8">
           <button
             type="button"
-            onClick={() => setView('login')}
+            onClick={() => setView(resolvedTenantId !== null ? 'password' : 'email')}
             className="inline-flex items-center gap-1 text-sm text-secondary hover:text-primary mb-4"
           >
             <ArrowLeft className="h-4 w-4" /> Back to login
@@ -310,20 +396,202 @@ export default function LoginPage() {
     );
   }
 
+  if (view === 'org-select') {
+    return (
+      <AuthLayout>
+        <div className="mb-8">
+          <button
+            type="button"
+            onClick={() => setView('email')}
+            className="inline-flex items-center gap-1 text-sm text-secondary hover:text-primary mb-4"
+          >
+            <ArrowLeft className="h-4 w-4" /> Back
+          </button>
+          <h1 className="text-2xl font-bold text-primary">Choose a workspace</h1>
+          <p className="text-sm text-secondary mt-1">
+            {resolvedEmail} has access to more than one workspace.
+          </p>
+        </div>
+
+        <div className="space-y-2">
+          {orgOptions.map((tenant) => (
+            <button
+              key={tenant.tenantId}
+              type="button"
+              onClick={() => onSelectOrg(tenant)}
+              className="flex w-full items-center gap-3 rounded-lg border border-default px-3 py-2.5 text-left hover:bg-surface-hover"
+            >
+              <Building2 className="h-4 w-4 shrink-0 text-secondary" />
+              <span className="flex-1 text-sm font-medium text-primary">{tenant.name}</span>
+            </button>
+          ))}
+        </div>
+      </AuthLayout>
+    );
+  }
+
+  if (view === 'manual') {
+    return (
+      <AuthLayout>
+        <div className="mb-8">
+          <button
+            type="button"
+            onClick={() => setView('email')}
+            className="inline-flex items-center gap-1 text-sm text-secondary hover:text-primary mb-4"
+          >
+            <ArrowLeft className="h-4 w-4" /> Back
+          </button>
+          <h1 className="text-2xl font-bold text-primary">Sign in with tenant ID</h1>
+          <p className="text-sm text-secondary mt-1">For workspaces the lookup can't find yet</p>
+        </div>
+
+        <form onSubmit={manualForm.handleSubmit(onManualSubmit)} className="space-y-4">
+          {formError && (
+            <FormAlert
+              message={formError.message}
+              tone={formError.tone}
+              onDismiss={() => setFormError(null)}
+            />
+          )}
+          <Input
+            label="Tenant ID"
+            type="number"
+            {...manualForm.register('tenantId')}
+            error={manualForm.formState.errors.tenantId?.message}
+          />
+          <Input
+            label="Email"
+            type="email"
+            placeholder="you@example.com"
+            autoComplete="email"
+            autoFocus
+            {...manualForm.register('email')}
+            error={manualForm.formState.errors.email?.message}
+          />
+          <PasswordInput
+            label="Password"
+            placeholder="••••••••"
+            autoComplete="current-password"
+            {...manualForm.register('password')}
+            error={manualForm.formState.errors.password?.message}
+          />
+          <Checkbox
+            label="Remember me on this device"
+            checked={rememberMe}
+            onChange={(e) => setRememberMe(e.target.checked)}
+          />
+          <Button type="submit" className="w-full justify-center" loading={loading} size="lg">
+            Sign In
+          </Button>
+          <button
+            type="button"
+            onClick={() =>
+              goToForgot({
+                tenantId: manualForm.getValues('tenantId') || 1,
+                email: manualForm.getValues('email'),
+              })
+            }
+            className="w-full text-sm text-brand hover:underline"
+          >
+            Forgot password?
+          </button>
+        </form>
+      </AuthLayout>
+    );
+  }
+
+  if (view === 'password') {
+    return (
+      <AuthLayout>
+        <div className="flex justify-center mb-8 lg:hidden">
+          <BrandMark />
+        </div>
+        <div className="mb-8">
+          <h1 className="font-display font-semibold text-2xl text-primary hidden lg:block">
+            Welcome back
+          </h1>
+          <p className="text-sm text-secondary mt-1">
+            Signing in as <span className="font-medium text-primary">{resolvedEmail}</span>
+            {resolvedOrgName ? (
+              <>
+                {' '}
+                to <span className="font-medium text-primary">{resolvedOrgName}</span>
+              </>
+            ) : null}
+            {' · '}
+            <button type="button" onClick={resetToEmailStep} className="text-brand hover:underline">
+              Not you?
+            </button>
+          </p>
+        </div>
+
+        <form onSubmit={passwordForm.handleSubmit(onPasswordSubmit)} className="space-y-4">
+          {formError && (
+            <FormAlert
+              message={formError.message}
+              tone={formError.tone}
+              onDismiss={() => setFormError(null)}
+            />
+          )}
+          <div>
+            <div className="flex items-center justify-between">
+              <label htmlFor="password" className="text-sm font-medium text-primary">
+                Password
+              </label>
+              <button
+                type="button"
+                onClick={() =>
+                  goToForgot({ tenantId: resolvedTenantId ?? 1, email: resolvedEmail ?? '' })
+                }
+                className="text-sm text-brand hover:underline"
+              >
+                Forgot password?
+              </button>
+            </div>
+            <PasswordInput
+              id="password"
+              placeholder="••••••••"
+              autoComplete="current-password"
+              wrapperClassName="mt-1"
+              autoFocus
+              onKeyUp={handlePasswordKeyEvent}
+              onKeyDown={handlePasswordKeyEvent}
+              {...passwordForm.register('password')}
+              error={passwordForm.formState.errors.password?.message}
+            />
+            {capsLockOn && (
+              <p className="flex items-center gap-1 text-xs text-warning mt-1">
+                <AlertCircle className="h-3.5 w-3.5" /> Caps Lock is on
+              </p>
+            )}
+          </div>
+
+          <Checkbox
+            label="Remember me on this device"
+            checked={rememberMe}
+            onChange={(e) => setRememberMe(e.target.checked)}
+          />
+
+          <Button type="submit" className="w-full justify-center" loading={loading} size="lg">
+            Sign In
+          </Button>
+        </form>
+      </AuthLayout>
+    );
+  }
+
+  // Default: 'email' — first step of the org-lookup flow
   return (
     <AuthLayout>
-      <div className="text-center mb-8 lg:hidden">
-        <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-brand text-white text-xl font-bold mb-3">
-          N
-        </div>
-        <h1 className="text-2xl font-bold text-primary">NEXORAA ERP</h1>
+      <div className="flex justify-center mb-8 lg:hidden">
+        <BrandMark />
       </div>
       <div className="mb-8 hidden lg:block">
-        <h1 className="text-2xl font-bold text-primary">Welcome back</h1>
+        <h1 className="font-display font-semibold text-2xl text-primary">Welcome back</h1>
         <p className="text-sm text-secondary mt-1">Sign in to your account</p>
       </div>
 
-      <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+      <form onSubmit={emailForm.handleSubmit(onEmailSubmit)} className="space-y-4">
         {formError && (
           <FormAlert
             message={formError.message}
@@ -332,64 +600,39 @@ export default function LoginPage() {
           />
         )}
         <Input
-          label="Tenant ID"
-          type="number"
-          {...register('tenantId')}
-          error={errors.tenantId?.message}
-        />
-        <Input
           label="Email"
           type="email"
           placeholder="you@example.com"
           autoComplete="email"
           autoFocus
-          {...register('email')}
-          error={errors.email?.message}
-        />
-        <div>
-          <div className="flex items-center justify-between">
-            <label htmlFor="password" className="text-sm font-medium text-primary">
-              Password
-            </label>
-            <button
-              type="button"
-              onClick={() => {
-                setForgotError(null);
-                forgotForm.setValue('email', getValues('email'));
-                forgotForm.setValue('tenantId', getValues('tenantId'));
-                setView('forgot');
-              }}
-              className="text-sm text-brand hover:underline"
-            >
-              Forgot password?
-            </button>
-          </div>
-          <PasswordInput
-            id="password"
-            placeholder="••••••••"
-            autoComplete="current-password"
-            wrapperClassName="mt-1"
-            onKeyUp={handlePasswordKeyEvent}
-            onKeyDown={handlePasswordKeyEvent}
-            {...register('password')}
-            error={errors.password?.message}
-          />
-          {capsLockOn && (
-            <p className="flex items-center gap-1 text-xs text-warning mt-1">
-              <AlertCircle className="h-3.5 w-3.5" /> Caps Lock is on
-            </p>
-          )}
-        </div>
-
-        <Checkbox
-          label="Remember me on this device"
-          checked={rememberMe}
-          onChange={(e) => setRememberMe(e.target.checked)}
+          {...emailForm.register('email')}
+          error={emailForm.formState.errors.email?.message}
         />
 
         <Button type="submit" className="w-full justify-center" loading={loading} size="lg">
-          Sign In
+          Continue
         </Button>
+
+        <p className="text-center text-sm text-secondary">
+          <button
+            type="button"
+            onClick={() => setView('manual')}
+            className="text-brand hover:underline"
+          >
+            Sign in with a tenant ID instead
+          </button>
+        </p>
+
+        <p className="text-center text-sm text-secondary">
+          New to NEXORAA ERP?{' '}
+          <button
+            type="button"
+            onClick={() => navigate('/signup')}
+            className="text-brand hover:underline"
+          >
+            Create a workspace
+          </button>
+        </p>
       </form>
     </AuthLayout>
   );

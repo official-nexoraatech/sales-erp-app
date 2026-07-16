@@ -29,6 +29,8 @@ vi.mock('@erp/db', () => ({
   userRoles: { __name: 'userRoles' },
   userBranches: { __name: 'userBranches' },
   rolePermissions: { __name: 'rolePermissions' },
+  tenants: { __name: 'tenants' },
+  branches: { __name: 'branches' },
 }));
 
 vi.mock('drizzle-orm', () => ({
@@ -37,6 +39,7 @@ vi.mock('drizzle-orm', () => ({
   isNull: vi.fn(() => '__isNull__'),
   ne: vi.fn(() => '__ne__'),
   inArray: vi.fn(() => '__inArray__'),
+  sql: vi.fn(() => '__count__'),
 }));
 
 // See security.test.ts for why: vitest can resolve '@erp/types' to a stale compiled

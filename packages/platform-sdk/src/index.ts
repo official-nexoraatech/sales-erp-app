@@ -105,6 +105,8 @@ export {
   subscribeToTenantStatusInvalidations,
 } from './tenantStatus.js';
 
+export { assertUnderUserLimit, assertUnderBranchLimit } from './entitlements.js';
+
 export {
   DuplicateOperationError,
   isUniqueConstraintViolation,

@@ -29,6 +29,7 @@ import { loginRoute } from './routes/login.js';
 import { refreshRoute } from './routes/refresh.js';
 import { logoutRoute } from './routes/logout.js';
 import { forgotPasswordRoute } from './routes/forgot-password.js';
+import { lookupTenantsRoute } from './routes/lookup-tenants.js';
 import { resetPasswordRoute } from './routes/reset-password.js';
 import { rolesRoutes } from './routes/roles.js';
 import { userRolesRoutes } from './routes/user-roles.js';
@@ -155,6 +156,7 @@ async function bootstrap(): Promise<void> {
   const registerAuthRoutes = async (sub: FastifyInstance): Promise<void> => {
     // Public routes — no JWT required
     await loginRoute(sub, db, config, redis);
+    await lookupTenantsRoute(sub, db, config);
     await refreshRoute(sub, db, config);
     await logoutRoute(sub, db);
     await forgotPasswordRoute(sub, db, config);

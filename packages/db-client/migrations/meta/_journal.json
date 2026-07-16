@@ -442,6 +442,48 @@
       "when": 1787949335804,
       "tag": "0062_cp9_tenant_notification_rate_limit",
       "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "7",
+      "when": 1788035735804,
+      "tag": "0063_webhook_generalization",
+      "breakpoints": true
+    },
+    {
+      "idx": 64,
+      "version": "7",
+      "when": 1788122135804,
+      "tag": "0064_search_suggest_pg_trgm",
+      "breakpoints": true
+    },
+    {
+      "idx": 65,
+      "version": "7",
+      "when": 1788208535804,
+      "tag": "0065_faq_items",
+      "breakpoints": true
+    },
+    {
+      "idx": 66,
+      "version": "7",
+      "when": 1788294935804,
+      "tag": "0066_inventory_manager_warehouse_price_permission_backfill",
+      "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "7",
+      "when": 1788381335804,
+      "tag": "0067_gst_ledger_gst_rate_backfill",
+      "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "7",
+      "when": 1788467735804,
+      "tag": "0068_pos_granular_permissions_backfill",
+      "breakpoints": true
     }
   ]
 }

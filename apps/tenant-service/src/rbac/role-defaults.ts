@@ -72,7 +72,15 @@ export const ROLE_DEFAULTS: Record<string, Permission[]> = {
     PERMISSIONS.CUSTOMER_CREATE,
     PERMISSIONS.ITEM_VIEW,
     PERMISSIONS.STOCK_VIEW,
-    PERMISSIONS.POS_MANAGE,
+    // CASHIER gets basic till access + shift open/close, but deliberately NOT
+    // POS_CASH_DRAWER (that's a supervisor-tier report — SALES_MANAGER/ADMIN/OWNER get
+    // it via their broader POS_MANAGE grant, checked via requireAnyPermission alongside
+    // these granular ones). See qa_pos_frontend_module_2026-07-13 for the retail-controls
+    // gap this closes — every POS route used to accept POS_MANAGE only, so any cashier
+    // who could use the till at all could also see the cash-drawer report.
+    PERMISSIONS.POS_ACCESS,
+    PERMISSIONS.POS_OPEN_SHIFT,
+    PERMISSIONS.POS_CLOSE_SHIFT,
     PERMISSIONS.SEARCH_GLOBAL,
   ],
 
@@ -159,6 +167,8 @@ export const ROLE_DEFAULTS: Record<string, Permission[]> = {
     PERMISSIONS.WAREHOUSE_VIEW,
     PERMISSIONS.WAREHOUSE_CREATE,
     PERMISSIONS.WAREHOUSE_UPDATE,
+    PERMISSIONS.WAREHOUSE_MANAGE,
+    PERMISSIONS.PRICE_LIST_VIEW,
     PERMISSIONS.REPORT_VIEW,
     PERMISSIONS.BARCODE_VIEW,
     PERMISSIONS.BARCODE_GENERATE,

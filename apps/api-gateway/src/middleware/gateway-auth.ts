@@ -5,29 +5,46 @@ import { verifyAccessToken } from '@erp/sdk';
 // never reach a backend service. Fine-grained requirePermission() checks stay
 // exclusively in each service (see PG-001 Architecture: gateway has no route-table
 // visibility into per-route permission requirements).
-const EXEMPT_PATHS = new Set(['/health', '/api/auth/auth/login', '/api/auth/auth/refresh']);
+const EXEMPT_PATHS = new Set([
+  '/health',
+  '/api/auth/auth/login',
+  '/api/auth/auth/lookup-tenants',
+  '/api/auth/auth/refresh',
+  '/api/tenant/public/signup',
+  '/api/tenant/public/faqs',
+]);
 
-export async function gatewayAuthPreHandler(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+export async function gatewayAuthPreHandler(
+  request: FastifyRequest,
+  reply: FastifyReply
+): Promise<void> {
   const path = request.url.split('?')[0];
   if (path !== undefined && EXEMPT_PATHS.has(path)) return;
 
   const authHeader = request.headers.authorization;
   const token = authHeader?.startsWith('Bearer ') ? authHeader.slice('Bearer '.length) : undefined;
   if (!token) {
-    void reply.code(401).send({ error: { code: 'UNAUTHENTICATED', message: 'Missing or invalid Authorization header' } });
+    void reply.code(401).send({
+      error: { code: 'UNAUTHENTICATED', message: 'Missing or invalid Authorization header' },
+    });
     return;
   }
 
   try {
-    const auth = await verifyAccessToken(token);
-    // request.headers is the same object as request.raw.headers, so mutating it here
-    // is what @fastify/http-proxy forwards upstream.
-    request.headers['x-tenant-id'] = String(auth.tenantId);
+    // Signature/expiry check only — deliberately not propagating tenantId via a header.
+    // Every downstream service independently re-verifies this same JWT and derives its
+    // own tenantId from it (see PG-001 Architecture note above); a client can reach most
+    // services directly, bypassing this gateway entirely (see PG-010's frontend-bypass
+    // finding), so a service ever trusting an x-tenant-id header instead of its own JWT
+    // verification would be spoofable. This call's only job is to reject bad tokens early.
+    await verifyAccessToken(token);
     const correlationId = (request as unknown as { correlationId?: string }).correlationId;
     if (correlationId) {
       request.headers['x-correlation-id'] = correlationId;
     }
   } catch {
-    void reply.code(401).send({ error: { code: 'UNAUTHENTICATED', message: 'Invalid or expired access token' } });
+    void reply
+      .code(401)
+      .send({ error: { code: 'UNAUTHENTICATED', message: 'Invalid or expired access token' } });
   }
 }

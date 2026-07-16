@@ -12,10 +12,7 @@ export const CreateTenantSchema = z.object({
   plan: z.enum(['STARTER', 'GROWTH', 'ENTERPRISE']).optional().default('STARTER'),
   adminFirstName: z.string().min(1).max(100),
   adminLastName: z.string().min(1).max(100),
-  adminPassword: z
-    .string()
-    .min(12, 'Admin password must be at least 12 characters')
-    .max(128),
+  adminPassword: z.string().min(12, 'Admin password must be at least 12 characters').max(128),
   orgSettings: z
     .object({
       timezone: z.string().optional(),
@@ -23,6 +20,22 @@ export const CreateTenantSchema = z.object({
       country: z.string().optional(),
     })
     .optional(),
+});
+
+// Self-serve public signup — mirrors CreateTenantSchema's field conventions but drops
+// platform-operator-only fields (plan, contactPhone, orgSettings): self-serve always starts
+// on STARTER, chosen server-side, not by the caller.
+export const PublicSignupSchema = z.object({
+  name: z.string().min(2).max(200),
+  slug: z
+    .string()
+    .min(3)
+    .max(100)
+    .regex(/^[a-z0-9-]+$/, 'Slug must be lowercase alphanumeric with hyphens'),
+  contactEmail: z.string().email(),
+  adminFirstName: z.string().min(1).max(100),
+  adminLastName: z.string().min(1).max(100),
+  adminPassword: z.string().min(12, 'Password must be at least 12 characters').max(128),
 });
 
 export const SuspendTenantSchema = z.object({

@@ -45,12 +45,22 @@ vi.mock('@erp/db', () => ({
   quotations: {},
   inventoryLedger: {},
   sagaLog: {},
+  webhookSubscriptions: {
+    id: 'id',
+    tenantId: 'tenant_id',
+    isActive: 'is_active',
+    events: 'events',
+  },
+  webhookDeliveries: {},
+  eventStore: {},
+  eventSnapshots: {},
 }));
 
 vi.mock('drizzle-orm', () => ({
   and: vi.fn((...args) => ({ type: 'and', args })),
   eq: vi.fn((col, val) => ({ type: 'eq', col, val })),
   sql: vi.fn((s) => s),
+  desc: vi.fn((c) => c),
 }));
 
 import { InvoiceService, PriceFloorViolationError } from '../domain/InvoiceService.js';
@@ -65,6 +75,7 @@ function makeTrx(script: unknown[]) {
     'from',
     'where',
     'orderBy',
+    'limit',
     'insert',
     'values',
     'update',
@@ -169,6 +180,10 @@ describe('ES-14 — InvoiceService.create price floor', () => {
       [{ id: 1 }], // insert invoices ... returning
       undefined, // insert invoiceLines
       undefined, // insert invoiceHistory
+      undefined, // insert outboxEvents (INVOICE_CREATED)
+      [], // EventStoreService.append: select current aggregate version — none yet
+      undefined, // EventStoreService.append: insert eventStore row
+      [], // select webhookSubscriptions (enqueueWebhookDeliveries) — none active
     ];
     const db = makeDb(script);
     const svc = new InvoiceService(db as never);
@@ -186,6 +201,10 @@ describe('InvoiceService.create walk-in sale (customerId 0)', () => {
       [{ id: 7 }], // insert invoices ... returning
       undefined, // insert invoiceLines
       undefined, // insert invoiceHistory
+      undefined, // insert outboxEvents (INVOICE_CREATED)
+      [], // EventStoreService.append: select current aggregate version — none yet
+      undefined, // EventStoreService.append: insert eventStore row
+      [], // select webhookSubscriptions (enqueueWebhookDeliveries) — none active
     ];
     const db = makeDb(script);
     const svc = new InvoiceService(db as never);
@@ -230,6 +249,9 @@ describe('ES-14 — InvoiceService.confirm duplicate invoice number + period clo
       undefined, // insert projectionCustomerBalance + onConflict
       [{ displayName: 'Test Customer', gstin: null }], // select customers
       undefined, // insert outboxEvents (INVOICE_CONFIRMED)
+      [], // EventStoreService.append: select current aggregate version — none yet
+      undefined, // EventStoreService.append: insert eventStore row
+      [], // select webhookSubscriptions (enqueueWebhookDeliveries) — none active
       undefined, // insert invoiceHistory
     ];
     const db = makeDb(script);

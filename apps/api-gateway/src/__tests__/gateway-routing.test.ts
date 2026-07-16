@@ -51,7 +51,7 @@ describe('API gateway — routing', () => {
       upstream.get('/health', async () => ({ status: 'healthy' }));
       upstream.all('*', async (request) => {
         upstreamHitCounts[service] += 1;
-        return { service, path: request.url, tenantHeader: request.headers['x-tenant-id'] };
+        return { service, path: request.url };
       });
       const address = await upstream.listen({ port: 0, host: '127.0.0.1' });
       process.env[ENV_VAR_BY_SERVICE[service]!] = address;
@@ -72,19 +72,21 @@ describe('API gateway — routing', () => {
     delete process.env['JWT_PUBLIC_KEY'];
   });
 
-  it.each(Object.keys(ENV_VAR_BY_SERVICE))('proxies /api/%s to the correct upstream', async (service) => {
-    const upstream = upstreams.find((u) => u.service === service)!;
-    const response = await gateway.inject({
-      method: 'GET',
-      url: `${upstream.prefix}/ping`,
-      headers: { authorization: `Bearer ${validToken}` },
-    });
-    expect(response.statusCode).toBe(200);
-    const body = response.json();
-    expect(body.service).toBe(service);
-    expect(body.path).toBe(`${upstream.rewritePrefix}/ping`);
-    expect(body.tenantHeader).toBe('1');
-  });
+  it.each(Object.keys(ENV_VAR_BY_SERVICE))(
+    'proxies /api/%s to the correct upstream',
+    async (service) => {
+      const upstream = upstreams.find((u) => u.service === service)!;
+      const response = await gateway.inject({
+        method: 'GET',
+        url: `${upstream.prefix}/ping`,
+        headers: { authorization: `Bearer ${validToken}` },
+      });
+      expect(response.statusCode).toBe(200);
+      const body = response.json();
+      expect(body.service).toBe(service);
+      expect(body.path).toBe(`${upstream.rewritePrefix}/ping`);
+    }
+  );
 
   it('aggregates all upstream statuses on /health', async () => {
     const response = await gateway.inject({ method: 'GET', url: '/health' });

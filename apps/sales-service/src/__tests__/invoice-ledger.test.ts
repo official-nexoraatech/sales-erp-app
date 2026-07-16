@@ -7,7 +7,17 @@ import { describe, it, expect, vi } from 'vitest';
 vi.mock('ulid', () => ({ ulid: () => 'TEST-ULID-01' }));
 
 vi.mock('@erp/db', () => ({
-  invoices: { id: 'id', tenantId: 'tenant_id', status: 'status', customerId: 'customer_id', grandTotal: 'grand_total', version: 'version', branchId: 'branch_id', invoiceDate: 'invoice_date', warehouseId: 'warehouse_id' },
+  invoices: {
+    id: 'id',
+    tenantId: 'tenant_id',
+    status: 'status',
+    customerId: 'customer_id',
+    grandTotal: 'grand_total',
+    version: 'version',
+    branchId: 'branch_id',
+    invoiceDate: 'invoice_date',
+    warehouseId: 'warehouse_id',
+  },
   invoiceLines: { invoiceId: 'invoice_id', itemId: 'item_id', quantity: 'quantity' },
   invoiceHistory: {},
   customers: {},
@@ -18,12 +28,22 @@ vi.mock('@erp/db', () => ({
   quotations: {},
   inventoryLedger: {},
   sagaLog: {},
+  webhookSubscriptions: {
+    id: 'id',
+    tenantId: 'tenant_id',
+    isActive: 'is_active',
+    events: 'events',
+  },
+  webhookDeliveries: {},
+  eventStore: {},
+  eventSnapshots: {},
 }));
 
 vi.mock('drizzle-orm', () => ({
   and: vi.fn((...args) => ({ type: 'and', args })),
   eq: vi.fn((col, val) => ({ type: 'eq', col, val })),
   sql: vi.fn((s) => s),
+  desc: vi.fn((c) => c),
 }));
 
 import { InvoiceService } from '../domain/InvoiceService.js';
@@ -36,14 +56,30 @@ function makeTrx(script: unknown[], insertedValues: unknown[] = []) {
   let i = 0;
   const next = () => Promise.resolve(script[i++]);
   const chainable: Record<string, unknown> = {};
-  for (const m of ['select', 'from', 'where', 'orderBy', 'insert', 'update', 'set', 'onConflictDoUpdate', 'for']) {
+  for (const m of [
+    'select',
+    'from',
+    'where',
+    'orderBy',
+    'limit',
+    'insert',
+    'update',
+    'set',
+    'onConflictDoUpdate',
+    'for',
+  ]) {
     chainable[m] = vi.fn(() => chainable);
   }
-  chainable['values'] = vi.fn((v: unknown) => { insertedValues.push(v); return chainable; });
+  chainable['values'] = vi.fn((v: unknown) => {
+    insertedValues.push(v);
+    return chainable;
+  });
   chainable['returning'] = vi.fn(() => next());
   chainable['execute'] = vi.fn(() => next());
-  (chainable as { then: unknown })['then'] = (resolve: (v: unknown) => void, reject: (e: unknown) => void) =>
-    next().then(resolve, reject);
+  (chainable as { then: unknown })['then'] = (
+    resolve: (v: unknown) => void,
+    reject: (e: unknown) => void
+  ) => next().then(resolve, reject);
   return chainable;
 }
 
@@ -66,8 +102,24 @@ function makeDb(script: unknown[], insertedValues: unknown[] = []) {
   };
 }
 
-const invoiceRow = { id: 1, tenantId: 1, status: 'DRAFT', customerId: 42, grandTotal: '1180.00', branchId: 1, invoiceDate: new Date(), warehouseId: 7 };
-const lineRow = { id: 100, invoiceId: 1, itemId: 5, variantId: undefined, quantity: '10.000', warehouseId: undefined };
+const invoiceRow = {
+  id: 1,
+  tenantId: 1,
+  status: 'DRAFT',
+  customerId: 42,
+  grandTotal: '1180.00',
+  branchId: 1,
+  invoiceDate: new Date(),
+  warehouseId: 7,
+};
+const lineRow = {
+  id: 100,
+  invoiceId: 1,
+  itemId: 5,
+  variantId: undefined,
+  quantity: '10.000',
+  warehouseId: undefined,
+};
 
 describe('InvoiceService.confirm — ES-03 inventory ledger', () => {
   it('writes one STOCK_OUT inventory_ledger row per invoice line, inside the transaction', async () => {
@@ -85,6 +137,9 @@ describe('InvoiceService.confirm — ES-03 inventory ledger', () => {
       undefined, // insert projectionCustomerBalance + onConflict
       [{ displayName: 'Test Customer', gstin: '27AAAAA0000A1Z5' }], // select customers
       undefined, // insert outboxEvents (INVOICE_CONFIRMED)
+      [], // EventStoreService.append: select current aggregate version — none yet
+      undefined, // EventStoreService.append: insert eventStore row
+      [], // select webhookSubscriptions (enqueueWebhookDeliveries) — none active
       undefined, // insert invoiceHistory
     ];
     const db = makeDb(script);
@@ -112,6 +167,9 @@ describe('InvoiceService.confirm — ES-03 inventory ledger', () => {
       undefined, // insert projectionCustomerBalance + onConflict
       [{ displayName: 'Test Customer', gstin: '27AAAAA0000A1Z5' }], // select customers
       undefined, // insert outboxEvents (INVOICE_CONFIRMED)
+      [], // EventStoreService.append: select current aggregate version — none yet
+      undefined, // EventStoreService.append: insert eventStore row
+      [], // select webhookSubscriptions (enqueueWebhookDeliveries) — none active
       undefined, // insert outboxEvents (COGS_CALCULATED)
       undefined, // insert invoiceHistory
     ];
@@ -123,13 +181,17 @@ describe('InvoiceService.confirm — ES-03 inventory ledger', () => {
 
     const ledgerRow = insertedValues.find(
       (v): v is { movementType: string; cogsPerUnit: string } =>
-        !!v && typeof v === 'object' && (v as { movementType?: string }).movementType === 'STOCK_OUT'
+        !!v &&
+        typeof v === 'object' &&
+        (v as { movementType?: string }).movementType === 'STOCK_OUT'
     );
     expect(ledgerRow?.cogsPerUnit).toBe('50'); // lineQty 10 * waccCost 50 = 500 total / 10 = 50/unit
 
     const cogsEvent = insertedValues.find(
       (v): v is { eventType: string; payload: { cogsTotal: string } } =>
-        !!v && typeof v === 'object' && (v as { eventType?: string }).eventType === 'COGS_CALCULATED'
+        !!v &&
+        typeof v === 'object' &&
+        (v as { eventType?: string }).eventType === 'COGS_CALCULATED'
     );
     expect(cogsEvent?.payload.cogsTotal).toBe('500'); // 10 units * ₹50
   });
@@ -137,7 +199,16 @@ describe('InvoiceService.confirm — ES-03 inventory ledger', () => {
   it('rolls back the whole confirm() when the ledger write fails (atomicity)', async () => {
     let callIndex = 0;
     const trx: Record<string, unknown> = {};
-    for (const m of ['select', 'from', 'where', 'orderBy', 'update', 'set', 'onConflictDoUpdate', 'for']) {
+    for (const m of [
+      'select',
+      'from',
+      'where',
+      'orderBy',
+      'update',
+      'set',
+      'onConflictDoUpdate',
+      'for',
+    ]) {
       trx[m] = vi.fn(() => trx);
     }
     trx['returning'] = vi.fn(() => Promise.resolve([{ id: 5, availableQty: '90.000' }]));
@@ -171,6 +242,8 @@ describe('InvoiceService.confirm — ES-03 inventory ledger', () => {
     };
     const svc = new InvoiceService(db as never);
 
-    await expect(svc.confirm(1, 1, 'INV-0001', 99)).rejects.toThrow('simulated ledger insert failure');
+    await expect(svc.confirm(1, 1, 'INV-0001', 99)).rejects.toThrow(
+      'simulated ledger insert failure'
+    );
   });
 });

@@ -5,6 +5,8 @@ import {
   roles,
   rolePermissions,
   users,
+  userRoles,
+  userBranches,
   featureFlags,
   branches,
   organizationSettings,
@@ -338,16 +340,14 @@ export class TenantProvisioner {
       .where(and(eq(roles.tenantId, tenantId), eq(roles.name, 'OWNER')));
 
     if (ownerRole) {
-      await this.db.execute(
-        `INSERT INTO user_roles (user_id, role_id, tenant_id) VALUES (${user.id}, ${ownerRole.id}, ${tenantId})`
-      );
+      await this.db.insert(userRoles).values({ userId: user.id, roleId: ownerRole.id, tenantId });
     }
 
     // Assign to head office branch
     if (branch) {
-      await this.db.execute(
-        `INSERT INTO user_branches (user_id, branch_id, tenant_id, is_primary) VALUES (${user.id}, ${branch.id}, ${tenantId}, true)`
-      );
+      await this.db
+        .insert(userBranches)
+        .values({ userId: user.id, branchId: branch.id, tenantId, isPrimary: true });
     }
 
     return user.id;

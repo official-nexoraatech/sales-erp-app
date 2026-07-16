@@ -8,6 +8,7 @@ const OWNER = { email: 'owner@qa-e2e.local', password: 'QaE2eOwner@2026', tenant
 
 async function realLogin(page: Page): Promise<void> {
   await page.goto('/login');
+  await page.getByRole('button', { name: 'Sign in with a tenant ID instead' }).click();
   await page.getByLabel('Tenant ID').fill(String(OWNER.tenantId));
   await page.getByLabel('Email').fill(OWNER.email);
   await page.getByLabel('Password', { exact: true }).fill(OWNER.password);
@@ -20,7 +21,7 @@ test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => localStorage.setItem('erp_onboarding_dismissed', 'true'));
 });
 
-test('LIVE — Event Store page loads and correctly shows its (permanently) empty state', async ({
+test("LIVE — Event Store page loads and reflects the Invoice aggregate's event history", async ({
   page,
 }) => {
   test.setTimeout(60_000);
@@ -28,17 +29,17 @@ test('LIVE — Event Store page loads and correctly shows its (permanently) empt
   await page.goto('/admin/distributed/events');
 
   await expect(page.getByRole('heading', { name: 'Event Store' })).toBeVisible({ timeout: 10000 });
-  // event_store has zero write path anywhere in the codebase — EventStoreService.append() has
-  // no callers, and no Kafka consumer relays published outbox_events into it (confirmed via
-  // direct DB query: event_store has 0 rows tenant-wide despite outbox_events having 1000+ real
-  // rows from this session's own CRUD). This is a real architectural gap, not something this
-  // QA pass fixes (would require either instrumenting every domain service or building a new
-  // consumer group) — see qa_distributed_systems_module_2026_07_13.md. This test asserts the
-  // UI correctly reflects that reality (a real empty state, not a crash) rather than pretending
-  // real event data exists.
-  await expect(page.getByText('No events match the current filters')).toBeVisible({
-    timeout: 10000,
-  });
+  // 2026-07-16 fix: EventStoreService.append() is now called from InvoiceService (create/
+  // confirm/cancel) and PaymentService.allocate() — see the Invoice aggregate's applyEvent
+  // switch in packages/platform-sdk/src/event-store.ts. This test intentionally doesn't assert
+  // a specific row count (that depends on how much invoice activity has already happened
+  // against the qa-e2e tenant from other specs in this suite) — it just asserts the page
+  // renders its real, non-crashing state instead of erroring, whichever state that is. A
+  // dedicated invoice-lifecycle spec (not this smoke-test file) is the right place to assert
+  // "create+confirm an invoice → an INVOICE_CREATED/INVOICE_CONFIRMED row appears here".
+  await expect(
+    page.getByText('No events match the current filters').or(page.getByRole('row').first())
+  ).toBeVisible({ timeout: 10000 });
 });
 
 test('LIVE — Dead Letter Queue loads real summary and topic drill-down', async ({ page }) => {

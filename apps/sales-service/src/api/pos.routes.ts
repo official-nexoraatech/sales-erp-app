@@ -14,7 +14,7 @@ import { and, desc, eq, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { PERMISSIONS } from '@erp/types';
 import { authenticate } from '../middleware/authenticate.js';
-import { requirePermission } from '../middleware/authorize.js';
+import { requireAnyPermission } from '../middleware/authorize.js';
 import {
   InvoiceService,
   DuplicateOperationError,
@@ -144,7 +144,7 @@ export async function posRoutes(
 
   // Open POS session
   fastify.post('/pos/sessions/open', {
-    preHandler: requirePermission(PERMISSIONS.POS_MANAGE),
+    preHandler: requireAnyPermission([PERMISSIONS.POS_MANAGE, PERMISSIONS.POS_OPEN_SHIFT]),
     handler: async (req, reply) => {
       const body = OpenSessionSchema.parse(req.body);
       if (!branchInScope(req.auth, body.branchId)) {
@@ -179,7 +179,7 @@ export async function posRoutes(
 
   // Close POS session
   fastify.post('/pos/sessions/:id/close', {
-    preHandler: requirePermission(PERMISSIONS.POS_MANAGE),
+    preHandler: requireAnyPermission([PERMISSIONS.POS_MANAGE, PERMISSIONS.POS_CLOSE_SHIFT]),
     handler: async (req, reply) => {
       const { id } = req.params as { id: string };
       const body = CloseSessionSchema.parse(req.body);
@@ -223,7 +223,7 @@ export async function posRoutes(
   // Active session for the caller — lets the frontend recover "is there an open session"
   // after a page reload, since the only other lookup is by numeric :id.
   fastify.get('/pos/sessions/active', {
-    preHandler: requirePermission(PERMISSIONS.POS_MANAGE),
+    preHandler: requireAnyPermission([PERMISSIONS.POS_MANAGE, PERMISSIONS.POS_ACCESS]),
     handler: async (req, reply) => {
       const ctx = ctxFactory.create({
         tenantId: req.auth.tenantId,
@@ -249,7 +249,7 @@ export async function posRoutes(
 
   // Session summary
   fastify.get('/pos/sessions/:id/summary', {
-    preHandler: requirePermission(PERMISSIONS.POS_MANAGE),
+    preHandler: requireAnyPermission([PERMISSIONS.POS_MANAGE, PERMISSIONS.POS_ACCESS]),
     handler: async (req, reply) => {
       const { id } = req.params as { id: string };
       const ctx = ctxFactory.create({
@@ -271,7 +271,7 @@ export async function posRoutes(
 
   // Fast-path POS sale
   fastify.post('/pos/sales', {
-    preHandler: requirePermission(PERMISSIONS.POS_MANAGE),
+    preHandler: requireAnyPermission([PERMISSIONS.POS_MANAGE, PERMISSIONS.POS_ACCESS]),
     handler: async (req, reply) => {
       const body = POSSaleSchema.parse(req.body);
       if (!branchInScope(req.auth, body.branchId)) {
@@ -512,7 +512,7 @@ export async function posRoutes(
 
   // Quick items for POS (top 20 items by sales)
   fastify.get('/pos/quick-items', {
-    preHandler: requirePermission(PERMISSIONS.POS_MANAGE),
+    preHandler: requireAnyPermission([PERMISSIONS.POS_MANAGE, PERMISSIONS.POS_ACCESS]),
     handler: async (req, reply) => {
       const ctx = ctxFactory.create({
         tenantId: req.auth.tenantId,
@@ -531,7 +531,7 @@ export async function posRoutes(
 
   // Optimized customer search for POS
   fastify.get('/pos/customer-search', {
-    preHandler: requirePermission(PERMISSIONS.POS_MANAGE),
+    preHandler: requireAnyPermission([PERMISSIONS.POS_MANAGE, PERMISSIONS.POS_ACCESS]),
     handler: async (req, reply) => {
       const ctx = ctxFactory.create({
         tenantId: req.auth.tenantId,
@@ -559,7 +559,7 @@ export async function posRoutes(
 
   // Park an in-progress cart (e.g. customer steps away mid-sale) for later resume.
   fastify.post('/pos/held-sales', {
-    preHandler: requirePermission(PERMISSIONS.POS_MANAGE),
+    preHandler: requireAnyPermission([PERMISSIONS.POS_MANAGE, PERMISSIONS.POS_ACCESS]),
     handler: async (req, reply) => {
       const body = z
         .object({
@@ -594,7 +594,7 @@ export async function posRoutes(
 
   // List held sales for the current session (most recent first).
   fastify.get('/pos/held-sales', {
-    preHandler: requirePermission(PERMISSIONS.POS_MANAGE),
+    preHandler: requireAnyPermission([PERMISSIONS.POS_MANAGE, PERMISSIONS.POS_ACCESS]),
     handler: async (req, reply) => {
       const ctx = ctxFactory.create({
         tenantId: req.auth.tenantId,
@@ -614,7 +614,7 @@ export async function posRoutes(
 
   // Resume a held sale — returns the parked cart and removes the hold (one-time use).
   fastify.post<{ Params: { id: string } }>('/pos/held-sales/:id/resume', {
-    preHandler: requirePermission(PERMISSIONS.POS_MANAGE),
+    preHandler: requireAnyPermission([PERMISSIONS.POS_MANAGE, PERMISSIONS.POS_ACCESS]),
     handler: async (req, reply) => {
       const id = parseInt(req.params.id, 10);
       const ctx = ctxFactory.create({
@@ -640,7 +640,7 @@ export async function posRoutes(
 
   // Discard a held sale without resuming it.
   fastify.delete<{ Params: { id: string } }>('/pos/held-sales/:id', {
-    preHandler: requirePermission(PERMISSIONS.POS_MANAGE),
+    preHandler: requireAnyPermission([PERMISSIONS.POS_MANAGE, PERMISSIONS.POS_ACCESS]),
     handler: async (req, reply) => {
       const id = parseInt(req.params.id, 10);
       const ctx = ctxFactory.create({
@@ -660,7 +660,7 @@ export async function posRoutes(
   // already read directly from other sales-service domain code (e.g. CampaignService), so
   // this follows the same established cross-service-read-of-shared-tables pattern.
   fastify.get('/pos/upi-vpa', {
-    preHandler: requirePermission(PERMISSIONS.POS_MANAGE),
+    preHandler: requireAnyPermission([PERMISSIONS.POS_MANAGE, PERMISSIONS.POS_ACCESS]),
     handler: async (req, reply) => {
       const ctx = ctxFactory.create({
         tenantId: req.auth.tenantId,
@@ -687,7 +687,7 @@ export async function posRoutes(
   fastify.post<{ Params: { id: string }; Body: { channel: 'WHATSAPP' | 'EMAIL' } }>(
     '/pos/sales/:id/send-receipt',
     {
-      preHandler: requirePermission(PERMISSIONS.POS_MANAGE),
+      preHandler: requireAnyPermission([PERMISSIONS.POS_MANAGE, PERMISSIONS.POS_ACCESS]),
       handler: async (req, reply) => {
         const invoiceId = parseInt(req.params.id, 10);
         const { channel } = z.object({ channel: z.enum(['WHATSAPP', 'EMAIL']) }).parse(req.body);

@@ -9,6 +9,12 @@ export const authApi = {
       requiresMFA?: boolean;
       mfaToken?: string;
     }>('auth', '/auth/login', data),
+  lookupTenants: (data: { email: string }) =>
+    apiClient.post<{ tenants: Array<{ tenantId: number; name: string; slug: string }> }>(
+      'auth',
+      '/auth/lookup-tenants',
+      data
+    ),
   me: () =>
     apiClient.get<{
       id: number;
@@ -85,6 +91,90 @@ export const ssoConfigApi = {
   get: () => apiClient.get('tenant', '/sso-config'),
   update: (data: Record<string, unknown>) => apiClient.put('tenant', '/sso-config', data),
   remove: () => apiClient.delete('tenant', '/sso-config'),
+};
+
+// ── Public self-serve signup (no auth required — new tenant + first admin user) ───
+export const tenantApi = {
+  publicSignup: (data: {
+    name: string;
+    slug: string;
+    contactEmail: string;
+    adminFirstName: string;
+    adminLastName: string;
+    adminPassword: string;
+  }) =>
+    apiClient.post<{ tenantId: number; adminUserId: number; adminEmail: string }>(
+      'tenant',
+      '/public/signup',
+      data
+    ),
+};
+
+// ── Integrations: outbound webhook subscriptions ───────────────────────────────
+export interface WebhookSubscription {
+  id: number;
+  targetUrl: string;
+  events: string[];
+  isActive: boolean;
+  createdAt: string;
+}
+export const integrationApi = {
+  listWebhooks: () =>
+    apiClient.get<{ content: WebhookSubscription[]; totalElements: number }>(
+      'sales',
+      '/integrations/webhook-subscriptions'
+    ),
+  createWebhook: (data: { targetUrl: string; events: string[]; isActive: boolean }) =>
+    apiClient.post<WebhookSubscription & { secret: string }>(
+      'sales',
+      '/integrations/webhook-subscriptions',
+      data
+    ),
+  updateWebhook: (
+    id: number,
+    data: Partial<{ targetUrl: string; events: string[]; isActive: boolean }>
+  ) =>
+    apiClient.put<WebhookSubscription>('sales', `/integrations/webhook-subscriptions/${id}`, data),
+  deleteWebhook: (id: number) =>
+    apiClient.delete('sales', `/integrations/webhook-subscriptions/${id}`),
+};
+
+// ── FAQ content (public site) ──────────────────────────────────────────────────
+export interface FaqItem {
+  id: number;
+  category: string;
+  question: string;
+  answer: string;
+  sortOrder: number;
+  isPublished: boolean;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
+export const faqApi = {
+  listPublic: () => apiClient.get<{ content: FaqItem[] }>('tenant', '/public/faqs'),
+  listAll: () =>
+    apiClient.get<{ content: FaqItem[]; totalElements: number }>('tenant', '/admin/platform/faqs'),
+  create: (data: {
+    category: string;
+    question: string;
+    answer: string;
+    sortOrder: number;
+    isPublished: boolean;
+  }) => apiClient.post<FaqItem>('tenant', '/admin/platform/faqs', data),
+  update: (
+    id: number,
+    data: Partial<{
+      category: string;
+      question: string;
+      answer: string;
+      sortOrder: number;
+      isPublished: boolean;
+    }> & {
+      version: number;
+    }
+  ) => apiClient.put<FaqItem>('tenant', `/admin/platform/faqs/${id}`, data),
+  delete: (id: number) => apiClient.delete('tenant', `/admin/platform/faqs/${id}`),
 };
 
 // ── Platform Admin: Tenants (cross-tenant, PLATFORM_TENANT_MANAGE only) ────────
@@ -1496,6 +1586,11 @@ export const searchApi = {
     if (params.dateTo) qs.set('dateTo', params.dateTo);
     return apiClient.get<SearchResult>('search', `/search?${qs.toString()}`);
   },
+  suggest: (q: string) =>
+    apiClient.get<{ suggestion: string | null }>(
+      'search',
+      `/search/suggest?q=${encodeURIComponent(q)}`
+    ),
 };
 
 // ── Saved Searches (Phase 6) ───────────────────────────────────────────────────

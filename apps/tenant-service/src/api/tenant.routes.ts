@@ -6,7 +6,12 @@ import { NotFoundError, ValidationError, BusinessError } from '@erp/types';
 import { PERMISSIONS } from '@erp/types';
 import { invalidateTenantStatusCache, StorageClient, type PlatformContextFactory } from '@erp/sdk';
 import { TenantProvisioner } from '../domain/TenantProvisioner.js';
-import { CreateTenantSchema, SuspendTenantSchema, CloseTenantSchema } from './tenant.schemas.js';
+import {
+  CreateTenantSchema,
+  PublicSignupSchema,
+  SuspendTenantSchema,
+  CloseTenantSchema,
+} from './tenant.schemas.js';
 import type { TenantServiceConfig } from '../config.js';
 import { authenticate } from '../middleware/authenticate.js';
 import { requirePermission } from '../middleware/authorize.js';
@@ -65,6 +70,55 @@ export async function tenantRoutes(
       changedFields: ['status'],
     });
   }
+
+  // ── POST /public/signup — Self-serve tenant provisioning, no auth required ──
+  // Reuses the same TenantProvisioner.provision() pipeline as /admin/tenants, just with a
+  // forced STARTER plan (self-serve can't pick Growth/Enterprise) and its own strict,
+  // IP-keyed rate limit (no tenant/auth context exists yet to key by) — same convention as
+  // auth-service's login/forgot-password route-level rate-limit overrides.
+  fastify.post(
+    '/public/signup',
+    {
+      config: {
+        rateLimit: {
+          max: config.signupRateLimitMax,
+          timeWindow: config.signupRateLimitWindowMs,
+        },
+      },
+    },
+    async (request, reply) => {
+      const body = PublicSignupSchema.safeParse(request.body);
+      if (!body.success) {
+        throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
+      }
+
+      try {
+        const result = await provisioner.provision({ ...body.data, plan: 'STARTER' });
+        return reply.code(201).send({
+          data: {
+            tenantId: result.tenantId,
+            adminUserId: result.adminUserId,
+            adminEmail: result.adminEmail,
+          },
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (message.includes('unique') || message.includes('duplicate')) {
+          throw new BusinessError(
+            'DUPLICATE_TENANT',
+            'A workspace with this URL or email already exists'
+          );
+        }
+        if (message.includes('S3_PROVISIONING_FAILED')) {
+          throw new BusinessError(
+            'S3_PROVISIONING_FAILED',
+            'Workspace storage could not be provisioned — please try again shortly'
+          );
+        }
+        throw err;
+      }
+    }
+  );
 
   // ── POST /admin/tenants — Provision new tenant ──────────────────────────
   fastify.post('/admin/tenants', { preHandler: PLATFORM_ADMIN }, async (request, reply) => {

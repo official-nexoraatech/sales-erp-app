@@ -29,6 +29,7 @@ import { ssoConfigRoutes } from './api/sso-config.routes.js';
 import { branchRoutes } from './api/branch.routes.js';
 import { searchSyncInternalRoutes } from './api/search-sync.internal.routes.js';
 import { usageRoutes } from './api/usage.routes.js';
+import { faqRoutes } from './api/faq.routes.js';
 
 initializeTelemetry({ serviceName: 'tenant-service' });
 
@@ -105,6 +106,7 @@ async function bootstrap(): Promise<void> {
       await branchRoutes(sub, ctxFactory);
       await searchSyncInternalRoutes(sub, db);
       await usageRoutes(sub, db);
+      await faqRoutes(sub, db);
     },
     { prefix: '/api/v2' }
   );

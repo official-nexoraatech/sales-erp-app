@@ -1,7 +1,16 @@
 import { and, eq, sql, desc } from 'drizzle-orm';
-import { payments, paymentAllocations, invoices, projectionDashboardDaily, projectionCustomerBalance, outboxEvents } from '@erp/db';
+import {
+  payments,
+  paymentAllocations,
+  invoices,
+  projectionDashboardDaily,
+  projectionCustomerBalance,
+  outboxEvents,
+} from '@erp/db';
 import type { ErpDatabase } from '@erp/db';
 import { BusinessError, NotFoundError } from '@erp/types';
+import { EventStoreService, TenantScopedDatabase } from '@erp/sdk';
+import { enqueueWebhookDeliveries } from './WebhookService.js';
 import { ulid } from 'ulid';
 
 export interface CreatePaymentParams {
@@ -10,7 +19,8 @@ export interface CreatePaymentParams {
   customerId: number;
   paymentNumber: string;
   paymentDate: Date;
-  paymentMode: 'CASH' | 'CARD' | 'UPI' | 'CHEQUE' | 'NEFT' | 'RTGS' | 'CREDIT_NOTE' | 'ADVANCE' | 'LOYALTY';
+  paymentMode:
+    'CASH' | 'CARD' | 'UPI' | 'CHEQUE' | 'NEFT' | 'RTGS' | 'CREDIT_NOTE' | 'ADVANCE' | 'LOYALTY';
   amount: number;
   chequeNumber?: string;
   chequeBankName?: string;
@@ -57,9 +67,28 @@ export class PaymentService {
       aggregateType: 'Payment',
       aggregateId: row.id,
       tenantId: params.tenantId,
-      payload: { paymentId: row.id, customerId: params.customerId, amount: params.amount, paymentMode: params.paymentMode },
+      payload: {
+        paymentId: row.id,
+        customerId: params.customerId,
+        amount: params.amount,
+        paymentMode: params.paymentMode,
+      },
       published: false,
     });
+
+    await enqueueWebhookDeliveries(
+      this.db,
+      params.tenantId,
+      'Payment',
+      row.id,
+      'PAYMENT_RECEIVED',
+      {
+        paymentId: row.id,
+        customerId: params.customerId,
+        amount: params.amount,
+        paymentMode: params.paymentMode,
+      }
+    );
 
     return row.id;
   }
@@ -80,7 +109,10 @@ export class PaymentService {
       const totalToAllocate = allocations.reduce((s, a) => s + a.amount, 0);
       const unallocated = parseFloat(String(payment.unallocatedAmount));
       if (totalToAllocate > unallocated + 0.01) {
-        throw new BusinessError('OVER_ALLOCATION', `Cannot allocate ${totalToAllocate} — only ${unallocated} unallocated`);
+        throw new BusinessError(
+          'OVER_ALLOCATION',
+          `Cannot allocate ${totalToAllocate} — only ${unallocated} unallocated`
+        );
       }
 
       for (const alloc of allocations) {
@@ -90,7 +122,10 @@ export class PaymentService {
           .where(and(eq(invoices.id, alloc.invoiceId), eq(invoices.tenantId, tenantId)));
         if (!invoice) throw new NotFoundError(`Invoice ${alloc.invoiceId} not found`);
         if (!['CONFIRMED', 'PARTIALLY_PAID', 'OVERDUE'].includes(invoice.status)) {
-          throw new BusinessError('INVALID_INVOICE_STATUS', `Invoice ${alloc.invoiceId} cannot receive payment in status ${invoice.status}`);
+          throw new BusinessError(
+            'INVALID_INVOICE_STATUS',
+            `Invoice ${alloc.invoiceId} cannot receive payment in status ${invoice.status}`
+          );
         }
 
         await trx.insert(paymentAllocations).values({
@@ -113,16 +148,33 @@ export class PaymentService {
             status: sql`CASE WHEN ${invoices.balanceDue} - ${alloc.amount} <= 0.01 THEN 'PAID' ELSE 'PARTIALLY_PAID' END`,
             updatedAt: new Date(),
           })
-          .where(and(
-            eq(invoices.id, alloc.invoiceId),
-            eq(invoices.tenantId, tenantId),
-            sql`${invoices.balanceDue} >= ${alloc.amount}`
-          ))
+          .where(
+            and(
+              eq(invoices.id, alloc.invoiceId),
+              eq(invoices.tenantId, tenantId),
+              sql`${invoices.balanceDue} >= ${alloc.amount}`
+            )
+          )
           .returning({ balanceDue: invoices.balanceDue });
 
         if (!updatedInvoice) {
-          throw new BusinessError('OVER_ALLOCATION', `Allocation of ${alloc.amount} exceeds invoice ${alloc.invoiceId}'s remaining balance`);
+          throw new BusinessError(
+            'OVER_ALLOCATION',
+            `Allocation of ${alloc.amount} exceeds invoice ${alloc.invoiceId}'s remaining balance`
+          );
         }
+
+        // Event Store: recorded against the Invoice aggregate (not Payment) — a payment
+        // isn't tied to a specific invoice until allocation, and EventStoreService's
+        // applyEvent accumulates paidAmount onto the Invoice's replayed state.
+        await new EventStoreService(new TenantScopedDatabase(tenantId, trx), tenantId).append({
+          eventId: ulid(),
+          eventType: 'PAYMENT_RECEIVED',
+          aggregateType: 'Invoice',
+          aggregateId: String(alloc.invoiceId),
+          payload: { paymentId, amount: alloc.amount },
+          userId,
+        });
 
         // Update customer projection
         await trx
@@ -133,10 +185,12 @@ export class PaymentService {
             lastPaymentAt: new Date(),
             updatedAt: new Date(),
           })
-          .where(and(
-            eq(projectionCustomerBalance.tenantId, tenantId),
-            eq(projectionCustomerBalance.customerId, invoice.customerId)
-          ));
+          .where(
+            and(
+              eq(projectionCustomerBalance.tenantId, tenantId),
+              eq(projectionCustomerBalance.customerId, invoice.customerId)
+            )
+          );
       }
 
       // Update payment allocated/unallocated amounts and status — atomic, guarded on
@@ -150,15 +204,20 @@ export class PaymentService {
           status: sql`CASE WHEN ${payments.unallocatedAmount} - ${totalToAllocate} <= 0.01 THEN 'FULLY_ALLOCATED' ELSE 'PARTIALLY_ALLOCATED' END`,
           updatedAt: new Date(),
         })
-        .where(and(
-          eq(payments.id, paymentId),
-          eq(payments.tenantId, tenantId),
-          sql`${payments.unallocatedAmount} >= ${totalToAllocate}`
-        ))
+        .where(
+          and(
+            eq(payments.id, paymentId),
+            eq(payments.tenantId, tenantId),
+            sql`${payments.unallocatedAmount} >= ${totalToAllocate}`
+          )
+        )
         .returning({ unallocatedAmount: payments.unallocatedAmount });
 
       if (!updatedPayment) {
-        throw new BusinessError('OVER_ALLOCATION', `Payment ${paymentId} has insufficient unallocated balance (concurrent allocation)`);
+        throw new BusinessError(
+          'OVER_ALLOCATION',
+          `Payment ${paymentId} has insufficient unallocated balance (concurrent allocation)`
+        );
       }
 
       // Dashboard projection: collected amount
@@ -170,11 +229,13 @@ export class PaymentService {
           collectedAmount: sql`${projectionDashboardDaily.collectedAmount} + ${totalToAllocate}`,
           updatedAt: new Date(),
         })
-        .where(and(
-          eq(projectionDashboardDaily.tenantId, tenantId),
-          eq(projectionDashboardDaily.branchId, payment.branchId),
-          eq(projectionDashboardDaily.date, dateKey)
-        ));
+        .where(
+          and(
+            eq(projectionDashboardDaily.tenantId, tenantId),
+            eq(projectionDashboardDaily.branchId, payment.branchId),
+            eq(projectionDashboardDaily.date, dateKey)
+          )
+        );
     });
   }
 
@@ -189,7 +250,12 @@ export class PaymentService {
 
     await this.db
       .update(payments)
-      .set({ status: 'BOUNCED', bouncedAt: new Date(), bounceReason: reason, updatedAt: new Date() })
+      .set({
+        status: 'BOUNCED',
+        bouncedAt: new Date(),
+        bounceReason: reason,
+        updatedAt: new Date(),
+      })
       .where(and(eq(payments.id, paymentId), eq(payments.tenantId, tenantId)));
 
     await this.db.insert(outboxEvents).values({
@@ -207,11 +273,13 @@ export class PaymentService {
     return this.db
       .select()
       .from(invoices)
-      .where(and(
-        eq(invoices.customerId, customerId),
-        eq(invoices.tenantId, tenantId),
-        sql`${invoices.status} IN ('CONFIRMED', 'PARTIALLY_PAID', 'OVERDUE')`
-      ))
+      .where(
+        and(
+          eq(invoices.customerId, customerId),
+          eq(invoices.tenantId, tenantId),
+          sql`${invoices.status} IN ('CONFIRMED', 'PARTIALLY_PAID', 'OVERDUE')`
+        )
+      )
       .orderBy(desc(invoices.dueDate));
   }
 }

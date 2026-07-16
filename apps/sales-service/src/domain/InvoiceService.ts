@@ -19,9 +19,12 @@ import {
   SagaExecutionError,
   DuplicateOperationError,
   isUniqueConstraintViolation,
+  EventStoreService,
+  TenantScopedDatabase,
 } from '@erp/sdk';
 import { GSTCalculator } from './GSTCalculator.js';
 import { ValuationService } from './ValuationService.js';
+import { enqueueWebhookDeliveries } from './WebhookService.js';
 import { ulid } from 'ulid';
 
 export class InsufficientStockError extends ERPError {
@@ -295,6 +298,43 @@ export class InvoiceService {
         },
         published: false,
       });
+
+      // Event Store (event-sourcing replay/audit for the Invoice aggregate — see
+      // packages/platform-sdk/src/event-store.ts's applyEvent switch). Separate from the
+      // outbox insert above: outbox is for cross-service Kafka delivery, this is the
+      // append-only replay log the Distributed Systems admin pages read from.
+      await new EventStoreService(
+        new TenantScopedDatabase(params.tenantId, trx),
+        params.tenantId
+      ).append({
+        eventId: ulid(),
+        eventType: 'INVOICE_CREATED',
+        aggregateType: 'Invoice',
+        aggregateId: String(invoiceId),
+        payload: {
+          invoiceId,
+          customerId: params.customerId,
+          status: 'DRAFT',
+          grandTotal: String(totals.grandTotal),
+        },
+        userId: params.createdBy,
+      });
+
+      await enqueueWebhookDeliveries(
+        trx,
+        params.tenantId,
+        'Invoice',
+        invoiceId,
+        'INVOICE_CREATED',
+        {
+          invoiceId,
+          customerId: params.customerId,
+          status: 'DRAFT',
+          grandTotal: String(totals.grandTotal),
+          invoiceDate: params.invoiceDate,
+          branchId: params.branchId,
+        }
+      );
 
       // Mark quotation as converted if linked
       if (params.quotationId) {
@@ -602,6 +642,25 @@ export class InvoiceService {
         published: false,
       });
 
+      await new EventStoreService(new TenantScopedDatabase(tenantId, trx), tenantId).append({
+        eventId: ulid(),
+        eventType: 'INVOICE_CONFIRMED',
+        aggregateType: 'Invoice',
+        aggregateId: String(id),
+        payload: { invoiceId: id, invoiceNumber, grandTotal: invoice.grandTotal },
+        userId,
+      });
+
+      await enqueueWebhookDeliveries(trx, tenantId, 'Invoice', id, 'INVOICE_CONFIRMED', {
+        invoiceId: id,
+        invoiceNumber,
+        invoiceDate: invoice.invoiceDate,
+        customerId: invoice.customerId,
+        customerName: customer?.displayName ?? null,
+        grandTotal: invoice.grandTotal,
+        branchId: invoice.branchId,
+      });
+
       // ES-13: COGS journal (DR Cost of Goods Sold / CR Inventory) is a separate
       // journal entry from the revenue recognition above — accounting-service posts
       // it on COGS_CALCULATED, independently of INVOICE_CONFIRMED.
@@ -710,6 +769,15 @@ export class InvoiceService {
             reason,
           },
           published: false,
+        });
+
+        await new EventStoreService(new TenantScopedDatabase(tenantId, trx), tenantId).append({
+          eventId: ulid(),
+          eventType: 'INVOICE_CANCELLED',
+          aggregateType: 'Invoice',
+          aggregateId: String(id),
+          payload: { invoiceId: id, customerId: invoice.customerId, reason },
+          userId,
         });
       }
 

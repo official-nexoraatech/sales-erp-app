@@ -7,6 +7,7 @@ import * as argon2 from 'argon2';
 import { BusinessError, NotFoundError, PermissionError, ValidationError } from '@erp/types';
 import { PERMISSIONS } from '@erp/types';
 import type { PlatformContextFactory } from '@erp/sdk';
+import { assertUnderUserLimit } from '@erp/sdk';
 import { authenticate } from '../middleware/authenticate.js';
 import { requirePermission } from '../middleware/authorize.js';
 
@@ -144,6 +145,8 @@ export async function userRoutes(
           'DUPLICATE_EMAIL',
           'A user with this email already exists in this tenant'
         );
+
+      await assertUnderUserLimit(ctx.db.raw, tenantId);
 
       // Roles must belong to this tenant, and the caller cannot grant a permission
       // they don't themselves hold — prevents self-escalation via arbitrary roleIds.

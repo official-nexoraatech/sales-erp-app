@@ -15,6 +15,8 @@ export interface TenantServiceConfig {
   smtpPort: number;
   smtpFromAddress: string;
   jwtPublicKey: string;
+  signupRateLimitMax: number;
+  signupRateLimitWindowMs: number;
 }
 
 export async function loadTenantConfig(): Promise<TenantServiceConfig> {
@@ -34,5 +36,7 @@ export async function loadTenantConfig(): Promise<TenantServiceConfig> {
     smtpPort: parseInt(process.env['SMTP_PORT'] ?? '1025', 10),
     smtpFromAddress: process.env['SMTP_FROM_ADDRESS'] ?? 'noreply@erp.local',
     jwtPublicKey: process.env['JWT_PUBLIC_KEY'] ?? '',
+    signupRateLimitMax: parseInt(process.env['SIGNUP_RATE_LIMIT_MAX'] ?? '5', 10),
+    signupRateLimitWindowMs: parseInt(process.env['SIGNUP_RATE_LIMIT_WINDOW_MS'] ?? '3600000', 10),
   };
 }

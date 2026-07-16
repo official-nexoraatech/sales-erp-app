@@ -11,11 +11,35 @@ import { describe, it, expect, vi } from 'vitest';
 vi.mock('ulid', () => ({ ulid: () => 'TEST-ULID-01' }));
 
 vi.mock('@erp/db', () => ({
-  invoices: { id: 'id', tenantId: 'tenant_id', status: 'status', customerId: 'customer_id', grandTotal: 'grand_total', version: 'version', branchId: 'branch_id', invoiceDate: 'invoice_date', warehouseId: 'warehouse_id', invoiceNumber: 'invoice_number', clientOperationId: 'client_operation_id' },
+  invoices: {
+    id: 'id',
+    tenantId: 'tenant_id',
+    status: 'status',
+    customerId: 'customer_id',
+    grandTotal: 'grand_total',
+    version: 'version',
+    branchId: 'branch_id',
+    invoiceDate: 'invoice_date',
+    warehouseId: 'warehouse_id',
+    invoiceNumber: 'invoice_number',
+    clientOperationId: 'client_operation_id',
+  },
   invoiceLines: { invoiceId: 'invoice_id', itemId: 'item_id', quantity: 'quantity' },
   invoiceHistory: {},
-  customers: { id: 'id', tenantId: 'tenant_id', creditLimit: 'credit_limit', creditLimitEnabled: 'credit_limit_enabled' },
-  items: { id: 'id', tenantId: 'tenant_id', availableQty: 'available_qty', version: 'version', minSalePrice: 'min_sale_price', trackInventory: 'track_inventory' },
+  customers: {
+    id: 'id',
+    tenantId: 'tenant_id',
+    creditLimit: 'credit_limit',
+    creditLimitEnabled: 'credit_limit_enabled',
+  },
+  items: {
+    id: 'id',
+    tenantId: 'tenant_id',
+    availableQty: 'available_qty',
+    version: 'version',
+    minSalePrice: 'min_sale_price',
+    trackInventory: 'track_inventory',
+  },
   outboxEvents: {},
   projectionDashboardDaily: { tenantId: 'tenant_id', branchId: 'branch_id', date: 'date' },
   projectionCustomerBalance: { tenantId: 'tenant_id', customerId: 'customer_id' },
@@ -23,15 +47,29 @@ vi.mock('@erp/db', () => ({
   deliveryChallans: {},
   inventoryLedger: {},
   sagaLog: {},
+  webhookSubscriptions: {
+    id: 'id',
+    tenantId: 'tenant_id',
+    isActive: 'is_active',
+    events: 'events',
+  },
+  webhookDeliveries: {},
+  eventStore: {},
+  eventSnapshots: {},
 }));
 
 vi.mock('drizzle-orm', () => ({
   and: vi.fn((...args) => ({ type: 'and', args })),
   eq: vi.fn((col, val) => ({ type: 'eq', col, val })),
   sql: vi.fn((s) => s),
+  desc: vi.fn((c) => c),
 }));
 
-import { InvoiceService, DuplicateOperationError, PriceFloorViolationError } from '../domain/InvoiceService.js';
+import {
+  InvoiceService,
+  DuplicateOperationError,
+  PriceFloorViolationError,
+} from '../domain/InvoiceService.js';
 
 // A unique-violation error shaped like what the `postgres` driver throws for a
 // unique_violation (matches isUniqueViolation's expectations in InvoiceService.ts).
@@ -55,13 +93,26 @@ function makeTrx(script: unknown[]) {
     return Promise.resolve(entry);
   };
   const chainable: Record<string, unknown> = {};
-  for (const m of ['select', 'from', 'where', 'orderBy', 'insert', 'values', 'update', 'set', 'onConflictDoUpdate']) {
+  for (const m of [
+    'select',
+    'from',
+    'where',
+    'orderBy',
+    'limit',
+    'insert',
+    'values',
+    'update',
+    'set',
+    'onConflictDoUpdate',
+  ]) {
     chainable[m] = vi.fn(() => chainable);
   }
   chainable['returning'] = vi.fn(() => next());
   chainable['execute'] = vi.fn(() => next());
-  (chainable as { then: unknown })['then'] = (resolve: (v: unknown) => void, reject: (e: unknown) => void) =>
-    next().then(resolve, reject);
+  (chainable as { then: unknown })['then'] = (
+    resolve: (v: unknown) => void,
+    reject: (e: unknown) => void
+  ) => next().then(resolve, reject);
   return chainable;
 }
 
@@ -106,7 +157,9 @@ describe('OFFLINE-02 — InvoiceService.create() idempotency-key dedup', () => {
     const db = makeDb(script);
     const svc = new InvoiceService(db as never);
 
-    const err = await svc.create({ ...baseCreateParams, clientOperationId: 'op-123' }).catch((e: unknown) => e);
+    const err = await svc
+      .create({ ...baseCreateParams, clientOperationId: 'op-123' })
+      .catch((e: unknown) => e);
     expect(err).toBeInstanceOf(DuplicateOperationError);
     expect((err as DuplicateOperationError).operationId).toBe('op-123');
     expect((err as DuplicateOperationError).statusCode).toBe(409);
@@ -121,7 +174,9 @@ describe('OFFLINE-02 — InvoiceService.create() idempotency-key dedup', () => {
     const db = makeDb(script);
     const svc = new InvoiceService(db as never);
 
-    const err = await svc.create({ ...baseCreateParams, clientOperationId: 'op-123' }).catch((e: unknown) => e);
+    const err = await svc
+      .create({ ...baseCreateParams, clientOperationId: 'op-123' })
+      .catch((e: unknown) => e);
     expect(err).not.toBeInstanceOf(DuplicateOperationError);
   });
 
@@ -134,7 +189,9 @@ describe('OFFLINE-02 — InvoiceService.create() idempotency-key dedup', () => {
     const db = makeDb(script);
     const svc = new InvoiceService(db as never);
 
-    await expect(svc.create({ ...baseCreateParams, clientOperationId: 'op-123' })).rejects.toThrow('connection lost');
+    await expect(svc.create({ ...baseCreateParams, clientOperationId: 'op-123' })).rejects.toThrow(
+      'connection lost'
+    );
   });
 
   it('writes clientOperationId into the invoice insert when provided', async () => {
@@ -144,6 +201,10 @@ describe('OFFLINE-02 — InvoiceService.create() idempotency-key dedup', () => {
       [{ id: 1 }], // insert invoices ... returning
       undefined, // insert invoiceLines
       undefined, // insert invoiceHistory
+      undefined, // insert outboxEvents (INVOICE_CREATED)
+      [], // EventStoreService.append: select current aggregate version — none yet
+      undefined, // EventStoreService.append: insert eventStore row
+      [], // select webhookSubscriptions (enqueueWebhookDeliveries) — none active
     ];
     const db = makeDb(script);
     const svc = new InvoiceService(db as never);
@@ -158,6 +219,10 @@ describe('OFFLINE-02 — InvoiceService.create() idempotency-key dedup', () => {
       [{ id: 10 }],
       undefined,
       undefined,
+      undefined,
+      [],
+      undefined,
+      [],
     ];
     const scriptB = [
       [{ creditLimit: '0', creditLimitEnabled: false }],
@@ -165,6 +230,10 @@ describe('OFFLINE-02 — InvoiceService.create() idempotency-key dedup', () => {
       [{ id: 11 }],
       undefined,
       undefined,
+      undefined,
+      [],
+      undefined,
+      [],
     ];
     const svcA = new InvoiceService(makeDb(scriptA) as never);
     const svcB = new InvoiceService(makeDb(scriptB) as never);

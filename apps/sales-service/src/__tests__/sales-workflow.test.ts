@@ -86,6 +86,15 @@ vi.mock('@erp/db', () => ({
     convertedInvoiceId: 'converted_invoice_id',
     convertedAt: 'converted_at',
   },
+  webhookSubscriptions: {
+    id: 'id',
+    tenantId: 'tenant_id',
+    isActive: 'is_active',
+    events: 'events',
+  },
+  webhookDeliveries: {},
+  eventStore: {},
+  eventSnapshots: {},
 }));
 
 vi.mock('drizzle-orm', () => ({
@@ -138,15 +147,19 @@ function makeDb(trxFactory?: () => ReturnType<typeof makeTrx>) {
 }
 
 // `where()` sometimes terminates a chain directly (`await ...where(x)`) and
-// sometimes is followed by `.returning(x)` (`await ...where(x).returning(y)`).
-// This resolves the former case as itself while exposing `.returning()` for
-// the latter, delegating to the trx's current `returning` mock so per-test
-// overrides of `trx.returning` still apply.
+// sometimes is followed by `.returning(x)` (`await ...where(x).returning(y)`)
+// or by `.orderBy(x).limit(y)` (EventStoreService.append()'s current-version
+// lookup). This resolves the direct-await case as itself while exposing
+// `.returning()` (delegating to the trx's current `returning` mock, so
+// per-test overrides still apply) and `.orderBy().limit()` (resolving to
+// `value ?? []` — an array, since EventStoreService destructures `existing[0]`).
 function hybridWhere(trx: ReturnType<typeof makeTrx>, value: unknown) {
   const p = Promise.resolve(value) as Promise<unknown> & {
     returning: (...args: unknown[]) => unknown;
+    orderBy: (...args: unknown[]) => { limit: (...args: unknown[]) => Promise<unknown> };
   };
   p.returning = (...args: unknown[]) => (trx.returning as (...a: unknown[]) => unknown)(...args);
+  p.orderBy = () => ({ limit: () => Promise.resolve(value ?? []) });
   return p;
 }
 
@@ -309,7 +322,7 @@ describe('InvoiceService credit limit', () => {
       .fn()
       .mockResolvedValueOnce([{ creditLimit: '5000', creditLimitEnabled: true }])
       .mockResolvedValueOnce([{ currentBalance: '4000.00' }])
-      .mockResolvedValue([]);
+      .mockImplementation(() => hybridWhere(trx, []));
 
     trx.returning = vi.fn().mockResolvedValue([{ id: 99 }]);
 
