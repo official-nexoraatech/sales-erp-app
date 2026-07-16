@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import JsBarcode from 'jsbarcode';
@@ -63,12 +64,22 @@ function QrDiv({ value }: { value: string }) {
     void QRCode.toString(value, { type: 'svg', margin: 1, width: 90 }).then((s) => {
       if (!cancelled) setSvg(s);
     });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [value]);
   return <div dangerouslySetInnerHTML={{ __html: svg }} />;
 }
 
-function LabelCard({ item, barcode, sizeMm }: { item: PrintData['item']; barcode: PrintBarcode; sizeMm: { widthMm: number; heightMm: number } }) {
+function LabelCard({
+  item,
+  barcode,
+  sizeMm,
+}: {
+  item: PrintData['item'];
+  barcode: PrintBarcode;
+  sizeMm: { widthMm: number; heightMm: number };
+}) {
   return (
     <div
       className="border border-gray-400 flex flex-col items-center justify-center overflow-hidden bg-white text-black"
@@ -76,15 +87,24 @@ function LabelCard({ item, barcode, sizeMm }: { item: PrintData['item']; barcode
     >
       <div className="text-[8px] font-semibold truncate w-full text-center">{item.name}</div>
       {item.mrp && <div className="text-[8px] w-full text-center">MRP ₹{item.mrp}</div>}
-      {barcode.format === 'QR' ? <QrDiv value={barcode.value} /> : <BarcodeSvg value={barcode.value} format={barcode.format} />}
+      {barcode.format === 'QR' ? (
+        <QrDiv value={barcode.value} />
+      ) : (
+        <BarcodeSvg value={barcode.value} format={barcode.format} />
+      )}
     </div>
   );
 }
 
 export default function BarcodeLabelsPage() {
   const hasPermission = useAuthStore((s) => s.hasPermission);
+  const [searchParams] = useSearchParams();
+  const urlItemId = searchParams.get('itemId');
+  const urlItemName = searchParams.get('itemName');
   const [itemSearch, setItemSearch] = useState('');
-  const [selectedItem, setSelectedItem] = useState<ItemOption | null>(null);
+  const [selectedItem, setSelectedItem] = useState<ItemOption | null>(
+    urlItemId && urlItemName ? { id: Number(urlItemId), name: urlItemName } : null
+  );
   const [quantity, setQuantity] = useState('1');
   const [format, setFormat] = useState<'EAN13' | 'CODE128' | 'QR'>('CODE128');
   const [printFormat, setPrintFormat] = useState<keyof typeof LABEL_SIZES>('LABEL_40x25');
@@ -101,12 +121,12 @@ export default function BarcodeLabelsPage() {
   const generateMutation = useMutation({
     mutationFn: async () => {
       const qty = parseInt(quantity, 10);
-      const gen = await productionApi.generateBarcodes({
+      const gen = (await productionApi.generateBarcodes({
         itemId: selectedItem!.id,
         quantity: qty,
         format,
         printFormat,
-      }) as { batchId: number };
+      })) as { batchId: number };
       return productionApi.getPrintData(gen.batchId) as Promise<PrintData>;
     },
     onSuccess: (data) => setPrintData(data),
@@ -149,7 +169,10 @@ export default function BarcodeLabelsPage() {
               required
               placeholder="Search item by name..."
               value={selectedItem ? selectedItem.name : itemSearch}
-              onChange={(e) => { setSelectedItem(null); setItemSearch(e.target.value); }}
+              onChange={(e) => {
+                setSelectedItem(null);
+                setItemSearch(e.target.value);
+              }}
             />
             {!selectedItem && itemSearch.length > 1 && itemOptions.length > 0 && (
               <div className="absolute z-10 mt-1 w-full border border-default rounded-lg bg-surface-card max-h-40 overflow-y-auto shadow-lg">
@@ -157,7 +180,10 @@ export default function BarcodeLabelsPage() {
                   <button
                     key={item.id}
                     className="w-full text-left px-3 py-2 text-sm hover:bg-surface-raised"
-                    onClick={() => { setSelectedItem(item); setItemSearch(''); }}
+                    onClick={() => {
+                      setSelectedItem(item);
+                      setItemSearch('');
+                    }}
                   >
                     {item.name}
                   </button>
@@ -165,15 +191,36 @@ export default function BarcodeLabelsPage() {
               </div>
             )}
           </div>
-          <Input label="Quantity" required type="number" min="1" max="1000" value={quantity} onChange={(e) => setQuantity(e.target.value)} />
-          <Select label="Symbology" required value={format} onChange={(e) => setFormat(e.target.value as typeof format)}>
+          <Input
+            label="Quantity"
+            required
+            type="number"
+            min="1"
+            max="1000"
+            value={quantity}
+            onChange={(e) => setQuantity(e.target.value)}
+          />
+          <Select
+            label="Symbology"
+            required
+            value={format}
+            onChange={(e) => setFormat(e.target.value as typeof format)}
+          >
             <option value="CODE128">CODE128</option>
             <option value="EAN13">EAN13</option>
             <option value="QR">QR Code</option>
           </Select>
-          <Select label="Label size" required wrapperClassName="col-span-2" value={printFormat} onChange={(e) => setPrintFormat(e.target.value as typeof printFormat)}>
+          <Select
+            label="Label size"
+            required
+            wrapperClassName="col-span-2"
+            value={printFormat}
+            onChange={(e) => setPrintFormat(e.target.value as typeof printFormat)}
+          >
             {Object.entries(LABEL_SIZES).map(([key, v]) => (
-              <option key={key} value={key}>{v.label}</option>
+              <option key={key} value={key}>
+                {v.label}
+              </option>
             ))}
           </Select>
           <div className="col-span-2 flex items-end">
@@ -191,7 +238,8 @@ export default function BarcodeLabelsPage() {
         <div className="bg-surface-card rounded-xl border border-default p-6">
           <div className="flex items-center justify-between mb-4">
             <h3 className="font-semibold text-primary">
-              Preview — {printData.barcodes.length} label{printData.barcodes.length === 1 ? '' : 's'}
+              Preview — {printData.barcodes.length} label
+              {printData.barcodes.length === 1 ? '' : 's'}
             </h3>
             {hasPermission(PERMISSIONS.BARCODE_PRINT) && (
               <Button onClick={handlePrint}>Print Labels</Button>

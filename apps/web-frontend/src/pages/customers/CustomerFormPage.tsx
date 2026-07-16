@@ -165,8 +165,7 @@ export default function CustomerFormPage() {
             label="GSTIN"
             value={gstinValue ?? ''}
             onChange={(val, valid) => {
-              const event = { target: { value: val } } as React.ChangeEvent<HTMLInputElement>;
-              register('gstin').onChange(event);
+              setValue('gstin', val, { shouldValidate: true, shouldDirty: true });
               setGstinStatus(val ? (valid ? 'valid' : 'invalid') : 'idle');
             }}
             error={errors.gstin?.message}

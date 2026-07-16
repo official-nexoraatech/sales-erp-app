@@ -1492,17 +1492,6 @@ export const crmApi = {
     senderAddressOrNumber: string;
   }) => apiClient.put('sales', '/crm/sender-identity', data),
 
-  // CP-8: outbound webhook subscriptions
-  listWebhookSubscriptions: () => apiClient.get('sales', '/crm/webhook-subscriptions'),
-  createWebhookSubscription: (data: { targetUrl: string; events: string[]; isActive?: boolean }) =>
-    apiClient.post('sales', '/crm/webhook-subscriptions', data),
-  updateWebhookSubscription: (
-    id: number,
-    data: { targetUrl?: string; events?: string[]; isActive?: boolean }
-  ) => apiClient.put('sales', `/crm/webhook-subscriptions/${id}`, data),
-  deleteWebhookSubscription: (id: number) =>
-    apiClient.delete('sales', `/crm/webhook-subscriptions/${id}`),
-
   // CP-4: campaign templates
   listCampaignTemplates: (params?: { channel?: string }) => {
     const qs = new URLSearchParams();

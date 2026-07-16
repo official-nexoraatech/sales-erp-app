@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Replace https://your-domain.example with the real production domain before launch. -->
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://your-domain.example/</loc><priority>1.0</priority></url>
+  <url><loc>https://your-domain.example/features</loc><priority>0.8</priority></url>
+  <url><loc>https://your-domain.example/pricing</loc><priority>0.8</priority></url>
+  <url><loc>https://your-domain.example/about</loc><priority>0.5</priority></url>
+  <url><loc>https://your-domain.example/contact</loc><priority>0.5</priority></url>
+  <url><loc>https://your-domain.example/signup</loc><priority>0.6</priority></url>
+</urlset>

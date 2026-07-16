@@ -156,7 +156,7 @@ export default function FixedAssetDetailPage() {
         }
       />
 
-      <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
+      <div className="bg-surface-card rounded-xl border border-default p-5">
         <h2 className="text-sm font-semibold text-secondary mb-4 uppercase tracking-wide">
           Summary
         </h2>
@@ -185,8 +185,8 @@ export default function FixedAssetDetailPage() {
         </dl>
       </div>
 
-      <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
-        <div className="px-5 py-4 border-b border-gray-200 dark:border-gray-700">
+      <div className="bg-surface-card rounded-xl border border-default">
+        <div className="px-5 py-4 border-b border-default">
           <h2 className="text-sm font-semibold text-secondary uppercase tracking-wide">
             Depreciation Schedule
           </h2>
@@ -201,7 +201,7 @@ export default function FixedAssetDetailPage() {
           />
         ) : (
           <table className="w-full text-sm">
-            <thead className="bg-gray-50 dark:bg-gray-900/40 border-b border-gray-200 dark:border-gray-700">
+            <thead className="bg-surface-subtle border-b border-default">
               <tr>
                 <th className="px-4 py-3 text-left font-medium text-secondary">Period</th>
                 <th className="px-4 py-3 text-right font-medium text-secondary">Opening Value</th>
@@ -209,7 +209,7 @@ export default function FixedAssetDetailPage() {
                 <th className="px-4 py-3 text-right font-medium text-secondary">Closing Value</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
+            <tbody className="divide-y divide-default">
               {schedule.map((row) => (
                 <tr key={row.id}>
                   <td className="px-4 py-3 text-secondary">

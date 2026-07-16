@@ -1,0 +1,80 @@
+// Real, verified feature bullets per module — sourced directly from route-level backend
+// capability (not docs-site, which was found to be stale), grouped to match MODULES' ids so
+// nav/footer anchors (#sales, #inventory, etc.) land on the right section.
+export const FEATURE_DETAILS: Record<string, string[]> = {
+  sales: [
+    'Quotations with send, accept/reject, expire and one-click convert-to-invoice',
+    'Invoices with confirm, cancel, PDF generation, duplicate and a full activity/audit trail',
+    'Delivery challans with dispatch and convert-to-invoice',
+    'Payments with allocation across invoices and cheque/NEFT bounce handling',
+    'Sale returns and credit notes, with apply/refund',
+    'A dedicated POS flow — sessions, quick items, held sales, customer search, UPI',
+  ],
+  purchase: [
+    'Purchase orders with submit/approve/amend/cancel, duplicate, PDF and activity trail',
+    'GRNs (goods receipt notes) with approve/reject and landed-cost allocation',
+    'Purchase returns and debit notes',
+    'Supplier payments with allocation, bounce handling, and outstanding/statement views',
+    'Expense tracking with submit/approve/pay',
+  ],
+  inventory: [
+    'Categories, brands, units and item master data with price lists',
+    'Multi-branch, multi-warehouse stock with valuation reporting',
+    'Stock reservations (create/expire/release)',
+    'Stock transfers with submit/approve/dispatch/receive',
+    'Stock adjustments with submit/approve',
+    'Physical verification — start counting, record counts, review variances, approve',
+    'Length-based fabric roll tracking with cut history, for textile/apparel businesses',
+  ],
+  accounting: [
+    'Full chart of accounts with a tree view',
+    'Opening balances for customers, suppliers, stock, accounts and cash/bank',
+    'Journals, bank accounts, cost centers and financial years',
+    'Fixed assets with depreciation runs',
+    'TDS liability, deduction tracking and certificate/26Q data',
+    'Trial balance, P&L (with cost-center breakdown), balance sheet and cash flow reports',
+  ],
+  gst: [
+    'GST rate/HSN lookup and computation, with HSN search',
+    'GST register and summary views',
+    'GSTR-1, GSTR-3B and GSTR-9 return data generation, ready for review and filing',
+    'GSTR-2A import and reconciliation',
+    'e-Invoice and e-Way Bill generation',
+    'Reverse-charge (RCM) register',
+  ],
+  hr: [
+    'Employee, department and designation management',
+    'Attendance — shift assignment, marking, bulk-mark, biometric import mapping, reporting',
+    'Leave types and leave applications with an approvals inbox',
+    'Payroll — salary structures, employee salaries, payroll runs, payslip delivery',
+    'Statutory — PF/ESI challans, Form 16 data',
+    'Employee loans, holiday calendar, and tailoring-specific alteration order tracking',
+  ],
+  crm: [
+    'Customer segments — rule-based and custom-filter',
+    'Campaigns across SMS, WhatsApp, Email and In-App, with templates and preview',
+    'Automation rules for birthday, anniversary and inactivity triggers',
+    'Seasonal promotions with configurable loyalty multipliers',
+    'Per-channel opt-out, genuinely enforced on every automated send',
+    'Outbound webhook subscriptions on campaign and sales events (see Integrations below)',
+  ],
+  production: [
+    'Job-work orders with materials-issue and quality-check stages',
+    'Consignment stock tracking and settlements',
+    'Automatic reorder detection with draft purchase-order generation',
+    'Barcode generation, batch printing and lookup-by-barcode',
+  ],
+  reports: [
+    'A report catalog with scheduled delivery and run history',
+    'AR/AP aging reports',
+    'Sales, inventory and HR analytics dashboards with KPIs, charts and alerts',
+    'POS-specific analytics',
+  ],
+  security: [
+    '285 named, granular RBAC permissions — not a handful of fixed role presets',
+    'TOTP-based multi-factor authentication with backup codes',
+    'Time-boxed, fully audit-logged admin impersonation for support scenarios',
+    'A security audit log covering logins and sensitive admin actions',
+    'SSO configuration storage (Okta / Azure AD / Google Workspace / generic OIDC) — the full interactive login handshake is on our roadmap, not yet live',
+  ],
+};

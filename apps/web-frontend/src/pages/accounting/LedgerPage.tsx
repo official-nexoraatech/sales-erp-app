@@ -91,7 +91,7 @@ export default function LedgerPage() {
         )}
       </div>
 
-      <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
+      <div className="bg-surface-card rounded-xl border border-default">
         {isLoading ? (
           <ERPTableSkeleton rows={10} />
         ) : !ledger || ledger.transactions.length === 0 ? (
@@ -103,7 +103,7 @@ export default function LedgerPage() {
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="bg-gray-50 dark:bg-gray-900/40 border-b border-gray-200 dark:border-gray-700">
+              <thead className="bg-surface-subtle border-b border-default">
                 <tr>
                   <th className="px-4 py-3 text-left font-medium text-secondary">Date</th>
                   <th className="px-4 py-3 text-left font-medium text-secondary">Journal</th>
@@ -113,20 +113,20 @@ export default function LedgerPage() {
                   <th className="px-4 py-3 text-right font-medium text-secondary">Balance</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
+              <tbody className="divide-y divide-default">
                 {ledger.transactions.map((tx) => (
-                  <tr key={tx.id} className="hover:bg-gray-50 dark:hover:bg-gray-750">
+                  <tr key={tx.id} className="hover:bg-surface-raised">
                     <td className="px-4 py-2.5 text-secondary text-xs">
                       {formatDatetime(tx.transactionDate)}
                     </td>
-                    <td className="px-4 py-2.5 font-mono text-xs text-blue-600 dark:text-blue-400">
+                    <td className="px-4 py-2.5 font-mono text-xs text-link">
                       {tx.journalId.slice(0, 16)}…
                     </td>
                     <td className="px-4 py-2.5 text-primary max-w-xs truncate">{tx.description}</td>
-                    <td className="px-4 py-2.5 text-right font-mono text-green-600 dark:text-green-400">
+                    <td className="px-4 py-2.5 text-right font-mono text-success">
                       {Number(tx.debitAmount) > 0 ? formatCurrency(Number(tx.debitAmount)) : '—'}
                     </td>
-                    <td className="px-4 py-2.5 text-right font-mono text-red-500 dark:text-red-400">
+                    <td className="px-4 py-2.5 text-right font-mono text-danger">
                       {Number(tx.creditAmount) > 0 ? formatCurrency(Number(tx.creditAmount)) : '—'}
                     </td>
                     <td className="px-4 py-2.5 text-right font-mono font-semibold text-primary">
@@ -139,7 +139,7 @@ export default function LedgerPage() {
           </div>
         )}
         {(ledger?.totalElements ?? 0) > 50 && (
-          <div className="flex items-center justify-between px-4 py-3 border-t border-gray-200 dark:border-gray-700">
+          <div className="flex items-center justify-between px-4 py-3 border-t border-default">
             <span className="text-sm text-secondary">Page {page + 1}</span>
             <div className="flex gap-2">
               <Button

@@ -14,14 +14,42 @@ import { PERMISSIONS } from '@erp/types';
 import type * as InvoiceServiceModule from '../domain/InvoiceService.js';
 
 vi.mock('@erp/db', () => ({
-  posSessions: { id: 'id', tenantId: 'tenant_id', status: 'status', totalSales: 'total_sales', totalTransactions: 'total_transactions' },
-  posHeldSales: {}, invoices: { id: 'id', tenantId: 'tenant_id', clientOperationId: 'client_operation_id', status: 'status', invoiceNumber: 'invoice_number', grandTotal: 'grand_total', loyaltyPointsEarned: 'loyalty_points_earned', loyaltyRedemptionValue: 'loyalty_redemption_value' },
-  invoiceLines: {}, items: {},
-  customers: {}, projectionDashboardDaily: {}, organizationSettings: {},
-  payments: {}, paymentAllocations: { paymentId: 'payment_id', invoiceId: 'invoice_id', tenantId: 'tenant_id' },
-  projectionCustomerBalance: {}, outboxEvents: {},
-  loyaltyTransactions: {}, featureFlags: {}, invoiceHistory: {}, quotations: {},
-  deliveryChallans: {}, inventoryLedger: {}, inventoryFifoLayers: {},
+  posSessions: {
+    id: 'id',
+    tenantId: 'tenant_id',
+    status: 'status',
+    totalSales: 'total_sales',
+    totalTransactions: 'total_transactions',
+  },
+  posHeldSales: {},
+  invoices: {
+    id: 'id',
+    tenantId: 'tenant_id',
+    clientOperationId: 'client_operation_id',
+    status: 'status',
+    invoiceNumber: 'invoice_number',
+    grandTotal: 'grand_total',
+    loyaltyPointsEarned: 'loyalty_points_earned',
+    loyaltyRedemptionValue: 'loyalty_redemption_value',
+  },
+  invoiceLines: {},
+  items: {},
+  customers: {},
+  projectionDashboardDaily: {},
+  organizationSettings: {},
+  payments: {},
+  paymentAllocations: { paymentId: 'payment_id', invoiceId: 'invoice_id', tenantId: 'tenant_id' },
+  projectionCustomerBalance: {},
+  outboxEvents: {},
+  loyaltyTransactions: {},
+  featureFlags: {},
+  invoiceHistory: {},
+  quotations: {},
+  deliveryChallans: {},
+  inventoryLedger: {},
+  inventoryFifoLayers: {},
+  webhookSubscriptions: {},
+  webhookDeliveries: {},
 }));
 
 vi.mock('drizzle-orm', () => ({
@@ -88,11 +116,24 @@ function makeChainableDb(script: unknown[]) {
   let i = 0;
   const next = () => Promise.resolve(script[i++]);
   const chainable: Record<string, unknown> = {};
-  for (const m of ['select', 'selectDistinct', 'from', 'where', 'orderBy', 'limit', 'insert', 'values', 'update', 'set']) {
+  for (const m of [
+    'select',
+    'selectDistinct',
+    'from',
+    'where',
+    'orderBy',
+    'limit',
+    'insert',
+    'values',
+    'update',
+    'set',
+  ]) {
     chainable[m] = vi.fn(() => chainable);
   }
-  (chainable as { then: unknown })['then'] = (resolve: (v: unknown) => void, reject: (e: unknown) => void) =>
-    next().then(resolve, reject);
+  (chainable as { then: unknown })['then'] = (
+    resolve: (v: unknown) => void,
+    reject: (e: unknown) => void
+  ) => next().then(resolve, reject);
   return chainable;
 }
 
@@ -116,7 +157,9 @@ describe('POST /pos/sales — OFFLINE-07 stock-conflict handling', () => {
 
   it('returns a distinguishable INSUFFICIENT_STOCK error with available/requested details, and cancels the orphaned DRAFT invoice', async () => {
     const cancelSpy = vi.fn().mockResolvedValue(undefined);
-    (InvoiceService as unknown as { mockImplementation: (fn: () => unknown) => void }).mockImplementation(() => ({
+    (
+      InvoiceService as unknown as { mockImplementation: (fn: () => unknown) => void }
+    ).mockImplementation(() => ({
       create: vi.fn().mockResolvedValue(42),
       confirm: vi.fn().mockRejectedValue(new InsufficientStockError(7, 2, 5)),
       cancel: cancelSpy,
@@ -136,7 +179,9 @@ describe('POST /pos/sales — OFFLINE-07 stock-conflict handling', () => {
     });
 
     expect(res.statusCode).toBe(422);
-    const body = JSON.parse(res.body) as { error: { code: string; details: { itemId: number; available: number; requested: number } } };
+    const body = JSON.parse(res.body) as {
+      error: { code: string; details: { itemId: number; available: number; requested: number } };
+    };
     expect(body.error.code).toBe('INSUFFICIENT_STOCK');
     expect(body.error.details).toEqual({ itemId: 7, available: 2, requested: 5 });
 
@@ -145,7 +190,9 @@ describe('POST /pos/sales — OFFLINE-07 stock-conflict handling', () => {
 
   it('propagates a non-stock error from confirm() unchanged (no cancel, no STOCK_CONFLICT translation)', async () => {
     const cancelSpy = vi.fn();
-    (InvoiceService as unknown as { mockImplementation: (fn: () => unknown) => void }).mockImplementation(() => ({
+    (
+      InvoiceService as unknown as { mockImplementation: (fn: () => unknown) => void }
+    ).mockImplementation(() => ({
       create: vi.fn().mockResolvedValue(42),
       confirm: vi.fn().mockRejectedValue(new Error('boom')),
       cancel: cancelSpy,

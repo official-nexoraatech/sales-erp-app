@@ -43,6 +43,7 @@ import { loyaltyRoutes } from './api/loyalty.routes.js';
 import { deliveryChallanRoutes } from './api/delivery-challan.routes.js';
 import { internalRoutes } from './api/internal.routes.js';
 import { crmRoutes } from './api/crm.routes.js';
+import { integrationsRoutes } from './api/integrations.routes.js';
 import { dashboardRoutes } from './api/dashboard.routes.js';
 import { attachmentRoutes } from './api/attachment.routes.js';
 import { searchSyncInternalRoutes } from './api/search-sync.internal.routes.js';
@@ -225,6 +226,7 @@ async function bootstrap(): Promise<void> {
       await loyaltyRoutes(sub, ctxFactory);
       await deliveryChallanRoutes(sub, ctxFactory);
       await crmRoutes(sub, ctxFactory);
+      await integrationsRoutes(sub, ctxFactory);
       await dashboardRoutes(sub, ctxFactory);
       await internalRoutes(sub, ctxFactory);
       await attachmentRoutes(sub, ctxFactory);

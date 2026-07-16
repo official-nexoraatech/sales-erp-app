@@ -166,6 +166,37 @@ export const usageSummary = pgTable(
   (t) => [unique('usage_summary_tenant_period').on(t.tenantId, t.periodStart)]
 );
 
+// ─── FAQ Items (platform marketing content — global, no tenant_id) ─────────
+// Backs the public marketing site's FAQ section (previously a hardcoded array in
+// FAQSection.tsx). Global, not tenant-scoped: this is platform content, not a
+// per-tenant configurable thing — mirrors plan_entitlements' "global template" shape
+// rather than campaignTemplates' tenant-scoped one. sortOrder/version/isPublished follow
+// this codebase's existing conventions (items.ts categories/brands/units for sortOrder,
+// notificationTemplates for the isActive-style publish flag, nearly every mutable table
+// for the optimistic-lock version column).
+export const faqItems = pgTable(
+  'faq_items',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    category: varchar('category', { length: 100 }).notNull(),
+    question: text('question').notNull(),
+    answer: text('answer').notNull(),
+    sortOrder: integer('sort_order').notNull().default(0),
+    isPublished: boolean('is_published').notNull().default(true),
+    version: integer('version').notNull().default(0),
+    createdBy: integer('created_by').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    index('idx_faq_items_published_sort').on(t.isPublished, t.sortOrder),
+    index('idx_faq_items_category').on(t.category, t.sortOrder),
+  ]
+);
+
+export type FaqItem = typeof faqItems.$inferSelect;
+export type NewFaqItem = typeof faqItems.$inferInsert;
+
 export type OutboxEvent = typeof outboxEvents.$inferInsert;
 export type InboxEvent = typeof inboxEvents.$inferInsert;
 export type AuditLogEntry = typeof auditLog.$inferInsert;

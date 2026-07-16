@@ -7,6 +7,11 @@ import '@fontsource/inter/400.css';
 import '@fontsource/inter/500.css';
 import '@fontsource/inter/600.css';
 import '@fontsource/inter/700.css';
+// Marketing-site display face only (--font-display) — headings on the public
+// pages, the authenticated app keeps Inter everywhere.
+import '@fontsource/lexend/500.css';
+import '@fontsource/lexend/600.css';
+import '@fontsource/lexend/700.css';
 import App from './App.js';
 import { ApiError } from './api/client.js';
 import { ThemeProvider } from './context/ThemeContext.js';

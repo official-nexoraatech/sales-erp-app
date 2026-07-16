@@ -88,6 +88,11 @@ export interface SearchOptions {
   // (multi-index), since a `terms` filter on `entityType` would incorrectly exclude
   // documents from entities that don't have that field at all.
   attachmentEntityTypes?: string[];
+  // Smart Search ranking boost: document IDs this tenant's users have previously clicked on
+  // for this exact query text (see search.routes.ts, sourced from the search_analytics table
+  // that's already populated on every search + click). Purely additive — when empty/omitted,
+  // ranking is identical to the plain multi_match query below.
+  boostedIds?: string[];
 }
 
 // ── Custom analyzer definition (erp_name_analyzer) ────────────────────────────
@@ -628,6 +633,7 @@ export class SearchEngine {
       branchIds,
       dateRange,
       attachmentEntityTypes,
+      boostedIds,
     } = options;
 
     // Caller (search.routes.ts) passes `entities` for an untyped global search, restricted
@@ -710,11 +716,26 @@ export class SearchEngine {
       });
     }
 
+    const baseQuery = { bool: { must, filter: [{ term: { tenantId: String(tenantId) } }] } };
+    // Smart Search: additive ranking boost for documents this tenant has previously clicked
+    // on for this exact query text — falls back to plain BM25 ranking (baseQuery unchanged)
+    // whenever there's no click history yet.
+    const esQuery =
+      boostedIds && boostedIds.length > 0
+        ? {
+            function_score: {
+              query: baseQuery,
+              boost_mode: 'sum' as const,
+              functions: [{ filter: { terms: { _id: boostedIds } }, weight: 5 }],
+            },
+          }
+        : baseQuery;
+
     const startTime = Date.now();
     const result = await this.esRequest('POST', `/${indices}/_search`, {
       from,
       size,
-      query: { bool: { must, filter: [{ term: { tenantId: String(tenantId) } }] } },
+      query: esQuery,
       highlight: {
         fields: {
           name: {},

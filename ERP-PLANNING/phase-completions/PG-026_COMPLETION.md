@@ -29,31 +29,31 @@ While researching the stubs, found and fixed two more pre-existing, unrelated, h
 
 ## The 23 Stubs — What Each Now Does
 
-| # | Job | Real work |
-|---|---|---|
-| 1 | `accounting.trial-balance.snapshot` | Calls new accounting-service route → `ReportsEngine.getTrialBalance` (already correct, JWT-only until now) → persists to new `trial_balance_snapshots` table |
-| 2 | `accounting.outstanding-report` | Calls new report-service route → `ReportEngine`'s tested `ar-aging`/`ap-aging` queries → emails tenant contact a summary if either total > 0 |
-| 3 | `accounting.bank-reconciliation-reminder` | Loops tenant's `bank_accounts`, sums `BankReconciliationService.getSummary`'s unmatched counts, emails a reminder if any account is unreconciled |
-| 4 | `inventory.low-stock-alert` | Reuses `production.reorder-report`'s (now-fixed) underlying query — same comparison, no duplicated logic |
-| 5 | `inventory.stock-value-report` | Reuses `valuation.routes.ts`'s live valuation query, persists to new `stock_valuation_snapshots` table |
-| 6 | `inventory.physical-verification-reminder` | Unconditional monthly reminder (no "next due" concept exists in this schema — noted, not invented) |
-| 7 | `gst.gstr1-auto-prepare` | Calls `Gstr1Service.compute` + `validateBeforeExport` for the previous period, audit-logs `GSTR1_AUTO_PREPARED` |
-| 8 | `gst.gstr3b-reminder` | Unconditional monthly reminder (no filed/status flag exists in this schema either) |
-| 9 | `gst.gstr2a-reconcile` | Actually calls `Gstr2aService.reconcile()` (not just the read-only summary getter), then reports the resulting summary |
-| 10 | `hr.payroll.prepare` | Find-or-create this month's `payroll_runs` row, runs the same calculate loop `/payroll-runs/:id/calculate` uses |
-| 11 | `hr.salary-slip.email` | Same publish-then-mark-sent logic as `/bulk-send`, scoped to slips not yet sent (idempotent across cron runs) |
-| 12 | `sales.credit-limit-review` | New query: customers with `creditLimitEnabled` whose `projection_customer_balance` ≥ 90% of limit; emails a summary |
-| 13 | `purchase.po-delivery-reminder` | Reuses `PurchaseOrderService.getPendingDelivery`, emails each supplier with an email on file |
-| 14 | `purchase.pending-grn-alert` | New query: GRNs in `DRAFT`/`PENDING_APPROVAL` older than `GRN_PENDING_ALERT_DAYS` (default 3) |
-| 15 | `workflow.approval-expiry` | Real escalation: reassigns to `workflowDefinitions.escalationUserId` if configured, else marks `EXPIRED` — see caveat below |
-| 16 | `workflow.approval-reminder` | Increments `reminderCount`/`notifiedAt` on pending approvals — see caveat below |
-| 17 | `platform.outbox-cleanup` | Batched `DELETE` of published outbox events > 7 days old |
-| 18 | `platform.audit-log-archive` | Batched export-to-S3 (via `StorageClient`) + delete for audit log rows > 1 year old — archives, doesn't silently delete |
-| 19 | `platform.token-cleanup` | Batched `DELETE` of expired refresh/password-reset tokens |
-| 20 | `platform.partition-maintenance` | Real `CREATE TABLE IF NOT EXISTS ... PARTITION OF financial_entries` for next year |
-| 21 | `platform.import-cleanup` | Deletes S3 files + tracking rows for completed/failed/rolled-back imports > 30 days old |
-| 22 | `platform.notification-log-archive` | Same archive-then-delete pattern as audit-log-archive, for entries > 90 days old |
-| 23 | `platform.export-cleanup` | Deletes S3 files for expired signed-URL exports, marks rows `EXPIRED` |
+| #   | Job                                        | Real work                                                                                                                                                    |
+| --- | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1   | `accounting.trial-balance.snapshot`        | Calls new accounting-service route → `ReportsEngine.getTrialBalance` (already correct, JWT-only until now) → persists to new `trial_balance_snapshots` table |
+| 2   | `accounting.outstanding-report`            | Calls new report-service route → `ReportEngine`'s tested `ar-aging`/`ap-aging` queries → emails tenant contact a summary if either total > 0                 |
+| 3   | `accounting.bank-reconciliation-reminder`  | Loops tenant's `bank_accounts`, sums `BankReconciliationService.getSummary`'s unmatched counts, emails a reminder if any account is unreconciled             |
+| 4   | `inventory.low-stock-alert`                | Reuses `production.reorder-report`'s (now-fixed) underlying query — same comparison, no duplicated logic                                                     |
+| 5   | `inventory.stock-value-report`             | Reuses `valuation.routes.ts`'s live valuation query, persists to new `stock_valuation_snapshots` table                                                       |
+| 6   | `inventory.physical-verification-reminder` | Unconditional monthly reminder (no "next due" concept exists in this schema — noted, not invented)                                                           |
+| 7   | `gst.gstr1-auto-prepare`                   | Calls `Gstr1Service.compute` + `validateBeforeExport` for the previous period, audit-logs `GSTR1_AUTO_PREPARED`                                              |
+| 8   | `gst.gstr3b-reminder`                      | Unconditional monthly reminder (no filed/status flag exists in this schema either)                                                                           |
+| 9   | `gst.gstr2a-reconcile`                     | Actually calls `Gstr2aService.reconcile()` (not just the read-only summary getter), then reports the resulting summary                                       |
+| 10  | `hr.payroll.prepare`                       | Find-or-create this month's `payroll_runs` row, runs the same calculate loop `/payroll-runs/:id/calculate` uses                                              |
+| 11  | `hr.salary-slip.email`                     | Same publish-then-mark-sent logic as `/bulk-send`, scoped to slips not yet sent (idempotent across cron runs)                                                |
+| 12  | `sales.credit-limit-review`                | New query: customers with `creditLimitEnabled` whose `projection_customer_balance` ≥ 90% of limit; emails a summary                                          |
+| 13  | `purchase.po-delivery-reminder`            | Reuses `PurchaseOrderService.getPendingDelivery`, emails each supplier with an email on file                                                                 |
+| 14  | `purchase.pending-grn-alert`               | New query: GRNs in `DRAFT`/`PENDING_APPROVAL` older than `GRN_PENDING_ALERT_DAYS` (default 3)                                                                |
+| 15  | `workflow.approval-expiry`                 | Real escalation: reassigns to `workflowDefinitions.escalationUserId` if configured, else marks `EXPIRED` — see caveat below                                  |
+| 16  | `workflow.approval-reminder`               | Increments `reminderCount`/`notifiedAt` on pending approvals — see caveat below                                                                              |
+| 17  | `platform.outbox-cleanup`                  | Batched `DELETE` of published outbox events > 7 days old                                                                                                     |
+| 18  | `platform.audit-log-archive`               | Batched export-to-S3 (via `StorageClient`) + delete for audit log rows > 1 year old — archives, doesn't silently delete                                      |
+| 19  | `platform.token-cleanup`                   | Batched `DELETE` of expired refresh/password-reset tokens                                                                                                    |
+| 20  | `platform.partition-maintenance`           | Real `CREATE TABLE IF NOT EXISTS ... PARTITION OF financial_entries` for next year                                                                           |
+| 21  | `platform.import-cleanup`                  | Deletes S3 files + tracking rows for completed/failed/rolled-back imports > 30 days old                                                                      |
+| 22  | `platform.notification-log-archive`        | Same archive-then-delete pattern as audit-log-archive, for entries > 90 days old                                                                             |
+| 23  | `platform.export-cleanup`                  | Deletes S3 files for expired signed-URL exports, marks rows `EXPIRED`                                                                                        |
 
 **Caveat on #15/#16 (workflow jobs):** see "Deep bug found, not fixed" below — both do real, honest bookkeeping against the schema as it actually behaves, but can't deliver an actual notification to a specific person today.
 
@@ -69,7 +69,7 @@ This is a separate, pre-existing, and significantly larger bug than PG-026's sco
 
 2. **Nine places across the codebase called notification-service at the wrong URL.** notification-service registers all its routes with **no prefix** (`await notificationRoutes(fastify, db, config)` directly on the root `fastify`), but 9 call sites used `/api/v2/notifications/...`. Every one 404's silently (wrapped in try/catch treated as best-effort). Found while implementing the reminder-type stubs above (which needed the correct pattern) and while researching hr-service for #10/#11. Fixed all 9:
    - `sales-service/api/internal.routes.ts` (×2), `hr-service/api/alteration.routes.ts` — found and fixed first, as they were directly in files this package was already touching.
-   - `sales-service/domain/CampaignService.ts`, `sales-service/api/pos.routes.ts`, `sales-service/domain/InvoiceNotificationService.ts`, `auth-service/routes/forgot-password.ts` — same 1-line URL fix; `auth-service/__tests__/forgot-password.test.ts` also updated (it asserted the *broken* URL as correct).
+   - `sales-service/domain/CampaignService.ts`, `sales-service/api/pos.routes.ts`, `sales-service/domain/InvoiceNotificationService.ts`, `auth-service/routes/forgot-password.ts` — same 1-line URL fix; `auth-service/__tests__/forgot-password.test.ts` also updated (it asserted the _broken_ URL as correct).
    - `tenant-service/domain/TenantProvisioner.ts`'s `sendWelcomeEmail` — this one was broken in **three** ways, not one: wrong URL, a request body shape (`templateKey`/`recipient`/`variables`) matching no real endpoint's schema, and no `x-internal-key` header at all. Rewrote it to call `/notifications/send-internal` with the real `InternalSendSchema` shape, and added a `POST /notifications/templates/seed-tenant` route (`notification-service/api/notification.routes.ts`, new — mirrors the existing `seed-hr`/`seed-crm`/`seed-auth` convention) seeding a `WELCOME_EMAIL` template, since none existed anywhere and the notification would have silently no-op'd (per `[[pg017_password_reset_email_delivery]]`'s established no-template-row-found gap) even with a correctly-shaped call.
    - **Net effect:** password-reset emails, invoice-confirmation emails, POS receipts, CRM campaign dispatch, and tenant welcome emails were all silently non-functional before this session.
 
@@ -93,7 +93,7 @@ This is a separate, pre-existing, and significantly larger bug than PG-026's sco
 
 ## Deployment Checklist
 
-- [ ] **Apply migration 0039** (`psql $DATABASE_URL < packages/db-client/migrations/0039_pg026_scheduled_report_snapshots.sql`) — creates `trial_balance_snapshots` and `stock_valuation_snapshots`. Not run this session (no live DB).
+- [x] **Apply migration 0039** (`psql $DATABASE_URL < packages/db-client/migrations/0039_pg026_scheduled_report_snapshots.sql`) — creates `trial_balance_snapshots` and `stock_valuation_snapshots`. Verified applied 2026-07-17: both tables exist in the dev DB.
 - [ ] **Manually trigger a sample of the 23 converted jobs** via `JobRegistry.triggerManual(name, tenantId)` against a real environment with real data, per this gap-prompt's own acceptance criteria — this session verified logic via mocked unit tests only, not live execution.
 - [ ] **Set `GRN_PENDING_ALERT_DAYS`** and **`CREDIT_LIMIT_REVIEW_THRESHOLD`** env vars if the defaults (3 days, 0.9) aren't right for production — both are optional with sane defaults, no action required if defaults are acceptable.
 - [ ] **Follow up on the `workflowApprovals.approverId`-is-a-role-id bug** (see dedicated section above) — a real, separate, larger fix needed before "pending approvals for me" or any per-approver notification can be trusted.

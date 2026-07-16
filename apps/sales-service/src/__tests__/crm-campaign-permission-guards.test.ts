@@ -23,7 +23,7 @@ vi.mock('@erp/db', () => ({
   businessSeasons: {},
   notificationLog: {},
   tenantSenderIdentity: {},
-  campaignWebhookSubscriptions: {},
+  webhookSubscriptions: {},
   tenantCommunicationSettings: {},
 }));
 
@@ -39,6 +39,7 @@ vi.mock('drizzle-orm', () => ({
 }));
 
 import { crmRoutes } from '../api/crm.routes.js';
+import { integrationsRoutes } from '../api/integrations.routes.js';
 
 const TEST_ISSUER = 'erp-test';
 const TEST_TTL = 900;
@@ -235,11 +236,11 @@ describe('PUT /crm/sender-identity — requirePermission(CRM_SENDER_IDENTITY_MAN
   });
 });
 
-describe('POST /crm/webhook-subscriptions — requirePermission(CRM_WEBHOOK_MANAGE)', () => {
+describe('POST /integrations/webhook-subscriptions — requirePermission(INTEGRATION_WEBHOOK_MANAGE)', () => {
   let app: FastifyInstance;
   beforeAll(async () => {
     app = Fastify({ logger: false });
-    await crmRoutes(app, mockCtxFactory);
+    await integrationsRoutes(app, mockCtxFactory);
   });
   afterAll(() => app.close());
 
@@ -247,18 +248,18 @@ describe('POST /crm/webhook-subscriptions — requirePermission(CRM_WEBHOOK_MANA
     const token = await makeToken([PERMISSIONS.CRM_CAMPAIGN_APPROVE]);
     const res = await app.inject({
       method: 'POST',
-      url: '/crm/webhook-subscriptions',
+      url: '/integrations/webhook-subscriptions',
       headers: { Authorization: `Bearer ${token}` },
       payload: { targetUrl: 'https://example.com/webhook', events: ['CAMPAIGN_SENT'] },
     });
     expect(res.statusCode).toBe(403);
   });
 
-  it('does not 403 a caller with CRM_WEBHOOK_MANAGE', async () => {
-    const token = await makeToken([PERMISSIONS.CRM_WEBHOOK_MANAGE]);
+  it('does not 403 a caller with INTEGRATION_WEBHOOK_MANAGE', async () => {
+    const token = await makeToken([PERMISSIONS.INTEGRATION_WEBHOOK_MANAGE]);
     const res = await app.inject({
       method: 'POST',
-      url: '/crm/webhook-subscriptions',
+      url: '/integrations/webhook-subscriptions',
       headers: { Authorization: `Bearer ${token}` },
       payload: { targetUrl: 'https://example.com/webhook', events: ['CAMPAIGN_SENT'] },
     });

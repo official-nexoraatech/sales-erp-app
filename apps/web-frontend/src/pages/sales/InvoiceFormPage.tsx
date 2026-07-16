@@ -426,7 +426,7 @@ export default function InvoiceFormPage() {
                 <th className="pb-2"></th>
               </tr>
             </thead>
-            <tbody className="divide-y dark:divide-gray-700">
+            <tbody className="divide-y divide-default">
               {computedLines.map((l, idx) => (
                 <tr key={idx}>
                   <td className="py-2 pr-2">{l.itemName}</td>

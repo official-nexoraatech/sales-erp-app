@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { ErpDatabase } from '@erp/db';
 import { searchAnalytics } from '@erp/db';
+import { and, eq, isNotNull } from 'drizzle-orm';
 import { PERMISSIONS, type Permission } from '@erp/types';
 import { getBranchScope } from '@erp/sdk';
 import { z } from 'zod';
@@ -75,7 +76,9 @@ const ATTACHMENT_PARENT_PERMISSION: Record<string, Permission> = {
 const ALL_ATTACHMENT_PARENT_TYPES = Object.keys(ATTACHMENT_PARENT_PERMISSION);
 
 function allowedAttachmentParentTypes(request: unknown): string[] {
-  return ALL_ATTACHMENT_PARENT_TYPES.filter((t) => hasPermission(request, ATTACHMENT_PARENT_PERMISSION[t]!));
+  return ALL_ATTACHMENT_PARENT_TYPES.filter((t) =>
+    hasPermission(request, ATTACHMENT_PARENT_PERMISSION[t]!)
+  );
 }
 
 const SearchQuerySchema = z.object({
@@ -100,11 +103,17 @@ const SearchQuerySchema = z.object({
 // itself) can keep calling searchRoutes(app, engine) — analytics logging (Phase 8) is a
 // best-effort side capability, not core to search working, and is skipped entirely if no db
 // is supplied rather than becoming a required dependency of this route module.
-export async function searchRoutes(fastify: FastifyInstance, engine: SearchEngine, db?: ErpDatabase): Promise<void> {
+export async function searchRoutes(
+  fastify: FastifyInstance,
+  engine: SearchEngine,
+  db?: ErpDatabase
+): Promise<void> {
   // ── GET /search — Global fuzzy search ────────────────────────────────────
   fastify.get('/search', { preHandler: [authenticate] }, async (request, reply) => {
     if (!hasPermission(request, PERMISSIONS.SEARCH_GLOBAL)) {
-      return reply.code(403).send({ error: { code: 'PERMISSION_DENIED', message: 'Missing permission: SEARCH_GLOBAL' } });
+      return reply.code(403).send({
+        error: { code: 'PERMISSION_DENIED', message: 'Missing permission: SEARCH_GLOBAL' },
+      });
     }
 
     const auth = (request as unknown as AuthedRequest).auth;
@@ -114,12 +123,21 @@ export async function searchRoutes(fastify: FastifyInstance, engine: SearchEngin
     if (params.entity === 'attachment') {
       if (allowedAttachmentParentTypes(request).length === 0) {
         return reply.code(403).send({
-          error: { code: 'PERMISSION_DENIED', message: 'Missing permission: INVOICE_VIEW, PO_VIEW, or GRN_VIEW' },
+          error: {
+            code: 'PERMISSION_DENIED',
+            message: 'Missing permission: INVOICE_VIEW, PO_VIEW, or GRN_VIEW',
+          },
         });
       }
-    } else if (params.entity !== undefined && !hasPermission(request, ENTITY_PERMISSION[params.entity])) {
+    } else if (
+      params.entity !== undefined &&
+      !hasPermission(request, ENTITY_PERMISSION[params.entity])
+    ) {
       return reply.code(403).send({
-        error: { code: 'PERMISSION_DENIED', message: `Missing permission: ${ENTITY_PERMISSION[params.entity]}` },
+        error: {
+          code: 'PERMISSION_DENIED',
+          message: `Missing permission: ${ENTITY_PERMISSION[params.entity]}`,
+        },
       });
     }
 
@@ -135,14 +153,18 @@ export async function searchRoutes(fastify: FastifyInstance, engine: SearchEngin
     // filter can't be safely mixed into a multi-index query, so it's only included here when
     // the caller can see every parent type outright — a caller with partial attachment
     // visibility must search `entity=attachment` directly to get the properly filtered subset.
-    const allowedEntities = params.entity === undefined
-      ? VALID_ENTITIES.filter((e) => {
-          if (e === 'attachment') return allowedAttachmentParentTypes(request).length === ALL_ATTACHMENT_PARENT_TYPES.length;
-          if (!hasPermission(request, ENTITY_PERMISSION[e])) return false;
-          if (branchIds !== undefined && BRANCH_SCOPED_ENTITIES.has(e)) return false;
-          return true;
-        })
-      : undefined;
+    const allowedEntities =
+      params.entity === undefined
+        ? VALID_ENTITIES.filter((e) => {
+            if (e === 'attachment')
+              return (
+                allowedAttachmentParentTypes(request).length === ALL_ATTACHMENT_PARENT_TYPES.length
+              );
+            if (!hasPermission(request, ENTITY_PERMISSION[e])) return false;
+            if (branchIds !== undefined && BRANCH_SCOPED_ENTITIES.has(e)) return false;
+            return true;
+          })
+        : undefined;
 
     // Advanced-search filters (Phase 6) — exact-match fields folded into `filters`, plus a
     // separate date-range clause since `filters` can only express equality.
@@ -153,17 +175,53 @@ export async function searchRoutes(fastify: FastifyInstance, engine: SearchEngin
     if (params.customerId !== undefined) filters['customerId'] = params.customerId;
     if (params.supplierId !== undefined) filters['supplierId'] = params.supplierId;
 
+    // Smart Search ranking boost: documents this tenant's users have previously clicked on
+    // for this exact query text, sourced from search_analytics (already populated by the
+    // click-tracking below and in search-analytics.routes.ts). Best-effort — a lookup
+    // failure never blocks the actual search.
+    let boostedIds: string[] | undefined;
+    if (db) {
+      try {
+        const clicked = await db
+          .selectDistinct({ id: searchAnalytics.clickedResultId })
+          .from(searchAnalytics)
+          .where(
+            and(
+              eq(searchAnalytics.tenantId, tenantId),
+              eq(searchAnalytics.query, params.q),
+              isNotNull(searchAnalytics.clickedResultId)
+            )
+          )
+          .limit(20);
+        const ids = clicked.map((c) => c.id).filter((id): id is string => id !== null);
+        if (ids.length > 0) boostedIds = ids;
+      } catch {
+        // best-effort — fall through with no boost
+      }
+    }
+
     const result = await engine.search(tenantId, params.q, {
       ...(params.entity !== undefined ? { entity: params.entity } : {}),
       ...(allowedEntities !== undefined ? { entities: allowedEntities } : {}),
-      ...(params.entity !== undefined && branchIds !== undefined && BRANCH_SCOPED_ENTITIES.has(params.entity)
+      ...(params.entity !== undefined &&
+      branchIds !== undefined &&
+      BRANCH_SCOPED_ENTITIES.has(params.entity)
         ? { branchIds }
         : {}),
-      ...(params.entity === 'attachment' ? { attachmentEntityTypes: allowedAttachmentParentTypes(request) } : {}),
+      ...(params.entity === 'attachment'
+        ? { attachmentEntityTypes: allowedAttachmentParentTypes(request) }
+        : {}),
       ...(Object.keys(filters).length > 0 ? { filters } : {}),
       ...(params.dateField && (params.dateFrom || params.dateTo)
-        ? { dateRange: { field: params.dateField, ...(params.dateFrom ? { from: params.dateFrom } : {}), ...(params.dateTo ? { to: params.dateTo } : {}) } }
+        ? {
+            dateRange: {
+              field: params.dateField,
+              ...(params.dateFrom ? { from: params.dateFrom } : {}),
+              ...(params.dateTo ? { to: params.dateTo } : {}),
+            },
+          }
         : {}),
+      ...(boostedIds ? { boostedIds } : {}),
       size: params.size ?? 20,
       from: params.from ?? 0,
       fuzziness: params.fuzziness ?? 'AUTO',
@@ -172,14 +230,17 @@ export async function searchRoutes(fastify: FastifyInstance, engine: SearchEngin
     // Fire-and-forget analytics logging (Phase 8) — never let a logging failure affect the
     // actual search response, and don't make the caller wait on it either.
     if (db) {
-      void db.insert(searchAnalytics).values({
-        tenantId,
-        userId: auth.userId ?? 0,
-        query: params.q,
-        entity: params.entity,
-        resultCount: result.total,
-        latencyMs: result.took,
-      }).catch(() => {});
+      void db
+        .insert(searchAnalytics)
+        .values({
+          tenantId,
+          userId: auth.userId ?? 0,
+          query: params.q,
+          entity: params.entity,
+          resultCount: result.total,
+          latencyMs: result.took,
+        })
+        .catch(() => {});
     }
 
     return reply.code(200).send({
@@ -196,68 +257,73 @@ export async function searchRoutes(fastify: FastifyInstance, engine: SearchEngin
   // Called by scheduler-service's `search.full-reindex` job (Phase 4), which has already
   // paged the owning service's internal listing endpoint for every row and sends the
   // complete document set for this tenant+entity in the body.
-  fastify.post<{ Params: { entity: string }; Body: { documents?: Array<{ id: string; doc: Record<string, unknown> }> } }>(
-    '/admin/search/reindex/:entity',
-    { preHandler: [authenticate] },
-    async (request, reply) => {
-      if (!hasPermission(request, PERMISSIONS.SEARCH_REINDEX)) {
-        return reply.code(403).send({ error: { code: 'PERMISSION_DENIED', message: 'Missing permission: SEARCH_REINDEX' } });
-      }
-
-      const { tenantId } = (request as unknown as AuthedRequest).auth;
-      const entity = request.params.entity as SearchEntity;
-
-      if (!VALID_ENTITIES.includes(entity)) {
-        return reply.code(422).send({ error: { code: 'INVALID_ENTITY', message: `Unknown entity: ${entity}` } });
-      }
-
-      const documents = request.body?.documents ?? [];
-      const result = await engine.fullReindex(tenantId, entity, async () => documents);
-
-      return reply.code(200).send({
-        data: { message: 'Reindex complete', tenantId, entity, ...result },
+  fastify.post<{
+    Params: { entity: string };
+    Body: { documents?: Array<{ id: string; doc: Record<string, unknown> }> };
+  }>('/admin/search/reindex/:entity', { preHandler: [authenticate] }, async (request, reply) => {
+    if (!hasPermission(request, PERMISSIONS.SEARCH_REINDEX)) {
+      return reply.code(403).send({
+        error: { code: 'PERMISSION_DENIED', message: 'Missing permission: SEARCH_REINDEX' },
       });
     }
-  );
+
+    const { tenantId } = (request as unknown as AuthedRequest).auth;
+    const entity = request.params.entity as SearchEntity;
+
+    if (!VALID_ENTITIES.includes(entity)) {
+      return reply
+        .code(422)
+        .send({ error: { code: 'INVALID_ENTITY', message: `Unknown entity: ${entity}` } });
+    }
+
+    const documents = request.body?.documents ?? [];
+    const result = await engine.fullReindex(tenantId, entity, async () => documents);
+
+    return reply.code(200).send({
+      data: { message: 'Reindex complete', tenantId, entity, ...result },
+    });
+  });
 
   // ── POST /admin/search/bulk-index — upsert without dropping the index first ──
   // Called by scheduler-service's `search.incremental-sync` job (Phase 4) as a catch-up
   // reconciliation pass, and reusable by any future backfill caller that already has the
   // records in hand.
-  fastify.post<{ Body: { entity: SearchEntity; documents: Array<{ id: string; doc: Record<string, unknown> }> } }>(
-    '/admin/search/bulk-index',
-    { preHandler: [authenticate] },
-    async (request, reply) => {
-      if (!hasPermission(request, PERMISSIONS.SEARCH_REINDEX)) {
-        return reply.code(403).send({ error: { code: 'PERMISSION_DENIED', message: 'Missing permission: SEARCH_REINDEX' } });
-      }
-
-      const { tenantId } = (request as unknown as AuthedRequest).auth;
-      const { entity, documents } = request.body;
-
-      if (!VALID_ENTITIES.includes(entity)) {
-        return reply.code(422).send({ error: { code: 'INVALID_ENTITY', message: `Unknown entity: ${entity}` } });
-      }
-
-      const result = await engine.bulkIndex(tenantId, entity, documents ?? []);
-      return reply.code(200).send({ data: { message: 'Bulk index complete', tenantId, entity, ...result } });
+  fastify.post<{
+    Body: { entity: SearchEntity; documents: Array<{ id: string; doc: Record<string, unknown> }> };
+  }>('/admin/search/bulk-index', { preHandler: [authenticate] }, async (request, reply) => {
+    if (!hasPermission(request, PERMISSIONS.SEARCH_REINDEX)) {
+      return reply.code(403).send({
+        error: { code: 'PERMISSION_DENIED', message: 'Missing permission: SEARCH_REINDEX' },
+      });
     }
-  );
+
+    const { tenantId } = (request as unknown as AuthedRequest).auth;
+    const { entity, documents } = request.body;
+
+    if (!VALID_ENTITIES.includes(entity)) {
+      return reply
+        .code(422)
+        .send({ error: { code: 'INVALID_ENTITY', message: `Unknown entity: ${entity}` } });
+    }
+
+    const result = await engine.bulkIndex(tenantId, entity, documents ?? []);
+    return reply
+      .code(200)
+      .send({ data: { message: 'Bulk index complete', tenantId, entity, ...result } });
+  });
 
   // ── POST /admin/search/indices — Create all indices for caller's tenant ──
-  fastify.post(
-    '/admin/search/indices',
-    { preHandler: [authenticate] },
-    async (request, reply) => {
-      if (!hasPermission(request, PERMISSIONS.SEARCH_REINDEX)) {
-        return reply.code(403).send({ error: { code: 'PERMISSION_DENIED', message: 'Missing permission: SEARCH_REINDEX' } });
-      }
-
-      const { tenantId } = (request as unknown as AuthedRequest).auth;
-      await engine.createTenantIndices(tenantId);
-      return reply.code(201).send({ data: { message: 'Indices created', tenantId } });
+  fastify.post('/admin/search/indices', { preHandler: [authenticate] }, async (request, reply) => {
+    if (!hasPermission(request, PERMISSIONS.SEARCH_REINDEX)) {
+      return reply.code(403).send({
+        error: { code: 'PERMISSION_DENIED', message: 'Missing permission: SEARCH_REINDEX' },
+      });
     }
-  );
+
+    const { tenantId } = (request as unknown as AuthedRequest).auth;
+    await engine.createTenantIndices(tenantId);
+    return reply.code(201).send({ data: { message: 'Indices created', tenantId } });
+  });
 
   // ── DELETE /admin/search/indices — Remove all indices for caller's tenant ─
   fastify.delete(
@@ -265,7 +331,9 @@ export async function searchRoutes(fastify: FastifyInstance, engine: SearchEngin
     { preHandler: [authenticate] },
     async (request, reply) => {
       if (!hasPermission(request, PERMISSIONS.SEARCH_REINDEX)) {
-        return reply.code(403).send({ error: { code: 'PERMISSION_DENIED', message: 'Missing permission: SEARCH_REINDEX' } });
+        return reply.code(403).send({
+          error: { code: 'PERMISSION_DENIED', message: 'Missing permission: SEARCH_REINDEX' },
+        });
       }
 
       const { tenantId } = (request as unknown as AuthedRequest).auth;
@@ -280,13 +348,17 @@ export async function searchRoutes(fastify: FastifyInstance, engine: SearchEngin
     { preHandler: [authenticate] },
     async (request, reply) => {
       if (!hasPermission(request, PERMISSIONS.SEARCH_REINDEX)) {
-        return reply.code(403).send({ error: { code: 'PERMISSION_DENIED', message: 'Missing permission: SEARCH_REINDEX' } });
+        return reply.code(403).send({
+          error: { code: 'PERMISSION_DENIED', message: 'Missing permission: SEARCH_REINDEX' },
+        });
       }
 
       const { tenantId } = (request as unknown as AuthedRequest).auth;
       const entity = request.params.entity as SearchEntity;
       if (!VALID_ENTITIES.includes(entity)) {
-        return reply.code(422).send({ error: { code: 'INVALID_ENTITY', message: `Unknown entity: ${entity}` } });
+        return reply
+          .code(422)
+          .send({ error: { code: 'INVALID_ENTITY', message: `Unknown entity: ${entity}` } });
       }
 
       const stats = await engine.getIndexStats(tenantId, entity);
@@ -299,14 +371,18 @@ export async function searchRoutes(fastify: FastifyInstance, engine: SearchEngin
     Body: { entity: SearchEntity; id: string; document: Record<string, unknown> };
   }>('/search/index', { preHandler: [authenticate] }, async (request, reply) => {
     if (!hasPermission(request, PERMISSIONS.SEARCH_REINDEX)) {
-      return reply.code(403).send({ error: { code: 'PERMISSION_DENIED', message: 'Missing permission: SEARCH_REINDEX' } });
+      return reply.code(403).send({
+        error: { code: 'PERMISSION_DENIED', message: 'Missing permission: SEARCH_REINDEX' },
+      });
     }
 
     const { tenantId } = (request as unknown as AuthedRequest).auth;
     const { entity, id, document } = request.body;
 
     if (!VALID_ENTITIES.includes(entity)) {
-      return reply.code(422).send({ error: { code: 'INVALID_ENTITY', message: `Unknown entity: ${entity}` } });
+      return reply
+        .code(422)
+        .send({ error: { code: 'INVALID_ENTITY', message: `Unknown entity: ${entity}` } });
     }
 
     await engine.index(tenantId, entity, id, document);
@@ -319,13 +395,17 @@ export async function searchRoutes(fastify: FastifyInstance, engine: SearchEngin
     { preHandler: [authenticate] },
     async (request, reply) => {
       if (!hasPermission(request, PERMISSIONS.SEARCH_REINDEX)) {
-        return reply.code(403).send({ error: { code: 'PERMISSION_DENIED', message: 'Missing permission: SEARCH_REINDEX' } });
+        return reply.code(403).send({
+          error: { code: 'PERMISSION_DENIED', message: 'Missing permission: SEARCH_REINDEX' },
+        });
       }
 
       const { tenantId } = (request as unknown as AuthedRequest).auth;
       const entity = request.params.entity as SearchEntity;
       if (!VALID_ENTITIES.includes(entity)) {
-        return reply.code(422).send({ error: { code: 'INVALID_ENTITY', message: `Unknown entity: ${entity}` } });
+        return reply
+          .code(422)
+          .send({ error: { code: 'INVALID_ENTITY', message: `Unknown entity: ${entity}` } });
       }
 
       await engine.delete(tenantId, entity, request.params.id);

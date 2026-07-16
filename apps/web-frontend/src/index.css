@@ -76,6 +76,7 @@
 
   /* ── Semantic — Danger ──────────────────────────────────────────────────── */
   .text-danger        { color: var(--color-danger); }
+  .bg-danger          { background-color: var(--color-danger); }
   .bg-danger-bg       { background-color: var(--color-danger-bg); }
   .border-danger      { border-color: var(--color-danger-border); }
   .text-danger-fg     { color: var(--color-danger-foreground); }
@@ -110,6 +111,26 @@
   .ring-brand         { --tw-ring-color: var(--brand-primary); }
   .ring-focus         { --tw-ring-color: var(--brand-primary); }
   .ring-danger        { --tw-ring-color: var(--color-danger); }
+
+  /* ── Marketing site only — ink surfaces, accent, display type ──────────── */
+  .bg-marketing-ink        { background-color: var(--marketing-ink); }
+  .bg-marketing-ink-raised { background-color: var(--marketing-ink-raised); }
+  .border-marketing-ink    { border-color: var(--marketing-ink-border); }
+  .text-marketing-ink      { color: var(--marketing-ink-text); }
+  .text-marketing-ink-muted { color: var(--marketing-ink-text-muted); }
+  .bg-gradient-ink         { background-image: var(--gradient-ink); }
+  .bg-gradient-accent-glow { background-image: var(--gradient-accent-glow); }
+  .bg-accent          { background-color: var(--brand-accent); }
+  .bg-accent-hover    { background-color: var(--brand-accent-hover); }
+  .bg-accent-subtle   { background-color: var(--brand-accent-subtle); }
+  .text-accent        { color: var(--brand-accent); }
+  .text-accent-fg     { color: var(--brand-accent-foreground); }
+  .border-accent      { border-color: var(--brand-accent); }
+  .font-display       { font-family: var(--font-display); }
+  .text-display-sm    { font-size: var(--display-sm); line-height: 1.15; }
+  .text-display-md    { font-size: var(--display-md); line-height: 1.1; }
+  .text-display-lg    { font-size: var(--display-lg); line-height: 1.05; }
+  .text-display-xl    { font-size: var(--display-xl); line-height: 1; }
 }
 
 /* 5. Animations */

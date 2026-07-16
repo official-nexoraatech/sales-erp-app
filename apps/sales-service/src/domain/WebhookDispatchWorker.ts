@@ -1,10 +1,11 @@
 /* global setTimeout */
-// CP-8 (Campaign Management Platform initiative): poll-loop dispatcher for
-// campaign_webhook_deliveries, structurally modeled on event-service's OutboxRelayWorker
+// CP-8 (Campaign Management Platform initiative), generalized beyond campaigns: poll-loop
+// dispatcher for webhook_deliveries, structurally modeled on event-service's OutboxRelayWorker
 // (SELECT ... FOR UPDATE SKIP LOCKED inside a short transaction, outbound I/O happens after the
-// transaction commits so a slow/unreachable third party never holds a DB lock or blocks
-// campaign-send). Deliveries are enqueued synchronously by CampaignService — this worker is the
-// only thing that ever performs the actual outbound HTTP call.
+// transaction commits so a slow/unreachable third party never holds a DB lock or blocks the
+// triggering business transaction). Deliveries are enqueued synchronously by
+// WebhookService.enqueueWebhookDeliveries — this worker is the only thing that ever performs
+// the actual outbound HTTP call.
 import { sql } from 'drizzle-orm';
 import type { ErpDatabase } from '@erp/db';
 import { createLogger } from '@erp/logger';
@@ -15,7 +16,8 @@ const logger = createLogger({ serviceName: 'sales-service' });
 interface DeliveryRow {
   id: number;
   event_type: string;
-  campaign_id: number;
+  aggregate_type: string;
+  aggregate_id: number;
   payload: Record<string, unknown>;
   attempt_count: number;
   target_url: string;
@@ -78,10 +80,10 @@ export class WebhookDispatchWorker {
     try {
       rows = await this.db.transaction(async (trx) => {
         const result = await trx.execute(sql`
-          SELECT d.id, d.event_type, d.campaign_id, d.payload, d.attempt_count,
+          SELECT d.id, d.event_type, d.aggregate_type, d.aggregate_id, d.payload, d.attempt_count,
                  s.target_url, s.secret
-          FROM campaign_webhook_deliveries d
-          JOIN campaign_webhook_subscriptions s ON s.id = d.subscription_id
+          FROM webhook_deliveries d
+          JOIN webhook_subscriptions s ON s.id = d.subscription_id
           WHERE d.status = 'PENDING'
           ORDER BY d.created_at
           LIMIT ${this.batchSize}
@@ -102,14 +104,15 @@ export class WebhookDispatchWorker {
         targetUrl: row.target_url,
         secret: row.secret,
         eventType: row.event_type,
-        campaignId: row.campaign_id,
+        aggregateType: row.aggregate_type,
+        aggregateId: row.aggregate_id,
         payload: row.payload,
       });
 
       try {
         if (outcome.success) {
           await this.db.execute(sql`
-            UPDATE campaign_webhook_deliveries
+            UPDATE webhook_deliveries
             SET status = 'SENT', attempt_count = ${row.attempt_count + 1}, sent_at = NOW(), last_error = NULL
             WHERE id = ${row.id}
           `);
@@ -118,7 +121,7 @@ export class WebhookDispatchWorker {
           const errMsg = outcome.error ?? `HTTP ${outcome.httpStatus ?? 'error'}`;
           if (nextAttempt >= this.maxAttempts) {
             await this.db.execute(sql`
-              UPDATE campaign_webhook_deliveries
+              UPDATE webhook_deliveries
               SET status = 'FAILED', attempt_count = ${nextAttempt}, last_error = ${errMsg}
               WHERE id = ${row.id}
             `);
@@ -128,7 +131,7 @@ export class WebhookDispatchWorker {
             );
           } else {
             await this.db.execute(sql`
-              UPDATE campaign_webhook_deliveries
+              UPDATE webhook_deliveries
               SET attempt_count = ${nextAttempt}, last_error = ${errMsg}
               WHERE id = ${row.id}
             `);

@@ -37,10 +37,7 @@ function SectionTable({
   return (
     <>
       {accounts.map((a) => (
-        <tr
-          key={a.accountId}
-          className="border-b border-gray-100 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-750"
-        >
+        <tr key={a.accountId} className="border-b border-default hover:bg-surface-raised">
           <td className="px-4 py-2 pl-8 text-sm font-mono text-xs text-disabled w-24">
             {a.accountCode}
           </td>
@@ -50,7 +47,7 @@ function SectionTable({
           </td>
         </tr>
       ))}
-      <tr className="bg-gray-50 dark:bg-gray-900/30 border-b-2 border-gray-300 dark:border-gray-600">
+      <tr className="bg-surface-subtle border-b-2 border-default">
         <td className="px-4 py-2.5 text-sm font-semibold text-primary" colSpan={2}>
           {label} Total
         </td>
@@ -87,7 +84,7 @@ export default function BalanceSheetPage() {
 
       {bs && (
         <div
-          className={`flex flex-wrap items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium ${bs.isBalanced ? 'bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-300' : 'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300'}`}
+          className={`flex flex-wrap items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium ${bs.isBalanced ? 'bg-success-bg text-success' : 'bg-danger-bg text-danger'}`}
         >
           {bs.isBalanced ? '✓ Balance sheet balances' : '⚠ Balance sheet does NOT balance'}
           <span className="ml-auto font-normal text-secondary">
@@ -99,8 +96,8 @@ export default function BalanceSheetPage() {
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
         {/* Assets */}
-        <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
-          <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700 font-semibold text-blue-700 dark:text-blue-400 text-sm uppercase tracking-wide">
+        <div className="bg-surface-card rounded-xl border border-default">
+          <div className="px-4 py-3 border-b border-default font-semibold text-info text-sm uppercase tracking-wide">
             Assets
           </div>
           {isLoading ? (
@@ -116,8 +113,8 @@ export default function BalanceSheetPage() {
 
         {/* Liabilities + Equity */}
         <div className="space-y-4">
-          <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
-            <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700 font-semibold text-red-700 dark:text-red-400 text-sm uppercase tracking-wide">
+          <div className="bg-surface-card rounded-xl border border-default">
+            <div className="px-4 py-3 border-b border-default font-semibold text-danger text-sm uppercase tracking-wide">
               Liabilities
             </div>
             {isLoading ? (
@@ -134,8 +131,8 @@ export default function BalanceSheetPage() {
               </table>
             ) : null}
           </div>
-          <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
-            <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700 font-semibold text-indigo-700 dark:text-indigo-400 text-sm uppercase tracking-wide">
+          <div className="bg-surface-card rounded-xl border border-default">
+            <div className="px-4 py-3 border-b border-default font-semibold text-brand text-sm uppercase tracking-wide">
               Equity
             </div>
             {isLoading ? (

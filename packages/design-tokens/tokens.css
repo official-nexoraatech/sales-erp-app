@@ -18,6 +18,25 @@
   --brand-primary-subtle-foreground: #1e3a8a;
   --brand-secondary: #7c3aed;
   --brand-accent: #f59e0b;
+  --brand-accent-hover: #d97706;
+  --brand-accent-foreground: #1c1300;
+  --brand-accent-subtle: #fffbeb;
+
+  /* ── Marketing "ink" surfaces ───────────────────────────────────────────────
+   * Public-marketing-only near-black surface, distinct from the authenticated
+   * app's --surface-*/--brand-primary scale (which stays untouched). Used for
+   * hero/CTA sections instead of the old hand-copied blue gradient. */
+  --marketing-ink: #0a0b0d;
+  --marketing-ink-raised: #16181c;
+  --marketing-ink-border: rgba(255, 255, 255, 0.08);
+  --marketing-ink-text: #f5f6f7;
+  --marketing-ink-text-muted: rgba(245, 246, 247, 0.65);
+  --gradient-ink: linear-gradient(160deg, #0a0b0d 0%, #14161a 55%, #0a0b0d 100%);
+  --gradient-accent-glow: radial-gradient(
+    circle at 30% 20%,
+    color-mix(in srgb, var(--brand-accent) 25%, transparent) 0%,
+    transparent 60%
+  );
 
   /* ── Surface ────────────────────────────────────────────────────────────── */
   --surface-page: #f8f9fb;
@@ -134,16 +153,33 @@
   --ease-default: cubic-bezier(0.4, 0, 0.2, 1);
   --ease-in: cubic-bezier(0.4, 0, 1, 1);
   --ease-out: cubic-bezier(0, 0, 0.2, 1);
+  /* Tailwind's own `transition`/`transition-colors`/`transition-all`/etc. utilities all read
+   * `transition-duration: var(--tw-duration, var(--default-transition-duration))`, and Tailwind
+   * defines that variable itself (150ms) in its own @theme block. Re-declaring it here — after
+   * `@import "tailwindcss"` per the app's established import-order rule — makes every bare
+   * `transition-*` utility in the app (the vast majority; almost nothing here sets an explicit
+   * `duration-*` class) automatically honor Reduced Motion with zero component-level changes,
+   * the same way the @media/[data-motion] blocks below already zero out --duration-* itself. */
+  --default-transition-duration: var(--duration-normal);
 
   /* ── Typography ─────────────────────────────────────────────────────────── */
   --font-sans: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --font-mono: 'JetBrains Mono', 'Fira Code', ui-monospace, 'Cascadia Code', monospace;
+  /* Public-marketing-only display face — headings on the marketing site only;
+   * the authenticated app keeps --font-sans everywhere, this is additive. */
+  --font-display: 'Lexend', var(--font-sans);
   --text-xs: 12px;
   --text-sm: 14px;
   --text-base: 16px;
   --text-lg: 18px;
   --text-xl: 20px;
   --text-2xl: 24px;
+
+  /* ── Marketing display scale (headings escape the app's 24px-max scale) ──── */
+  --display-sm: 32px;
+  --display-md: 40px;
+  --display-lg: 56px;
+  --display-xl: 72px;
 
   /* ── Icons ──────────────────────────────────────────────────────────────── */
   --icon-xs: 14px;
@@ -176,6 +212,20 @@
   --shadow-focus-error: 0 0 0 3px color-mix(in srgb, var(--color-danger) 18%, transparent);
   --shadow-focus-success: 0 0 0 3px color-mix(in srgb, var(--color-success) 18%, transparent);
   --shadow-focus-warning: 0 0 0 3px color-mix(in srgb, var(--color-warning) 18%, transparent);
+
+  /* ── Chart series (categorical, up to 8 distinct hues) ─────────────────────
+   * For recharts/SVG `fill`/`stroke` props, which take literal color values, not Tailwind
+   * classes — reference as `var(--chart-1)` etc. directly in those props. Not reused from
+   * --color-success/warning/danger/info: those are reserved for true semantic status, and a
+   * chart series (e.g. "Category 3 of 8") isn't a status. */
+  --chart-1: #6366f1;
+  --chart-2: #22c55e;
+  --chart-3: #f59e0b;
+  --chart-4: #ef4444;
+  --chart-5: #06b6d4;
+  --chart-6: #a855f7;
+  --chart-7: #ec4899;
+  --chart-8: #14b8a6;
 }
 
 /* ── Dark Mode Overrides ─────────────────────────────────────────────────── */
@@ -244,6 +294,27 @@
   --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.4), 0 2px 4px -2px rgb(0 0 0 / 0.4);
   --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.4), 0 4px 6px -4px rgb(0 0 0 / 0.4);
   --shadow-modal: 0 25px 50px -12px rgb(0 0 0 / 0.7);
+
+  /* Marketing ink — one shade lighter than light-mode so it still reads as a
+     distinct "hero surface" against the app's own dark --surface-page. */
+  --marketing-ink: #131519;
+  --marketing-ink-raised: #1c1f24;
+  --marketing-ink-border: rgba(255, 255, 255, 0.1);
+
+  --brand-accent: #fbbf24;
+  --brand-accent-hover: #fcd34d;
+  --brand-accent-foreground: #1c1300;
+  --brand-accent-subtle: #1c1300;
+
+  /* Chart series — lightened for legibility against dark surfaces */
+  --chart-1: #818cf8;
+  --chart-2: #4ade80;
+  --chart-3: #fbbf24;
+  --chart-4: #f87171;
+  --chart-5: #22d3ee;
+  --chart-6: #c084fc;
+  --chart-7: #f472b6;
+  --chart-8: #2dd4bf;
 }
 
 /* ── High Contrast Mode ─────────────────────────────────────────────────────
@@ -283,6 +354,17 @@
   --color-danger-foreground: #fecaca;
   --color-info-foreground: #bfdbfe;
 
+  /* Marketing ink in HC mode: pure black + white border, same AAA-outline
+     principle as the rest of .hc (no soft gradients/glows — those are
+     switched off in the marketing components themselves when .hc is active). */
+  --marketing-ink: #000000;
+  --marketing-ink-raised: #000000;
+  --marketing-ink-border: #ffffff;
+  --marketing-ink-text: #ffffff;
+  --marketing-ink-text-muted: #e5e5e5;
+  --brand-accent: #fcd34d;
+  --brand-accent-foreground: #000000;
+
   /* Elevation communicates via the border outline above, not soft shadows — a
    * low-contrast cue by nature is the wrong tool once a user has opted into HC. */
   --shadow-xs: none;
@@ -291,6 +373,18 @@
   --shadow-lg: none;
   --shadow-xl: none;
   --shadow-modal: 0 0 0 1px #ffffff;
+
+  /* Chart series — light-300-tier tones, chosen for AAA contrast against the near-black
+   * .hc surfaces, same hue order as the default palette so a series stays recognizable
+   * across mode switches. */
+  --chart-1: #a5b4fc;
+  --chart-2: #86efac;
+  --chart-3: #fcd34d;
+  --chart-4: #fca5a5;
+  --chart-5: #67e8f9;
+  --chart-6: #d8b4fe;
+  --chart-7: #f9a8d4;
+  --chart-8: #5eead4;
 }
 
 /* ── Density ────────────────────────────────────────────────────────────────
@@ -326,9 +420,25 @@
     --duration-normal: 0ms;
     --duration-slow: 0ms;
   }
+  /* Transitions are covered above via --duration-*, but @keyframes animations
+   * (scroll-reveal, counters, marketing decorative motion) read their own
+   * `animation-duration`, not the --duration-* tokens — this is the standard
+   * broad a11y override so those stop dead too, not just CSS transitions. */
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+  }
 }
 [data-motion='none'] {
   --duration-fast: 0ms;
   --duration-normal: 0ms;
   --duration-slow: 0ms;
+}
+[data-motion='none'] *,
+[data-motion='none'] *::before,
+[data-motion='none'] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  scroll-behavior: auto !important;
 }

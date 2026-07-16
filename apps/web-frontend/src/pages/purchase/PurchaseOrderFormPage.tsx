@@ -13,7 +13,7 @@ import ERPTextarea from '../../components/erp/ERPTextarea.js';
 import ERPAsyncSelect, { type AsyncSelectOption } from '../../components/erp/ERPAsyncSelect.js';
 import ERPEmptyState from '../../components/erp/ERPEmptyState.js';
 import ERPStickyFooter from '../../components/erp/ERPStickyFooter.js';
-import Kbd from '../../components/erp/Kbd.js';
+import { Kbd } from '@erp/ui';
 import Button from '../../components/ui/Button.js';
 import Input from '../../components/ui/Input.js';
 import Select from '../../components/ui/Select.js';

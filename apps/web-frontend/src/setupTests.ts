@@ -16,3 +16,23 @@ if (typeof window !== 'undefined' && typeof window.matchMedia !== 'function') {
       dispatchEvent: () => false,
     }) as MediaQueryList;
 }
+
+// jsdom doesn't implement IntersectionObserver at all — needed by useScrollReveal (marketing
+// site scroll-reveal animations). A no-op stub is enough for tests: components just never
+// receive an "isVisible" callback, which every consumer already treats as a valid, renderable
+// state (pre-reveal), not an error condition.
+if (typeof window !== 'undefined' && typeof window.IntersectionObserver !== 'function') {
+  class MockIntersectionObserver implements IntersectionObserver {
+    readonly root: Element | Document | null = null;
+    readonly rootMargin: string = '';
+    readonly thresholds: ReadonlyArray<number> = [];
+    observe(): void {}
+    unobserve(): void {}
+    disconnect(): void {}
+    takeRecords(): IntersectionObserverEntry[] {
+      return [];
+    }
+  }
+  window.IntersectionObserver = MockIntersectionObserver as unknown as typeof IntersectionObserver;
+  globalThis.IntersectionObserver = window.IntersectionObserver;
+}

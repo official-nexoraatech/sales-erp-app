@@ -26,7 +26,7 @@ import QuickCreateMenu from './erp/QuickCreateMenu.js';
 import AppearanceMenu from './erp/AppearanceMenu.js';
 import TenantThemeSync from './erp/TenantThemeSync.js';
 import ImpersonationBanner from './erp/ImpersonationBanner.js';
-import Kbd from './erp/Kbd.js';
+import { Kbd } from '@erp/ui';
 import { HelpPanel } from './help/HelpPanel.js';
 import { OnboardingChecklist } from './help/OnboardingChecklist.js';
 import { NotificationsPanel } from './notifications/NotificationsPanel.js';
@@ -355,7 +355,7 @@ export default function Layout() {
           onClick={() => setLogoutConfirmOpen(true)}
           aria-label="Logout"
           title={showLabels ? undefined : 'Logout'}
-          className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm text-red-400 hover:bg-red-900/20 transition-colors"
+          className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm text-danger hover:bg-danger-bg transition-colors"
         >
           <LogOut size={15} className="shrink-0" />
           {showLabels && 'Logout'}
@@ -391,7 +391,7 @@ export default function Layout() {
           }`}
         >
           {overlayExpanded ? (
-            <div className="absolute inset-y-0 left-0 w-60 flex flex-col bg-sidebar border-r border-sidebar rounded-r-xl shadow-token-lg z-[var(--z-popover)] animate-[sidebarFlyoutIn_150ms_ease-out]">
+            <div className="absolute inset-y-0 left-0 w-60 flex flex-col bg-sidebar border-r border-sidebar rounded-r-xl shadow-token-lg z-[var(--z-popover)] animate-[sidebarFlyoutIn_var(--duration-normal)_ease-out]">
               {sidebarInner}
             </div>
           ) : (
@@ -436,11 +436,11 @@ export default function Layout() {
                 <button
                   onClick={() => setNotificationsOpen((v) => !v)}
                   aria-label="Notifications"
-                  className={`p-2 rounded-lg transition-colors relative ${notificationsOpen ? 'bg-blue-600 text-white' : 'text-secondary hover:bg-surface-raised'}`}
+                  className={`p-2 rounded-lg transition-colors relative ${notificationsOpen ? 'bg-primary text-primary-fg' : 'text-secondary hover:bg-surface-raised'}`}
                 >
                   <Bell size={18} />
                   {unreadCount > 0 && (
-                    <span className="absolute top-0.5 right-0.5 min-w-[16px] h-4 px-1 flex items-center justify-center rounded-full bg-red-500 text-white text-[10px] font-semibold leading-none">
+                    <span className="absolute top-0.5 right-0.5 min-w-[16px] h-4 px-1 flex items-center justify-center rounded-full bg-danger text-white text-[10px] font-semibold leading-none">
                       {unreadCount > 99 ? '99+' : unreadCount}
                     </span>
                   )}
@@ -456,8 +456,10 @@ export default function Layout() {
               <button
                 onClick={() => setHelpOpen((v) => !v)}
                 aria-label="Open help panel"
+                aria-haspopup="dialog"
+                aria-expanded={helpOpen}
                 title="Help (press ?)"
-                className={`p-2 rounded-lg transition-colors ${helpOpen ? 'bg-blue-600 text-white' : 'text-secondary hover:bg-surface-raised'}`}
+                className={`p-2 rounded-lg transition-colors ${helpOpen ? 'bg-primary text-primary-fg' : 'text-secondary hover:bg-surface-raised'}`}
               >
                 <HelpCircle size={18} />
               </button>

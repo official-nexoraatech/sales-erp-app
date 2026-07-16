@@ -29,32 +29,32 @@ type IrnStatus =
 const STATUS_CONFIG: Record<IrnStatus, { label: string; color: string; icon: ReactNode }> = {
   IRN_GENERATED: {
     label: 'IRN Generated',
-    color: 'text-green-700 dark:text-green-400 bg-green-100 dark:bg-green-900/30',
+    color: 'text-success bg-success-bg',
     icon: <CheckCircle className="w-3.5 h-3.5" />,
   },
   PENDING_IRN: {
     label: 'Pending Retry',
-    color: 'text-amber-700 dark:text-amber-400 bg-amber-100 dark:bg-amber-900/30',
+    color: 'text-warning bg-warning-bg',
     icon: <Clock className="w-3.5 h-3.5" />,
   },
   IRN_CANCELLED: {
     label: 'Cancelled',
-    color: 'text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-gray-800',
+    color: 'text-secondary bg-surface-raised',
     icon: <XCircle className="w-3.5 h-3.5" />,
   },
   FAILED_IRN: {
     label: 'Failed',
-    color: 'text-red-700 dark:text-red-400 bg-red-100 dark:bg-red-900/30',
+    color: 'text-danger bg-danger-bg',
     icon: <XCircle className="w-3.5 h-3.5" />,
   },
   NOT_APPLICABLE: {
     label: 'Not Applicable',
-    color: 'text-gray-400 dark:text-gray-500 bg-gray-100 dark:bg-gray-800',
+    color: 'text-secondary bg-surface-raised',
     icon: <AlertTriangle className="w-3.5 h-3.5" />,
   },
   CANCEL_REQUIRED_MANUALLY: {
     label: 'Cancel via Portal',
-    color: 'text-orange-700 dark:text-orange-400 bg-orange-100 dark:bg-orange-900/30',
+    color: 'text-warning bg-warning-bg',
     icon: <AlertTriangle className="w-3.5 h-3.5" />,
   },
 };
@@ -108,10 +108,10 @@ function EInvoiceListTable() {
   });
 
   return (
-    <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
-      <div className="px-5 py-4 border-b border-gray-200 dark:border-gray-700">
-        <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Recent e-Invoices</h3>
-        <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+    <div className="bg-surface-card border border-default rounded-xl overflow-hidden">
+      <div className="px-5 py-4 border-b border-default">
+        <h3 className="text-sm font-semibold text-primary">Recent e-Invoices</h3>
+        <p className="text-xs text-secondary mt-0.5">
           Invoices for which IRN generation was attempted — auto-triggered on confirmation, or via
           manual retry
         </p>
@@ -129,7 +129,7 @@ function EInvoiceListTable() {
       {!isLoading && (data?.length ?? 0) > 0 && (
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="bg-gray-50 dark:bg-gray-900/50 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
+            <thead className="bg-surface-subtle text-left text-xs font-medium text-secondary uppercase">
               <tr>
                 <th className="px-5 py-2.5">Invoice</th>
                 <th className="px-5 py-2.5">IRN Status</th>
@@ -138,32 +138,30 @@ function EInvoiceListTable() {
                 <th className="px-5 py-2.5">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
+            <tbody className="divide-y divide-default">
               {data?.map((row) => (
                 <tr key={row.invoiceId}>
-                  <td className="px-5 py-3 font-medium text-gray-900 dark:text-white">
-                    {row.invoiceNumber}
-                  </td>
+                  <td className="px-5 py-3 font-medium text-primary">{row.invoiceNumber}</td>
                   <td className="px-5 py-3">
                     <StatusBadge status={row.irnStatus} />
                     {row.irnStatus === 'FAILED_IRN' && row.failureReason && (
                       <p
-                        className="text-xs text-red-600 dark:text-red-400 mt-1 max-w-xs truncate"
+                        className="text-xs text-danger mt-1 max-w-xs truncate"
                         title={row.failureReason}
                       >
                         {row.failureReason}
                       </p>
                     )}
                   </td>
-                  <td className="px-5 py-3 font-mono text-xs text-gray-600 dark:text-gray-400">
+                  <td className="px-5 py-3 font-mono text-xs text-secondary">
                     {row.irn ? `${row.irn.substring(0, 20)}...` : '—'}
                     {row.signedQrCode && (
-                      <span className="ml-2 inline-block text-[10px] px-1.5 py-0.5 rounded bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400">
+                      <span className="ml-2 inline-block text-[10px] px-1.5 py-0.5 rounded bg-primary-subtle text-brand">
                         QR ready
                       </span>
                     )}
                   </td>
-                  <td className="px-5 py-3 text-xs text-gray-600 dark:text-gray-400">
+                  <td className="px-5 py-3 text-xs text-secondary">
                     {row.ewbNumber ? (
                       <span className="inline-flex items-center gap-1">
                         <Truck className="w-3.5 h-3.5" /> {row.ewbNumber}
@@ -213,10 +211,8 @@ function InvoiceStatusLookup() {
   };
 
   return (
-    <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-5">
-      <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-4">
-        Check e-Invoice Status
-      </h3>
+    <div className="bg-surface-card border border-default rounded-xl p-5">
+      <h3 className="text-sm font-semibold text-primary mb-4">Check e-Invoice Status</h3>
       <div className="flex gap-3">
         <input
           type="number"
@@ -224,7 +220,7 @@ function InvoiceStatusLookup() {
           onChange={(e) => setInvoiceId(e.target.value)}
           placeholder="Enter Invoice ID"
           onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-          className="flex-1 px-3 py-2 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          className="flex-1 px-3 py-2 text-sm bg-surface-card border border-default rounded-lg text-primary focus:outline-none focus:ring-2 focus:ring-focus"
         />
         <Button variant="primary" onClick={handleSearch}>
           <Search size={16} />
@@ -232,72 +228,58 @@ function InvoiceStatusLookup() {
         </Button>
       </div>
 
-      {isLoading && (
-        <p className="mt-4 text-sm text-gray-400 dark:text-gray-500">Fetching status...</p>
-      )}
+      {isLoading && <p className="mt-4 text-sm text-secondary">Fetching status...</p>}
       {error && (
-        <p className="mt-4 text-sm text-red-600 dark:text-red-400">
-          Invoice not found or error fetching status
-        </p>
+        <p className="mt-4 text-sm text-danger">Invoice not found or error fetching status</p>
       )}
 
       {data && (
         <div className="mt-4 space-y-3">
           <div className="flex items-center justify-between">
-            <span className="text-sm text-gray-600 dark:text-gray-400">Status</span>
+            <span className="text-sm text-secondary">Status</span>
             <StatusBadge status={(data.irnStatus as IrnStatus) ?? 'NOT_APPLICABLE'} />
           </div>
           {Boolean(data.irn) && (
             <div>
-              <span className="text-xs text-gray-500 dark:text-gray-400">IRN</span>
-              <p className="text-xs font-mono text-gray-700 dark:text-gray-300 break-all mt-0.5">
-                {String(data.irn)}
-              </p>
+              <span className="text-xs text-secondary">IRN</span>
+              <p className="text-xs font-mono text-primary break-all mt-0.5">{String(data.irn)}</p>
             </div>
           )}
           {Boolean(data.ackNumber) && (
             <div className="flex justify-between">
-              <span className="text-sm text-gray-600 dark:text-gray-400">Ack No</span>
-              <span className="text-sm font-medium text-gray-900 dark:text-white font-mono">
+              <span className="text-sm text-secondary">Ack No</span>
+              <span className="text-sm font-medium text-primary font-mono">
                 {String(data.ackNumber)}
               </span>
             </div>
           )}
           {Boolean(data.ackDate) && (
             <div className="flex justify-between">
-              <span className="text-sm text-gray-600 dark:text-gray-400">Ack Date</span>
-              <span className="text-sm text-gray-700 dark:text-gray-300">
-                {String(data.ackDate)}
-              </span>
+              <span className="text-sm text-secondary">Ack Date</span>
+              <span className="text-sm text-primary">{String(data.ackDate)}</span>
             </div>
           )}
           {Boolean(data.ewbNumber) && (
-            <div className="mt-2 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
-              <p className="text-xs font-medium text-blue-700 dark:text-blue-400">e-Way Bill</p>
-              <p className="text-sm font-mono text-blue-800 dark:text-blue-300 mt-1">
-                {String(data.ewbNumber)}
-              </p>
+            <div className="mt-2 p-3 bg-info-bg rounded-lg">
+              <p className="text-xs font-medium text-info">e-Way Bill</p>
+              <p className="text-sm font-mono text-info mt-1">{String(data.ewbNumber)}</p>
               {Boolean(data.ewbValidUpto) && (
-                <p className="text-xs text-blue-600 dark:text-blue-400 mt-1">
-                  Valid until: {String(data.ewbValidUpto)}
-                </p>
+                <p className="text-xs text-info mt-1">Valid until: {String(data.ewbValidUpto)}</p>
               )}
             </div>
           )}
           {Boolean(data.signedQrCode) && (
             <div>
-              <span className="text-xs text-gray-500 dark:text-gray-400">Signed QR</span>
-              <p className="text-xs font-mono text-gray-500 dark:text-gray-500 truncate mt-0.5">
+              <span className="text-xs text-secondary">Signed QR</span>
+              <p className="text-xs font-mono text-secondary truncate mt-0.5">
                 {String(data.signedQrCode).substring(0, 40)}...
               </p>
             </div>
           )}
           {data.retryCount !== undefined && Number(data.retryCount) > 0 && (
             <div className="flex justify-between">
-              <span className="text-sm text-gray-600 dark:text-gray-400">Retry Attempts</span>
-              <span className="text-sm text-amber-600 dark:text-amber-400">
-                {String(data.retryCount)} / 5
-              </span>
+              <span className="text-sm text-secondary">Retry Attempts</span>
+              <span className="text-sm text-warning">{String(data.retryCount)} / 5</span>
             </div>
           )}
         </div>
@@ -310,10 +292,10 @@ export function EInvoicePage() {
   return (
     <div className="p-6 space-y-6">
       <div className="flex items-center gap-3">
-        <Zap className="w-6 h-6 text-indigo-600 dark:text-indigo-400" />
+        <Zap className="w-6 h-6 text-brand" />
         <div>
-          <h1 className="text-xl font-semibold text-gray-900 dark:text-white">e-Invoice (IRN)</h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400">
+          <h1 className="text-xl font-semibold text-primary">e-Invoice (IRN)</h1>
+          <p className="text-sm text-secondary">
             NIC IRP portal integration — IRN generation, cancellation &amp; e-Way Bill
           </p>
         </div>
@@ -321,32 +303,20 @@ export function EInvoicePage() {
 
       {/* Info card */}
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-        <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl p-4">
-          <div className="text-xs font-medium text-blue-600 dark:text-blue-400 uppercase mb-1">
-            Threshold
-          </div>
-          <div className="text-lg font-semibold text-blue-800 dark:text-blue-300">₹5 Lakh</div>
-          <div className="text-xs text-blue-600 dark:text-blue-500 mt-1">
-            e-Invoice mandatory above this
-          </div>
+        <div className="bg-info-bg border border-info rounded-xl p-4">
+          <div className="text-xs font-medium text-info uppercase mb-1">Threshold</div>
+          <div className="text-lg font-semibold text-info">₹5 Lakh</div>
+          <div className="text-xs text-info mt-1">e-Invoice mandatory above this</div>
         </div>
-        <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-xl p-4">
-          <div className="text-xs font-medium text-green-600 dark:text-green-400 uppercase mb-1">
-            e-Way Bill
-          </div>
-          <div className="text-lg font-semibold text-green-800 dark:text-green-300">₹50K+</div>
-          <div className="text-xs text-green-600 dark:text-green-500 mt-1">
-            EWB required for goods in transit
-          </div>
+        <div className="bg-success-bg border border-success rounded-xl p-4">
+          <div className="text-xs font-medium text-success uppercase mb-1">e-Way Bill</div>
+          <div className="text-lg font-semibold text-success">₹50K+</div>
+          <div className="text-xs text-success mt-1">EWB required for goods in transit</div>
         </div>
-        <div className="bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 rounded-xl p-4">
-          <div className="text-xs font-medium text-purple-600 dark:text-purple-400 uppercase mb-1">
-            Cancellation
-          </div>
-          <div className="text-lg font-semibold text-purple-800 dark:text-purple-300">24 Hours</div>
-          <div className="text-xs text-purple-600 dark:text-purple-500 mt-1">
-            IRN can be cancelled within 24h
-          </div>
+        <div className="bg-accent-purple-subtle border border-default rounded-xl p-4">
+          <div className="text-xs font-medium text-accent-purple uppercase mb-1">Cancellation</div>
+          <div className="text-lg font-semibold text-accent-purple">24 Hours</div>
+          <div className="text-xs text-accent-purple mt-1">IRN can be cancelled within 24h</div>
         </div>
       </div>
 
@@ -357,37 +327,35 @@ export function EInvoicePage() {
       <InvoiceStatusLookup />
 
       {/* Instructions */}
-      <div className="bg-gray-50 dark:bg-gray-900/50 border border-gray-200 dark:border-gray-700 rounded-xl p-5">
-        <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">
-          How IRN Generation Works
-        </h3>
-        <ol className="space-y-2 text-sm text-gray-600 dark:text-gray-400">
+      <div className="bg-surface-subtle border border-default rounded-xl p-5">
+        <h3 className="text-sm font-semibold text-primary mb-3">How IRN Generation Works</h3>
+        <ol className="space-y-2 text-sm text-secondary">
           <li className="flex gap-2">
-            <span className="flex-shrink-0 w-5 h-5 rounded-full bg-indigo-600 text-white text-xs flex items-center justify-center font-medium">
+            <span className="flex-shrink-0 w-5 h-5 rounded-full bg-primary text-primary-fg text-xs flex items-center justify-center font-medium">
               1
             </span>
             Confirming a B2B invoice (customer GSTIN on file) auto-triggers IRN generation via NIC
           </li>
           <li className="flex gap-2">
-            <span className="flex-shrink-0 w-5 h-5 rounded-full bg-indigo-600 text-white text-xs flex items-center justify-center font-medium">
+            <span className="flex-shrink-0 w-5 h-5 rounded-full bg-primary text-primary-fg text-xs flex items-center justify-center font-medium">
               2
             </span>
             IRN, Ack No, and signed QR code are stored automatically on success
           </li>
           <li className="flex gap-2">
-            <span className="flex-shrink-0 w-5 h-5 rounded-full bg-indigo-600 text-white text-xs flex items-center justify-center font-medium">
+            <span className="flex-shrink-0 w-5 h-5 rounded-full bg-primary text-primary-fg text-xs flex items-center justify-center font-medium">
               3
             </span>
             Transient NIC failures retry automatically (3x on the call, then every 15 min)
           </li>
           <li className="flex gap-2">
-            <span className="flex-shrink-0 w-5 h-5 rounded-full bg-indigo-600 text-white text-xs flex items-center justify-center font-medium">
+            <span className="flex-shrink-0 w-5 h-5 rounded-full bg-primary text-primary-fg text-xs flex items-center justify-center font-medium">
               4
             </span>
             Use "Retry" on a Failed row above to force an immediate retry
           </li>
           <li className="flex gap-2">
-            <span className="flex-shrink-0 w-5 h-5 rounded-full bg-indigo-600 text-white text-xs flex items-center justify-center font-medium">
+            <span className="flex-shrink-0 w-5 h-5 rounded-full bg-primary text-primary-fg text-xs flex items-center justify-center font-medium">
               5
             </span>
             Generate e-Way Bill from the invoice detail page if goods value &gt; ₹50K
@@ -396,16 +364,14 @@ export function EInvoicePage() {
       </div>
 
       {/* Status legend */}
-      <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-5">
-        <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">
-          Status Reference
-        </h3>
+      <div className="bg-surface-card border border-default rounded-xl p-5">
+        <h3 className="text-sm font-semibold text-primary mb-3">Status Reference</h3>
         <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
           {(Object.entries(STATUS_CONFIG) as [IrnStatus, (typeof STATUS_CONFIG)[IrnStatus]][]).map(
             ([status]) => (
               <div key={status} className="flex flex-col items-start gap-1.5">
                 <StatusBadge status={status} />
-                <p className="text-xs text-gray-500 dark:text-gray-400 leading-tight">
+                <p className="text-xs text-secondary leading-tight">
                   {status === 'IRN_GENERATED' && 'Successfully registered with NIC IRP'}
                   {status === 'PENDING_IRN' && 'Network timeout; auto-retry pending'}
                   {status === 'IRN_CANCELLED' && 'Cancelled at NIC portal'}

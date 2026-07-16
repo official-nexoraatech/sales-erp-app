@@ -64,6 +64,8 @@ import {
   Flag,
   Fingerprint,
   Settings,
+  Webhook,
+  HelpCircle,
 } from 'lucide-react';
 import type { ComponentType } from 'react';
 import { PERMISSIONS, type Permission } from '../constants/permissions.js';
@@ -618,6 +620,18 @@ export const NAV_GROUPS: NavGroup[] = [
         path: '/settings/sso',
         icon: Fingerprint,
         permission: PERMISSIONS.SSO_CONFIG_MANAGE,
+      },
+      {
+        label: 'Integrations',
+        path: '/settings/integrations',
+        icon: Webhook,
+        permission: PERMISSIONS.INTEGRATION_WEBHOOK_MANAGE,
+      },
+      {
+        label: 'FAQ Management',
+        path: '/settings/faqs',
+        icon: HelpCircle,
+        permission: PERMISSIONS.PLATFORM_CONTENT_MANAGE,
       },
       { label: 'Security Settings', path: '/security', icon: KeyRound },
     ],

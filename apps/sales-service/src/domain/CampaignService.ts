@@ -11,8 +11,6 @@ import {
   projectionCustomerBalance,
   tenantCommunicationSettings,
   tenantSenderIdentity,
-  campaignWebhookSubscriptions,
-  campaignWebhookDeliveries,
   customerCommunicationPreferences,
   type Campaign,
   type CampaignAutomationRule,
@@ -22,6 +20,7 @@ import { createCircuitBreaker } from '@erp/sdk';
 import { BusinessError, NotFoundError, OptimisticLockError, ValidationError } from '@erp/types';
 import { createLogger } from '@erp/logger';
 import { SegmentService, type SegmentFilterDefinition } from './SegmentService.js';
+import { enqueueWebhookDeliveries } from './WebhookService.js';
 
 const logger = createLogger({ serviceName: 'sales-service' });
 
@@ -648,51 +647,24 @@ export class CampaignService {
       entityId: campaignId,
       after: { sentCount, failedCount },
     });
-    await CampaignService.enqueueWebhookDeliveries(ctx, 'CAMPAIGN_SENT', campaignId, {
+    await enqueueWebhookDeliveries(
+      ctx.db.raw,
+      ctx.tenant.tenantId,
+      'CAMPAIGN',
       campaignId,
-      name: updated.name,
-      channel: updated.channel,
-      totalRecipients: recipients.length,
-      sentCount,
-      failedCount,
-      sentAt: updated.sentAt,
-    });
+      'CAMPAIGN_SENT',
+      {
+        campaignId,
+        name: updated.name,
+        channel: updated.channel,
+        totalRecipients: recipients.length,
+        sentCount,
+        failedCount,
+        sentAt: updated.sentAt,
+      }
+    );
 
     return updated;
-  }
-
-  // CP-8: enqueues one PENDING delivery row per active subscription whose `events` list
-  // includes eventType — a cheap synchronous INSERT (no outbound I/O), matching the CP-6
-  // decision to keep third-party-dependent latency off the campaign-send critical path.
-  // WebhookDispatchWorker (a separate poll loop, modeled on event-service's OutboxRelayWorker)
-  // is what actually performs the HTTP POST, asynchronously.
-  private static async enqueueWebhookDeliveries(
-    ctx: PlatformContext,
-    eventType: string,
-    campaignId: number,
-    payload: Record<string, unknown>
-  ): Promise<void> {
-    const subscriptions = await ctx.db.raw
-      .select({ id: campaignWebhookSubscriptions.id, events: campaignWebhookSubscriptions.events })
-      .from(campaignWebhookSubscriptions)
-      .where(
-        and(
-          eq(campaignWebhookSubscriptions.tenantId, ctx.tenant.tenantId),
-          eq(campaignWebhookSubscriptions.isActive, true)
-        )
-      );
-    const matching = subscriptions.filter((s) => s.events.includes(eventType));
-    if (matching.length === 0) return;
-
-    await ctx.db.raw.insert(campaignWebhookDeliveries).values(
-      matching.map((s) => ({
-        tenantId: ctx.tenant.tenantId,
-        subscriptionId: s.id,
-        eventType,
-        campaignId,
-        payload,
-      }))
-    );
   }
 
   /**
@@ -1209,12 +1181,19 @@ export class CampaignService {
     });
 
     await ctx.audit.log({ action: 'CANCEL', entityType: 'campaign', entityId: campaignId });
-    await CampaignService.enqueueWebhookDeliveries(ctx, 'CAMPAIGN_CANCELLED', campaignId, {
+    await enqueueWebhookDeliveries(
+      ctx.db.raw,
+      ctx.tenant.tenantId,
+      'CAMPAIGN',
       campaignId,
-      name: updated.name,
-      channel: updated.channel,
-      cancelledAt: updated.cancelledAt,
-    });
+      'CAMPAIGN_CANCELLED',
+      {
+        campaignId,
+        name: updated.name,
+        channel: updated.channel,
+        cancelledAt: updated.cancelledAt,
+      }
+    );
     return updated;
   }
 

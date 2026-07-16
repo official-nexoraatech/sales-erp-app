@@ -60,6 +60,7 @@ export async function login(page: Page, permissions: string[]): Promise<void> {
   );
 
   await page.goto('/login');
+  await page.getByRole('button', { name: 'Sign in with a tenant ID instead' }).click();
   await page.getByLabel('Tenant ID').fill('1');
   await page.getByLabel('Email').fill('owner@example.com');
   await page.getByLabel('Password', { exact: true }).fill('correct-horse-battery-staple');

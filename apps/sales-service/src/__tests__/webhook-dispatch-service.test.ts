@@ -48,7 +48,8 @@ describe('deliverWebhook', () => {
       targetUrl: 'https://example.com/webhook',
       secret: 'sub-secret',
       eventType: 'CAMPAIGN_SENT',
-      campaignId: 42,
+      aggregateType: 'CAMPAIGN',
+      aggregateId: 42,
       payload: { sentCount: 10 },
     });
 
@@ -65,9 +66,14 @@ describe('deliverWebhook', () => {
     const expectedSig = `sha256=${signWebhookPayload('sub-secret', options.body)}`;
     expect(options.headers['X-Webhook-Signature']).toBe(expectedSig);
 
-    const parsed = JSON.parse(options.body) as { eventType: string; campaignId: number };
+    const parsed = JSON.parse(options.body) as {
+      eventType: string;
+      aggregateType: string;
+      aggregateId: number;
+    };
     expect(parsed.eventType).toBe('CAMPAIGN_SENT');
-    expect(parsed.campaignId).toBe(42);
+    expect(parsed.aggregateType).toBe('CAMPAIGN');
+    expect(parsed.aggregateId).toBe(42);
   });
 
   it('returns success:false with the HTTP status on a non-2xx response', async () => {
@@ -76,7 +82,8 @@ describe('deliverWebhook', () => {
       targetUrl: 'https://example.com/webhook',
       secret: 's',
       eventType: 'CAMPAIGN_SENT',
-      campaignId: 1,
+      aggregateType: 'CAMPAIGN',
+      aggregateId: 1,
       payload: {},
     });
     expect(outcome).toEqual({ success: false, httpStatus: 500 });
@@ -91,7 +98,8 @@ describe('deliverWebhook', () => {
       targetUrl: 'https://example.invalid/webhook',
       secret: 's',
       eventType: 'CAMPAIGN_CANCELLED',
-      campaignId: 2,
+      aggregateType: 'CAMPAIGN',
+      aggregateId: 2,
       payload: {},
     });
     expect(outcome.success).toBe(false);

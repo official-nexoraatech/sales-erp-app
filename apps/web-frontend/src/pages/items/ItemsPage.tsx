@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { Pencil, Barcode, Trash2 } from 'lucide-react';
+import { Pencil, Barcode, Printer, Trash2 } from 'lucide-react';
 import { itemApi, categoryApi, brandApi } from '../../api/endpoints.js';
 import { useDebounce } from '../../hooks/useDebounce.js';
 import { useAuthStore } from '../../store/auth.store.js';
@@ -174,6 +174,18 @@ export default function ItemsPage() {
             icon: Barcode,
             label: 'Generate Barcode',
             onClick: (r: Item) => generateBarcodeMutation.mutate(r.id),
+          },
+        ]
+      : []),
+    ...(hasPermission(PERMISSIONS.BARCODE_GENERATE)
+      ? [
+          {
+            icon: Printer,
+            label: 'Print Barcode Label',
+            onClick: (r: Item) =>
+              navigate(
+                `/production/barcode-labels?itemId=${r.id}&itemName=${encodeURIComponent(r.name)}`
+              ),
           },
         ]
       : []),

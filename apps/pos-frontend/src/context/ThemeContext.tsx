@@ -25,6 +25,18 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     }
   }, [isDark]);
 
+  // Cross-tab sync — the `storage` event fires in every other same-origin tab whenever
+  // localStorage changes, so toggling dark mode in one tab updates every other open tab.
+  useEffect(() => {
+    function onStorage(e: StorageEvent) {
+      if (e.key === 'erp-theme' && e.newValue !== null) {
+        setIsDark(e.newValue === 'dark');
+      }
+    }
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, []);
+
   function toggleTheme() {
     setIsDark((prev) => !prev);
   }

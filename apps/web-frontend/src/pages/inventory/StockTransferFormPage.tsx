@@ -156,7 +156,7 @@ export default function StockTransferFormPage() {
         </ERPFormSection>
 
         <div className="bg-surface-card rounded-xl border border-default p-4">
-          <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Items</h3>
+          <h3 className="text-sm font-medium text-primary mb-2">Items</h3>
           <Input
             label="Search item to add"
             value={itemSearch}
@@ -164,11 +164,11 @@ export default function StockTransferFormPage() {
             placeholder="Type item name..."
           />
           {itemResults.length > 0 && (
-            <div className="mt-1 border rounded-lg divide-y bg-white dark:bg-gray-800 dark:border-gray-700 max-h-48 overflow-y-auto">
+            <div className="mt-1 border border-default rounded-lg divide-y bg-surface-card max-h-48 overflow-y-auto">
               {itemResults.map((item) => (
                 <button
                   key={item.id}
-                  className="w-full text-left px-3 py-2 text-sm hover:bg-indigo-50 dark:hover:bg-gray-700"
+                  className="w-full text-left px-3 py-2 text-sm hover:bg-surface-raised"
                   onClick={() => addLine(item)}
                 >
                   <span className="font-medium">{item.name}</span>
@@ -184,14 +184,14 @@ export default function StockTransferFormPage() {
         {lines.length > 0 && (
           <table className="w-full text-sm">
             <thead>
-              <tr className="text-left text-gray-500 dark:text-gray-400 border-b dark:border-gray-700">
+              <tr className="text-left text-secondary border-b border-default">
                 <th className="pb-2 font-medium">Item</th>
                 <th className="pb-2 font-medium w-32">Qty</th>
                 <th className="pb-2 font-medium w-32">Unit Cost (₹)</th>
                 <th className="pb-2 w-12"></th>
               </tr>
             </thead>
-            <tbody className="divide-y dark:divide-gray-700">
+            <tbody className="divide-y divide-default">
               {lines.map((line, idx) => (
                 <tr key={line.itemId}>
                   <td className="py-2">{line.itemName}</td>
@@ -204,7 +204,7 @@ export default function StockTransferFormPage() {
                       onChange={(e) =>
                         updateLine(idx, 'requestedQty', parseFloat(e.target.value) || 0)
                       }
-                      className="w-28 rounded border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm px-2 py-1"
+                      className="w-28 rounded border-default bg-surface-card text-sm px-2 py-1"
                     />
                   </td>
                   <td className="py-2">
@@ -215,7 +215,7 @@ export default function StockTransferFormPage() {
                       value={line.unitCost ?? ''}
                       onChange={(e) => updateLine(idx, 'unitCost', parseFloat(e.target.value) || 0)}
                       placeholder="Optional"
-                      className="w-28 rounded border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm px-2 py-1"
+                      className="w-28 rounded border-default bg-surface-card text-sm px-2 py-1"
                     />
                   </td>
                   <td className="py-2">

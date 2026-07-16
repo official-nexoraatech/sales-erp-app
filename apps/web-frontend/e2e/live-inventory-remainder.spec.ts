@@ -7,6 +7,7 @@ const OWNER = { email: 'owner@qa-e2e.local', password: 'QaE2eOwner@2026', tenant
 
 async function realLogin(page: Page): Promise<void> {
   await page.goto('/login');
+  await page.getByRole('button', { name: 'Sign in with a tenant ID instead' }).click();
   await page.getByLabel('Tenant ID').fill(String(OWNER.tenantId));
   await page.getByLabel('Email').fill(OWNER.email);
   await page.getByLabel('Password', { exact: true }).fill(OWNER.password);

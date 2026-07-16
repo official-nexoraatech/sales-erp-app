@@ -1,8 +1,19 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
-  LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
-  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
+  LineChart,
+  Line,
+  BarChart,
+  Bar,
+  PieChart,
+  Pie,
+  Cell,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  Legend,
 } from 'recharts';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
 import ERPErrorBoundary from '../../components/erp/ERPErrorBoundary.js';
@@ -10,7 +21,16 @@ import { ERPCardSkeleton } from '../../components/erp/ERPSkeleton.js';
 import ERPDateRangePicker from '../../components/erp/ERPDateRangePicker.js';
 import { reportsEngineApi } from '../../api/endpoints.js';
 
-const COLORS = ['#6366f1', '#22c55e', '#f59e0b', '#ef4444', '#06b6d4', '#a855f7', '#ec4899', '#14b8a6'];
+const COLORS = [
+  'var(--chart-1)',
+  'var(--chart-2)',
+  'var(--chart-3)',
+  'var(--chart-4)',
+  'var(--chart-5)',
+  'var(--chart-6)',
+  'var(--chart-7)',
+  'var(--chart-8)',
+];
 
 function fmt(n: number | undefined | null): string {
   if (n === null || n === undefined) return '–';
@@ -19,10 +39,25 @@ function fmt(n: number | undefined | null): string {
   return `₹${n.toFixed(0)}`;
 }
 
-interface DepartmentRow { department: string; headcount: number | string; }
-interface SalaryTrendRow { month: string; employeeCount: number | string; grossSalaryCost: number | string; totalDeductions: number | string; }
-interface HiresExitsRow { month: string; newHires: number | string; exits: number | string; }
-interface GenderRow { gender: string; headcount: number | string; }
+interface DepartmentRow {
+  department: string;
+  headcount: number | string;
+}
+interface SalaryTrendRow {
+  month: string;
+  employeeCount: number | string;
+  grossSalaryCost: number | string;
+  totalDeductions: number | string;
+}
+interface HiresExitsRow {
+  month: string;
+  newHires: number | string;
+  exits: number | string;
+}
+interface GenderRow {
+  gender: string;
+  headcount: number | string;
+}
 
 function defaultFromDate(): string {
   const d = new Date();
@@ -38,32 +73,50 @@ export default function HRAnalyticsPage() {
 
   const { data: deptData, isLoading: deptLoading } = useQuery({
     queryKey: ['hr-headcount-by-department'],
-    queryFn: async () => (await reportsEngineApi.run('hr-headcount-by-department', {})) as { rows: DepartmentRow[] },
+    queryFn: async () =>
+      (await reportsEngineApi.run('hr-headcount-by-department', {})) as { rows: DepartmentRow[] },
   });
 
   const { data: salaryData, isLoading: salaryLoading } = useQuery({
     queryKey: ['hr-salary-cost-trend', fromDate, toDate],
-    queryFn: async () => (await reportsEngineApi.run('hr-salary-cost-trend', { fromDate, toDate })) as { rows: SalaryTrendRow[] },
+    queryFn: async () =>
+      (await reportsEngineApi.run('hr-salary-cost-trend', { fromDate, toDate })) as {
+        rows: SalaryTrendRow[];
+      },
   });
 
   const { data: hiresData, isLoading: hiresLoading } = useQuery({
     queryKey: ['hr-hires-vs-exits', fromDate, toDate],
-    queryFn: async () => (await reportsEngineApi.run('hr-hires-vs-exits', { fromDate, toDate })) as { rows: HiresExitsRow[] },
+    queryFn: async () =>
+      (await reportsEngineApi.run('hr-hires-vs-exits', { fromDate, toDate })) as {
+        rows: HiresExitsRow[];
+      },
   });
 
   const { data: genderData, isLoading: genderLoading } = useQuery({
     queryKey: ['hr-gender-diversity'],
-    queryFn: async () => (await reportsEngineApi.run('hr-gender-diversity', {})) as { rows: GenderRow[] },
+    queryFn: async () =>
+      (await reportsEngineApi.run('hr-gender-diversity', {})) as { rows: GenderRow[] },
   });
 
-  const departments = (deptData?.rows ?? []).map((r) => ({ department: r.department, headcount: Number(r.headcount) }));
+  const departments = (deptData?.rows ?? []).map((r) => ({
+    department: r.department,
+    headcount: Number(r.headcount),
+  }));
   const salaryTrend = (salaryData?.rows ?? []).map((r) => ({
     month: r.month,
     grossSalaryCost: Number(r.grossSalaryCost),
     totalDeductions: Number(r.totalDeductions),
   }));
-  const hiresExits = (hiresData?.rows ?? []).map((r) => ({ month: r.month, newHires: Number(r.newHires), exits: Number(r.exits) }));
-  const genderDiversity = (genderData?.rows ?? []).map((r) => ({ gender: r.gender, headcount: Number(r.headcount) }));
+  const hiresExits = (hiresData?.rows ?? []).map((r) => ({
+    month: r.month,
+    newHires: Number(r.newHires),
+    exits: Number(r.exits),
+  }));
+  const genderDiversity = (genderData?.rows ?? []).map((r) => ({
+    gender: r.gender,
+    headcount: Number(r.headcount),
+  }));
 
   const isLoading = deptLoading || salaryLoading || hiresLoading || genderLoading;
 
@@ -77,14 +130,19 @@ export default function HRAnalyticsPage() {
           actions={
             <ERPDateRangePicker
               value={{ from: fromDate, to: toDate }}
-              onChange={(range) => { setFromDate(range.from); setToDate(range.to); }}
+              onChange={(range) => {
+                setFromDate(range.from);
+                setToDate(range.to);
+              }}
             />
           }
         />
 
         {isLoading ? (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {Array.from({ length: 4 }).map((_, i) => <ERPCardSkeleton key={i} lines={4} />)}
+            {Array.from({ length: 4 }).map((_, i) => (
+              <ERPCardSkeleton key={i} lines={4} />
+            ))}
           </div>
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -96,7 +154,12 @@ export default function HRAnalyticsPage() {
                   <XAxis dataKey="department" tick={{ fontSize: 10 }} />
                   <YAxis tick={{ fontSize: 10 }} allowDecimals={false} />
                   <Tooltip />
-                  <Bar dataKey="headcount" name="Headcount" fill="#6366f1" radius={[4, 4, 0, 0]} />
+                  <Bar
+                    dataKey="headcount"
+                    name="Headcount"
+                    fill="var(--chart-1)"
+                    radius={[4, 4, 0, 0]}
+                  />
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -116,7 +179,9 @@ export default function HRAnalyticsPage() {
                     labelLine={false}
                     style={{ fontSize: 10 }}
                   >
-                    {genderDiversity.map((_entry, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
+                    {genderDiversity.map((_entry, i) => (
+                      <Cell key={i} fill={COLORS[i % COLORS.length]} />
+                    ))}
                   </Pie>
                   <Tooltip />
                 </PieChart>
@@ -132,8 +197,22 @@ export default function HRAnalyticsPage() {
                   <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => fmt(v)} />
                   <Tooltip formatter={(v: number) => fmt(v)} />
                   <Legend wrapperStyle={{ fontSize: 11 }} />
-                  <Line type="monotone" dataKey="grossSalaryCost" name="Gross Salary Cost" stroke="#6366f1" strokeWidth={2} dot={{ r: 3 }} />
-                  <Line type="monotone" dataKey="totalDeductions" name="Deductions" stroke="#ef4444" strokeWidth={2} dot={{ r: 3 }} />
+                  <Line
+                    type="monotone"
+                    dataKey="grossSalaryCost"
+                    name="Gross Salary Cost"
+                    stroke="var(--chart-1)"
+                    strokeWidth={2}
+                    dot={{ r: 3 }}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="totalDeductions"
+                    name="Deductions"
+                    stroke="var(--chart-4)"
+                    strokeWidth={2}
+                    dot={{ r: 3 }}
+                  />
                 </LineChart>
               </ResponsiveContainer>
             </div>
@@ -147,8 +226,13 @@ export default function HRAnalyticsPage() {
                   <YAxis tick={{ fontSize: 11 }} allowDecimals={false} />
                   <Tooltip />
                   <Legend wrapperStyle={{ fontSize: 11 }} />
-                  <Bar dataKey="newHires" name="New Hires" fill="#22c55e" radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="exits" name="Exits" fill="#ef4444" radius={[4, 4, 0, 0]} />
+                  <Bar
+                    dataKey="newHires"
+                    name="New Hires"
+                    fill="var(--chart-2)"
+                    radius={[4, 4, 0, 0]}
+                  />
+                  <Bar dataKey="exits" name="Exits" fill="var(--chart-4)" radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </div>

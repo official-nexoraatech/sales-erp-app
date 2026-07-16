@@ -35,14 +35,14 @@ import ERPStatCard from '../components/erp/ERPStatCard.js';
 import ChartCard from '../components/erp/ChartCard.js';
 
 const COLORS = [
-  '#6366f1',
-  '#22c55e',
-  '#f59e0b',
-  '#ef4444',
-  '#06b6d4',
-  '#a855f7',
-  '#ec4899',
-  '#14b8a6',
+  'var(--chart-1)',
+  'var(--chart-2)',
+  'var(--chart-3)',
+  'var(--chart-4)',
+  'var(--chart-5)',
+  'var(--chart-6)',
+  'var(--chart-7)',
+  'var(--chart-8)',
 ];
 
 function fmt(n: number | string | undefined | null): string {
@@ -230,7 +230,7 @@ export default function DashboardPage() {
         </div>
         <div className="flex items-center gap-2">
           {isStale && (
-            <span className="flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-400 font-medium">
+            <span className="flex items-center gap-1.5 text-xs text-warning font-medium">
               <RefreshCw size={12} className="animate-spin" />
               Data may be stale
             </span>
@@ -310,16 +310,16 @@ export default function DashboardPage() {
                 type="monotone"
                 dataKey="total_sales"
                 name="Sales"
-                stroke="#6366f1"
-                fill="#6366f133"
+                stroke="var(--chart-1)"
+                fill="color-mix(in srgb, var(--chart-1) 20%, transparent)"
                 strokeWidth={2}
               />
               <Area
                 type="monotone"
                 dataKey="gross_profit"
                 name="Profit"
-                stroke="#22c55e"
-                fill="#22c55e22"
+                stroke="var(--chart-2)"
+                fill="color-mix(in srgb, var(--chart-2) 13%, transparent)"
                 strokeWidth={2}
               />
             </AreaChart>
@@ -361,7 +361,7 @@ export default function DashboardPage() {
               <XAxis dataKey="bucket" tick={{ fontSize: 10 }} />
               <YAxis tick={{ fontSize: 10 }} tickFormatter={(v) => `₹${(v / 1000).toFixed(0)}K`} />
               <Tooltip formatter={(v: number) => fmt(v)} />
-              <Bar dataKey="amount" fill="#ef4444" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="amount" fill="var(--chart-4)" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </ChartCard>
@@ -420,8 +420,8 @@ export default function DashboardPage() {
                 type="monotone"
                 dataKey="total_purchases"
                 name="Purchases"
-                stroke="#f59e0b"
-                fill="#f59e0b22"
+                stroke="var(--chart-3)"
+                fill="color-mix(in srgb, var(--chart-3) 13%, transparent)"
                 strokeWidth={2}
               />
             </AreaChart>
@@ -442,7 +442,7 @@ export default function DashboardPage() {
               />
               <YAxis type="category" dataKey="category" tick={{ fontSize: 10 }} />
               <Tooltip formatter={(v: number) => fmt(v)} />
-              <Bar dataKey="value" fill="#6366f1" radius={[0, 4, 4, 0]} />
+              <Bar dataKey="value" fill="var(--chart-1)" radius={[0, 4, 4, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </ChartCard>
@@ -512,7 +512,7 @@ export default function DashboardPage() {
               label="overdue payables"
               count={alerts!.overduePayables.count}
               amount={alerts!.overduePayables.total_amount}
-              color="border-orange-400 dark:border-orange-700 bg-orange-50 text-orange-600 dark:bg-orange-900/20 dark:text-orange-400"
+              color="border-warning bg-warning-bg text-warning"
             />
           )}
           {(alerts?.pendingPurchaseOrders.count ?? 0) > 0 && (

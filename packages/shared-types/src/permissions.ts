@@ -256,11 +256,15 @@ export const PERMISSIONS = {
   // tenant may want a different set of people managing always-on trigger rules than authoring
   // one-off campaigns. Backfilled in migration 0058 above.
   CRM_AUTOMATION_MANAGE: 'CRM_AUTOMATION_MANAGE',
-  // CP-8: manage per-tenant/per-channel sender identity (tenant_sender_identity) and outbound
-  // webhook subscriptions for third-party CRM/marketing tools. Backfilled for existing tenants
-  // in packages/db-client/migrations/0060_cp8_sender_identity_webhook_permission_backfill.sql.
+  // CP-8: manage per-tenant/per-channel sender identity (tenant_sender_identity). Backfilled
+  // for existing tenants in
+  // packages/db-client/migrations/0060_cp8_sender_identity_webhook_permission_backfill.sql.
   CRM_SENDER_IDENTITY_MANAGE: 'CRM_SENDER_IDENTITY_MANAGE',
-  CRM_WEBHOOK_MANAGE: 'CRM_WEBHOOK_MANAGE',
+  // Manage outbound webhook subscriptions for third-party tools. Originally CRM-scoped
+  // (CRM_WEBHOOK_MANAGE, CP-8) — renamed when the underlying feature was generalized beyond
+  // campaign events to any business event (invoice/payment/etc). Existing grants renamed in
+  // packages/db-client/migrations/0063_webhook_generalization.sql.
+  INTEGRATION_WEBHOOK_MANAGE: 'INTEGRATION_WEBHOOK_MANAGE',
   CRM_LOYALTY_VIEW: 'CRM_LOYALTY_VIEW',
   CRM_LOYALTY_ADJUST: 'CRM_LOYALTY_ADJUST',
   CRM_INTERACTION_VIEW: 'CRM_INTERACTION_VIEW',
@@ -415,6 +419,9 @@ export const PERMISSIONS = {
   // ── Platform-level permissions — cross-tenant, not scoped to request.auth.tenantId. ──
   // Only assignable to a platform-operator role, never a tenant's own Owner/Admin role.
   PLATFORM_TENANT_MANAGE: 'PLATFORM_TENANT_MANAGE',
+  // Manage the public marketing site's FAQ content (faq_items — global, not tenant-scoped).
+  // Platform-operator only, like PLATFORM_TENANT_MANAGE, since this is platform content.
+  PLATFORM_CONTENT_MANAGE: 'PLATFORM_CONTENT_MANAGE',
 } as const;
 
 export type Permission = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];

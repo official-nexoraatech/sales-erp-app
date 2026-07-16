@@ -97,7 +97,7 @@ export default function PhysicalVerificationDetailPage() {
         </Badge>
       </ERPPageHeader>
 
-      <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-6 space-y-6">
+      <div className="bg-surface-card rounded-xl border border-default p-6 space-y-6">
         {verif.status === 'DRAFT' && (
           <Button onClick={() => startMutation.mutate()} isLoading={startMutation.isPending}>
             Start Counting (Take Snapshot)
@@ -106,7 +106,7 @@ export default function PhysicalVerificationDetailPage() {
 
         {verif.status === 'COUNTING' && (
           <>
-            <p className="text-sm text-gray-500 dark:text-gray-400">
+            <p className="text-sm text-secondary">
               Snapshot taken {verif.snapshotTakenAt ? formatDatetime(verif.snapshotTakenAt) : ''}.
               Enter physical counts below.
             </p>
@@ -114,14 +114,14 @@ export default function PhysicalVerificationDetailPage() {
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="text-left text-gray-500 dark:text-gray-400 border-b dark:border-gray-700">
+                  <tr className="text-left text-secondary border-b border-default">
                     <th className="pb-2">Item ID</th>
                     <th className="pb-2">System Qty</th>
                     <th className="pb-2">Physical Qty</th>
                     <th className="pb-2">Variance</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y dark:divide-gray-700">
+                <tbody className="divide-y divide-default">
                   {variances.map((line) => {
                     const physical =
                       counts[line.id] ??
@@ -144,7 +144,7 @@ export default function PhysicalVerificationDetailPage() {
                                 [line.id]: parseFloat(e.target.value) || 0,
                               }))
                             }
-                            className="w-28 rounded border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm px-2 py-1"
+                            className="w-28 rounded border-default bg-surface-card text-sm px-2 py-1"
                           />
                         </td>
                         <td
@@ -186,7 +186,7 @@ export default function PhysicalVerificationDetailPage() {
         )}
 
         {verif.status === 'APPROVED' && (
-          <p className="text-green-700 dark:text-green-400 font-medium">
+          <p className="text-success font-medium">
             Verification approved. Stock adjustments have been created automatically.
           </p>
         )}

@@ -1,7 +1,6 @@
 import { useEffect, useRef, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
-import Button from '../ui/Button.js';
 import { useFocusTrap } from '../../hooks/useFocusTrap.js';
 
 type DrawerSize = 'sm' | 'md' | 'lg' | 'xl';
@@ -57,7 +56,9 @@ export default function ERPDrawer({
     } else {
       document.body.style.overflow = '';
     }
-    return () => { document.body.style.overflow = ''; };
+    return () => {
+      document.body.style.overflow = '';
+    };
   }, [open]);
 
   if (!open) return null;
@@ -77,7 +78,7 @@ export default function ERPDrawer({
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className={`relative ml-auto flex flex-col bg-surface-card shadow-token-modal h-full ${sizeClass[size]} animate-[slideInRight_200ms_ease-out]`}
+        className={`relative ml-auto flex flex-col bg-surface-card shadow-token-modal h-full ${sizeClass[size]} animate-[slideInRight_var(--duration-normal)_ease-out]`}
       >
         {/* Header */}
         {(title || subtitle) && (
@@ -101,9 +102,7 @@ export default function ERPDrawer({
 
         {/* Footer */}
         {footer && (
-          <div className="shrink-0 px-6 py-4 border-t border-default bg-surface-card">
-            {footer}
-          </div>
+          <div className="shrink-0 px-6 py-4 border-t border-default bg-surface-card">{footer}</div>
         )}
       </div>
     </div>,

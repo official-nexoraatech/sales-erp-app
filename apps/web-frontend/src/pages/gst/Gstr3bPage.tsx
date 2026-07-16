@@ -36,19 +36,10 @@ interface TableRowProps {
 
 function TableRow({ label, igst, cgst, sgst, cess, total, bold, indent }: TableRowProps) {
   return (
-    <tr
-      className={`${bold ? 'bg-gray-50 dark:bg-gray-900/30 font-semibold' : ''} border-b border-gray-100 dark:border-gray-700`}
-    >
-      <td
-        className={`py-3 pr-4 text-sm text-gray-700 dark:text-gray-300 ${indent ? 'pl-8' : 'pl-4'}`}
-      >
-        {label}
-      </td>
+    <tr className={`${bold ? 'bg-surface-subtle font-semibold' : ''} border-b border-default`}>
+      <td className={`py-3 pr-4 text-sm text-primary ${indent ? 'pl-8' : 'pl-4'}`}>{label}</td>
       {[igst, cgst, sgst, cess, total].map((v, i) => (
-        <td
-          key={i}
-          className="py-3 px-4 text-sm text-right text-gray-700 dark:text-gray-300 whitespace-nowrap"
-        >
+        <td key={i} className="py-3 px-4 text-sm text-right text-primary whitespace-nowrap">
           {v !== undefined ? formatCurrency(v) : '—'}
         </td>
       ))}
@@ -59,19 +50,19 @@ function TableRow({ label, igst, cgst, sgst, cess, total, bold, indent }: TableR
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   const [open, setOpen] = useState(true);
   return (
-    <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl">
+    <div className="bg-surface-card border border-default rounded-xl">
       <button
         className="w-full flex items-center justify-between px-5 py-4 text-left"
         onClick={() => setOpen((o) => !o)}
       >
-        <span className="text-sm font-semibold text-gray-900 dark:text-white">{title}</span>
+        <span className="text-sm font-semibold text-primary">{title}</span>
         {open ? (
-          <ChevronDown className="w-4 h-4 text-gray-400 dark:text-gray-500" />
+          <ChevronDown className="w-4 h-4 text-secondary" />
         ) : (
-          <ChevronRight className="w-4 h-4 text-gray-400 dark:text-gray-500" />
+          <ChevronRight className="w-4 h-4 text-secondary" />
         )}
       </button>
-      {open && <div className="border-t border-gray-100 dark:border-gray-700">{children}</div>}
+      {open && <div className="border-t border-default">{children}</div>}
     </div>
   );
 }
@@ -110,10 +101,10 @@ export function Gstr3bPage() {
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <Calculator className="w-6 h-6 text-indigo-600 dark:text-indigo-400" />
+          <Calculator className="w-6 h-6 text-brand" />
           <div>
-            <h1 className="text-xl font-semibold text-gray-900 dark:text-white">GSTR-3B</h1>
-            <p className="text-sm text-gray-500 dark:text-gray-400">Monthly Summary Return</p>
+            <h1 className="text-xl font-semibold text-primary">GSTR-3B</h1>
+            <p className="text-sm text-secondary">Monthly Summary Return</p>
           </div>
         </div>
         {canFileGstr3b && (
@@ -138,9 +129,7 @@ export function Gstr3bPage() {
           <ERPCardSkeleton lines={3} />
         </div>
       ) : !result ? (
-        <div className="py-12 text-center text-sm text-gray-400 dark:text-gray-500">
-          No data for selected period
-        </div>
+        <div className="py-12 text-center text-sm text-secondary">No data for selected period</div>
       ) : (
         <div className="space-y-4">
           {/* Table 3.1 */}
@@ -148,23 +137,23 @@ export function Gstr3bPage() {
             <div className="overflow-x-auto">
               <table className="min-w-full">
                 <thead>
-                  <tr className="bg-gray-50 dark:bg-gray-900/30">
-                    <th className="py-3 pl-4 pr-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
+                  <tr className="bg-surface-subtle">
+                    <th className="py-3 pl-4 pr-4 text-left text-xs font-medium text-secondary uppercase">
                       Nature of supply
                     </th>
-                    <th className="py-3 px-4 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
+                    <th className="py-3 px-4 text-right text-xs font-medium text-secondary uppercase">
                       IGST
                     </th>
-                    <th className="py-3 px-4 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
+                    <th className="py-3 px-4 text-right text-xs font-medium text-secondary uppercase">
                       CGST
                     </th>
-                    <th className="py-3 px-4 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
+                    <th className="py-3 px-4 text-right text-xs font-medium text-secondary uppercase">
                       SGST
                     </th>
-                    <th className="py-3 px-4 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
+                    <th className="py-3 px-4 text-right text-xs font-medium text-secondary uppercase">
                       Cess
                     </th>
-                    <th className="py-3 px-4 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
+                    <th className="py-3 px-4 text-right text-xs font-medium text-secondary uppercase">
                       Total Tax
                     </th>
                   </tr>
@@ -201,23 +190,23 @@ export function Gstr3bPage() {
             <div className="overflow-x-auto">
               <table className="min-w-full">
                 <thead>
-                  <tr className="bg-gray-50 dark:bg-gray-900/30">
-                    <th className="py-3 pl-4 pr-4 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
+                  <tr className="bg-surface-subtle">
+                    <th className="py-3 pl-4 pr-4 text-left text-xs font-medium text-secondary uppercase">
                       Details
                     </th>
-                    <th className="py-3 px-4 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
+                    <th className="py-3 px-4 text-right text-xs font-medium text-secondary uppercase">
                       IGST
                     </th>
-                    <th className="py-3 px-4 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
+                    <th className="py-3 px-4 text-right text-xs font-medium text-secondary uppercase">
                       CGST
                     </th>
-                    <th className="py-3 px-4 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
+                    <th className="py-3 px-4 text-right text-xs font-medium text-secondary uppercase">
                       SGST
                     </th>
-                    <th className="py-3 px-4 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
+                    <th className="py-3 px-4 text-right text-xs font-medium text-secondary uppercase">
                       Cess
                     </th>
-                    <th className="py-3 px-4 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
+                    <th className="py-3 px-4 text-right text-xs font-medium text-secondary uppercase">
                       Total
                     </th>
                   </tr>
@@ -253,7 +242,7 @@ export function Gstr3bPage() {
           {itcSetoff && (
             <Section title="ITC Set-off Computation (per GST Act S.49)">
               <div className="px-5 py-4">
-                <div className="flex items-start gap-2 mb-4 text-xs text-indigo-700 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/20 rounded-lg px-3 py-2">
+                <div className="flex items-start gap-2 mb-4 text-xs text-brand bg-primary-subtle rounded-lg px-3 py-2">
                   <Info className="w-4 h-4 flex-shrink-0 mt-0.5" />
                   <span>
                     Set-off order: IGST liability → IGST ITC → CGST ITC → SGST ITC. CGST liability
@@ -270,22 +259,22 @@ export function Gstr3bPage() {
                       t
                     ];
                     return (
-                      <div key={t} className="bg-gray-50 dark:bg-gray-900/30 rounded-lg p-4">
-                        <div className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase mb-3">
+                      <div key={t} className="bg-surface-subtle rounded-lg p-4">
+                        <div className="text-xs font-medium text-secondary uppercase mb-3">
                           {t.toUpperCase()} Liability
                         </div>
                         {so &&
                           Object.entries(so).map(([k, v]) => (
                             <div
                               key={k}
-                              className="flex justify-between text-xs text-gray-600 dark:text-gray-400 mb-1"
+                              className="flex justify-between text-xs text-secondary mb-1"
                             >
                               <span>{k.replace(/_/g, ' ')}</span>
                               <span>{formatCurrency(v)}</span>
                             </div>
                           ))}
                         {cash !== undefined && Number(cash) > 0 && (
-                          <div className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-700 flex justify-between text-xs font-semibold text-red-600 dark:text-red-400">
+                          <div className="mt-2 pt-2 border-t border-default flex justify-between text-xs font-semibold text-danger">
                             <span>Cash required</span>
                             <span>{formatCurrency(cash)}</span>
                           </div>
@@ -294,11 +283,11 @@ export function Gstr3bPage() {
                     );
                   })}
                 </div>
-                <div className="mt-4 flex justify-between items-center px-4 py-3 bg-orange-50 dark:bg-orange-900/20 rounded-lg border border-orange-200 dark:border-orange-800">
-                  <span className="text-sm font-medium text-orange-800 dark:text-orange-300">
+                <div className="mt-4 flex justify-between items-center px-4 py-3 bg-warning-bg rounded-lg border border-warning">
+                  <span className="text-sm font-medium text-warning">
                     Total Cash Required (GST payable)
                   </span>
-                  <span className="text-lg font-bold text-orange-700 dark:text-orange-400">
+                  <span className="text-lg font-bold text-warning">
                     {formatCurrency(
                       Number(
                         (itcSetoff.cashRequired as Record<string, unknown> | undefined)?.igst ?? 0

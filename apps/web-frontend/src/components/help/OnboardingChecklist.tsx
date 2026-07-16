@@ -104,7 +104,7 @@ export function OnboardingChecklist({ onNavigate, onDismiss }: OnboardingCheckli
   }
 
   return (
-    <div className="fixed bottom-4 right-4 z-40 w-80 bg-white dark:bg-neutral-900 rounded-xl shadow-2xl border border-neutral-200 dark:border-neutral-700 overflow-hidden">
+    <div className="fixed bottom-4 right-4 z-40 w-80 bg-surface-card rounded-xl shadow-2xl border border-default overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 bg-gradient-to-r from-blue-600 to-indigo-600">
         <div className="flex items-center gap-2">
@@ -127,14 +127,18 @@ export function OnboardingChecklist({ onNavigate, onDismiss }: OnboardingCheckli
           >
             {collapsed ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
           </button>
-          <button onClick={onDismiss} className="text-blue-200 hover:text-white ml-1" aria-label="Dismiss">
+          <button
+            onClick={onDismiss}
+            className="text-blue-200 hover:text-white ml-1"
+            aria-label="Dismiss"
+          >
             <X size={16} />
           </button>
         </div>
       </div>
 
       {/* Progress bar */}
-      <div className="h-1 bg-neutral-100 dark:bg-neutral-800">
+      <div className="h-1 bg-surface-raised">
         <div
           className="h-1 bg-blue-500 transition-all duration-500"
           style={{ width: `${progress}%` }}
@@ -143,7 +147,7 @@ export function OnboardingChecklist({ onNavigate, onDismiss }: OnboardingCheckli
 
       {/* Steps */}
       {!collapsed && (
-        <div className="divide-y divide-neutral-100 dark:divide-neutral-800 max-h-96 overflow-y-auto">
+        <div className="divide-y divide-default max-h-96 overflow-y-auto">
           {STEPS.map((step) => {
             const done = completed.has(step.id);
             return (
@@ -156,23 +160,25 @@ export function OnboardingChecklist({ onNavigate, onDismiss }: OnboardingCheckli
                   {done ? (
                     <CheckCircle2 size={18} className="text-green-500" />
                   ) : (
-                    <Circle size={18} className="text-neutral-300 dark:text-neutral-600" />
+                    <Circle size={18} className="text-secondary" />
                   )}
                 </button>
                 <div className="flex-1 min-w-0">
-                  <p className={`text-sm font-medium ${done ? 'line-through text-neutral-400' : 'text-neutral-800 dark:text-neutral-200'}`}>
+                  <p
+                    className={`text-sm font-medium ${done ? 'line-through text-neutral-400' : 'text-primary'}`}
+                  >
                     {step.label}
                   </p>
                   {!done && (
                     <>
-                      <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5 leading-snug">
+                      <p className="text-xs text-secondary mt-0.5 leading-snug">
                         {step.description}
                       </p>
                       <button
                         onClick={() => {
                           onNavigate(step.path);
                         }}
-                        className="mt-1 text-xs text-blue-600 dark:text-blue-400 font-medium hover:underline"
+                        className="mt-1 text-xs text-link font-medium hover:underline"
                       >
                         {step.cta} →
                       </button>
@@ -187,14 +193,11 @@ export function OnboardingChecklist({ onNavigate, onDismiss }: OnboardingCheckli
 
       {/* All done banner */}
       {allDone && !collapsed && (
-        <div className="px-4 py-3 bg-green-50 dark:bg-green-950 text-center">
-          <p className="text-sm text-green-700 dark:text-green-300 font-medium">
+        <div className="px-4 py-3 bg-success-bg text-center">
+          <p className="text-sm text-success font-medium">
             Your ERP is fully set up! You can dismiss this checklist.
           </p>
-          <button
-            onClick={onDismiss}
-            className="mt-2 text-xs text-green-600 dark:text-green-400 underline"
-          >
+          <button onClick={onDismiss} className="mt-2 text-xs text-success underline">
             Dismiss forever
           </button>
         </div>

@@ -29,7 +29,8 @@ export interface WebhookDeliveryAttempt {
   targetUrl: string;
   secret: string;
   eventType: string;
-  campaignId: number;
+  aggregateType: string;
+  aggregateId: number;
   payload: Record<string, unknown>;
 }
 
@@ -47,7 +48,8 @@ export async function deliverWebhook(
 ): Promise<WebhookDeliveryOutcome> {
   const body = JSON.stringify({
     eventType: attempt.eventType,
-    campaignId: attempt.campaignId,
+    aggregateType: attempt.aggregateType,
+    aggregateId: attempt.aggregateId,
     data: attempt.payload,
   });
   const signature = signWebhookPayload(attempt.secret, body);

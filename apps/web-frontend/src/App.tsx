@@ -10,8 +10,16 @@ import ERPEmptyState from './components/erp/ERPEmptyState.js';
 
 // ── Lazy-loaded pages ────────────────────────────────────────────────────────
 const LoginPage = lazy(() => import('./pages/auth/LoginPage.js'));
+const SignupPage = lazy(() => import('./pages/auth/SignupPage.js'));
 const ResetPasswordPage = lazy(() => import('./pages/auth/ResetPasswordPage.js'));
 const SecuritySettingsPage = lazy(() => import('./pages/auth/SecuritySettingsPage.js'));
+
+// Marketing / public site
+const LandingPage = lazy(() => import('./pages/marketing/LandingPage.js'));
+const PricingPage = lazy(() => import('./pages/marketing/PricingPage.js'));
+const FeaturesPage = lazy(() => import('./pages/marketing/FeaturesPage.js'));
+const AboutPage = lazy(() => import('./pages/marketing/AboutPage.js'));
+const ContactPage = lazy(() => import('./pages/marketing/ContactPage.js'));
 const DashboardPage = lazy(() => import('./pages/DashboardPage.js'));
 const NotFoundPage = lazy(() => import('./pages/NotFoundPage.js'));
 const NoModulesAssignedPage = lazy(() => import('./pages/NoModulesAssignedPage.js'));
@@ -20,6 +28,8 @@ const AccountSuspendedPage = lazy(() => import('./pages/AccountSuspendedPage.js'
 // Settings
 const OrganizationPage = lazy(() => import('./pages/settings/OrganizationPage.js'));
 const SsoConfigPage = lazy(() => import('./pages/settings/SsoConfigPage.js'));
+const IntegrationsPage = lazy(() => import('./pages/settings/IntegrationsPage.js'));
+const FaqManagementPage = lazy(() => import('./pages/settings/FaqManagementPage.js'));
 const BranchesPage = lazy(() => import('./pages/settings/BranchesPage.js'));
 const BranchFormPage = lazy(() => import('./pages/settings/BranchFormPage.js'));
 const WarehousesPage = lazy(() => import('./pages/settings/WarehousesPage.js'));
@@ -265,6 +275,13 @@ function IndexRedirect() {
   return <Navigate to={firstPath ?? '/no-access'} replace />;
 }
 
+/** "/" is the public front door: logged-out visitors see the marketing landing page,
+ * logged-in users are sent straight into the app (same target IndexRedirect used to pick). */
+function HomeGate() {
+  const accessToken = useAuthStore((s) => s.accessToken);
+  return accessToken ? <IndexRedirect /> : <LandingPage />;
+}
+
 // ── Suspense wrapper for each page ───────────────────────────────────────────
 function Page({ children }: { children: ReactNode }) {
   return (
@@ -279,10 +296,58 @@ export default function App() {
   return (
     <Routes>
       <Route
+        path="/"
+        element={
+          <Page>
+            <HomeGate />
+          </Page>
+        }
+      />
+      <Route
         path="/login"
         element={
           <Page>
             <LoginPage />
+          </Page>
+        }
+      />
+      <Route
+        path="/signup"
+        element={
+          <Page>
+            <SignupPage />
+          </Page>
+        }
+      />
+      <Route
+        path="/pricing"
+        element={
+          <Page>
+            <PricingPage />
+          </Page>
+        }
+      />
+      <Route
+        path="/features"
+        element={
+          <Page>
+            <FeaturesPage />
+          </Page>
+        }
+      />
+      <Route
+        path="/about"
+        element={
+          <Page>
+            <AboutPage />
+          </Page>
+        }
+      />
+      <Route
+        path="/contact"
+        element={
+          <Page>
+            <ContactPage />
           </Page>
         }
       />
@@ -304,14 +369,12 @@ export default function App() {
       />
 
       <Route
-        path="/"
         element={
           <ProtectedRoute>
             <Layout />
           </ProtectedRoute>
         }
       >
-        <Route index element={<IndexRedirect />} />
         <Route
           path="no-access"
           element={
@@ -359,6 +422,28 @@ export default function App() {
               <PermissionRoute
                 permission={PERMISSIONS.SSO_CONFIG_MANAGE}
                 element={<SsoConfigPage />}
+              />
+            </Page>
+          }
+        />
+        <Route
+          path="settings/integrations"
+          element={
+            <Page>
+              <PermissionRoute
+                permission={PERMISSIONS.INTEGRATION_WEBHOOK_MANAGE}
+                element={<IntegrationsPage />}
+              />
+            </Page>
+          }
+        />
+        <Route
+          path="settings/faqs"
+          element={
+            <Page>
+              <PermissionRoute
+                permission={PERMISSIONS.PLATFORM_CONTENT_MANAGE}
+                element={<FaqManagementPage />}
               />
             </Page>
           }

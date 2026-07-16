@@ -1,18 +1,41 @@
 import { useEffect, useMemo, useRef, useState, type ComponentType } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Search, X, Clock, ArrowUpRight, WifiOff, SlidersHorizontal, Bookmark, BookmarkPlus, Trash2, Terminal, SunMoon } from 'lucide-react';
-import { searchApi, savedSearchApi, searchAnalyticsApi, type SearchHit, type SavedSearch } from '../../api/endpoints.js';
+import {
+  Search,
+  X,
+  Clock,
+  ArrowUpRight,
+  WifiOff,
+  SlidersHorizontal,
+  Bookmark,
+  BookmarkPlus,
+  Trash2,
+  Terminal,
+  SunMoon,
+} from 'lucide-react';
+import {
+  searchApi,
+  savedSearchApi,
+  searchAnalyticsApi,
+  type SearchHit,
+  type SavedSearch,
+} from '../../api/endpoints.js';
 import { useDebounce } from '../../hooks/useDebounce.js';
 import { useRecentSearchesStore } from '../../store/recentSearches.store.js';
-import { SEARCH_ENTITY_CONFIG, getSearchResultTitle, getSearchResultSubtitle, getSearchResultRoute } from '../../lib/searchEntityConfig.js';
+import {
+  SEARCH_ENTITY_CONFIG,
+  getSearchResultTitle,
+  getSearchResultSubtitle,
+  getSearchResultRoute,
+} from '../../lib/searchEntityConfig.js';
 import { NAV_GROUPS, filterNavGroups, findNavItemByPath } from '../../lib/navigation.js';
 import { QUICK_CREATE_ITEMS, filterQuickCreateItems } from '../../lib/quickCreate.js';
 import { useAuthStore } from '../../store/auth.store.js';
 import { useUIStore } from '../../store/ui.store.js';
 import { useTheme } from '../../context/ThemeContext.js';
 import ERPEmptyState from './ERPEmptyState.js';
-import Kbd from './Kbd.js';
+import { Kbd } from '@erp/ui';
 
 interface Props {
   open: boolean;
@@ -51,7 +74,13 @@ function HighlightedText({ fragment }: { fragment: string }) {
     <>
       {parts.map((part, i) => {
         const match = /^<em>(.*)<\/em>$/.exec(part);
-        return match ? <mark key={i} className="bg-warning-bg text-warning-fg rounded px-0.5">{match[1]}</mark> : <span key={i}>{part}</span>;
+        return match ? (
+          <mark key={i} className="bg-warning-bg text-warning-fg rounded px-0.5">
+            {match[1]}
+          </mark>
+        ) : (
+          <span key={i}>{part}</span>
+        );
       })}
     </>
   );
@@ -77,7 +106,11 @@ export default function ERPCommandPalette({ open, onClose, initialQuery = '' }: 
   const [savingName, setSavingName] = useState<string | null>(null);
   const debouncedQuery = useDebounce(query, 300);
   const debouncedStatus = useDebounce(status, 300);
-  const { items: recentItems, addItem: addRecentItem, clear: clearRecent } = useRecentSearchesStore();
+  const {
+    items: recentItems,
+    addItem: addRecentItem,
+    clear: clearRecent,
+  } = useRecentSearchesStore();
   const recentPages = useUIStore((s) => s.recentPages);
   const inputRef = useRef<HTMLInputElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -97,17 +130,37 @@ export default function ERPCommandPalette({ open, onClose, initialQuery = '' }: 
       for (const item of group.items) {
         if (item.children) {
           for (const child of item.children) {
-            commands.push({ key: `nav-${child.path}`, label: `Go to ${item.label} → ${child.label}`, icon: child.icon, onRun: () => navigate(child.path) });
+            commands.push({
+              key: `nav-${child.path}`,
+              label: `Go to ${item.label} → ${child.label}`,
+              icon: child.icon,
+              onRun: () => navigate(child.path),
+            });
           }
         } else {
-          commands.push({ key: `nav-${item.path}`, label: `Go to ${item.label}`, icon: item.icon, onRun: () => navigate(item.path) });
+          commands.push({
+            key: `nav-${item.path}`,
+            label: `Go to ${item.label}`,
+            icon: item.icon,
+            onRun: () => navigate(item.path),
+          });
         }
       }
     }
     for (const item of filterQuickCreateItems(QUICK_CREATE_ITEMS, hasPermission)) {
-      commands.push({ key: `create-${item.path}`, label: `Create ${item.label}`, icon: item.icon, onRun: () => navigate(item.path) });
+      commands.push({
+        key: `create-${item.path}`,
+        label: `Create ${item.label}`,
+        icon: item.icon,
+        onRun: () => navigate(item.path),
+      });
     }
-    commands.push({ key: 'toggle-theme', label: 'Toggle light/dark theme', icon: SunMoon, onRun: toggleTheme });
+    commands.push({
+      key: 'toggle-theme',
+      label: 'Toggle light/dark theme',
+      icon: SunMoon,
+      onRun: toggleTheme,
+    });
     return commands;
   }, [hasPermission, navigate, toggleTheme]);
 
@@ -132,19 +185,30 @@ export default function ERPCommandPalette({ open, onClose, initialQuery = '' }: 
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ['global-search', trimmedQuery, debouncedStatus, dateFrom, dateTo],
-    queryFn: () => searchApi.search({
-      q: trimmedQuery,
-      size: 30,
-      ...(debouncedStatus ? { status: debouncedStatus } : {}),
-      // '_indexed_at' is the one date field SearchEngine.index() stamps onto every document
-      // regardless of entity (see SearchEngine.ts) — most per-entity date fields
-      // (invoiceDate, quotationDate, etc.) aren't present across every entity, so filtering
-      // by them here would silently no-op for entities that lack that field.
-      ...(dateFrom ? { dateFrom, dateField: '_indexed_at' } : {}),
-      ...(dateTo ? { dateTo, dateField: '_indexed_at' } : {}),
-    }),
+    queryFn: () =>
+      searchApi.search({
+        q: trimmedQuery,
+        size: 30,
+        ...(debouncedStatus ? { status: debouncedStatus } : {}),
+        // '_indexed_at' is the one date field SearchEngine.index() stamps onto every document
+        // regardless of entity (see SearchEngine.ts) — most per-entity date fields
+        // (invoiceDate, quotationDate, etc.) aren't present across every entity, so filtering
+        // by them here would silently no-op for entities that lack that field.
+        ...(dateFrom ? { dateFrom, dateField: '_indexed_at' } : {}),
+        ...(dateTo ? { dateTo, dateField: '_indexed_at' } : {}),
+      }),
     enabled: open && isSearching,
     staleTime: 10_000,
+  });
+
+  // Smart Search "did you mean" — only fetched once a search has actually come back empty,
+  // never speculatively on every keystroke.
+  const zeroResults = isSearching && !isLoading && (data?.hits.length ?? 0) === 0;
+  const { data: suggestData } = useQuery({
+    queryKey: ['search-suggest', trimmedQuery],
+    queryFn: () => searchApi.suggest(trimmedQuery),
+    enabled: open && zeroResults,
+    staleTime: 30_000,
   });
 
   const { data: savedSearchesData } = useQuery({
@@ -157,11 +221,16 @@ export default function ERPCommandPalette({ open, onClose, initialQuery = '' }: 
 
   const createSavedSearch = useMutation({
     mutationFn: (name: string) => savedSearchApi.create({ name, query: trimmedQuery }),
-    onSuccess: () => { void queryClient.invalidateQueries({ queryKey: ['saved-searches'] }); setSavingName(null); },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['saved-searches'] });
+      setSavingName(null);
+    },
   });
   const deleteSavedSearch = useMutation({
     mutationFn: (id: number) => savedSearchApi.delete(id),
-    onSuccess: () => { void queryClient.invalidateQueries({ queryKey: ['saved-searches'] }); },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['saved-searches'] });
+    },
   });
 
   // Reset transient state whenever the palette opens, and move focus/restore it on close —
@@ -184,7 +253,9 @@ export default function ERPCommandPalette({ open, onClose, initialQuery = '' }: 
 
   useEffect(() => {
     document.body.style.overflow = open ? 'hidden' : '';
-    return () => { document.body.style.overflow = ''; };
+    return () => {
+      document.body.style.overflow = '';
+    };
   }, [open]);
 
   const groupedResults = useMemo(() => {
@@ -245,7 +316,15 @@ export default function ERPCommandPalette({ open, onClose, initialQuery = '' }: 
       }
     }
     return rows;
-  }, [isActionMode, actionRows, isSearching, recentItems, recentPages, groupedResults, savedSearches]);
+  }, [
+    isActionMode,
+    actionRows,
+    isSearching,
+    recentItems,
+    recentPages,
+    groupedResults,
+    savedSearches,
+  ]);
 
   function selectRow(row: FlatRow): void {
     if (row.action) {
@@ -273,7 +352,9 @@ export default function ERPCommandPalette({ open, onClose, initialQuery = '' }: 
       });
       // Fire-and-forget: closes the analytics loop (Phase 8) without making the click feel
       // slower — a failed/late tracking call should never block navigation.
-      searchAnalyticsApi.trackClick({ query: trimmedQuery, resultId: row.hit.id, resultEntity: row.hit.entity }).catch(() => {});
+      searchAnalyticsApi
+        .trackClick({ query: trimmedQuery, resultId: row.hit.id, resultEntity: row.hit.entity })
+        .catch(() => {});
     }
     navigate(row.route);
     onClose();
@@ -336,7 +417,10 @@ export default function ERPCommandPalette({ open, onClose, initialQuery = '' }: 
           <input
             ref={inputRef}
             value={query}
-            onChange={(e) => { setQuery(e.target.value); setHighlightedIndex(0); }}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              setHighlightedIndex(0);
+            }}
             placeholder="Search pages, records... (type > for commands)"
             aria-label="Search"
             className="flex-1 bg-transparent outline-none text-primary placeholder:text-disabled text-sm"
@@ -359,7 +443,11 @@ export default function ERPCommandPalette({ open, onClose, initialQuery = '' }: 
           >
             <SlidersHorizontal size={16} />
           </button>
-          <button onClick={onClose} aria-label="Close search" className="text-secondary hover:text-primary transition-colors shrink-0">
+          <button
+            onClick={onClose}
+            aria-label="Close search"
+            className="text-secondary hover:text-primary transition-colors shrink-0"
+          >
             <X size={18} />
           </button>
         </div>
@@ -370,7 +458,10 @@ export default function ERPCommandPalette({ open, onClose, initialQuery = '' }: 
               autoFocus
               value={savingName}
               onChange={(e) => setSavingName(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter' && savingName.trim()) createSavedSearch.mutate(savingName.trim()); }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && savingName.trim())
+                  createSavedSearch.mutate(savingName.trim());
+              }}
               placeholder="Name this search..."
               aria-label="Saved search name"
               className="flex-1 bg-transparent outline-none text-sm text-primary placeholder:text-disabled"
@@ -416,7 +507,11 @@ export default function ERPCommandPalette({ open, onClose, initialQuery = '' }: 
             </label>
             {hasActiveFilters && (
               <button
-                onClick={() => { setStatus(''); setDateFrom(''); setDateTo(''); }}
+                onClick={() => {
+                  setStatus('');
+                  setDateFrom('');
+                  setDateTo('');
+                }}
                 className="text-secondary hover:text-primary transition-colors"
               >
                 Clear filters
@@ -427,9 +522,18 @@ export default function ERPCommandPalette({ open, onClose, initialQuery = '' }: 
 
         <div className="flex-1 overflow-y-auto">
           {isActionMode && flatRows.length === 0 ? (
-            <ERPEmptyState type="no-results" icon={Terminal} description={`No commands match "${actionQuery}".`} />
+            <ERPEmptyState
+              type="no-results"
+              icon={Terminal}
+              description={`No commands match "${actionQuery}".`}
+            />
           ) : showOffline && !isActionMode ? (
-            <ERPEmptyState type="error" icon={WifiOff} title="You're offline" description="Global search needs a network connection. Reconnect and try again." />
+            <ERPEmptyState
+              type="error"
+              icon={WifiOff}
+              title="You're offline"
+              description="Global search needs a network connection. Reconnect and try again."
+            />
           ) : isSearching && isLoading ? (
             <div className="py-6 space-y-3 px-4" aria-busy="true" aria-label="Searching">
               {[0, 1, 2].map((i) => (
@@ -437,13 +541,35 @@ export default function ERPCommandPalette({ open, onClose, initialQuery = '' }: 
               ))}
             </div>
           ) : isSearching && isError ? (
-            <ERPEmptyState type="error" description="Search is temporarily unavailable. Please try again." />
+            <ERPEmptyState
+              type="error"
+              description="Search is temporarily unavailable. Please try again."
+            />
           ) : isSearching && flatRows.length === 0 ? (
-            <ERPEmptyState type="no-results" description={`No results for "${trimmedQuery}". Try a different search term.`} />
+            <div>
+              <ERPEmptyState type="no-results" description={`No results for "${trimmedQuery}".`} />
+              {suggestData?.suggestion && (
+                <p className="text-center text-sm text-secondary -mt-4 pb-6">
+                  Did you mean{' '}
+                  <button
+                    type="button"
+                    className="text-brand hover:underline font-medium"
+                    onClick={() => setQuery(suggestData.suggestion!)}
+                  >
+                    {suggestData.suggestion}
+                  </button>
+                  ?
+                </p>
+              )}
+            </div>
           ) : !isSearching && !isActionMode && flatRows.length === 0 ? (
             <div className="py-12 px-6 text-center">
-              <p className="text-sm text-secondary">Start typing to search across customers, invoices, items and more.</p>
-              <p className="text-xs text-disabled mt-2">Tip: type <Kbd>{'>'}</Kbd> for commands, or press <Kbd>Esc</Kbd> to close</p>
+              <p className="text-sm text-secondary">
+                Start typing to search across customers, invoices, items and more.
+              </p>
+              <p className="text-xs text-disabled mt-2">
+                Tip: type <Kbd>{'>'}</Kbd> for commands, or press <Kbd>Esc</Kbd> to close
+              </p>
             </div>
           ) : (
             <div className="py-2">
@@ -459,9 +585,16 @@ export default function ERPCommandPalette({ open, onClose, initialQuery = '' }: 
                       <div key={row.key}>
                         {showHeader && (
                           <div className="flex items-center justify-between px-4 pt-2 pb-1">
-                            <p className="text-[10px] font-semibold uppercase tracking-widest text-secondary select-none">{groupLabel}</p>
+                            <p className="text-[10px] font-semibold uppercase tracking-widest text-secondary select-none">
+                              {groupLabel}
+                            </p>
                             {groupLabel === 'Recent' && (
-                              <button onClick={clearRecent} className="text-xs text-secondary hover:text-primary transition-colors">Clear</button>
+                              <button
+                                onClick={clearRecent}
+                                className="text-xs text-secondary hover:text-primary transition-colors"
+                              >
+                                Clear
+                              </button>
                             )}
                           </div>
                         )}
@@ -470,7 +603,9 @@ export default function ERPCommandPalette({ open, onClose, initialQuery = '' }: 
                           highlighted={idx === highlightedIndex}
                           onSelect={() => selectRow(row)}
                           onMouseEnter={() => setHighlightedIndex(idx)}
-                          {...(row.savedSearch ? { onDelete: () => deleteSavedSearch.mutate(row.savedSearch!.id) } : {})}
+                          {...(row.savedSearch
+                            ? { onDelete: () => deleteSavedSearch.mutate(row.savedSearch!.id) }
+                            : {})}
                         />
                       </div>
                     );
@@ -484,7 +619,13 @@ export default function ERPCommandPalette({ open, onClose, initialQuery = '' }: 
   );
 }
 
-function CommandRow({ row, highlighted, onSelect, onMouseEnter, onDelete }: {
+function CommandRow({
+  row,
+  highlighted,
+  onSelect,
+  onMouseEnter,
+  onDelete,
+}: {
   row: FlatRow;
   highlighted: boolean;
   onSelect: () => void;
@@ -519,7 +660,10 @@ function CommandRow({ row, highlighted, onSelect, onMouseEnter, onDelete }: {
       </button>
       {onDelete && (
         <button
-          onClick={(e) => { e.stopPropagation(); onDelete(); }}
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete();
+          }}
           aria-label={`Delete saved search "${row.title}"`}
           className="p-2 mr-2 text-disabled hover:text-danger transition-colors shrink-0"
         >

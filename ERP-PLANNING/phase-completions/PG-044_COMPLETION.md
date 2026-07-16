@@ -87,8 +87,8 @@ and the lookup returns `0`, not Maharashtra's rate and not an error.
 
 ## Deployment Checklist
 
-- [ ] Run `pt_slabs` migration (`0045_pg044_pt_slabs.sql`) against the target database — not yet
-      applied anywhere; Docker/Postgres unavailable this session.
+- [x] Run `pt_slabs` migration (`0045_pg044_pt_slabs.sql`) against the target database — verified
+      applied 2026-07-17: `pt_slabs` table exists in the dev DB.
 - [x] No new environment variables.
 - [x] No new permissions — existing `PAYROLL_PROCESS`/`PAYROLL_APPROVE` gates are unchanged and
       sufficient (calculation-accuracy fix, not a new capability).

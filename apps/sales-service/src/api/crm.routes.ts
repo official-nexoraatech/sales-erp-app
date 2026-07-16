@@ -1,7 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { PlatformContextFactory } from '@erp/sdk';
 import { getBranchScope } from '@erp/sdk';
-import { randomBytes } from 'node:crypto';
 import {
   customers,
   customerInteractions,
@@ -13,7 +12,6 @@ import {
   businessSeasons,
   notificationLog,
   tenantSenderIdentity,
-  campaignWebhookSubscriptions,
   tenantCommunicationSettings,
 } from '@erp/db';
 import type { ErpDatabase } from '@erp/db';
@@ -146,13 +144,6 @@ const SenderIdentitySchema = z.object({
   channel: z.enum(['SMS', 'WHATSAPP', 'EMAIL', 'IN_APP']),
   senderName: z.string().min(1).max(200),
   senderAddressOrNumber: z.string().min(1).max(200),
-});
-
-// CP-8: outbound webhook subscriptions for third-party CRM/marketing tools.
-const WebhookSubscriptionSchema = z.object({
-  targetUrl: z.string().url(),
-  events: z.array(z.enum(['CAMPAIGN_SENT', 'CAMPAIGN_CANCELLED'])).min(1),
-  isActive: z.boolean().default(true),
 });
 
 // CP-7/CP-5 follow-up: tenant_communication_settings had no route at all until now — approval
@@ -1722,156 +1713,6 @@ export async function crmRoutes(
       });
 
       return reply.code(200).send({ data: saved });
-    }
-  );
-
-  // ════════════════════════════════════════════════════════════════════════
-  // CP-8 — Outbound Webhook Subscriptions
-  // ════════════════════════════════════════════════════════════════════════
-
-  fastify.get(
-    '/crm/webhook-subscriptions',
-    { preHandler: [authenticate, requirePermission(PERMISSIONS.CRM_WEBHOOK_MANAGE)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-      const rows = await ctx.db.raw
-        .select({
-          id: campaignWebhookSubscriptions.id,
-          targetUrl: campaignWebhookSubscriptions.targetUrl,
-          events: campaignWebhookSubscriptions.events,
-          isActive: campaignWebhookSubscriptions.isActive,
-          createdAt: campaignWebhookSubscriptions.createdAt,
-          // secret is deliberately never returned after creation — same principle as an API key,
-          // shown once at creation time only.
-        })
-        .from(campaignWebhookSubscriptions)
-        .where(eq(campaignWebhookSubscriptions.tenantId, tenantId))
-        .orderBy(sql`created_at DESC`);
-      return reply.code(200).send({ data: { content: rows, totalElements: rows.length } });
-    }
-  );
-
-  fastify.post(
-    '/crm/webhook-subscriptions',
-    { preHandler: [authenticate, requirePermission(PERMISSIONS.CRM_WEBHOOK_MANAGE)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-
-      const body = WebhookSubscriptionSchema.safeParse(request.body);
-      if (!body.success)
-        throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
-
-      const secret = randomBytes(32).toString('hex');
-      const [created] = await ctx.db.raw
-        .insert(campaignWebhookSubscriptions)
-        .values({
-          tenantId,
-          targetUrl: body.data.targetUrl,
-          events: body.data.events,
-          isActive: body.data.isActive,
-          secret,
-          createdBy: userId,
-        })
-        .returning();
-      if (!created) throw new Error('Webhook subscription creation failed unexpectedly');
-
-      await ctx.audit.log({
-        action: 'CREATE',
-        entityType: 'campaign_webhook_subscription',
-        entityId: created.id,
-      });
-
-      // The secret is only ever returned in this create response — the caller must store it now.
-      return reply.code(201).send({ data: created });
-    }
-  );
-
-  fastify.put<{ Params: { id: string } }>(
-    '/crm/webhook-subscriptions/:id',
-    { preHandler: [authenticate, requirePermission(PERMISSIONS.CRM_WEBHOOK_MANAGE)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-      const id = parseInt(request.params.id, 10);
-
-      const body = WebhookSubscriptionSchema.partial().safeParse(request.body);
-      if (!body.success)
-        throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
-
-      const [existing] = await ctx.db.raw
-        .select({ id: campaignWebhookSubscriptions.id })
-        .from(campaignWebhookSubscriptions)
-        .where(
-          and(
-            eq(campaignWebhookSubscriptions.id, id),
-            eq(campaignWebhookSubscriptions.tenantId, tenantId)
-          )
-        );
-      if (!existing) throw new NotFoundError('Webhook subscription', id);
-
-      const [updated] = await ctx.db.raw
-        .update(campaignWebhookSubscriptions)
-        .set({ ...body.data, updatedAt: new Date() })
-        .where(eq(campaignWebhookSubscriptions.id, id))
-        .returning();
-      if (!updated) throw new Error('Webhook subscription update failed unexpectedly');
-
-      await ctx.audit.log({
-        action: 'UPDATE',
-        entityType: 'campaign_webhook_subscription',
-        entityId: id,
-      });
-      return reply.code(200).send({ data: updated });
-    }
-  );
-
-  fastify.delete<{ Params: { id: string } }>(
-    '/crm/webhook-subscriptions/:id',
-    { preHandler: [authenticate, requirePermission(PERMISSIONS.CRM_WEBHOOK_MANAGE)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-      const id = parseInt(request.params.id, 10);
-
-      const [existing] = await ctx.db.raw
-        .select({ id: campaignWebhookSubscriptions.id })
-        .from(campaignWebhookSubscriptions)
-        .where(
-          and(
-            eq(campaignWebhookSubscriptions.id, id),
-            eq(campaignWebhookSubscriptions.tenantId, tenantId)
-          )
-        );
-      if (!existing) throw new NotFoundError('Webhook subscription', id);
-
-      await ctx.db.raw
-        .delete(campaignWebhookSubscriptions)
-        .where(eq(campaignWebhookSubscriptions.id, id));
-
-      await ctx.audit.log({
-        action: 'DELETE',
-        entityType: 'campaign_webhook_subscription',
-        entityId: id,
-      });
-      return reply.code(204).send();
     }
   );
 }

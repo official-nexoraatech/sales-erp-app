@@ -16,21 +16,33 @@ interface ReportDef {
 }
 
 const CATEGORY_COLORS: Record<string, string> = {
-  SALES: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300',
-  PURCHASE: 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300',
-  INVENTORY: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300',
-  FINANCIAL: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300',
-  HR: 'bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-300',
-  GST: 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300',
-  ANALYTICS: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300',
+  SALES: 'bg-info-bg text-info',
+  PURCHASE: 'bg-accent-purple-subtle text-accent-purple',
+  INVENTORY: 'bg-success-bg text-success',
+  FINANCIAL: 'bg-warning-bg text-warning',
+  HR: 'bg-danger-bg text-danger',
+  GST: 'bg-warning-bg text-warning',
+  ANALYTICS: 'bg-primary-subtle text-brand',
 };
 
 const CATEGORIES = ['ALL', 'SALES', 'PURCHASE', 'INVENTORY', 'FINANCIAL', 'HR', 'GST', 'ANALYTICS'];
 
 const ANALYTICS_DASHBOARDS = [
-  { path: '/reports/sales-analytics', name: 'Sales Analytics', description: 'Revenue trend, top customers, category and salesperson performance' },
-  { path: '/reports/inventory-analytics', name: 'Inventory Analytics', description: 'Stock levels, days of supply, fast/slow movers and stockout alerts' },
-  { path: '/reports/hr-analytics', name: 'HR Analytics', description: 'Headcount, salary cost trend, hiring activity and diversity' },
+  {
+    path: '/reports/sales-analytics',
+    name: 'Sales Analytics',
+    description: 'Revenue trend, top customers, category and salesperson performance',
+  },
+  {
+    path: '/reports/inventory-analytics',
+    name: 'Inventory Analytics',
+    description: 'Stock levels, days of supply, fast/slow movers and stockout alerts',
+  },
+  {
+    path: '/reports/hr-analytics',
+    name: 'HR Analytics',
+    description: 'Headcount, salary cost trend, hiring activity and diversity',
+  },
 ];
 
 export default function ReportsPage() {
@@ -44,14 +56,13 @@ export default function ReportsPage() {
     queryFn: reportsEngineApi.list,
   });
 
-  const allReports: ReportDef[] = data
-    ? Object.values(data.grouped).flat() as ReportDef[]
-    : [];
+  const allReports: ReportDef[] = data ? (Object.values(data.grouped).flat() as ReportDef[]) : [];
 
   const filtered = allReports.filter((r) => {
-    const matchesSearch = !debouncedSearch
-      || r.name.toLowerCase().includes(debouncedSearch.toLowerCase())
-      || r.description.toLowerCase().includes(debouncedSearch.toLowerCase());
+    const matchesSearch =
+      !debouncedSearch ||
+      r.name.toLowerCase().includes(debouncedSearch.toLowerCase()) ||
+      r.description.toLowerCase().includes(debouncedSearch.toLowerCase());
     const matchesCat = activeCategory === 'ALL' || r.category === activeCategory;
     return matchesSearch && matchesCat;
   });
@@ -78,7 +89,9 @@ export default function ReportsPage() {
       {/* Analytics dashboards */}
       <div>
         <div className="flex items-center gap-2 mb-3">
-          <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${CATEGORY_COLORS['ANALYTICS']}`}>
+          <span
+            className={`text-xs font-semibold px-2 py-0.5 rounded-full ${CATEGORY_COLORS['ANALYTICS']}`}
+          >
             DASHBOARDS
           </span>
           <span className="text-xs text-secondary">Charts &amp; visual analytics</span>
@@ -95,9 +108,14 @@ export default function ReportsPage() {
                   <p className="text-sm font-semibold text-primary group-hover:text-brand transition-colors">
                     {dashboard.name}
                   </p>
-                  <p className="text-xs text-secondary mt-0.5 line-clamp-2">{dashboard.description}</p>
+                  <p className="text-xs text-secondary mt-0.5 line-clamp-2">
+                    {dashboard.description}
+                  </p>
                 </div>
-                <ChevronRight size={14} className="text-secondary group-hover:text-primary transition-colors shrink-0 mt-0.5" />
+                <ChevronRight
+                  size={14}
+                  className="text-secondary group-hover:text-primary transition-colors shrink-0 mt-0.5"
+                />
               </div>
             </button>
           ))}
@@ -135,7 +153,9 @@ export default function ReportsPage() {
 
       {isLoading && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-          {Array.from({ length: 6 }).map((_, i) => <ERPCardSkeleton key={i} lines={2} />)}
+          {Array.from({ length: 6 }).map((_, i) => (
+            <ERPCardSkeleton key={i} lines={2} />
+          ))}
         </div>
       )}
 
@@ -143,7 +163,9 @@ export default function ReportsPage() {
       {Object.entries(grouped).map(([category, reports]) => (
         <div key={category}>
           <div className="flex items-center gap-2 mb-3">
-            <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${CATEGORY_COLORS[category] ?? 'bg-surface-raised text-secondary'}`}>
+            <span
+              className={`text-xs font-semibold px-2 py-0.5 rounded-full ${CATEGORY_COLORS[category] ?? 'bg-surface-raised text-secondary'}`}
+            >
               {category}
             </span>
             <span className="text-xs text-secondary">{reports.length} reports</span>
@@ -160,9 +182,14 @@ export default function ReportsPage() {
                     <p className="text-sm font-semibold text-primary group-hover:text-brand transition-colors">
                       {report.name}
                     </p>
-                    <p className="text-xs text-secondary mt-0.5 line-clamp-2">{report.description}</p>
+                    <p className="text-xs text-secondary mt-0.5 line-clamp-2">
+                      {report.description}
+                    </p>
                   </div>
-                  <ChevronRight size={14} className="text-secondary group-hover:text-primary transition-colors shrink-0 mt-0.5" />
+                  <ChevronRight
+                    size={14}
+                    className="text-secondary group-hover:text-primary transition-colors shrink-0 mt-0.5"
+                  />
                 </div>
               </button>
             ))}

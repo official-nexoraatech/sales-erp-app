@@ -59,19 +59,19 @@ const PREFERENCE_CATEGORIES = ['PROMOTIONAL', 'TRANSACTIONAL'] as const;
 const INTERACTION_TYPES = ['VISIT', 'CALL', 'COMPLAINT', 'EMAIL', 'WHATSAPP', 'OTHER'] as const;
 
 const ACTIVITY_COLOR: Record<string, string> = {
-  INVOICE: 'text-blue-500 dark:text-blue-400',
-  PAYMENT: 'text-green-500 dark:text-green-400',
-  RETURN: 'text-red-400 dark:text-red-300',
-  ALTERATION: 'text-purple-500 dark:text-purple-400',
-  LOYALTY_EARN: 'text-yellow-500 dark:text-yellow-400',
-  LOYALTY_REDEEM: 'text-yellow-600 dark:text-yellow-400',
-  LOYALTY_EXPIRE: 'text-gray-400 dark:text-gray-300',
-  VISIT: 'text-teal-500 dark:text-teal-400',
-  CALL: 'text-teal-400 dark:text-teal-300',
-  COMPLAINT: 'text-red-500 dark:text-red-400',
-  EMAIL: 'text-blue-400 dark:text-blue-300',
-  WHATSAPP: 'text-green-400 dark:text-green-300',
-  OTHER: 'text-gray-400 dark:text-gray-300',
+  INVOICE: 'text-info',
+  PAYMENT: 'text-success',
+  RETURN: 'text-danger',
+  ALTERATION: 'text-accent-purple',
+  LOYALTY_EARN: 'text-warning',
+  LOYALTY_REDEEM: 'text-warning',
+  LOYALTY_EXPIRE: 'text-secondary',
+  VISIT: 'text-info',
+  CALL: 'text-info',
+  COMPLAINT: 'text-danger',
+  EMAIL: 'text-info',
+  WHATSAPP: 'text-success',
+  OTHER: 'text-secondary',
 };
 
 function activityLabel(item: ActivityItem): string {
@@ -139,7 +139,8 @@ export default function CustomerViewPage() {
     queryFn: () => crmApi.listInteractions(Number(id)),
     enabled: tab === 'interactions' && canViewInteractions,
   });
-  const interactions: Interaction[] = (interactionData as Interaction[]) ?? [];
+  const interactions: Interaction[] =
+    (interactionData as { content?: Interaction[] })?.content ?? [];
 
   const logMut = useMutation({
     mutationFn: () =>
@@ -245,8 +246,8 @@ export default function CustomerViewPage() {
       {tab === 'details' && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2 space-y-4">
-            <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
-              <h2 className="text-sm font-semibold text-gray-500 dark:text-gray-400 mb-4 uppercase tracking-wide">
+            <div className="bg-surface-card rounded-xl border border-default p-5">
+              <h2 className="text-sm font-semibold text-secondary mb-4 uppercase tracking-wide">
                 Details
               </h2>
               <dl className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -275,7 +276,7 @@ export default function CustomerViewPage() {
                 ].map(({ label, value }) => (
                   <div key={label}>
                     <dt className="text-xs text-disabled">{label}</dt>
-                    <dd className="text-sm text-gray-800 dark:text-gray-200 font-medium">
+                    <dd className="text-sm text-primary font-medium">
                       {(value as React.ReactNode) ?? '–'}
                     </dd>
                   </div>
@@ -283,11 +284,11 @@ export default function CustomerViewPage() {
               </dl>
             </div>
             {billing && (
-              <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
-                <h2 className="text-sm font-semibold text-gray-500 dark:text-gray-400 mb-3 uppercase tracking-wide">
+              <div className="bg-surface-card rounded-xl border border-default p-5">
+                <h2 className="text-sm font-semibold text-secondary mb-3 uppercase tracking-wide">
                   Billing Address
                 </h2>
-                <p className="text-sm text-gray-700 dark:text-gray-300">
+                <p className="text-sm text-primary">
                   {billing.addressLine1}
                   {billing.city ? `, ${billing.city}` : ''}
                   {billing.state ? `, ${billing.state}` : ''} {billing.pinCode}
@@ -305,15 +306,12 @@ export default function CustomerViewPage() {
               },
               { label: 'Loyalty Points', value: String(customer.loyaltyPoints ?? 0) },
             ].map(({ label, value }) => (
-              <div
-                key={label}
-                className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5"
-              >
+              <div key={label} className="bg-surface-card rounded-xl border border-default p-5">
                 <p className="text-xs text-disabled uppercase tracking-wide mb-1">{label}</p>
-                <p className="text-lg font-bold text-gray-900 dark:text-gray-100">{value}</p>
+                <p className="text-lg font-bold text-primary">{value}</p>
               </div>
             ))}
-            <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
+            <div className="bg-surface-card rounded-xl border border-default p-5">
               <p className="text-xs text-disabled uppercase tracking-wide mb-3">
                 Communication Preferences
               </p>
@@ -329,7 +327,7 @@ export default function CustomerViewPage() {
                   return (
                     <div
                       key={key}
-                      className="flex items-center justify-between text-sm text-gray-700 dark:text-gray-300"
+                      className="flex items-center justify-between text-sm text-primary"
                     >
                       <span>{label}</span>
                       <Checkbox
@@ -348,7 +346,7 @@ export default function CustomerViewPage() {
               </p>
             </div>
 
-            <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
+            <div className="bg-surface-card rounded-xl border border-default p-5">
               <p className="text-xs text-disabled uppercase tracking-wide mb-1">Detailed Consent</p>
               <p className="text-xs text-disabled mb-3">
                 Finer-grained than the flags above — lets a customer opt out of promotional messages
@@ -366,10 +364,10 @@ export default function CustomerViewPage() {
                     ))}
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
+                <tbody className="divide-y divide-default">
                   {PREFERENCE_CHANNELS.map((channel) => (
                     <tr key={channel}>
-                      <td className="py-2 text-gray-700 dark:text-gray-300">{channel}</td>
+                      <td className="py-2 text-primary">{channel}</td>
                       {PREFERENCE_CATEGORIES.map((category) => {
                         const existing = preferences.find(
                           (p) => p.channel === channel && p.category === category
@@ -424,7 +422,7 @@ export default function CustomerViewPage() {
                     className="flex items-start gap-4 px-5 py-3"
                   >
                     <div
-                      className={`mt-0.5 text-xs font-bold uppercase ${ACTIVITY_COLOR[item.type] ?? 'text-gray-400 dark:text-gray-300'}`}
+                      className={`mt-0.5 text-xs font-bold uppercase ${ACTIVITY_COLOR[item.type] ?? 'text-secondary'}`}
                     >
                       {item.type.replace(/_/g, ' ')}
                     </div>

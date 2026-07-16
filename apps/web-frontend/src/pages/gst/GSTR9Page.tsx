@@ -30,21 +30,18 @@ interface AmountCardProps {
 
 function AmountCard({ title, rows, total }: AmountCardProps) {
   return (
-    <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-5">
-      <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">{title}</h3>
+    <div className="bg-surface-card border border-default rounded-xl p-5">
+      <h3 className="text-sm font-semibold text-primary mb-3">{title}</h3>
       <div className="space-y-1.5">
         {rows.map((r) => (
-          <div
-            key={r.label}
-            className="flex justify-between text-sm text-gray-600 dark:text-gray-400"
-          >
+          <div key={r.label} className="flex justify-between text-sm text-secondary">
             <span>{r.label}</span>
             <span className="font-mono">{formatCurrency(r.value)}</span>
           </div>
         ))}
       </div>
       {total !== undefined && (
-        <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700 flex justify-between text-sm font-semibold text-gray-900 dark:text-white">
+        <div className="mt-3 pt-3 border-t border-default flex justify-between text-sm font-semibold text-primary">
           <span>Total</span>
           <span className="font-mono">{formatCurrency(total)}</span>
         </div>
@@ -110,10 +107,10 @@ export function GSTR9Page() {
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <FileSpreadsheet className="w-6 h-6 text-indigo-600 dark:text-indigo-400" />
+          <FileSpreadsheet className="w-6 h-6 text-brand" />
           <div>
-            <h1 className="text-xl font-semibold text-gray-900 dark:text-white">GSTR-9</h1>
-            <p className="text-sm text-gray-500 dark:text-gray-400">Annual Return</p>
+            <h1 className="text-xl font-semibold text-primary">GSTR-9</h1>
+            <p className="text-sm text-secondary">Annual Return</p>
           </div>
         </div>
         {canFileGstr9 && (
@@ -129,16 +126,14 @@ export function GSTR9Page() {
       </div>
 
       <div>
-        <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
-          Financial Year
-        </label>
+        <label className="block text-xs font-medium text-primary mb-1">Financial Year</label>
         <input
           type="text"
           value={year}
           onChange={(e) => setYear(e.target.value)}
           placeholder="2025-26"
           pattern="\d{4}-\d{2}"
-          className="px-3 py-2 text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 w-36"
+          className="px-3 py-2 text-sm bg-surface-card border border-default rounded-lg text-primary focus:outline-none focus:ring-2 focus:ring-focus w-36"
         />
       </div>
 
@@ -146,26 +141,22 @@ export function GSTR9Page() {
       {calendar.length > 0 && (
         <div
           className={`flex items-start gap-3 rounded-xl border px-4 py-3 ${
-            filingReady
-              ? 'border-green-300 dark:border-green-700 bg-green-50 dark:bg-green-900/20'
-              : 'border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/20'
+            filingReady ? 'border-success bg-success-bg' : 'border-warning bg-warning-bg'
           }`}
         >
           {filingReady ? (
-            <CheckCircle className="w-5 h-5 text-green-600 dark:text-green-400 shrink-0 mt-0.5" />
+            <CheckCircle className="w-5 h-5 text-success shrink-0 mt-0.5" />
           ) : (
-            <AlertTriangle className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+            <AlertTriangle className="w-5 h-5 text-warning shrink-0 mt-0.5" />
           )}
           <div className="text-sm">
-            <p
-              className={`font-medium ${filingReady ? 'text-green-800 dark:text-green-300' : 'text-amber-800 dark:text-amber-300'}`}
-            >
+            <p className={`font-medium ${filingReady ? 'text-success' : 'text-warning'}`}>
               {filingReady
                 ? 'Ready to prepare filing'
                 : `${unfiled.length} GSTR-1 / GSTR-3B return(s) not yet filed for ${year}`}
             </p>
             {!filingReady && (
-              <p className="text-amber-700 dark:text-amber-400 mt-0.5">
+              <p className="text-warning mt-0.5">
                 File all monthly GSTR-1 and GSTR-3B returns for the year before filing GSTR-9. See
                 the GST Compliance Calendar.
               </p>
@@ -184,9 +175,7 @@ export function GSTR9Page() {
           <ERPCardSkeleton lines={4} />
         </div>
       ) : !result ? (
-        <div className="py-12 text-center text-sm text-gray-400 dark:text-gray-500">
-          No data for selected year
-        </div>
+        <div className="py-12 text-center text-sm text-secondary">No data for selected year</div>
       ) : (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <AmountCard
@@ -263,13 +252,13 @@ export function GSTR9Page() {
       )}
 
       {result && table9Complete === false && (
-        <div className="flex items-start gap-3 rounded-xl border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/20 px-4 py-3">
-          <AlertTriangle className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+        <div className="flex items-start gap-3 rounded-xl border border-warning bg-warning-bg px-4 py-3">
+          <AlertTriangle className="w-5 h-5 text-warning shrink-0 mt-0.5" />
           <div className="text-sm">
-            <p className="font-medium text-amber-800 dark:text-amber-300">
+            <p className="font-medium text-warning">
               Table 9 reflects {12 - unfiledPeriods.length} of 12 filed periods
             </p>
-            <p className="text-amber-700 dark:text-amber-400 mt-0.5">
+            <p className="text-warning mt-0.5">
               {unfiledPeriods.length} period(s) not yet filed (or filed before real tax-paid
               tracking was in place) are excluded: {unfiledPeriods.join(', ')}.
             </p>

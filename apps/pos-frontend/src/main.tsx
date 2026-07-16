@@ -29,14 +29,19 @@ function RequireAuth({ children }: { children: ReactElement }) {
 }
 
 // Every real pos-frontend backend route (shift open/close, sales, drawer — see
-// apps/sales-service/src/api/pos.routes.ts) is gated on POS_MANAGE uniformly, so an
-// authenticated user without it can never do anything useful here. Without this guard,
+// apps/sales-service/src/api/pos.routes.ts) now accepts POS_MANAGE (SALES_MANAGER/ADMIN/
+// OWNER's broad grant) OR POS_ACCESS (CASHIER's basic till-operator grant), so an
+// authenticated user without either can never do anything useful here. Without this guard,
 // such a user (e.g. an HR Manager who is a valid ERP login but not till staff) could still
 // navigate into any screen and only discover the problem after submitting a form, via a
-// raw "Missing permission: POS_MANAGE" toast with no way to sign out from that screen.
+// raw "Missing permission" toast with no way to sign out from that screen.
 // Checked right after RequireAuth so it fires before branch-select/shift-open/etc.
 function RequirePermission({ children }: { children: ReactElement }) {
-  return hasPermission(PERMISSIONS.POS_MANAGE) ? children : <AccessDeniedScreen />;
+  return hasPermission(PERMISSIONS.POS_MANAGE) || hasPermission(PERMISSIONS.POS_ACCESS) ? (
+    children
+  ) : (
+    <AccessDeniedScreen />
+  );
 }
 
 // PG-051 — redirects to /branch-select until a branch/warehouse has been persisted for

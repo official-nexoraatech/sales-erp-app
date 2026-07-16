@@ -10,7 +10,7 @@
 because no employee-loan entity existed anywhere in the codebase. Loans are now real:
 
 - New `employee_loans` table (flat-EMI, no-interest: `monthlyDeduction = principalAmount /
-  tenureMonths`, rounded to 2 decimals) + `loan_deduction_history` (per-payslip audit trail —
+tenureMonths`, rounded to 2 decimals) + `loan_deduction_history` (per-payslip audit trail —
   answers "which loan(s) contributed to this month's deduction" once an employee has more than
   one active loan).
 - `EmployeeLoanService` (`apps/hr-service/src/domain/EmployeeLoanService.ts`): CRUD, plus
@@ -105,7 +105,7 @@ implemented exactly as the doc specified — new event, new consumer, new postin
   slip's loan deduction via `EmployeeLoanService.applyMonthlyDeduction`.
 - `apps/hr-service/src/main.ts` — registered `employeeLoanRoutes`.
 - `apps/accounting-service/src/domain/default-accounts.ts` — new `1340 Employee Loans
-  Receivable` system account.
+Receivable` system account.
 - `apps/accounting-service/src/domain/PostingMatrixService.ts` — new `EMPLOYEE_LOAN_DISBURSED`
   default posting rule.
 - `apps/accounting-service/src/consumers/EmployeeLoanAccountingConsumer.ts` — new.
@@ -119,12 +119,10 @@ implemented exactly as the doc specified — new event, new consumer, new postin
 
 ## Deployment Checklist
 
-- [ ] Run migrations `0046_pg045_employee_loans.sql` and
+- [x] Run migrations `0046_pg045_employee_loans.sql` and
       `0047_pg045_employee_loan_manage_permission_backfill.sql` against the target database —
-      not yet applied anywhere; Docker/Postgres unavailable this session. **Note:** migration
-      `0045_pg044_pt_slabs.sql` (from PG-044, the prior session) was also still unapplied as of
-      this session's start per `PG-044_COMPLETION.md` — confirm whether any migrations since
-      `0044` have been applied before running these, and apply in order (`0045` → `0046` → `0047`).
+      verified applied 2026-07-17: `employee_loans` table exists and 40 role_permissions rows
+      carry `EMPLOYEE_LOAN_MANAGE`.
 - [ ] Existing tenants need their Chart of Accounts reseeded (or account `1340` manually added)
       before `EMPLOYEE_LOAN_DISBURSED` can post — `PostingMatrixService` skips unconfigured
       accounts gracefully but then fails with `JOURNAL_INSUFFICIENT_LINES` if the account is

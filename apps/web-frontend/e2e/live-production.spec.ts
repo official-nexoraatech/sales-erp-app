@@ -13,6 +13,7 @@ async function realLogin(
   creds: { email: string; password: string; tenantId: number }
 ): Promise<void> {
   await page.goto('/login');
+  await page.getByRole('button', { name: 'Sign in with a tenant ID instead' }).click();
   await page.getByLabel('Tenant ID').fill(String(creds.tenantId));
   await page.getByLabel('Email').fill(creds.email);
   await page.getByLabel('Password', { exact: true }).fill(creds.password);

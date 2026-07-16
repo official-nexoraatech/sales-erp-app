@@ -38,20 +38,18 @@ function ActivitySection({
   color: string;
 }) {
   return (
-    <div className="border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
-      <div
-        className={`px-4 py-3 border-b border-gray-200 dark:border-gray-700 font-semibold text-sm ${color}`}
-      >
+    <div className="border border-default rounded-xl overflow-hidden">
+      <div className={`px-4 py-3 border-b border-default font-semibold text-sm ${color}`}>
         {title}
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <tbody>
             {activities.map((a, i) => (
-              <tr key={i} className="border-b border-gray-100 dark:border-gray-700">
+              <tr key={i} className="border-b border-default">
                 <td className="px-4 py-2 pl-6 text-secondary">{a.label}</td>
                 <td
-                  className={`px-4 py-2 text-right font-mono ${a.amount < 0 ? 'text-red-500 dark:text-red-400' : 'text-green-600 dark:text-green-400'}`}
+                  className={`px-4 py-2 text-right font-mono ${a.amount < 0 ? 'text-danger' : 'text-success'}`}
                 >
                   {formatCurrency(a.amount)}
                 </td>
@@ -65,11 +63,11 @@ function ActivitySection({
               </tr>
             )}
           </tbody>
-          <tfoot className="bg-gray-50 dark:bg-gray-900/30">
+          <tfoot className="bg-surface-subtle">
             <tr>
               <td className="px-4 py-2.5 font-semibold text-primary">Net {title.split(' ')[0]}</td>
               <td
-                className={`px-4 py-2.5 text-right font-mono font-semibold ${net < 0 ? 'text-red-500 dark:text-red-400' : 'text-green-600 dark:text-green-400'}`}
+                className={`px-4 py-2.5 text-right font-mono font-semibold ${net < 0 ? 'text-danger' : 'text-success'}`}
               >
                 {formatCurrency(net)}
               </td>
@@ -115,12 +113,12 @@ export default function CashFlowPage() {
       {isLoading ? (
         <ERPTableSkeleton rows={8} />
       ) : !cf ? (
-        <div className="flex items-center justify-center py-16 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
+        <div className="flex items-center justify-center py-16 bg-surface-card rounded-xl border border-default">
           <p className="text-secondary">Select a date range to view the cash flow statement</p>
         </div>
       ) : (
         <div className="space-y-4">
-          <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 px-4 py-3 flex justify-between items-center text-sm">
+          <div className="bg-surface-card rounded-xl border border-default px-4 py-3 flex justify-between items-center text-sm">
             <span className="font-semibold text-primary">Opening Cash Balance</span>
             <span className="font-mono font-semibold text-primary">
               {formatCurrency(cf.openingCash)}
@@ -131,22 +129,22 @@ export default function CashFlowPage() {
             title="Operating Activities"
             activities={cf.operatingActivities}
             net={cf.netOperating}
-            color="text-blue-700 dark:text-blue-400"
+            color="text-info"
           />
           <ActivitySection
             title="Investing Activities"
             activities={cf.investingActivities}
             net={cf.netInvesting}
-            color="text-purple-700 dark:text-purple-400"
+            color="text-accent-purple"
           />
           <ActivitySection
             title="Financing Activities"
             activities={cf.financingActivities}
             net={cf.netFinancing}
-            color="text-orange-700 dark:text-orange-400"
+            color="text-warning"
           />
 
-          <div className="bg-gray-900 dark:bg-gray-950 rounded-xl px-4 py-4 flex justify-between items-center">
+          <div className="bg-gray-900 rounded-xl px-4 py-4 flex justify-between items-center">
             <span className="font-semibold text-white">Closing Cash Balance</span>
             <span
               className={`font-mono text-xl font-bold ${cf.closingCash >= 0 ? 'text-green-400' : 'text-red-400'}`}

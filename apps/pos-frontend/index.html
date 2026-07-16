@@ -11,6 +11,18 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="NEXORAA POS" />
+    <!-- Applies the user's saved dark-mode preference to <html> before React mounts, so
+         the page doesn't flash light mode on every load for a user who chose dark. Mirrors
+         apps/pos-frontend/src/context/ThemeContext.tsx — keep in sync if that changes. -->
+    <script>
+      (function () {
+        try {
+          var mode = localStorage.getItem('erp-theme');
+          var isDark = mode ? mode === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
+          if (isDark) document.documentElement.classList.add('dark');
+        } catch (e) {}
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

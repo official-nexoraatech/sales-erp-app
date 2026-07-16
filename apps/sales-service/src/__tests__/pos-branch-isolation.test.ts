@@ -13,11 +13,27 @@ import { SignJWT, importPKCS8, type KeyLike } from 'jose';
 import { PERMISSIONS } from '@erp/types';
 
 vi.mock('@erp/db', () => ({
-  posSessions: {}, posHeldSales: {}, invoices: {}, invoiceLines: {}, items: {},
-  customers: {}, projectionDashboardDaily: {}, organizationSettings: {},
-  payments: {}, paymentAllocations: {}, projectionCustomerBalance: {}, outboxEvents: {},
-  loyaltyTransactions: {}, featureFlags: {}, invoiceHistory: {}, quotations: {},
-  deliveryChallans: {}, inventoryLedger: {}, inventoryFifoLayers: {},
+  posSessions: {},
+  posHeldSales: {},
+  invoices: {},
+  invoiceLines: {},
+  items: {},
+  customers: {},
+  projectionDashboardDaily: {},
+  organizationSettings: {},
+  payments: {},
+  paymentAllocations: {},
+  projectionCustomerBalance: {},
+  outboxEvents: {},
+  loyaltyTransactions: {},
+  featureFlags: {},
+  invoiceHistory: {},
+  quotations: {},
+  deliveryChallans: {},
+  inventoryLedger: {},
+  inventoryFifoLayers: {},
+  webhookSubscriptions: {},
+  webhookDeliveries: {},
 }));
 
 vi.mock('drizzle-orm', () => ({
@@ -89,7 +105,7 @@ describe('Branch isolation guard on POST /pos/sales', () => {
 
   afterAll(() => app.close());
 
-  it('rejects a branchId not in the caller\'s JWT branchIds with 403', async () => {
+  it("rejects a branchId not in the caller's JWT branchIds with 403", async () => {
     const token = await makeToken([PERMISSIONS.POS_MANAGE], [1, 3]);
 
     const res = await app.inject({
@@ -104,7 +120,7 @@ describe('Branch isolation guard on POST /pos/sales', () => {
     expect(body.error.code).toBe('BRANCH_ACCESS_DENIED');
   });
 
-  it('does not reject a branchId that is in the caller\'s JWT branchIds', async () => {
+  it("does not reject a branchId that is in the caller's JWT branchIds", async () => {
     const token = await makeToken([PERMISSIONS.POS_MANAGE], [2, 3]);
 
     const res = await app.inject({
@@ -156,7 +172,7 @@ describe('Branch isolation guard on POST /pos/sessions/open', () => {
 
   afterAll(() => app.close());
 
-  it('rejects a branchId not in the caller\'s JWT branchIds with 403', async () => {
+  it("rejects a branchId not in the caller's JWT branchIds with 403", async () => {
     const token = await makeToken([PERMISSIONS.POS_MANAGE], [1]);
 
     const res = await app.inject({
@@ -171,7 +187,7 @@ describe('Branch isolation guard on POST /pos/sessions/open', () => {
     expect(body.error.code).toBe('BRANCH_ACCESS_DENIED');
   });
 
-  it('does not reject a branchId that is in the caller\'s JWT branchIds', async () => {
+  it("does not reject a branchId that is in the caller's JWT branchIds", async () => {
     const token = await makeToken([PERMISSIONS.POS_MANAGE], [2]);
 
     const res = await app.inject({

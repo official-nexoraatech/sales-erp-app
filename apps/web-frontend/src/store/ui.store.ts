@@ -32,12 +32,29 @@ export const useUIStore = create<UIState>()(
       setDensity: (v) => set({ density: v }),
       pushRecentPage: (page) =>
         set((s) => ({
-          recentPages: [page, ...s.recentPages.filter((p) => p.path !== page.path)].slice(0, MAX_RECENT_PAGES),
+          recentPages: [page, ...s.recentPages.filter((p) => p.path !== page.path)].slice(
+            0,
+            MAX_RECENT_PAGES
+          ),
         })),
     }),
     {
       name: 'nexoraa-ui',
-      partialize: (s) => ({ sidebarCollapsed: s.sidebarCollapsed, density: s.density, recentPages: s.recentPages }),
+      partialize: (s) => ({
+        sidebarCollapsed: s.sidebarCollapsed,
+        density: s.density,
+        recentPages: s.recentPages,
+      }),
     }
   )
 );
+
+// Cross-tab sync: the `storage` event fires in every other same-origin tab whenever
+// localStorage changes, so changing density (or sidebar/recent-pages) in one tab now
+// updates every other open tab live — matches the mode/motion sync in ThemeContext.tsx and
+// the tenant-brand-color sync in TenantThemeSync.tsx, instead of only applying on reload.
+if (typeof window !== 'undefined') {
+  window.addEventListener('storage', (e) => {
+    if (e.key === 'nexoraa-ui') void useUIStore.persist.rehydrate();
+  });
+}

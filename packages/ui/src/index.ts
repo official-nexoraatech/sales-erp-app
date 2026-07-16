@@ -32,3 +32,4 @@ export { default as MonthPicker, type MonthPickerProps } from './MonthPicker.js'
 export { default as TimePicker, type TimePickerProps } from './TimePicker.js';
 export { default as DateTimePicker, type DateTimePickerProps } from './DateTimePicker.js';
 export { default as RichTextEditor, type RichTextEditorProps } from './RichTextEditor.js';
+export { default as Kbd } from './Kbd.js';

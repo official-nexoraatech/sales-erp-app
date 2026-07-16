@@ -96,27 +96,27 @@ export default function SegmentsPage() {
             {
               label: 'Champion',
               count: health.champion,
-              color: 'text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-900/20',
+              color: 'text-success bg-success-bg',
             },
             {
               label: 'Loyal',
               count: health.loyal,
-              color: 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20',
+              color: 'text-info bg-info-bg',
             },
             {
               label: 'At Risk',
               count: health.atRisk,
-              color: 'text-yellow-600 dark:text-yellow-400 bg-yellow-50 dark:bg-yellow-900/20',
+              color: 'text-warning bg-warning-bg',
             },
             {
               label: 'Lost',
               count: health.lost,
-              color: 'text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20',
+              color: 'text-danger bg-danger-bg',
             },
             {
               label: 'Unscored',
               count: health.unscored,
-              color: 'text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-800',
+              color: 'text-secondary bg-surface-raised',
             },
           ].map((s) => (
             <div key={s.label} className={`rounded-xl p-4 text-center ${s.color}`}>

@@ -154,23 +154,20 @@ export default function InvoiceDetailPage() {
           { label: 'Grand Total', value: formatCurrency(parseFloat(invoice.grandTotal)) },
           { label: 'Balance Due', value: formatCurrency(parseFloat(invoice.balanceDue)) },
         ].map(({ label, value }) => (
-          <div
-            key={label}
-            className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-4"
-          >
-            <div className="text-xs text-gray-500 dark:text-gray-400">{label}</div>
+          <div key={label} className="bg-surface-card rounded-xl border border-default p-4">
+            <div className="text-xs text-secondary">{label}</div>
             <div className="text-lg font-semibold mt-1">{value}</div>
           </div>
         ))}
       </div>
 
       {/* Line Items */}
-      <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-4 mb-4">
+      <div className="bg-surface-card rounded-xl border border-default p-4 mb-4">
         <h3 className="font-semibold mb-3">Line Items</h3>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="text-left text-gray-500 dark:text-gray-400 border-b dark:border-gray-700">
+              <tr className="text-left text-secondary border-b border-default">
                 <th className="pb-2">Item</th>
                 <th className="pb-2">HSN</th>
                 <th className="pb-2">Qty</th>
@@ -182,7 +179,7 @@ export default function InvoiceDetailPage() {
                 <th className="pb-2 text-right">Total</th>
               </tr>
             </thead>
-            <tbody className="divide-y dark:divide-gray-700">
+            <tbody className="divide-y divide-default">
               {invoice.lines.map((l) => (
                 <tr key={l.id}>
                   <td className="py-2">{l.itemId}</td>
@@ -202,7 +199,7 @@ export default function InvoiceDetailPage() {
           </table>
         </div>
 
-        <div className="mt-4 pt-4 border-t dark:border-gray-700 flex justify-end">
+        <div className="mt-4 pt-4 border-t border-default flex justify-end">
           <div className="w-64 space-y-1 text-sm">
             <div className="flex justify-between">
               <span className="text-secondary">Taxable</span>
@@ -226,7 +223,7 @@ export default function InvoiceDetailPage() {
                 <span>₹{parseFloat(invoice.igstAmount).toFixed(2)}</span>
               </div>
             )}
-            <div className="flex justify-between font-bold text-base pt-1 border-t dark:border-gray-700">
+            <div className="flex justify-between font-bold text-base pt-1 border-t border-default">
               <span>Grand Total</span>
               <span>₹{parseFloat(invoice.grandTotal).toFixed(2)}</span>
             </div>
@@ -243,9 +240,9 @@ export default function InvoiceDetailPage() {
       </div>
 
       {invoice.notes && (
-        <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-4 mb-4">
+        <div className="bg-surface-card rounded-xl border border-default p-4 mb-4">
           <h3 className="font-semibold mb-1 text-sm">Notes</h3>
-          <p className="text-sm text-gray-600 dark:text-gray-400">{invoice.notes}</p>
+          <p className="text-sm text-secondary">{invoice.notes}</p>
         </div>
       )}
 
@@ -256,7 +253,7 @@ export default function InvoiceDetailPage() {
       {/* Confirm Modal */}
       <Modal isOpen={showConfirm} onClose={() => setShowConfirm(false)} title="Confirm Invoice">
         <div className="space-y-4">
-          <p className="text-sm text-gray-600 dark:text-gray-400">
+          <p className="text-sm text-secondary">
             Confirming will deduct stock and assign an invoice number. This cannot be undone easily.
           </p>
           <Input

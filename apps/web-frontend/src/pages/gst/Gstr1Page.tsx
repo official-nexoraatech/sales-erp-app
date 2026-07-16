@@ -41,34 +41,30 @@ interface SectionCardProps {
 function SectionCard({ title, subtitle, count, amount, children }: SectionCardProps) {
   const [open, setOpen] = useState(false);
   return (
-    <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl">
+    <div className="bg-surface-card border border-default rounded-xl">
       <button
         className="w-full flex items-center justify-between px-5 py-4 text-left"
         onClick={() => setOpen((o) => !o)}
       >
         <div>
           <div className="flex items-center gap-2">
-            <span className="text-sm font-semibold text-gray-900 dark:text-white">{title}</span>
-            <span className="px-2 py-0.5 text-xs bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 rounded-full">
+            <span className="text-sm font-semibold text-primary">{title}</span>
+            <span className="px-2 py-0.5 text-xs bg-surface-raised text-secondary rounded-full">
               {count}
             </span>
           </div>
-          <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{subtitle}</div>
+          <div className="text-xs text-secondary mt-0.5">{subtitle}</div>
         </div>
         <div className="flex items-center gap-4">
-          <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
-            {formatCurrency(amount)}
-          </span>
+          <span className="text-sm font-medium text-primary">{formatCurrency(amount)}</span>
           {open ? (
-            <ChevronDown className="w-4 h-4 text-gray-400 dark:text-gray-500" />
+            <ChevronDown className="w-4 h-4 text-secondary" />
           ) : (
-            <ChevronRight className="w-4 h-4 text-gray-400 dark:text-gray-500" />
+            <ChevronRight className="w-4 h-4 text-secondary" />
           )}
         </div>
       </button>
-      {open && (
-        <div className="border-t border-gray-100 dark:border-gray-700 px-5 py-4">{children}</div>
-      )}
+      {open && <div className="border-t border-default px-5 py-4">{children}</div>}
     </div>
   );
 }
@@ -117,10 +113,10 @@ export function Gstr1Page() {
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <FileText className="w-6 h-6 text-indigo-600 dark:text-indigo-400" />
+          <FileText className="w-6 h-6 text-brand" />
           <div>
-            <h1 className="text-xl font-semibold text-gray-900 dark:text-white">GSTR-1</h1>
-            <p className="text-sm text-gray-500 dark:text-gray-400">Outward Supplies Return</p>
+            <h1 className="text-xl font-semibold text-primary">GSTR-1</h1>
+            <p className="text-sm text-secondary">Outward Supplies Return</p>
           </div>
         </div>
         <div className="flex gap-2">
@@ -142,7 +138,7 @@ export function Gstr1Page() {
           <MonthPicker label="Period" value={period} onChange={setPeriod} />
         </div>
         <div>
-          <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
+          <label className="block text-xs font-medium text-primary mb-1">
             Your GSTIN (for export)
           </label>
           <input
@@ -151,7 +147,7 @@ export function Gstr1Page() {
             onChange={(e) => setGstin(e.target.value.toUpperCase())}
             placeholder="15-char GSTIN"
             maxLength={15}
-            className="px-3 py-2 text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-900 dark:text-white font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500 w-48"
+            className="px-3 py-2 text-sm bg-surface-card border border-default rounded-lg text-primary font-mono focus:outline-none focus:ring-2 focus:ring-focus w-48"
           />
         </div>
       </div>
@@ -161,28 +157,28 @@ export function Gstr1Page() {
         <div
           className={`flex items-start gap-3 px-4 py-3 rounded-lg ${
             gstr1Data.isExportReady
-              ? 'bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800'
-              : 'bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800'
+              ? 'bg-success-bg border border-success'
+              : 'bg-warning-bg border border-warning'
           }`}
         >
           {gstr1Data.isExportReady ? (
-            <CheckCircle className="w-5 h-5 text-green-600 dark:text-green-400 flex-shrink-0 mt-0.5" />
+            <CheckCircle className="w-5 h-5 text-success flex-shrink-0 mt-0.5" />
           ) : (
-            <AlertTriangle className="w-5 h-5 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" />
+            <AlertTriangle className="w-5 h-5 text-warning flex-shrink-0 mt-0.5" />
           )}
           <div>
             {gstr1Data.isExportReady ? (
-              <p className="text-sm font-medium text-green-800 dark:text-green-300">
+              <p className="text-sm font-medium text-success">
                 Ready to export — {totalOutward} invoices in GSTR-1
               </p>
             ) : (
               <>
-                <p className="text-sm font-medium text-amber-800 dark:text-amber-300">
+                <p className="text-sm font-medium text-warning">
                   Validation issues ({validationErrors.length})
                 </p>
                 <ul className="mt-1 space-y-0.5">
                   {(validationErrors as string[]).map((e, i) => (
-                    <li key={i} className="text-xs text-amber-700 dark:text-amber-400">
+                    <li key={i} className="text-xs text-warning">
                       • {e}
                     </li>
                   ))}
@@ -212,12 +208,12 @@ export function Gstr1Page() {
             )}
           >
             {b2bEntries.length === 0 ? (
-              <p className="text-sm text-gray-400 dark:text-gray-500">No B2B invoices</p>
+              <p className="text-sm text-secondary">No B2B invoices</p>
             ) : (
               <div className="overflow-x-auto">
                 <table className="min-w-full text-xs">
                   <thead>
-                    <tr className="text-gray-500 dark:text-gray-400">
+                    <tr className="text-secondary">
                       <th className="py-2 pr-4 text-left font-medium">Invoice No</th>
                       <th className="py-2 pr-4 text-left font-medium">Date</th>
                       <th className="py-2 pr-4 text-left font-medium">Buyer GSTIN</th>
@@ -225,11 +221,11 @@ export function Gstr1Page() {
                       <th className="py-2 text-right font-medium">Tax</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
+                  <tbody className="divide-y divide-default">
                     {b2bEntries.map((e, i) => {
                       const r = e as Record<string, unknown>;
                       return (
-                        <tr key={i} className="text-gray-700 dark:text-gray-300">
+                        <tr key={i} className="text-primary">
                           <td className="py-2 pr-4 font-mono">{String(r.documentNumber ?? '')}</td>
                           <td className="py-2 pr-4">{String(r.documentDate ?? '')}</td>
                           <td className="py-2 pr-4 font-mono">
@@ -258,9 +254,9 @@ export function Gstr1Page() {
             )}
           >
             {b2csEntries.length === 0 ? (
-              <p className="text-sm text-gray-400 dark:text-gray-500">No B2CS entries</p>
+              <p className="text-sm text-secondary">No B2CS entries</p>
             ) : (
-              <pre className="text-xs text-gray-600 dark:text-gray-400 overflow-x-auto">
+              <pre className="text-xs text-secondary overflow-x-auto">
                 {JSON.stringify(b2csEntries, null, 2)}
               </pre>
             )}
@@ -276,9 +272,9 @@ export function Gstr1Page() {
             )}
           >
             {cdnrEntries.length === 0 ? (
-              <p className="text-sm text-gray-400 dark:text-gray-500">No credit/debit notes</p>
+              <p className="text-sm text-secondary">No credit/debit notes</p>
             ) : (
-              <pre className="text-xs text-gray-600 dark:text-gray-400 overflow-x-auto">
+              <pre className="text-xs text-secondary overflow-x-auto">
                 {JSON.stringify(cdnrEntries, null, 2)}
               </pre>
             )}
@@ -291,9 +287,9 @@ export function Gstr1Page() {
             amount={0}
           >
             {hsnData.length === 0 ? (
-              <p className="text-sm text-gray-400 dark:text-gray-500">No HSN data</p>
+              <p className="text-sm text-secondary">No HSN data</p>
             ) : (
-              <pre className="text-xs text-gray-600 dark:text-gray-400 overflow-x-auto">
+              <pre className="text-xs text-secondary overflow-x-auto">
                 {JSON.stringify(hsnData, null, 2)}
               </pre>
             )}

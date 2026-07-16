@@ -1,8 +1,19 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
-  LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
-  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
+  LineChart,
+  Line,
+  BarChart,
+  Bar,
+  PieChart,
+  Pie,
+  Cell,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  Legend,
 } from 'recharts';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
 import ERPErrorBoundary from '../../components/erp/ERPErrorBoundary.js';
@@ -12,7 +23,16 @@ import { reportsEngineApi } from '../../api/endpoints.js';
 import { useAuthStore } from '../../store/auth.store.js';
 import { PERMISSIONS } from '../../constants/permissions.js';
 
-const COLORS = ['#6366f1', '#22c55e', '#f59e0b', '#ef4444', '#06b6d4', '#a855f7', '#ec4899', '#14b8a6'];
+const COLORS = [
+  'var(--chart-1)',
+  'var(--chart-2)',
+  'var(--chart-3)',
+  'var(--chart-4)',
+  'var(--chart-5)',
+  'var(--chart-6)',
+  'var(--chart-7)',
+  'var(--chart-8)',
+];
 
 function fmt(n: number | undefined | null): string {
   if (n === null || n === undefined) return '–';
@@ -21,10 +41,24 @@ function fmt(n: number | undefined | null): string {
   return `₹${n.toFixed(0)}`;
 }
 
-interface RevenueTrendRow { month: string; invoiceCount: number | string; revenue: number | string; }
-interface CustomerRow { customerName: string; totalSales: number | string; }
-interface CategoryRow { category: string; revenue: number | string; }
-interface SalespersonRow { salesperson: string; invoiceCount: number | string; revenue: number | string; }
+interface RevenueTrendRow {
+  month: string;
+  invoiceCount: number | string;
+  revenue: number | string;
+}
+interface CustomerRow {
+  customerName: string;
+  totalSales: number | string;
+}
+interface CategoryRow {
+  category: string;
+  revenue: number | string;
+}
+interface SalespersonRow {
+  salesperson: string;
+  invoiceCount: number | string;
+  revenue: number | string;
+}
 
 function defaultFromDate(): string {
   const d = new Date();
@@ -41,33 +75,52 @@ export default function SalesAnalyticsPage() {
 
   const { data: trendData, isLoading: trendLoading } = useQuery({
     queryKey: ['sales-revenue-trend', fromDate, toDate],
-    queryFn: async () => (await reportsEngineApi.run('sales-revenue-trend', { fromDate, toDate })) as { rows: RevenueTrendRow[] },
+    queryFn: async () =>
+      (await reportsEngineApi.run('sales-revenue-trend', { fromDate, toDate })) as {
+        rows: RevenueTrendRow[];
+      },
   });
 
   const { data: customerData, isLoading: customerLoading } = useQuery({
     queryKey: ['sales-by-customer', fromDate, toDate],
-    queryFn: async () => (await reportsEngineApi.run('sales-by-customer', { fromDate, toDate })) as { rows: CustomerRow[] },
+    queryFn: async () =>
+      (await reportsEngineApi.run('sales-by-customer', { fromDate, toDate })) as {
+        rows: CustomerRow[];
+      },
     enabled: canViewInvoices,
   });
 
   const { data: categoryData, isLoading: categoryLoading } = useQuery({
     queryKey: ['sales-by-category', fromDate, toDate],
-    queryFn: async () => (await reportsEngineApi.run('sales-by-category', { fromDate, toDate })) as { rows: CategoryRow[] },
+    queryFn: async () =>
+      (await reportsEngineApi.run('sales-by-category', { fromDate, toDate })) as {
+        rows: CategoryRow[];
+      },
     enabled: canViewInvoices,
   });
 
   const { data: salespersonData, isLoading: salespersonLoading } = useQuery({
     queryKey: ['sales-by-salesperson', fromDate, toDate],
-    queryFn: async () => (await reportsEngineApi.run('sales-by-salesperson', { fromDate, toDate })) as { rows: SalespersonRow[] },
+    queryFn: async () =>
+      (await reportsEngineApi.run('sales-by-salesperson', { fromDate, toDate })) as {
+        rows: SalespersonRow[];
+      },
     enabled: canViewInvoices,
   });
 
-  const trend = (trendData?.rows ?? []).map((r) => ({ month: r.month, revenue: Number(r.revenue), invoiceCount: Number(r.invoiceCount) }));
+  const trend = (trendData?.rows ?? []).map((r) => ({
+    month: r.month,
+    revenue: Number(r.revenue),
+    invoiceCount: Number(r.invoiceCount),
+  }));
   const topCustomers = (customerData?.rows ?? [])
     .map((r) => ({ customerName: r.customerName, totalSales: Number(r.totalSales) }))
     .sort((a, b) => b.totalSales - a.totalSales)
     .slice(0, 10);
-  const categories = (categoryData?.rows ?? []).map((r) => ({ category: r.category, revenue: Number(r.revenue) }));
+  const categories = (categoryData?.rows ?? []).map((r) => ({
+    category: r.category,
+    revenue: Number(r.revenue),
+  }));
   const salespeople = (salespersonData?.rows ?? []).map((r) => ({
     salesperson: r.salesperson,
     invoiceCount: Number(r.invoiceCount),
@@ -86,14 +139,19 @@ export default function SalesAnalyticsPage() {
           actions={
             <ERPDateRangePicker
               value={{ from: fromDate, to: toDate }}
-              onChange={(range) => { setFromDate(range.from); setToDate(range.to); }}
+              onChange={(range) => {
+                setFromDate(range.from);
+                setToDate(range.to);
+              }}
             />
           }
         />
 
         {isLoading ? (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {Array.from({ length: 4 }).map((_, i) => <ERPCardSkeleton key={i} lines={4} />)}
+            {Array.from({ length: 4 }).map((_, i) => (
+              <ERPCardSkeleton key={i} lines={4} />
+            ))}
           </div>
         ) : (
           <>
@@ -106,21 +164,44 @@ export default function SalesAnalyticsPage() {
                   <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => fmt(v)} />
                   <Tooltip formatter={(v: number) => fmt(v)} />
                   <Legend wrapperStyle={{ fontSize: 11 }} />
-                  <Line type="monotone" dataKey="revenue" name="Revenue" stroke="#6366f1" strokeWidth={2} dot={{ r: 3 }} />
+                  <Line
+                    type="monotone"
+                    dataKey="revenue"
+                    name="Revenue"
+                    stroke="var(--chart-1)"
+                    strokeWidth={2}
+                    dot={{ r: 3 }}
+                  />
                 </LineChart>
               </ResponsiveContainer>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               <div className="bg-surface-card border border-default rounded-xl p-4">
-                <h3 className="text-sm font-semibold text-primary mb-3">Top 10 Customers by Revenue</h3>
+                <h3 className="text-sm font-semibold text-primary mb-3">
+                  Top 10 Customers by Revenue
+                </h3>
                 <ResponsiveContainer width="100%" height={260}>
-                  <BarChart data={topCustomers} layout="vertical" margin={{ top: 0, right: 16, left: 80, bottom: 0 }}>
+                  <BarChart
+                    data={topCustomers}
+                    layout="vertical"
+                    margin={{ top: 0, right: 16, left: 80, bottom: 0 }}
+                  >
                     <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
                     <XAxis type="number" tick={{ fontSize: 10 }} tickFormatter={(v) => fmt(v)} />
-                    <YAxis type="category" dataKey="customerName" tick={{ fontSize: 10 }} width={90} />
+                    <YAxis
+                      type="category"
+                      dataKey="customerName"
+                      tick={{ fontSize: 10 }}
+                      width={90}
+                    />
                     <Tooltip formatter={(v: number) => fmt(v)} />
-                    <Bar dataKey="totalSales" name="Revenue" fill="#6366f1" radius={[0, 4, 4, 0]} />
+                    <Bar
+                      dataKey="totalSales"
+                      name="Revenue"
+                      fill="var(--chart-1)"
+                      radius={[0, 4, 4, 0]}
+                    />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
@@ -140,7 +221,9 @@ export default function SalesAnalyticsPage() {
                       labelLine={false}
                       style={{ fontSize: 10 }}
                     >
-                      {categories.map((_entry, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
+                      {categories.map((_entry, i) => (
+                        <Cell key={i} fill={COLORS[i % COLORS.length]} />
+                      ))}
                     </Pie>
                     <Tooltip formatter={(v: number) => fmt(v)} />
                   </PieChart>
@@ -162,7 +245,9 @@ export default function SalesAnalyticsPage() {
                   <tbody>
                     {salespeople.length === 0 ? (
                       <tr>
-                        <td colSpan={3} className="px-3 py-6 text-center text-secondary">No data for this period</td>
+                        <td colSpan={3} className="px-3 py-6 text-center text-secondary">
+                          No data for this period
+                        </td>
                       </tr>
                     ) : (
                       salespeople.map((s, i) => (

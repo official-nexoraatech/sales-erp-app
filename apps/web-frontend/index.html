@@ -4,6 +4,83 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>NEXORAA ERP</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <!-- Static defaults for the public marketing pages (crawlers, and the instant before
+         React mounts). Per-page pages/marketing/*.tsx override these at runtime via
+         components/marketing/SEO.tsx — this is just the fallback. -->
+    <meta
+      name="description"
+      content="Sales, purchase, inventory, accounting, GST compliance, HR and CRM — unified in one multi-tenant ERP platform."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="NEXORAA ERP" />
+    <meta
+      property="og:description"
+      content="Sales, purchase, inventory, accounting, GST compliance, HR and CRM — unified in one multi-tenant ERP platform."
+    />
+    <meta property="og:image" content="/og-image.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:image" content="/og-image.png" />
+    <meta name="robots" content="index, follow" />
+    <!-- Placeholder domain (matches sitemap.xml's convention) — replace with the real
+         production domain before launch. -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "Organization",
+        "name": "NEXORAA Technologies",
+        "url": "https://your-domain.example",
+        "logo": "https://your-domain.example/favicon.svg",
+        "description": "NEXORAA builds connected ERP software for growing, multi-branch businesses — sales, purchase, inventory, accounting, GST compliance, HR and CRM, unified in one platform."
+      }
+    </script>
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "NEXORAA ERP",
+        "applicationCategory": "BusinessApplication",
+        "operatingSystem": "Web",
+        "offers": {
+          "@type": "AggregateOffer",
+          "priceCurrency": "INR",
+          "lowPrice": "0",
+          "offerCount": "3"
+        }
+      }
+    </script>
+    <!-- Applies the user's saved mode/density/motion preference to <html> before React
+         mounts, so the page doesn't flash light/comfortable/full-motion on every load for
+         a user who chose dark/hc/compact/spacious/reduced-motion. Mirrors the logic in
+         ThemeContext.tsx and Layout.tsx's density effect — keep in sync if those change. -->
+    <script>
+      (function () {
+        try {
+          var mode = localStorage.getItem('erp-theme');
+          if (mode !== 'light' && mode !== 'dark' && mode !== 'hc') {
+            mode = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+          }
+          if (mode !== 'light') document.documentElement.classList.add(mode);
+
+          var motionStored = localStorage.getItem('erp-reduced-motion');
+          var reducedMotion =
+            motionStored !== null
+              ? motionStored === 'true'
+              : window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+          if (reducedMotion) document.documentElement.setAttribute('data-motion', 'none');
+
+          var uiRaw = localStorage.getItem('nexoraa-ui');
+          if (uiRaw) {
+            var density = JSON.parse(uiRaw).state.density;
+            if (density && density !== 'comfortable') {
+              document.documentElement.setAttribute('data-density', density);
+            }
+          }
+        } catch (e) {}
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

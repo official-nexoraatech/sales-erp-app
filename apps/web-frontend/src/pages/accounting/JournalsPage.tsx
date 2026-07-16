@@ -57,7 +57,7 @@ export default function JournalsPage() {
         }
       />
 
-      <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
+      <div className="bg-surface-card rounded-xl border border-default">
         {isLoading ? (
           <ERPTableSkeleton rows={8} />
         ) : journals.length === 0 ? (
@@ -77,7 +77,7 @@ export default function JournalsPage() {
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="bg-gray-50 dark:bg-gray-900/40 border-b border-gray-200 dark:border-gray-700">
+              <thead className="bg-surface-subtle border-b border-default">
                 <tr>
                   <th className="px-4 py-3 text-left font-medium text-secondary">Journal ID</th>
                   <th className="px-4 py-3 text-left font-medium text-secondary">Description</th>
@@ -87,14 +87,14 @@ export default function JournalsPage() {
                   <th className="px-4 py-3 text-left font-medium text-secondary">Date</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
+              <tbody className="divide-y divide-default">
                 {journals.map((j) => (
                   <tr
                     key={j.journalId}
-                    className="hover:bg-gray-50 dark:hover:bg-gray-750 cursor-pointer"
+                    className="hover:bg-surface-raised cursor-pointer"
                     onClick={() => navigate(`/accounting/journals/${j.journalId}`)}
                   >
-                    <td className="px-4 py-3 font-mono text-xs text-blue-600 dark:text-blue-400">
+                    <td className="px-4 py-3 font-mono text-xs text-link">
                       {j.journalId.slice(0, 20)}…
                     </td>
                     <td className="px-4 py-3 text-primary max-w-xs truncate">{j.description}</td>
@@ -118,7 +118,7 @@ export default function JournalsPage() {
         )}
 
         {total > 20 && (
-          <div className="flex items-center justify-between px-4 py-3 border-t border-gray-200 dark:border-gray-700">
+          <div className="flex items-center justify-between px-4 py-3 border-t border-default">
             <span className="text-sm text-secondary">Page {page + 1}</span>
             <div className="flex gap-2">
               <Button variant="ghost" disabled={page === 0} onClick={() => setPage((p) => p - 1)}>

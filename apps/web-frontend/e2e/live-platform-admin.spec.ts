@@ -12,6 +12,7 @@ const OPERATOR = {
 
 async function realLogin(page: Page): Promise<void> {
   await page.goto('/login');
+  await page.getByRole('button', { name: 'Sign in with a tenant ID instead' }).click();
   await page.getByLabel('Tenant ID').fill(String(OPERATOR.tenantId));
   await page.getByLabel('Email').fill(OPERATOR.email);
   await page.getByLabel('Password', { exact: true }).fill(OPERATOR.password);

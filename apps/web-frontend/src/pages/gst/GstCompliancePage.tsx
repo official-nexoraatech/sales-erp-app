@@ -21,22 +21,22 @@ type FilingStatus = 'PENDING' | 'FILED' | 'LATE_FILED' | 'NOT_DUE';
 const STATUS_CONFIG: Record<FilingStatus, { label: string; color: string; icon: ReactNode }> = {
   FILED: {
     label: 'Filed',
-    color: 'text-green-700 dark:text-green-400 bg-green-100 dark:bg-green-900/30',
+    color: 'text-success bg-success-bg',
     icon: <CheckCircle className="w-3.5 h-3.5" />,
   },
   LATE_FILED: {
     label: 'Late Filed',
-    color: 'text-amber-700 dark:text-amber-400 bg-amber-100 dark:bg-amber-900/30',
+    color: 'text-warning bg-warning-bg',
     icon: <AlertTriangle className="w-3.5 h-3.5" />,
   },
   PENDING: {
     label: 'Pending',
-    color: 'text-red-700 dark:text-red-400 bg-red-100 dark:bg-red-900/30',
+    color: 'text-danger bg-danger-bg',
     icon: <Clock className="w-3.5 h-3.5" />,
   },
   NOT_DUE: {
     label: 'Not Due',
-    color: 'text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-800',
+    color: 'text-secondary bg-surface-raised',
     icon: <Clock className="w-3.5 h-3.5" />,
   },
 };
@@ -80,13 +80,13 @@ function MarkFiledModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl p-6 w-full max-w-md mx-4">
-        <h2 className="text-base font-semibold text-gray-900 dark:text-white mb-4">
+      <div className="bg-surface-card rounded-xl shadow-token-modal p-6 w-full max-w-md mx-4">
+        <h2 className="text-base font-semibold text-primary mb-4">
           Mark {String(entry.returnType)} as Filed — {String(entry.period)}
         </h2>
         <div className="space-y-4">
           <div>
-            <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
+            <label className="block text-xs font-medium text-primary mb-1">
               Reference Number (optional)
             </label>
             <input
@@ -94,7 +94,7 @@ function MarkFiledModal({
               value={refNo}
               onChange={(e) => setRefNo(e.target.value)}
               placeholder="ARN or acknowledgement number"
-              className="w-full px-3 py-2 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              className="w-full px-3 py-2 text-sm bg-surface-card border border-default rounded-lg text-primary focus:outline-none focus:ring-2 focus:ring-focus"
             />
           </div>
           <div className="flex gap-3 justify-end">
@@ -144,12 +144,10 @@ export function GstCompliancePage() {
   return (
     <div className="p-6 space-y-6">
       <div className="flex items-center gap-3">
-        <Calendar className="w-6 h-6 text-indigo-600 dark:text-indigo-400" />
+        <Calendar className="w-6 h-6 text-brand" />
         <div>
-          <h1 className="text-xl font-semibold text-gray-900 dark:text-white">
-            GST Compliance Calendar
-          </h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400">
+          <h1 className="text-xl font-semibold text-primary">GST Compliance Calendar</h1>
+          <p className="text-sm text-secondary">
             Return filing tracker &amp; e-Way Bill monitoring
           </p>
         </div>
@@ -162,32 +160,29 @@ export function GstCompliancePage() {
             {
               key: 'pendingCount',
               label: 'Pending Returns',
-              color: 'text-amber-600 dark:text-amber-400',
+              color: 'text-warning',
               icon: <Clock className="w-5 h-5" />,
             },
             {
               key: 'overdueCount',
               label: 'Overdue',
-              color: 'text-red-600 dark:text-red-400',
+              color: 'text-danger',
               icon: <AlertTriangle className="w-5 h-5" />,
             },
             {
               key: 'filedThisMonth',
               label: 'Filed This Month',
-              color: 'text-green-600 dark:text-green-400',
+              color: 'text-success',
               icon: <CheckCircle className="w-5 h-5" />,
             },
             {
               key: 'nextDue',
               label: 'Next Due',
-              color: 'text-indigo-600 dark:text-indigo-400',
+              color: 'text-brand',
               icon: <TrendingUp className="w-5 h-5" />,
             },
           ].map(({ key, label, color, icon }) => (
-            <div
-              key={key}
-              className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4"
-            >
+            <div key={key} className="bg-surface-card border border-default rounded-xl p-4">
               <div className={`flex items-center gap-2 mb-2 ${color}`}>
                 {icon}
                 <span className="text-xs">{label}</span>
@@ -206,16 +201,14 @@ export function GstCompliancePage() {
 
       {/* FY Selector */}
       <div>
-        <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
-          Financial Year
-        </label>
+        <label className="block text-xs font-medium text-primary mb-1">Financial Year</label>
         <input
           type="text"
           value={fy}
           onChange={(e) => setFy(e.target.value)}
           placeholder="2025-26"
           pattern="\d{4}-\d{2}"
-          className="px-3 py-2 text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 w-36"
+          className="px-3 py-2 text-sm bg-surface-card border border-default rounded-lg text-primary focus:outline-none focus:ring-2 focus:ring-focus w-36"
         />
       </div>
 
@@ -228,28 +221,25 @@ export function GstCompliancePage() {
             { label: 'GSTR-1 (11th of following month)', entries: gstr1Entries },
             { label: 'GSTR-3B (20th of following month)', entries: gstr3bEntries },
           ].map(({ label, entries }) => (
-            <div
-              key={label}
-              className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl"
-            >
-              <div className="px-5 py-4 border-b border-gray-100 dark:border-gray-700">
-                <h3 className="text-sm font-semibold text-gray-900 dark:text-white">{label}</h3>
+            <div key={label} className="bg-surface-card border border-default rounded-xl">
+              <div className="px-5 py-4 border-b border-default">
+                <h3 className="text-sm font-semibold text-primary">{label}</h3>
               </div>
               <div className="overflow-x-auto">
                 <table className="min-w-full">
-                  <thead className="bg-gray-50 dark:bg-gray-900/30">
+                  <thead className="bg-surface-subtle">
                     <tr>
                       {['Period', 'Due Date', 'Status', 'Filed On', 'Action'].map((h) => (
                         <th
                           key={h}
-                          className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider"
+                          className="px-4 py-2 text-left text-xs font-medium text-secondary uppercase tracking-wider"
                         >
                           {h}
                         </th>
                       ))}
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
+                  <tbody className="divide-y divide-default">
                     {entries.length === 0 ? (
                       <tr>
                         <td colSpan={5}>
@@ -264,15 +254,15 @@ export function GstCompliancePage() {
                       entries.map((e, i) => (
                         <tr
                           key={i}
-                          className={`${e.isOverdue ? 'bg-red-50/30 dark:bg-red-900/5' : ''} hover:bg-gray-50 dark:hover:bg-gray-700/30`}
+                          className={`${e.isOverdue ? 'bg-danger-bg' : ''} hover:bg-surface-raised`}
                         >
-                          <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300 font-medium">
+                          <td className="px-4 py-3 text-sm text-primary font-medium">
                             {String(e.period ?? '')}
                           </td>
-                          <td className="px-4 py-3 text-sm text-gray-500 dark:text-gray-400 whitespace-nowrap">
+                          <td className="px-4 py-3 text-sm text-secondary whitespace-nowrap">
                             {String(e.dueDate ?? '')}
                             {Boolean(e.isOverdue) && (
-                              <span className="ml-1 text-xs text-red-600 dark:text-red-400">
+                              <span className="ml-1 text-xs text-danger">
                                 ({String(e.daysOverdue ?? 0)}d late)
                               </span>
                             )}
@@ -280,7 +270,7 @@ export function GstCompliancePage() {
                           <td className="px-4 py-3">
                             <StatusBadge status={String(e.status ?? 'PENDING')} />
                           </td>
-                          <td className="px-4 py-3 text-sm text-gray-500 dark:text-gray-400">
+                          <td className="px-4 py-3 text-sm text-secondary">
                             {e.filedAt ? String(e.filedAt).substring(0, 10) : '—'}
                           </td>
                           <td className="px-4 py-3">
@@ -303,10 +293,10 @@ export function GstCompliancePage() {
 
       {/* e-Way Bill expiry alert */}
       {ewbData && ewbData.totalElements > 0 && (
-        <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl p-5">
+        <div className="bg-warning-bg border border-warning rounded-xl p-5">
           <div className="flex items-center gap-3 mb-3">
-            <Truck className="w-5 h-5 text-amber-600 dark:text-amber-400" />
-            <h3 className="text-sm font-semibold text-amber-800 dark:text-amber-300">
+            <Truck className="w-5 h-5 text-warning" />
+            <h3 className="text-sm font-semibold text-warning">
               {ewbData.totalElements} e-Way Bill{ewbData.totalElements > 1 ? 's' : ''} Expiring
               Within 24 Hours
             </h3>
@@ -314,12 +304,8 @@ export function GstCompliancePage() {
           <div className="space-y-2">
             {(ewbData.content as Record<string, unknown>[]).map((e, i) => (
               <div key={i} className="flex items-center justify-between text-sm">
-                <span className="text-amber-700 dark:text-amber-400 font-mono">
-                  EWB: {String(e.ewbNumber ?? '')}
-                </span>
-                <span className="text-amber-600 dark:text-amber-500">
-                  Expires: {String(e.ewbValidUpto ?? '')}
-                </span>
+                <span className="text-warning font-mono">EWB: {String(e.ewbNumber ?? '')}</span>
+                <span className="text-warning">Expires: {String(e.ewbValidUpto ?? '')}</span>
               </div>
             ))}
           </div>

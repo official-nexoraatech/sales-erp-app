@@ -33,11 +33,12 @@ export function NotificationsPanel({ onClose, onUnreadCountChange }: Notificatio
       .finally(() => setLoading(false));
     // onUnreadCountChange is a stable setState-derived callback from the parent; omitting
     // it from deps avoids re-fetching on every render without it ever actually changing.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const markRead = (id: number) => {
-    setItems((prev) => prev.map((n) => (n.id === id ? { ...n, readAt: new Date().toISOString() } : n)));
+    setItems((prev) =>
+      prev.map((n) => (n.id === id ? { ...n, readAt: new Date().toISOString() } : n))
+    );
     onUnreadCountChange(items.filter((n) => n.id !== id && !n.readAt).length);
     notificationsApi.markRead(id).catch(() => {});
   };
@@ -46,7 +47,11 @@ export function NotificationsPanel({ onClose, onUnreadCountChange }: Notificatio
     <div className="absolute right-0 top-12 z-50 w-80 max-h-[28rem] flex flex-col bg-surface-card border border-default rounded-lg shadow-2xl overflow-hidden">
       <div className="flex items-center justify-between px-4 py-3 border-b border-default">
         <span className="text-sm font-semibold text-primary">Notifications</span>
-        <button onClick={onClose} aria-label="Close notifications panel" className="text-secondary hover:text-primary transition-colors">
+        <button
+          onClick={onClose}
+          aria-label="Close notifications panel"
+          className="text-secondary hover:text-primary transition-colors"
+        >
           <X size={16} />
         </button>
       </div>
@@ -72,13 +77,17 @@ export function NotificationsPanel({ onClose, onUnreadCountChange }: Notificatio
                 <button
                   onClick={() => markRead(n.id)}
                   className={`w-full text-left px-4 py-3 border-b border-default hover:bg-surface-raised transition-colors ${
-                    n.readAt ? '' : 'bg-blue-50 dark:bg-blue-950/30'
+                    n.readAt ? '' : 'bg-info-bg'
                   }`}
                 >
                   <div className="flex items-start gap-2">
-                    {!n.readAt && <span className="mt-1.5 w-2 h-2 rounded-full bg-blue-500 shrink-0" />}
+                    {!n.readAt && (
+                      <span className="mt-1.5 w-2 h-2 rounded-full bg-blue-500 shrink-0" />
+                    )}
                     <div className="min-w-0">
-                      {n.subject && <p className="text-sm font-medium text-primary truncate">{n.subject}</p>}
+                      {n.subject && (
+                        <p className="text-sm font-medium text-primary truncate">{n.subject}</p>
+                      )}
                       <p className="text-sm text-secondary line-clamp-2">{n.body}</p>
                       <p className="text-xs text-disabled mt-1">{timeAgo(n.createdAt)}</p>
                     </div>

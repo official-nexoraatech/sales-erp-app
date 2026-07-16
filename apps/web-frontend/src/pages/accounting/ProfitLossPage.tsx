@@ -59,15 +59,9 @@ function PLRow({
   highlight?: 'profit' | 'loss';
 }) {
   const colorClass =
-    highlight === 'profit'
-      ? 'text-green-600 dark:text-green-400'
-      : highlight === 'loss'
-        ? 'text-red-600 dark:text-red-400'
-        : 'text-primary';
+    highlight === 'profit' ? 'text-success' : highlight === 'loss' ? 'text-danger' : 'text-primary';
   return (
-    <tr
-      className={`border-b border-gray-100 dark:border-gray-700 ${bold ? 'bg-gray-50 dark:bg-gray-900/30' : ''}`}
-    >
+    <tr className={`border-b border-default ${bold ? 'bg-surface-subtle' : ''}`}>
       <td className="px-4 py-2.5" style={{ paddingLeft: `${16 + indent * 24}px` }}>
         <span className={`text-sm ${bold ? 'font-semibold' : ''} ${colorClass}`}>{label}</span>
       </td>
@@ -151,13 +145,13 @@ export default function ProfitLossPage() {
         </div>
       )}
 
-      <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
+      <div className="bg-surface-card rounded-xl border border-default">
         {view === 'byCostCenter' ? (
           byCcLoading ? (
             <ERPTableSkeleton rows={6} />
           ) : (
             <table className="w-full">
-              <thead className="bg-gray-50 dark:bg-gray-900/40 border-b border-gray-200 dark:border-gray-700">
+              <thead className="bg-surface-subtle border-b border-default">
                 <tr>
                   <th className="px-4 py-3 text-left font-medium text-secondary">Cost Center</th>
                   <th className="px-4 py-3 text-right font-medium text-secondary">Revenue</th>
@@ -178,10 +172,7 @@ export default function ProfitLossPage() {
                   </tr>
                 ) : (
                   byCcLines.map((l) => (
-                    <tr
-                      key={l.costCenterId ?? 'unassigned'}
-                      className="border-b border-gray-100 dark:border-gray-700"
-                    >
+                    <tr key={l.costCenterId ?? 'unassigned'} className="border-b border-default">
                       <td className="px-4 py-2.5 text-sm text-primary">
                         {l.costCenterName
                           ? `${l.costCenterCode} — ${l.costCenterName}`
@@ -200,7 +191,7 @@ export default function ProfitLossPage() {
                         {formatCurrency(l.otherExpenses)}
                       </td>
                       <td
-                        className={`px-4 py-2.5 text-right font-mono text-sm font-semibold ${l.netProfit >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}
+                        className={`px-4 py-2.5 text-right font-mono text-sm font-semibold ${l.netProfit >= 0 ? 'text-success' : 'text-danger'}`}
                       >
                         {formatCurrency(l.netProfit)}
                       </td>
@@ -218,7 +209,7 @@ export default function ProfitLossPage() {
           </div>
         ) : (
           <table className="w-full">
-            <thead className="bg-gray-50 dark:bg-gray-900/40 border-b border-gray-200 dark:border-gray-700">
+            <thead className="bg-surface-subtle border-b border-default">
               <tr>
                 <th className="px-4 py-3 text-left font-medium text-secondary">Particulars</th>
                 <th className="px-4 py-3 text-right font-medium text-secondary">Amount (₹)</th>
@@ -259,7 +250,7 @@ export default function ProfitLossPage() {
               <PLRow label="Other Income" amount={pl.totalOtherIncome} indent={1} />
               <PLRow label="Financial Charges" amount={-pl.totalFinancialCharges} indent={1} />
               <tr>
-                <td colSpan={2} className="h-px bg-gray-200 dark:bg-gray-600" />
+                <td colSpan={2} className="h-px bg-surface-sunken" />
               </tr>
               <PLRow
                 label="Net Profit / (Loss)"

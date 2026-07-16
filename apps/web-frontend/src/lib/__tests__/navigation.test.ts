@@ -7,7 +7,13 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { NAV_GROUPS, getFirstAccessiblePath, filterNavGroups, type NavGroup, type NavItem } from '../navigation.js';
+import {
+  NAV_GROUPS,
+  getFirstAccessiblePath,
+  filterNavGroups,
+  type NavGroup,
+  type NavItem,
+} from '../navigation.js';
 import { PERMISSIONS } from '../../constants/permissions.js';
 
 function has(...granted: string[]) {
@@ -88,7 +94,7 @@ describe('every permission-gated App.tsx route has a navigation.ts entry', () =>
     '/reports/hr-analytics',
   ]);
 
-  const routeRegex = /<Route path="([^"]+)"\s+element=\{<Page><PermissionRoute/g;
+  const routeRegex = /<Route\s+path="([^"]+)"\s+element=\{\s*<Page>\s*<PermissionRoute/g;
   const permissionRoutePaths = [...appTsx.matchAll(routeRegex)].map((m) => m[1]!);
 
   it('parsed a plausible number of permission-gated routes from App.tsx (regex sanity check)', () => {

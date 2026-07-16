@@ -1,0 +1,11 @@
+User-agent: *
+Disallow: /
+Allow: /$
+Allow: /login$
+Allow: /signup$
+Allow: /pricing$
+Allow: /features$
+Allow: /about$
+Allow: /contact$
+
+Sitemap: /sitemap.xml

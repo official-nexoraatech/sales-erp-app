@@ -31,31 +31,31 @@ const STATUS_CONFIG: Record<
 > = {
   MATCHED: {
     label: 'Matched',
-    color: 'text-green-700 dark:text-green-400 bg-green-100 dark:bg-green-900/30',
+    color: 'text-success bg-success-bg',
     icon: <CheckCircle className="w-3.5 h-3.5" />,
     action: 'No action needed',
   },
   BOOKS_ONLY: {
     label: 'Books Only',
-    color: 'text-blue-700 dark:text-blue-400 bg-blue-100 dark:bg-blue-900/30',
+    color: 'text-info bg-info-bg',
     icon: <Info className="w-3.5 h-3.5" />,
     action: 'Contact supplier to file GSTR-1',
   },
   GSTR2A_ONLY: {
     label: 'GSTR-2A Only',
-    color: 'text-purple-700 dark:text-purple-400 bg-purple-100 dark:bg-purple-900/30',
+    color: 'text-accent-purple bg-accent-purple-subtle',
     icon: <Info className="w-3.5 h-3.5" />,
     action: 'Check if GRN was missed',
   },
   AMOUNT_MISMATCH: {
     label: 'Amount Mismatch',
-    color: 'text-amber-700 dark:text-amber-400 bg-amber-100 dark:bg-amber-900/30',
+    color: 'text-warning bg-warning-bg',
     icon: <AlertTriangle className="w-3.5 h-3.5" />,
     action: 'Raise debit note or amend GRN',
   },
   UNMATCHED: {
     label: 'Unmatched',
-    color: 'text-red-700 dark:text-red-400 bg-red-100 dark:bg-red-900/30',
+    color: 'text-danger bg-danger-bg',
     icon: <XCircle className="w-3.5 h-3.5" />,
     action: 'Manual review required',
   },
@@ -117,22 +117,20 @@ export function Gstr2aPage() {
   const booksOnlyEntries = (reconcData?.booksOnlyEntries as unknown[]) ?? [];
 
   const summaryCards = [
-    { key: 'matched', label: 'Matched', color: 'text-green-600 dark:text-green-400' },
-    { key: 'amountMismatch', label: 'Mismatch', color: 'text-amber-600 dark:text-amber-400' },
-    { key: 'booksOnly', label: 'Books Only', color: 'text-blue-600 dark:text-blue-400' },
-    { key: 'gstr2aOnly', label: '2A Only', color: 'text-purple-600 dark:text-purple-400' },
+    { key: 'matched', label: 'Matched', color: 'text-success' },
+    { key: 'amountMismatch', label: 'Mismatch', color: 'text-warning' },
+    { key: 'booksOnly', label: 'Books Only', color: 'text-info' },
+    { key: 'gstr2aOnly', label: '2A Only', color: 'text-accent-purple' },
   ];
 
   return (
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <RefreshCcw className="w-6 h-6 text-indigo-600 dark:text-indigo-400" />
+          <RefreshCcw className="w-6 h-6 text-brand" />
           <div>
-            <h1 className="text-xl font-semibold text-gray-900 dark:text-white">
-              GSTR-2A Reconciliation
-            </h1>
-            <p className="text-sm text-gray-500 dark:text-gray-400">
+            <h1 className="text-xl font-semibold text-primary">GSTR-2A Reconciliation</h1>
+            <p className="text-sm text-secondary">
               Match purchase books against supplier-filed GSTR-2A data
             </p>
           </div>
@@ -166,18 +164,18 @@ export function Gstr2aPage() {
           {summaryCards.map(({ key, label, color }) => (
             <div
               key={key}
-              className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4 text-center"
+              className="bg-surface-card border border-default rounded-xl p-4 text-center"
             >
               <div className={`text-2xl font-bold ${color}`}>{String(summary[key] ?? 0)}</div>
-              <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">{label}</div>
+              <div className="text-xs text-secondary mt-1">{label}</div>
             </div>
           ))}
         </div>
       )}
 
       {/* Tolerance note */}
-      <div className="flex items-start gap-2 text-xs text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-900/50 rounded-lg px-4 py-3">
-        <Info className="w-4 h-4 flex-shrink-0 mt-0.5 text-gray-400 dark:text-gray-500" />
+      <div className="flex items-start gap-2 text-xs text-secondary bg-surface-subtle rounded-lg px-4 py-3">
+        <Info className="w-4 h-4 flex-shrink-0 mt-0.5 text-secondary" />
         <span>
           Match tolerance: ±1% on GST amounts. Entries within tolerance are marked MATCHED
           automatically.
@@ -195,13 +193,13 @@ export function Gstr2aPage() {
       />
 
       {/* Table */}
-      <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
+      <div className="bg-surface-card border border-default rounded-xl overflow-hidden">
         {isLoading ? (
           <ERPTableSkeleton rows={6} cols={7} />
         ) : (
           <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-              <thead className="bg-gray-50 dark:bg-gray-900/50">
+            <table className="min-w-full divide-y divide-default">
+              <thead className="bg-surface-subtle">
                 <tr>
                   {[
                     'Supplier GSTIN',
@@ -214,14 +212,14 @@ export function Gstr2aPage() {
                   ].map((h) => (
                     <th
                       key={h}
-                      className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider whitespace-nowrap"
+                      className="px-4 py-3 text-left text-xs font-medium text-secondary uppercase tracking-wider whitespace-nowrap"
                     >
                       {h}
                     </th>
                   ))}
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+              <tbody className="divide-y divide-default">
                 {activeTab === 'gstr2a' ? (
                   gstr2aEntries.length === 0 ? (
                     <tr>
@@ -245,20 +243,20 @@ export function Gstr2aPage() {
                         Number(r.sgstAmount ?? 0) +
                         Number(r.igstAmount ?? 0);
                       return (
-                        <tr key={i} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
-                          <td className="px-4 py-3 text-xs font-mono text-gray-700 dark:text-gray-300">
+                        <tr key={i} className="hover:bg-surface-raised">
+                          <td className="px-4 py-3 text-xs font-mono text-primary">
                             {String(r.supplierGstin ?? '')}
                           </td>
-                          <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">
+                          <td className="px-4 py-3 text-sm text-primary">
                             {String(r.invoiceNumber ?? '')}
                           </td>
-                          <td className="px-4 py-3 text-sm text-gray-500 dark:text-gray-400 whitespace-nowrap">
+                          <td className="px-4 py-3 text-sm text-secondary whitespace-nowrap">
                             {String(r.invoiceDate ?? '')}
                           </td>
-                          <td className="px-4 py-3 text-sm text-right text-gray-700 dark:text-gray-300">
+                          <td className="px-4 py-3 text-sm text-right text-primary">
                             {formatCurrency(r.taxableAmount)}
                           </td>
-                          <td className="px-4 py-3 text-sm text-right text-gray-700 dark:text-gray-300">
+                          <td className="px-4 py-3 text-sm text-right text-primary">
                             {formatCurrency(totalGst)}
                           </td>
                           <td className="px-4 py-3">
@@ -268,15 +266,13 @@ export function Gstr2aPage() {
                             {r.matchVariance != null ? (
                               <span
                                 className={
-                                  Number(r.matchVariance) > 0
-                                    ? 'text-red-600 dark:text-red-400'
-                                    : 'text-green-600 dark:text-green-400'
+                                  Number(r.matchVariance) > 0 ? 'text-danger' : 'text-success'
                                 }
                               >
                                 {formatCurrency(r.matchVariance)}
                               </span>
                             ) : (
-                              <span className="text-gray-400 dark:text-gray-500">—</span>
+                              <span className="text-secondary">—</span>
                             )}
                           </td>
                         </tr>
@@ -286,7 +282,7 @@ export function Gstr2aPage() {
                 ) : booksOnlyEntries.length === 0 ? (
                   <tr>
                     <td colSpan={7} className="py-8 text-center text-sm text-secondary">
-                      <CheckCircle className="w-8 h-8 text-green-400 dark:text-green-500 mx-auto mb-2" />
+                      <CheckCircle className="w-8 h-8 text-success mx-auto mb-2" />
                       All purchase entries are matched
                     </td>
                   </tr>
@@ -298,20 +294,20 @@ export function Gstr2aPage() {
                       Number(r.sgstAmount ?? 0) +
                       Number(r.igstAmount ?? 0);
                     return (
-                      <tr key={i} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
-                        <td className="px-4 py-3 text-xs font-mono text-gray-700 dark:text-gray-300">
+                      <tr key={i} className="hover:bg-surface-raised">
+                        <td className="px-4 py-3 text-xs font-mono text-primary">
                           {String(r.gstinOfCounterparty ?? '—')}
                         </td>
-                        <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">
+                        <td className="px-4 py-3 text-sm text-primary">
                           {String(r.documentNumber ?? '')}
                         </td>
-                        <td className="px-4 py-3 text-sm text-gray-500 dark:text-gray-400">
+                        <td className="px-4 py-3 text-sm text-secondary">
                           {String(r.documentDate ?? '')}
                         </td>
-                        <td className="px-4 py-3 text-sm text-right text-gray-700 dark:text-gray-300">
+                        <td className="px-4 py-3 text-sm text-right text-primary">
                           {formatCurrency(r.taxableAmount)}
                         </td>
-                        <td className="px-4 py-3 text-sm text-right text-gray-700 dark:text-gray-300">
+                        <td className="px-4 py-3 text-sm text-right text-primary">
                           {formatCurrency(totalGst)}
                         </td>
                         <td className="px-4 py-3">

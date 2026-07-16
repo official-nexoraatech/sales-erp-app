@@ -12,7 +12,11 @@ const MODE_OPTIONS: { mode: ThemeMode; label: string; icon: IconType }[] = [
   { mode: 'hc', label: 'High Contrast', icon: Contrast },
 ];
 
-const DENSITY_OPTIONS: { value: 'compact' | 'comfortable' | 'spacious'; label: string; icon: IconType }[] = [
+const DENSITY_OPTIONS: {
+  value: 'compact' | 'comfortable' | 'spacious';
+  label: string;
+  icon: IconType;
+}[] = [
   { value: 'compact', label: 'Compact', icon: Gauge },
   { value: 'comfortable', label: 'Comfortable', icon: Waves },
   { value: 'spacious', label: 'Spacious', icon: Sparkles },
@@ -23,7 +27,11 @@ const DENSITY_OPTIONS: { value: 'compact' | 'comfortable' | 'spacious'; label: s
  * toggle button, which only covered light/dark. */
 export default function AppearanceMenu() {
   const { mode, setMode, reducedMotion, setReducedMotion } = useTheme();
-  const { density, setDensity } = useUIStore();
+  // Selector form (not the whole-store destructure) so this menu only re-renders when
+  // density itself changes — not on every route nav, which pushes to recentPages in the
+  // same store.
+  const density = useUIStore((s) => s.density);
+  const setDensity = useUIStore((s) => s.setDensity);
 
   const modeItems: ERPMenuItem[] = MODE_OPTIONS.map((o) => ({
     label: o.label,

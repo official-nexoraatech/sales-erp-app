@@ -305,11 +305,13 @@ export const tenantSenderIdentity = pgTable(
   (t) => [unique('tenant_sender_identity_unique').on(t.tenantId, t.channel)]
 );
 
-// ─── Campaign Webhook Subscriptions + Deliveries (CP-8) ─────────────────────
-// Outbound webhooks for third-party CRM/marketing tools — fires on campaign lifecycle events
-// (CAMPAIGN_SENT, CAMPAIGN_CANCELLED). See WebhookDispatchService/WebhookDispatchWorker.
-export const campaignWebhookSubscriptions = pgTable(
-  'campaign_webhook_subscriptions',
+// ─── Webhook Subscriptions + Deliveries (CP-8, generalized beyond campaigns) ────────
+// Outbound webhooks for third-party tools — originally campaign-only (CAMPAIGN_SENT,
+// CAMPAIGN_CANCELLED), generalized to any aggregate type (invoice, payment, campaign, ...)
+// so tenants can subscribe to broader business events. See
+// WebhookDispatchService/WebhookDispatchWorker.
+export const webhookSubscriptions = pgTable(
+  'webhook_subscriptions',
   {
     id: bigserial('id', { mode: 'number' }).primaryKey(),
     tenantId: integer('tenant_id').notNull(),
@@ -321,17 +323,18 @@ export const campaignWebhookSubscriptions = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
-  (t) => [index('idx_campaign_webhook_subscriptions_tenant').on(t.tenantId, t.isActive)]
+  (t) => [index('idx_webhook_subscriptions_tenant').on(t.tenantId, t.isActive)]
 );
 
-export const campaignWebhookDeliveries = pgTable(
-  'campaign_webhook_deliveries',
+export const webhookDeliveries = pgTable(
+  'webhook_deliveries',
   {
     id: bigserial('id', { mode: 'number' }).primaryKey(),
     tenantId: integer('tenant_id').notNull(),
     subscriptionId: integer('subscription_id').notNull(),
     eventType: varchar('event_type', { length: 50 }).notNull(),
-    campaignId: integer('campaign_id').notNull(),
+    aggregateType: varchar('aggregate_type', { length: 50 }).notNull(),
+    aggregateId: integer('aggregate_id').notNull(),
     payload: jsonb('payload').$type<Record<string, unknown>>().notNull(),
     status: varchar('status', { length: 20 })
       .notNull()
@@ -342,7 +345,7 @@ export const campaignWebhookDeliveries = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     sentAt: timestamp('sent_at', { withTimezone: true }),
   },
-  (t) => [index('idx_campaign_webhook_deliveries_status').on(t.status, t.createdAt)]
+  (t) => [index('idx_webhook_deliveries_status').on(t.status, t.createdAt)]
 );
 
 // ─── Business Seasons — Festival Planner (M9.7) ────────────────────────────
@@ -400,7 +403,7 @@ export type BusinessSeason = typeof businessSeasons.$inferSelect;
 export type NewBusinessSeason = typeof businessSeasons.$inferInsert;
 export type TenantSenderIdentity = typeof tenantSenderIdentity.$inferSelect;
 export type NewTenantSenderIdentity = typeof tenantSenderIdentity.$inferInsert;
-export type CampaignWebhookSubscription = typeof campaignWebhookSubscriptions.$inferSelect;
-export type NewCampaignWebhookSubscription = typeof campaignWebhookSubscriptions.$inferInsert;
-export type CampaignWebhookDelivery = typeof campaignWebhookDeliveries.$inferSelect;
-export type NewCampaignWebhookDelivery = typeof campaignWebhookDeliveries.$inferInsert;
+export type WebhookSubscription = typeof webhookSubscriptions.$inferSelect;
+export type NewWebhookSubscription = typeof webhookSubscriptions.$inferInsert;
+export type WebhookDelivery = typeof webhookDeliveries.$inferSelect;
+export type NewWebhookDelivery = typeof webhookDeliveries.$inferInsert;

@@ -1,14 +1,14 @@
 import { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
+import { ArrowRight } from 'lucide-react';
 import { crmApi } from '../../api/endpoints.js';
-import { useConfirm } from '../../context/ConfirmContext.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
 import { ERPFormSkeleton } from '../../components/erp/ERPSkeleton.js';
 import Button from '../../components/ui/Button.js';
 import Checkbox from '../../components/ui/Checkbox.js';
 import Input from '../../components/ui/Input.js';
-import Modal from '../../components/ui/Modal.js';
 
 interface CommunicationSettings {
   approvalRequired: boolean;
@@ -25,16 +25,7 @@ interface SenderIdentity {
   senderAddressOrNumber: string;
 }
 
-interface WebhookSubscription {
-  id: number;
-  targetUrl: string;
-  events: string[];
-  isActive: boolean;
-  createdAt: string;
-}
-
 const CHANNELS = ['SMS', 'WHATSAPP', 'EMAIL', 'IN_APP'] as const;
-const WEBHOOK_EVENTS = ['CAMPAIGN_SENT', 'CAMPAIGN_CANCELLED'] as const;
 
 function ApprovalSection() {
   const { data, isLoading } = useQuery({
@@ -231,143 +222,23 @@ function SenderIdentitySection() {
   );
 }
 
-function WebhookSubscriptionsSection() {
-  const qc = useQueryClient();
-  const confirm = useConfirm();
-  const { data, isLoading } = useQuery({
-    queryKey: ['crm-webhook-subscriptions'],
-    queryFn: () => crmApi.listWebhookSubscriptions(),
-  });
-  const subscriptions: WebhookSubscription[] =
-    (data as { content?: WebhookSubscription[] })?.content ?? [];
-
-  const [targetUrl, setTargetUrl] = useState('');
-  const [events, setEvents] = useState<string[]>([...WEBHOOK_EVENTS]);
-  const [newSecret, setNewSecret] = useState<string | null>(null);
-
-  const createMut = useMutation({
-    mutationFn: () => crmApi.createWebhookSubscription({ targetUrl, events }),
-    onSuccess: (res) => {
-      const created = res as { secret?: string };
-      toast.success('Webhook subscription created');
-      void qc.invalidateQueries({ queryKey: ['crm-webhook-subscriptions'] });
-      setTargetUrl('');
-      if (created.secret) setNewSecret(created.secret);
-    },
-    onError: () => toast.error('Failed to create webhook subscription'),
-  });
-
-  const toggleActiveMut = useMutation({
-    mutationFn: (sub: WebhookSubscription) =>
-      crmApi.updateWebhookSubscription(sub.id, { isActive: !sub.isActive }),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ['crm-webhook-subscriptions'] }),
-    onError: () => toast.error('Failed to update webhook subscription'),
-  });
-
-  const deleteMut = useMutation({
-    mutationFn: (id: number) => crmApi.deleteWebhookSubscription(id),
-    onSuccess: () => {
-      toast.success('Webhook subscription removed');
-      void qc.invalidateQueries({ queryKey: ['crm-webhook-subscriptions'] });
-    },
-    onError: () => toast.error('Failed to remove webhook subscription'),
-  });
-
-  if (isLoading) return <ERPFormSkeleton />;
-
+function WebhooksMovedNotice() {
   return (
-    <div className="bg-surface-card rounded-xl border border-default p-5 space-y-4">
+    <div className="bg-surface-card rounded-xl border border-default p-5 space-y-2">
       <h2 className="text-sm font-semibold text-secondary uppercase tracking-wide">
         Outbound Webhooks
       </h2>
-      <p className="text-xs text-secondary">
-        Notify a third-party CRM/marketing tool automatically when a campaign is sent or cancelled.
-        Each call is HMAC-SHA256 signed with the subscription's secret (shown once, at creation).
+      <p className="text-sm text-secondary">
+        Webhook subscriptions now cover any business event, not just campaigns, and have moved to{' '}
+        <Link
+          to="/settings/integrations"
+          className="inline-flex items-center gap-1 font-medium text-accent hover:underline"
+        >
+          Organization → Integrations
+          <ArrowRight className="h-3.5 w-3.5" />
+        </Link>
+        .
       </p>
-
-      {subscriptions.length > 0 && (
-        <div className="divide-y divide-default border border-default rounded-lg">
-          {subscriptions.map((s) => (
-            <div key={s.id} className="flex items-center justify-between px-3 py-2 text-sm gap-3">
-              <div className="min-w-0">
-                <p className="truncate">{s.targetUrl}</p>
-                <p className="text-xs text-secondary">
-                  {s.events.join(', ')} — {s.isActive ? 'Active' : 'Paused'}
-                </p>
-              </div>
-              <div className="flex gap-2 shrink-0">
-                <Button variant="ghost" size="sm" onClick={() => toggleActiveMut.mutate(s)}>
-                  {s.isActive ? 'Pause' : 'Resume'}
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={async () => {
-                    const ok = await confirm({
-                      title: 'Remove Webhook Subscription',
-                      message: `Stop notifying ${s.targetUrl}?`,
-                      confirmLabel: 'Remove',
-                      variant: 'danger',
-                    });
-                    if (ok) deleteMut.mutate(s.id);
-                  }}
-                >
-                  Remove
-                </Button>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      <div className="space-y-3">
-        <Input
-          label="Target URL"
-          value={targetUrl}
-          onChange={(e) => setTargetUrl(e.target.value)}
-          placeholder="https://your-crm.example.com/webhooks/erp"
-        />
-        <div>
-          <label className="block text-xs font-medium text-secondary mb-1.5">Events</label>
-          <div className="flex gap-4">
-            {WEBHOOK_EVENTS.map((ev) => (
-              <Checkbox
-                key={ev}
-                checked={events.includes(ev)}
-                onChange={(e) =>
-                  setEvents((prev) =>
-                    e.target.checked ? [...prev, ev] : prev.filter((x) => x !== ev)
-                  )
-                }
-                label={ev.replace('_', ' ')}
-              />
-            ))}
-          </div>
-        </div>
-        <div className="flex justify-end">
-          <Button
-            onClick={() => createMut.mutate()}
-            disabled={createMut.isPending || !targetUrl.trim() || events.length === 0}
-          >
-            {createMut.isPending ? 'Creating…' : 'Add Subscription'}
-          </Button>
-        </div>
-      </div>
-
-      <Modal open={newSecret !== null} onClose={() => setNewSecret(null)} title="Webhook Secret">
-        <div className="space-y-3">
-          <p className="text-sm text-secondary">
-            Save this secret now — it's shown only once and can't be retrieved later. Use it to
-            verify the <code>X-Webhook-Signature</code> header (HMAC-SHA256) on incoming calls.
-          </p>
-          <code className="block break-all rounded-lg bg-surface-raised p-3 text-xs">
-            {newSecret}
-          </code>
-          <div className="flex justify-end">
-            <Button onClick={() => setNewSecret(null)}>Done</Button>
-          </div>
-        </div>
-      </Modal>
     </div>
   );
 }
@@ -383,7 +254,7 @@ export default function CampaignSettingsPage() {
       <div className="space-y-5 max-w-3xl">
         <ApprovalSection />
         <SenderIdentitySection />
-        <WebhookSubscriptionsSection />
+        <WebhooksMovedNotice />
       </div>
     </div>
   );
