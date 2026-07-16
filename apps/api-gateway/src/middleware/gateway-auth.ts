@@ -10,16 +10,27 @@ const EXEMPT_PATHS = new Set([
   '/api/auth/auth/login',
   '/api/auth/auth/lookup-tenants',
   '/api/auth/auth/refresh',
+  '/api/auth/auth/logout',
+  '/api/auth/auth/forgot-password',
+  '/api/auth/auth/reset-password',
+  '/api/auth/auth/mfa/verify',
   '/api/tenant/public/signup',
   '/api/tenant/public/faqs',
 ]);
+
+// A handful of genuinely unauthenticated routes carry a dynamic path segment (e.g. a
+// one-time token), so they can't be listed as an exact string in EXEMPT_PATHS above.
+const EXEMPT_PREFIXES = ['/api/report/unsubscribe/'];
 
 export async function gatewayAuthPreHandler(
   request: FastifyRequest,
   reply: FastifyReply
 ): Promise<void> {
   const path = request.url.split('?')[0];
-  if (path !== undefined && EXEMPT_PATHS.has(path)) return;
+  if (path !== undefined) {
+    if (EXEMPT_PATHS.has(path)) return;
+    if (EXEMPT_PREFIXES.some((prefix) => path.startsWith(prefix))) return;
+  }
 
   const authHeader = request.headers.authorization;
   const token = authHeader?.startsWith('Bearer ') ? authHeader.slice('Bearer '.length) : undefined;

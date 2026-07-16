@@ -8,15 +8,22 @@
 // token/refresh-token here just means the sync attempt fails and the item stays queued for
 // the next attempt, rather than forcing a page redirect that a service worker can't do.
 import {
-  getPendingSales, deletePendingSale, incrementRetries,
-  getPendingCustomers, deletePendingCustomer, incrementCustomerRetries, rewritePendingSalesCustomerId,
+  getPendingSales,
+  deletePendingSale,
+  incrementRetries,
+  getPendingCustomers,
+  deletePendingCustomer,
+  incrementCustomerRetries,
+  rewritePendingSalesCustomerId,
 } from './offlineDb.js';
 import { upsertCustomers, deleteCustomerById, setSyncMeta } from './localStore.js';
 import { getMirroredTokens, mirrorTokens } from './tokenStore.js';
 import type { CachedCustomer } from './db.js';
 
-const AUTH_API = (import.meta.env['VITE_AUTH_API_URL'] ?? 'http://localhost:3010') + '/api/v2';
-const SALES_API = import.meta.env['VITE_SALES_API_URL'] ?? 'http://localhost:3013/api/v2';
+// Routed through api-gateway rather than calling services directly by port — see
+// apps/web-frontend/src/api/client.ts's header comment for why.
+const AUTH_API = (import.meta.env['VITE_AUTH_API_URL'] ?? 'http://localhost:3000') + '/api/auth';
+const SALES_API = import.meta.env['VITE_SALES_API_URL'] ?? 'http://localhost:3000/api/sales';
 
 export const PENDING_SYNC_META_STORE = 'pendingSync';
 
@@ -40,7 +47,9 @@ async function refreshAccessToken(refreshToken: string): Promise<string | null> 
 
 function refreshOnce(refreshToken: string): Promise<string | null> {
   if (!refreshPromise) {
-    refreshPromise = refreshAccessToken(refreshToken).finally(() => { refreshPromise = null; });
+    refreshPromise = refreshAccessToken(refreshToken).finally(() => {
+      refreshPromise = null;
+    });
   }
   return refreshPromise;
 }
@@ -77,17 +86,22 @@ async function syncPendingCustomersSW(): Promise<number> {
         const body = (await res.json()) as { data: CachedCustomer & { id: number } };
         const real = body.data;
         await deleteCustomerById(c.localCustomerId);
-        await upsertCustomers([{
-          id: real.id,
-          tenantId: real.tenantId,
-          branchId: real.branchId,
-          displayName: real.displayName,
-          phone: real.phone,
-          ...(real.altPhone !== undefined ? { altPhone: real.altPhone } : {}),
-          ...(real.email !== undefined ? { email: real.email } : {}),
-          customerType: real.customerType,
-          updatedAt: typeof real.updatedAt === 'string' ? real.updatedAt : new Date(real.updatedAt).toISOString(),
-        }]);
+        await upsertCustomers([
+          {
+            id: real.id,
+            tenantId: real.tenantId,
+            branchId: real.branchId,
+            displayName: real.displayName,
+            phone: real.phone,
+            ...(real.altPhone !== undefined ? { altPhone: real.altPhone } : {}),
+            ...(real.email !== undefined ? { email: real.email } : {}),
+            customerType: real.customerType,
+            updatedAt:
+              typeof real.updatedAt === 'string'
+                ? real.updatedAt
+                : new Date(real.updatedAt).toISOString(),
+          },
+        ]);
         await rewritePendingSalesCustomerId(c.localCustomerId, real.id);
         await deletePendingCustomer(c.id!);
         synced++;

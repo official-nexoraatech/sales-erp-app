@@ -6,7 +6,9 @@ import { setTokens } from './auth.js';
 import POSInput from './components/pos/POSInput.js';
 import POSButton from './components/pos/POSButton.js';
 
-const AUTH_API = (import.meta.env['VITE_AUTH_API_URL'] ?? 'http://localhost:3010') + '/api/v2';
+// Routed through api-gateway rather than calling auth-service directly by port — see
+// apps/web-frontend/src/api/client.ts's header comment for why.
+const AUTH_API = (import.meta.env['VITE_AUTH_API_URL'] ?? 'http://localhost:3000') + '/api/auth';
 
 export default function LoginScreen() {
   const navigate = useNavigate();
@@ -29,7 +31,11 @@ export default function LoginScreen() {
         const err = body.error;
         throw new Error(typeof err === 'string' ? err : (err?.message ?? 'Login failed'));
       }
-      const result = body.data as { accessToken?: string; refreshToken?: string; requiresMFA?: boolean };
+      const result = body.data as {
+        accessToken?: string;
+        refreshToken?: string;
+        requiresMFA?: boolean;
+      };
       if (result.requiresMFA) {
         throw new Error('Two-factor accounts must sign in via the main ERP app first');
       }

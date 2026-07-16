@@ -21,6 +21,11 @@ describe('gatewayAuthPreHandler', () => {
     app.get('/api/sales/api/v2/invoices', async (request) => ({
       tenantHeader: request.headers['x-tenant-id'],
     }));
+    app.post('/api/auth/auth/forgot-password', async () => ({ ok: true }));
+    app.post('/api/auth/auth/reset-password', async () => ({ ok: true }));
+    app.post('/api/auth/auth/mfa/verify', async () => ({ ok: true }));
+    app.post('/api/auth/auth/logout', async () => ({ ok: true }));
+    app.get('/api/report/unsubscribe/some-token-123', async () => ({ ok: true }));
     await app.ready();
   });
 
@@ -82,6 +87,24 @@ describe('gatewayAuthPreHandler', () => {
       headers: { authorization: `Bearer ${forged}` },
     });
     expect(response.statusCode).toBe(401);
+  });
+
+  it.each([
+    '/api/auth/auth/forgot-password',
+    '/api/auth/auth/reset-password',
+    '/api/auth/auth/mfa/verify',
+    '/api/auth/auth/logout',
+  ])('allows %s through without an Authorization header', async (url) => {
+    const response = await app.inject({ method: 'POST', url });
+    expect(response.statusCode).toBe(200);
+  });
+
+  it('allows a dynamic-token unsubscribe link through via prefix match, without an Authorization header', async () => {
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/report/unsubscribe/some-token-123',
+    });
+    expect(response.statusCode).toBe(200);
   });
 
   it('allows a request through with a valid token and does not inject an x-tenant-id header', async () => {

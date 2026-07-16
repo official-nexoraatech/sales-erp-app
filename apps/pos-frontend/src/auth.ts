@@ -1,6 +1,8 @@
 import { mirrorTokens, clearMirroredTokens } from './tokenStore.js';
 
-const AUTH_API = (import.meta.env['VITE_AUTH_API_URL'] ?? 'http://localhost:3010') + '/api/v2';
+// Routed through api-gateway rather than calling auth-service directly by port — see
+// apps/web-frontend/src/api/client.ts's header comment for why.
+const AUTH_API = (import.meta.env['VITE_AUTH_API_URL'] ?? 'http://localhost:3000') + '/api/auth';
 
 const ACCESS_TOKEN_KEY = 'pos_token';
 const REFRESH_TOKEN_KEY = 'pos_refresh_token';

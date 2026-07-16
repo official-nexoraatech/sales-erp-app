@@ -9,7 +9,9 @@ import POSInput from './components/pos/POSInput.js';
 import POSButton from './components/pos/POSButton.js';
 import POSLogoutLink from './components/pos/POSLogoutLink.js';
 
-const SALES_API = import.meta.env['VITE_SALES_API_URL'] ?? 'http://localhost:3013/api/v2';
+// Routed through api-gateway rather than calling sales-service directly by port — see
+// apps/web-frontend/src/api/client.ts's header comment for why.
+const SALES_API = import.meta.env['VITE_SALES_API_URL'] ?? 'http://localhost:3000/api/sales';
 
 export default function ShiftCloseScreen() {
   const navigate = useNavigate();

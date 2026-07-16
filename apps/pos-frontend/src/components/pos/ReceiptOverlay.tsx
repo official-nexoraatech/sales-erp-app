@@ -7,7 +7,9 @@ import { supportsAnyPrinting, writeToPairedPrinter } from '../../webPrinter.js';
 import type { CompletedSale } from './types.js';
 import POSButton from './POSButton.js';
 
-const SALES_API = import.meta.env['VITE_SALES_API_URL'] ?? 'http://localhost:3013/api/v2';
+// Routed through api-gateway rather than calling sales-service directly by port — see
+// apps/web-frontend/src/api/client.ts's header comment for why.
+const SALES_API = import.meta.env['VITE_SALES_API_URL'] ?? 'http://localhost:3000/api/sales';
 
 const PAPER_SIZES: Record<
   'A4' | '80mm' | '58mm',

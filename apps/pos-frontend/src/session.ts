@@ -1,6 +1,8 @@
 import { authFetch } from './auth.js';
 
-const SALES_API = import.meta.env['VITE_SALES_API_URL'] ?? 'http://localhost:3013/api/v2';
+// Routed through api-gateway rather than calling sales-service directly by port — see
+// apps/web-frontend/src/api/client.ts's header comment for why.
+const SALES_API = import.meta.env['VITE_SALES_API_URL'] ?? 'http://localhost:3000/api/sales';
 
 const SESSION_ID_KEY = 'pos_session_id';
 

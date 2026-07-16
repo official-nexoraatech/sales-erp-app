@@ -3,7 +3,9 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { authFetch, getAccessToken } from '../../auth.js';
 import { shiftLightness } from '../../lib/colorShade.js';
 
-const TENANT_API = import.meta.env['VITE_TENANT_API_URL'] ?? 'http://localhost:3011/api/v2';
+// Routed through api-gateway rather than calling tenant-service directly by port — see
+// apps/web-frontend/src/api/client.ts's header comment for why.
+const TENANT_API = import.meta.env['VITE_TENANT_API_URL'] ?? 'http://localhost:3000/api/tenant';
 
 interface ThemeConfig {
   brandPrimary?: string;
@@ -14,7 +16,15 @@ interface ThemeConfig {
 }
 
 const CHANNEL_NAME = 'nexoraa-tenant-theme';
-const BRAND_VARS = ['--brand-primary', '--brand-primary-hover', '--brand-primary-active', '--brand-primary-subtle', '--brand-secondary', '--brand-accent', '--font-sans'] as const;
+const BRAND_VARS = [
+  '--brand-primary',
+  '--brand-primary-hover',
+  '--brand-primary-active',
+  '--brand-primary-subtle',
+  '--brand-secondary',
+  '--brand-accent',
+  '--font-sans',
+] as const;
 
 function applyThemeConfig(config: ThemeConfig | undefined): void {
   const html = document.documentElement;
@@ -31,7 +41,8 @@ function applyThemeConfig(config: ThemeConfig | undefined): void {
   }
   if (config.brandSecondary) root.setProperty('--brand-secondary', config.brandSecondary);
   if (config.brandAccent) root.setProperty('--brand-accent', config.brandAccent);
-  if (config.fontSans) root.setProperty('--font-sans', `'${config.fontSans}', system-ui, sans-serif`);
+  if (config.fontSans)
+    root.setProperty('--font-sans', `'${config.fontSans}', system-ui, sans-serif`);
   if (config.radiusScale && config.radiusScale !== 'default') {
     html.setAttribute('data-radius-scale', config.radiusScale);
   }

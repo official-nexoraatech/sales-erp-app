@@ -1,27 +1,25 @@
 import { useAuthStore } from '../store/auth.store.js';
 
-// Services below mount all their routes under an `/api/v2` prefix (see each
-// service's main.ts). report, production and event are the exceptions: their
-// call paths in endpoints.ts already embed `/api/v2` (report's analytics/dashboard
-// routes) or `/api/v1` (report's two aging reports) directly, or no prefix at all
-// (report's PDF/number-series routes, which this frontend never calls), so their
-// base URLs must stay unsuffixed here to avoid doubling the prefix.
-// PG-010: auth, notification and search now register under /api/v2 too (auth-service's
-// /auth/refresh call in refreshAccessToken() below relies on this same base URL).
+// Routed through api-gateway (apps/api-gateway) rather than calling each service
+// directly by port — the gateway strips its own `/api/<service>` prefix and rewrites
+// it to whatever prefix that service actually expects (see api-gateway/src/config.ts),
+// so every entry here is just `<gateway>/api/<service>` regardless of that service's
+// own internal versioning convention. Call paths in endpoints.ts are unchanged.
+const GATEWAY_URL = import.meta.env.VITE_GATEWAY_URL ?? 'http://localhost:3000';
 const BASE_URLS: Record<string, string> = {
-  auth: (import.meta.env.VITE_AUTH_URL ?? 'http://localhost:3010') + '/api/v2',
-  tenant: (import.meta.env.VITE_TENANT_URL ?? 'http://localhost:3011') + '/api/v2',
-  inventory: (import.meta.env.VITE_INVENTORY_URL ?? 'http://localhost:3012') + '/api/v2',
-  sales: (import.meta.env.VITE_SALES_URL ?? 'http://localhost:3013') + '/api/v2',
-  gst: (import.meta.env.VITE_GST_URL ?? 'http://localhost:3018') + '/api/v2',
-  accounting: (import.meta.env.VITE_ACCOUNTING_URL ?? 'http://localhost:3019') + '/api/v2',
-  purchase: (import.meta.env.VITE_PURCHASE_URL ?? 'http://localhost:3020') + '/api/v2',
-  hr: (import.meta.env.VITE_HR_URL ?? 'http://localhost:3021') + '/api/v2',
-  production: import.meta.env.VITE_PRODUCTION_URL ?? 'http://localhost:3022',
-  search: (import.meta.env.VITE_SEARCH_URL ?? 'http://localhost:3017') + '/api/v2',
-  report: import.meta.env.VITE_REPORT_URL ?? 'http://localhost:3015',
-  event: import.meta.env.VITE_EVENT_URL ?? 'http://localhost:3023',
-  notification: (import.meta.env.VITE_NOTIFICATION_URL ?? 'http://localhost:3014') + '/api/v2',
+  auth: `${GATEWAY_URL}/api/auth`,
+  tenant: `${GATEWAY_URL}/api/tenant`,
+  inventory: `${GATEWAY_URL}/api/inventory`,
+  sales: `${GATEWAY_URL}/api/sales`,
+  gst: `${GATEWAY_URL}/api/gst`,
+  accounting: `${GATEWAY_URL}/api/accounting`,
+  purchase: `${GATEWAY_URL}/api/purchase`,
+  hr: `${GATEWAY_URL}/api/hr`,
+  production: `${GATEWAY_URL}/api/production`,
+  search: `${GATEWAY_URL}/api/search`,
+  report: `${GATEWAY_URL}/api/report`,
+  event: `${GATEWAY_URL}/api/event`,
+  notification: `${GATEWAY_URL}/api/notification`,
 };
 
 export function notificationServiceUrl(): string {

@@ -66,14 +66,18 @@ import { POSSummary } from './components/pos/POSSummary.js';
 import { POSPaymentPanel } from './components/pos/POSPaymentPanel.js';
 import POSDialog from './components/pos/POSDialog.js';
 import { useTheme } from './context/ThemeContext.js';
+import { Kbd } from '@erp/ui';
 import type { CartItem, POSItem, Customer, CompletedSale } from './components/pos/types.js';
 import { friendlySaleErrorMessage, friendlyErrorMessage } from './posErrorMessages.js';
 
 export { SyncStatusPanel } from './components/pos/SyncStatusPanel.js';
 export { StockConflictModal } from './components/pos/StockConflictModal.js';
 
-const SALES_API = import.meta.env['VITE_SALES_API_URL'] ?? 'http://localhost:3013/api/v2';
-const PRODUCTION_API = import.meta.env['VITE_PRODUCTION_API_URL'] ?? 'http://localhost:3022';
+// Routed through api-gateway rather than calling services directly by port — see
+// apps/web-frontend/src/api/client.ts's header comment for why.
+const SALES_API = import.meta.env['VITE_SALES_API_URL'] ?? 'http://localhost:3000/api/sales';
+const PRODUCTION_API =
+  import.meta.env['VITE_PRODUCTION_API_URL'] ?? 'http://localhost:3000/api/production';
 // Returns/exchange reuse the full sales-return workflow (approvals, credit notes) already
 // built in the main back-office app rather than duplicating that domain logic in POS.
 const WEB_FRONTEND_URL = import.meta.env['VITE_WEB_FRONTEND_URL'] ?? 'http://localhost:5173';
@@ -970,6 +974,19 @@ export default function POSScreen() {
             onToggleCamera={() => setCameraOpen((v) => !v)}
             onSubmit={(value) => void resolveAndAddItem(value)}
           />
+
+          {/* Keyboard shortcut hints — the handlers for these live in the useEffect above */}
+          <div className="flex items-center gap-4 text-xs text-secondary">
+            <span className="flex items-center gap-1">
+              <Kbd>F2</Kbd> New bill
+            </span>
+            <span className="flex items-center gap-1">
+              <Kbd>F8</Kbd> Charge
+            </span>
+            <span className="flex items-center gap-1">
+              <Kbd>F9</Kbd> Repeat last item
+            </span>
+          </div>
 
           {/* Quick item grid */}
           <div className="grid grid-cols-4 gap-3 overflow-y-auto flex-1 content-start">

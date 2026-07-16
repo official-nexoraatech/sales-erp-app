@@ -8,8 +8,11 @@ import POSCard from './components/pos/POSCard.js';
 import POSInput from './components/pos/POSInput.js';
 import POSLogoutLink from './components/pos/POSLogoutLink.js';
 
-const TENANT_API = import.meta.env['VITE_TENANT_API_URL'] ?? 'http://localhost:3011/api/v2';
-const INVENTORY_API = import.meta.env['VITE_INVENTORY_API_URL'] ?? 'http://localhost:3012/api/v2';
+// Routed through api-gateway rather than calling services directly by port — see
+// apps/web-frontend/src/api/client.ts's header comment for why.
+const TENANT_API = import.meta.env['VITE_TENANT_API_URL'] ?? 'http://localhost:3000/api/tenant';
+const INVENTORY_API =
+  import.meta.env['VITE_INVENTORY_API_URL'] ?? 'http://localhost:3000/api/inventory';
 
 interface Branch {
   id: number;

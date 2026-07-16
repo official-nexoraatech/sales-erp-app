@@ -13,8 +13,11 @@ import {
   upsertTaxRates,
 } from './localStore.js';
 
-const SALES_API = import.meta.env['VITE_SALES_API_URL'] ?? 'http://localhost:3013/api/v2';
-const INVENTORY_API = import.meta.env['VITE_INVENTORY_API_URL'] ?? 'http://localhost:3012/api/v2';
+// Routed through api-gateway rather than calling services directly by port — see
+// apps/web-frontend/src/api/client.ts's header comment for why.
+const SALES_API = import.meta.env['VITE_SALES_API_URL'] ?? 'http://localhost:3000/api/sales';
+const INVENTORY_API =
+  import.meta.env['VITE_INVENTORY_API_URL'] ?? 'http://localhost:3000/api/inventory';
 
 const PAGE_SIZE = 200;
 // A flapping connection shouldn't trigger a fresh full sync on every 'online' blip.
@@ -29,7 +32,11 @@ interface SyncEnvelope<T> {
 // advances the cursor to the sync's start time — but only once every page has succeeded.
 // A failure partway through pagination throws before the cursor is touched, so the next
 // sync resumes from the prior lastSyncedAt instead of silently skipping the failed range.
-async function syncEntity<T>(store: string, endpoint: string, upsert: (rows: T[]) => Promise<void>): Promise<void> {
+async function syncEntity<T>(
+  store: string,
+  endpoint: string,
+  upsert: (rows: T[]) => Promise<void>
+): Promise<void> {
   const meta = await getSyncMeta(store);
   const modifiedSince = meta?.lastSyncedAt ? new Date(meta.lastSyncedAt).toISOString() : undefined;
   const syncStartedAt = Date.now();
@@ -71,12 +78,18 @@ export async function syncAllReferenceData(force = false): Promise<void> {
     const results = await Promise.allSettled([
       syncEntity<CatalogItem>('catalogItems', `${INVENTORY_API}/sync/items`, upsertCatalogItems),
       syncEntity<CachedCustomer>('customers', `${SALES_API}/sync/customers`, upsertCustomers),
-      syncEntity<CachedPriceListItem>('priceListItems', `${INVENTORY_API}/sync/price-list-items`, upsertPriceListItems),
+      syncEntity<CachedPriceListItem>(
+        'priceListItems',
+        `${INVENTORY_API}/sync/price-list-items`,
+        upsertPriceListItems
+      ),
       syncEntity<CachedTaxRate>('taxRates', `${INVENTORY_API}/sync/tax-rates`, upsertTaxRates),
     ]);
     const failed = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
     if (failed.length > 0) {
-      toast.error(`Reference data sync incomplete (${failed.length}/${results.length} failed) — will retry`);
+      toast.error(
+        `Reference data sync incomplete (${failed.length}/${results.length} failed) — will retry`
+      );
     }
   })().finally(() => {
     syncInFlight = null;
