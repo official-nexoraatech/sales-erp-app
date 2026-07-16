@@ -466,11 +466,23 @@ export class TenantProvisioner {
     }
     const internalKey = process.env['INTERNAL_API_KEY'] ?? '';
     try {
-      await fetch(`${notificationUrl}/notifications/templates/seed-tenant`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-internal-key': internalKey },
-        body: JSON.stringify({ tenantId }),
-      });
+      // seed-auth/seed-crm/seed-hr exist for exactly this purpose but were never called from
+      // anywhere (found during the 2026-07-16 gateway-cutover audit — see migration
+      // 0069_notification_templates_backfill.sql for the existing-tenant backfill). Every
+      // notification send in this codebase is fire-and-forget, so a missing template silently
+      // "SKIPPED" the send with no error anywhere — this includes password-reset emails.
+      const seedEndpoints = ['seed-tenant', 'seed-auth', 'seed-crm', 'seed-hr'];
+      await Promise.all(
+        seedEndpoints.map((endpoint) =>
+          fetch(`${notificationUrl}/notifications/templates/${endpoint}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-internal-key': internalKey },
+            body: JSON.stringify({ tenantId }),
+          }).catch((err) =>
+            logger.warn({ tenantId, endpoint, err }, 'Template seed failed (non-fatal)')
+          )
+        )
+      );
 
       const res = await fetch(`${notificationUrl}/notifications/send-internal`, {
         method: 'POST',

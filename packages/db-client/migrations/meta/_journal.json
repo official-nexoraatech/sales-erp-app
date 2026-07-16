@@ -484,6 +484,13 @@
       "when": 1788467735804,
       "tag": "0068_pos_granular_permissions_backfill",
       "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "7",
+      "when": 1788554135804,
+      "tag": "0069_notification_templates_backfill",
+      "breakpoints": true
     }
   ]
 }
