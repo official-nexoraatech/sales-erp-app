@@ -577,6 +577,12 @@ export const NAV_GROUPS: NavGroup[] = [
             icon: Scissors,
             permission: PERMISSIONS.ALTERATION_VIEW,
           },
+          {
+            label: 'Holiday Calendar',
+            path: '/hr/holidays',
+            icon: CalendarRange,
+            permission: PERMISSIONS.HR_MANAGE,
+          },
         ],
       },
     ],

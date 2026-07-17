@@ -1,11 +1,16 @@
 import { PERMISSIONS, type Permission } from '@erp/types';
 
-// PLATFORM_TENANT_MANAGE is cross-tenant (list/provision/suspend/close ANY tenant) and is
-// reserved for the PLATFORM_OPERATOR role in the platform-operations tenant only — see
-// migration 0020_es21_platform_operator.sql. It must never be included in a tenant-scoped
-// role's defaults, even ones that otherwise enumerate "every permission".
+// PLATFORM_TENANT_MANAGE (list/provision/suspend/close ANY tenant) and PLATFORM_CONTENT_MANAGE
+// (manage the public marketing site's global, non-tenant-scoped FAQ content) are both
+// cross-tenant and reserved for the PLATFORM_OPERATOR role in the platform-operations tenant
+// only — see migration 0020_es21_platform_operator.sql. Neither must ever be included in a
+// tenant-scoped role's defaults, even ones that otherwise enumerate "every permission".
+const PLATFORM_ONLY_PERMISSIONS: Permission[] = [
+  PERMISSIONS.PLATFORM_TENANT_MANAGE,
+  PERMISSIONS.PLATFORM_CONTENT_MANAGE,
+];
 const TENANT_SCOPED_PERMISSIONS = (Object.values(PERMISSIONS) as Permission[]).filter(
-  (p) => p !== PERMISSIONS.PLATFORM_TENANT_MANAGE
+  (p) => !PLATFORM_ONLY_PERMISSIONS.includes(p)
 );
 
 // Default permission sets per system role.

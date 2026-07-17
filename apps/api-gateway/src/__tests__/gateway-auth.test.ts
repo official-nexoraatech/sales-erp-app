@@ -26,6 +26,7 @@ describe('gatewayAuthPreHandler', () => {
     app.post('/api/auth/auth/mfa/verify', async () => ({ ok: true }));
     app.post('/api/auth/auth/logout', async () => ({ ok: true }));
     app.get('/api/report/unsubscribe/some-token-123', async () => ({ ok: true }));
+    app.get('/api/notification/notifications/stream', async () => ({ ok: true }));
     await app.ready();
   });
 
@@ -118,5 +119,35 @@ describe('gatewayAuthPreHandler', () => {
     // Deliberately not propagated — see gateway-auth.ts's header comment. Downstream
     // services re-derive tenantId from the JWT itself, not from a gateway-set header.
     expect(response.json()).toEqual({ tenantHeader: undefined });
+  });
+
+  // Regression test for a live-QA finding (2026-07-17): the SSE stream 401'd on every page
+  // load because the gateway only recognized an Authorization header, but the browser's
+  // native EventSource API can't set one — the frontend passes the JWT as ?token= instead
+  // (notification-service's own authenticateStream already handled this; the gateway didn't).
+  it('accepts a ?token= query param for the notification SSE stream route', async () => {
+    const token = await signToken({ sub: '42', tenantId: 7 });
+    const response = await app.inject({
+      method: 'GET',
+      url: `/api/notification/notifications/stream?token=${token}`,
+    });
+    expect(response.statusCode).toBe(200);
+  });
+
+  it('still returns 401 for the SSE stream route with no token at all', async () => {
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/notification/notifications/stream',
+    });
+    expect(response.statusCode).toBe(401);
+  });
+
+  it('does not accept a ?token= query param on a non-SSE route (query-token fallback is route-scoped)', async () => {
+    const token = await signToken({ sub: '42', tenantId: 7 });
+    const response = await app.inject({
+      method: 'GET',
+      url: `/api/sales/api/v2/invoices?token=${token}`,
+    });
+    expect(response.statusCode).toBe(401);
   });
 });

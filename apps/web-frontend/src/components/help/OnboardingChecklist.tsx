@@ -104,7 +104,10 @@ export function OnboardingChecklist({ onNavigate, onDismiss }: OnboardingCheckli
   }
 
   return (
-    <div className="fixed bottom-4 right-4 z-40 w-80 bg-surface-card rounded-xl shadow-2xl border border-default overflow-hidden">
+    // bottom-left, not bottom-right: bottom-right is where toasts render (main.tsx) and where
+    // primary form-submit buttons commonly sit — a fixed panel there intercepted clicks on
+    // e.g. the New Branch form's Save button (found in live QA 2026-07-17).
+    <div className="fixed bottom-4 left-4 z-40 w-80 bg-surface-card rounded-xl shadow-2xl border border-default overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 bg-gradient-to-r from-blue-600 to-indigo-600">
         <div className="flex items-center gap-2">

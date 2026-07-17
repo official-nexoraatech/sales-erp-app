@@ -1,5 +1,5 @@
-import { and, eq, lt, inArray } from 'drizzle-orm';
-import { quotations, quotationLines, outboxEvents } from '@erp/db';
+import { and, eq, lt, inArray, getTableColumns } from 'drizzle-orm';
+import { quotations, quotationLines, outboxEvents, customers, items } from '@erp/db';
 import type { ErpDatabase } from '@erp/db';
 import { BusinessError, NotFoundError } from '@erp/types';
 import { GSTCalculator } from './GSTCalculator.js';
@@ -217,14 +217,16 @@ export class QuotationService {
 
   async getWithLines(id: number, tenantId: number) {
     const [q] = await this.db
-      .select()
+      .select({ ...getTableColumns(quotations), customerName: customers.displayName })
       .from(quotations)
+      .leftJoin(customers, eq(quotations.customerId, customers.id))
       .where(and(eq(quotations.id, id), eq(quotations.tenantId, tenantId)));
     if (!q) throw new NotFoundError('Quotation not found');
 
     const lines = await this.db
-      .select()
+      .select({ ...getTableColumns(quotationLines), itemName: items.name })
       .from(quotationLines)
+      .leftJoin(items, eq(quotationLines.itemId, items.id))
       .where(eq(quotationLines.quotationId, id));
 
     return { ...q, lines };

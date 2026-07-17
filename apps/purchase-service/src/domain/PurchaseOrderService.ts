@@ -1,10 +1,11 @@
-import { and, eq, sql, desc, lt } from 'drizzle-orm';
+import { and, eq, sql, desc, lt, getTableColumns } from 'drizzle-orm';
 import {
   purchaseOrders,
   purchaseOrderLines,
   purchaseOrderHistory,
   purchaseOrderAmendments,
   suppliers,
+  items,
   projectionSupplierBalance,
   outboxEvents,
 } from '@erp/db';
@@ -148,7 +149,12 @@ export class PurchaseOrderService {
 
       await trx
         .update(purchaseOrders)
-        .set({ status: 'SUBMITTED', submittedAt: new Date(), updatedBy: userId, updatedAt: new Date() })
+        .set({
+          status: 'SUBMITTED',
+          submittedAt: new Date(),
+          updatedBy: userId,
+          updatedAt: new Date(),
+        })
         .where(and(eq(purchaseOrders.id, id), eq(purchaseOrders.tenantId, tenantId)));
 
       await trx.insert(purchaseOrderHistory).values({
@@ -180,7 +186,10 @@ export class PurchaseOrderService {
 
       if (!overrideCreditLimit) {
         const [supplier] = await trx
-          .select({ creditLimit: suppliers.creditLimit, creditLimitEnabled: suppliers.creditLimitEnabled })
+          .select({
+            creditLimit: suppliers.creditLimit,
+            creditLimitEnabled: suppliers.creditLimitEnabled,
+          })
           .from(suppliers)
           .where(and(eq(suppliers.id, po.supplierId), eq(suppliers.tenantId, tenantId)));
 
@@ -265,7 +274,11 @@ export class PurchaseOrderService {
 
       await trx
         .update(purchaseOrders)
-        .set({ updatedBy: userId, updatedAt: new Date(), version: sql`${purchaseOrders.version} + 1` })
+        .set({
+          updatedBy: userId,
+          updatedAt: new Date(),
+          version: sql`${purchaseOrders.version} + 1`,
+        })
         .where(and(eq(purchaseOrders.id, id), eq(purchaseOrders.tenantId, tenantId)));
 
       await trx.insert(purchaseOrderHistory).values({
@@ -403,14 +416,16 @@ export class PurchaseOrderService {
 
   async getWithLines(id: number, tenantId: number) {
     const [po] = await this.db
-      .select()
+      .select({ ...getTableColumns(purchaseOrders), supplierName: suppliers.displayName })
       .from(purchaseOrders)
+      .leftJoin(suppliers, eq(purchaseOrders.supplierId, suppliers.id))
       .where(and(eq(purchaseOrders.id, id), eq(purchaseOrders.tenantId, tenantId)));
     if (!po) throw new NotFoundError('PurchaseOrder', id);
 
     const lines = await this.db
-      .select()
+      .select({ ...getTableColumns(purchaseOrderLines), itemName: items.name })
       .from(purchaseOrderLines)
+      .leftJoin(items, eq(purchaseOrderLines.itemId, items.id))
       .where(eq(purchaseOrderLines.purchaseOrderId, id));
 
     return { ...po, lines };
@@ -431,7 +446,12 @@ export class PurchaseOrderService {
       .orderBy(desc(purchaseOrders.expectedDeliveryDate));
   }
 
-  async update(id: number, tenantId: number, userId: number, params: Partial<CreatePOParams>): Promise<void> {
+  async update(
+    id: number,
+    tenantId: number,
+    userId: number,
+    params: Partial<CreatePOParams>
+  ): Promise<void> {
     const [po] = await this.db
       .select()
       .from(purchaseOrders)

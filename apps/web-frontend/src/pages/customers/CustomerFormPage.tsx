@@ -71,10 +71,15 @@ export default function CustomerFormPage() {
   }, [customer, reset]);
 
   // Default to the user's own branch when they're only assigned to one — most
-  // customers are created by single-branch staff, so this saves a click.
+  // customers are created by single-branch staff, so this saves a click. Gated on
+  // `branches` having loaded too: setValue()-ing before the matching <option> exists in the
+  // DOM leaves a native <select> visually showing the empty placeholder even though the form
+  // state is correct, making a required field look unset (found in live QA 2026-07-17).
   useEffect(() => {
-    if (!isEdit && userBranchIds.length === 1) setValue('branchId', userBranchIds[0] as number);
-  }, [isEdit, userBranchIds, setValue]);
+    if (!isEdit && userBranchIds.length === 1 && branches.length > 0) {
+      setValue('branchId', userBranchIds[0] as number);
+    }
+  }, [isEdit, userBranchIds, branches, setValue]);
 
   const gstinValue = watch('gstin');
 

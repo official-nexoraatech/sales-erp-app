@@ -1,4 +1,5 @@
 # ES-37 Completion Report — RBAC Audit Phase D: Frontend UI-Level Permission Gating
+
 **Date:** 2026-07-04
 **Status:** COMPLETE
 
@@ -15,6 +16,7 @@ BankReconciliation), `gst/` (EInvoice, Gstr1, Gstr3b, GSTR9, GstCompliance), `in
 (Branches, Warehouses, Organization), `users/` (Users), `suppliers/` (Suppliers).
 
 **Skipped deliberately, not overlooked:**
+
 - Pure read-only reports with no actions: `BalanceSheetPage`, `CashFlowPage`,
   `ProfitLossPage`, `TrialBalancePage`, `LedgerPage`, `TDSPage`.
 - Pages where the backend enforces one single permission for the entire feature,
@@ -29,16 +31,16 @@ BankReconciliation), `gst/` (EInvoice, Gstr1, Gstr3b, GSTR9, GstCompliance), `in
 
 ## Real Bugs Found While Gating (not just missing UI polish)
 
-Checking each button against the backend's *actual* enforced permission (rather than
+Checking each button against the backend's _actual_ enforced permission (rather than
 assuming the page's route-level permission applies to every action on it) surfaced the
 same "two similarly-named permissions, wrong one wired up" bug class ES-35 found in
 `CUSTOMER_UPDATE`/`CUSTOMER_EDIT` — **three more times**:
 
-| Constant pair | Real-world effect | Fix |
-|---|---|---|
-| `ITEM_UPDATE` (route-level + `role-defaults.ts`) vs `ITEM_EDIT` (backend `PUT /items/:id`) | `INVENTORY_MANAGER` could open the item edit form but every save 403'd | `App.tsx` route + `INVENTORY_MANAGER`'s role-defaults switched to `ITEM_EDIT` |
-| `SUPPLIER_UPDATE` (route-level + `role-defaults.ts`) vs `SUPPLIER_EDIT` (backend `PUT /suppliers/:id`) | `PURCHASE_MANAGER` could open the supplier edit form but every save 403'd | Same fix pattern, `SUPPLIER_EDIT` |
-| `ORGANIZATION_SETTINGS_VIEW` (route) vs `ORG_SETTINGS_EDIT` (backend `PUT /organization`) | Not a role-defaults bug (neither is explicitly assigned to a named role — only `OWNER`/`ADMIN` get `ORG_SETTINGS_EDIT` via their full permission set), but confirmed the same naming-collision pattern; Save button now gated on the correct constant |
+| Constant pair                                                                                          | Real-world effect                                                                                                                                                                                                                                     | Fix                                                                           |
+| ------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| `ITEM_UPDATE` (route-level + `role-defaults.ts`) vs `ITEM_EDIT` (backend `PUT /items/:id`)             | `INVENTORY_MANAGER` could open the item edit form but every save 403'd                                                                                                                                                                                | `App.tsx` route + `INVENTORY_MANAGER`'s role-defaults switched to `ITEM_EDIT` |
+| `SUPPLIER_UPDATE` (route-level + `role-defaults.ts`) vs `SUPPLIER_EDIT` (backend `PUT /suppliers/:id`) | `PURCHASE_MANAGER` could open the supplier edit form but every save 403'd                                                                                                                                                                             | Same fix pattern, `SUPPLIER_EDIT`                                             |
+| `ORGANIZATION_SETTINGS_VIEW` (route) vs `ORG_SETTINGS_EDIT` (backend `PUT /organization`)              | Not a role-defaults bug (neither is explicitly assigned to a named role — only `OWNER`/`ADMIN` get `ORG_SETTINGS_EDIT` via their full permission set), but confirmed the same naming-collision pattern; Save button now gated on the correct constant |
 
 **A fourth, different bug** (route permission far weaker than what the page actually
 needs, carried over from ES-34's research): `OpeningBalancesPage`'s route (`App.tsx` and
@@ -63,14 +65,14 @@ delete them. Added `CATEGORY_UPDATE`, `CATEGORY_DELETE`, `BRAND_UPDATE`, `UNIT_U
 
 ## Files Changed
 
-| File | Change |
-|------|--------|
-| `apps/web-frontend/src/constants/permissions.ts` | 13 new constants |
-| `apps/web-frontend/src/App.tsx` | 3 route-permission corrections (`ITEM_EDIT`, `SUPPLIER_EDIT`, `OPENING_BALANCE_LOCK`) |
-| `apps/web-frontend/src/lib/navigation.ts` | 1 nav-permission correction (`OPENING_BALANCE_LOCK`) |
-| `apps/tenant-service/src/rbac/role-defaults.ts` | `INVENTORY_MANAGER`, `PURCHASE_MANAGER` corrected/completed |
-| 25 page files across `sales/`, `purchase/`, `accounting/`, `gst/`, `inventory/`, `items/`, `settings/`, `users/`, `suppliers/` | `canX` permission-gating pattern applied |
-| `apps/web-frontend/src/pages/settings/__tests__/OrganizationPage.test.tsx` | Fixed — test rendered with no permissions, now-gated Save button disappeared; added `beforeEach` granting `ORG_SETTINGS_EDIT` |
+| File                                                                                                                           | Change                                                                                                                        |
+| ------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
+| `apps/web-frontend/src/constants/permissions.ts`                                                                               | 13 new constants                                                                                                              |
+| `apps/web-frontend/src/App.tsx`                                                                                                | 3 route-permission corrections (`ITEM_EDIT`, `SUPPLIER_EDIT`, `OPENING_BALANCE_LOCK`)                                         |
+| `apps/web-frontend/src/lib/navigation.ts`                                                                                      | 1 nav-permission correction (`OPENING_BALANCE_LOCK`)                                                                          |
+| `apps/tenant-service/src/rbac/role-defaults.ts`                                                                                | `INVENTORY_MANAGER`, `PURCHASE_MANAGER` corrected/completed                                                                   |
+| 25 page files across `sales/`, `purchase/`, `accounting/`, `gst/`, `inventory/`, `items/`, `settings/`, `users/`, `suppliers/` | `canX` permission-gating pattern applied                                                                                      |
+| `apps/web-frontend/src/pages/settings/__tests__/OrganizationPage.test.tsx`                                                     | Fixed — test rendered with no permissions, now-gated Save button disappeared; added `beforeEach` granting `ORG_SETTINGS_EDIT` |
 
 ## Test Results
 
@@ -83,16 +85,13 @@ DB-gated skips unrelated to this phase).
 
 ## Deployment Checklist
 
-- [ ] **Backfill migration needed for existing tenants** (same caveat as ES-35's
+- [x] **Backfill migration needed for existing tenants** (same caveat as ES-35's
       `CUSTOMER_EDIT` fix and every other `ROLE_DEFAULTS` change in this audit):
       `INVENTORY_MANAGER` (`ITEM_UPDATE`→`ITEM_EDIT`, +`CATEGORY_UPDATE`/
       `CATEGORY_DELETE`/`BRAND_UPDATE`/`UNIT_UPDATE`) and `PURCHASE_MANAGER`
-      (`SUPPLIER_UPDATE`→`SUPPLIER_EDIT`) only take effect for newly-provisioned tenants.
-      **Dev environment: no real tenants exist yet, so this is a no-op today** — write the
-      equivalent backfill migration before any tenant relying on these roles reaches
-      production. This is now the fourth such pending backfill from this audit
-      (ES-35's `SALES_MANAGER` fix, plus these two) — worth doing as one consolidated
-      migration rather than four separate ones.
+      (`SUPPLIER_UPDATE`→`SUPPLIER_EDIT`). Fixed 2026-07-17 as one consolidated migration
+      per this note's own recommendation: `0070_es35_es37_role_defaults_permission_backfill.sql`,
+      applied and verified (synthetic role/tenant data) against the dev DB.
 - [x] No other DB migrations required — remaining changes are frontend permission
       constants + UI conditional-rendering only.
 

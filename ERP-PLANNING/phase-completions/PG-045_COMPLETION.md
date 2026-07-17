@@ -123,9 +123,12 @@ Receivable` system account.
       `0047_pg045_employee_loan_manage_permission_backfill.sql` against the target database —
       verified applied 2026-07-17: `employee_loans` table exists and 40 role_permissions rows
       carry `EMPLOYEE_LOAN_MANAGE`.
-- [ ] Existing tenants need their Chart of Accounts reseeded (or account `1340` manually added)
+- [x] Existing tenants need their Chart of Accounts reseeded (or account `1340` manually added)
       before `EMPLOYEE_LOAN_DISBURSED` can post — `PostingMatrixService` skips unconfigured
       accounts gracefully but then fails with `JOURNAL_INSUFFICIENT_LINES` if the account is
       genuinely missing. New tenants provisioned after this change get it automatically via
-      `DEFAULT_ACCOUNTS`.
+      `DEFAULT_ACCOUNTS`. Fixed 2026-07-17:
+      `0071_pg045_employee_loans_receivable_account_backfill.sql`, applied and verified
+      (synthetic tenant/account data confirming correct parent-account resolution) against
+      the dev DB.
 - [x] No new environment variables.

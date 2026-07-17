@@ -9,12 +9,35 @@ const logger = createLogger({ serviceName: 'accounting-service' });
 
 type TDSSection = '194C' | '194H' | '194J';
 
-const TDS_SECTION_RATES: Record<string, { section: TDSSection; rate: number; threshold: number; description: string }> = {
-  '194C_INDIVIDUAL': { section: '194C', rate: 1, threshold: 30000, description: 'Payment to contractor — individual/HUF' },
-  '194C_COMPANY':    { section: '194C', rate: 2, threshold: 30000, description: 'Payment to contractor — others' },
-  '194H':            { section: '194H', rate: 5, threshold: 15000, description: 'Commission or brokerage' },
-  '194J_PROFESSIONAL':{ section: '194J', rate: 10, threshold: 30000, description: 'Professional services' },
-  '194J_TECHNICAL':  { section: '194J', rate: 2, threshold: 30000, description: 'Technical services' },
+const TDS_SECTION_RATES: Record<
+  string,
+  { section: TDSSection; rate: number; threshold: number; description: string }
+> = {
+  '194C_INDIVIDUAL': {
+    section: '194C',
+    rate: 1,
+    threshold: 30000,
+    description: 'Payment to contractor — individual/HUF',
+  },
+  '194C_COMPANY': {
+    section: '194C',
+    rate: 2,
+    threshold: 30000,
+    description: 'Payment to contractor — others',
+  },
+  '194H': { section: '194H', rate: 5, threshold: 15000, description: 'Commission or brokerage' },
+  '194J_PROFESSIONAL': {
+    section: '194J',
+    rate: 10,
+    threshold: 30000,
+    description: 'Professional services',
+  },
+  '194J_TECHNICAL': {
+    section: '194J',
+    rate: 2,
+    threshold: 30000,
+    description: 'Technical services',
+  },
 };
 
 export type TDSCategory = keyof typeof TDS_SECTION_RATES;
@@ -61,7 +84,10 @@ export class TDSService {
     );
 
     if (tdsAmount <= 0) {
-      throw new BusinessError('TDS_BELOW_THRESHOLD', 'TDS amount is zero — gross amount below threshold');
+      throw new BusinessError(
+        'TDS_BELOW_THRESHOLD',
+        'TDS amount is zero — gross amount below threshold'
+      );
     }
 
     return db.transaction(async (trx) => {
@@ -105,7 +131,10 @@ export class TDSService {
 
       if (!entry) throw new Error('TDS entry insert failed');
 
-      logger.info({ tdsEntryId: entry.id, journalId, section, tdsAmount }, 'TDS deduction recorded');
+      logger.info(
+        { tdsEntryId: entry.id, journalId, section, tdsAmount },
+        'TDS deduction recorded'
+      );
       return { tdsEntryId: entry.id, journalId, tdsAmount };
     });
   }
@@ -115,8 +144,13 @@ export class TDSService {
     tenantId: number,
     periodMonth: number,
     periodYear: number
-  ): Promise<{ periodMonth: number; periodYear: number; totalLiability: number; entryCount: number }> {
-    const [result] = await db.raw.execute(sql`
+  ): Promise<{
+    periodMonth: number;
+    periodYear: number;
+    totalLiability: number;
+    entryCount: number;
+  }> {
+    const [result] = (await db.raw.execute(sql`
       SELECT
         COALESCE(SUM(tds_amount), 0)::NUMERIC AS total_liability,
         COUNT(*)::INTEGER AS entry_count
@@ -125,7 +159,7 @@ export class TDSService {
         AND period_month = ${periodMonth}
         AND period_year = ${periodYear}
         AND deposit_status = 'PENDING'
-    `) as { total_liability: string; entry_count: number }[];
+    `)) as { total_liability: string; entry_count: number }[];
 
     return {
       periodMonth,
@@ -154,7 +188,7 @@ export class TDSService {
     const months = quarterMonths[periodQuarter] ?? [];
     const calYear = periodQuarter === 4 ? periodYear + 1 : periodYear;
 
-    const [totals] = await db.raw.execute(sql`
+    const [totals] = (await db.raw.execute(sql`
       SELECT
         COALESCE(SUM(taxable_amount), 0)::NUMERIC AS total_taxable,
         COALESCE(SUM(tds_amount), 0)::NUMERIC AS total_tds,
@@ -163,12 +197,15 @@ export class TDSService {
       WHERE tenant_id = ${tenantId}
         AND supplier_id = ${supplierId}
         AND period_year IN (${periodYear}, ${calYear})
-        AND period_month = ANY(${months}::INTEGER[])
+        AND period_month IN ${months}
         AND deposit_status IN ('PENDING', 'DEPOSITED')
-    `) as { total_taxable: string; total_tds: string; tds_section: string }[];
+    `)) as { total_taxable: string; total_tds: string; tds_section: string }[];
 
     if (Number(totals?.total_tds ?? 0) <= 0) {
-      throw new BusinessError('NO_TDS_ENTRIES', `No TDS entries found for supplier ${supplierId} for Q${periodQuarter} ${periodYear}`);
+      throw new BusinessError(
+        'NO_TDS_ENTRIES',
+        `No TDS entries found for supplier ${supplierId} for Q${periodQuarter} ${periodYear}`
+      );
     }
 
     const section = (totals?.tds_section ?? '194C') as TDSSection;
@@ -194,12 +231,12 @@ export class TDSService {
     await db.raw
       .update(tdsEntries)
       .set({ depositStatus: 'DEPOSITED', depositedAt: new Date(), depositedBy: userId })
-      .where(and(
-        eq(tdsEntries.tenantId, tenantId),
-        eq(tdsEntries.supplierId, supplierId)
-      ));
+      .where(and(eq(tdsEntries.tenantId, tenantId), eq(tdsEntries.supplierId, supplierId)));
 
-    logger.info({ certId: cert.id, supplierId, periodYear, periodQuarter }, 'Form 16A certificate generated');
+    logger.info(
+      { certId: cert.id, supplierId, periodYear, periodQuarter },
+      'Form 16A certificate generated'
+    );
     return cert;
   }
 
@@ -207,11 +244,13 @@ export class TDSService {
     db: TenantScopedDatabase,
     tenantId: number,
     supplierId: number
-  ): Promise<typeof tdsCertificates.$inferSelect[]> {
+  ): Promise<(typeof tdsCertificates.$inferSelect)[]> {
     return db.raw
       .select()
       .from(tdsCertificates)
-      .where(and(eq(tdsCertificates.tenantId, tenantId), eq(tdsCertificates.supplierId, supplierId)));
+      .where(
+        and(eq(tdsCertificates.tenantId, tenantId), eq(tdsCertificates.supplierId, supplierId))
+      );
   }
 
   static async get26QData(
@@ -232,7 +271,7 @@ export class TDSService {
     const rows = await db.raw.execute(sql`
       SELECT
         te.supplier_id AS "supplierId",
-        s.name AS "supplierName",
+        s.display_name AS "supplierName",
         s.pan AS "pan",
         te.tds_section AS "section",
         te.taxable_amount AS "grossAmount",
@@ -242,20 +281,34 @@ export class TDSService {
       JOIN suppliers s ON s.id = te.supplier_id AND s.tenant_id = te.tenant_id
       WHERE te.tenant_id = ${tenantId}
         AND te.period_year IN (${year}, ${calYear})
-        AND te.period_month = ANY(${months}::INTEGER[])
+        AND te.period_month IN ${months}
       ORDER BY te.created_at
     `);
 
     return {
       period: `${year}-Q${quarter}`,
       tenantId,
-      entries: (rows as unknown as Array<{ pan: string; supplierName: string; section: string; grossAmount: string; tdsAmount: string; dateOfPayment: Date }>).map((r) => ({
+      entries: (
+        rows as unknown as Array<{
+          pan: string;
+          supplierName: string;
+          section: string;
+          grossAmount: string;
+          tdsAmount: string;
+          dateOfPayment: Date | string;
+        }>
+      ).map((r) => ({
         pan: r.pan ?? 'UNKNOWN',
         supplierName: r.supplierName,
         section: r.section,
         grossAmount: Number(r.grossAmount),
         tdsAmount: Number(r.tdsAmount),
-        dateOfPayment: r.dateOfPayment?.toISOString().substring(0, 10),
+        // db.raw.execute() (a raw sql tag, not the typed query builder) returns timestamp
+        // columns as strings, not parsed Date objects — normalize via `new Date(...)` rather
+        // than assuming a Date instance (found in live QA 2026-07-17: threw on every row).
+        dateOfPayment: r.dateOfPayment
+          ? new Date(r.dateOfPayment).toISOString().substring(0, 10)
+          : undefined,
       })),
     };
   }

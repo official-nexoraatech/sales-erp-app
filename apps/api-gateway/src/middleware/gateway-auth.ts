@@ -22,6 +22,13 @@ const EXEMPT_PATHS = new Set([
 // one-time token), so they can't be listed as an exact string in EXEMPT_PATHS above.
 const EXEMPT_PREFIXES = ['/api/report/unsubscribe/'];
 
+// The native browser EventSource API cannot set an Authorization header, so SSE routes
+// accept the JWT as a `?token=` query param instead (notification-service's own
+// authenticateStream already handles this) — the gateway must recognize the same fallback
+// for exactly these routes, or it 401s every SSE connection before notification-service ever
+// sees it (found in live QA 2026-07-17: the stream 401'd on every page load).
+const QUERY_TOKEN_PATHS = new Set(['/api/notification/notifications/stream']);
+
 export async function gatewayAuthPreHandler(
   request: FastifyRequest,
   reply: FastifyReply
@@ -33,7 +40,10 @@ export async function gatewayAuthPreHandler(
   }
 
   const authHeader = request.headers.authorization;
-  const token = authHeader?.startsWith('Bearer ') ? authHeader.slice('Bearer '.length) : undefined;
+  let token = authHeader?.startsWith('Bearer ') ? authHeader.slice('Bearer '.length) : undefined;
+  if (!token && path !== undefined && QUERY_TOKEN_PATHS.has(path)) {
+    token = (request.query as { token?: string } | undefined)?.token;
+  }
   if (!token) {
     void reply.code(401).send({
       error: { code: 'UNAUTHENTICATED', message: 'Missing or invalid Authorization header' },

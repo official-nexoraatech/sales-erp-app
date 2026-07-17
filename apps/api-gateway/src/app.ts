@@ -5,6 +5,7 @@ import rateLimit from '@fastify/rate-limit';
 import httpProxy from '@fastify/http-proxy';
 import {
   HELMET_OPTIONS,
+  CORS_METHODS,
   PERMISSIONS_POLICY,
   registerHealthRoute,
   tenantOrIpKeyGenerator,
@@ -55,6 +56,7 @@ export async function buildGateway(
     void reply.header('Permissions-Policy', PERMISSIONS_POLICY);
   });
   await fastify.register(cors, {
+    methods: CORS_METHODS,
     origin: config.allowedOrigins,
     credentials: true,
   });

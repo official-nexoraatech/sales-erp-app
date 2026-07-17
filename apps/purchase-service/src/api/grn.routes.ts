@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { PlatformContextFactory } from '@erp/sdk';
 import { grns, suppliers } from '@erp/db';
-import { and, desc, eq, ilike, sql } from 'drizzle-orm';
+import { and, desc, eq, ilike, sql, getTableColumns } from 'drizzle-orm';
 import { z } from 'zod';
 import { PERMISSIONS } from '@erp/types';
 import { authenticate } from '../middleware/authenticate.js';
@@ -76,8 +76,9 @@ export async function grnRoutes(
       if (q.search) conditions.push(ilike(grns.grnNumber, `%${q.search}%`));
 
       const rows = await ctx.db.raw
-        .select()
+        .select({ ...getTableColumns(grns), supplierName: suppliers.displayName })
         .from(grns)
+        .leftJoin(suppliers, eq(grns.supplierId, suppliers.id))
         .where(and(...conditions))
         .orderBy(desc(grns.grnDate), desc(grns.id))
         .limit(pageSize)
@@ -169,7 +170,21 @@ export async function grnRoutes(
           (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
       });
       const svc = new GRNService(ctx.db.raw);
-      await svc.approve(parseInt(id, 10), req.auth.tenantId, req.auth.userId, body.grnNumber);
+      const grnId = parseInt(id, 10);
+      const { lines } = await svc.getWithLines(grnId, req.auth.tenantId);
+      await svc.approve(grnId, req.auth.tenantId, req.auth.userId, body.grnNumber);
+
+      // GRNService.approve() writes availableQty/WACC/valuation directly to the shared
+      // `items` table (purchase-service has no business calling into inventory-service's own
+      // API for this) — inventory-service's Redis item-cache is never told, so its single-item
+      // GET route served pre-GRN stock/valuation for up to the full 5-minute TTL (found in live
+      // QA 2026-07-17). Invalidate the same `item:{id}` cache key inventory-service's own
+      // ItemCacheService uses, via the shared Redis both services already talk to through
+      // TenantScopedCache — no new cross-service HTTP call or event consumer needed.
+      await Promise.all(
+        [...new Set(lines.map((l) => l.itemId))].map((itemId) => ctx.cache.del(`item:${itemId}`))
+      );
+
       return reply.send({ success: true });
     },
   });

@@ -932,15 +932,10 @@ export function registerSystemJobs(
   );
 
   // ── WORKFLOW / APPROVALS ──────────────────────────────────────────────────
-  // PG-026 note: workflowApprovals.approverId is actually populated with a ROLE id, not a
-  // real user id (see WorkflowEngine.resolveApprover in packages/platform-sdk/src/workflow.ts
-  // — "Find first user with this role — simplified for Phase 1" returns the role's own id).
-  // This means getPendingForApprover(userId) has likely never matched real rows, and neither
-  // of the two jobs below can resolve a real notification recipient today. That's a separate,
-  // deeper bug in the core workflow engine (needs proper role→user(s) resolution), well beyond
-  // this package's scope — both jobs below do real, honest bookkeeping work against the schema
-  // as it actually behaves, without pretending to deliver a notification to someone we can't
-  // correctly identify.
+  // Fixed 2026-07-17: workflowApprovals.approverId now holds a real user id (WorkflowEngine
+  // .resolveApprovers resolves ROLE nodes to every active user holding that role, one approval
+  // row each), so getPendingForApprover(userId) and the bulk updates below correctly target
+  // real approvers.
   registry.register(
     'workflow.approval-expiry',
     {

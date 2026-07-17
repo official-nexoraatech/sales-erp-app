@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { PlatformContextFactory } from '@erp/sdk';
-import { saleReturns, creditNotes } from '@erp/db';
-import { and, desc, eq, sql } from 'drizzle-orm';
+import { saleReturns, creditNotes, customers, invoices } from '@erp/db';
+import { and, desc, eq, sql, getTableColumns } from 'drizzle-orm';
 import { z } from 'zod';
 import { PERMISSIONS } from '@erp/types';
 import { authenticate } from '../middleware/authenticate.js';
@@ -54,8 +54,14 @@ export async function saleReturnRoutes(
       const pageSize = Math.min(100, parseInt(q.pageSize ?? '20', 10));
 
       const rows = await ctx.db.raw
-        .select()
+        .select({
+          ...getTableColumns(saleReturns),
+          customerName: customers.displayName,
+          invoiceNumber: invoices.invoiceNumber,
+        })
         .from(saleReturns)
+        .leftJoin(customers, eq(saleReturns.customerId, customers.id))
+        .leftJoin(invoices, eq(saleReturns.invoiceId, invoices.id))
         .where(eq(saleReturns.tenantId, req.auth.tenantId))
         .orderBy(desc(saleReturns.returnDate), desc(saleReturns.id))
         .limit(pageSize)

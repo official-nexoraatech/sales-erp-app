@@ -16,7 +16,7 @@ interface InvoiceConfirmedPayload {
   sgstAmount?: string | number;
   igstAmount?: string | number;
   placeOfSupply?: string;
-  sellerStateCode?: string;
+  isInterstate?: boolean;
 }
 
 interface InvoiceCancelledPayload {
@@ -36,7 +36,12 @@ export async function handleInvoiceConfirmed(
   const cgstAmount = Number(p.cgstAmount ?? 0);
   const sgstAmount = Number(p.sgstAmount ?? 0);
   const igstAmount = Number(p.igstAmount ?? 0);
-  const isInterstate = p.placeOfSupply !== p.sellerStateCode;
+  // The producer (InvoiceService.confirm) already computes this correctly from
+  // igstAmount > 0 — recomputing it here from placeOfSupply/sellerStateCode was wrong: the
+  // producer never sends sellerStateCode, so that comparison was `true` for every invoice,
+  // which meant the CGST/SGST posting branch never fired and tax lines were silently
+  // dropped from every invoice-confirmation journal (found in live QA 2026-07-17).
+  const isInterstate = p.isInterstate ?? false;
 
   try {
     await JournalEngine.checkPeriodOpen(db, event.tenantId, new Date());
@@ -55,7 +60,10 @@ export async function handleInvoiceConfirmed(
     });
 
     const result = await JournalEngine.post(db, event.tenantId, event.userId, journalEntry);
-    logger.info({ journalId: result.journalId, invoiceId: p.invoiceId }, 'Accounting: INVOICE_CONFIRMED posted');
+    logger.info(
+      { journalId: result.journalId, invoiceId: p.invoiceId },
+      'Accounting: INVOICE_CONFIRMED posted'
+    );
   } catch (err) {
     logger.error({ err, invoiceId: p.invoiceId }, 'Accounting: failed to post INVOICE_CONFIRMED');
     throw err;
@@ -70,7 +78,7 @@ export async function handleInvoiceCancelled(
 
   try {
     // Find the original journal for this invoice
-    const [original] = await db.raw.execute(
+    const [original] = (await db.raw.execute(
       `SELECT journal_id FROM journals
        WHERE tenant_id = ${event.tenantId}
          AND reference_type = 'INVOICE'
@@ -78,10 +86,13 @@ export async function handleInvoiceCancelled(
          AND is_reversal = false
          AND status = 'POSTED'
        LIMIT 1`
-    ) as { journal_id: string }[];
+    )) as { journal_id: string }[];
 
     if (!original?.journal_id) {
-      logger.warn({ invoiceId: p.invoiceId }, 'Accounting: no posted journal found for cancelled invoice — skipping reversal');
+      logger.warn(
+        { invoiceId: p.invoiceId },
+        'Accounting: no posted journal found for cancelled invoice — skipping reversal'
+      );
       return;
     }
 
@@ -92,9 +103,15 @@ export async function handleInvoiceCancelled(
       original.journal_id,
       `Reversal: Invoice ${p.invoiceNumber} cancelled`
     );
-    logger.info({ journalId: result.journalId, invoiceId: p.invoiceId }, 'Accounting: INVOICE_CANCELLED reversed');
+    logger.info(
+      { journalId: result.journalId, invoiceId: p.invoiceId },
+      'Accounting: INVOICE_CANCELLED reversed'
+    );
   } catch (err) {
-    logger.error({ err, invoiceId: p.invoiceId }, 'Accounting: failed to reverse INVOICE_CANCELLED');
+    logger.error(
+      { err, invoiceId: p.invoiceId },
+      'Accounting: failed to reverse INVOICE_CANCELLED'
+    );
     throw err;
   }
 }

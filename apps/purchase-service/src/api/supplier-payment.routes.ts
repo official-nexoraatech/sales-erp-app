@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { PlatformContextFactory } from '@erp/sdk';
-import { supplierPayments } from '@erp/db';
-import { and, desc, eq, sql } from 'drizzle-orm';
+import { supplierPayments, suppliers } from '@erp/db';
+import { and, desc, eq, sql, getTableColumns } from 'drizzle-orm';
 import { z } from 'zod';
 import { PERMISSIONS } from '@erp/types';
 import { authenticate } from '../middleware/authenticate.js';
@@ -64,8 +64,9 @@ export async function supplierPaymentRoutes(
       if (q.status) conditions.push(eq(supplierPayments.status, q.status as never));
 
       const rows = await ctx.db.raw
-        .select()
+        .select({ ...getTableColumns(supplierPayments), supplierName: suppliers.displayName })
         .from(supplierPayments)
+        .leftJoin(suppliers, eq(supplierPayments.supplierId, suppliers.id))
         .where(and(...conditions))
         .orderBy(desc(supplierPayments.paymentDate), desc(supplierPayments.id))
         .limit(pageSize)

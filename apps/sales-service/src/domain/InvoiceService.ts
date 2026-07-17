@@ -1,4 +1,4 @@
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, sql, getTableColumns } from 'drizzle-orm';
 import {
   invoices,
   invoiceLines,
@@ -880,12 +880,17 @@ export class InvoiceService {
 
   async getWithLines(id: number, tenantId: number) {
     const [invoice] = await this.db
-      .select()
+      .select({ ...getTableColumns(invoices), customerName: customers.displayName })
       .from(invoices)
+      .leftJoin(customers, eq(invoices.customerId, customers.id))
       .where(and(eq(invoices.id, id), eq(invoices.tenantId, tenantId)));
     if (!invoice) throw new NotFoundError('Invoice not found');
 
-    const lines = await this.db.select().from(invoiceLines).where(eq(invoiceLines.invoiceId, id));
+    const lines = await this.db
+      .select({ ...getTableColumns(invoiceLines), itemName: items.name })
+      .from(invoiceLines)
+      .leftJoin(items, eq(invoiceLines.itemId, items.id))
+      .where(eq(invoiceLines.invoiceId, id));
 
     return { ...invoice, lines };
   }

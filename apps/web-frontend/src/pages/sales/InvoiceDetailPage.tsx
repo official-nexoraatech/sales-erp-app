@@ -18,6 +18,7 @@ import { formatDate, formatCurrency } from '../../lib/format.js';
 interface InvoiceLine {
   id: number;
   itemId: number;
+  itemName?: string;
   quantity: string;
   unitPrice: string;
   taxableAmount: string;
@@ -33,6 +34,7 @@ interface InvoiceDetail {
   invoiceNumber: string | null;
   status: string;
   customerId: number;
+  customerName?: string;
   invoiceDate: string;
   dueDate: string;
   subtotal: string;
@@ -118,7 +120,7 @@ export default function InvoiceDetailPage() {
       <ERPPageHeader
         variant="list"
         title={invoice.invoiceNumber ?? 'Draft Invoice'}
-        subtitle={`Customer ${invoice.customerId}`}
+        subtitle={invoice.customerName ?? `Customer ${invoice.customerId}`}
       >
         <div className="flex flex-wrap items-center gap-3">
           <Badge variant={STATUS_COLORS[invoice.status] ?? 'default'}>{invoice.status}</Badge>
@@ -182,7 +184,7 @@ export default function InvoiceDetailPage() {
             <tbody className="divide-y divide-default">
               {invoice.lines.map((l) => (
                 <tr key={l.id}>
-                  <td className="py-2">{l.itemId}</td>
+                  <td className="py-2">{l.itemName ?? l.itemId}</td>
                   <td className="py-2 text-secondary">{l.hsnCode ?? '—'}</td>
                   <td className="py-2">{parseFloat(l.quantity).toFixed(3)}</td>
                   <td className="py-2">₹{parseFloat(l.unitPrice).toFixed(2)}</td>

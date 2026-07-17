@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { PlatformContextFactory } from '@erp/sdk';
 import { purchaseReturns, debitNotes, suppliers } from '@erp/db';
-import { and, desc, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, sql, getTableColumns } from 'drizzle-orm';
 import { z } from 'zod';
 import { PERMISSIONS } from '@erp/types';
 import { authenticate } from '../middleware/authenticate.js';
@@ -58,8 +58,9 @@ export async function purchaseReturnRoutes(
       if (q.supplierId) conditions.push(eq(purchaseReturns.supplierId, parseInt(q.supplierId, 10)));
 
       const rows = await ctx.db.raw
-        .select()
+        .select({ ...getTableColumns(purchaseReturns), supplierName: suppliers.displayName })
         .from(purchaseReturns)
+        .leftJoin(suppliers, eq(purchaseReturns.supplierId, suppliers.id))
         .where(and(...conditions))
         .orderBy(desc(purchaseReturns.returnDate), desc(purchaseReturns.id))
         .limit(pageSize)
@@ -163,8 +164,9 @@ export async function purchaseReturnRoutes(
       if (q.status) conditions.push(eq(debitNotes.status, q.status as never));
 
       const rows = await ctx.db.raw
-        .select()
+        .select({ ...getTableColumns(debitNotes), supplierName: suppliers.displayName })
         .from(debitNotes)
+        .leftJoin(suppliers, eq(debitNotes.supplierId, suppliers.id))
         .where(and(...conditions))
         .orderBy(desc(debitNotes.issueDate), desc(debitNotes.id))
         .limit(pageSize)

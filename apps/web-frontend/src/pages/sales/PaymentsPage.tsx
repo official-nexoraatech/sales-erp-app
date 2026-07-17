@@ -19,6 +19,7 @@ interface Payment {
   id: number;
   paymentNumber: string;
   customerId: number;
+  customerName?: string;
   paymentDate: string;
   paymentMode: string;
   amount: string;
@@ -63,7 +64,7 @@ export default function PaymentsPage() {
 
   const columns: ERPColumnDef<Payment>[] = [
     { key: 'paymentNumber', header: 'Number', mono: true },
-    { key: 'customerId', header: 'Customer' },
+    { key: 'customerName', header: 'Customer', render: (r) => r.customerName ?? r.customerId },
     { key: 'paymentMode', header: 'Mode' },
     {
       key: 'amount',

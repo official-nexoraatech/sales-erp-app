@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useForm, Controller } from 'react-hook-form';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { Plus, Trash2, Copy } from 'lucide-react';
+import { Plus, Trash2, Copy, Pencil } from 'lucide-react';
 import { integrationApi, type WebhookSubscription } from '../../api/endpoints.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
 import ERPEmptyState from '../../components/erp/ERPEmptyState.js';
@@ -31,6 +31,7 @@ export default function IntegrationsPage() {
   const qc = useQueryClient();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [newSecret, setNewSecret] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<number | null>(null);
 
   const { data, isLoading } = useQuery({
     queryKey: ['webhook-subscriptions'],
@@ -57,6 +58,19 @@ export default function IntegrationsPage() {
     onError: (err: Error) => toast.error(err.message),
   });
 
+  const updateMutation = useMutation({
+    mutationFn: (payload: WebhookForm & { id: number }) =>
+      integrationApi.updateWebhook(payload.id, payload),
+    onSuccess: () => {
+      toast.success('Webhook subscription updated');
+      setDrawerOpen(false);
+      setEditingId(null);
+      reset();
+      void qc.invalidateQueries({ queryKey: ['webhook-subscriptions'] });
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
   const deleteMutation = useMutation({
     mutationFn: (id: number) => integrationApi.deleteWebhook(id),
     onSuccess: () => {
@@ -66,12 +80,22 @@ export default function IntegrationsPage() {
     onError: (err: Error) => toast.error(err.message),
   });
 
+  function openEdit(sub: WebhookSubscription) {
+    setEditingId(sub.id);
+    reset({ targetUrl: sub.targetUrl, events: sub.events, isActive: sub.isActive });
+    setDrawerOpen(true);
+  }
+
   function onSubmit(data: WebhookForm) {
     if (data.events.length === 0) {
       toast.error('Select at least one event');
       return;
     }
-    createMutation.mutate(data);
+    if (editingId !== null) {
+      updateMutation.mutate({ id: editingId, ...data });
+    } else {
+      createMutation.mutate(data);
+    }
   }
 
   return (
@@ -81,7 +105,14 @@ export default function IntegrationsPage() {
         title="Integrations"
         subtitle="Subscribe external systems to key business events with signed, verifiable webhook deliveries."
         actions={
-          <Button size="sm" onClick={() => setDrawerOpen(true)}>
+          <Button
+            size="sm"
+            onClick={() => {
+              setEditingId(null);
+              reset({ targetUrl: '', events: [], isActive: true });
+              setDrawerOpen(true);
+            }}
+          >
             <Plus className="h-4 w-4" /> Add Webhook
           </Button>
         }
@@ -115,7 +146,15 @@ export default function IntegrationsPage() {
                   <td className="px-4 py-3">
                     <ERPStatusBadge status={sub.isActive ? 'Active' : 'Inactive'} />
                   </td>
-                  <td className="px-4 py-3 text-right">
+                  <td className="px-4 py-3 text-right space-x-3">
+                    <button
+                      type="button"
+                      aria-label="Edit webhook subscription"
+                      className="text-secondary hover:text-primary"
+                      onClick={() => openEdit(sub)}
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </button>
                     <button
                       type="button"
                       aria-label="Delete webhook subscription"
@@ -141,8 +180,9 @@ export default function IntegrationsPage() {
         onClose={() => {
           setDrawerOpen(false);
           setNewSecret(null);
+          setEditingId(null);
         }}
-        title="Add Webhook Subscription"
+        title={editingId !== null ? 'Edit Webhook Subscription' : 'Add Webhook Subscription'}
         subtitle="We'll sign every delivery with HMAC-SHA256 so you can verify it came from us."
       >
         {newSecret ? (
@@ -207,8 +247,12 @@ export default function IntegrationsPage() {
               />
             </div>
             <Checkbox label="Active" {...register('isActive')} />
-            <Button type="submit" className="w-full justify-center" loading={isSubmitting}>
-              Create Subscription
+            <Button
+              type="submit"
+              className="w-full justify-center"
+              loading={isSubmitting || updateMutation.isPending}
+            >
+              {editingId !== null ? 'Save Changes' : 'Create Subscription'}
             </Button>
           </form>
         )}

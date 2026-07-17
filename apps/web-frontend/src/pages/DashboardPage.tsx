@@ -61,6 +61,26 @@ function fmtNum(n: number | string | undefined | null): string {
   return num.toLocaleString('en-IN');
 }
 
+// Recharts <Pie> has a known rendering bug (v2.15) for a single 100%-share slice: the
+// start/end sweep angle collapses to exactly 180°, drawing a flat-topped dome instead of a
+// circle (found in live QA 2026-07-17 on this tenant's single-category sales data). Padding
+// a lone slice with a second, negligible one forces the multi-slice code path, which renders
+// correctly — the padding slice is far too small to be visually or numerically meaningful.
+function padSinglePieSlice<T extends Record<string, unknown>>(
+  data: T[],
+  valueKey: string,
+  nameKey: string
+): T[] {
+  // No items on this tenant have a category assigned yet — the backend's LEFT JOIN
+  // legitimately returns `category: null` rather than inventing one; label it instead of
+  // leaving the chart's only slice unnamed.
+  const named = data.map((d) => (d[nameKey] ? d : { ...d, [nameKey]: 'Uncategorized' }));
+  if (named.length !== 1) return named;
+  const value = Number(named[0]![valueKey] ?? 0);
+  if (!(value > 0)) return named;
+  return [...named, { [valueKey]: value * 0.0001, [nameKey]: '' } as unknown as T];
+}
+
 interface KpiData {
   today_sales: number;
   today_collection: number;
@@ -330,19 +350,23 @@ export default function DashboardPage() {
           <ResponsiveContainer width="100%" height={200}>
             <PieChart>
               <Pie
-                data={charts?.salesByCategory ?? []}
+                data={padSinglePieSlice(charts?.salesByCategory ?? [], 'revenue', 'category')}
                 dataKey="revenue"
                 nameKey="category"
                 cx="50%"
                 cy="50%"
                 outerRadius={70}
-                label={({ name, percent }) => `${name} ${((percent ?? 0) * 100).toFixed(0)}%`}
+                label={({ name, percent }) =>
+                  name ? `${name} ${((percent ?? 0) * 100).toFixed(0)}%` : ''
+                }
                 labelLine={false}
                 style={{ fontSize: 10 }}
               >
-                {(charts?.salesByCategory ?? []).map((_entry, i) => (
-                  <Cell key={i} fill={COLORS[i % COLORS.length]} />
-                ))}
+                {padSinglePieSlice(charts?.salesByCategory ?? [], 'revenue', 'category').map(
+                  (_entry, i) => (
+                    <Cell key={i} fill={COLORS[i % COLORS.length]} />
+                  )
+                )}
               </Pie>
               <Tooltip formatter={(v: number) => fmt(v)} />
             </PieChart>

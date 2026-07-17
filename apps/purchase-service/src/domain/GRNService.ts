@@ -9,6 +9,7 @@ import {
   suppliers,
   outboxEvents,
   projectionSupplierBalance,
+  projectionStockLevel,
   inventoryLedger,
 } from '@erp/db';
 import type { ErpDatabase } from '@erp/db';
@@ -56,10 +57,18 @@ export class GRNService {
       const [po] = await trx
         .select()
         .from(purchaseOrders)
-        .where(and(eq(purchaseOrders.id, params.purchaseOrderId), eq(purchaseOrders.tenantId, params.tenantId)));
+        .where(
+          and(
+            eq(purchaseOrders.id, params.purchaseOrderId),
+            eq(purchaseOrders.tenantId, params.tenantId)
+          )
+        );
       if (!po) throw new NotFoundError('PurchaseOrder', params.purchaseOrderId);
       if (!['APPROVED', 'PARTIALLY_RECEIVED'].includes(po.status))
-        throw new BusinessError('INVALID_PO_STATUS', `PO must be APPROVED or PARTIALLY_RECEIVED to create GRN`);
+        throw new BusinessError(
+          'INVALID_PO_STATUS',
+          `PO must be APPROVED or PARTIALLY_RECEIVED to create GRN`
+        );
 
       // RCM (ES-10): an unregistered supplier doesn't charge GST — buyer self-assesses
       // and pays it directly to the government instead of to the supplier.
@@ -100,7 +109,12 @@ export class GRNService {
           throw new BusinessError(
             'PURCHASE_QTY_MISMATCH',
             `Received qty ${newlyReceived} exceeds remaining PO qty ${remainingQty} for PO line ${poLineId}`,
-            { purchaseOrderLineId: poLineId, orderedQty, alreadyReceived, receivedQty: newlyReceived }
+            {
+              purchaseOrderLineId: poLineId,
+              orderedQty,
+              alreadyReceived,
+              receivedQty: newlyReceived,
+            }
           );
         }
       }
@@ -288,6 +302,39 @@ export class GRNService {
           sourceLedgerId: ledgerRow!.id,
           receivedAt: grn.grnDate,
         });
+
+        // GRN receipts only ever updated the item's global availableQty above, never the
+        // per-warehouse projection_stock_level row InventoryLedgerService's other stock-in
+        // paths (adjustments, transfers) already keep current — silently broke the Stock
+        // Levels page's per-warehouse breakdown and made Physical Verification uncountable
+        // for any warehouse whose stock came in via purchasing (found in live QA
+        // 2026-07-17). Mirrors InventoryLedgerService's own upsert exactly, since
+        // purchase-service can't call into inventory-service's domain layer directly
+        // (separate services — see architecture note on duplicated ledger logic).
+        await trx
+          .insert(projectionStockLevel)
+          .values({
+            tenantId,
+            itemId: line.itemId,
+            variantId: line.variantId ?? undefined,
+            warehouseId: lineWarehouseId,
+            availableQty: String(Math.max(0, qty)),
+            reservedQty: '0',
+            lastMovementAt: new Date(),
+          })
+          .onConflictDoUpdate({
+            target: [
+              projectionStockLevel.tenantId,
+              projectionStockLevel.itemId,
+              projectionStockLevel.warehouseId,
+              projectionStockLevel.variantId,
+            ],
+            set: {
+              availableQty: sql`projection_stock_level.available_qty + ${qty}`,
+              lastMovementAt: new Date(),
+              updatedAt: new Date(),
+            },
+          });
       }
 
       // Step 3: Update PO received quantities
@@ -296,7 +343,8 @@ export class GRNService {
         if (line.purchaseOrderLineId) {
           linesByPoLine.set(
             line.purchaseOrderLineId,
-            (linesByPoLine.get(line.purchaseOrderLineId) ?? 0) + parseFloat(String(line.receivedQty))
+            (linesByPoLine.get(line.purchaseOrderLineId) ?? 0) +
+              parseFloat(String(line.receivedQty))
           );
         }
       }
@@ -330,7 +378,9 @@ export class GRNService {
       const [po] = await trx
         .select()
         .from(purchaseOrders)
-        .where(and(eq(purchaseOrders.id, grn.purchaseOrderId), eq(purchaseOrders.tenantId, tenantId)));
+        .where(
+          and(eq(purchaseOrders.id, grn.purchaseOrderId), eq(purchaseOrders.tenantId, tenantId))
+        );
 
       if (po) {
         const allPOLines = await trx
@@ -352,7 +402,9 @@ export class GRNService {
             receivedAmount: sql`${purchaseOrders.receivedAmount} + ${receivedDelta}`,
             updatedAt: new Date(),
           })
-          .where(and(eq(purchaseOrders.id, grn.purchaseOrderId), eq(purchaseOrders.tenantId, tenantId)));
+          .where(
+            and(eq(purchaseOrders.id, grn.purchaseOrderId), eq(purchaseOrders.tenantId, tenantId))
+          );
       }
 
       // Update GRN status
@@ -490,7 +542,12 @@ export class GRNService {
 
       await trx
         .update(grns)
-        .set({ status: 'REJECTED', rejectionReason: reason, updatedBy: userId, updatedAt: new Date() })
+        .set({
+          status: 'REJECTED',
+          rejectionReason: reason,
+          updatedBy: userId,
+          updatedAt: new Date(),
+        })
         .where(and(eq(grns.id, id), eq(grns.tenantId, tenantId)));
 
       await trx.insert(grnHistory).values({

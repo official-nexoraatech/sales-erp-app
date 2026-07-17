@@ -25,6 +25,7 @@ interface GRN {
   id: number;
   grnNumber: string | null;
   supplierId: number;
+  supplierName?: string;
   purchaseOrderId: number;
   status: string;
   grandTotal: string;
@@ -111,7 +112,7 @@ export default function GRNsPage() {
         ),
     },
     { key: 'purchaseOrderId', header: 'PO #', render: (r) => `PO-${r.purchaseOrderId}` },
-    { key: 'supplierId', header: 'Supplier' },
+    { key: 'supplierName', header: 'Supplier', render: (r) => r.supplierName ?? r.supplierId },
     {
       key: 'grandTotal',
       header: 'Total',

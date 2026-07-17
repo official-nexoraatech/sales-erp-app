@@ -25,6 +25,7 @@ interface PurchaseOrder {
   id: number;
   poNumber: string | null;
   supplierId: number;
+  supplierName?: string;
   status: string;
   grandTotal: string;
   expectedDeliveryDate: string | null;
@@ -133,7 +134,7 @@ export default function PurchaseOrdersPage() {
           <span className="text-secondary italic text-sm">Draft</span>
         ),
     },
-    { key: 'supplierId', header: 'Supplier' },
+    { key: 'supplierName', header: 'Supplier', render: (r) => r.supplierName ?? r.supplierId },
     {
       key: 'grandTotal',
       header: 'Amount',

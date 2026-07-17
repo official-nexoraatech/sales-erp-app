@@ -1,8 +1,8 @@
 import type { FastifyInstance } from 'fastify';
-import type { PlatformContextFactory } from '@erp/sdk';
+import type { PlatformContextFactory, TenantScopedDatabase } from '@erp/sdk';
 import { PlatformEventBus } from '@erp/sdk';
 import { accounts, financialEntries } from '@erp/db';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, isNull, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { BusinessError, NotFoundError, OptimisticLockError, ValidationError } from '@erp/types';
 import { PERMISSIONS, OptionalIFSCSchema, OptionalBankAccountSchema } from '@erp/types';
@@ -36,6 +36,55 @@ const AccountUpdateSchema = AccountSchema.extend({
 
 type AuthedRequest = { auth: { tenantId: number; userId: number } };
 
+// The account list/tree used to render `openingBalance` directly under a "Balance" header —
+// almost always ₹0.00, since only accounts touched by the Opening Balance wizard ever get a
+// non-zero one, while everything else's real balance lives in financial_entries (the same
+// source Trial Balance already aggregates correctly). Computes an actual running balance per
+// account in one aggregate query rather than N+1 (found in live QA 2026-07-17: "Balance always
+// ₹0.00 even for accounts with a real ₹58,000 balance on Trial Balance").
+async function getAccountBalances(
+  db: TenantScopedDatabase,
+  tenantId: number
+): Promise<Map<number, number>> {
+  const balanceRows = (await db.raw.execute(sql`
+    SELECT
+      a.id AS account_id,
+      COALESCE(a.opening_balance, 0)::NUMERIC AS opening_balance,
+      a.opening_balance_type,
+      a.normal_balance,
+      COALESCE(SUM(fe.debit_amount), 0)::NUMERIC AS total_debits,
+      COALESCE(SUM(fe.credit_amount), 0)::NUMERIC AS total_credits
+    FROM accounts a
+    LEFT JOIN financial_entries fe ON fe.account_id = a.id AND fe.tenant_id = ${tenantId}
+    WHERE a.tenant_id = ${tenantId} AND a.deleted_at IS NULL
+    GROUP BY a.id, a.opening_balance, a.opening_balance_type, a.normal_balance
+  `)) as Array<{
+    account_id: number;
+    opening_balance: string;
+    opening_balance_type: string;
+    normal_balance: string;
+    total_debits: string;
+    total_credits: string;
+  }>;
+  return new Map(
+    balanceRows.map((r) => {
+      const openingSigned =
+        r.opening_balance_type === 'CREDIT'
+          ? -Number(r.opening_balance)
+          : Number(r.opening_balance);
+      const net = openingSigned + Number(r.total_debits) - Number(r.total_credits);
+      // Expressed in the account's own normal-balance direction, so an ASSET/EXPENSE account
+      // with real debit activity shows positive, matching how Trial Balance and every other
+      // report in this app already present balances.
+      const balance = r.normal_balance === 'CREDIT' ? -net : net;
+      // account_id is a raw BIGINT column — postgres.js returns it as a string, unlike
+      // drizzle's schema-aware .select() (accounts.id is bigserial with mode:'number'), so an
+      // un-cast key here silently never matches `accounts.id` when looked up below.
+      return [Number(r.account_id), balance];
+    })
+  );
+}
+
 export async function accountRoutes(
   fastify: FastifyInstance,
   ctxFactory: PlatformContextFactory
@@ -55,7 +104,11 @@ export async function accountRoutes(
         .select()
         .from(accounts)
         .where(and(eq(accounts.tenantId, tenantId), isNull(accounts.deletedAt)));
-      return reply.code(200).send({ data: { content: rows, totalElements: rows.length } });
+
+      const balanceByAccountId = await getAccountBalances(ctx.db, tenantId);
+      const content = rows.map((r) => ({ ...r, balance: balanceByAccountId.get(r.id) ?? 0 }));
+
+      return reply.code(200).send({ data: { content, totalElements: content.length } });
     }
   );
 
@@ -74,13 +127,16 @@ export async function accountRoutes(
         .select()
         .from(accounts)
         .where(and(eq(accounts.tenantId, tenantId), isNull(accounts.deletedAt)));
+      const balanceByAccountId = await getAccountBalances(ctx.db, tenantId);
 
       // Build tree in-memory
-      type AccountNode = (typeof rows)[number] & { children: AccountNode[] };
+      type AccountNode = (typeof rows)[number] & { balance: number; children: AccountNode[] };
       const nodeMap = new Map<number, AccountNode>();
       const roots: AccountNode[] = [];
 
-      rows.forEach((row) => nodeMap.set(row.id, { ...row, children: [] }));
+      rows.forEach((row) =>
+        nodeMap.set(row.id, { ...row, balance: balanceByAccountId.get(row.id) ?? 0, children: [] })
+      );
       rows.forEach((row) => {
         const node = nodeMap.get(row.id)!;
         if (row.parentId && nodeMap.has(row.parentId)) {

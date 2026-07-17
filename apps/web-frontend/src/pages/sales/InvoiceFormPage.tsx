@@ -297,6 +297,10 @@ export default function InvoiceFormPage() {
       toast.error('Fill all required fields and add at least one item');
       return;
     }
+    if (lines.some((l) => !(l.quantity > 0))) {
+      toast.error('Every line item must have a quantity greater than zero');
+      return;
+    }
 
     createMutation.mutate({
       customerId: Number(customerId),

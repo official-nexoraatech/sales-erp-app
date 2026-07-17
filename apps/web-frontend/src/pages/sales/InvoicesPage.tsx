@@ -22,6 +22,7 @@ interface Invoice {
   id: number;
   invoiceNumber: string | null;
   customerId: number;
+  customerName?: string;
   status: string;
   grandTotal: string;
   balanceDue: string;
@@ -101,7 +102,7 @@ export default function InvoicesPage() {
           <span className="text-disabled text-sm italic">Draft</span>
         ),
     },
-    { key: 'customerId', header: 'Customer' },
+    { key: 'customerName', header: 'Customer', render: (r) => r.customerName ?? r.customerId },
     {
       key: 'grandTotal',
       header: 'Amount',

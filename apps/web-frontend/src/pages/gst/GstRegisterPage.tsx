@@ -128,17 +128,21 @@ export function GstRegisterPage() {
               creditNotes: 'Credit Notes',
               purchaseReturns: 'Purchase Returns',
             };
+            // GstLedgerService.getSummary() only puts a `total` field on `sales` (and an
+            // unrelated `itcEligible` on `purchases`) — `creditNotes`/`purchaseReturns` have
+            // no total field at all. `cgst + sgst + igst` is the one shape every category
+            // actually shares, so compute the display total from that instead of a
+            // nonexistent `totalGst` (found in live QA 2026-07-17: every card showed ₹0.00).
+            const totalGst = Number(s?.cgst ?? 0) + Number(s?.sgst ?? 0) + Number(s?.igst ?? 0);
             return (
               <div key={key} className="bg-surface-card border border-default rounded-xl p-4">
                 <div className="flex items-center gap-2 mb-2">
                   <Icon className={`w-4 h-4 ${color}`} />
                   <span className="text-xs text-secondary">{labels[key]}</span>
                 </div>
-                <div className="text-lg font-semibold text-primary">
-                  {formatCurrency(s?.totalGst)}
-                </div>
+                <div className="text-lg font-semibold text-primary">{formatCurrency(totalGst)}</div>
                 <div className="text-xs text-secondary mt-1">
-                  Taxable: {formatCurrency(s?.taxableAmount)}
+                  Taxable: {formatCurrency(s?.taxable)}
                 </div>
               </div>
             );

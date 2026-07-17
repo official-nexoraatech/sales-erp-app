@@ -91,7 +91,10 @@ export default function Combobox<T extends ComboboxOption = ComboboxOption>({
   const doSearch = useCallback(
     async (q: string) => {
       if (!loadOptions) return;
-      if (q.length < minChars) {
+      // An empty query is never useful to a search API and most backends reject it outright
+      // (400 on every combobox focus/clear) — require at least 1 char even when a caller sets
+      // minChars: 0.
+      if (q.length < Math.max(minChars, 1)) {
         setAsyncOptions([]);
         return;
       }

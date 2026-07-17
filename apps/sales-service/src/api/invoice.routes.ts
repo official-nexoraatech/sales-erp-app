@@ -9,7 +9,7 @@ import {
   einvoiceData,
   items,
 } from '@erp/db';
-import { and, desc, eq, ilike, inArray, sql } from 'drizzle-orm';
+import { and, desc, eq, ilike, inArray, sql, getTableColumns } from 'drizzle-orm';
 import { z } from 'zod';
 import QRCode from 'qrcode';
 import { PERMISSIONS, BusinessError } from '@erp/types';
@@ -102,8 +102,9 @@ export async function invoiceRoutes(
       if (branchScope !== 'all') conditions.push(inArray(invoices.branchId, branchScope));
 
       const rows = await ctx.db.raw
-        .select()
+        .select({ ...getTableColumns(invoices), customerName: customers.displayName })
         .from(invoices)
+        .leftJoin(customers, eq(invoices.customerId, customers.id))
         .where(and(...conditions))
         // invoiceDate alone ties for every invoice created the same day (the common case once
         // daily volume exceeds one page) — Postgres doesn't guarantee stable ordering among

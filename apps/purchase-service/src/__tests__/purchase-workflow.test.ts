@@ -24,6 +24,12 @@ vi.mock('@erp/db', () => ({
   grnHistory: {},
   items: { id: 'id', tenantId: 'tenant_id', availableQty: 'available_qty', version: 'version' },
   inventoryLedger: {},
+  projectionStockLevel: {
+    tenantId: 'tenant_id',
+    itemId: 'item_id',
+    warehouseId: 'warehouse_id',
+    variantId: 'variant_id',
+  },
   supplierPayments: { id: 'id', tenantId: 'tenant_id' },
   supplierPaymentAllocations: {},
 }));
@@ -59,14 +65,22 @@ function makeTrx(script: unknown[]) {
     chainable[m] = vi.fn(() => chainable);
   }
   chainable['returning'] = vi.fn(() => next());
-  (chainable as { then: unknown })['then'] = (resolve: (v: unknown) => void, reject: (e: unknown) => void) =>
-    next().then(resolve, reject);
+  (chainable as { then: unknown })['then'] = (
+    resolve: (v: unknown) => void,
+    reject: (e: unknown) => void
+  ) => next().then(resolve, reject);
   return chainable;
 }
 
 describe('PurchaseOrderService.approve — re-entry guard', () => {
   it('approves a SUBMITTED PO', async () => {
-    const poRow = { id: 1, tenantId: 1, status: 'SUBMITTED', supplierId: 9, grandTotal: '10000.00' };
+    const poRow = {
+      id: 1,
+      tenantId: 1,
+      status: 'SUBMITTED',
+      supplierId: 9,
+      grandTotal: '10000.00',
+    };
     const supplierRow = { creditLimit: '0', creditLimitEnabled: false };
     const script = [[poRow], [supplierRow], undefined, undefined, undefined];
     const trx = makeTrx(script);
@@ -82,13 +96,21 @@ describe('PurchaseOrderService.approve — re-entry guard', () => {
     const db = { transaction: vi.fn((fn: (t: typeof trx) => Promise<unknown>) => fn(trx)) };
     const svc = new PurchaseOrderService(db as never);
 
-    await expect(svc.approve(1, 1, 99, 'PO-0001')).rejects.toMatchObject({ code: 'INVALID_STATUS' });
+    await expect(svc.approve(1, 1, 99, 'PO-0001')).rejects.toMatchObject({
+      code: 'INVALID_STATUS',
+    });
   });
 });
 
 describe('PurchaseOrderService.approve — vendor credit limit', () => {
   it('throws VENDOR_CREDIT_LIMIT_EXCEEDED when new balance would exceed the limit', async () => {
-    const poRow = { id: 1, tenantId: 1, status: 'SUBMITTED', supplierId: 9, grandTotal: '50000.00' };
+    const poRow = {
+      id: 1,
+      tenantId: 1,
+      status: 'SUBMITTED',
+      supplierId: 9,
+      grandTotal: '50000.00',
+    };
     const supplierRow = { creditLimit: '100000.00', creditLimitEnabled: true };
     const balanceRow = { currentBalance: '60000.00' };
     const trx = makeTrx([[poRow], [supplierRow], [balanceRow]]);
@@ -99,7 +121,13 @@ describe('PurchaseOrderService.approve — vendor credit limit', () => {
   });
 
   it('succeeds when overrideCreditLimit=true, bypassing the check entirely', async () => {
-    const poRow = { id: 1, tenantId: 1, status: 'SUBMITTED', supplierId: 9, grandTotal: '999999.00' };
+    const poRow = {
+      id: 1,
+      tenantId: 1,
+      status: 'SUBMITTED',
+      supplierId: 9,
+      grandTotal: '999999.00',
+    };
     const script = [[poRow], undefined, undefined, undefined];
     const trx = makeTrx(script);
     const db = { transaction: vi.fn((fn: (t: typeof trx) => Promise<unknown>) => fn(trx)) };
@@ -128,15 +156,29 @@ describe('PurchaseOrderService.amend', () => {
     const db = { transaction: vi.fn((fn: (t: typeof trx) => Promise<unknown>) => fn(trx)) };
     const svc = new PurchaseOrderService(db as never);
 
-    await expect(svc.amend(1, 1, 99, {}, 'reason')).rejects.toMatchObject({ code: 'INVALID_STATUS' });
+    await expect(svc.amend(1, 1, 99, {}, 'reason')).rejects.toMatchObject({
+      code: 'INVALID_STATUS',
+    });
   });
 });
 
 describe('GRNService.create — over-receipt guard', () => {
   it('throws PURCHASE_QTY_MISMATCH when received qty exceeds remaining PO qty', async () => {
-    const poRow = { id: 1, tenantId: 1, status: 'APPROVED', sellerStateCode: 'MH', placeOfSupply: 'MH' };
+    const poRow = {
+      id: 1,
+      tenantId: 1,
+      status: 'APPROVED',
+      sellerStateCode: 'MH',
+      placeOfSupply: 'MH',
+    };
     const supplierRow = { isRegistered: true };
-    const poLineRow = { id: 5, purchaseOrderId: 1, orderedQty: '10.000', receivedQty: '8.000', unitPrice: '100.00' };
+    const poLineRow = {
+      id: 5,
+      purchaseOrderId: 1,
+      orderedQty: '10.000',
+      receivedQty: '8.000',
+      unitPrice: '100.00',
+    };
     const trx = makeTrx([[poRow], [supplierRow], [poLineRow]]);
     const db = { transaction: vi.fn((fn: (t: typeof trx) => Promise<unknown>) => fn(trx)) };
     const svc = new GRNService(db as never);
@@ -197,6 +239,7 @@ describe('GRNService.approve — partial receive updates PO status', () => {
       [{ id: 1 }], // insert inventoryLedger ... returning
       [{ costingMethod: 'WACC', currentStockValue: '0' }], // ES-13: ValuationService item lookup
       undefined, // ES-13: ValuationService update items.current_stock_value
+      undefined, // insert projectionStockLevel onConflictDoUpdate
       [{ id: 5 }], // update purchaseOrderLines ... returning (ES-23 [M1] ceiling-guarded increment)
       [poRow], // select purchaseOrders
       allPoLines, // select purchaseOrderLines (allPOLines)
@@ -214,7 +257,9 @@ describe('GRNService.approve — partial receive updates PO status', () => {
     await svc.approve(1, 1, 99, 'GRN-0001');
 
     const setCalls = (trx['set'] as { mock: { calls: unknown[][] } }).mock.calls;
-    const poStatusUpdate = setCalls.find((args) => (args[0] as { status?: string }).status === 'PARTIALLY_RECEIVED');
+    const poStatusUpdate = setCalls.find(
+      (args) => (args[0] as { status?: string }).status === 'PARTIALLY_RECEIVED'
+    );
     expect(poStatusUpdate).toBeDefined();
   });
 });
@@ -247,13 +292,16 @@ describe('GRNService.approve — ES-23 [M1] over-receipt ceiling guard', () => {
       [{ id: 1 }], // insert inventoryLedger ... returning
       [{ costingMethod: 'WACC', currentStockValue: '0' }], // ES-13: ValuationService item lookup
       undefined, // ES-13: ValuationService update items.current_stock_value
+      undefined, // insert projectionStockLevel onConflictDoUpdate
       [], // update purchaseOrderLines ... returning → empty = ceiling guard failed (over-receipt)
     ];
     const trx = makeTrx(script);
     const db = { transaction: vi.fn((fn: (t: typeof trx) => Promise<unknown>) => fn(trx)) };
     const svc = new GRNService(db as never);
 
-    await expect(svc.approve(1, 1, 99, 'GRN-0001')).rejects.toMatchObject({ code: 'PURCHASE_QTY_MISMATCH' });
+    await expect(svc.approve(1, 1, 99, 'GRN-0001')).rejects.toMatchObject({
+      code: 'PURCHASE_QTY_MISMATCH',
+    });
   });
 });
 
@@ -268,7 +316,9 @@ describe('SupplierPaymentService.allocate — status transitions', () => {
     await svc.allocate(1, 1, [{ grnId: 10, amount: 5000 }], 99);
 
     const setCalls = (trx['set'] as { mock: { calls: unknown[][] } }).mock.calls;
-    const statusUpdate = setCalls.find((args) => (args[0] as { status?: string }).status === 'FULLY_ALLOCATED');
+    const statusUpdate = setCalls.find(
+      (args) => (args[0] as { status?: string }).status === 'FULLY_ALLOCATED'
+    );
     expect(statusUpdate).toBeDefined();
   });
 
@@ -282,7 +332,9 @@ describe('SupplierPaymentService.allocate — status transitions', () => {
     await svc.allocate(1, 1, [{ grnId: 10, amount: 2000 }], 99);
 
     const setCalls = (trx['set'] as { mock: { calls: unknown[][] } }).mock.calls;
-    const statusUpdate = setCalls.find((args) => (args[0] as { status?: string }).status === 'PARTIALLY_ALLOCATED');
+    const statusUpdate = setCalls.find(
+      (args) => (args[0] as { status?: string }).status === 'PARTIALLY_ALLOCATED'
+    );
     expect(statusUpdate).toBeDefined();
   });
 });

@@ -19,6 +19,7 @@ interface SupplierPayment {
   id: number;
   paymentNumber: string;
   supplierId: number;
+  supplierName?: string;
   paymentDate: string;
   paymentMode: string;
   amount: string;
@@ -64,7 +65,7 @@ export default function SupplierPaymentsPage() {
 
   const columns: ERPColumnDef<SupplierPayment>[] = [
     { key: 'paymentNumber', header: 'Number', mono: true },
-    { key: 'supplierId', header: 'Supplier' },
+    { key: 'supplierName', header: 'Supplier', render: (r) => r.supplierName ?? r.supplierId },
     {
       key: 'paymentMode',
       header: 'Mode',

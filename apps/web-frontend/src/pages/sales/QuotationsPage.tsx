@@ -22,6 +22,7 @@ interface Quotation {
   id: number;
   quotationNumber: string;
   customerId: number;
+  customerName?: string;
   status: string;
   grandTotal: string;
   validUntil: string;
@@ -107,7 +108,7 @@ export default function QuotationsPage() {
 
   const columns: ERPColumnDef<Quotation>[] = [
     { key: 'quotationNumber', header: 'Number', mono: true, sortable: true },
-    { key: 'customerId', header: 'Customer' },
+    { key: 'customerName', header: 'Customer', render: (r) => r.customerName ?? r.customerId },
     {
       key: 'grandTotal',
       header: 'Total',

@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { PlatformContextFactory } from '@erp/sdk';
-import { purchaseOrders, purchaseOrderHistory } from '@erp/db';
-import { and, desc, eq, ilike, sql } from 'drizzle-orm';
+import { purchaseOrders, purchaseOrderHistory, suppliers } from '@erp/db';
+import { and, desc, eq, ilike, sql, getTableColumns } from 'drizzle-orm';
 import { z } from 'zod';
 import { PERMISSIONS } from '@erp/types';
 import { authenticate } from '../middleware/authenticate.js';
@@ -85,8 +85,9 @@ export async function purchaseOrderRoutes(
       if (q.search) conditions.push(ilike(purchaseOrders.poNumber, `%${q.search}%`));
 
       const rows = await ctx.db.raw
-        .select()
+        .select({ ...getTableColumns(purchaseOrders), supplierName: suppliers.displayName })
         .from(purchaseOrders)
+        .leftJoin(suppliers, eq(purchaseOrders.supplierId, suppliers.id))
         .where(and(...conditions))
         .orderBy(desc(purchaseOrders.poDate), desc(purchaseOrders.id))
         .limit(pageSize)

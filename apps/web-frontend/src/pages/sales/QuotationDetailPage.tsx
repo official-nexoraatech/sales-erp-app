@@ -16,6 +16,7 @@ import { useState } from 'react';
 interface QuotationLine {
   id: number;
   itemId: number;
+  itemName?: string;
   description?: string;
   quantity: string;
   unitPrice: string;
@@ -32,6 +33,7 @@ interface QuotationDetail {
   id: number;
   quotationNumber: string;
   customerId: number;
+  customerName?: string;
   status: string;
   validUntil: string;
   createdAt: string;
@@ -176,7 +178,7 @@ export default function QuotationDetailPage() {
       {/* Summary cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         {[
-          { label: 'Customer', value: `ID: ${q.customerId}` },
+          { label: 'Customer', value: q.customerName ?? `ID: ${q.customerId}` },
           { label: 'Valid Until', value: formatDate(q.validUntil) },
           { label: 'Grand Total', value: formatCurrency(parseFloat(q.grandTotal)) },
           { label: 'Place of Supply', value: q.placeOfSupply },
@@ -210,7 +212,7 @@ export default function QuotationDetailPage() {
             <tbody className="divide-y divide-default">
               {q.lines.map((l) => (
                 <tr key={l.id}>
-                  <td className="py-2">{l.description ?? `Item ${l.itemId}`}</td>
+                  <td className="py-2">{l.itemName ?? l.description ?? `Item ${l.itemId}`}</td>
                   <td className="py-2 text-secondary">{l.hsnCode ?? '—'}</td>
                   <td className="py-2">{parseFloat(l.gstRate).toFixed(0)}%</td>
                   <td className="py-2">{parseFloat(l.quantity).toFixed(3)}</td>

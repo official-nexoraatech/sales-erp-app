@@ -20,6 +20,7 @@ interface PurchaseReturn {
   id: number;
   returnNumber: string;
   supplierId: number;
+  supplierName?: string;
   grnId: number;
   status: string;
   grandTotal: string;
@@ -31,6 +32,7 @@ interface DebitNote {
   id: number;
   debitNoteNumber: string;
   supplierId: number;
+  supplierName?: string;
   status: string;
   total: string;
   issueDate: string;
@@ -92,7 +94,7 @@ export default function PurchaseReturnsPage() {
 
   const returnColumns: ERPColumnDef<PurchaseReturn>[] = [
     { key: 'returnNumber', header: 'Return #', mono: true, sortable: true },
-    { key: 'supplierId', header: 'Supplier' },
+    { key: 'supplierName', header: 'Supplier', render: (r) => r.supplierName ?? r.supplierId },
     { key: 'grnId', header: 'GRN #', render: (r) => `GRN-${r.grnId}` },
     { key: 'reason', header: 'Reason', render: (r) => r.reason.replace('_', ' ') },
     {
@@ -126,7 +128,7 @@ export default function PurchaseReturnsPage() {
 
   const dnColumns: ERPColumnDef<DebitNote>[] = [
     { key: 'debitNoteNumber', header: 'DN #', mono: true },
-    { key: 'supplierId', header: 'Supplier' },
+    { key: 'supplierName', header: 'Supplier', render: (r) => r.supplierName ?? r.supplierId },
     {
       key: 'total',
       header: 'Amount',

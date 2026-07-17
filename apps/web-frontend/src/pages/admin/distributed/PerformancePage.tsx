@@ -19,7 +19,7 @@ interface PerformanceBaseline {
 interface PerformanceTarget {
   endpoint: string;
   method: string;
-  targetMs: number;
+  targetP95Ms: number;
 }
 
 function statusVariant(actual: number, target: number): 'success' | 'warning' | 'danger' {
@@ -47,7 +47,7 @@ export default function PerformancePage() {
   });
   const targets: PerformanceTarget[] = (targetsData as unknown as PerformanceTarget[]) ?? [];
 
-  const targetMap = new Map(targets.map((t) => [`${t.method}:${t.endpoint}`, t.targetMs]));
+  const targetMap = new Map(targets.map((t) => [`${t.method}:${t.endpoint}`, t.targetP95Ms]));
 
   const breachCount = baselines.filter((b) => {
     const target = targetMap.get(`${b.method}:${b.endpoint}`);
@@ -194,7 +194,7 @@ export default function PerformancePage() {
                 <p className="text-xs text-secondary">
                   {t.method} {t.endpoint}
                 </p>
-                <p className="text-sm font-bold text-primary">{formatMs(t.targetMs)}</p>
+                <p className="text-sm font-bold text-primary">{formatMs(t.targetP95Ms)}</p>
               </div>
             ))}
           </div>

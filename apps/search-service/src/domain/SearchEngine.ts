@@ -732,7 +732,13 @@ export class SearchEngine {
         : baseQuery;
 
     const startTime = Date.now();
-    const result = await this.esRequest('POST', `/${indices}/_search`, {
+    // ignore_unavailable=true: `indices` is often a caller-permission-scoped comma-list
+    // (search.routes.ts) or the tenant-wide `erp_${tenantId}_*` wildcard. Either way, an
+    // index that hasn't been created yet for this tenant (e.g. an entity type added to
+    // ENTITY_MAPPINGS after the tenant was provisioned, with no reindex backfill run) must
+    // not fail the *entire* multi-index search — ES's default behavior for an explicit,
+    // comma-joined index list is to 404 the whole request if any named index is missing.
+    const result = await this.esRequest('POST', `/${indices}/_search?ignore_unavailable=true`, {
       from,
       size,
       query: esQuery,
@@ -762,6 +768,16 @@ export class SearchEngine {
     });
 
     const took = Date.now() - startTime;
+    if (!result.ok) {
+      // Surface real ES failures loudly instead of letting them collapse into an
+      // indistinguishable-from-legitimate "0 results" — this exact silent-failure shape is
+      // what let the missing-index 404 above go undetected in production traffic.
+      logger.error(
+        { tenantId, query, indices, status: result.status, esError: result.data },
+        'Search request failed'
+      );
+      throw new Error(`Elasticsearch search failed with status ${result.status}`);
+    }
     const resp = result.data as {
       hits?: {
         total?: { value: number };

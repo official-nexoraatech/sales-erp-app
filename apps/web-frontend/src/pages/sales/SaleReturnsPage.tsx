@@ -14,7 +14,9 @@ interface SaleReturn {
   id: number;
   returnNumber: string;
   invoiceId: number;
+  invoiceNumber?: string;
   customerId: number;
+  customerName?: string;
   returnDate: string;
   status: string;
   totalAmount: string;
@@ -39,7 +41,8 @@ export default function SaleReturnsPage() {
 
   const columns: ERPColumnDef<SaleReturn>[] = [
     { key: 'returnNumber', header: 'Return #', mono: true, sortable: true },
-    { key: 'invoiceId', header: 'Invoice' },
+    { key: 'invoiceNumber', header: 'Invoice', render: (r) => r.invoiceNumber ?? r.invoiceId },
+    { key: 'customerName', header: 'Customer', render: (r) => r.customerName ?? r.customerId },
     { key: 'reason', header: 'Reason' },
     {
       key: 'totalAmount',

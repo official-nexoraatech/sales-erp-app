@@ -24,6 +24,7 @@ interface Account {
   isBank: boolean;
   children?: Account[];
   openingBalance?: string;
+  balance?: number;
 }
 
 const TYPE_COLORS: Record<string, 'blue' | 'green' | 'yellow' | 'red' | 'indigo' | 'gray'> = {
@@ -69,7 +70,7 @@ function AccountRow({ account, depth = 0 }: { account: Account; depth?: number }
         </td>
         <td className="px-4 py-2.5 text-xs text-secondary">{account.normalBalance}</td>
         <td className="px-4 py-2.5 text-right text-sm text-secondary">
-          {account.openingBalance ? formatCurrency(parseFloat(account.openingBalance)) : '–'}
+          {account.balance !== undefined ? formatCurrency(account.balance) : '–'}
         </td>
         <td className="px-4 py-2.5">
           {canEditAccount && !account.isSystem && (

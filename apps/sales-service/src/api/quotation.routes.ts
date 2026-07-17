@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { PlatformContextFactory } from '@erp/sdk';
-import { quotations } from '@erp/db';
-import { and, desc, eq, ilike, sql } from 'drizzle-orm';
+import { quotations, customers } from '@erp/db';
+import { and, desc, eq, ilike, sql, getTableColumns } from 'drizzle-orm';
 import { z } from 'zod';
 import { PERMISSIONS } from '@erp/types';
 import { authenticate } from '../middleware/authenticate.js';
@@ -64,8 +64,9 @@ export async function quotationRoutes(
       if (q.search) conditions.push(ilike(quotations.quotationNumber, `%${q.search}%`));
 
       const rows = await ctx.db.raw
-        .select()
+        .select({ ...getTableColumns(quotations), customerName: customers.displayName })
         .from(quotations)
+        .leftJoin(customers, eq(quotations.customerId, customers.id))
         .where(and(...conditions))
         .orderBy(desc(quotations.createdAt), desc(quotations.id))
         .limit(pageSize)

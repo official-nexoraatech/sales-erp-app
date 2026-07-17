@@ -83,7 +83,25 @@ export async function userRoutes(
       const ctx = ctxFor(request);
 
       const allUsers = await ctx.db.raw.select().from(users).where(eq(users.tenantId, tenantId));
-      const safe = allUsers.map(sanitizeUser);
+
+      // The frontend's Users list renders a `roles: string[]` column per user (UsersPage.tsx)
+      // — batch-fetch every tenant user's role names in one query rather than N+1.
+      const roleRows = await ctx.db.raw
+        .select({ userId: userRoles.userId, roleName: roles.name })
+        .from(userRoles)
+        .innerJoin(roles, eq(roles.id, userRoles.roleId))
+        .where(eq(userRoles.tenantId, tenantId));
+      const rolesByUserId = new Map<number, string[]>();
+      for (const row of roleRows) {
+        const existing = rolesByUserId.get(row.userId);
+        if (existing) existing.push(row.roleName);
+        else rolesByUserId.set(row.userId, [row.roleName]);
+      }
+
+      const safe = allUsers.map((u) => ({
+        ...sanitizeUser(u),
+        roles: rolesByUserId.get(u.id) ?? [],
+      }));
       return reply.code(200).send({ data: { content: safe, totalElements: safe.length } });
     }
   );
