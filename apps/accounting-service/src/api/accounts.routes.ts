@@ -368,86 +368,21 @@ export async function accountRoutes(
         userId,
         correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
       });
-      const { DEFAULT_ACCOUNTS } = await import('../domain/default-accounts.js');
+      const { seedDefaultAccounts } = await import('../domain/default-accounts.js');
 
-      // ES-24 [C6]: the whole seed (both insert passes) + its outbox publish now commit
-      // atomically — previously the publish was a separate, non-transactional call after
-      // all the inserts had already committed.
-      await ctx.db.transaction(async (trx) => {
-        // First pass: insert root accounts (no parentCode)
-        const codeToId = new Map<string, number>();
-
-        const rootAccounts = DEFAULT_ACCOUNTS.filter((a) => !a.parentCode);
-        for (const acc of rootAccounts) {
-          const [inserted] = await trx.raw
-            .insert(accounts)
-            .values({
-              tenantId,
-              createdBy: userId,
-              accountCode: acc.accountCode,
-              name: acc.name,
-              accountType: acc.accountType,
-              accountSubType: acc.accountSubType,
-              normalBalance: acc.normalBalance,
-              isBank: acc.isBank ?? false,
-              isCash: acc.isCash ?? false,
-              isSystem: acc.isSystem ?? false,
-              openingBalance: '0',
-            } as unknown as typeof accounts.$inferInsert)
-            .onConflictDoNothing()
-            .returning();
-          if (inserted) codeToId.set(acc.accountCode, inserted.id);
-        }
-
-        // Reload to get IDs for already-existing accounts
-        const existingRows = await trx.raw
-          .select()
-          .from(accounts)
-          .where(eq(accounts.tenantId, tenantId));
-        existingRows.forEach((r) => {
-          if (r.accountCode) codeToId.set(r.accountCode, r.id);
-        });
-
-        // Second pass: child accounts
-        const childAccounts = DEFAULT_ACCOUNTS.filter((a) => a.parentCode);
-        for (const acc of childAccounts) {
-          const parentId = acc.parentCode ? codeToId.get(acc.parentCode) : undefined;
-          const [inserted] = await trx.raw
-            .insert(accounts)
-            .values({
-              tenantId,
-              createdBy: userId,
-              accountCode: acc.accountCode,
-              name: acc.name,
-              accountType: acc.accountType,
-              accountSubType: acc.accountSubType,
-              normalBalance: acc.normalBalance,
-              isBank: acc.isBank ?? false,
-              isCash: acc.isCash ?? false,
-              isSystem: acc.isSystem ?? false,
-              parentId: parentId ?? undefined,
-              openingBalance: '0',
-            } as unknown as typeof accounts.$inferInsert)
-            .onConflictDoNothing()
-            .returning();
-          if (inserted) codeToId.set(acc.accountCode, inserted.id);
-        }
-
-        const eventBus = new PlatformEventBus(trx, tenantId, userId, ctx.tenant.correlationId);
-        await eventBus.publishInTransaction('account', tenantId, 'CHART_OF_ACCOUNTS_SEEDED', {
-          tenantId,
-          count: DEFAULT_ACCOUNTS.length,
-        });
-      });
+      // ES-24 [C6]: the whole seed (both insert passes) + its outbox publish commit
+      // atomically inside seedDefaultAccounts — previously the publish was a separate,
+      // non-transactional call after all the inserts had already committed.
+      const count = await seedDefaultAccounts(ctx, tenantId, userId);
 
       await ctx.audit.log({
         action: 'CREATE',
         entityType: 'account',
-        metadata: { action: 'SEED_COA', count: DEFAULT_ACCOUNTS.length },
+        metadata: { action: 'SEED_COA', count },
       });
 
       return reply.code(200).send({
-        data: { message: 'Chart of accounts seeded', count: DEFAULT_ACCOUNTS.length },
+        data: { message: 'Chart of accounts seeded', count },
       });
     }
   );

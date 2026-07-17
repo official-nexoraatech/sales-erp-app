@@ -122,6 +122,7 @@ const DeliveryChallanDetailPage = lazy(() => import('./pages/sales/DeliveryChall
 // Purchase
 const PurchaseOrdersPage = lazy(() => import('./pages/purchase/PurchaseOrdersPage.js'));
 const PurchaseOrderFormPage = lazy(() => import('./pages/purchase/PurchaseOrderFormPage.js'));
+const PurchaseOrderDetailPage = lazy(() => import('./pages/purchase/PurchaseOrderDetailPage.js'));
 const GRNsPage = lazy(() => import('./pages/purchase/GRNsPage.js'));
 const GRNCreatePage = lazy(() => import('./pages/purchase/GRNCreatePage.js'));
 const SupplierPaymentsPage = lazy(() => import('./pages/purchase/SupplierPaymentsPage.js'));
@@ -1170,6 +1171,17 @@ export default function App() {
               <PermissionRoute
                 permission={PERMISSIONS.PO_CREATE}
                 element={<PurchaseOrderFormPage />}
+              />
+            </Page>
+          }
+        />
+        <Route
+          path="purchase/orders/:id"
+          element={
+            <Page>
+              <PermissionRoute
+                permission={PERMISSIONS.PO_VIEW}
+                element={<PurchaseOrderDetailPage />}
               />
             </Page>
           }

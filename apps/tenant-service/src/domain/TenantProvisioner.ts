@@ -57,6 +57,7 @@ const ALL_PROVISION_STEPS = [
   'CREATE_ES_INDICES',
   'SET_FEATURE_FLAGS',
   'ASSIGN_PLAN_ENTITLEMENTS',
+  'SEED_CHART_OF_ACCOUNTS',
   'SEND_WELCOME_EMAIL',
 ] as const;
 
@@ -240,6 +241,19 @@ export class TenantProvisioner {
     await this.db
       .update(tenants)
       .set({ provisioningStatus: 'PLAN_ENTITLEMENTS_ASSIGNED', provisioningSteps: completedSteps })
+      .where(eq(tenants.id, tenantId));
+
+    // ── STEP 9b: Seed default Chart of Accounts ─────────────────────────────
+    // Found in live QA 2026-07-17: no provisioning step ever seeded a CoA — every journal
+    // post silently failed with JOURNAL_INSUFFICIENT_LINES for every tenant, forever, until
+    // someone manually clicked "Seed Default Accounts" on the Chart of Accounts page.
+    logger.info({ tenantId }, 'Seeding default Chart of Accounts');
+    await this.seedChartOfAccounts(tenantId);
+    markStep('SEED_CHART_OF_ACCOUNTS');
+
+    await this.db
+      .update(tenants)
+      .set({ provisioningSteps: completedSteps })
       .where(eq(tenants.id, tenantId));
 
     // ── STEP 10: Send welcome email ───────────────────────────────────────────
@@ -500,6 +514,40 @@ export class TenantProvisioner {
       }
     } catch (err) {
       logger.warn({ email, err }, 'Welcome email delivery failed (non-fatal)');
+    }
+  }
+
+  // Not blocking provisioning on this (matches the fire-and-forget pattern every other
+  // cross-service call in this method already uses — provisioning has no rollback story for
+  // a partial-step failure regardless), but logged at error level rather than warn: unlike a
+  // missed welcome email, a tenant with no Chart of Accounts can never post a single
+  // accounting journal until someone notices and manually calls POST /accounts/seed.
+  private async seedChartOfAccounts(tenantId: number): Promise<void> {
+    const accountingUrl = process.env['ACCOUNTING_SERVICE_URL'];
+    if (!accountingUrl) {
+      logger.error(
+        { tenantId },
+        'ACCOUNTING_SERVICE_URL not configured — Chart of Accounts NOT seeded'
+      );
+      return;
+    }
+    const internalKey = process.env['INTERNAL_API_KEY'] ?? '';
+    try {
+      // createdBy: 0 — the same "system-authored" sentinel used for every other
+      // automatic-provisioning-time seed in this codebase (workflow definitions, RBAC
+      // defaults, etc.), not the admin user, since they never explicitly requested this.
+      const res = await fetch(
+        `${accountingUrl}/api/v2/internal/accounts/seed?tenantId=${tenantId}`,
+        {
+          method: 'POST',
+          headers: { 'x-internal-key': internalKey },
+        }
+      );
+      if (!res.ok) {
+        logger.error({ tenantId, status: res.status }, 'Chart of Accounts seeding failed');
+      }
+    } catch (err) {
+      logger.error({ tenantId, err }, 'Chart of Accounts seeding failed');
     }
   }
 

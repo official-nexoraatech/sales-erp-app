@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { Send, CheckCircle2, PackageCheck, Paperclip, Copy, Ban } from 'lucide-react';
+import { Eye, Send, CheckCircle2, PackageCheck, Paperclip, Copy, Ban } from 'lucide-react';
 import { purchaseOrderApi } from '../../api/endpoints.js';
 import { useDebounce } from '../../hooks/useDebounce.js';
 import { useAuthStore } from '../../store/auth.store.js';
@@ -157,6 +157,12 @@ export default function PurchaseOrdersPage() {
   ];
 
   const rowActions: ERPRowAction<PurchaseOrder>[] = [
+    {
+      label: 'View',
+      icon: Eye,
+      type: 'view',
+      onClick: (r: PurchaseOrder) => navigate(`/purchase/orders/${r.id}`),
+    },
     ...(canCreatePO
       ? [
           {

@@ -1,5 +1,5 @@
 ﻿import { useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, Navigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { physicalVerifApi } from '../../api/endpoints.js';
@@ -31,23 +31,31 @@ export default function PhysicalVerificationDetailPage() {
   const qc = useQueryClient();
   const [counts, setCounts] = useState<Record<number, number>>({});
 
+  // No dedicated /new route exists — the real "start a verification" flow is a modal on
+  // the list page, not a route. Bookmarking/typing this URL used to hit the API with
+  // Number("new") = NaN and 500 (found in live QA 2026-07-17); redirect to the list
+  // instead, where the working "+ Start Verification" action actually lives. Checked via
+  // `enabled`, not an early return, so hook call order stays stable across renders.
+  const numericId = Number(id);
+  const hasValidId = id !== undefined && !Number.isNaN(numericId);
+
   const { data, isLoading } = useQuery({
     queryKey: ['physical-verif', id],
-    queryFn: () => physicalVerifApi.getById(Number(id)),
-    enabled: !!id,
+    queryFn: () => physicalVerifApi.getById(numericId),
+    enabled: hasValidId,
   });
 
   const { data: varianceData } = useQuery({
     queryKey: ['physical-verif-variances', id],
-    queryFn: () => physicalVerifApi.variances(Number(id)),
-    enabled: !!(id && (data as { status?: string })?.status === 'COUNTING'),
+    queryFn: () => physicalVerifApi.variances(numericId),
+    enabled: hasValidId && (data as { status?: string })?.status === 'COUNTING',
   });
 
   const verif = data as Verification;
   const variances: VerifLine[] = (varianceData as VerifLine[]) ?? [];
 
   const startMutation = useMutation({
-    mutationFn: () => physicalVerifApi.startCounting(Number(id)),
+    mutationFn: () => physicalVerifApi.startCounting(numericId),
     onSuccess: () => {
       toast.success('Counting started — snapshot taken');
       qc.invalidateQueries({ queryKey: ['physical-verif', id] });
@@ -57,7 +65,7 @@ export default function PhysicalVerificationDetailPage() {
 
   const saveMutation = useMutation({
     mutationFn: (countsArr: Array<{ lineId: number; physicalQty: number }>) =>
-      physicalVerifApi.updateCounts(Number(id), countsArr),
+      physicalVerifApi.updateCounts(numericId, countsArr),
     onSuccess: () => {
       toast.success('Counts saved');
       qc.invalidateQueries({ queryKey: ['physical-verif-variances', id] });
@@ -66,7 +74,7 @@ export default function PhysicalVerificationDetailPage() {
   });
 
   const approveMutation = useMutation({
-    mutationFn: () => physicalVerifApi.approve(Number(id)),
+    mutationFn: () => physicalVerifApi.approve(numericId),
     onSuccess: () => {
       toast.success('Verification approved — adjustments created');
       qc.invalidateQueries({ queryKey: ['physical-verif', id] });
@@ -75,6 +83,7 @@ export default function PhysicalVerificationDetailPage() {
     onError: (e: Error) => toast.error(e.message),
   });
 
+  if (!hasValidId) return <Navigate to="/inventory/physical-verifications" replace />;
   if (isLoading || !verif) return <ERPDetailSkeleton />;
 
   return (

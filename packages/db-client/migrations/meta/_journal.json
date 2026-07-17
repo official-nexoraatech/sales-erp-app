@@ -491,6 +491,27 @@
       "when": 1788554135804,
       "tag": "0069_notification_templates_backfill",
       "breakpoints": true
+    },
+    {
+      "idx": 70,
+      "version": "7",
+      "when": 1788640535804,
+      "tag": "0070_es35_es37_role_defaults_permission_backfill",
+      "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "7",
+      "when": 1788726935804,
+      "tag": "0071_pg045_employee_loans_receivable_account_backfill",
+      "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "7",
+      "when": 1788813335804,
+      "tag": "0072_platform_content_manage_tenant_leak_revoke",
+      "breakpoints": true
     }
   ]
 }

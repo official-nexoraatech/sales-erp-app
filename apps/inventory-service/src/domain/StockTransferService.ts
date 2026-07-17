@@ -1,10 +1,11 @@
-import { eq, and, sql } from 'drizzle-orm';
-import { stockTransfers, stockTransferLines } from '@erp/db';
+import { eq, and, sql, getTableColumns } from 'drizzle-orm';
+import { aliasedTable } from 'drizzle-orm/alias';
+import { stockTransfers, stockTransferLines, warehouses, items } from '@erp/db';
 import { ERPError } from '@erp/types';
 import type { ErpDatabase } from '@erp/db';
 import { InventoryLedgerService } from './InventoryLedgerService.js';
 
-type TransferStatus = typeof stockTransfers.$inferSelect['status'];
+type TransferStatus = (typeof stockTransfers.$inferSelect)['status'];
 
 function nextTransferNumber(tenantId: number): string {
   return `TRF-${tenantId}-${Date.now()}`;
@@ -21,7 +22,13 @@ export class StockTransferService {
     tenantId: number;
     fromWarehouseId: number;
     toWarehouseId: number;
-    lines: Array<{ itemId: number; variantId?: number; requestedQty: number; unitCost?: number; notes?: string }>;
+    lines: Array<{
+      itemId: number;
+      variantId?: number;
+      requestedQty: number;
+      unitCost?: number;
+      notes?: string;
+    }>;
     notes?: string;
     createdBy: number;
   }) {
@@ -59,7 +66,13 @@ export class StockTransferService {
     id: number,
     tenantId: number,
     params: {
-      lines?: Array<{ itemId: number; variantId?: number; requestedQty: number; unitCost?: number; notes?: string }>;
+      lines?: Array<{
+        itemId: number;
+        variantId?: number;
+        requestedQty: number;
+        unitCost?: number;
+        notes?: string;
+      }>;
       notes?: string;
     }
   ) {
@@ -74,7 +87,11 @@ export class StockTransferService {
       if (params.notes !== undefined) {
         await db
           .update(stockTransfers)
-          .set({ notes: params.notes, version: sql`${stockTransfers.version} + 1`, updatedAt: new Date() })
+          .set({
+            notes: params.notes,
+            version: sql`${stockTransfers.version} + 1`,
+            updatedAt: new Date(),
+          })
           .where(and(eq(stockTransfers.id, id), eq(stockTransfers.tenantId, tenantId)));
       }
 
@@ -98,7 +115,7 @@ export class StockTransferService {
     });
   }
 
-  async submit(id: number, tenantId: number, userId: number) {
+  async submit(id: number, tenantId: number, _userId: number) {
     return this.transitionStatus(id, tenantId, 'DRAFT', 'SUBMITTED', {});
   }
 
@@ -112,7 +129,11 @@ export class StockTransferService {
   async dispatch(id: number, tenantId: number, userId: number) {
     const transfer = await this.get(id, tenantId);
     if (transfer.status !== 'APPROVED') {
-      throw new ERPError('INVALID_STATUS', `Cannot dispatch transfer in status ${transfer.status}`, 409);
+      throw new ERPError(
+        'INVALID_STATUS',
+        `Cannot dispatch transfer in status ${transfer.status}`,
+        409
+      );
     }
 
     const lines = await this.db
@@ -165,7 +186,11 @@ export class StockTransferService {
   ) {
     const transfer = await this.get(id, tenantId);
     if (transfer.status !== 'DISPATCHED' && transfer.status !== 'IN_TRANSIT') {
-      throw new ERPError('INVALID_STATUS', `Cannot receive transfer in status ${transfer.status}`, 409);
+      throw new ERPError(
+        'INVALID_STATUS',
+        `Cannot receive transfer in status ${transfer.status}`,
+        409
+      );
     }
 
     await this.db.transaction(async (trx) => {
@@ -216,7 +241,11 @@ export class StockTransferService {
   async cancel(id: number, tenantId: number, userId: number, reason: string) {
     const transfer = await this.get(id, tenantId);
     if (['RECEIVED', 'CANCELLED'].includes(transfer.status)) {
-      throw new ERPError('INVALID_STATUS', `Cannot cancel transfer in status ${transfer.status}`, 409);
+      throw new ERPError(
+        'INVALID_STATUS',
+        `Cannot cancel transfer in status ${transfer.status}`,
+        409
+      );
     }
 
     await this.db
@@ -246,11 +275,25 @@ export class StockTransferService {
 
   async getWithLines(id: number, tenantId: number) {
     const transfer = await this.get(id, tenantId);
+
+    // The detail page used to render raw fromWarehouseId/toWarehouseId — same
+    // "raw ID instead of name" gap found across Sales/Purchase list pages this session.
+    const fromWarehouse = aliasedTable(warehouses, 'from_warehouse');
+    const toWarehouse = aliasedTable(warehouses, 'to_warehouse');
+    const [names] = await this.db
+      .select({ fromWarehouseName: fromWarehouse.name, toWarehouseName: toWarehouse.name })
+      .from(stockTransfers)
+      .leftJoin(fromWarehouse, eq(stockTransfers.fromWarehouseId, fromWarehouse.id))
+      .leftJoin(toWarehouse, eq(stockTransfers.toWarehouseId, toWarehouse.id))
+      .where(and(eq(stockTransfers.id, id), eq(stockTransfers.tenantId, tenantId)));
+
     const lines = await this.db
-      .select()
+      .select({ ...getTableColumns(stockTransferLines), itemName: items.name })
       .from(stockTransferLines)
+      .leftJoin(items, eq(stockTransferLines.itemId, items.id))
       .where(eq(stockTransferLines.transferId, id));
-    return { ...transfer, lines };
+
+    return { ...transfer, ...names, lines };
   }
 
   private async transitionStatus(
@@ -262,7 +305,11 @@ export class StockTransferService {
   ) {
     const transfer = await this.get(id, tenantId);
     if (transfer.status !== fromStatus) {
-      throw new ERPError('INVALID_STATUS', `Transfer must be ${fromStatus} to transition to ${toStatus}`, 409);
+      throw new ERPError(
+        'INVALID_STATUS',
+        `Transfer must be ${fromStatus} to transition to ${toStatus}`,
+        409
+      );
     }
     await this.db
       .update(stockTransfers)
