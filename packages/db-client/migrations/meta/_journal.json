@@ -512,6 +512,13 @@
       "when": 1788813335804,
       "tag": "0072_platform_content_manage_tenant_leak_revoke",
       "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "7",
+      "when": 1788899735804,
+      "tag": "0073_seed_missing_supplier_balance_projection_metadata",
+      "breakpoints": true
     }
   ]
 }

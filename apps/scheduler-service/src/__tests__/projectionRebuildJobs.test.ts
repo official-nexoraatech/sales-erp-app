@@ -23,7 +23,10 @@ vi.mock('drizzle-orm', () => ({
   eq: vi.fn((col: unknown, val: unknown) => ({ type: 'eq', col, val })),
 }));
 
-import { registerProjectionRebuildJobs, PROJECTION_QUEUE_NAMES } from '../jobs/projectionRebuildJobs.js';
+import {
+  registerProjectionRebuildJobs,
+  PROJECTION_QUEUE_NAMES,
+} from '../jobs/projectionRebuildJobs.js';
 
 type JobHandler = (job: unknown, tenantId?: number) => Promise<void>;
 
@@ -33,27 +36,37 @@ function buildFakeRegistry() {
   return {
     handlers,
     configs,
-    register: vi.fn((name: string, config: { manualOnly?: boolean; tenantScoped: boolean }, handler: JobHandler) => {
-      handlers.set(name, handler);
-      configs.set(name, config);
-    }),
+    register: vi.fn(
+      (
+        name: string,
+        config: { manualOnly?: boolean; tenantScoped: boolean },
+        handler: JobHandler
+      ) => {
+        handlers.set(name, handler);
+        configs.set(name, config);
+      }
+    ),
   };
 }
 
 function buildFakeDb(executeResults: unknown[]) {
   let executeIndex = 0;
+  const insertValues: Array<Record<string, unknown>> = [];
   const onConflictSets: Array<Record<string, unknown>> = [];
   const updateSets: Array<Record<string, unknown>> = [];
 
   return {
     execute: vi.fn(() => Promise.resolve(executeResults[executeIndex++] ?? [])),
     insert: vi.fn(() => ({
-      values: vi.fn(() => ({
-        onConflictDoUpdate: vi.fn(({ set }: { set: Record<string, unknown> }) => {
-          onConflictSets.push(set);
-          return Promise.resolve();
-        }),
-      })),
+      values: vi.fn((values: Record<string, unknown>) => {
+        insertValues.push(values);
+        return {
+          onConflictDoUpdate: vi.fn(({ set }: { set: Record<string, unknown> }) => {
+            onConflictSets.push(set);
+            return Promise.resolve();
+          }),
+        };
+      }),
     })),
     update: vi.fn(() => ({
       set: vi.fn((patch: Record<string, unknown>) => {
@@ -61,6 +74,7 @@ function buildFakeDb(executeResults: unknown[]) {
         return { where: vi.fn(() => Promise.resolve()) };
       }),
     })),
+    insertValues,
     onConflictSets,
     updateSets,
   };
@@ -108,22 +122,25 @@ describe('registerProjectionRebuildJobs', () => {
 
     expect(db.onConflictSets).toHaveLength(1);
     expect(db.onConflictSets[0]).toMatchObject({ availableQty: '80', reservedQty: '20' });
-    expect(db.updateSets).toContainEqual(
-      expect.objectContaining({ status: 'UP_TO_DATE' })
-    );
+    expect(db.updateSets).toContainEqual(expect.objectContaining({ status: 'UP_TO_DATE' }));
   });
 
   it('rebuilds projection_customer_balance: currentBalance = invoiced - paid - returns, overwritten not incremented', async () => {
     const registry = buildFakeRegistry();
+    // db.execute() returns raw postgres.js wire-format strings for timestamp columns, not
+    // Date instances — using a string here (not `new Date(...)`) is what actually caught the
+    // 2026-07-17 "value.toISOString is not a function" bug; a Date-object mock would have hidden it.
     const db = buildFakeDb([
-      [{
-        customer_id: 7,
-        total_invoiced: '500',
-        total_paid: '200',
-        total_returned: '50',
-        last_invoice_at: new Date('2026-01-01'),
-        last_payment_at: new Date('2026-01-02'),
-      }],
+      [
+        {
+          customer_id: 7,
+          total_invoiced: '500',
+          total_paid: '200',
+          total_returned: '50',
+          last_invoice_at: '2026-01-01 00:00:00+00',
+          last_payment_at: '2026-01-02 00:00:00+00',
+        },
+      ],
     ]);
     registerProjectionRebuildJobs(registry as never, db as never);
 
@@ -137,19 +154,23 @@ describe('registerProjectionRebuildJobs', () => {
       totalPaid: '200',
       overdueAmount: '0',
     });
+    expect(db.onConflictSets[0]!['lastInvoiceAt']).toBeInstanceOf(Date);
+    expect(db.onConflictSets[0]!['lastPaymentAt']).toBeInstanceOf(Date);
   });
 
   it('rebuilds projection_supplier_balance: currentBalance = purchased - paid - returns, overwritten not incremented', async () => {
     const registry = buildFakeRegistry();
     const db = buildFakeDb([
-      [{
-        supplier_id: 9,
-        total_purchased: '1000',
-        total_paid: '400',
-        total_returned: '100',
-        last_grn_at: new Date('2026-01-01'),
-        last_payment_at: new Date('2026-01-02'),
-      }],
+      [
+        {
+          supplier_id: 9,
+          total_purchased: '1000',
+          total_paid: '400',
+          total_returned: '100',
+          last_grn_at: '2026-01-01 00:00:00+00',
+          last_payment_at: '2026-01-02 00:00:00+00',
+        },
+      ],
     ]);
     registerProjectionRebuildJobs(registry as never, db as never);
 
@@ -164,20 +185,24 @@ describe('registerProjectionRebuildJobs', () => {
       totalReturns: '100',
       overdueAmount: '0',
     });
+    expect(db.onConflictSets[0]!['lastGrnAt']).toBeInstanceOf(Date);
+    expect(db.onConflictSets[0]!['lastPaymentAt']).toBeInstanceOf(Date);
   });
 
   it('rebuilds projection_dashboard_daily from invoices/payments/returns for the trailing window', async () => {
     const registry = buildFakeRegistry();
     const db = buildFakeDb([
-      [{
-        branch_id: 2,
-        date_key: new Date('2026-07-01'),
-        sales_count: '10',
-        sales_amount: '5000',
-        collected_amount: '3000',
-        return_count: '2',
-        return_amount: '150',
-      }],
+      [
+        {
+          branch_id: 2,
+          date_key: '2026-07-01 00:00:00+00',
+          sales_count: '10',
+          sales_amount: '5000',
+          collected_amount: '3000',
+          return_count: '2',
+          return_amount: '150',
+        },
+      ],
     ]);
     registerProjectionRebuildJobs(registry as never, db as never);
 
@@ -192,6 +217,7 @@ describe('registerProjectionRebuildJobs', () => {
       returnCount: 2,
       returnAmount: '150',
     });
+    expect(db.insertValues[0]!['date']).toBeInstanceOf(Date);
   });
 
   it('marks projectionMetadata ERROR with a message and rethrows on a forced recompute failure', async () => {

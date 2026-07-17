@@ -39,11 +39,22 @@ async function markResult(db: ErpDatabase, projectionName: string, err: unknown)
     .update(projectionMetadata)
     .set({
       status: 'UP_TO_DATE',
+      errorMessage: null,
       lastUpdatedAt: new Date(),
       rebuildCompletedAt: new Date(),
       updatedAt: new Date(),
     })
     .where(eq(projectionMetadata.projectionName, projectionName));
+}
+
+// db.execute() returns raw postgres.js rows — timestamp columns come back as wire-format
+// strings (e.g. "2026-07-14 00:00:00+00"), not JS Date instances, unlike drizzle's
+// schema-aware typed .select(). Passing that raw string straight into a drizzle `timestamp`
+// column crashes with "value.toISOString is not a function" (found in live QA 2026-07-17 —
+// both projection_dashboard_daily and projection_customer_balance were stuck in ERROR since
+// 2026-07-12; projection_supplier_balance has the same latent bug, just never rebuilt yet).
+function toDateOrUndefined(value: Date | string | null): Date | undefined {
+  return value == null ? undefined : new Date(value);
 }
 
 // Ledger sum reused/extended from apps/inventory-service/src/jobs/reconciliation.job.ts
@@ -144,8 +155,8 @@ async function rebuildCustomerBalance(db: ErpDatabase, tenantId: number): Promis
     total_invoiced: string;
     total_paid: string;
     total_returned: string;
-    last_invoice_at: Date | null;
-    last_payment_at: Date | null;
+    last_invoice_at: string | null;
+    last_payment_at: string | null;
   }>(sql`
     WITH invoiced AS (
       SELECT customer_id, SUM(grand_total) AS total_invoiced, MAX(invoice_date) AS last_invoice_at
@@ -182,8 +193,8 @@ async function rebuildCustomerBalance(db: ErpDatabase, tenantId: number): Promis
     total_invoiced: string;
     total_paid: string;
     total_returned: string;
-    last_invoice_at: Date | null;
-    last_payment_at: Date | null;
+    last_invoice_at: string | null;
+    last_payment_at: string | null;
   }>;
 
   for (const row of rows) {
@@ -191,6 +202,9 @@ async function rebuildCustomerBalance(db: ErpDatabase, tenantId: number): Promis
     const totalPaid = parseFloat(row.total_paid ?? '0');
     const totalReturned = parseFloat(row.total_returned ?? '0');
     const currentBalance = totalInvoiced - totalPaid - totalReturned;
+
+    const lastInvoiceAt = toDateOrUndefined(row.last_invoice_at);
+    const lastPaymentAt = toDateOrUndefined(row.last_payment_at);
 
     await db
       .insert(projectionCustomerBalance)
@@ -201,8 +215,8 @@ async function rebuildCustomerBalance(db: ErpDatabase, tenantId: number): Promis
         totalInvoiced: String(totalInvoiced),
         totalPaid: String(totalPaid),
         overdueAmount: '0',
-        lastInvoiceAt: row.last_invoice_at ?? undefined,
-        lastPaymentAt: row.last_payment_at ?? undefined,
+        lastInvoiceAt,
+        lastPaymentAt,
       })
       .onConflictDoUpdate({
         target: [projectionCustomerBalance.tenantId, projectionCustomerBalance.customerId],
@@ -211,8 +225,8 @@ async function rebuildCustomerBalance(db: ErpDatabase, tenantId: number): Promis
           totalInvoiced: String(totalInvoiced),
           totalPaid: String(totalPaid),
           overdueAmount: '0',
-          lastInvoiceAt: row.last_invoice_at ?? undefined,
-          lastPaymentAt: row.last_payment_at ?? undefined,
+          lastInvoiceAt,
+          lastPaymentAt,
           updatedAt: new Date(),
         },
       });
@@ -231,8 +245,8 @@ async function rebuildSupplierBalance(db: ErpDatabase, tenantId: number): Promis
     total_purchased: string;
     total_paid: string;
     total_returned: string;
-    last_grn_at: Date | null;
-    last_payment_at: Date | null;
+    last_grn_at: string | null;
+    last_payment_at: string | null;
   }>(sql`
     WITH purchased AS (
       SELECT supplier_id, SUM(grand_total) AS total_purchased, MAX(grn_date) AS last_grn_at
@@ -268,8 +282,8 @@ async function rebuildSupplierBalance(db: ErpDatabase, tenantId: number): Promis
     total_purchased: string;
     total_paid: string;
     total_returned: string;
-    last_grn_at: Date | null;
-    last_payment_at: Date | null;
+    last_grn_at: string | null;
+    last_payment_at: string | null;
   }>;
 
   for (const row of rows) {
@@ -277,6 +291,9 @@ async function rebuildSupplierBalance(db: ErpDatabase, tenantId: number): Promis
     const totalPaid = parseFloat(row.total_paid ?? '0');
     const totalReturned = parseFloat(row.total_returned ?? '0');
     const currentBalance = totalPurchased - totalPaid - totalReturned;
+
+    const lastGrnAt = toDateOrUndefined(row.last_grn_at);
+    const lastPaymentAt = toDateOrUndefined(row.last_payment_at);
 
     await db
       .insert(projectionSupplierBalance)
@@ -288,8 +305,8 @@ async function rebuildSupplierBalance(db: ErpDatabase, tenantId: number): Promis
         totalPaid: String(totalPaid),
         totalReturns: String(totalReturned),
         overdueAmount: '0',
-        lastGrnAt: row.last_grn_at ?? undefined,
-        lastPaymentAt: row.last_payment_at ?? undefined,
+        lastGrnAt,
+        lastPaymentAt,
       })
       .onConflictDoUpdate({
         target: [projectionSupplierBalance.tenantId, projectionSupplierBalance.supplierId],
@@ -299,8 +316,8 @@ async function rebuildSupplierBalance(db: ErpDatabase, tenantId: number): Promis
           totalPaid: String(totalPaid),
           totalReturns: String(totalReturned),
           overdueAmount: '0',
-          lastGrnAt: row.last_grn_at ?? undefined,
-          lastPaymentAt: row.last_payment_at ?? undefined,
+          lastGrnAt,
+          lastPaymentAt,
           updatedAt: new Date(),
         },
       });
@@ -319,7 +336,7 @@ async function rebuildSupplierBalance(db: ErpDatabase, tenantId: number): Promis
 async function rebuildDashboardDaily(db: ErpDatabase, tenantId: number): Promise<void> {
   const result = await db.execute<{
     branch_id: number;
-    date_key: Date;
+    date_key: string;
     sales_count: string;
     sales_amount: string;
     collected_amount: string;
@@ -364,7 +381,7 @@ async function rebuildDashboardDaily(db: ErpDatabase, tenantId: number): Promise
   `);
   const rows = result as Array<{
     branch_id: number;
-    date_key: Date;
+    date_key: string;
     sales_count: string;
     sales_amount: string;
     collected_amount: string;
@@ -379,12 +396,15 @@ async function rebuildDashboardDaily(db: ErpDatabase, tenantId: number): Promise
     const returnCount = parseInt(row.return_count, 10) || 0;
     const returnAmount = parseFloat(row.return_amount ?? '0');
 
+    const dateKey = toDateOrUndefined(row.date_key);
+    if (!dateKey) continue;
+
     await db
       .insert(projectionDashboardDaily)
       .values({
         tenantId,
         branchId: row.branch_id,
-        date: row.date_key,
+        date: dateKey,
         salesCount,
         salesAmount: String(salesAmount),
         collectedAmount: String(collectedAmount),
@@ -435,7 +455,10 @@ export function registerProjectionRebuildJobs(registry: JobRegistry, db: ErpData
       },
       async (_job, tenantId) => {
         if (tenantId === undefined) {
-          logger.warn({ projectionName }, 'Projection rebuild triggered without a tenantId — skipping');
+          logger.warn(
+            { projectionName },
+            'Projection rebuild triggered without a tenantId — skipping'
+          );
           return;
         }
 
