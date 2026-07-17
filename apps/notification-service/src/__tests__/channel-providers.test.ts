@@ -10,6 +10,11 @@ import { WhatsAppChannelProvider } from '../domain/channels/WhatsAppChannelProvi
 import { InAppChannelProvider } from '../domain/channels/InAppChannelProvider.js';
 import { ChannelRegistry } from '../domain/channels/ChannelRegistry.js';
 
+const sendMailMock = vi.fn().mockResolvedValue({ messageId: 'smtp-msg-1' });
+vi.mock('nodemailer', () => ({
+  default: { createTransport: vi.fn(() => ({ sendMail: sendMailMock })) },
+}));
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
@@ -155,6 +160,46 @@ describe('EmailChannelProvider', () => {
     const body = JSON.parse(options.body);
     expect(body.from.email).toBe('noreply@erp.local');
     expect(body.from.name).toBeUndefined();
+  });
+
+  // Found in live QA 2026-07-17: sendgridApiKey defaults to 'test_key' in dev with no real
+  // SendGrid account configured, so every email 401'd against the live API and was
+  // undeliverable in local dev. Falls back to the local Mailhog SMTP catcher instead.
+  it('falls back to SMTP when the configured key is not a real SendGrid key', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    sendMailMock.mockClear();
+
+    const provider = new EmailChannelProvider('test_key', 'noreply@erp.local', {
+      host: 'localhost',
+      port: 1025,
+      user: '',
+      pass: '',
+    });
+    const result = await provider.send({ email: 'a@b.com', body: '<p>Hello</p>', tenantId: 1 });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(sendMailMock).toHaveBeenCalledWith(
+      expect.objectContaining({ to: 'a@b.com', from: 'noreply@erp.local' })
+    );
+    expect(result.externalId).toBe('smtp-msg-1');
+  });
+
+  it('still uses SendGrid when a real SendGrid key is configured, even if smtp config is passed', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, headers: new Map() });
+    vi.stubGlobal('fetch', fetchMock);
+    sendMailMock.mockClear();
+
+    const provider = new EmailChannelProvider('SG.real-key', 'noreply@erp.local', {
+      host: 'localhost',
+      port: 1025,
+      user: '',
+      pass: '',
+    });
+    await provider.send({ email: 'a@b.com', body: '<p>Hello</p>', tenantId: 1 });
+
+    expect(fetchMock).toHaveBeenCalled();
+    expect(sendMailMock).not.toHaveBeenCalled();
   });
 });
 

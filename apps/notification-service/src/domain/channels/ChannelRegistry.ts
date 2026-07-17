@@ -15,13 +15,25 @@ export class ChannelRegistry {
       | 'msg91TemplateId'
       | 'sendgridApiKey'
       | 'fromEmail'
+      | 'smtpHost'
+      | 'smtpPort'
+      | 'smtpUser'
+      | 'smtpPass'
       | 'whatsappPhoneNumberId'
       | 'whatsappAccessToken'
     >
   ) {
     this.providers = new Map<ChannelName, ChannelProvider>([
       ['SMS', new SmsChannelProvider(config.msg91AuthKey, config.msg91TemplateId)],
-      ['EMAIL', new EmailChannelProvider(config.sendgridApiKey, config.fromEmail)],
+      [
+        'EMAIL',
+        new EmailChannelProvider(config.sendgridApiKey, config.fromEmail, {
+          host: config.smtpHost,
+          port: config.smtpPort,
+          user: config.smtpUser,
+          pass: config.smtpPass,
+        }),
+      ],
       [
         'WHATSAPP',
         new WhatsAppChannelProvider(config.whatsappPhoneNumberId, config.whatsappAccessToken),

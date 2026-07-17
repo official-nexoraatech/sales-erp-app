@@ -8,6 +8,10 @@ export interface NotificationServiceConfig {
   msg91TemplateId: string;
   sendgridApiKey: string;
   fromEmail: string;
+  smtpHost: string;
+  smtpPort: number;
+  smtpUser: string;
+  smtpPass: string;
   whatsappPhoneNumberId: string;
   whatsappAccessToken: string;
   jwtPublicKey: string;
@@ -36,6 +40,10 @@ export async function loadNotificationConfig(): Promise<NotificationServiceConfi
     msg91TemplateId: process.env['MSG91_TEMPLATE_ID'] ?? 'test_template',
     sendgridApiKey: process.env['SENDGRID_API_KEY'] ?? 'test_key',
     fromEmail: process.env['SMTP_FROM_ADDRESS'] ?? 'noreply@erp.local',
+    smtpHost: process.env['SMTP_HOST'] ?? 'localhost',
+    smtpPort: parseInt(process.env['SMTP_PORT'] ?? '1025', 10),
+    smtpUser: process.env['SMTP_USER'] ?? '',
+    smtpPass: process.env['SMTP_PASS'] ?? '',
     whatsappPhoneNumberId: process.env['WHATSAPP_PHONE_NUMBER_ID'] ?? '',
     whatsappAccessToken: process.env['WHATSAPP_ACCESS_TOKEN'] ?? '',
     jwtPublicKey: process.env['JWT_PUBLIC_KEY'] ?? '',

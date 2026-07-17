@@ -26,11 +26,13 @@
     "handlebars": "^4.7.8",
     "ioredis": "^5.4.1",
     "jose": "^5.10.0",
+    "nodemailer": "^9.0.1",
     "ulid": "^2.3.0",
     "zod": "^3.24.0"
   },
   "devDependencies": {
     "@types/node": "^20.17.0",
+    "@types/nodemailer": "^6.4.17",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3",
     "vitest": "^3.2.6"

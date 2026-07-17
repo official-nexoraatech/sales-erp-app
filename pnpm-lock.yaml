@@ -516,6 +516,9 @@ importers:
       jose:
         specifier: ^5.10.0
         version: 5.10.0
+      nodemailer:
+        specifier: ^9.0.1
+        version: 9.0.3
       ulid:
         specifier: ^2.3.0
         version: 2.4.0
@@ -526,6 +529,9 @@ importers:
       '@types/node':
         specifier: ^20.17.0
         version: 20.19.43
+      '@types/nodemailer':
+        specifier: ^6.4.17
+        version: 6.4.24
       tsx:
         specifier: ^4.19.2
         version: 4.22.4
