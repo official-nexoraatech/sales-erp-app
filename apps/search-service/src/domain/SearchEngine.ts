@@ -517,15 +517,26 @@ export class SearchEngine {
   private async esRequest(
     method: string,
     path: string,
-    body?: unknown
+    body?: unknown,
+    contentType = 'application/json'
   ): Promise<{ ok: boolean; status: number; data: unknown }> {
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    const headers: Record<string, string> = { 'Content-Type': contentType };
     if (this.apiKey) headers['Authorization'] = `ApiKey ${this.apiKey}`;
 
+    // bulkIndex() below passes an already-formatted NDJSON string (the _bulk API's required
+    // wire format — one JSON object per line, no enclosing array) — JSON.stringify-ing it
+    // AGAIN here would wrap the whole multi-line string in outer quotes and escape its
+    // internal newlines, turning valid NDJSON into a single invalid JSON string value. ES
+    // then 400s ("bulk request must be terminated by a newline"), but bulkIndex()'s success
+    // count only checked `resp.items` for per-item errors — with no `items` array at all
+    // (a request-level 400, not per-item failures), it fell back to "0 failed" and reported
+    // false success. Found live 2026-07-17: every scheduled full-reindex/incremental-sync
+    // silently wrote zero documents for every entity, despite logging "indexed: N, failed: 0".
+    const isPreformatted = typeof body === 'string';
     const res = await fetch(`${this.baseUrl}${path}`, {
       method,
       headers,
-      body: body !== undefined ? JSON.stringify(body) : null,
+      body: body === undefined ? null : isPreformatted ? body : JSON.stringify(body),
     });
     const data = await res.json();
     return { ok: res.ok, status: res.status, data };
@@ -603,8 +614,21 @@ export class SearchEngine {
     const result = await this.esRequest(
       'POST',
       '/_bulk',
-      body.map((l) => JSON.stringify(l)).join('\n') + '\n'
+      body.map((l) => JSON.stringify(l)).join('\n') + '\n',
+      'application/x-ndjson'
     );
+    // A request-level failure (bad request, connection issue, cluster error) has no `items`
+    // array at all — treat that as every document failed, not "0 failed" via `?? 0`. That
+    // silent-success fallback is exactly what hid the NDJSON double-stringify bug above:
+    // this logged "indexed: N, failed: 0" every single reindex run while writing zero
+    // documents, for every entity, every tenant, until caught by live QA 2026-07-17.
+    if (!result.ok) {
+      logger.error(
+        { index, status: result.status, result: result.data },
+        'Bulk index request failed'
+      );
+      return { indexed: 0, failed: documents.length };
+    }
     const resp = result.data as {
       errors?: boolean;
       items?: Array<{ index?: { error?: unknown } }>;

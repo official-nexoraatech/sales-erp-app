@@ -15,10 +15,14 @@ function jsonResponse(data: unknown): Response {
   return { ok: true, status: 200, json: async () => data } as unknown as Response;
 }
 
+// bulkIndex() sends a raw multi-line NDJSON string body (the _bulk API's required wire
+// format), not a single JSON document like every other esRequest() caller — so this can't
+// eagerly JSON.parse the body here; each test parses it in the shape appropriate to the
+// call it's testing (single index() calls parse directly, bulkIndex() splits by line first).
 function captureRequest() {
-  const calls: Array<{ url: string; body: Record<string, unknown> }> = [];
+  const calls: Array<{ url: string; body: string }> = [];
   global.fetch = vi.fn(async (url: string | URL, init?: RequestInit) => {
-    calls.push({ url: String(url), body: JSON.parse((init?.body as string) ?? '{}') });
+    calls.push({ url: String(url), body: (init?.body as string) ?? '{}' });
     return jsonResponse({ result: 'updated' });
   }) as unknown as typeof fetch;
   return calls;
@@ -34,7 +38,7 @@ describe('SearchEngine.index — displayName aliasing', () => {
     const engine = new SearchEngine({ elasticsearchUrl: 'http://es:9200' });
     await engine.index(7, 'customer', '5', { displayName: 'Ramesh Textiles', phone: '9876543210' });
 
-    const doc = calls[0]!.body['doc'] as Record<string, unknown>;
+    const doc = (JSON.parse(calls[0]!.body)['doc'] ?? {}) as Record<string, unknown>;
     expect(doc['name']).toBe('Ramesh Textiles');
     expect(doc['displayName']).toBe('Ramesh Textiles');
   });
@@ -44,7 +48,7 @@ describe('SearchEngine.index — displayName aliasing', () => {
     const engine = new SearchEngine({ elasticsearchUrl: 'http://es:9200' });
     await engine.index(7, 'item', '9', { name: 'Cotton Saree', displayName: 'ignored' });
 
-    const doc = calls[0]!.body['doc'] as Record<string, unknown>;
+    const doc = (JSON.parse(calls[0]!.body)['doc'] ?? {}) as Record<string, unknown>;
     expect(doc['name']).toBe('Cotton Saree');
   });
 
@@ -53,7 +57,7 @@ describe('SearchEngine.index — displayName aliasing', () => {
     const engine = new SearchEngine({ elasticsearchUrl: 'http://es:9200' });
     await engine.index(7, 'invoice', '1', { invoiceNumber: 'INV-001' });
 
-    const doc = calls[0]!.body['doc'] as Record<string, unknown>;
+    const doc = (JSON.parse(calls[0]!.body)['doc'] ?? {}) as Record<string, unknown>;
     expect(doc['name']).toBeUndefined();
   });
 });
@@ -71,8 +75,7 @@ describe('SearchEngine.bulkIndex — displayName aliasing', () => {
       { id: '2', doc: { displayName: 'Bharat Traders' } },
     ]);
 
-    const raw = calls[0]!.body as unknown as string;
-    const lines = raw
+    const lines = calls[0]!.body
       .split('\n')
       .filter(Boolean)
       .map((l) => JSON.parse(l));

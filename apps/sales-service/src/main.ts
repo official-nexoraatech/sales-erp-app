@@ -214,6 +214,27 @@ async function bootstrap(): Promise<void> {
     }
   });
 
+  // Internal-key-guarded routes (scheduler/service-to-service callers, checked via
+  // x-internal-key, never a JWT) — registered as their own top-level, genuinely sibling
+  // .register() call, never nested inside (or after) the block below. Found live
+  // 2026-07-17: several route files below (attachmentRoutes, quotationRoutes,
+  // invoiceRoutes, paymentRoutes, ...) call fastify.addHook('preHandler', authenticate)
+  // directly on the shared `sub` instance they're given. A Fastify child only escapes a
+  // parent's hooks by being a true sibling at the same encapsulation level — nesting a
+  // child inside that same `sub` does NOT protect it, even if the nested .register() call
+  // is written before the addHook-adding calls in source order, because avvio finalizes a
+  // parent's full hook chain before any of its children boot (confirmed by test:
+  // src/__tests__/internal-route-auth-isolation.test.ts). The old code registered these
+  // routes directly on `sub` below, so they silently inherited every one of those hooks —
+  // 401ing every scheduled search-sync/reindex call for every entity, every tenant.
+  await fastify.register(
+    async (internalSub) => {
+      await internalRoutes(internalSub, ctxFactory);
+      await searchSyncInternalRoutes(internalSub, ctxFactory);
+    },
+    { prefix: '/api/v2' }
+  );
+
   await fastify.register(
     async (sub) => {
       await customerRoutes(sub, ctxFactory);
@@ -228,9 +249,7 @@ async function bootstrap(): Promise<void> {
       await crmRoutes(sub, ctxFactory);
       await integrationsRoutes(sub, ctxFactory);
       await dashboardRoutes(sub, ctxFactory);
-      await internalRoutes(sub, ctxFactory);
       await attachmentRoutes(sub, ctxFactory);
-      await searchSyncInternalRoutes(sub, ctxFactory);
       await syncRoutes(sub, ctxFactory);
     },
     { prefix: '/api/v2' }
