@@ -534,26 +534,32 @@ export function registerSystemJobs(
       if (tenantId === undefined) return;
       const hrUrl = process.env['HR_SERVICE_URL'] ?? 'http://localhost:3021';
       const apiKey = process.env['INTERNAL_API_KEY'] ?? '';
-      try {
-        const res = await fetch(`${hrUrl}/api/v2/internal/payroll/prepare?tenantId=${tenantId}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'x-internal-key': apiKey },
-        });
-        const body = (await res.json()) as {
-          data?: { payrollRunId?: number; employeeCount?: number; totalNet?: number };
-        };
-        logger.info(
-          {
-            tenantId,
-            payrollRunId: body.data?.payrollRunId,
-            employeeCount: body.data?.employeeCount,
-            totalNet: body.data?.totalNet,
-          },
-          'Payroll prepare complete'
-        );
-      } catch (err) {
-        logger.warn({ tenantId, err }, 'Payroll prepare job failed (non-fatal)');
+      // Security/correctness audit: this used to swallow every failure (network error AND
+      // non-2xx response) into a `logger.warn` with no rethrow — since JobRegistry's worker
+      // only lets BullMQ's attempts:3/exponential-backoff retry fire when the handler
+      // actually throws, a swallowed error meant the job was marked COMPLETED and never
+      // retried. A brief hr-service outage at 1 AM on the 25th meant that tenant's payroll
+      // prep for the month silently never ran, with no automated retry and nothing beyond a
+      // log line to notice it. Now checks res.ok and rethrows on any failure.
+      const res = await fetch(`${hrUrl}/api/v2/internal/payroll/prepare?tenantId=${tenantId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-internal-key': apiKey },
+      });
+      if (!res.ok) {
+        throw new Error(`Payroll prepare failed: HTTP ${res.status} ${await res.text()}`);
       }
+      const body = (await res.json()) as {
+        data?: { payrollRunId?: number; employeeCount?: number; totalNet?: number };
+      };
+      logger.info(
+        {
+          tenantId,
+          payrollRunId: body.data?.payrollRunId,
+          employeeCount: body.data?.employeeCount,
+          totalNet: body.data?.totalNet,
+        },
+        'Payroll prepare complete'
+      );
     }
   );
 
@@ -568,22 +574,21 @@ export function registerSystemJobs(
       if (tenantId === undefined) return;
       const hrUrl = process.env['HR_SERVICE_URL'] ?? 'http://localhost:3021';
       const apiKey = process.env['INTERNAL_API_KEY'] ?? '';
-      try {
-        const res = await fetch(
-          `${hrUrl}/api/v2/internal/payroll/send-slips?tenantId=${tenantId}`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'x-internal-key': apiKey },
-          }
+      // See hr.payroll.prepare's comment above — same swallow-and-never-retry gap, same fix.
+      const res = await fetch(`${hrUrl}/api/v2/internal/payroll/send-slips?tenantId=${tenantId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-internal-key': apiKey },
+      });
+      if (!res.ok) {
+        throw new Error(
+          `Salary slip email dispatch failed: HTTP ${res.status} ${await res.text()}`
         );
-        const body = (await res.json()) as { data?: { payrollRunId?: number; count?: number } };
-        logger.info(
-          { tenantId, payrollRunId: body.data?.payrollRunId, count: body.data?.count },
-          'Salary slip email dispatch complete'
-        );
-      } catch (err) {
-        logger.warn({ tenantId, err }, 'Salary slip email job failed (non-fatal)');
       }
+      const body = (await res.json()) as { data?: { payrollRunId?: number; count?: number } };
+      logger.info(
+        { tenantId, payrollRunId: body.data?.payrollRunId, count: body.data?.count },
+        'Salary slip email dispatch complete'
+      );
     }
   );
 
