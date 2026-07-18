@@ -154,6 +154,17 @@ export class ReorderService {
       .where(and(eq(suppliers.tenantId, params.tenantId), inArray(suppliers.id, supplierIds)));
     const supplierStateById = new Map(supplierRows.map((r) => [r.id, r.billingAddress?.stateCode]));
 
+    // Security audit: itemIds/supplierIds are client-supplied — previously a missing entry
+    // (an id from another tenant) silently fell through to a default GST rate / placeOfSupply
+    // fallback instead of being rejected, letting a purchase order be created with a dangling
+    // cross-tenant itemId/supplierId reference. Reject up front instead.
+    const missingItemId = itemIds.find((id) => !itemGstById.has(id));
+    if (missingItemId !== undefined)
+      throw new BusinessError('ITEM_NOT_FOUND', `Item ${missingItemId} not found`);
+    const missingSupplierId = supplierIds.find((id) => !supplierStateById.has(id));
+    if (missingSupplierId !== undefined)
+      throw new BusinessError('SUPPLIER_NOT_FOUND', `Supplier ${missingSupplierId} not found`);
+
     const poIds: number[] = [];
 
     await this.db.transaction(async (trx) => {

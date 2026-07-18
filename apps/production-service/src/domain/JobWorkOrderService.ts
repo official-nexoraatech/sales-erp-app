@@ -55,6 +55,23 @@ export class JobWorkOrderService {
 
   async create(params: CreateJobWorkOrderParams): Promise<number> {
     return this.db.transaction(async (trx) => {
+      // Security audit: supplierId/outputItemId were never checked against the caller's tenant
+      // before being stored — a client-supplied id from another tenant would silently create a
+      // job work order with a cross-tenant reference (surfaced via the supplier/item name joins
+      // in list()/getWithDetails(), now tenant-scoped, but the dangling reference itself should
+      // never be creatable). Mirrors the existing itemId check in ConsignmentService.receive().
+      const [supplier] = await trx
+        .select({ id: suppliers.id })
+        .from(suppliers)
+        .where(and(eq(suppliers.id, params.supplierId), eq(suppliers.tenantId, params.tenantId)));
+      if (!supplier) throw new NotFoundError('Supplier', params.supplierId);
+
+      const [outputItem] = await trx
+        .select({ id: items.id })
+        .from(items)
+        .where(and(eq(items.id, params.outputItemId), eq(items.tenantId, params.tenantId)));
+      if (!outputItem) throw new NotFoundError('Item', params.outputItemId);
+
       const materialsCost = params.materials.reduce(
         (sum, m) => sum + m.requiredQty * m.unitCost,
         0
@@ -485,8 +502,15 @@ export class JobWorkOrderService {
         outputItemName: items.name,
       })
       .from(jobWorkOrders)
-      .leftJoin(suppliers, eq(jobWorkOrders.supplierId, suppliers.id))
-      .leftJoin(items, eq(jobWorkOrders.outputItemId, items.id))
+      // Security audit: these joins were id-only (no tenant filter on the joined side) — a
+      // job work order whose supplierId/outputItemId happened to reference another tenant's row
+      // (e.g. via a client-supplied id at creation) would silently resolve and display that
+      // other tenant's supplier/item name here. Scoping both sides of the join closes the leak.
+      .leftJoin(
+        suppliers,
+        and(eq(jobWorkOrders.supplierId, suppliers.id), eq(suppliers.tenantId, tenantId))
+      )
+      .leftJoin(items, and(eq(jobWorkOrders.outputItemId, items.id), eq(items.tenantId, tenantId)))
       .where(and(eq(jobWorkOrders.id, id), eq(jobWorkOrders.tenantId, tenantId)));
     if (!order) throw new NotFoundError('JobWorkOrder', id);
 
@@ -543,19 +567,28 @@ export class JobWorkOrderService {
 
     // The list page displays supplierName/outputItemName with a "—" fallback — they were
     // never actually populated (plain select(), no join), so every row silently showed "—".
-    return this.db
-      .select({
-        ...getTableColumns(jobWorkOrders),
-        supplierName: suppliers.displayName,
-        outputItemName: items.name,
-      })
-      .from(jobWorkOrders)
-      .leftJoin(suppliers, eq(jobWorkOrders.supplierId, suppliers.id))
-      .leftJoin(items, eq(jobWorkOrders.outputItemId, items.id))
-      .where(and(...conditions))
-      .orderBy(desc(jobWorkOrders.orderDate), desc(jobWorkOrders.id))
-      .limit(filters.pageSize)
-      .offset((filters.page - 1) * filters.pageSize);
+    return (
+      this.db
+        .select({
+          ...getTableColumns(jobWorkOrders),
+          supplierName: suppliers.displayName,
+          outputItemName: items.name,
+        })
+        .from(jobWorkOrders)
+        // Security audit: same tenant-scoped-join fix as getWithDetails() above.
+        .leftJoin(
+          suppliers,
+          and(eq(jobWorkOrders.supplierId, suppliers.id), eq(suppliers.tenantId, tenantId))
+        )
+        .leftJoin(
+          items,
+          and(eq(jobWorkOrders.outputItemId, items.id), eq(items.tenantId, tenantId))
+        )
+        .where(and(...conditions))
+        .orderBy(desc(jobWorkOrders.orderDate), desc(jobWorkOrders.id))
+        .limit(filters.pageSize)
+        .offset((filters.page - 1) * filters.pageSize)
+    );
   }
 
   async getDashboardStats(tenantId: number): Promise<{

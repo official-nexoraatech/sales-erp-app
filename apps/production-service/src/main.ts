@@ -94,6 +94,20 @@ async function bootstrap(): Promise<void> {
       await barcodeRoutes(sub, ctxFactory);
       await consignmentRoutes(sub, ctxFactory);
       await reorderRoutes(sub, ctxFactory);
+    },
+    { prefix: '/api/v2' }
+  );
+
+  // Registered in its own sibling plugin context (not the block above) so it does NOT inherit
+  // the `authenticate` (JWT) preHandler hook those four route files each add via
+  // `fastify.addHook('preHandler', authenticate)` — Fastify hooks added by a plain function call
+  // apply to every route registered afterward on that same instance, including ones registered by
+  // an unrelated plugin called later. This route is internal-key-only (see checkInternalKey) and
+  // is called by scheduler-service with just an `x-internal-key` header, no JWT — sharing the
+  // instance silently 401'd it before `checkInternalKey` ever ran, reintroducing the exact PG-026
+  // bug (scheduler jobs calling a JWT-only route with no JWT) this route was built to fix.
+  await fastify.register(
+    async (sub) => {
       await schedulerInternalRoutes(sub, ctxFactory);
     },
     { prefix: '/api/v2' }

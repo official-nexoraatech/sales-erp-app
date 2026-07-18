@@ -21,6 +21,21 @@ const ThemeConfigSchema = z.object({
   radiusScale: z.enum(['sharp', 'default', 'rounded']).optional(),
 });
 
+// PG-013/security-audit: fileName previously went unvalidated straight into the S3 key
+// (path-traversal risk via "../"), and contentType was unrestricted (could request a
+// non-image upload target). Allow-list both.
+const LogoUploadSchema = z.object({
+  fileName: z
+    .string()
+    .max(255)
+    .regex(
+      /^[A-Za-z0-9._-]+$/,
+      'fileName must contain only letters, numbers, dots, hyphens, and underscores'
+    )
+    .optional(),
+  contentType: z.enum(['image/png', 'image/jpeg', 'image/webp', 'image/svg+xml']).optional(),
+});
+
 const UpdateOrgSchema = z.object({
   orgName: z.string().min(2).max(200),
   legalName: z.string().max(300).optional(),
@@ -60,9 +75,17 @@ export async function organizationRoutes(
   fastify: FastifyInstance,
   ctxFactory: PlatformContextFactory
 ): Promise<void> {
-  function ctxFor(request: { auth: { tenantId: number; userId: number }; headers: Record<string, unknown> }): ReturnType<PlatformContextFactory['create']> {
-    const correlationId = (request.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID();
-    return ctxFactory.create({ tenantId: request.auth.tenantId, userId: request.auth.userId, correlationId });
+  function ctxFor(request: {
+    auth: { tenantId: number; userId: number };
+    headers: Record<string, unknown>;
+  }): ReturnType<PlatformContextFactory['create']> {
+    const correlationId =
+      (request.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID();
+    return ctxFactory.create({
+      tenantId: request.auth.tenantId,
+      userId: request.auth.userId,
+      correlationId,
+    });
   }
 
   // ── GET /organization ─────────────────────────────────────────────────────
@@ -115,73 +138,94 @@ export async function organizationRoutes(
   });
 
   // ── PUT /organization ─────────────────────────────────────────────────────
-  fastify.put('/organization', { preHandler: [authenticate, requirePermission(PERMISSIONS.ORG_SETTINGS_EDIT)] }, async (request, reply) => {
-    const { tenantId, userId } = request.auth;
-    const ctx = ctxFor(request);
+  fastify.put(
+    '/organization',
+    { preHandler: [authenticate, requirePermission(PERMISSIONS.ORG_SETTINGS_EDIT)] },
+    async (request, reply) => {
+      const { tenantId, userId } = request.auth;
+      const ctx = ctxFor(request);
 
-    const body = UpdateOrgSchema.safeParse(request.body);
-    if (!body.success) {
-      throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
-    }
-
-    const [existing] = await ctx.db.raw
-      .select()
-      .from(organizationSettings)
-      .where(eq(organizationSettings.tenantId, tenantId));
-
-    if (!existing) {
-      const [created] = await ctx.db.raw
-        .insert(organizationSettings)
-        .values({
-          tenantId,
-          createdBy: userId,
-          ...body.data,
-        } as unknown as typeof organizationSettings.$inferInsert)
-        .returning();
-      if (created) {
-        await ctx.events.publish('organization', tenantId, 'ORGANIZATION_UPDATED', created as unknown as Record<string, unknown>);
+      const body = UpdateOrgSchema.safeParse(request.body);
+      if (!body.success) {
+        throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
       }
-      return reply.code(200).send({ data: created });
+
+      const [existing] = await ctx.db.raw
+        .select()
+        .from(organizationSettings)
+        .where(eq(organizationSettings.tenantId, tenantId));
+
+      if (!existing) {
+        const [created] = await ctx.db.raw
+          .insert(organizationSettings)
+          .values({
+            tenantId,
+            createdBy: userId,
+            ...body.data,
+          } as unknown as typeof organizationSettings.$inferInsert)
+          .returning();
+        if (created) {
+          await ctx.events.publish(
+            'organization',
+            tenantId,
+            'ORGANIZATION_UPDATED',
+            created as unknown as Record<string, unknown>
+          );
+        }
+        return reply.code(200).send({ data: created });
+      }
+
+      if (body.data.version !== undefined && existing.version !== body.data.version) {
+        const { OptimisticLockError } = await import('@erp/types');
+        throw new OptimisticLockError('Organization settings');
+      }
+
+      const [updated] = await ctx.db.raw
+        .update(organizationSettings)
+        .set({
+          ...body.data,
+          updatedAt: new Date(),
+          updatedBy: userId,
+          version: existing.version + 1,
+        } as unknown as Partial<typeof organizationSettings.$inferInsert>)
+        .where(eq(organizationSettings.tenantId, tenantId))
+        .returning();
+
+      if (updated) {
+        await ctx.events.publish(
+          'organization',
+          tenantId,
+          'ORGANIZATION_UPDATED',
+          updated as unknown as Record<string, unknown>
+        );
+      }
+
+      return reply.code(200).send({ data: updated });
     }
-
-    if (body.data.version !== undefined && existing.version !== body.data.version) {
-      const { OptimisticLockError } = await import('@erp/types');
-      throw new OptimisticLockError('Organization settings');
-    }
-
-    const [updated] = await ctx.db.raw
-      .update(organizationSettings)
-      .set({
-        ...body.data,
-        updatedAt: new Date(),
-        updatedBy: userId,
-        version: existing.version + 1,
-      } as unknown as Partial<typeof organizationSettings.$inferInsert>)
-      .where(eq(organizationSettings.tenantId, tenantId))
-      .returning();
-
-    if (updated) {
-      await ctx.events.publish('organization', tenantId, 'ORGANIZATION_UPDATED', updated as unknown as Record<string, unknown>);
-    }
-
-    return reply.code(200).send({ data: updated });
-  });
+  );
 
   // ── POST /organization/logo/upload ────────────────────────────────────────
-  fastify.post('/organization/logo/upload', { preHandler: [authenticate, requirePermission(PERMISSIONS.ORG_SETTINGS_EDIT)] }, async (request, reply) => {
-    const { tenantId } = request.auth;
-    const body = request.body as { fileName?: string; contentType?: string };
-    const fileName = body.fileName ?? 'logo.png';
-    const contentType = body.contentType ?? 'image/png';
-    const s3Key = `tenants/${tenantId}/logo/${Date.now()}-${fileName}`;
+  fastify.post(
+    '/organization/logo/upload',
+    { preHandler: [authenticate, requirePermission(PERMISSIONS.ORG_SETTINGS_EDIT)] },
+    async (request, reply) => {
+      const { tenantId } = request.auth;
+      const body = LogoUploadSchema.safeParse(request.body);
+      if (!body.success) {
+        throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
+      }
+      const fileName = body.data.fileName ?? 'logo.png';
+      const contentType = body.data.contentType ?? 'image/png';
+      const s3Key = `tenants/${tenantId}/logo/${Date.now()}-${fileName}`;
 
-    return reply.code(200).send({
-      data: {
-        uploadUrl: `${process.env['MINIO_ENDPOINT'] ?? 'http://localhost:9000'}/erp-storage/${s3Key}`,
-        s3Key,
-        contentType,
-        expiresIn: 900,
-      },
-    });
-  });
+      return reply.code(200).send({
+        data: {
+          uploadUrl: `${process.env['MINIO_ENDPOINT'] ?? 'http://localhost:9000'}/erp-storage/${s3Key}`,
+          s3Key,
+          contentType,
+          expiresIn: 900,
+        },
+      });
+    }
+  );
 }

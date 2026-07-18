@@ -402,13 +402,23 @@ export async function notificationRoutes(
     '/notifications/:id/read',
     { preHandler: authenticate },
     async (request, reply) => {
-      const { tenantId } = (request as unknown as AuthedRequest).auth;
+      const { tenantId, userId = 0 } = (request as unknown as AuthedRequest).auth;
       const id = parseInt(request.params.id, 10);
 
+      // Security audit: this WHERE clause only checked tenantId, not recipientUserId — any
+      // authenticated user in the tenant could mark ANY other user's notification as read by
+      // guessing/enumerating ids (IDOR). GET /notifications and /unread-count both already scope
+      // by recipientUserId; this route needs the same scoping.
       await db
         .update(notificationLog)
         .set({ readAt: new Date(), updatedAt: new Date() })
-        .where(and(eq(notificationLog.id, id), eq(notificationLog.tenantId, tenantId)));
+        .where(
+          and(
+            eq(notificationLog.id, id),
+            eq(notificationLog.tenantId, tenantId),
+            eq(notificationLog.recipientUserId, userId)
+          )
+        );
 
       return reply.code(200).send({ data: { message: 'Marked as read' } });
     }

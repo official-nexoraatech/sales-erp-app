@@ -37,6 +37,14 @@ export class ConsignmentService {
         .where(and(eq(items.id, params.itemId), eq(items.tenantId, params.tenantId)));
       if (!item) throw new NotFoundError('Item', params.itemId);
 
+      // Security audit: supplierId had no tenant-ownership check (itemId's above was the only
+      // one) — mirrors the same fix applied to JobWorkOrderService.create().
+      const [supplier] = await trx
+        .select({ id: suppliers.id })
+        .from(suppliers)
+        .where(and(eq(suppliers.id, params.supplierId), eq(suppliers.tenantId, params.tenantId)));
+      if (!supplier) throw new NotFoundError('Supplier', params.supplierId);
+
       // Consignment stock is NOT posted to financial_entries — it's not owned until sold
       const [row] = await trx
         .insert(consignmentStocks)
@@ -315,34 +323,52 @@ export class ConsignmentService {
 
     // The list page displays supplierName/itemName/warehouseName with a "—" fallback — they
     // were never actually populated (plain select(), no join).
-    return this.db
-      .select({
-        ...getTableColumns(consignmentStocks),
-        supplierName: suppliers.displayName,
-        itemName: items.name,
-        warehouseName: warehouses.name,
-      })
-      .from(consignmentStocks)
-      .leftJoin(suppliers, eq(consignmentStocks.supplierId, suppliers.id))
-      .leftJoin(items, eq(consignmentStocks.itemId, items.id))
-      .leftJoin(warehouses, eq(consignmentStocks.warehouseId, warehouses.id))
-      .where(and(...conditions))
-      .orderBy(desc(consignmentStocks.receivedDate), desc(consignmentStocks.id));
+    return (
+      this.db
+        .select({
+          ...getTableColumns(consignmentStocks),
+          supplierName: suppliers.displayName,
+          itemName: items.name,
+          warehouseName: warehouses.name,
+        })
+        .from(consignmentStocks)
+        // Security audit: these joins were id-only (no tenant filter on the joined side) — a
+        // consignment stock row whose supplierId/warehouseId happened to reference another
+        // tenant's row would silently resolve and display that other tenant's name here. Scoping
+        // both sides of the join closes the leak (itemId was already tenant-checked at receive()).
+        .leftJoin(
+          suppliers,
+          and(eq(consignmentStocks.supplierId, suppliers.id), eq(suppliers.tenantId, tenantId))
+        )
+        .leftJoin(items, and(eq(consignmentStocks.itemId, items.id), eq(items.tenantId, tenantId)))
+        .leftJoin(
+          warehouses,
+          and(eq(consignmentStocks.warehouseId, warehouses.id), eq(warehouses.tenantId, tenantId))
+        )
+        .where(and(...conditions))
+        .orderBy(desc(consignmentStocks.receivedDate), desc(consignmentStocks.id))
+    );
   }
 
   async listSettlements(tenantId: number, supplierId?: number): Promise<unknown[]> {
     const conditions = [eq(consignmentSettlements.tenantId, tenantId)];
     if (supplierId) conditions.push(eq(consignmentSettlements.supplierId, supplierId));
 
-    return this.db
-      .select({
-        ...getTableColumns(consignmentSettlements),
-        supplierName: suppliers.displayName,
-      })
-      .from(consignmentSettlements)
-      .leftJoin(suppliers, eq(consignmentSettlements.supplierId, suppliers.id))
-      .where(and(...conditions))
-      .orderBy(desc(consignmentSettlements.createdAt), desc(consignmentSettlements.id));
+    return (
+      this.db
+        .select({
+          ...getTableColumns(consignmentSettlements),
+          supplierName: suppliers.displayName,
+        })
+        .from(consignmentSettlements)
+        // Security audit: same tenant-scoped-join fix as listStock() above.
+        .leftJoin(
+          suppliers,
+          and(eq(consignmentSettlements.supplierId, suppliers.id), eq(suppliers.tenantId, tenantId))
+        )
+        .where(and(...conditions))
+        .orderBy(desc(consignmentSettlements.createdAt), desc(consignmentSettlements.id))
+    );
   }
 
   async createSettlement(
