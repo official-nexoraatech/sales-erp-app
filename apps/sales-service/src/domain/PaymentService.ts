@@ -35,62 +35,63 @@ export class PaymentService {
   constructor(private db: ErpDatabase) {}
 
   async create(params: CreatePaymentParams): Promise<number> {
-    const [row] = await this.db
-      .insert(payments)
-      .values({
+    // Payment insert + outbox event + webhook enqueue used to be three separate,
+    // independently-committing statements on this.db — if the outbox insert (or the
+    // webhook enqueue) threw after the payment insert had already committed, a Payment
+    // row could exist with no outbox event, so nothing downstream (accounting ledger,
+    // GST, etc.) would ever learn about it. All three now happen in one transaction.
+    return this.db.transaction(async (trx) => {
+      const db = trx as unknown as ErpDatabase;
+
+      const [row] = await db
+        .insert(payments)
+        .values({
+          tenantId: params.tenantId,
+          branchId: params.branchId,
+          paymentNumber: params.paymentNumber,
+          customerId: params.customerId,
+          paymentDate: params.paymentDate,
+          paymentMode: params.paymentMode,
+          amount: String(params.amount),
+          allocatedAmount: '0',
+          unallocatedAmount: String(params.amount),
+          status: 'RECEIVED',
+          chequeNumber: params.chequeNumber,
+          chequeBankName: params.chequeBankName,
+          chequeDate: params.chequeDate,
+          transactionReference: params.transactionReference,
+          notes: params.notes,
+          posSessionId: params.posSessionId,
+          createdBy: params.createdBy,
+        })
+        .returning({ id: payments.id });
+
+      if (!row) throw new BusinessError('PAYMENT_CREATE_FAILED', 'Failed to create payment');
+
+      await db.insert(outboxEvents).values({
+        eventId: ulid(),
+        eventType: 'PAYMENT_RECEIVED',
+        aggregateType: 'Payment',
+        aggregateId: row.id,
         tenantId: params.tenantId,
-        branchId: params.branchId,
-        paymentNumber: params.paymentNumber,
-        customerId: params.customerId,
-        paymentDate: params.paymentDate,
-        paymentMode: params.paymentMode,
-        amount: String(params.amount),
-        allocatedAmount: '0',
-        unallocatedAmount: String(params.amount),
-        status: 'RECEIVED',
-        chequeNumber: params.chequeNumber,
-        chequeBankName: params.chequeBankName,
-        chequeDate: params.chequeDate,
-        transactionReference: params.transactionReference,
-        notes: params.notes,
-        posSessionId: params.posSessionId,
-        createdBy: params.createdBy,
-      })
-      .returning({ id: payments.id });
+        payload: {
+          paymentId: row.id,
+          customerId: params.customerId,
+          amount: params.amount,
+          paymentMode: params.paymentMode,
+        },
+        published: false,
+      });
 
-    if (!row) throw new BusinessError('PAYMENT_CREATE_FAILED', 'Failed to create payment');
-
-    // Publish outbox event
-    await this.db.insert(outboxEvents).values({
-      eventId: ulid(),
-      eventType: 'PAYMENT_RECEIVED',
-      aggregateType: 'Payment',
-      aggregateId: row.id,
-      tenantId: params.tenantId,
-      payload: {
+      await enqueueWebhookDeliveries(db, params.tenantId, 'Payment', row.id, 'PAYMENT_RECEIVED', {
         paymentId: row.id,
         customerId: params.customerId,
         amount: params.amount,
         paymentMode: params.paymentMode,
-      },
-      published: false,
+      });
+
+      return row.id;
     });
-
-    await enqueueWebhookDeliveries(
-      this.db,
-      params.tenantId,
-      'Payment',
-      row.id,
-      'PAYMENT_RECEIVED',
-      {
-        paymentId: row.id,
-        customerId: params.customerId,
-        amount: params.amount,
-        paymentMode: params.paymentMode,
-      }
-    );
-
-    return row.id;
   }
 
   async allocate(
@@ -248,24 +249,28 @@ export class PaymentService {
     if (payment.paymentMode !== 'CHEQUE')
       throw new BusinessError('NOT_CHEQUE', 'Only cheque payments can be bounced');
 
-    await this.db
-      .update(payments)
-      .set({
-        status: 'BOUNCED',
-        bouncedAt: new Date(),
-        bounceReason: reason,
-        updatedAt: new Date(),
-      })
-      .where(and(eq(payments.id, paymentId), eq(payments.tenantId, tenantId)));
+    await this.db.transaction(async (trx) => {
+      const db = trx as unknown as ErpDatabase;
 
-    await this.db.insert(outboxEvents).values({
-      eventId: ulid(),
-      eventType: 'CHEQUE_BOUNCED',
-      aggregateType: 'Payment',
-      aggregateId: paymentId,
-      tenantId,
-      payload: { paymentId, customerId: payment.customerId, amount: payment.amount, reason },
-      published: false,
+      await db
+        .update(payments)
+        .set({
+          status: 'BOUNCED',
+          bouncedAt: new Date(),
+          bounceReason: reason,
+          updatedAt: new Date(),
+        })
+        .where(and(eq(payments.id, paymentId), eq(payments.tenantId, tenantId)));
+
+      await db.insert(outboxEvents).values({
+        eventId: ulid(),
+        eventType: 'CHEQUE_BOUNCED',
+        aggregateType: 'Payment',
+        aggregateId: paymentId,
+        tenantId,
+        payload: { paymentId, customerId: payment.customerId, amount: payment.amount, reason },
+        published: false,
+      });
     });
   }
 

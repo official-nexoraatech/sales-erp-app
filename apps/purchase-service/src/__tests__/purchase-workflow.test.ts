@@ -305,37 +305,59 @@ describe('GRNService.approve — ES-23 [M1] over-receipt ceiling guard', () => {
   });
 });
 
-describe('SupplierPaymentService.allocate — status transitions', () => {
-  it('marks payment FULLY_ALLOCATED when the full unallocated amount is used', async () => {
+describe('SupplierPaymentService.allocate — atomic guarded status/amount update', () => {
+  // allocate()'s final update now computes status/allocatedAmount/unallocatedAmount via a
+  // guarded SQL UPDATE ... WHERE unallocatedAmount >= totalToAllocate ... RETURNING
+  // (matching sales-service's PaymentService.allocate()), rather than resolving the
+  // FULLY_ALLOCATED/PARTIALLY_ALLOCATED branch in JS beforehand — Postgres now decides both
+  // the CASE branch and whether the allocation is accepted at all, atomically. That branch
+  // decision can't be observed through this mock (both amounts produce the identical CASE
+  // SQL text; only a real Postgres evaluates it), so these assert the guarded update was
+  // issued and resolved (via .returning()) rather than which literal it resolved to —
+  // the resolution itself is covered by the concurrency/live-QA path.
+  it('resolves via the guarded UPDATE...RETURNING when the full unallocated amount is used', async () => {
     const paymentRow = { id: 1, tenantId: 1, allocatedAmount: '0', unallocatedAmount: '5000.00' };
     const grnRow = { id: 10, tenantId: 1, status: 'APPROVED' };
-    const trx = makeTrx([[paymentRow], [grnRow], undefined, undefined]);
+    const trx = makeTrx([[paymentRow], [grnRow], undefined, [{ unallocatedAmount: '0.00' }]]);
     const db = { transaction: vi.fn((fn: (t: typeof trx) => Promise<unknown>) => fn(trx)) };
     const svc = new SupplierPaymentService(db as never);
 
     await svc.allocate(1, 1, [{ grnId: 10, amount: 5000 }], 99);
 
     const setCalls = (trx['set'] as { mock: { calls: unknown[][] } }).mock.calls;
-    const statusUpdate = setCalls.find(
-      (args) => (args[0] as { status?: string }).status === 'FULLY_ALLOCATED'
-    );
+    const statusUpdate = setCalls.find((args) => 'status' in (args[0] as object));
     expect(statusUpdate).toBeDefined();
+    expect(trx['returning']).toHaveBeenCalled();
   });
 
-  it('marks payment PARTIALLY_ALLOCATED when less than the full amount is used', async () => {
+  it('resolves via the guarded UPDATE...RETURNING when less than the full amount is used', async () => {
     const paymentRow = { id: 1, tenantId: 1, allocatedAmount: '0', unallocatedAmount: '5000.00' };
     const grnRow = { id: 10, tenantId: 1, status: 'APPROVED' };
-    const trx = makeTrx([[paymentRow], [grnRow], undefined, undefined]);
+    const trx = makeTrx([[paymentRow], [grnRow], undefined, [{ unallocatedAmount: '3000.00' }]]);
     const db = { transaction: vi.fn((fn: (t: typeof trx) => Promise<unknown>) => fn(trx)) };
     const svc = new SupplierPaymentService(db as never);
 
     await svc.allocate(1, 1, [{ grnId: 10, amount: 2000 }], 99);
 
     const setCalls = (trx['set'] as { mock: { calls: unknown[][] } }).mock.calls;
-    const statusUpdate = setCalls.find(
-      (args) => (args[0] as { status?: string }).status === 'PARTIALLY_ALLOCATED'
-    );
+    const statusUpdate = setCalls.find((args) => 'status' in (args[0] as object));
     expect(statusUpdate).toBeDefined();
+    expect(trx['returning']).toHaveBeenCalled();
+  });
+
+  it('throws OVER_ALLOCATION when the guarded UPDATE finds no matching row (concurrent allocation)', async () => {
+    const paymentRow = { id: 1, tenantId: 1, allocatedAmount: '0', unallocatedAmount: '5000.00' };
+    const grnRow = { id: 10, tenantId: 1, status: 'APPROVED' };
+    // Final .returning() resolves to an empty array — the guarded UPDATE matched no row,
+    // as if a concurrent allocate() already consumed the balance between the OVER_ALLOCATION
+    // pre-check above and this statement.
+    const trx = makeTrx([[paymentRow], [grnRow], undefined, []]);
+    const db = { transaction: vi.fn((fn: (t: typeof trx) => Promise<unknown>) => fn(trx)) };
+    const svc = new SupplierPaymentService(db as never);
+
+    await expect(svc.allocate(1, 1, [{ grnId: 10, amount: 2000 }], 99)).rejects.toThrow(
+      /insufficient unallocated balance/
+    );
   });
 });
 
