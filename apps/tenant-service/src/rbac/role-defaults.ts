@@ -54,6 +54,13 @@ export const ROLE_DEFAULTS: Record<string, Permission[]> = {
     PERMISSIONS.STOCK_VIEW,
     PERMISSIONS.REPORT_VIEW,
     PERMISSIONS.REPORT_EXPORT,
+    // Security audit: REPORT_EXPORT never actually gated anything — the real bulk-export
+    // feature (scheduler-service's POST /exports/generate, GET /exports/:jobId/download|status)
+    // checks EXPORT_GENERATE/EXPORT_VIEW instead, which this role never held. Same
+    // role-defaults.ts-omission pattern as migration 0066 (INVENTORY_MANAGER/WAREHOUSE_MANAGE) —
+    // added here plus a backfill migration for existing tenants.
+    PERMISSIONS.EXPORT_GENERATE,
+    PERMISSIONS.EXPORT_VIEW,
     PERMISSIONS.DISCOUNT_OVERRIDE,
     PERMISSIONS.PRICE_OVERRIDE,
     PERMISSIONS.CREDIT_LIMIT_OVERRIDE,
@@ -149,6 +156,10 @@ export const ROLE_DEFAULTS: Record<string, Permission[]> = {
     PERMISSIONS.PROJECTION_VIEW,
     PERMISSIONS.EVENT_STORE_VIEW,
     PERMISSIONS.PERFORMANCE_VIEW,
+    // See SALES_MANAGER's EXPORT_GENERATE/EXPORT_VIEW comment above — same dead-constant
+    // fix for REPORT_EXPORT (this role also holds LEDGER_EXPORT, equally dead).
+    PERMISSIONS.EXPORT_GENERATE,
+    PERMISSIONS.EXPORT_VIEW,
     PERMISSIONS.SEARCH_GLOBAL,
   ],
 
@@ -243,6 +254,9 @@ export const ROLE_DEFAULTS: Record<string, Permission[]> = {
     PERMISSIONS.PROJECTION_VIEW,
     PERMISSIONS.EVENT_STORE_VIEW,
     PERMISSIONS.PERFORMANCE_VIEW,
+    // See SALES_MANAGER's EXPORT_GENERATE/EXPORT_VIEW comment above.
+    PERMISSIONS.EXPORT_GENERATE,
+    PERMISSIONS.EXPORT_VIEW,
     PERMISSIONS.SEARCH_GLOBAL,
   ],
 
@@ -267,6 +281,9 @@ export const ROLE_DEFAULTS: Record<string, Permission[]> = {
     PERMISSIONS.PROJECTION_VIEW,
     PERMISSIONS.EVENT_STORE_VIEW,
     PERMISSIONS.PERFORMANCE_VIEW,
+    // See SALES_MANAGER's EXPORT_GENERATE/EXPORT_VIEW comment above.
+    PERMISSIONS.EXPORT_GENERATE,
+    PERMISSIONS.EXPORT_VIEW,
     PERMISSIONS.SEARCH_GLOBAL,
   ],
 
@@ -275,6 +292,10 @@ export const ROLE_DEFAULTS: Record<string, Permission[]> = {
     PERMISSIONS.EXPORT_CUSTOMER_DATA,
     PERMISSIONS.REPORT_VIEW,
     PERMISSIONS.REPORT_EXPORT,
+    // See SALES_MANAGER's EXPORT_GENERATE/EXPORT_VIEW comment above — this role's whole
+    // purpose is bulk data export, so the omission was especially severe here.
+    PERMISSIONS.EXPORT_GENERATE,
+    PERMISSIONS.EXPORT_VIEW,
     PERMISSIONS.SEARCH_GLOBAL,
   ],
 

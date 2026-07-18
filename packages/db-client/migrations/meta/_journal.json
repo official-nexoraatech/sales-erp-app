@@ -519,6 +519,13 @@
       "when": 1788899735804,
       "tag": "0073_seed_missing_supplier_balance_projection_metadata",
       "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1789072535804,
+      "tag": "0075_export_generate_view_permission_backfill",
+      "breakpoints": true
     }
   ]
 }
