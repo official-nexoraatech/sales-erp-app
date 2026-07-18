@@ -7,7 +7,8 @@ const logger = createLogger({ serviceName: 'gst-service' });
 
 interface SaleReturnApprovedPayload {
   returnId: number;
-  creditNoteNumber: string;
+  returnNumber?: string;
+  creditNoteNumber?: string;
   creditNoteDate?: string;
   originalInvoiceId?: number;
   customerId?: number;
@@ -15,6 +16,7 @@ interface SaleReturnApprovedPayload {
   customerGstin?: string;
   placeOfSupply?: string;
   sellerStateCode?: string;
+  isInterstate?: boolean;
   taxableAmount?: string | number;
   cgstAmount?: string | number;
   sgstAmount?: string | number;
@@ -41,7 +43,12 @@ export async function handleSaleReturnApproved(
   const totalGst = cgstAmount + sgstAmount + igstAmount + cessAmount;
   const grandTotal = n(p.grandTotal) || taxableAmount + totalGst;
 
-  const isInterstate = p.sellerStateCode !== p.placeOfSupply;
+  // Financial-correctness audit: the producer never sent sellerStateCode (sale_returns has
+  // no such column), so this comparison was `true` for every return regardless of whether
+  // it was actually interstate — the identical always-true bug already fixed for
+  // InvoiceAccountingConsumer.ts. The producer now sends isInterstate directly, computed
+  // from igstAmount, same as InvoiceService.ts does.
+  const isInterstate = p.isInterstate ?? false;
   const documentDate = p.creditNoteDate
     ? p.creditNoteDate.substring(0, 10)
     : new Date().toISOString().substring(0, 10);
@@ -56,7 +63,11 @@ export async function handleSaleReturnApproved(
       entryType: 'CREDIT_NOTE',
       gstinOfCounterparty: p.customerGstin ?? null,
       counterpartyName: p.customerName ?? null,
-      documentNumber: p.creditNoteNumber,
+      // gst_ledger.document_number is NOT NULL — creditNoteNumber is always sent by the
+      // current producer, but this fallback keeps a missing/future payload from throwing a
+      // DB constraint violation and crash-looping this consumer (the exact failure mode the
+      // pre-fix payload mismatch caused, since creditNoteNumber was never sent at all).
+      documentNumber: p.creditNoteNumber ?? `RETURN-${p.returnId}`,
       documentDate,
       placeOfSupply: p.placeOfSupply ?? null,
       isInterstate,

@@ -40,7 +40,9 @@ export interface CreateSaleReturnParams {
 export class SaleReturnService {
   constructor(private db: ErpDatabase) {}
 
-  async create(params: CreateSaleReturnParams): Promise<{ returnId: number; creditNoteId: number }> {
+  async create(
+    params: CreateSaleReturnParams
+  ): Promise<{ returnId: number; creditNoteId: number }> {
     return this.db.transaction(async (trx) => {
       const [invoice] = await trx
         .select()
@@ -48,11 +50,17 @@ export class SaleReturnService {
         .where(and(eq(invoices.id, params.invoiceId), eq(invoices.tenantId, params.tenantId)));
       if (!invoice) throw new NotFoundError('Invoice not found');
       if (!['CONFIRMED', 'PARTIALLY_PAID', 'PAID'].includes(invoice.status))
-        throw new BusinessError('INVALID_INVOICE_STATUS', `Cannot return invoice in status ${invoice.status}`);
+        throw new BusinessError(
+          'INVALID_INVOICE_STATUS',
+          `Cannot return invoice in status ${invoice.status}`
+        );
 
       // Fetch original lines to compute return amounts with matching GST
       let totalAmount = 0;
-      let cgstTotal = 0, sgstTotal = 0, igstTotal = 0, subtotal = 0;
+      let cgstTotal = 0,
+        sgstTotal = 0,
+        igstTotal = 0,
+        subtotal = 0;
       const returnLineValues = [];
       const stockRestorations: Array<{
         itemId: number;
@@ -68,7 +76,9 @@ export class SaleReturnService {
         const [origLine] = await trx
           .select()
           .from(invoiceLines)
-          .where(and(eq(invoiceLines.id, rl.invoiceLineId), eq(invoiceLines.invoiceId, params.invoiceId)));
+          .where(
+            and(eq(invoiceLines.id, rl.invoiceLineId), eq(invoiceLines.invoiceId, params.invoiceId))
+          );
         if (!origLine) throw new NotFoundError(`Invoice line ${rl.invoiceLineId} not found`);
 
         const origQty = parseFloat(String(origLine.quantity));
@@ -168,11 +178,12 @@ export class SaleReturnService {
           createdBy: params.createdBy,
         })
         .returning({ id: saleReturns.id });
-      if (!returnRow) throw new BusinessError('RETURN_CREATE_FAILED', 'Failed to create sale return');
+      if (!returnRow)
+        throw new BusinessError('RETURN_CREATE_FAILED', 'Failed to create sale return');
 
-      await trx.insert(saleReturnLines).values(
-        returnLineValues.map((l) => ({ ...l, returnId: returnRow.id }))
-      );
+      await trx
+        .insert(saleReturnLines)
+        .values(returnLineValues.map((l) => ({ ...l, returnId: returnRow.id })));
 
       // Write STOCK_IN inventory ledger rows for stock restored above
       if (stockRestorations.length > 0) {
@@ -227,10 +238,12 @@ export class SaleReturnService {
           currentBalance: sql`${projectionCustomerBalance.currentBalance} - ${totalAmount}`,
           updatedAt: new Date(),
         })
-        .where(and(
-          eq(projectionCustomerBalance.tenantId, params.tenantId),
-          eq(projectionCustomerBalance.customerId, params.customerId)
-        ));
+        .where(
+          and(
+            eq(projectionCustomerBalance.tenantId, params.tenantId),
+            eq(projectionCustomerBalance.customerId, params.customerId)
+          )
+        );
 
       // Outbox events
       await trx.insert(outboxEvents).values([
@@ -240,7 +253,38 @@ export class SaleReturnService {
           aggregateType: 'SaleReturn',
           aggregateId: returnRow.id,
           tenantId: params.tenantId,
-          payload: { returnId: returnRow.id, invoiceId: params.invoiceId, totalAmount },
+          // Financial-correctness audit — two independent consumers listen to this event,
+          // and both had a near-total payload mismatch:
+          // 1. SaleReturnAccountingConsumer.ts (accounting-service) read `p.grandTotal`,
+          //    never sent — every sale return posted ₹0 instead of reversing revenue.
+          // 2. SaleReturnGstConsumer.ts (gst-service) expected creditNoteNumber (used as
+          //    gst_ledger.document_number, a NOT NULL column — with no fallback, this
+          //    consumer likely crash-looped on every sale return) plus
+          //    taxableAmount/cgstAmount/sgstAmount/igstAmount (none sent, so every GST-ledger
+          //    credit-note entry that did get through would still be a $0 line).
+          // Now sends everything both consumers actually declare: the renamed grandTotal,
+          // returnNumber/customerId (declared but never received), and the GST breakdown +
+          // isInterstate computed the same way InvoiceService.ts's already-fixed equivalent
+          // does (directly from igstAmount, not from a sellerStateCode this table doesn't
+          // even have a column for — the placeOfSupply/sellerStateCode comparison the GST
+          // consumer used to fall back to was the exact same always-true bug already fixed
+          // for invoices).
+          payload: {
+            returnId: returnRow.id,
+            returnNumber: params.returnNumber,
+            invoiceId: params.invoiceId,
+            customerId: params.customerId,
+            grandTotal: totalAmount,
+            creditNoteNumber: params.creditNoteNumber,
+            creditNoteDate: params.returnDate.toISOString(),
+            taxableAmount: subtotal,
+            cgstAmount: cgstTotal,
+            sgstAmount: sgstTotal,
+            igstAmount: igstTotal,
+            isInterstate: igstTotal > 0,
+            placeOfSupply: invoice.placeOfSupply,
+            branchId: params.branchId,
+          },
           published: false,
         },
         {
@@ -262,7 +306,7 @@ export class SaleReturnService {
     creditNoteId: number,
     invoiceId: number,
     tenantId: number,
-    userId: number
+    _userId: number
   ): Promise<void> {
     await this.db.transaction(async (trx) => {
       const [cn] = await trx
