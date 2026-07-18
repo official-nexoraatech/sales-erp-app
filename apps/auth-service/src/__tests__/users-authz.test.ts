@@ -31,6 +31,7 @@ vi.mock('@erp/db', () => ({
   rolePermissions: { __name: 'rolePermissions' },
   tenants: { __name: 'tenants' },
   branches: { __name: 'branches' },
+  refreshTokens: { __name: 'refreshTokens', userId: '__refreshTokens.userId__' },
 }));
 
 vi.mock('drizzle-orm', () => ({

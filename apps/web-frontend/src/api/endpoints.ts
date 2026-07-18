@@ -27,7 +27,8 @@ export const authApi = {
   updateMe: (data: Record<string, unknown>) => apiClient.put('auth', '/users/me', data),
   changePassword: (data: { currentPassword: string; newPassword: string }) =>
     apiClient.put('auth', '/users/me/password', data),
-  refresh: (refreshToken: string) => refreshAccessToken(refreshToken),
+  refresh: () => refreshAccessToken(),
+  logout: () => apiClient.post<{ message: string }>('auth', '/auth/logout'),
   forgotPassword: (data: { email: string; tenantId: number }) =>
     apiClient.post<{ message: string }>('auth', '/auth/forgot-password', data),
   resetPasswordWithToken: (data: { token: string; newPassword: string }) =>

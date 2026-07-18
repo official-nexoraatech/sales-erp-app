@@ -8,6 +8,7 @@
 
 import { describe, it, expect, vi, beforeAll } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
+import cookie from '@fastify/cookie';
 import { generateKeyPairSync } from 'node:crypto';
 import { authenticator } from 'otplib';
 import { decryptField } from '@erp/utils/server';
@@ -193,6 +194,7 @@ async function buildAppWithMfaEnabledUser(tenantId: number): Promise<{
 
   const redis = makeRedis();
   const app = Fastify({ logger: false });
+  await app.register(cookie);
   await loginRoute(app, db as never, TEST_CONFIG as never, redis as never);
   await mfaVerifyRoute(app, db as never, TEST_CONFIG as never, redis as never);
 

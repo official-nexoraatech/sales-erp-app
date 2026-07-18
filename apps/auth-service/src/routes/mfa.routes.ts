@@ -11,6 +11,7 @@ import { MFAService } from '../domain/MFAService.js';
 import { issueTokensAndSession } from '../domain/session.js';
 import { loadUserRolesAndPermissions } from '../domain/roles.js';
 import { inetParam } from '../db-helpers.js';
+import { setRefreshCookie } from '../refresh-cookie.js';
 
 const VerifyBody = z.object({
   mfaToken: z.string().min(1),
@@ -38,11 +39,20 @@ async function issueTokensForUser(
   const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
   if (!user) throw new Error('User not found');
 
-  const { roleNames, permissions, branchIds } = await loadUserRolesAndPermissions(db, userId, tenantId);
+  const { roleNames, permissions, branchIds } = await loadUserRolesAndPermissions(
+    db,
+    userId,
+    tenantId
+  );
 
   await db
     .update(users)
-    .set({ failedLoginAttempts: 0, lockedUntil: null, lastLoginAt: new Date(), updatedAt: new Date() })
+    .set({
+      failedLoginAttempts: 0,
+      lockedUntil: null,
+      lastLoginAt: new Date(),
+      updatedAt: new Date(),
+    })
     .where(eq(users.id, userId));
 
   return issueTokensAndSession(
@@ -90,7 +100,9 @@ export async function mfaVerifyRoute(
       const mfaService = new MFAService(db, config.fieldEncryptionKey);
 
       const validTotp = await mfaService.verifyTOTP(userId, body.data.code);
-      const validBackup = validTotp ? false : await mfaService.useBackupCode(userId, body.data.code);
+      const validBackup = validTotp
+        ? false
+        : await mfaService.useBackupCode(userId, body.data.code);
 
       if (!validTotp && !validBackup) {
         // Per-token attempt cap — independent of the global rate limiter. A wrong
@@ -117,13 +129,18 @@ export async function mfaVerifyRoute(
         userAgent: request.headers['user-agent'] ?? null,
       });
 
+      setRefreshCookie(reply, tokens.refreshToken, config);
       return reply.code(200).send({ data: tokens });
     },
   });
 }
 
 // Protected MFA management routes — require `authenticate` preHandler (request.auth set)
-export async function mfaManagementRoutes(fastify: FastifyInstance, db: ErpDatabase, config: AuthConfig): Promise<void> {
+export async function mfaManagementRoutes(
+  fastify: FastifyInstance,
+  db: ErpDatabase,
+  config: AuthConfig
+): Promise<void> {
   const mfaService = new MFAService(db, config.fieldEncryptionKey);
 
   fastify.post('/mfa/enroll', {

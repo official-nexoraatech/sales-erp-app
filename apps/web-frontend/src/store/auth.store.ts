@@ -18,7 +18,9 @@ export interface AuthUser {
 interface RealSession {
   user: AuthUser;
   accessToken: string;
-  refreshToken: string;
+  // Not persisted (see partialize below) — kept optional since a rehydrated session
+  // never has it, and nothing reads it anymore now that refresh goes via the cookie.
+  refreshToken?: string;
 }
 
 interface AuthState {
@@ -45,14 +47,26 @@ export const useAuthStore = create<AuthState>()(
       impersonationExpiresAt: null,
       setTokens: (accessToken, refreshToken) => set({ accessToken, refreshToken }),
       setUser: (user) => set({ user }),
-      logout: () => set({ user: null, accessToken: null, refreshToken: null, realSession: null, impersonationExpiresAt: null }),
+      logout: () =>
+        set({
+          user: null,
+          accessToken: null,
+          refreshToken: null,
+          realSession: null,
+          impersonationExpiresAt: null,
+        }),
       hasPermission: (permission: string) => {
         const { user } = get();
         if (!user) return false;
         return user.permissions.includes(permission);
       },
       startImpersonation: (accessToken, targetUser, expiresAt) => {
-        const { user, accessToken: currentAccessToken, refreshToken: currentRefreshToken, realSession } = get();
+        const {
+          user,
+          accessToken: currentAccessToken,
+          refreshToken: currentRefreshToken,
+          realSession,
+        } = get();
         // Ignore nested impersonation attempts and refuse to start without a real session to return to.
         if (realSession || !user || !currentAccessToken || !currentRefreshToken) return;
         set({
@@ -68,7 +82,7 @@ export const useAuthStore = create<AuthState>()(
         set({
           user: realSession.user,
           accessToken: realSession.accessToken,
-          refreshToken: realSession.refreshToken,
+          refreshToken: realSession.refreshToken ?? null,
           realSession: null,
           impersonationExpiresAt: null,
         });
@@ -76,11 +90,18 @@ export const useAuthStore = create<AuthState>()(
     }),
     {
       name: 'erp-auth',
+      // refreshToken is deliberately excluded (both here and inside realSession) — it
+      // now lives only in the httpOnly refresh_token cookie set by auth-service, never
+      // in localStorage, so an XSS payload reading localStorage can no longer steal a
+      // 7-day-lived credential. The in-memory refreshToken field is kept only so
+      // setTokens()'s existing call sites don't need to change; nothing reads it anymore
+      // (see performRefresh in api/client.ts, which refreshes via the cookie instead).
       partialize: (s) => ({
         accessToken: s.accessToken,
-        refreshToken: s.refreshToken,
         user: s.user,
-        realSession: s.realSession,
+        realSession: s.realSession
+          ? { user: s.realSession.user, accessToken: s.realSession.accessToken }
+          : null,
         impersonationExpiresAt: s.impersonationExpiresAt,
       }),
     }

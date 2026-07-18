@@ -11,6 +11,7 @@ import type { AuthConfig } from '../config.js';
 import { checkIpBlocked, recordFailedLoginAndMaybeBlock } from '../middleware/suspicious-login.js';
 import { issueTokensAndSession } from '../domain/session.js';
 import { loadUserRolesAndPermissions } from '../domain/roles.js';
+import { setRefreshCookie } from '../refresh-cookie.js';
 
 const LoginBody = z.object({
   email: z.string().email(),
@@ -152,6 +153,7 @@ export async function loginRoute(
         })
         .where(eq(users.id, user.id));
 
+      setRefreshCookie(reply, tokens.refreshToken, config);
       return reply.code(200).send({ data: tokens });
     },
   });

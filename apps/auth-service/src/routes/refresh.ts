@@ -9,9 +9,13 @@ import { generateSecureToken, sha256Hex } from '../crypto.js';
 import type { AuthConfig } from '../config.js';
 import { rotateSession } from '../domain/session.js';
 import { loadUserRolesAndPermissions } from '../domain/roles.js';
+import { REFRESH_COOKIE_NAME, setRefreshCookie } from '../refresh-cookie.js';
 
+// pos-frontend (needs the raw token for its offline-sync localStorage persistence)
+// sends refreshToken in the body; web-frontend sends none and relies solely on the
+// httpOnly cookie set by login/refresh/mfa-verify — both are accepted here.
 const RefreshBody = z.object({
-  refreshToken: z.string().min(1),
+  refreshToken: z.string().min(1).optional(),
 });
 
 export async function refreshRoute(
@@ -21,12 +25,17 @@ export async function refreshRoute(
 ): Promise<void> {
   fastify.post('/auth/refresh', {
     handler: async (request, reply) => {
-      const body = RefreshBody.safeParse(request.body);
+      const body = RefreshBody.safeParse(request.body ?? {});
       if (!body.success) {
         return reply.code(400).send({ error: 'Invalid request' });
       }
 
-      const tokenHash = sha256Hex(body.data.refreshToken);
+      const refreshToken = body.data.refreshToken ?? request.cookies[REFRESH_COOKIE_NAME];
+      if (!refreshToken) {
+        return reply.code(401).send({ error: 'Invalid or expired refresh token' });
+      }
+
+      const tokenHash = sha256Hex(refreshToken);
       const now = new Date();
 
       const [tokenRow] = await db
@@ -99,6 +108,7 @@ export async function refreshRoute(
         });
       }
 
+      setRefreshCookie(reply, plainRefreshToken, config);
       return reply.code(200).send({
         accessToken,
         refreshToken: plainRefreshToken,

@@ -11,6 +11,7 @@ import {
   X,
 } from 'lucide-react';
 import { useAuthStore } from '../store/auth.store.js';
+import { authApi } from '../api/endpoints.js';
 import { useUIStore } from '../store/ui.store.js';
 import { useNotificationStream } from '../hooks/useNotificationStream.js';
 import { useKeyboardShortcut } from '../hooks/useKeyboardShortcut.js';
@@ -271,6 +272,10 @@ export default function Layout() {
   const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false);
 
   function handleLogout() {
+    // Revoke the refresh token + clear the cookie server-side — best-effort: local
+    // state is cleared and navigation happens regardless, so a network failure here
+    // never traps the user on a "logged out" screen that's still actually logged in.
+    void authApi.logout().catch(() => {});
     logout();
     navigate('/login');
   }

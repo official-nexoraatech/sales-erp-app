@@ -12,6 +12,7 @@
 
 import { describe, it, expect, vi, beforeAll } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
+import cookie from '@fastify/cookie';
 import { generateKeyPairSync } from 'node:crypto';
 import { SignJWT, importPKCS8, importSPKI, type KeyLike } from 'jose';
 
@@ -152,6 +153,7 @@ async function buildApp(
   redis: Record<string, unknown> = makeRedis()
 ): Promise<FastifyInstance> {
   const app = Fastify({ logger: false });
+  await app.register(cookie);
   await loginRoute(app, db as never, TEST_CONFIG as never, redis as never);
   await refreshRoute(app, db as never, TEST_CONFIG as never);
   return app;
@@ -188,17 +190,23 @@ describe('Phase 13 — Auth Security Hardening', () => {
       mockArgon2Verify.mockResolvedValueOnce(false);
 
       const mockUser = {
-        id: 1, email: 'brute@testco.com', tenantId: 1,
-        isActive: true, passwordHash: '$argon2id$fake',
-        failedLoginAttempts: 4, lockedUntil: null,
-        lastLoginAt: null, updatedAt: new Date(),
+        id: 1,
+        email: 'brute@testco.com',
+        tenantId: 1,
+        isActive: true,
+        passwordHash: '$argon2id$fake',
+        failedLoginAttempts: 4,
+        lockedUntil: null,
+        lastLoginAt: null,
+        updatedAt: new Date(),
       };
 
       const { set: updateSetSpy } = makeUpdate();
       const db = {
-        select: vi.fn()
-          .mockReturnValueOnce(makeSelectLimit([]))       // blocked_ips lookup — IP not blocked
-          .mockReturnValue(makeSelectLimit([mockUser])),  // users lookup
+        select: vi
+          .fn()
+          .mockReturnValueOnce(makeSelectLimit([])) // blocked_ips lookup — IP not blocked
+          .mockReturnValue(makeSelectLimit([mockUser])), // users lookup
         update: vi.fn().mockReturnValue({ set: updateSetSpy }),
         insert: vi.fn().mockReturnValue(makeInsert()),
       };
@@ -229,17 +237,22 @@ describe('Phase 13 — Auth Security Hardening', () => {
       mockArgon2Verify.mockClear();
 
       const lockedUser = {
-        id: 2, email: 'locked@testco.com', tenantId: 1,
-        isActive: true, passwordHash: '$argon2id$fake',
+        id: 2,
+        email: 'locked@testco.com',
+        tenantId: 1,
+        isActive: true,
+        passwordHash: '$argon2id$fake',
         failedLoginAttempts: 5,
         lockedUntil: new Date(Date.now() + 900_000), // still locked
-        lastLoginAt: null, updatedAt: new Date(),
+        lastLoginAt: null,
+        updatedAt: new Date(),
       };
 
       const db = {
-        select: vi.fn()
-          .mockReturnValueOnce(makeSelectLimit([]))          // blocked_ips lookup — IP not blocked
-          .mockReturnValue(makeSelectLimit([lockedUser])),   // users lookup
+        select: vi
+          .fn()
+          .mockReturnValueOnce(makeSelectLimit([])) // blocked_ips lookup — IP not blocked
+          .mockReturnValue(makeSelectLimit([lockedUser])), // users lookup
         update: vi.fn(),
       };
 
@@ -268,13 +281,16 @@ describe('Phase 13 — Auth Security Hardening', () => {
     it('verifyAccessToken rejects a token with a past expiration time', async () => {
       const nowSec = Math.floor(Date.now() / 1000);
       const expiredToken = await new SignJWT({
-        tenantId: 1, email: 'user@testco.com', roles: [], permissions: [],
+        tenantId: 1,
+        email: 'user@testco.com',
+        roles: [],
+        permissions: [],
       })
         .setProtectedHeader({ alg: 'RS256' })
         .setSubject('1')
-        .setIssuedAt(nowSec - 3600)     // issued 1 hour ago
+        .setIssuedAt(nowSec - 3600) // issued 1 hour ago
         .setIssuer(TEST_ISSUER)
-        .setExpirationTime(nowSec - 1)  // expired 1 second ago
+        .setExpirationTime(nowSec - 1) // expired 1 second ago
         .sign(testPrivateKey);
 
       await expect(verifyAccessToken(expiredToken)).rejects.toThrow();
@@ -283,7 +299,10 @@ describe('Phase 13 — Auth Security Hardening', () => {
     it('authenticate middleware returns 401 for an expired Bearer token', async () => {
       const nowSec = Math.floor(Date.now() / 1000);
       const expiredToken = await new SignJWT({
-        tenantId: 1, email: 'user@testco.com', roles: [], permissions: [],
+        tenantId: 1,
+        email: 'user@testco.com',
+        roles: [],
+        permissions: [],
       })
         .setProtectedHeader({ alg: 'RS256' })
         .setSubject('1')
@@ -317,26 +336,38 @@ describe('Phase 13 — Auth Security Hardening', () => {
       const expectedHash = sha256Hex(PLAIN_TOKEN);
 
       const tokenRow = {
-        id: 10, tokenHash: expectedHash, revokedAt: null,
+        id: 10,
+        tokenHash: expectedHash,
+        revokedAt: null,
         expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-        userId: 1, tenantId: 1, userAgent: null, ipAddress: '127.0.0.1',
+        userId: 1,
+        tenantId: 1,
+        userAgent: null,
+        ipAddress: '127.0.0.1',
       };
 
       const userRow = {
-        id: 1, email: 'rotate@testco.com', tenantId: 1, isActive: true,
-        passwordHash: '$argon2id$fake', failedLoginAttempts: 0,
-        lockedUntil: null, lastLoginAt: null, updatedAt: new Date(),
+        id: 1,
+        email: 'rotate@testco.com',
+        tenantId: 1,
+        isActive: true,
+        passwordHash: '$argon2id$fake',
+        failedLoginAttempts: 0,
+        lockedUntil: null,
+        lastLoginAt: null,
+        updatedAt: new Date(),
       };
 
       const revokeSpy = vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue([]) });
 
       const db = {
-        select: vi.fn()
-          .mockReturnValueOnce(makeSelectLimit([tokenRow]))   // refreshTokens lookup
-          .mockReturnValueOnce(makeSelectLimit([userRow]))    // users lookup
-          .mockReturnValueOnce(makeSelectWhere([]))           // userRoles lookup (empty -> skips rolePermissions)
-          .mockReturnValueOnce(makeSelectWhere([]))           // userBranches lookup (queried in parallel with userRoles)
-          .mockReturnValue(makeSelectLimit([])),              // rotateSession's activeSessions lookup
+        select: vi
+          .fn()
+          .mockReturnValueOnce(makeSelectLimit([tokenRow])) // refreshTokens lookup
+          .mockReturnValueOnce(makeSelectLimit([userRow])) // users lookup
+          .mockReturnValueOnce(makeSelectWhere([])) // userRoles lookup (empty -> skips rolePermissions)
+          .mockReturnValueOnce(makeSelectWhere([])) // userBranches lookup (queried in parallel with userRoles)
+          .mockReturnValue(makeSelectLimit([])), // rotateSession's activeSessions lookup
         update: vi.fn().mockReturnValue({ set: revokeSpy }),
         insert: vi.fn().mockReturnValue(makeInsert([{ id: 99 }])),
       };
@@ -371,7 +402,7 @@ describe('Phase 13 — Auth Security Hardening', () => {
     it('request.auth.tenantId equals the tenantId embedded in the JWT', async () => {
       const nowSec = Math.floor(Date.now() / 1000);
       const token = await new SignJWT({
-        tenantId: 42,  // a specific tenant
+        tenantId: 42, // a specific tenant
         email: 'owner@tenant42.com',
         roles: [],
         permissions: [],
@@ -410,7 +441,10 @@ describe('Phase 13 — Auth Security Hardening', () => {
       // override the tenantId without possessing the private key.
       const nowSec = Math.floor(Date.now() / 1000);
       const tokenForTenant1 = await new SignJWT({
-        tenantId: 1, email: 'hacker@evil.com', roles: [], permissions: [],
+        tenantId: 1,
+        email: 'hacker@evil.com',
+        roles: [],
+        permissions: [],
       })
         .setProtectedHeader({ alg: 'RS256' })
         .setSubject('7')

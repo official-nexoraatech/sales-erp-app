@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { User } from '@erp/db';
-import { users, roles, userRoles, userBranches, rolePermissions } from '@erp/db';
-import { and, eq, ne, inArray } from 'drizzle-orm';
+import { users, roles, userRoles, userBranches, rolePermissions, refreshTokens } from '@erp/db';
+import { and, eq, ne, inArray, isNull } from 'drizzle-orm';
 import { z } from 'zod';
 import * as argon2 from 'argon2';
 import { BusinessError, NotFoundError, PermissionError, ValidationError } from '@erp/types';
@@ -358,10 +358,20 @@ export async function userRoutes(
       if (!existing) throw new NotFoundError('User', id);
 
       const passwordHash = await argon2.hash(body.data.newPassword, { type: argon2.argon2id });
+      const now = new Date();
       await ctx.db.raw
         .update(users)
-        .set({ passwordHash, failedLoginAttempts: 0, lockedUntil: null, updatedAt: new Date() })
+        .set({ passwordHash, failedLoginAttempts: 0, lockedUntil: null, updatedAt: now })
         .where(eq(users.id, id));
+
+      // Revoke all existing sessions for the target user — matches the forgot-password
+      // and cross-tenant admin reset flows (reset-password.ts, admin-users.routes.ts),
+      // which both already do this. Without it, a stolen/reused refresh token for the
+      // target account would keep working after their password was reset.
+      await ctx.db.raw
+        .update(refreshTokens)
+        .set({ revokedAt: now })
+        .where(and(eq(refreshTokens.userId, id), isNull(refreshTokens.revokedAt)));
 
       return reply.code(200).send({ data: { message: 'Password reset successfully' } });
     }
@@ -544,10 +554,18 @@ export async function userRoutes(
     if (!valid)
       throw new BusinessError('INVALID_CURRENT_PASSWORD', 'Current password is incorrect');
     const passwordHash = await argon2.hash(body.data.newPassword, { type: argon2.argon2id });
+    const now = new Date();
     await ctx.db.raw
       .update(users)
-      .set({ passwordHash, updatedAt: new Date() })
+      .set({ passwordHash, updatedAt: now })
       .where(eq(users.id, userId));
+    // Revoke all existing refresh tokens — same rationale as the admin reset-password
+    // routes: changing your password should also end any other/stolen sessions, not
+    // just the one making this request.
+    await ctx.db.raw
+      .update(refreshTokens)
+      .set({ revokedAt: now })
+      .where(and(eq(refreshTokens.userId, userId), isNull(refreshTokens.revokedAt)));
     return reply.code(200).send({ data: { message: 'Password changed successfully' } });
   });
 

@@ -1,5 +1,6 @@
 import Fastify, { type FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
+import cookie from '@fastify/cookie';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 import Redis from 'ioredis';
@@ -127,6 +128,8 @@ async function bootstrap(): Promise<void> {
     origin: process.env['ALLOWED_ORIGINS']?.split(',') ?? ['http://localhost:3000'],
     credentials: true,
   });
+
+  await fastify.register(cookie);
 
   // ES-16: global default (200/min) for every route; the login route below keeps its
   // own stricter per-route override (config.rateLimit, set from LOGIN_RATE_LIMIT_MAX/

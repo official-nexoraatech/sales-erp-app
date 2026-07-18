@@ -53,13 +53,16 @@ export class ApiError extends Error {
 
 // The refresh endpoint returns tokens directly (no {data:...} envelope), unlike every
 // other route, so it's called with a plain fetch rather than through request()/apiClient.
-export async function refreshAccessToken(
-  refreshToken: string
-): Promise<{ accessToken: string; refreshToken: string } | null> {
+// No refreshToken is sent — the browser attaches it automatically via the httpOnly
+// refresh_token cookie set by auth-service on login/refresh (credentials: 'include' is
+// what makes the cross-origin gateway request carry it).
+export async function refreshAccessToken(): Promise<{
+  accessToken: string;
+  refreshToken: string;
+} | null> {
   const response = await fetch(`${BASE_URLS.auth}/auth/refresh`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ refreshToken }),
+    credentials: 'include',
   });
   if (!response.ok) return null;
   const body = await response.json();
@@ -69,12 +72,8 @@ export async function refreshAccessToken(
 let refreshPromise: Promise<string | null> | null = null;
 
 async function performRefresh(): Promise<string | null> {
-  const { refreshToken, setTokens, setUser, user, logout } = useAuthStore.getState();
-  if (!refreshToken) {
-    logout();
-    return null;
-  }
-  const result = await refreshAccessToken(refreshToken);
+  const { setTokens, setUser, user, logout } = useAuthStore.getState();
+  const result = await refreshAccessToken();
   if (!result) {
     logout();
     return null;
@@ -114,6 +113,10 @@ async function request<T>(
 
   const response = await fetch(url, {
     ...options,
+    // Only the auth service ever sets/reads the httpOnly refresh_token cookie (Path
+    // scoped to /api/auth) — 'include' here is what lets the browser send/store it on
+    // login/refresh/logout, which are cross-origin from this app's own dev server.
+    ...(service === 'auth' ? { credentials: 'include' as RequestCredentials } : {}),
     headers: {
       ...(options?.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
       ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
