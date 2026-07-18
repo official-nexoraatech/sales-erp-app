@@ -1,11 +1,5 @@
 import { eq, and, sql } from 'drizzle-orm';
-import {
-  bankAccounts,
-  bankStatements,
-  bankReconciliationItems,
-  financialEntries,
-  journals,
-} from '@erp/db';
+import { bankAccounts, bankStatements, bankReconciliationItems, financialEntries } from '@erp/db';
 import type { TenantScopedDatabase } from '@erp/sdk';
 import { BusinessError, NotFoundError } from '@erp/types';
 
@@ -99,26 +93,31 @@ export class BankReconciliationService {
       const bankAccountEntry = await trx.raw
         .select({ journalId: financialEntries.journalId })
         .from(financialEntries)
-        .where(and(
-          eq(financialEntries.tenantId, tenantId),
-          eq(financialEntries.accountId, bankAcc.accountId),
-          sql`${financialEntries.createdAt} >= ${new Date(rows[0]?.date ?? new Date())}`
-        ));
+        .where(
+          and(
+            eq(financialEntries.tenantId, tenantId),
+            eq(financialEntries.accountId, bankAcc.accountId),
+            sql`${financialEntries.createdAt} >= ${new Date(rows[0]?.date ?? new Date())}`
+          )
+        );
 
       for (const entry of bankAccountEntry) {
-        await trx.raw.insert(bankReconciliationItems).values({
-          tenantId,
-          bankAccountId,
-          bankStatementId: stmt.id,
-          itemType: 'BOOK',
-          transactionDate: new Date().toISOString().substring(0, 10),
-          description: `Journal ${entry.journalId}`,
-          journalId: entry.journalId,
-          debitAmount: '0',
-          creditAmount: '0',
-          status: 'UNMATCHED',
-          createdBy: userId,
-        } as typeof bankReconciliationItems.$inferInsert).onConflictDoNothing();
+        await trx.raw
+          .insert(bankReconciliationItems)
+          .values({
+            tenantId,
+            bankAccountId,
+            bankStatementId: stmt.id,
+            itemType: 'BOOK',
+            transactionDate: new Date().toISOString().substring(0, 10),
+            description: `Journal ${entry.journalId}`,
+            journalId: entry.journalId,
+            debitAmount: '0',
+            creditAmount: '0',
+            status: 'UNMATCHED',
+            createdBy: userId,
+          } as typeof bankReconciliationItems.$inferInsert)
+          .onConflictDoNothing();
       }
 
       return { statementId: stmt.id, itemsImported: rows.length };
@@ -129,14 +128,16 @@ export class BankReconciliationService {
     db: TenantScopedDatabase,
     tenantId: number,
     bankAccountId: number
-  ): Promise<typeof bankReconciliationItems.$inferSelect[]> {
+  ): Promise<(typeof bankReconciliationItems.$inferSelect)[]> {
     return db.raw
       .select()
       .from(bankReconciliationItems)
-      .where(and(
-        eq(bankReconciliationItems.tenantId, tenantId),
-        eq(bankReconciliationItems.bankAccountId, bankAccountId)
-      ));
+      .where(
+        and(
+          eq(bankReconciliationItems.tenantId, tenantId),
+          eq(bankReconciliationItems.bankAccountId, bankAccountId)
+        )
+      );
   }
 
   static async matchItem(
@@ -149,7 +150,9 @@ export class BankReconciliationService {
     const [item] = await db.raw
       .select()
       .from(bankReconciliationItems)
-      .where(and(eq(bankReconciliationItems.id, itemId), eq(bankReconciliationItems.tenantId, tenantId)));
+      .where(
+        and(eq(bankReconciliationItems.id, itemId), eq(bankReconciliationItems.tenantId, tenantId))
+      );
     if (!item) throw new NotFoundError('ReconciliationItem', itemId);
     if (item.status !== 'UNMATCHED') {
       throw new BusinessError('ITEM_ALREADY_MATCHED', 'This item is already matched or cleared');
@@ -159,12 +162,22 @@ export class BankReconciliationService {
       await trx.raw
         .update(bankReconciliationItems)
         .set({ status: 'MATCHED', matchedItemId })
-        .where(eq(bankReconciliationItems.id, itemId));
+        .where(
+          and(
+            eq(bankReconciliationItems.id, itemId),
+            eq(bankReconciliationItems.tenantId, tenantId)
+          )
+        );
 
       await trx.raw
         .update(bankReconciliationItems)
         .set({ status: 'MATCHED', matchedItemId: itemId })
-        .where(and(eq(bankReconciliationItems.id, matchedItemId), eq(bankReconciliationItems.tenantId, tenantId)));
+        .where(
+          and(
+            eq(bankReconciliationItems.id, matchedItemId),
+            eq(bankReconciliationItems.tenantId, tenantId)
+          )
+        );
     });
   }
 

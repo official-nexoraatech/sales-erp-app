@@ -2,7 +2,7 @@ import { eq, and } from 'drizzle-orm';
 import type { TenantScopedDatabase } from '@erp/sdk';
 import { gstReturnFilings } from '@erp/db';
 import { createLogger } from '@erp/logger';
-import { NotFoundError } from '@erp/types';
+import { NotFoundError, BusinessError } from '@erp/types';
 import type { Gstr3bDischargeData, Gstr3bManualAdjustments } from './Gstr3bService.js';
 
 const logger = createLogger({ serviceName: 'gst-service' });
@@ -37,26 +37,32 @@ export class GstReturnTrackerService {
     for (const period of periods) {
       for (const returnType of ['GSTR1', 'GSTR3B'] as ReturnType[]) {
         const dueDate = GstReturnTrackerService.getDueDate(returnType, period);
-        await db.raw.insert(gstReturnFilings).values({
-          tenantId,
-          returnType,
-          period,
-          dueDate,
-          status: 'PENDING',
-        }).onConflictDoNothing();
+        await db.raw
+          .insert(gstReturnFilings)
+          .values({
+            tenantId,
+            returnType,
+            period,
+            dueDate,
+            status: 'PENDING',
+          })
+          .onConflictDoNothing();
       }
     }
 
     // Annual returns (GSTR-9 due 31 Dec of the following year)
     const gstr9Due = `${fyStart + 1}-12-31`;
     const gstr9Period = `${fyStart + 1}-03`; // March of the FY
-    await db.raw.insert(gstReturnFilings).values({
-      tenantId,
-      returnType: 'GSTR9',
-      period: gstr9Period,
-      dueDate: gstr9Due,
-      status: 'PENDING',
-    }).onConflictDoNothing();
+    await db.raw
+      .insert(gstReturnFilings)
+      .values({
+        tenantId,
+        returnType: 'GSTR9',
+        period: gstr9Period,
+        dueDate: gstr9Due,
+        status: 'PENDING',
+      })
+      .onConflictDoNothing();
 
     const filings = await db.raw
       .select()
@@ -109,6 +115,22 @@ export class GstReturnTrackerService {
 
     if (!filing) throw new NotFoundError(`${returnType} filing for period ${period}`);
 
+    // Security audit: a GST return that has already been filed is a legally significant
+    // document — a second mark-filed call used to silently overwrite filedDate/
+    // referenceNumber/filingData (including the "locked in at filing time" GSTR3B discharge
+    // figures PG-040 was specifically built to protect from later ledger changes). Filing is
+    // now a one-way transition.
+    if (
+      filing.status === 'FILED' ||
+      filing.status === 'LATE_FILED' ||
+      filing.status === 'NIL_FILED'
+    ) {
+      throw new BusinessError(
+        'RETURN_ALREADY_FILED',
+        `${returnType} for period ${period} was already filed${filing.filedDate ? ` on ${String(filing.filedDate)}` : ''} and cannot be re-filed`
+      );
+    }
+
     const today = new Date().toISOString().substring(0, 10);
     const isLate = today > String(filing.dueDate);
 
@@ -135,7 +157,10 @@ export class GstReturnTrackerService {
         )
       );
 
-    logger.info({ tenantId, returnType, period, isLate, referenceNumber }, 'GST return marked filed');
+    logger.info(
+      { tenantId, returnType, period, isLate, referenceNumber },
+      'GST return marked filed'
+    );
   }
 
   static async getStatus(
@@ -251,9 +276,12 @@ export class GstReturnTrackerService {
     const pad = (n: number): string => String(n).padStart(2, '0');
 
     switch (returnType) {
-      case 'GSTR1': return `${nextYear}-${pad(nextMonth)}-11`;
-      case 'GSTR3B': return `${nextYear}-${pad(nextMonth)}-20`;
-      default: return `${nextYear}-${pad(nextMonth)}-20`;
+      case 'GSTR1':
+        return `${nextYear}-${pad(nextMonth)}-11`;
+      case 'GSTR3B':
+        return `${nextYear}-${pad(nextMonth)}-20`;
+      default:
+        return `${nextYear}-${pad(nextMonth)}-20`;
     }
   }
 
