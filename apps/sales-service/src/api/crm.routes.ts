@@ -632,8 +632,15 @@ export async function crmRoutes(
         String(c.loyaltyPoints),
         c.status,
       ]);
+      // Prefix a leading quote on cells starting with =, +, -, @ (or tab/CR) so Excel/Sheets
+      // never interprets a free-text field (e.g. customer display name) as a formula when this
+      // CSV is opened — CWE-1236 CSV/formula injection.
+      const sanitizeCsvCell = (v: unknown): string => {
+        const s = String(v);
+        return /^[=+\-@\t\r]/.test(s) ? `'${s}` : s;
+      };
       const csv = [header, ...csvRows]
-        .map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(','))
+        .map((r) => r.map((v) => `"${sanitizeCsvCell(v).replace(/"/g, '""')}"`).join(','))
         .join('\r\n');
 
       reply.header('Content-Type', 'text/csv; charset=utf-8');

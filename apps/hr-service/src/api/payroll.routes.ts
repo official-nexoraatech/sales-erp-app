@@ -56,7 +56,7 @@ const SalaryStructureSchema = z.object({
   basicPercent: z.number().min(0).max(100).default(50),
   hraPercent: z.number().min(0).max(100).default(20),
   daPercent: z.number().min(0).max(100).default(10),
-  allowances: z.array(z.object({ name: z.string(), amount: z.number() })).default([]),
+  allowances: z.array(z.object({ name: z.string(), amount: z.number().min(0) })).default([]),
 });
 
 const EmployeeSalarySchema = z.object({

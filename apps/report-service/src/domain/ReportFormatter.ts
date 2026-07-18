@@ -1,8 +1,18 @@
 import * as XLSX from 'xlsx';
 import type { ReportDefinition } from './ReportRegistry.js';
-import type { ReportResult, ReportRow } from './ReportEngine.js';
+import type { ReportResult } from './ReportEngine.js';
 
 export type ExportFormat = 'JSON' | 'CSV' | 'EXCEL';
+
+// Cell values starting with =, +, -, @ (or tab/CR) are interpreted as formulas by
+// Excel/Sheets when a CSV/XLSX is opened, letting a free-text field (customer name,
+// invoice notes, etc.) that ends up in an export execute arbitrary formulas/commands
+// on whoever opens the file (CWE-1236 CSV/formula injection). Prefixing a leading
+// single quote is the standard mitigation — Excel then renders the value as literal text.
+const FORMULA_INJECTION_PREFIX = /^[=+\-@\t\r]/;
+function sanitizeCell(value: string): string {
+  return FORMULA_INJECTION_PREFIX.test(value) ? `'${value}` : value;
+}
 
 function formatCellValue(value: unknown, type: string): string | number {
   if (value === null || value === undefined) return '';
@@ -14,7 +24,7 @@ function formatCellValue(value: unknown, type: string): string | number {
     const d = new Date(String(value));
     return isNaN(d.getTime()) ? String(value) : d.toLocaleDateString('en-IN');
   }
-  return String(value);
+  return sanitizeCell(String(value));
 }
 
 export class ReportFormatter {
@@ -74,9 +84,12 @@ export class ReportFormatter {
 
   getContentType(format: ExportFormat): string {
     switch (format) {
-      case 'CSV': return 'text/csv';
-      case 'EXCEL': return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
-      default: return 'application/json';
+      case 'CSV':
+        return 'text/csv';
+      case 'EXCEL':
+        return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+      default:
+        return 'application/json';
     }
   }
 

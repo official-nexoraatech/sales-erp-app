@@ -3,8 +3,18 @@ interface CsvColumn {
   header: string;
 }
 
+// Cell values starting with =, +, -, @ (or tab/CR) are interpreted as formulas by
+// Excel/Sheets when a CSV is opened, letting a free-text field (customer name, item
+// name, notes, etc.) in an exported table execute arbitrary formulas/commands on
+// whoever opens the file (CWE-1236 CSV/formula injection). Prefixing a leading single
+// quote is the standard mitigation — Excel then renders the value as literal text.
+// Matches the same fix applied server-side in report-service/scheduler-service/
+// sales-service/hr-service's own CSV/XLSX exporters.
+const FORMULA_INJECTION_PREFIX = /^[=+\-@\t\r]/;
+
 function escapeCsvCell(value: unknown): string {
-  const s = value === null || value === undefined ? '' : String(value);
+  let s = value === null || value === undefined ? '' : String(value);
+  if (FORMULA_INJECTION_PREFIX.test(s)) s = `'${s}`;
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 

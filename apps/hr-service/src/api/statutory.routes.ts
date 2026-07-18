@@ -23,8 +23,15 @@ const MarkFiledSchema = z.object({
   year: z.number().int().min(2000).max(2100),
 });
 
+// Prefix a leading quote on cells starting with =, +, -, @ (or tab/CR) so Excel/Sheets
+// never interprets a free-text field (e.g. employee name) as a formula when this CSV is
+// opened — CWE-1236 CSV/formula injection.
 function toCSV(header: string[], rows: (string | number)[][]): string {
-  const escape = (v: string | number) => `"${String(v).replace(/"/g, '""')}"`;
+  const escape = (v: string | number) => {
+    const s = String(v);
+    const safe = /^[=+\-@\t\r]/.test(s) ? `'${s}` : s;
+    return `"${safe.replace(/"/g, '""')}"`;
+  };
   return [header, ...rows].map((r) => r.map(escape).join(',')).join('\r\n');
 }
 
@@ -38,12 +45,14 @@ async function getFiling(
   const [filing] = await db.raw
     .select()
     .from(statutoryChallanFilings)
-    .where(and(
-      eq(statutoryChallanFilings.tenantId, tenantId),
-      eq(statutoryChallanFilings.challanType, challanType),
-      eq(statutoryChallanFilings.periodMonth, periodMonth),
-      eq(statutoryChallanFilings.periodYear, periodYear),
-    ));
+    .where(
+      and(
+        eq(statutoryChallanFilings.tenantId, tenantId),
+        eq(statutoryChallanFilings.challanType, challanType),
+        eq(statutoryChallanFilings.periodMonth, periodMonth),
+        eq(statutoryChallanFilings.periodYear, periodYear)
+      )
+    );
   return filing ?? null;
 }
 
@@ -57,11 +66,21 @@ export async function statutoryRoutes(
     { preHandler: [authenticate, requirePermission(PERMISSIONS.HR_STATUTORY)] },
     async (request, reply) => {
       const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({ tenantId, userId, correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID() });
+      const ctx = ctxFactory.create({
+        tenantId,
+        userId,
+        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
+      });
       const query = PeriodQuerySchema.safeParse(request.query);
-      if (!query.success) throw new ValidationError(query.error.errors.map((e) => e.message).join('; '));
+      if (!query.success)
+        throw new ValidationError(query.error.errors.map((e) => e.message).join('; '));
 
-      const challan = await PFChallanService.generateChallan(ctx.db, tenantId, query.data.month, query.data.year);
+      const challan = await PFChallanService.generateChallan(
+        ctx.db,
+        tenantId,
+        query.data.month,
+        query.data.year
+      );
       const filing = await getFiling(ctx.db, tenantId, 'PF', query.data.month, query.data.year);
 
       return reply.code(200).send({ data: { ...challan, filedAt: filing?.filedAt ?? null } });
@@ -73,17 +92,44 @@ export async function statutoryRoutes(
     { preHandler: [authenticate, requirePermission(PERMISSIONS.HR_STATUTORY)] },
     async (request, reply) => {
       const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({ tenantId, userId, correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID() });
+      const ctx = ctxFactory.create({
+        tenantId,
+        userId,
+        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
+      });
       const query = PeriodQuerySchema.safeParse(request.query);
-      if (!query.success) throw new ValidationError(query.error.errors.map((e) => e.message).join('; '));
+      if (!query.success)
+        throw new ValidationError(query.error.errors.map((e) => e.message).join('; '));
 
-      const challan = await PFChallanService.generateChallan(ctx.db, tenantId, query.data.month, query.data.year);
-      const header = ['UAN', 'Employee Name', 'Basic Salary', 'EPF Employee', 'EPF Employer', 'EPS Amount'];
-      const rows = challan.rows.map((r) => [r.uan ?? '', r.employeeName, r.basicSalary, r.epfEmployee, r.epfEmployer, r.epsAmount]);
+      const challan = await PFChallanService.generateChallan(
+        ctx.db,
+        tenantId,
+        query.data.month,
+        query.data.year
+      );
+      const header = [
+        'UAN',
+        'Employee Name',
+        'Basic Salary',
+        'EPF Employee',
+        'EPF Employer',
+        'EPS Amount',
+      ];
+      const rows = challan.rows.map((r) => [
+        r.uan ?? '',
+        r.employeeName,
+        r.basicSalary,
+        r.epfEmployee,
+        r.epfEmployer,
+        r.epsAmount,
+      ]);
       const csv = toCSV(header, rows);
 
       reply.header('Content-Type', 'text/csv; charset=utf-8');
-      reply.header('Content-Disposition', `attachment; filename="pf-challan-${query.data.year}-${String(query.data.month).padStart(2, '0')}.csv"`);
+      reply.header(
+        'Content-Disposition',
+        `attachment; filename="pf-challan-${query.data.year}-${String(query.data.month).padStart(2, '0')}.csv"`
+      );
       return reply.code(200).send(csv);
     }
   );
@@ -93,13 +139,21 @@ export async function statutoryRoutes(
     { preHandler: [authenticate, requirePermission(PERMISSIONS.HR_STATUTORY)] },
     async (request, reply) => {
       const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({ tenantId, userId, correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID() });
+      const ctx = ctxFactory.create({
+        tenantId,
+        userId,
+        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
+      });
       const body = MarkFiledSchema.safeParse(request.body);
-      if (!body.success) throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
+      if (!body.success)
+        throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
 
       const existing = await getFiling(ctx.db, tenantId, 'PF', body.data.month, body.data.year);
       if (existing) {
-        await ctx.db.raw.update(statutoryChallanFilings).set({ filedAt: new Date(), filedBy: userId }).where(eq(statutoryChallanFilings.id, existing.id));
+        await ctx.db.raw
+          .update(statutoryChallanFilings)
+          .set({ filedAt: new Date(), filedBy: userId })
+          .where(eq(statutoryChallanFilings.id, existing.id));
       } else {
         await ctx.db.raw.insert(statutoryChallanFilings).values({
           tenantId,
@@ -111,8 +165,14 @@ export async function statutoryRoutes(
         } as typeof statutoryChallanFilings.$inferInsert);
       }
 
-      await ctx.audit.log({ action: 'UPDATE', entityType: 'pf_challan', metadata: { action: 'MARK_FILED', ...body.data } });
-      return reply.code(200).send({ data: { message: 'PF challan marked as filed', ...body.data } });
+      await ctx.audit.log({
+        action: 'UPDATE',
+        entityType: 'pf_challan',
+        metadata: { action: 'MARK_FILED', ...body.data },
+      });
+      return reply
+        .code(200)
+        .send({ data: { message: 'PF challan marked as filed', ...body.data } });
     }
   );
 
@@ -122,11 +182,21 @@ export async function statutoryRoutes(
     { preHandler: [authenticate, requirePermission(PERMISSIONS.HR_STATUTORY)] },
     async (request, reply) => {
       const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({ tenantId, userId, correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID() });
+      const ctx = ctxFactory.create({
+        tenantId,
+        userId,
+        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
+      });
       const query = PeriodQuerySchema.safeParse(request.query);
-      if (!query.success) throw new ValidationError(query.error.errors.map((e) => e.message).join('; '));
+      if (!query.success)
+        throw new ValidationError(query.error.errors.map((e) => e.message).join('; '));
 
-      const challan = await ESIChallanService.generateChallan(ctx.db, tenantId, query.data.month, query.data.year);
+      const challan = await ESIChallanService.generateChallan(
+        ctx.db,
+        tenantId,
+        query.data.month,
+        query.data.year
+      );
       const filing = await getFiling(ctx.db, tenantId, 'ESI', query.data.month, query.data.year);
 
       return reply.code(200).send({ data: { ...challan, filedAt: filing?.filedAt ?? null } });
@@ -138,17 +208,42 @@ export async function statutoryRoutes(
     { preHandler: [authenticate, requirePermission(PERMISSIONS.HR_STATUTORY)] },
     async (request, reply) => {
       const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({ tenantId, userId, correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID() });
+      const ctx = ctxFactory.create({
+        tenantId,
+        userId,
+        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
+      });
       const query = PeriodQuerySchema.safeParse(request.query);
-      if (!query.success) throw new ValidationError(query.error.errors.map((e) => e.message).join('; '));
+      if (!query.success)
+        throw new ValidationError(query.error.errors.map((e) => e.message).join('; '));
 
-      const challan = await ESIChallanService.generateChallan(ctx.db, tenantId, query.data.month, query.data.year);
-      const header = ['ESI Number', 'Employee Name', 'Gross Salary', 'ESI Employee', 'ESI Employer'];
-      const rows = challan.rows.map((r) => [r.esiNumber ?? '', r.employeeName, r.grossSalary, r.esiEmployee, r.esiEmployer]);
+      const challan = await ESIChallanService.generateChallan(
+        ctx.db,
+        tenantId,
+        query.data.month,
+        query.data.year
+      );
+      const header = [
+        'ESI Number',
+        'Employee Name',
+        'Gross Salary',
+        'ESI Employee',
+        'ESI Employer',
+      ];
+      const rows = challan.rows.map((r) => [
+        r.esiNumber ?? '',
+        r.employeeName,
+        r.grossSalary,
+        r.esiEmployee,
+        r.esiEmployer,
+      ]);
       const csv = toCSV(header, rows);
 
       reply.header('Content-Type', 'text/csv; charset=utf-8');
-      reply.header('Content-Disposition', `attachment; filename="esi-challan-${query.data.year}-${String(query.data.month).padStart(2, '0')}.csv"`);
+      reply.header(
+        'Content-Disposition',
+        `attachment; filename="esi-challan-${query.data.year}-${String(query.data.month).padStart(2, '0')}.csv"`
+      );
       return reply.code(200).send(csv);
     }
   );
@@ -158,13 +253,21 @@ export async function statutoryRoutes(
     { preHandler: [authenticate, requirePermission(PERMISSIONS.HR_STATUTORY)] },
     async (request, reply) => {
       const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({ tenantId, userId, correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID() });
+      const ctx = ctxFactory.create({
+        tenantId,
+        userId,
+        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
+      });
       const body = MarkFiledSchema.safeParse(request.body);
-      if (!body.success) throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
+      if (!body.success)
+        throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
 
       const existing = await getFiling(ctx.db, tenantId, 'ESI', body.data.month, body.data.year);
       if (existing) {
-        await ctx.db.raw.update(statutoryChallanFilings).set({ filedAt: new Date(), filedBy: userId }).where(eq(statutoryChallanFilings.id, existing.id));
+        await ctx.db.raw
+          .update(statutoryChallanFilings)
+          .set({ filedAt: new Date(), filedBy: userId })
+          .where(eq(statutoryChallanFilings.id, existing.id));
       } else {
         await ctx.db.raw.insert(statutoryChallanFilings).values({
           tenantId,
@@ -176,8 +279,14 @@ export async function statutoryRoutes(
         } as typeof statutoryChallanFilings.$inferInsert);
       }
 
-      await ctx.audit.log({ action: 'UPDATE', entityType: 'esi_challan', metadata: { action: 'MARK_FILED', ...body.data } });
-      return reply.code(200).send({ data: { message: 'ESI challan marked as filed', ...body.data } });
+      await ctx.audit.log({
+        action: 'UPDATE',
+        entityType: 'esi_challan',
+        metadata: { action: 'MARK_FILED', ...body.data },
+      });
+      return reply
+        .code(200)
+        .send({ data: { message: 'ESI challan marked as filed', ...body.data } });
     }
   );
 
@@ -187,12 +296,22 @@ export async function statutoryRoutes(
     { preHandler: [authenticate, requirePermission(PERMISSIONS.VIEW_SALARY_DETAILS)] },
     async (request, reply) => {
       const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({ tenantId, userId, correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID() });
+      const ctx = ctxFactory.create({
+        tenantId,
+        userId,
+        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
+      });
       const employeeId = parseInt(request.params.id, 10);
       const financialYear = request.query.year;
-      if (!financialYear) throw new ValidationError('year query parameter is required, e.g. ?year=2025-26');
+      if (!financialYear)
+        throw new ValidationError('year query parameter is required, e.g. ?year=2025-26');
 
-      const data = await Form16Service.generateForm16Data(ctx.db, tenantId, employeeId, financialYear);
+      const data = await Form16Service.generateForm16Data(
+        ctx.db,
+        tenantId,
+        employeeId,
+        financialYear
+      );
       return reply.code(200).send({ data });
     }
   );

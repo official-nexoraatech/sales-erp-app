@@ -6,6 +6,16 @@ import type { ExportColumn } from './ExportEngine.js';
 // shared — scheduler-service and report-service are separate deployables with no dependency
 // edge between them today (see PG-009's Coding Standards section).
 
+// Cell values starting with =, +, -, @ (or tab/CR) are interpreted as formulas by
+// Excel/Sheets when a CSV/XLSX is opened, letting a free-text field (customer name,
+// notes, etc.) that ends up in an export execute arbitrary formulas/commands on
+// whoever opens the file (CWE-1236 CSV/formula injection). Prefixing a leading
+// single quote is the standard mitigation — Excel then renders the value as literal text.
+const FORMULA_INJECTION_PREFIX = /^[=+\-@\t\r]/;
+function sanitizeCell(value: string): string {
+  return FORMULA_INJECTION_PREFIX.test(value) ? `'${value}` : value;
+}
+
 function formatCellValue(value: unknown, type: ExportColumn['type']): string | number {
   if (value === null || value === undefined) return '';
   if (type === 'currency' || type === 'number' || type === 'percent') {
@@ -16,7 +26,7 @@ function formatCellValue(value: unknown, type: ExportColumn['type']): string | n
     const d = new Date(String(value));
     return isNaN(d.getTime()) ? String(value) : d.toLocaleDateString('en-IN');
   }
-  return String(value);
+  return sanitizeCell(String(value));
 }
 
 export class ExportFormatter {
@@ -33,9 +43,15 @@ export class ExportFormatter {
     return [header, ...dataRows].join('\n');
   }
 
-  toExcel(entityType: string, columns: ExportColumn[], rows: Array<Record<string, unknown>>): Buffer {
+  toExcel(
+    entityType: string,
+    columns: ExportColumn[],
+    rows: Array<Record<string, unknown>>
+  ): Buffer {
     const headerRow = columns.map((c) => c.label);
-    const dataRows = rows.map((row) => columns.map((col) => formatCellValue(row[col.key], col.type)));
+    const dataRows = rows.map((row) =>
+      columns.map((col) => formatCellValue(row[col.key], col.type))
+    );
 
     const wsData = [headerRow, ...dataRows];
     const ws = XLSX.utils.aoa_to_sheet(wsData);

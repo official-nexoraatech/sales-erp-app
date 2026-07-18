@@ -35,7 +35,7 @@ export async function dlqRoutes(
       const db = ctx.db.raw;
 
       const rows = await db.execute(
-        sql`SELECT topic, status, COUNT(*) as count FROM dlq_items GROUP BY topic, status ORDER BY topic, status`
+        sql`SELECT topic, status, COUNT(*) as count FROM dlq_items WHERE tenant_id = ${request.auth.tenantId} GROUP BY topic, status ORDER BY topic, status`
       );
 
       const topics: Record<string, Record<string, number>> = {};
@@ -87,13 +87,13 @@ export async function dlqRoutes(
       const rows = await db
         .select()
         .from(dlqItems)
-        .where(eq(dlqItems.topic, topic))
+        .where(and(eq(dlqItems.topic, topic), eq(dlqItems.tenantId, request.auth.tenantId)))
         .orderBy(desc(dlqItems.createdAt), desc(dlqItems.id))
         .limit(size)
         .offset((page - 1) * size);
 
       const totalRows = await db.execute(
-        sql`SELECT COUNT(*) as count FROM dlq_items WHERE topic = ${topic}`
+        sql`SELECT COUNT(*) as count FROM dlq_items WHERE topic = ${topic} AND tenant_id = ${request.auth.tenantId}`
       );
       const total = parseInt((totalRows[0] as { count: string }).count, 10);
 
@@ -123,7 +123,13 @@ export async function dlqRoutes(
       const rows = await db
         .select()
         .from(dlqItems)
-        .where(and(eq(dlqItems.id, id), eq(dlqItems.topic, request.params.topic)))
+        .where(
+          and(
+            eq(dlqItems.id, id),
+            eq(dlqItems.topic, request.params.topic),
+            eq(dlqItems.tenantId, request.auth.tenantId)
+          )
+        )
         .limit(1);
 
       if (!rows[0]) {
@@ -151,7 +157,13 @@ export async function dlqRoutes(
       const pending = await db
         .select()
         .from(dlqItems)
-        .where(and(eq(dlqItems.topic, topic), eq(dlqItems.status, 'PENDING')));
+        .where(
+          and(
+            eq(dlqItems.topic, topic),
+            eq(dlqItems.status, 'PENDING'),
+            eq(dlqItems.tenantId, request.auth.tenantId)
+          )
+        );
 
       let replayed = 0;
       let failed = 0;
@@ -208,7 +220,11 @@ export async function dlqRoutes(
       });
       const db = ctx.db.raw;
 
-      const rows = await db.select().from(dlqItems).where(eq(dlqItems.id, id)).limit(1);
+      const rows = await db
+        .select()
+        .from(dlqItems)
+        .where(and(eq(dlqItems.id, id), eq(dlqItems.tenantId, request.auth.tenantId)))
+        .limit(1);
       if (!rows[0]) {
         return reply
           .code(404)
@@ -218,7 +234,7 @@ export async function dlqRoutes(
       await db
         .update(dlqItems)
         .set({ status: 'DISCARDED', updatedAt: new Date() })
-        .where(eq(dlqItems.id, id));
+        .where(and(eq(dlqItems.id, id), eq(dlqItems.tenantId, request.auth.tenantId)));
 
       return reply.code(200).send({ data: { id, status: 'DISCARDED' } });
     },
