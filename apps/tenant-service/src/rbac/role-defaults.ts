@@ -68,6 +68,10 @@ export const ROLE_DEFAULTS: Record<string, Permission[]> = {
     PERMISSIONS.CUSTOMER_CREDIT_LIMIT_UPDATE,
     PERMISSIONS.EXPORT_CUSTOMER_DATA,
     PERMISSIONS.POS_MANAGE,
+    // Security audit: the Customer Loyalty Report (ReportRegistry.ts) is gated on this
+    // separate constant, not CUSTOMER_VIEW/POS_MANAGE — this role could run loyalty
+    // operations but never see the report on them.
+    PERMISSIONS.CRM_LOYALTY_VIEW,
     PERMISSIONS.SEARCH_GLOBAL,
   ],
 
@@ -117,6 +121,10 @@ export const ROLE_DEFAULTS: Record<string, Permission[]> = {
     PERMISSIONS.SUPPLIER_EDIT,
     PERMISSIONS.ITEM_VIEW,
     PERMISSIONS.STOCK_VIEW,
+    // Security audit: same reorder-report omission as INVENTORY_MANAGER — this role owns
+    // PO creation, so it gets REORDER_CREATE_PO too, not just the view.
+    PERMISSIONS.REORDER_VIEW,
+    PERMISSIONS.REORDER_CREATE_PO,
     PERMISSIONS.REPORT_VIEW,
     PERMISSIONS.SEARCH_GLOBAL,
   ],
@@ -138,12 +146,25 @@ export const ROLE_DEFAULTS: Record<string, Permission[]> = {
     PERMISSIONS.GST_FILE,
     PERMISSIONS.GSTR9_VIEW,
     PERMISSIONS.GSTR9_FILE,
+    // Security audit: GST_FILE only gates the generic compliance-calendar "mark as filed"
+    // endpoint — the actual monthly/quarterly returns (gst-service's gstr1.routes.ts,
+    // gstr3b.routes.ts) check GSTR1_*/GSTR3B_* instead, which this role never held despite
+    // already holding the once-a-year GSTR9_* pair. Same role-defaults.ts-omission pattern
+    // as the EXPORT_GENERATE/EXPORT_VIEW fix above.
+    PERMISSIONS.GSTR1_VIEW,
+    PERMISSIONS.GSTR1_FILE,
+    PERMISSIONS.GSTR3B_VIEW,
+    PERMISSIONS.GSTR3B_FILE,
     PERMISSIONS.EINVOICE_GENERATE,
     PERMISSIONS.EWAY_BILL_GENERATE,
     PERMISSIONS.FIXED_ASSET_VIEW,
     PERMISSIONS.FIXED_ASSET_CREATE,
     PERMISSIONS.FIXED_ASSET_UPDATE,
     PERMISSIONS.FIXED_ASSET_DISPOSE,
+    // Same omission pattern — TDS module (accounting-service's tds.routes.ts) was
+    // unreachable despite this role owning the rest of tax/compliance.
+    PERMISSIONS.TDS_VIEW,
+    PERMISSIONS.TDS_MANAGE,
     PERMISSIONS.REPORT_VIEW,
     PERMISSIONS.REPORT_EXPORT,
     PERMISSIONS.AUDIT_LOG_VIEW,
@@ -167,6 +188,18 @@ export const ROLE_DEFAULTS: Record<string, Permission[]> = {
     PERMISSIONS.STOCK_VIEW,
     PERMISSIONS.STOCK_ADJUST,
     PERMISSIONS.STOCK_TRANSFER,
+    // Security audit: this role could create/approve adjustments, transfers, physical
+    // verifications, and fabric-roll operations, but couldn't view the corresponding
+    // report-service reports or find its own transactions in Global Search — those check
+    // the granular *_VIEW constants below, which STOCK_ADJUST/STOCK_TRANSFER don't cover.
+    PERMISSIONS.STOCK_ADJUSTMENT_VIEW,
+    PERMISSIONS.STOCK_TRANSFER_VIEW,
+    PERMISSIONS.PHYSICAL_VERIFICATION_VIEW,
+    PERMISSIONS.FABRIC_ROLL_VIEW,
+    // Reorder report + "create PO from reorder" (production-service's reorder.routes.ts)
+    // were unreachable — view-only here since PO creation itself stays a PURCHASE_MANAGER
+    // action (see PURCHASE_MANAGER below).
+    PERMISSIONS.REORDER_VIEW,
     PERMISSIONS.ITEM_VIEW,
     PERMISSIONS.ITEM_CREATE,
     PERMISSIONS.ITEM_EDIT,
@@ -198,6 +231,10 @@ export const ROLE_DEFAULTS: Record<string, Permission[]> = {
     PERMISSIONS.EMPLOYEE_UPDATE,
     PERMISSIONS.ATTENDANCE_VIEW,
     PERMISSIONS.ATTENDANCE_MARK,
+    // Security audit: hr-service's /attendance/report and /attendance/team-summary check
+    // this separate constant, not ATTENDANCE_VIEW — this role could mark/view individual
+    // attendance but never see the report or team summary.
+    PERMISSIONS.ATTENDANCE_REPORT,
     PERMISSIONS.LEAVE_VIEW,
     PERMISSIONS.LEAVE_APPROVE,
     PERMISSIONS.PAYROLL_VIEW,
@@ -206,6 +243,11 @@ export const ROLE_DEFAULTS: Record<string, Permission[]> = {
     PERMISSIONS.VIEW_SALARY_DETAILS,
     PERMISSIONS.HR_STATUTORY,
     PERMISSIONS.EMPLOYEE_LOAN_MANAGE,
+    // Security audit: the whole Alterations module (hr-service's alteration.routes.ts, 10
+    // endpoints) was unreachable — no ALTERATION_* constant was granted to this role at all.
+    PERMISSIONS.ALTERATION_VIEW,
+    PERMISSIONS.ALTERATION_CREATE,
+    PERMISSIONS.ALTERATION_UPDATE,
     PERMISSIONS.REPORT_VIEW,
     PERMISSIONS.SEARCH_GLOBAL,
   ],
@@ -244,6 +286,14 @@ export const ROLE_DEFAULTS: Record<string, Permission[]> = {
     PERMISSIONS.GST_FILE,
     PERMISSIONS.GSTR9_VIEW,
     PERMISSIONS.GSTR9_FILE,
+    // See ACCOUNTANT's GSTR1/GSTR3B comment above — same omission.
+    PERMISSIONS.GSTR1_VIEW,
+    PERMISSIONS.GSTR1_FILE,
+    PERMISSIONS.GSTR3B_VIEW,
+    PERMISSIONS.GSTR3B_FILE,
+    // See ACCOUNTANT's TDS comment above — same omission.
+    PERMISSIONS.TDS_VIEW,
+    PERMISSIONS.TDS_MANAGE,
     PERMISSIONS.REPORT_VIEW,
     PERMISSIONS.REPORT_EXPORT,
     PERMISSIONS.AUDIT_LOG_VIEW,
