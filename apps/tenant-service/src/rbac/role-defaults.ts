@@ -156,6 +156,14 @@ export const ROLE_DEFAULTS: Record<string, Permission[]> = {
     PERMISSIONS.GSTR3B_VIEW,
     PERMISSIONS.GSTR3B_FILE,
     PERMISSIONS.EINVOICE_GENERATE,
+    // Security audit: this role held EINVOICE_GENERATE but not EINVOICE_CANCEL (einvoice.routes.ts
+    // checks them separately), and held GST_FILE/GSTR1_FILE/GSTR3B_FILE but not GSTR2A_RECONCILE
+    // or GST_COMPUTE — same role-defaults.ts-omission pattern as the GSTR1/GSTR3B fix above.
+    // GstConfigPage's "Compute" button and the whole GSTR-2A reconciliation page were
+    // reachable/visible but 403'd or were unreachable respectively for this role.
+    PERMISSIONS.EINVOICE_CANCEL,
+    PERMISSIONS.GSTR2A_RECONCILE,
+    PERMISSIONS.GST_COMPUTE,
     PERMISSIONS.EWAY_BILL_GENERATE,
     PERMISSIONS.FIXED_ASSET_VIEW,
     PERMISSIONS.FIXED_ASSET_CREATE,
@@ -276,9 +284,20 @@ export const ROLE_DEFAULTS: Record<string, Permission[]> = {
     PERMISSIONS.LEDGER_EXPORT,
     PERMISSIONS.COST_CENTER_VIEW,
     PERMISSIONS.COST_CENTER_MANAGE,
+    // Security audit: this role held ZERO fixed-asset permissions even though the junior
+    // ACCOUNTANT role already has all four — a supervisor couldn't even view an asset an
+    // accountant registered. Same role-defaults.ts-omission pattern as migration 0076.
+    PERMISSIONS.FIXED_ASSET_VIEW,
+    PERMISSIONS.FIXED_ASSET_CREATE,
+    PERMISSIONS.FIXED_ASSET_UPDATE,
+    PERMISSIONS.FIXED_ASSET_DISPOSE,
     PERMISSIONS.BALANCE_SHEET_VIEW,
     PERMISSIONS.PROFIT_LOSS_VIEW,
     PERMISSIONS.TRIAL_BALANCE_VIEW,
+    // Security audit: accounting-service's GET /reports/cash-flow checks this separate
+    // constant, not the other three report-view permissions above (which this role already
+    // held) — same role-defaults.ts-omission pattern as migration 0076.
+    PERMISSIONS.CASH_FLOW_VIEW,
     PERMISSIONS.BANK_RECONCILIATION_VIEW,
     PERMISSIONS.BANK_RECONCILIATION_DO,
     PERMISSIONS.FINANCIAL_YEAR_VIEW,
@@ -291,6 +310,14 @@ export const ROLE_DEFAULTS: Record<string, Permission[]> = {
     PERMISSIONS.GSTR1_FILE,
     PERMISSIONS.GSTR3B_VIEW,
     PERMISSIONS.GSTR3B_FILE,
+    // Security audit: this role (senior to ACCOUNTANT — see FIXED_ASSET comment above) held
+    // none of e-Invoice/e-Way Bill/GSTR-2A/GST-compute at all, despite the junior ACCOUNTANT
+    // role holding all of them. Same omission pattern, mirrored here.
+    PERMISSIONS.EINVOICE_GENERATE,
+    PERMISSIONS.EINVOICE_CANCEL,
+    PERMISSIONS.EWAY_BILL_GENERATE,
+    PERMISSIONS.GSTR2A_RECONCILE,
+    PERMISSIONS.GST_COMPUTE,
     // See ACCOUNTANT's TDS comment above — same omission.
     PERMISSIONS.TDS_VIEW,
     PERMISSIONS.TDS_MANAGE,
