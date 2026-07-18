@@ -272,26 +272,70 @@ export class StockTransferService {
   }
 
   async cancel(id: number, tenantId: number, userId: number, reason: string) {
-    const transfer = await this.get(id, tenantId);
-    if (['RECEIVED', 'CANCELLED'].includes(transfer.status)) {
-      throw new ERPError(
-        'INVALID_STATUS',
-        `Cannot cancel transfer in status ${transfer.status}`,
-        409
-      );
-    }
+    // Correctness audit: this used to unconditionally flip status to CANCELLED with no
+    // stock-reversal step. Cancelling a DRAFT/SUBMITTED/APPROVED transfer is fine as-is
+    // (no stock has moved yet) — but dispatch() already deducted stock from the source
+    // warehouse for a DISPATCHED (or IN_TRANSIT) transfer, and cancelling it never put
+    // that stock back, permanently stranding it: the goods never actually left the source
+    // warehouse, but the system's stock count said they did.
+    const lines = await this.db
+      .select()
+      .from(stockTransferLines)
+      .where(eq(stockTransferLines.transferId, id));
 
-    await this.db
-      .update(stockTransfers)
-      .set({
-        status: 'CANCELLED',
-        cancelledBy: userId,
-        cancelledAt: new Date(),
-        cancellationReason: reason,
-        version: sql`${stockTransfers.version} + 1`,
-        updatedAt: new Date(),
-      })
-      .where(and(eq(stockTransfers.id, id), eq(stockTransfers.tenantId, tenantId)));
+    await this.db.transaction(async (trx) => {
+      const db = trx as unknown as ErpDatabase;
+
+      // Lock the row and read its pre-cancel status before mutating it — RETURNING on the
+      // UPDATE below would only ever give back the *new* (CANCELLED) status, not what it
+      // was before, and this reversal decision depends on knowing that.
+      const [locked] = await db
+        .select()
+        .from(stockTransfers)
+        .where(and(eq(stockTransfers.id, id), eq(stockTransfers.tenantId, tenantId)))
+        .for('update');
+      if (!locked) throw new ERPError('TRANSFER_NOT_FOUND', 'Transfer not found', 404);
+      if (locked.status === 'RECEIVED' || locked.status === 'CANCELLED') {
+        throw new ERPError(
+          'INVALID_STATUS',
+          `Cannot cancel transfer in status ${locked.status}`,
+          409
+        );
+      }
+
+      await db
+        .update(stockTransfers)
+        .set({
+          status: 'CANCELLED',
+          cancelledBy: userId,
+          cancelledAt: new Date(),
+          cancellationReason: reason,
+          version: sql`${stockTransfers.version} + 1`,
+          updatedAt: new Date(),
+        })
+        .where(and(eq(stockTransfers.id, id), eq(stockTransfers.tenantId, tenantId)));
+
+      if (locked.status === 'DISPATCHED' || locked.status === 'IN_TRANSIT') {
+        for (const line of lines) {
+          const dispatchedQty = parseFloat(line.dispatchedQty ?? '0');
+          if (dispatchedQty <= 0) continue;
+
+          await new InventoryLedgerService(db).addStock({
+            tenantId,
+            itemId: line.itemId,
+            ...(line.variantId != null ? { variantId: line.variantId } : {}),
+            warehouseId: locked.fromWarehouseId,
+            quantity: dispatchedQty,
+            referenceType: 'STOCK_TRANSFER',
+            referenceId: id,
+            referenceLineId: line.id,
+            ...(line.unitCost ? { unitCost: parseFloat(line.unitCost) } : {}),
+            createdBy: userId,
+            notes: `Cancel: transfer ${locked.transferNumber} (reversing dispatch)`,
+          });
+        }
+      }
+    });
 
     return this.get(id, tenantId);
   }
