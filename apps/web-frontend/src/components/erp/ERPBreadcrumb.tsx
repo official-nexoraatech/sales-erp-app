@@ -59,6 +59,20 @@ function toLabel(seg: string): string {
   return SEGMENT_LABELS[seg] ?? seg.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+// Module segments with no landing page of their own — only their sub-pages have routes.
+const NO_INDEX_ROUTE = new Set([
+  'settings',
+  'inventory',
+  'gst',
+  'accounting',
+  'sales',
+  'purchase',
+  'crm',
+  'production',
+  'hr',
+  'admin',
+]);
+
 export default function ERPBreadcrumb() {
   const { pathname } = useLocation();
   const segments = pathname.split('/').filter(Boolean);
@@ -70,7 +84,8 @@ export default function ERPBreadcrumb() {
   const crumbs = segments.map((seg, i) => {
     path += `/${seg}`;
     const isLast = i === segments.length - 1;
-    return { label: toLabel(seg), to: isLast ? undefined : path };
+    const isDeadModuleRoot = i === 0 && NO_INDEX_ROUTE.has(seg);
+    return { label: toLabel(seg), to: isLast || isDeadModuleRoot ? undefined : path };
   });
 
   return (

@@ -7,6 +7,7 @@ import { reportsEngineApi, type ReportRunPending } from '../../api/endpoints.js'
 import { ERPDetailSkeleton } from '../../components/erp/ERPSkeleton.js';
 import ERPEmptyState from '../../components/erp/ERPEmptyState.js';
 import Button from '../../components/ui/Button.js';
+import { useAuthStore } from '../../store/auth.store.js';
 
 interface ParamDef {
   key: string;
@@ -152,7 +153,7 @@ export default function ReportViewerPage() {
   const downloadMutation = useMutation({
     mutationFn: async (fmt: 'CSV' | 'EXCEL') => {
       const baseUrl = import.meta.env.VITE_REPORT_URL ?? 'http://localhost:3015';
-      const token = localStorage.getItem('accessToken') ?? '';
+      const token = useAuthStore.getState().accessToken ?? '';
       const res = await fetch(`${baseUrl}/api/v2/reports/${slug}/run`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },

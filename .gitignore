@@ -57,3 +57,6 @@ yarn-error.log*
 
 # Local AI / workspace artifacts
 .claude/
+
+# QA session scratch scripts/screenshots (never source)
+.qa-tmp/
