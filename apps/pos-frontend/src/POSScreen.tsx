@@ -38,6 +38,7 @@ import {
 import { authFetch, ensureFreshToken, getAuthClaims } from './auth.js';
 import { getActiveSessionId } from './session.js';
 import { getSelectedBranch } from './branchStore.js';
+import { getCachedSellerStateCode, setCachedSellerStateCode } from './orgStore.js';
 import { syncAllReferenceData } from './referenceSync.js';
 import { buildDrawerKickOnly } from './escpos.js';
 import { supportsAnyPrinting, writeToPairedPrinter, reconnectPairedPrinter } from './webPrinter.js';
@@ -82,6 +83,7 @@ export { StockConflictModal } from './components/pos/StockConflictModal.js';
 const SALES_API = import.meta.env['VITE_SALES_API_URL'] ?? 'http://localhost:3000/api/sales';
 const PRODUCTION_API =
   import.meta.env['VITE_PRODUCTION_API_URL'] ?? 'http://localhost:3000/api/production';
+const TENANT_API = import.meta.env['VITE_TENANT_API_URL'] ?? 'http://localhost:3000/api/tenant';
 // Returns/exchange reuse the full sales-return workflow (approvals, credit notes) already
 // built in the main back-office app rather than duplicating that domain logic in POS.
 const WEB_FRONTEND_URL = import.meta.env['VITE_WEB_FRONTEND_URL'] ?? 'http://localhost:5173';
@@ -192,6 +194,24 @@ export default function POSScreen() {
     },
     enabled: paymentMode === 'UPI' && showPayment,
     staleTime: 5 * 60_000,
+  });
+
+  // Compliance audit: salePayload() used to hardcode placeOfSupply/sellerStateCode to '27'
+  // (Maharashtra) for every sale — any non-Maharashtra tenant got wrong CGST/SGST-vs-IGST
+  // splitting. Fetches the tenant's GSTIN once online and caches the derived state code in
+  // localStorage (see orgStore.ts) so it's still available for offline sales after the
+  // first successful sync — an in-memory-only query cache wouldn't survive an offline reload.
+  useQuery({
+    queryKey: ['pos-org-gstin'],
+    queryFn: async () => {
+      const res = await authFetch(`${TENANT_API}/organization`);
+      if (!res.ok) return null;
+      const body = (await res.json()) as { data?: { gstin?: string | null } };
+      const gstin = body.data?.gstin;
+      if (gstin && gstin.length >= 2) setCachedSellerStateCode(gstin.substring(0, 2));
+      return gstin ?? null;
+    },
+    staleTime: 60 * 60_000,
   });
   const upiVpa = (upiData as { data?: { upiVpa: string | null } } | undefined)?.data?.upiVpa;
   const upiPayeeName =
@@ -572,8 +592,8 @@ export default function POSScreen() {
     customerId: customer?.id,
     branchId: selectedBranch?.branchId ?? 0,
     warehouseId: selectedBranch?.warehouseId ?? 0,
-    placeOfSupply: '27',
-    sellerStateCode: '27',
+    placeOfSupply: getCachedSellerStateCode() ?? '27',
+    sellerStateCode: getCachedSellerStateCode() ?? '27',
     lines: cart.map((l) => ({
       itemId: l.itemId,
       quantity: l.quantity,

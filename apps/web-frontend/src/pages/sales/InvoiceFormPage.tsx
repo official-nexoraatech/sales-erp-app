@@ -10,6 +10,7 @@ import {
   customerApi,
   warehouseApi,
   branchApi,
+  organizationApi,
 } from '../../api/endpoints.js';
 import { useAuthStore } from '../../store/auth.store.js';
 import { PERMISSIONS } from '../../constants/permissions.js';
@@ -70,7 +71,6 @@ export default function InvoiceFormPage() {
   const [branchId, setBranchId] = useState('');
   const [warehouseId, setWarehouseId] = useState('');
   const [placeOfSupply, setPlaceOfSupply] = useState('27');
-  const [sellerState] = useState('27');
   const [invoiceDate, setInvoiceDate] = useState<string>(new Date().toISOString().substring(0, 10));
   const [dueDate, setDueDate] = useState<string>(
     new Date(Date.now() + 30 * 86400_000).toISOString().substring(0, 10)
@@ -98,6 +98,18 @@ export default function InvoiceFormPage() {
     queryFn: () => branchApi.list(),
     enabled: hasPermission(PERMISSIONS.BRANCH_VIEW),
   });
+  // Compliance audit: sellerState was hardcoded to '27' (Maharashtra) — every tenant
+  // registered in another state got wrong CGST/SGST-vs-IGST splitting on every invoice.
+  // The first two digits of a GSTIN are its state code (same derivation gst-service's
+  // GstLedgerService.extractStateCode() uses server-side); '27' remains only as a
+  // last-resort fallback for a tenant that hasn't set its GSTIN yet.
+  const { data: orgData } = useQuery({
+    queryKey: ['organization'],
+    queryFn: () => organizationApi.get(),
+    staleTime: 60 * 60_000,
+  });
+  const sellerState =
+    ((orgData as { gstin?: string | null } | undefined)?.gstin ?? '').substring(0, 2) || '27';
   const { data: quotData } = useQuery({
     queryKey: ['quotation-detail', quotationId],
     queryFn: () => quotationApi.getById(Number(quotationId)),
