@@ -61,8 +61,8 @@ async function bootstrap(): Promise<void> {
     serviceName: 'hr-service',
     storage: {
       endpoint: process.env['MINIO_ENDPOINT'] ?? 'localhost:9000',
-      accessKeyId: process.env['MINIO_ACCESS_KEY'] ?? 'minioadmin',
-      secretAccessKey: process.env['MINIO_SECRET_KEY'] ?? 'minioadmin123',
+      accessKeyId: config.minioAccessKey,
+      secretAccessKey: config.minioSecretKey,
       useSSL: process.env['MINIO_USE_SSL'] === 'true',
       bucket: process.env['MINIO_BUCKET'] ?? 'erp-local',
     },

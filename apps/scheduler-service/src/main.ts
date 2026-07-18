@@ -63,8 +63,8 @@ async function bootstrap(): Promise<void> {
 
   const storage = new StorageClient({
     endpoint: process.env['MINIO_ENDPOINT'] ?? 'localhost:9000',
-    accessKeyId: process.env['MINIO_ACCESS_KEY'] ?? 'erp_minio',
-    secretAccessKey: process.env['MINIO_SECRET_KEY'] ?? 'erp_minio_secret',
+    accessKeyId: config.minioAccessKey,
+    secretAccessKey: config.minioSecretKey,
     useSSL: process.env['MINIO_USE_SSL'] === 'true',
     bucket: process.env['MINIO_BUCKET'] ?? 'erp-storage',
   });

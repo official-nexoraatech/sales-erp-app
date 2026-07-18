@@ -41,10 +41,11 @@ export function loadConfig(serviceName: string): AppConfig {
     nodeEnv: process.env['NODE_ENV'] ?? 'development',
     port: parseInt(process.env['PORT'] ?? '3000', 10),
     serviceName,
-    databaseUrl:
-      process.env['DATABASE_URL'] ?? 'postgresql://erp:erp@localhost:5432/erp',
+    databaseUrl: process.env['DATABASE_URL'] ?? 'postgresql://erp:erp@localhost:5432/erp',
     databaseReplicaUrl:
-      process.env['DATABASE_REPLICA_URL'] ?? process.env['DATABASE_URL'] ?? 'postgresql://erp:erp@localhost:5433/erp',
+      process.env['DATABASE_REPLICA_URL'] ??
+      process.env['DATABASE_URL'] ??
+      'postgresql://erp:erp@localhost:5433/erp',
     redisUrl: process.env['REDIS_URL'] ?? 'redis://localhost:6379',
     kafkaBrokers: (process.env['KAFKA_BROKERS'] ?? 'localhost:9092').split(','),
     kafkaClientId: process.env['KAFKA_CLIENT_ID'] ?? serviceName,
@@ -68,10 +69,16 @@ export function loadConfig(serviceName: string): AppConfig {
 // Priority-1 secrets (PG-004): highest blast-radius secrets, migrated first.
 // Vault path per service: secret/data/erp/<serviceName>; key names match the
 // env vars they replace so the mapping stays self-documenting.
-const PRIORITY_SECRETS: Array<{ envKey: string; configField: 'databaseUrl' | 'databaseReplicaUrl' | 'jwtPrivateKey' }> = [
+const PRIORITY_SECRETS: Array<{
+  envKey: string;
+  configField:
+    'databaseUrl' | 'databaseReplicaUrl' | 'jwtPrivateKey' | 'minioAccessKey' | 'minioSecretKey';
+}> = [
   { envKey: 'DATABASE_URL', configField: 'databaseUrl' },
   { envKey: 'DATABASE_REPLICA_URL', configField: 'databaseReplicaUrl' },
   { envKey: 'JWT_PRIVATE_KEY', configField: 'jwtPrivateKey' },
+  { envKey: 'MINIO_ACCESS_KEY', configField: 'minioAccessKey' },
+  { envKey: 'MINIO_SECRET_KEY', configField: 'minioSecretKey' },
 ];
 
 export interface LoadConfigWithSecretsOptions {
@@ -95,7 +102,7 @@ export interface LoadConfigWithSecretsOptions {
  */
 export async function loadConfigWithSecrets(
   serviceName: string,
-  options?: LoadConfigWithSecretsOptions,
+  options?: LoadConfigWithSecretsOptions
 ): Promise<AppConfig> {
   const config = loadConfig(serviceName);
   if (config.nodeEnv !== 'production') {
@@ -109,7 +116,7 @@ export async function loadConfigWithSecrets(
   const vaultToken = process.env['VAULT_TOKEN'];
   if (!vaultAddr || !vaultToken) {
     throw new Error(
-      `VAULT_ADDR and VAULT_TOKEN are required in production (service "${serviceName}")`,
+      `VAULT_ADDR and VAULT_TOKEN are required in production (service "${serviceName}")`
     );
   }
 
@@ -121,7 +128,7 @@ export async function loadConfigWithSecrets(
       resolved[configField] = await vault.getSecret(`erp/${serviceName}`, envKey);
     } catch (err) {
       throw new Error(
-        `Failed to load required secret "${envKey}" from Vault for service "${serviceName}": ${(err as Error).message}`,
+        `Failed to load required secret "${envKey}" from Vault for service "${serviceName}": ${(err as Error).message}`
       );
     }
   }
@@ -131,7 +138,7 @@ export async function loadConfigWithSecrets(
       process.env[envKey] = await vault.getSecret(`erp/${serviceName}`, envKey);
     } catch (err) {
       throw new Error(
-        `Failed to load required secret "${envKey}" from Vault for service "${serviceName}": ${(err as Error).message}`,
+        `Failed to load required secret "${envKey}" from Vault for service "${serviceName}": ${(err as Error).message}`
       );
     }
   }
