@@ -144,11 +144,26 @@ export const ROLE_DEFAULTS: Record<string, Permission[]> = {
   ACCOUNTANT: [
     PERMISSIONS.ACCOUNT_VIEW,
     PERMISSIONS.ACCOUNT_CREATE,
+    // Security audit (docs-site's own accounting architecture audit page): accounts.routes.ts
+    // gates both PUT /accounts/:id and DELETE /accounts/:id on ACCOUNT_UPDATE — this role
+    // could create an account but never edit or delete one afterward.
+    PERMISSIONS.ACCOUNT_UPDATE,
     PERMISSIONS.VOUCHER_CREATE,
     PERMISSIONS.JOURNAL_VIEW,
     PERMISSIONS.JOURNAL_CREATE,
     PERMISSIONS.LEDGER_VIEW,
     PERMISSIONS.COST_CENTER_VIEW,
+    // Same audit: this role couldn't view any of the four core financial reports
+    // (Trial Balance/P&L/Balance Sheet/Cash Flow) despite being the one entering the
+    // underlying journal/account data — ACCOUNTANT_SUPERVISOR/AUDITOR already hold these.
+    PERMISSIONS.BALANCE_SHEET_VIEW,
+    PERMISSIONS.PROFIT_LOSS_VIEW,
+    PERMISSIONS.TRIAL_BALANCE_VIEW,
+    PERMISSIONS.CASH_FLOW_VIEW,
+    // Same audit: report-service's Bank Book report is gated on BANK_RECONCILIATION_VIEW,
+    // which only ACCOUNTANT_SUPERVISOR held — view-only here (the actual reconciliation
+    // action, BANK_RECONCILIATION_DO, stays supervisor-tier).
+    PERMISSIONS.BANK_RECONCILIATION_VIEW,
     PERMISSIONS.INVOICE_VIEW,
     PERMISSIONS.PAYMENT_IN_VIEW,
     PERMISSIONS.PAYMENT_OUT_VIEW,

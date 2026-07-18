@@ -575,6 +575,13 @@
       "when": 1789590935804,
       "tag": "0081_payment_view_import_permission_backfill",
       "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "7",
+      "when": 1789677335804,
+      "tag": "0082_accountant_report_permission_backfill",
+      "breakpoints": true
     }
   ]
 }
