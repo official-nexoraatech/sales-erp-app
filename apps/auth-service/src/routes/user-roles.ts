@@ -3,7 +3,7 @@ import type { ErpDatabase } from '@erp/db';
 import { users, roles, userRoles, rolePermissions } from '@erp/db';
 import { eq, and, inArray } from 'drizzle-orm';
 import { z } from 'zod';
-import { NotFoundError, ValidationError, BusinessError } from '@erp/types';
+import { NotFoundError, ValidationError, BusinessError, PermissionError } from '@erp/types';
 import { PERMISSIONS } from '@erp/types';
 import { authenticate } from '../middleware/authenticate.js';
 import { requirePermission } from '../middleware/authorize.js';
@@ -49,7 +49,7 @@ export async function userRolesRoutes(fastify: FastifyInstance, db: ErpDatabase)
     '/users/:id/roles',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.ROLE_ASSIGN_USER)] },
     async (request, reply) => {
-      const auth = (request as { auth: { tenantId: number } }).auth;
+      const auth = (request as { auth: { tenantId: number; permissions: string[] } }).auth;
       const tenantId = auth.tenantId;
       const userId = parseInt(request.params.id, 10);
 
@@ -75,12 +75,30 @@ export async function userRolesRoutes(fastify: FastifyInstance, db: ErpDatabase)
         throw new BusinessError('INVALID_ROLE', 'One or more role IDs are invalid for this tenant');
       }
 
-      // Replace atomically
-      await db.delete(userRoles).where(and(eq(userRoles.userId, userId), eq(userRoles.tenantId, tenantId)));
-
-      await db.insert(userRoles).values(
-        body.data.roleIds.map((roleId) => ({ userId, roleId, tenantId }))
+      // Privilege-escalation guard: a caller can only grant roles whose permissions are a
+      // subset of their own — otherwise anyone holding just ROLE_ASSIGN_USER (e.g. ADMIN,
+      // which role-defaults.ts deliberately excludes IMPERSONATE_USER/FINANCIAL_YEAR_CLOSE/
+      // PAYROLL_PROCESS from) could self-assign the OWNER system role and instantly gain
+      // every permission in the tenant.
+      const grantedPerms = await db
+        .select({ permission: rolePermissions.permission })
+        .from(rolePermissions)
+        .where(inArray(rolePermissions.roleId, body.data.roleIds));
+      const notOwned = [...new Set(grantedPerms.map((p) => p.permission))].filter(
+        (p) => !auth.permissions.includes(p)
       );
+      if (notOwned.length > 0) {
+        throw new PermissionError(notOwned.join(', '));
+      }
+
+      // Replace atomically
+      await db
+        .delete(userRoles)
+        .where(and(eq(userRoles.userId, userId), eq(userRoles.tenantId, tenantId)));
+
+      await db
+        .insert(userRoles)
+        .values(body.data.roleIds.map((roleId) => ({ userId, roleId, tenantId })));
 
       return reply.code(200).send({ data: { userId, roleIds: body.data.roleIds } });
     }

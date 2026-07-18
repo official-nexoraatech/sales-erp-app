@@ -24,10 +24,15 @@ const SetPermissionsSchema = z.object({
   permissions: z.array(z.string()).min(0),
 });
 
-export async function rolesRoutes(fastify: FastifyInstance, ctxFactory: PlatformContextFactory): Promise<void> {
+export async function rolesRoutes(
+  fastify: FastifyInstance,
+  ctxFactory: PlatformContextFactory
+): Promise<void> {
   function ctxFor(request: unknown): ReturnType<PlatformContextFactory['create']> {
     const auth = (request as { auth: { tenantId: number; userId?: number } }).auth;
-    const correlationId = ((request as { headers?: Record<string, unknown> }).headers?.['x-correlation-id'] as string | undefined) ?? crypto.randomUUID();
+    const correlationId =
+      ((request as { headers?: Record<string, unknown> }).headers?.['x-correlation-id'] as
+        string | undefined) ?? crypto.randomUUID();
     return ctxFactory.create({ tenantId: auth.tenantId, userId: auth.userId ?? 0, correlationId });
   }
 
@@ -64,7 +69,9 @@ export async function rolesRoutes(fastify: FastifyInstance, ctxFactory: Platform
     '/roles',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.ROLE_CREATE)] },
     async (request, reply) => {
-      const auth = (request as { auth: { tenantId: number; userId: number } }).auth;
+      const auth = (
+        request as { auth: { tenantId: number; userId: number; permissions: string[] } }
+      ).auth;
       const tenantId = auth.tenantId;
       const ctx = ctxFor(request);
 
@@ -101,6 +108,15 @@ export async function rolesRoutes(fastify: FastifyInstance, ctxFactory: Platform
           throw new ValidationError(`Invalid permissions: ${invalid.join(', ')}`);
         }
 
+        // Privilege-escalation guard: a caller can only grant permissions they themselves
+        // already hold — otherwise e.g. an ADMIN (deliberately missing IMPERSONATE_USER,
+        // see role-defaults.ts) could create a custom role with it and self-assign it via
+        // PUT /users/:id/roles, bypassing that exclusion entirely.
+        const notOwned = body.data.permissions.filter((p) => !auth.permissions.includes(p));
+        if (notOwned.length > 0) {
+          throw new PermissionError(notOwned.join(', '));
+        }
+
         await ctx.db.raw.insert(rolePermissions).values(
           body.data.permissions.map((p) => ({
             roleId: role.id,
@@ -110,7 +126,10 @@ export async function rolesRoutes(fastify: FastifyInstance, ctxFactory: Platform
         );
       }
 
-      await ctx.events.publish('role', role.id, 'ROLE_CREATED', { ...role, permissions: body.data.permissions } as unknown as Record<string, unknown>);
+      await ctx.events.publish('role', role.id, 'ROLE_CREATED', {
+        ...role,
+        permissions: body.data.permissions,
+      } as unknown as Record<string, unknown>);
 
       return reply.code(201).send({
         data: { ...role, permissions: body.data.permissions },
@@ -152,7 +171,12 @@ export async function rolesRoutes(fastify: FastifyInstance, ctxFactory: Platform
         .returning();
 
       if (updated) {
-        await ctx.events.publish('role', roleId, 'ROLE_UPDATED', updated as unknown as Record<string, unknown>);
+        await ctx.events.publish(
+          'role',
+          roleId,
+          'ROLE_UPDATED',
+          updated as unknown as Record<string, unknown>
+        );
       }
 
       return reply.code(200).send({ data: updated });
@@ -177,13 +201,9 @@ export async function rolesRoutes(fastify: FastifyInstance, ctxFactory: Platform
       if (!role) throw new NotFoundError('Role', roleId);
       if (role.isSystem) throw new PermissionError(PERMISSIONS.ROLE_DELETE);
 
-      await ctx.db.raw
-        .delete(rolePermissions)
-        .where(and(eq(rolePermissions.roleId, roleId)));
+      await ctx.db.raw.delete(rolePermissions).where(and(eq(rolePermissions.roleId, roleId)));
 
-      await ctx.db.raw
-        .delete(roles)
-        .where(and(eq(roles.id, roleId), eq(roles.tenantId, tenantId)));
+      await ctx.db.raw.delete(roles).where(and(eq(roles.id, roleId), eq(roles.tenantId, tenantId)));
 
       await ctx.events.publish('role', roleId, 'ROLE_DELETED', { id: roleId });
 
@@ -224,7 +244,7 @@ export async function rolesRoutes(fastify: FastifyInstance, ctxFactory: Platform
     '/roles/:id/permissions',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.ROLE_ASSIGN_PERMISSION)] },
     async (request, reply) => {
-      const auth = (request as { auth: { tenantId: number } }).auth;
+      const auth = (request as { auth: { tenantId: number; permissions: string[] } }).auth;
       const tenantId = auth.tenantId;
       const ctx = ctxFor(request);
       const roleId = parseInt(request.params.id, 10);
@@ -247,6 +267,13 @@ export async function rolesRoutes(fastify: FastifyInstance, ctxFactory: Platform
         throw new ValidationError(`Invalid permissions: ${invalid.join(', ')}`);
       }
 
+      // Privilege-escalation guard: same rationale as POST /roles above — a caller can
+      // only grant a role permissions they themselves already hold.
+      const notOwned = body.data.permissions.filter((p) => !auth.permissions.includes(p));
+      if (notOwned.length > 0) {
+        throw new PermissionError(notOwned.join(', '));
+      }
+
       // Replace all permissions atomically
       await ctx.db.raw.delete(rolePermissions).where(eq(rolePermissions.roleId, roleId));
 
@@ -260,7 +287,10 @@ export async function rolesRoutes(fastify: FastifyInstance, ctxFactory: Platform
         );
       }
 
-      await ctx.events.publish('role', roleId, 'ROLE_UPDATED', { id: roleId, permissions: body.data.permissions });
+      await ctx.events.publish('role', roleId, 'ROLE_UPDATED', {
+        id: roleId,
+        permissions: body.data.permissions,
+      });
 
       return reply.code(200).send({
         data: { roleId, permissions: body.data.permissions },
