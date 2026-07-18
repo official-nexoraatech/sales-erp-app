@@ -16,9 +16,10 @@ import {
   warehouses,
   projectionStockLevel,
 } from '@erp/db';
+import type { ErpDatabase } from '@erp/db';
 import { and, desc, eq, isNull, sql } from 'drizzle-orm';
 import { z } from 'zod';
-import { PERMISSIONS } from '@erp/types';
+import { PERMISSIONS, BusinessError } from '@erp/types';
 import { authenticate } from '../middleware/authenticate.js';
 import { requireAnyPermission } from '../middleware/authorize.js';
 import {
@@ -409,13 +410,134 @@ export async function posRoutes(
         throw err;
       }
 
-      // Immediately confirm POS sales (no draft state)
+      // Confirm + collect payment + redeem/earn loyalty + update session totals as one
+      // atomic unit. Previously each ran as its own separate, independently-committing
+      // step (confirm()'s own transaction, then unwrapped payment/loyalty calls) — a
+      // failure partway through (e.g. a concurrent OVER_ALLOCATION on the payment loop)
+      // could leave a CONFIRMED, stock-deducted invoice with missing or partial payment
+      // recording and no automatic way to reconcile it. Now either everything here commits
+      // together, or none of it does — nested .transaction() calls inside confirm()/
+      // paymentSvc/loyaltySvc become Postgres SAVEPOINTs within this one transaction
+      // (drizzle-orm's standard nested-transaction behavior), so a failure rolls back the
+      // stock deduction and invoice confirmation along with the payment/loyalty writes.
+      let grandTotal = 0;
+      let redemptionValue = 0;
+      let loyaltyPointsEarned = 0;
+      const paymentIds: number[] = [];
+
       try {
-        await svc.confirm(invoiceId, req.auth.tenantId, invoiceNumber, req.auth.userId);
+        await ctx.db.raw.transaction(async (trx) => {
+          const trxDb = trx as unknown as ErpDatabase;
+          const trxInvoiceSvc = new InvoiceService(trxDb);
+          const trxPaymentSvc = new PaymentService(trxDb);
+          const trxLoyaltySvc = new LoyaltyService(trxDb);
+
+          await trxInvoiceSvc.confirm(invoiceId, req.auth.tenantId, invoiceNumber, req.auth.userId);
+
+          const [inv] = await trxDb
+            .select({ grandTotal: invoices.grandTotal })
+            .from(invoices)
+            .where(eq(invoices.id, invoiceId));
+          grandTotal = parseFloat(String(inv?.grandTotal ?? 0));
+
+          // Loyalty redemption reduces the amount due before cash/card/UPI is collected —
+          // recorded as its own Payment row (paymentMode LOYALTY) so it shows in reconciliation.
+          if (body.loyaltyPointsRedeem > 0 && body.customerId) {
+            redemptionValue = await trxLoyaltySvc.redeemPoints(
+              req.auth.tenantId,
+              body.customerId,
+              body.loyaltyPointsRedeem,
+              'POS_SALE',
+              invoiceId,
+              req.auth.userId
+            );
+            if (redemptionValue > 0) {
+              const loyaltyPaymentId = await trxPaymentSvc.create({
+                tenantId: req.auth.tenantId,
+                branchId: body.branchId,
+                customerId: body.customerId,
+                paymentNumber: `PAY-${req.auth.tenantId}-${Date.now()}-0`,
+                paymentDate: new Date(),
+                paymentMode: 'LOYALTY',
+                amount: redemptionValue,
+                posSessionId: body.sessionId,
+                createdBy: req.auth.userId,
+              });
+              await trxPaymentSvc.allocate(
+                loyaltyPaymentId,
+                req.auth.tenantId,
+                [{ invoiceId, amount: redemptionValue }],
+                req.auth.userId
+              );
+              paymentIds.push(loyaltyPaymentId);
+            }
+          }
+
+          // Record and allocate the payment(s) taken at the till — without this, a POS sale
+          // left invoices.balanceDue permanently equal to grandTotal, i.e. every counter
+          // sale (even cash paid in full) looked unpaid in the books forever. Supports a
+          // single mode (paymentMode/amountTendered) or a split across multiple modes.
+          const amountDue = round2(grandTotal - redemptionValue);
+          const paymentLines =
+            body.payments && body.payments.length > 0
+              ? body.payments
+              : [{ mode: body.paymentMode, amount: amountDue }];
+
+          const paymentsSum = round2(paymentLines.reduce((s, p) => s + p.amount, 0));
+          if (Math.abs(paymentsSum - amountDue) > 0.02) {
+            throw new BusinessError(
+              'PAYMENT_MISMATCH',
+              `Payments total ₹${paymentsSum} does not match amount due ₹${amountDue}`
+            );
+          }
+
+          for (const p of paymentLines) {
+            const paymentId = await trxPaymentSvc.create({
+              tenantId: req.auth.tenantId,
+              branchId: body.branchId,
+              customerId: body.customerId ?? 0,
+              paymentNumber: `PAY-${req.auth.tenantId}-${Date.now()}-${paymentIds.length + 1}`,
+              paymentDate: new Date(),
+              paymentMode: p.mode,
+              amount: p.amount,
+              posSessionId: body.sessionId,
+              createdBy: req.auth.userId,
+            });
+            await trxPaymentSvc.allocate(
+              paymentId,
+              req.auth.tenantId,
+              [{ invoiceId, amount: p.amount }],
+              req.auth.userId
+            );
+            paymentIds.push(paymentId);
+          }
+
+          // Earn loyalty points on the sale total (best-effort — no-op if the feature flag
+          // is off or there's no real customer on the sale).
+          if (body.customerId) {
+            loyaltyPointsEarned = await trxLoyaltySvc.earnPoints(
+              req.auth.tenantId,
+              body.customerId,
+              grandTotal,
+              'POS_SALE',
+              invoiceId,
+              req.auth.userId
+            );
+          }
+
+          // Update session totals
+          await trxDb
+            .update(posSessions)
+            .set({
+              totalSales: sql`${posSessions.totalSales} + ${grandTotal}`,
+              totalTransactions: sql`${posSessions.totalTransactions} + 1`,
+            })
+            .where(eq(posSessions.id, body.sessionId));
+        });
       } catch (err) {
         if (err instanceof InsufficientStockError) {
           // OFFLINE-07: create() already committed a DRAFT invoice (its own transaction,
-          // separate from confirm()'s) — left un-voided, that orphan would permanently
+          // separate from this one) — left un-voided, that orphan would permanently
           // block any retry under the same operationId (unique constraint) while never
           // itself reaching a resolvable state. Void it now so the cashier's adjust/cancel
           // resolution (offline sync stuck-item UI) can resubmit cleanly under a new one.
@@ -431,122 +553,27 @@ export async function posRoutes(
             requested: err.requested,
           });
         }
+        if (err instanceof BusinessError && err.code === 'PAYMENT_MISMATCH') {
+          await svc.cancel(invoiceId, req.auth.tenantId, req.auth.userId, err.message);
+          return sendError(reply, 400, 'PAYMENT_MISMATCH', err.message);
+        }
+        // Everything above rolled back together — the invoice never actually reached
+        // CONFIRMED (still DRAFT, exactly as create() left it). Void it so a retry under
+        // the same operationId isn't permanently blocked, then surface the real error.
+        await svc.cancel(
+          invoiceId,
+          req.auth.tenantId,
+          req.auth.userId,
+          `POS sale processing failed: ${err instanceof Error ? err.message : String(err)}`
+        );
         throw err;
       }
-
-      const [inv] = await ctx.db.raw
-        .select({ grandTotal: invoices.grandTotal })
-        .from(invoices)
-        .where(eq(invoices.id, invoiceId));
-      const grandTotal = parseFloat(String(inv?.grandTotal ?? 0));
-
-      const paymentSvc = new PaymentService(ctx.db.raw);
-      const loyaltySvc = new LoyaltyService(ctx.db.raw);
-      const paymentIds: number[] = [];
-
-      // Loyalty redemption reduces the amount due before cash/card/UPI is collected —
-      // recorded as its own Payment row (paymentMode LOYALTY) so it shows in reconciliation.
-      let redemptionValue = 0;
-      if (body.loyaltyPointsRedeem > 0 && body.customerId) {
-        redemptionValue = await loyaltySvc.redeemPoints(
-          req.auth.tenantId,
-          body.customerId,
-          body.loyaltyPointsRedeem,
-          'POS_SALE',
-          invoiceId,
-          req.auth.userId
-        );
-        if (redemptionValue > 0) {
-          const loyaltyPaymentId = await paymentSvc.create({
-            tenantId: req.auth.tenantId,
-            branchId: body.branchId,
-            customerId: body.customerId,
-            paymentNumber: `PAY-${req.auth.tenantId}-${Date.now()}-0`,
-            paymentDate: new Date(),
-            paymentMode: 'LOYALTY',
-            amount: redemptionValue,
-            posSessionId: body.sessionId,
-            createdBy: req.auth.userId,
-          });
-          await paymentSvc.allocate(
-            loyaltyPaymentId,
-            req.auth.tenantId,
-            [{ invoiceId, amount: redemptionValue }],
-            req.auth.userId
-          );
-          paymentIds.push(loyaltyPaymentId);
-        }
-      }
-
-      // Record and allocate the payment(s) taken at the till — without this, a POS sale
-      // left invoices.balanceDue permanently equal to grandTotal, i.e. every counter
-      // sale (even cash paid in full) looked unpaid in the books forever. Supports a
-      // single mode (paymentMode/amountTendered) or a split across multiple modes.
-      const amountDue = round2(grandTotal - redemptionValue);
-      const paymentLines =
-        body.payments && body.payments.length > 0
-          ? body.payments
-          : [{ mode: body.paymentMode, amount: amountDue }];
-
-      const paymentsSum = round2(paymentLines.reduce((s, p) => s + p.amount, 0));
-      if (Math.abs(paymentsSum - amountDue) > 0.02) {
-        return sendError(
-          reply,
-          400,
-          'PAYMENT_MISMATCH',
-          `Payments total ₹${paymentsSum} does not match amount due ₹${amountDue}`
-        );
-      }
-
-      for (const p of paymentLines) {
-        const paymentId = await paymentSvc.create({
-          tenantId: req.auth.tenantId,
-          branchId: body.branchId,
-          customerId: body.customerId ?? 0,
-          paymentNumber: `PAY-${req.auth.tenantId}-${Date.now()}-${paymentIds.length + 1}`,
-          paymentDate: new Date(),
-          paymentMode: p.mode,
-          amount: p.amount,
-          posSessionId: body.sessionId,
-          createdBy: req.auth.userId,
-        });
-        await paymentSvc.allocate(
-          paymentId,
-          req.auth.tenantId,
-          [{ invoiceId, amount: p.amount }],
-          req.auth.userId
-        );
-        paymentIds.push(paymentId);
-      }
-
-      // Earn loyalty points on the sale total (best-effort — no-op if the feature flag
-      // is off or there's no real customer on the sale).
-      let loyaltyPointsEarned = 0;
-      if (body.customerId) {
-        loyaltyPointsEarned = await loyaltySvc.earnPoints(
-          req.auth.tenantId,
-          body.customerId,
-          grandTotal,
-          'POS_SALE',
-          invoiceId,
-          req.auth.userId
-        );
-      }
-
-      // Update session totals
-      await ctx.db.raw
-        .update(posSessions)
-        .set({
-          totalSales: sql`${posSessions.totalSales} + ${grandTotal}`,
-          totalTransactions: sql`${posSessions.totalTransactions} + 1`,
-        })
-        .where(eq(posSessions.id, body.sessionId));
 
       return reply.code(201).send({
         data: {
           invoiceId,
           invoiceNumber,
-          grandTotal: inv?.grandTotal,
+          grandTotal: String(grandTotal),
           paymentIds,
           loyaltyPointsEarned,
           loyaltyRedemptionValue: redemptionValue,

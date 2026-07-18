@@ -134,6 +134,10 @@ function makeChainableDb(script: unknown[]) {
     resolve: (v: unknown) => void,
     reject: (e: unknown) => void
   ) => next().then(resolve, reject);
+  // POS sale confirm+payment+loyalty now run inside one ctx.db.raw.transaction(...) call —
+  // invokes the callback with this same chainable so any select/update inside it still
+  // resolves from `script`, matching how the un-transacted calls resolved before.
+  chainable['transaction'] = vi.fn((fn: (trx: unknown) => unknown) => fn(chainable));
   return chainable;
 }
 
@@ -188,8 +192,8 @@ describe('POST /pos/sales — OFFLINE-07 stock-conflict handling', () => {
     expect(cancelSpy).toHaveBeenCalledWith(42, 1, 1, expect.stringContaining('Stock conflict'));
   });
 
-  it('propagates a non-stock error from confirm() unchanged (no cancel, no STOCK_CONFLICT translation)', async () => {
-    const cancelSpy = vi.fn();
+  it('propagates a non-stock error from confirm() unchanged (no STOCK_CONFLICT translation), and still voids the orphaned DRAFT', async () => {
+    const cancelSpy = vi.fn().mockResolvedValue(undefined);
     (
       InvoiceService as unknown as { mockImplementation: (fn: () => unknown) => void }
     ).mockImplementation(() => ({
@@ -211,7 +215,18 @@ describe('POST /pos/sales — OFFLINE-07 stock-conflict handling', () => {
       payload: SALE_BODY,
     });
 
+    // A generic (non-InsufficientStockError, non-PAYMENT_MISMATCH) failure inside the
+    // confirm+payment+loyalty transaction still propagates as a real 500 rather than being
+    // translated into a stock-conflict response — but since the whole transaction rolled
+    // back (the invoice never actually reached CONFIRMED), the orphaned DRAFT is voided the
+    // same as the stock-conflict case, so it doesn't permanently block a retry under the
+    // same operationId.
     expect(res.statusCode).toBe(500);
-    expect(cancelSpy).not.toHaveBeenCalled();
+    expect(cancelSpy).toHaveBeenCalledWith(
+      42,
+      1,
+      1,
+      expect.stringContaining('POS sale processing failed')
+    );
   });
 });
