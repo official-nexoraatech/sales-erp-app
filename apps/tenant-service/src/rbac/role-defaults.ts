@@ -67,6 +67,13 @@ export const ROLE_DEFAULTS: Record<string, Permission[]> = {
     PERMISSIONS.PRICE_FLOOR_OVERRIDE,
     PERMISSIONS.CUSTOMER_CREDIT_LIMIT_UPDATE,
     PERMISSIONS.EXPORT_CUSTOMER_DATA,
+    // Security audit: scheduler-service's bulk CSV import (customers) checks these three
+    // generic constants — none of the roles that actually own an importable entity type
+    // held them, so bulk import was effectively OWNER/ADMIN-only despite each entity's
+    // normal CRUD already being delegated.
+    PERMISSIONS.IMPORT_VIEW,
+    PERMISSIONS.IMPORT_EXECUTE,
+    PERMISSIONS.IMPORT_ROLLBACK,
     PERMISSIONS.POS_MANAGE,
     // Security audit: the Customer Loyalty Report (ReportRegistry.ts) is gated on this
     // separate constant, not CUSTOMER_VIEW/POS_MANAGE — this role could run loyalty
@@ -121,6 +128,11 @@ export const ROLE_DEFAULTS: Record<string, Permission[]> = {
     PERMISSIONS.SUPPLIER_EDIT,
     PERMISSIONS.ITEM_VIEW,
     PERMISSIONS.STOCK_VIEW,
+    // See SALES_MANAGER's bulk-import comment above — same omission (this role owns
+    // suppliers, one of the importable entity types).
+    PERMISSIONS.IMPORT_VIEW,
+    PERMISSIONS.IMPORT_EXECUTE,
+    PERMISSIONS.IMPORT_ROLLBACK,
     // Security audit: same reorder-report omission as INVENTORY_MANAGER — this role owns
     // PO creation, so it gets REORDER_CREATE_PO too, not just the view.
     PERMISSIONS.REORDER_VIEW,
@@ -140,6 +152,11 @@ export const ROLE_DEFAULTS: Record<string, Permission[]> = {
     PERMISSIONS.INVOICE_VIEW,
     PERMISSIONS.PAYMENT_IN_VIEW,
     PERMISSIONS.PAYMENT_OUT_VIEW,
+    // Security audit: report-service's Payment Collection Report checks the single,
+    // broader PAYMENT_VIEW constant (not PAYMENT_IN_VIEW/PAYMENT_OUT_VIEW) — this role
+    // could see payment records via the sales-service routes (which accept either) but
+    // 403'd on the report specifically about them.
+    PERMISSIONS.PAYMENT_VIEW,
     PERMISSIONS.EXPENSE_VIEW,
     PERMISSIONS.EXPENSE_CREATE,
     PERMISSIONS.GST_VIEW,
@@ -208,6 +225,11 @@ export const ROLE_DEFAULTS: Record<string, Permission[]> = {
     // were unreachable — view-only here since PO creation itself stays a PURCHASE_MANAGER
     // action (see PURCHASE_MANAGER below).
     PERMISSIONS.REORDER_VIEW,
+    // See SALES_MANAGER's bulk-import comment above — same omission (this role owns
+    // items, one of the importable entity types).
+    PERMISSIONS.IMPORT_VIEW,
+    PERMISSIONS.IMPORT_EXECUTE,
+    PERMISSIONS.IMPORT_ROLLBACK,
     PERMISSIONS.ITEM_VIEW,
     PERMISSIONS.ITEM_CREATE,
     PERMISSIONS.ITEM_EDIT,
@@ -256,6 +278,14 @@ export const ROLE_DEFAULTS: Record<string, Permission[]> = {
     PERMISSIONS.ALTERATION_VIEW,
     PERMISSIONS.ALTERATION_CREATE,
     PERMISSIONS.ALTERATION_UPDATE,
+    // See SALES_MANAGER's bulk-import comment above — same omission. EMPLOYEE_IMPORT is an
+    // additional, entity-specific gate ImportEngine checks only for the employee entity type,
+    // on top of the generic IMPORT_EXECUTE (see ImportEngine.ts's own comment) — HR_MANAGER
+    // needs both to actually run an employee CSV import.
+    PERMISSIONS.IMPORT_VIEW,
+    PERMISSIONS.IMPORT_EXECUTE,
+    PERMISSIONS.IMPORT_ROLLBACK,
+    PERMISSIONS.EMPLOYEE_IMPORT,
     PERMISSIONS.REPORT_VIEW,
     PERMISSIONS.SEARCH_GLOBAL,
   ],
@@ -284,6 +314,8 @@ export const ROLE_DEFAULTS: Record<string, Permission[]> = {
     PERMISSIONS.LEDGER_EXPORT,
     PERMISSIONS.COST_CENTER_VIEW,
     PERMISSIONS.COST_CENTER_MANAGE,
+    // See ACCOUNTANT's Payment Collection Report comment above — same omission.
+    PERMISSIONS.PAYMENT_VIEW,
     // Security audit: this role held ZERO fixed-asset permissions even though the junior
     // ACCOUNTANT role already has all four — a supervisor couldn't even view an asset an
     // accountant registered. Same role-defaults.ts-omission pattern as migration 0076.
@@ -339,6 +371,9 @@ export const ROLE_DEFAULTS: Record<string, Permission[]> = {
 
   AUDITOR: [
     PERMISSIONS.INVOICE_VIEW,
+    // See ACCOUNTANT's Payment Collection Report comment above — same omission; auditors
+    // need to review collections as part of financial oversight.
+    PERMISSIONS.PAYMENT_VIEW,
     PERMISSIONS.JOURNAL_VIEW,
     PERMISSIONS.LEDGER_VIEW,
     PERMISSIONS.LEDGER_EXPORT,
@@ -367,6 +402,11 @@ export const ROLE_DEFAULTS: Record<string, Permission[]> = {
   DATA_OFFICER: [
     PERMISSIONS.CUSTOMER_VIEW,
     PERMISSIONS.EXPORT_CUSTOMER_DATA,
+    // See SALES_MANAGER's bulk-import comment above — same omission, especially severe
+    // here since this role's whole purpose is bulk data operations.
+    PERMISSIONS.IMPORT_VIEW,
+    PERMISSIONS.IMPORT_EXECUTE,
+    PERMISSIONS.IMPORT_ROLLBACK,
     PERMISSIONS.REPORT_VIEW,
     PERMISSIONS.REPORT_EXPORT,
     // See SALES_MANAGER's EXPORT_GENERATE/EXPORT_VIEW comment above — this role's whole

@@ -13,6 +13,20 @@ type DbClient = ErpDatabase;
 const LOCK_KEY_PREFIX = 'erp:report-schedule:lock';
 const LOCK_TTL_SECONDS = 300;
 
+// Security audit: row values (customer name, notes, etc. — free text entered elsewhere in
+// the app) were interpolated straight into this email's HTML with no escaping, so a value
+// containing e.g. "<a href=...>" would render as live HTML/a clickable link in the
+// recipient's mail client. Same risk class as the CSV-formula-injection fix already
+// applied to ReportFormatter, but for email HTML rather than spreadsheet formulas.
+function escapeHtml(value: unknown): string {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 export class ScheduledReportJob {
   private readonly engine: ReportEngine;
   private readonly formatter: ReportFormatter;
@@ -197,12 +211,12 @@ export class ScheduledReportJob {
             ? `
           <br>
           <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;font-family:sans-serif;font-size:12px">
-            <tr>${definition.columns.map((c) => `<th style="background:#f0f0f0">${c.label}</th>`).join('')}</tr>
+            <tr>${definition.columns.map((c) => `<th style="background:#f0f0f0">${escapeHtml(c.label)}</th>`).join('')}</tr>
             ${result.rows
               .slice(0, 100)
               .map(
                 (row) =>
-                  `<tr>${definition.columns.map((c) => `<td>${row[c.key] ?? ''}</td>`).join('')}</tr>`
+                  `<tr>${definition.columns.map((c) => `<td>${escapeHtml(row[c.key])}</td>`).join('')}</tr>`
               )
               .join('')}
           </table>
