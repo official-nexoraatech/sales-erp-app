@@ -1,4 +1,4 @@
-import { eq, and, sql } from 'drizzle-orm';
+import { eq, and, sql, inArray } from 'drizzle-orm';
 import { stockAdjustments, stockAdjustmentLines, items } from '@erp/db';
 import { ERPError } from '@erp/types';
 import type { ErpDatabase } from '@erp/db';
@@ -16,7 +16,7 @@ export class StockAdjustmentService {
   async create(params: {
     tenantId: number;
     warehouseId: number;
-    adjustmentType: typeof stockAdjustments.$inferInsert['adjustmentType'];
+    adjustmentType: (typeof stockAdjustments.$inferInsert)['adjustmentType'];
     lines: Array<{
       itemId: number;
       variantId?: number;
@@ -108,43 +108,21 @@ export class StockAdjustmentService {
   }
 
   async approve(id: number, tenantId: number, userId: number) {
-    const adj = await this.get(id, tenantId);
-    if (!['SUBMITTED', 'PENDING_APPROVAL'].includes(adj.status)) {
-      throw new ERPError('INVALID_STATUS', `Adjustment cannot be approved in status ${adj.status}`, 409);
-    }
-
     const lines = await this.db
       .select()
       .from(stockAdjustmentLines)
       .where(eq(stockAdjustmentLines.adjustmentId, id));
 
-    const ledger = new InventoryLedgerService(this.db);
-
     await this.db.transaction(async (trx) => {
       const db = trx as unknown as ErpDatabase;
-      const ledgerTrx = new InventoryLedgerService(db);
 
-      for (const line of lines) {
-        await ledgerTrx.adjustStock(
-          {
-            tenantId,
-            itemId: line.itemId,
-            ...(line.variantId != null ? { variantId: line.variantId } : {}),
-            warehouseId: adj.warehouseId,
-            quantity: parseFloat(line.quantity),
-            direction: line.direction,
-            referenceType: 'STOCK_ADJUSTMENT',
-            referenceId: id,
-            referenceLineId: line.id,
-            ...(line.unitCost ? { unitCost: parseFloat(line.unitCost) } : {}),
-            createdBy: userId,
-            notes: `Adj ${adj.adjustmentNumber}: ${adj.adjustmentType}`,
-          },
-          db
-        );
-      }
-
-      await db
+      // Atomically claim the row: this UPDATE only matches (and thus only takes effect) if
+      // the adjustment is still in an approvable status. Two concurrent approve() calls on
+      // the same adjustment serialize on Postgres's row lock; whichever commits second finds
+      // the WHERE no longer matches and claims nothing — this closes a check-then-act race
+      // the previous get()-then-update() pattern had, which could double-apply the ledger
+      // lines below for one physical adjustment.
+      const [claimed] = await db
         .update(stockAdjustments)
         .set({
           status: 'APPROVED',
@@ -153,7 +131,48 @@ export class StockAdjustmentService {
           version: sql`${stockAdjustments.version} + 1`,
           updatedAt: new Date(),
         })
-        .where(eq(stockAdjustments.id, id));
+        .where(
+          and(
+            eq(stockAdjustments.id, id),
+            eq(stockAdjustments.tenantId, tenantId),
+            inArray(stockAdjustments.status, ['SUBMITTED', 'PENDING_APPROVAL'])
+          )
+        )
+        .returning();
+
+      if (!claimed) {
+        const [current] = await db
+          .select()
+          .from(stockAdjustments)
+          .where(and(eq(stockAdjustments.id, id), eq(stockAdjustments.tenantId, tenantId)));
+        if (!current) throw new ERPError('ADJUSTMENT_NOT_FOUND', 'Adjustment not found', 404);
+        throw new ERPError(
+          'INVALID_STATUS',
+          `Adjustment cannot be approved in status ${current.status}`,
+          409
+        );
+      }
+
+      const ledgerTrx = new InventoryLedgerService(db);
+      for (const line of lines) {
+        await ledgerTrx.adjustStock(
+          {
+            tenantId,
+            itemId: line.itemId,
+            ...(line.variantId != null ? { variantId: line.variantId } : {}),
+            warehouseId: claimed.warehouseId,
+            quantity: parseFloat(line.quantity),
+            direction: line.direction,
+            referenceType: 'STOCK_ADJUSTMENT',
+            referenceId: id,
+            referenceLineId: line.id,
+            ...(line.unitCost ? { unitCost: parseFloat(line.unitCost) } : {}),
+            createdBy: userId,
+            notes: `Adj ${claimed.adjustmentNumber}: ${claimed.adjustmentType}`,
+          },
+          db
+        );
+      }
     });
 
     return this.get(id, tenantId);

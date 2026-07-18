@@ -1,4 +1,4 @@
-import { eq, and, sql, getTableColumns } from 'drizzle-orm';
+import { eq, and, sql, inArray, getTableColumns } from 'drizzle-orm';
 import { aliasedTable } from 'drizzle-orm/alias';
 import { stockTransfers, stockTransferLines, warehouses, items } from '@erp/db';
 import { ERPError } from '@erp/types';
@@ -127,43 +127,19 @@ export class StockTransferService {
   }
 
   async dispatch(id: number, tenantId: number, userId: number) {
-    const transfer = await this.get(id, tenantId);
-    if (transfer.status !== 'APPROVED') {
-      throw new ERPError(
-        'INVALID_STATUS',
-        `Cannot dispatch transfer in status ${transfer.status}`,
-        409
-      );
-    }
-
     const lines = await this.db
       .select()
       .from(stockTransferLines)
       .where(eq(stockTransferLines.transferId, id));
 
     await this.db.transaction(async (trx) => {
-      for (const line of lines) {
-        await new InventoryLedgerService(trx as unknown as ErpDatabase).deductStock({
-          tenantId,
-          itemId: line.itemId,
-          ...(line.variantId != null ? { variantId: line.variantId } : {}),
-          warehouseId: transfer.fromWarehouseId,
-          quantity: parseFloat(line.requestedQty),
-          referenceType: 'STOCK_TRANSFER',
-          referenceId: id,
-          referenceLineId: line.id,
-          ...(line.unitCost ? { unitCost: parseFloat(line.unitCost) } : {}),
-          createdBy: userId,
-          notes: `Dispatch: transfer ${transfer.transferNumber}`,
-        });
+      const db = trx as unknown as ErpDatabase;
 
-        await (trx as unknown as ErpDatabase)
-          .update(stockTransferLines)
-          .set({ dispatchedQty: line.requestedQty, updatedAt: new Date() })
-          .where(eq(stockTransferLines.id, line.id));
-      }
-
-      await (trx as unknown as ErpDatabase)
+      // Atomically claim the row (see StockAdjustmentService.approve() for the same
+      // pattern/rationale): a double-click or two concurrent dispatch() calls on the same
+      // transfer must not both pass this check and both deduct stock from the source
+      // warehouse for one physical dispatch.
+      const [claimed] = await db
         .update(stockTransfers)
         .set({
           status: 'DISPATCHED',
@@ -172,7 +148,48 @@ export class StockTransferService {
           version: sql`${stockTransfers.version} + 1`,
           updatedAt: new Date(),
         })
-        .where(eq(stockTransfers.id, id));
+        .where(
+          and(
+            eq(stockTransfers.id, id),
+            eq(stockTransfers.tenantId, tenantId),
+            eq(stockTransfers.status, 'APPROVED')
+          )
+        )
+        .returning();
+
+      if (!claimed) {
+        const [current] = await db
+          .select()
+          .from(stockTransfers)
+          .where(and(eq(stockTransfers.id, id), eq(stockTransfers.tenantId, tenantId)));
+        if (!current) throw new ERPError('TRANSFER_NOT_FOUND', 'Transfer not found', 404);
+        throw new ERPError(
+          'INVALID_STATUS',
+          `Cannot dispatch transfer in status ${current.status}`,
+          409
+        );
+      }
+
+      for (const line of lines) {
+        await new InventoryLedgerService(db).deductStock({
+          tenantId,
+          itemId: line.itemId,
+          ...(line.variantId != null ? { variantId: line.variantId } : {}),
+          warehouseId: claimed.fromWarehouseId,
+          quantity: parseFloat(line.requestedQty),
+          referenceType: 'STOCK_TRANSFER',
+          referenceId: id,
+          referenceLineId: line.id,
+          ...(line.unitCost ? { unitCost: parseFloat(line.unitCost) } : {}),
+          createdBy: userId,
+          notes: `Dispatch: transfer ${claimed.transferNumber}`,
+        });
+
+        await db
+          .update(stockTransferLines)
+          .set({ dispatchedQty: line.requestedQty, updatedAt: new Date() })
+          .where(eq(stockTransferLines.id, line.id));
+      }
     });
 
     return this.get(id, tenantId);
@@ -184,17 +201,44 @@ export class StockTransferService {
     userId: number,
     lineUpdates: Array<{ lineId: number; receivedQty: number }>
   ) {
-    const transfer = await this.get(id, tenantId);
-    if (transfer.status !== 'DISPATCHED' && transfer.status !== 'IN_TRANSIT') {
-      throw new ERPError(
-        'INVALID_STATUS',
-        `Cannot receive transfer in status ${transfer.status}`,
-        409
-      );
-    }
-
     await this.db.transaction(async (trx) => {
       const db = trx as unknown as ErpDatabase;
+
+      // Atomically claim the row (see StockAdjustmentService.approve() for the same
+      // pattern/rationale): a double-click or two concurrent receive() calls on the same
+      // transfer must not both pass this check and both credit stock into the destination
+      // warehouse for one physical receipt.
+      const [claimed] = await db
+        .update(stockTransfers)
+        .set({
+          status: 'RECEIVED',
+          receivedBy: userId,
+          receivedAt: new Date(),
+          version: sql`${stockTransfers.version} + 1`,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(stockTransfers.id, id),
+            eq(stockTransfers.tenantId, tenantId),
+            inArray(stockTransfers.status, ['DISPATCHED', 'IN_TRANSIT'])
+          )
+        )
+        .returning();
+
+      if (!claimed) {
+        const [current] = await db
+          .select()
+          .from(stockTransfers)
+          .where(and(eq(stockTransfers.id, id), eq(stockTransfers.tenantId, tenantId)));
+        if (!current) throw new ERPError('TRANSFER_NOT_FOUND', 'Transfer not found', 404);
+        throw new ERPError(
+          'INVALID_STATUS',
+          `Cannot receive transfer in status ${current.status}`,
+          409
+        );
+      }
+
       for (const upd of lineUpdates) {
         const [line] = await db
           .select()
@@ -207,14 +251,14 @@ export class StockTransferService {
           tenantId,
           itemId: line.itemId,
           ...(line.variantId != null ? { variantId: line.variantId } : {}),
-          warehouseId: transfer.toWarehouseId,
+          warehouseId: claimed.toWarehouseId,
           quantity: upd.receivedQty,
           referenceType: 'STOCK_TRANSFER',
           referenceId: id,
           referenceLineId: line.id,
           ...(line.unitCost ? { unitCost: parseFloat(line.unitCost) } : {}),
           createdBy: userId,
-          notes: `Receive: transfer ${transfer.transferNumber}`,
+          notes: `Receive: transfer ${claimed.transferNumber}`,
         });
 
         await db
@@ -222,17 +266,6 @@ export class StockTransferService {
           .set({ receivedQty: String(upd.receivedQty), updatedAt: new Date() })
           .where(eq(stockTransferLines.id, upd.lineId));
       }
-
-      await db
-        .update(stockTransfers)
-        .set({
-          status: 'RECEIVED',
-          receivedBy: userId,
-          receivedAt: new Date(),
-          version: sql`${stockTransfers.version} + 1`,
-          updatedAt: new Date(),
-        })
-        .where(eq(stockTransfers.id, id));
     });
 
     return this.get(id, tenantId);
@@ -303,15 +336,10 @@ export class StockTransferService {
     toStatus: TransferStatus,
     extra: Record<string, unknown>
   ) {
-    const transfer = await this.get(id, tenantId);
-    if (transfer.status !== fromStatus) {
-      throw new ERPError(
-        'INVALID_STATUS',
-        `Transfer must be ${fromStatus} to transition to ${toStatus}`,
-        409
-      );
-    }
-    await this.db
+    // Same guarded-UPDATE pattern as dispatch()/receive(): the WHERE's status check and the
+    // transition happen in one statement, so two concurrent calls can't both pass a
+    // separate pre-check and both transition the row.
+    const [claimed] = await this.db
       .update(stockTransfers)
       .set({
         status: toStatus,
@@ -319,7 +347,23 @@ export class StockTransferService {
         version: sql`${stockTransfers.version} + 1`,
         updatedAt: new Date(),
       })
-      .where(and(eq(stockTransfers.id, id), eq(stockTransfers.tenantId, tenantId)));
-    return this.get(id, tenantId);
+      .where(
+        and(
+          eq(stockTransfers.id, id),
+          eq(stockTransfers.tenantId, tenantId),
+          eq(stockTransfers.status, fromStatus)
+        )
+      )
+      .returning();
+
+    if (!claimed) {
+      const current = await this.get(id, tenantId);
+      throw new ERPError(
+        'INVALID_STATUS',
+        `Transfer must be ${fromStatus} to transition to ${toStatus}, not ${current.status}`,
+        409
+      );
+    }
+    return claimed;
   }
 }
