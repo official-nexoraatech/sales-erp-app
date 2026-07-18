@@ -159,8 +159,12 @@ export const grns = pgTable(
     igstAmount: decimal('igst_amount', { precision: 15, scale: 2 }).notNull().default('0'),
     cessAmount: decimal('cess_amount', { precision: 15, scale: 2 }).notNull().default('0'),
     grandTotal: decimal('grand_total', { precision: 15, scale: 2 }).notNull().default('0'),
-    landedCostTotal: decimal('landed_cost_total', { precision: 15, scale: 2 }).notNull().default('0'),
-    effectiveCostTotal: decimal('effective_cost_total', { precision: 15, scale: 2 }).notNull().default('0'),
+    landedCostTotal: decimal('landed_cost_total', { precision: 15, scale: 2 })
+      .notNull()
+      .default('0'),
+    effectiveCostTotal: decimal('effective_cost_total', { precision: 15, scale: 2 })
+      .notNull()
+      .default('0'),
     hasPriceVariance: boolean('has_price_variance').notNull().default(false),
     // RCM: true when supplier is unregistered — buyer self-assesses GST (ES-10)
     rcmApplicable: boolean('rcm_applicable').notNull().default(false),
@@ -175,9 +179,15 @@ export const grns = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
     version: integer('version').notNull().default(0),
+    // Optional client-generated idempotency key — same mechanism as invoices.clientOperationId
+    // (nullable + unique per tenant, so NULL never collides). A network-timeout retry of
+    // POST /grns with the same operationId returns the original GRN instead of creating a
+    // second DRAFT one that could later be independently approved, double-crediting stock.
+    clientOperationId: varchar('client_operation_id', { length: 100 }),
   },
   (t) => [
     unique('grns_tenant_number').on(t.tenantId, t.grnNumber),
+    unique('grns_tenant_client_operation_id').on(t.tenantId, t.clientOperationId),
     index('idx_grn_tenant_status').on(t.tenantId, t.status, t.createdAt),
     index('idx_grn_po').on(t.purchaseOrderId, t.tenantId),
     index('idx_grn_supplier').on(t.supplierId, t.tenantId),
@@ -200,7 +210,9 @@ export const grnLines = pgTable(
     unitId: integer('unit_id'),
     poRate: decimal('po_rate', { precision: 15, scale: 2 }).notNull().default('0'),
     grnRate: decimal('grn_rate', { precision: 15, scale: 2 }).notNull(),
-    priceVariancePct: decimal('price_variance_pct', { precision: 8, scale: 4 }).notNull().default('0'),
+    priceVariancePct: decimal('price_variance_pct', { precision: 8, scale: 4 })
+      .notNull()
+      .default('0'),
     gstRate: decimal('gst_rate', { precision: 5, scale: 2 }).notNull().default('0'),
     cgstRate: decimal('cgst_rate', { precision: 5, scale: 2 }).notNull().default('0'),
     sgstRate: decimal('sgst_rate', { precision: 5, scale: 2 }).notNull().default('0'),
@@ -212,8 +224,12 @@ export const grnLines = pgTable(
     cessRate: decimal('cess_rate', { precision: 5, scale: 2 }).notNull().default('0'),
     cessAmount: decimal('cess_amount', { precision: 15, scale: 2 }).notNull().default('0'),
     lineTotal: decimal('line_total', { precision: 15, scale: 2 }).notNull(),
-    allocatedLandedCost: decimal('allocated_landed_cost', { precision: 15, scale: 2 }).notNull().default('0'),
-    effectiveUnitCost: decimal('effective_unit_cost', { precision: 15, scale: 4 }).notNull().default('0'),
+    allocatedLandedCost: decimal('allocated_landed_cost', { precision: 15, scale: 2 })
+      .notNull()
+      .default('0'),
+    effectiveUnitCost: decimal('effective_unit_cost', { precision: 15, scale: 4 })
+      .notNull()
+      .default('0'),
     hsnCode: varchar('hsn_code', { length: 20 }),
     warehouseId: integer('warehouse_id'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
@@ -277,7 +293,9 @@ export const supplierPayments = pgTable(
       .notNull()
       .$type<'CASH' | 'CHEQUE' | 'NEFT' | 'RTGS' | 'UPI' | 'ADVANCE'>(),
     amount: decimal('amount', { precision: 15, scale: 2 }).notNull(),
-    allocatedAmount: decimal('allocated_amount', { precision: 15, scale: 2 }).notNull().default('0'),
+    allocatedAmount: decimal('allocated_amount', { precision: 15, scale: 2 })
+      .notNull()
+      .default('0'),
     unallocatedAmount: decimal('unallocated_amount', { precision: 15, scale: 2 }).notNull(),
     status: varchar('status', { length: 30 })
       .notNull()
@@ -424,7 +442,9 @@ export const expenses = pgTable(
     expenseNumber: varchar('expense_number', { length: 50 }),
     expenseType: varchar('expense_type', { length: 50 })
       .notNull()
-      .$type<'RENT' | 'ELECTRICITY' | 'SALARY' | 'FREIGHT' | 'MARKETING' | 'MAINTENANCE' | 'MISC'>(),
+      .$type<
+        'RENT' | 'ELECTRICITY' | 'SALARY' | 'FREIGHT' | 'MARKETING' | 'MAINTENANCE' | 'MISC'
+      >(),
     supplierId: integer('supplier_id'),
     status: varchar('status', { length: 30 })
       .notNull()
@@ -435,7 +455,9 @@ export const expenses = pgTable(
     description: text('description'),
     totalAmount: decimal('total_amount', { precision: 15, scale: 2 }).notNull().default('0'),
     paidAmount: decimal('paid_amount', { precision: 15, scale: 2 }).notNull().default('0'),
-    paymentMode: varchar('payment_mode', { length: 20 }).$type<'CASH' | 'CHEQUE' | 'NEFT' | 'RTGS' | 'UPI'>(),
+    paymentMode: varchar('payment_mode', { length: 20 }).$type<
+      'CASH' | 'CHEQUE' | 'NEFT' | 'RTGS' | 'UPI'
+    >(),
     paymentDate: timestamp('payment_date', { withTimezone: true }),
     paymentReference: varchar('payment_reference', { length: 100 }),
     accountId: integer('account_id'),

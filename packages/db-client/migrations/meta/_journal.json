@@ -540,6 +540,27 @@
       "when": 1789158935804,
       "tag": "0076_rbac_dead_permission_sweep_backfill",
       "breakpoints": true
+    },
+    {
+      "idx": 77,
+      "version": "7",
+      "when": 1789245335804,
+      "tag": "0077_grn_client_operation_id",
+      "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "7",
+      "when": 1789331735804,
+      "tag": "0078_accountant_supervisor_fixed_asset_cash_flow_backfill",
+      "breakpoints": true
+    },
+    {
+      "idx": 79,
+      "version": "7",
+      "when": 1789418135804,
+      "tag": "0079_gst_service_permission_backfill",
+      "breakpoints": true
     }
   ]
 }

@@ -14,9 +14,12 @@ import {
 } from '@erp/db';
 import type { ErpDatabase } from '@erp/db';
 import { BusinessError, NotFoundError } from '@erp/types';
+import { DuplicateOperationError, isUniqueConstraintViolation } from '@erp/sdk';
 import { GSTCalculator } from './GSTCalculator.js';
 import { ValuationService } from './ValuationService.js';
 import { ulid } from 'ulid';
+
+export { DuplicateOperationError };
 
 const PRICE_VARIANCE_THRESHOLD = 0.05; // 5%
 
@@ -46,12 +49,28 @@ export interface CreateGRNParams {
   lines: GRNLineInput[];
   notes?: string | undefined;
   createdBy: number;
+  // Optional client-generated idempotency key (grns.clientOperationId, nullable + unique
+  // per tenant) — a network-timeout retry of POST /grns with the same operationId returns
+  // the original GRN instead of creating a second DRAFT one that could later be
+  // independently approved, double-crediting stock/supplier-balance.
+  clientOperationId?: string | undefined;
 }
 
 export class GRNService {
   constructor(private db: ErpDatabase) {}
 
   async create(params: CreateGRNParams): Promise<number> {
+    try {
+      return await this.createInTransaction(params);
+    } catch (err) {
+      if (isUniqueConstraintViolation(err, 'grns_tenant_client_operation_id')) {
+        throw new DuplicateOperationError(params.clientOperationId!);
+      }
+      throw err;
+    }
+  }
+
+  private async createInTransaction(params: CreateGRNParams): Promise<number> {
     return this.db.transaction(async (trx) => {
       // Validate PO exists and is in receivable state
       const [po] = await trx
@@ -188,6 +207,7 @@ export class GRNService {
           rcmApplicable,
           notes: params.notes,
           createdBy: params.createdBy,
+          clientOperationId: params.clientOperationId,
         })
         .returning({ id: grns.id });
 

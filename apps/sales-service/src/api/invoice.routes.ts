@@ -16,7 +16,7 @@ import { PERMISSIONS, BusinessError } from '@erp/types';
 import { getBranchScope } from '@erp/sdk';
 import { authenticate } from '../middleware/authenticate.js';
 import { requirePermission } from '../middleware/authorize.js';
-import { InvoiceService } from '../domain/InvoiceService.js';
+import { InvoiceService, DuplicateOperationError } from '../domain/InvoiceService.js';
 import { InvoiceNotificationService } from '../domain/InvoiceNotificationService.js';
 import { sendError } from './http-errors.js';
 
@@ -55,6 +55,11 @@ const CreateInvoiceSchema = z.object({
   deliveryAddress: z.object({}).passthrough().optional(),
   overrideCreditLimit: z.boolean().default(false),
   overridePriceFloor: z.boolean().default(false),
+  // Optional client-generated idempotency key, same mechanism POS sales already use
+  // (invoices.clientOperationId, nullable + unique per tenant — omitting it behaves
+  // exactly as before). A network-timeout retry of this route with the same operationId
+  // returns the original invoice instead of creating a duplicate DRAFT.
+  operationId: z.string().max(100).optional(),
 });
 
 const ConfirmSchema = z.object({
@@ -160,26 +165,54 @@ export async function invoiceRoutes(
       });
       const svc = new InvoiceService(ctx.db.raw);
 
-      const id = await svc.create({
-        tenantId: req.auth.tenantId,
-        branchId: body.branchId,
-        warehouseId: body.warehouseId,
-        customerId: body.customerId,
-        quotationId: body.quotationId,
-        deliveryChallanId: body.deliveryChallanId,
-        placeOfSupply: body.placeOfSupply,
-        sellerStateCode: body.sellerStateCode,
-        invoiceDate: new Date(body.invoiceDate),
-        dueDate: new Date(body.dueDate),
-        paymentTerms: body.paymentTerms,
-        lines: body.lines,
-        notes: body.notes,
-        deliveryDate: body.deliveryDate ? new Date(body.deliveryDate) : undefined,
-        deliveryAddress: body.deliveryAddress,
-        createdBy: req.auth.userId,
-        overrideCreditLimit: body.overrideCreditLimit,
-        overridePriceFloor: body.overridePriceFloor,
-      } as Parameters<typeof svc.create>[0]);
+      let id: number;
+      try {
+        id = await svc.create({
+          tenantId: req.auth.tenantId,
+          branchId: body.branchId,
+          warehouseId: body.warehouseId,
+          customerId: body.customerId,
+          quotationId: body.quotationId,
+          deliveryChallanId: body.deliveryChallanId,
+          placeOfSupply: body.placeOfSupply,
+          sellerStateCode: body.sellerStateCode,
+          invoiceDate: new Date(body.invoiceDate),
+          dueDate: new Date(body.dueDate),
+          paymentTerms: body.paymentTerms,
+          lines: body.lines,
+          notes: body.notes,
+          deliveryDate: body.deliveryDate ? new Date(body.deliveryDate) : undefined,
+          deliveryAddress: body.deliveryAddress,
+          createdBy: req.auth.userId,
+          overrideCreditLimit: body.overrideCreditLimit,
+          overridePriceFloor: body.overridePriceFloor,
+          clientOperationId: body.operationId,
+        } as Parameters<typeof svc.create>[0]);
+      } catch (err) {
+        // A network-timeout retry with the same operationId lands here instead of
+        // creating a second DRAFT invoice — return the one that already exists.
+        if (err instanceof DuplicateOperationError && body.operationId) {
+          const [existing] = await ctx.db.raw
+            .select({ id: invoices.id })
+            .from(invoices)
+            .where(
+              and(
+                eq(invoices.tenantId, req.auth.tenantId),
+                eq(invoices.clientOperationId, body.operationId)
+              )
+            );
+          if (existing) {
+            return reply.code(200).send({ data: { id: existing.id } });
+          }
+          return sendError(
+            reply,
+            409,
+            'DUPLICATE_OPERATION_PROCESSING',
+            'This invoice is still being created — please retry shortly'
+          );
+        }
+        throw err;
+      }
 
       await ctx.audit.log({
         action: 'CREATE',

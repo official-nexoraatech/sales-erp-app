@@ -6,7 +6,7 @@ import { z } from 'zod';
 import { PERMISSIONS } from '@erp/types';
 import { authenticate } from '../middleware/authenticate.js';
 import { requirePermission } from '../middleware/authorize.js';
-import { GRNService } from '../domain/GRNService.js';
+import { GRNService, DuplicateOperationError } from '../domain/GRNService.js';
 
 const GRNLineSchema = z.object({
   purchaseOrderLineId: z.number().int().positive(),
@@ -32,6 +32,10 @@ const CreateGRNSchema = z.object({
   supplierInvoiceDate: z.string().datetime().optional(),
   lines: z.array(GRNLineSchema).min(1),
   notes: z.string().max(2000).optional(),
+  // Optional client-generated idempotency key (see GRNService.CreateGRNParams) — a
+  // network-timeout retry with the same operationId returns the original GRN instead of
+  // creating a duplicate.
+  operationId: z.string().max(100).optional(),
 });
 
 const ApproveGRNSchema = z.object({
@@ -106,21 +110,49 @@ export async function grnRoutes(
           (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
       });
       const svc = new GRNService(ctx.db.raw);
-      const id = await svc.create({
-        tenantId: req.auth.tenantId,
-        branchId: body.branchId,
-        warehouseId: body.warehouseId,
-        purchaseOrderId: body.purchaseOrderId,
-        supplierId: body.supplierId,
-        grnDate: new Date(body.grnDate),
-        supplierInvoiceNumber: body.supplierInvoiceNumber,
-        supplierInvoiceDate: body.supplierInvoiceDate
-          ? new Date(body.supplierInvoiceDate)
-          : undefined,
-        lines: body.lines,
-        notes: body.notes,
-        createdBy: req.auth.userId,
-      });
+      let id: number;
+      try {
+        id = await svc.create({
+          tenantId: req.auth.tenantId,
+          branchId: body.branchId,
+          warehouseId: body.warehouseId,
+          purchaseOrderId: body.purchaseOrderId,
+          supplierId: body.supplierId,
+          grnDate: new Date(body.grnDate),
+          supplierInvoiceNumber: body.supplierInvoiceNumber,
+          supplierInvoiceDate: body.supplierInvoiceDate
+            ? new Date(body.supplierInvoiceDate)
+            : undefined,
+          lines: body.lines,
+          notes: body.notes,
+          createdBy: req.auth.userId,
+          clientOperationId: body.operationId,
+        });
+      } catch (err) {
+        // A network-timeout retry with the same operationId lands here instead of
+        // creating a second DRAFT GRN — return the one that already exists.
+        if (err instanceof DuplicateOperationError && body.operationId) {
+          const [existing] = await ctx.db.raw
+            .select({ id: grns.id })
+            .from(grns)
+            .where(
+              and(
+                eq(grns.tenantId, req.auth.tenantId),
+                eq(grns.clientOperationId, body.operationId)
+              )
+            );
+          if (existing) {
+            return reply.code(200).send({ data: { id: existing.id } });
+          }
+          return reply.code(409).send({
+            error: {
+              code: 'DUPLICATE_OPERATION_PROCESSING',
+              message: 'This GRN is still being created — please retry shortly',
+            },
+          });
+        }
+        throw err;
+      }
       // grnNumber genuinely doesn't exist yet — it's assigned at approval (see grn.routes.ts
       // ApproveGRNSchema / GRNService.approve), not a bug to fix here. supplierName/grnDate
       // are denormalized now so the DRAFT-window search result at least shows the supplier
