@@ -425,49 +425,73 @@ export async function payrollRoutes(
         .from(payrollRuns)
         .where(and(eq(payrollRuns.id, id), eq(payrollRuns.tenantId, tenantId)));
       if (!run) throw new NotFoundError('PayrollRun', id);
-      if (run.status !== 'CALCULATED')
-        throw new BusinessError(
-          'PAYROLL_NOT_CALCULATED',
-          'Payroll must be calculated before approval'
-        );
 
-      await ctx.db.raw
-        .update(payrollRuns)
-        .set({
-          status: 'APPROVED',
-          approvedBy: userId,
-          approvedAt: new Date(),
-          updatedAt: new Date(),
-        })
-        .where(eq(payrollRuns.id, id));
-      await ctx.db.raw
-        .update(payrollSlips)
-        .set({ status: 'APPROVED', updatedAt: new Date() })
-        .where(and(eq(payrollSlips.payrollRunId, id), eq(payrollSlips.tenantId, tenantId)));
+      // Approve was previously a sequence of separate, un-transacted statements with a
+      // plain get()-then-update() status check — two concurrent approve calls (double-click,
+      // or a client retry after a slow response) could both pass the check before either
+      // committed, and both then loop the loan-EMI deduction below, double-decrementing every
+      // employee's loan balance for one physical approval. The status transition and the loan
+      // deductions now happen in one transaction, gated by an atomic guarded UPDATE (see
+      // StockAdjustmentService.approve() for the same pattern/rationale) — whichever caller
+      // commits second finds the WHERE no longer matches and claims nothing.
+      await ctx.db.transaction(async (trx) => {
+        const [claimed] = await trx.raw
+          .update(payrollRuns)
+          .set({
+            status: 'APPROVED',
+            approvedBy: userId,
+            approvedAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .where(
+            and(
+              eq(payrollRuns.id, id),
+              eq(payrollRuns.tenantId, tenantId),
+              eq(payrollRuns.status, 'CALCULATED')
+            )
+          )
+          .returning();
 
-      // Loan EMI (PG-045): decrement outstandingBalance + record history exactly once per
-      // approval — computeSlip only ever read loan balances, never mutated them, precisely
-      // to avoid double-decrementing on repeated DRAFT recalculation.
-      const approvedSlips = await ctx.db.raw
-        .select({
-          id: payrollSlips.id,
-          employeeId: payrollSlips.employeeId,
-          loanDeduction: payrollSlips.loanDeduction,
-        })
-        .from(payrollSlips)
-        .where(and(eq(payrollSlips.payrollRunId, id), eq(payrollSlips.tenantId, tenantId)));
-      for (const slip of approvedSlips) {
-        if (parseFloat(slip.loanDeduction) > 0) {
-          await EmployeeLoanService.applyMonthlyDeduction(
-            ctx.db,
-            tenantId,
-            slip.employeeId,
-            slip.id,
-            run.periodMonth,
-            run.periodYear
+        if (!claimed) {
+          const [current] = await trx.raw
+            .select({ status: payrollRuns.status })
+            .from(payrollRuns)
+            .where(and(eq(payrollRuns.id, id), eq(payrollRuns.tenantId, tenantId)));
+          throw new BusinessError(
+            'PAYROLL_NOT_CALCULATED',
+            `Payroll must be calculated before approval (currently ${current?.status ?? 'unknown'})`
           );
         }
-      }
+
+        await trx.raw
+          .update(payrollSlips)
+          .set({ status: 'APPROVED', updatedAt: new Date() })
+          .where(and(eq(payrollSlips.payrollRunId, id), eq(payrollSlips.tenantId, tenantId)));
+
+        // Loan EMI (PG-045): decrement outstandingBalance + record history exactly once per
+        // approval — computeSlip only ever read loan balances, never mutated them, precisely
+        // to avoid double-decrementing on repeated DRAFT recalculation.
+        const approvedSlips = await trx.raw
+          .select({
+            id: payrollSlips.id,
+            employeeId: payrollSlips.employeeId,
+            loanDeduction: payrollSlips.loanDeduction,
+          })
+          .from(payrollSlips)
+          .where(and(eq(payrollSlips.payrollRunId, id), eq(payrollSlips.tenantId, tenantId)));
+        for (const slip of approvedSlips) {
+          if (parseFloat(slip.loanDeduction) > 0) {
+            await EmployeeLoanService.applyMonthlyDeduction(
+              trx,
+              tenantId,
+              slip.employeeId,
+              slip.id,
+              run.periodMonth,
+              run.periodYear
+            );
+          }
+        }
+      });
 
       // Publish event for accounting-service to post salary payable journal (DR Salary Expense / CR Salary Payable)
       await ctx.events.publish('payroll_run', id, 'PAYROLL_RUN_APPROVED', {
@@ -507,20 +531,40 @@ export async function payrollRoutes(
         .from(payrollRuns)
         .where(and(eq(payrollRuns.id, id), eq(payrollRuns.tenantId, tenantId)));
       if (!run) throw new NotFoundError('PayrollRun', id);
-      if (run.status !== 'APPROVED')
-        throw new BusinessError(
-          'PAYROLL_NOT_APPROVED',
-          'Payroll must be approved before disbursal'
-        );
 
-      await ctx.db.raw
-        .update(payrollRuns)
-        .set({ status: 'DISBURSED', disbursedAt: new Date(), updatedAt: new Date() })
-        .where(eq(payrollRuns.id, id));
-      await ctx.db.raw
-        .update(payrollSlips)
-        .set({ status: 'PAID', updatedAt: new Date() })
-        .where(and(eq(payrollSlips.payrollRunId, id), eq(payrollSlips.tenantId, tenantId)));
+      // Same atomic-guarded-transition pattern as approve() above — two concurrent disburse
+      // calls used to both pass a plain status check and both publish PAYROLL_RUN_DISBURSED,
+      // double-posting the DR Salary Payable / CR Bank journal in accounting-service for one
+      // physical payout.
+      await ctx.db.transaction(async (trx) => {
+        const [claimed] = await trx.raw
+          .update(payrollRuns)
+          .set({ status: 'DISBURSED', disbursedAt: new Date(), updatedAt: new Date() })
+          .where(
+            and(
+              eq(payrollRuns.id, id),
+              eq(payrollRuns.tenantId, tenantId),
+              eq(payrollRuns.status, 'APPROVED')
+            )
+          )
+          .returning();
+
+        if (!claimed) {
+          const [current] = await trx.raw
+            .select({ status: payrollRuns.status })
+            .from(payrollRuns)
+            .where(and(eq(payrollRuns.id, id), eq(payrollRuns.tenantId, tenantId)));
+          throw new BusinessError(
+            'PAYROLL_NOT_APPROVED',
+            `Payroll must be approved before disbursal (currently ${current?.status ?? 'unknown'})`
+          );
+        }
+
+        await trx.raw
+          .update(payrollSlips)
+          .set({ status: 'PAID', updatedAt: new Date() })
+          .where(and(eq(payrollSlips.payrollRunId, id), eq(payrollSlips.tenantId, tenantId)));
+      });
 
       // Publish event for accounting-service to post disbursal journal (DR Salary Payable / CR Bank)
       await ctx.events.publish('payroll_run', id, 'PAYROLL_RUN_DISBURSED', {
@@ -853,30 +897,50 @@ export async function payrollRoutes(
     let totalDeductions = 0;
     let totalNet = 0;
     const ptStateCache = new Map<number | null, string | null>();
+    // Same skip-and-report handling as the manual /payroll-runs/:id/calculate endpoint above
+    // (see its comment) — this unattended, cron-triggered path used to lack it entirely, so
+    // one employee missing a salary structure aborted the whole run, leaving it stuck in
+    // CALCULATING with no automated retry (this endpoint isn't the one the Calculate button
+    // re-invokes) until a human noticed and manually recalculated from the UI.
+    const skipped: Array<{ employeeId: number; reason: string }> = [];
     for (const emp of activeEmployees) {
-      const slip = await PayrollEngine.computeSlip(
-        ctx.db,
-        tenantId,
-        emp.id,
-        run.periodMonth,
-        run.periodYear,
-        run.workingDays,
-        ptStateCache
-      );
-      await PayrollEngine.upsertSlip(ctx.db, tenantId, run.id, slip);
-      totalGross += slip.grossSalary;
-      totalDeductions += slip.totalDeductions;
-      totalNet += slip.netSalary;
+      try {
+        const slip = await PayrollEngine.computeSlip(
+          ctx.db,
+          tenantId,
+          emp.id,
+          run.periodMonth,
+          run.periodYear,
+          run.workingDays,
+          ptStateCache
+        );
+        await PayrollEngine.upsertSlip(ctx.db, tenantId, run.id, slip);
+        totalGross += slip.grossSalary;
+        totalDeductions += slip.totalDeductions;
+        totalNet += slip.netSalary;
+      } catch (err) {
+        skipped.push({
+          employeeId: emp.id,
+          reason: err instanceof Error ? err.message : 'Unknown error',
+        });
+      }
     }
+
+    const processedCount = activeEmployees.length - skipped.length;
+    const notes =
+      skipped.length > 0
+        ? `Skipped ${skipped.length} employee(s): ${skipped.map((s) => `#${s.employeeId} (${s.reason})`).join('; ')}`
+        : undefined;
 
     await ctx.db.raw
       .update(payrollRuns)
       .set({
         status: 'CALCULATED',
-        totalEmployees: activeEmployees.length,
+        totalEmployees: processedCount,
         totalGross: String(Math.round(totalGross * 100) / 100),
         totalDeductions: String(Math.round(totalDeductions * 100) / 100),
         totalNet: String(Math.round(totalNet * 100) / 100),
+        notes,
         updatedAt: new Date(),
       })
       .where(eq(payrollRuns.id, run.id));
@@ -885,12 +949,16 @@ export async function payrollRoutes(
       action: 'UPDATE',
       entityType: 'payroll_run',
       entityId: run.id,
-      metadata: { action: 'AUTO_PREPARE', employeeCount: activeEmployees.length },
+      metadata: {
+        action: 'AUTO_PREPARE',
+        employeeCount: processedCount,
+        skippedCount: skipped.length,
+      },
     });
 
-    return reply
-      .code(200)
-      .send({ data: { payrollRunId: run.id, employeeCount: activeEmployees.length, totalNet } });
+    return reply.code(200).send({
+      data: { payrollRunId: run.id, employeeCount: processedCount, skipped, totalNet },
+    });
   });
 
   // ── POST /internal/payroll/send-slips?tenantId=... — PG-026, scheduler-triggered ──

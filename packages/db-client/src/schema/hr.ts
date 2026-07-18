@@ -200,9 +200,7 @@ export const biometricDeviceConfigs = pgTable(
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
     createdBy: integer('created_by').notNull(),
   },
-  (t) => [
-    unique('biometric_device_configs_tenant_unique').on(t.tenantId),
-  ]
+  (t) => [unique('biometric_device_configs_tenant_unique').on(t.tenantId)]
 );
 
 // ─── Leave Types ──────────────────────────────────────────────────────────────
@@ -215,7 +213,9 @@ export const leaveTypes = pgTable(
     code: varchar('code', { length: 20 }).notNull(),
     daysPerYear: decimal('days_per_year', { precision: 6, scale: 2 }).notNull().default('0'),
     canCarryForward: boolean('can_carry_forward').notNull().default(false),
-    maxCarryForwardDays: decimal('max_carry_forward_days', { precision: 6, scale: 2 }).notNull().default('0'),
+    maxCarryForwardDays: decimal('max_carry_forward_days', { precision: 6, scale: 2 })
+      .notNull()
+      .default('0'),
     isGenderSpecific: boolean('is_gender_specific').notNull().default(false),
     genderAllowed: varchar('gender_allowed', { length: 10 }).$type<'MALE' | 'FEMALE'>(),
     minServiceMonths: integer('min_service_months').notNull().default(0),
@@ -245,7 +245,9 @@ export const employeeLeaveBalance = pgTable(
     totalDays: decimal('total_days', { precision: 6, scale: 2 }).notNull().default('0'),
     usedDays: decimal('used_days', { precision: 6, scale: 2 }).notNull().default('0'),
     pendingDays: decimal('pending_days', { precision: 6, scale: 2 }).notNull().default('0'),
-    carriedForwardDays: decimal('carried_forward_days', { precision: 6, scale: 2 }).notNull().default('0'),
+    carriedForwardDays: decimal('carried_forward_days', { precision: 6, scale: 2 })
+      .notNull()
+      .default('0'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
@@ -301,7 +303,9 @@ export const salaryStructures = pgTable(
     basicPercent: decimal('basic_percent', { precision: 5, scale: 2 }).notNull().default('50'),
     hraPercent: decimal('hra_percent', { precision: 5, scale: 2 }).notNull().default('20'),
     daPercent: decimal('da_percent', { precision: 5, scale: 2 }).notNull().default('10'),
-    allowances: jsonb('allowances').$type<Array<{ name: string; amount: number; percent?: number }>>().default([]),
+    allowances: jsonb('allowances')
+      .$type<Array<{ name: string; amount: number; percent?: number }>>()
+      .default([]),
     isActive: boolean('is_active').notNull().default(true),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     createdBy: integer('created_by').notNull(),
@@ -333,9 +337,7 @@ export const employeeSalaries = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     createdBy: integer('created_by').notNull(),
   },
-  (t) => [
-    index('idx_emp_salaries_employee').on(t.employeeId, t.tenantId, t.isActive),
-  ]
+  (t) => [index('idx_emp_salaries_employee').on(t.employeeId, t.tenantId, t.isActive)]
 );
 
 // ─── Payroll Runs ─────────────────────────────────────────────────────────────
@@ -353,7 +355,9 @@ export const payrollRuns = pgTable(
       .$type<'DRAFT' | 'CALCULATING' | 'CALCULATED' | 'APPROVED' | 'DISBURSED'>(),
     totalEmployees: integer('total_employees').notNull().default(0),
     totalGross: decimal('total_gross', { precision: 15, scale: 2 }).notNull().default('0'),
-    totalDeductions: decimal('total_deductions', { precision: 15, scale: 2 }).notNull().default('0'),
+    totalDeductions: decimal('total_deductions', { precision: 15, scale: 2 })
+      .notNull()
+      .default('0'),
     totalNet: decimal('total_net', { precision: 15, scale: 2 }).notNull().default('0'),
     salaryJournalId: varchar('salary_journal_id', { length: 26 }),
     disbursalJournalId: varchar('disbursal_journal_id', { length: 26 }),
@@ -387,18 +391,26 @@ export const payrollSlips = pgTable(
     basicSalary: decimal('basic_salary', { precision: 15, scale: 2 }).notNull().default('0'),
     hraAmount: decimal('hra_amount', { precision: 15, scale: 2 }).notNull().default('0'),
     daAmount: decimal('da_amount', { precision: 15, scale: 2 }).notNull().default('0'),
-    otherAllowances: decimal('other_allowances', { precision: 15, scale: 2 }).notNull().default('0'),
-    pieceRateAmount: decimal('piece_rate_amount', { precision: 15, scale: 2 }).notNull().default('0'),
+    otherAllowances: decimal('other_allowances', { precision: 15, scale: 2 })
+      .notNull()
+      .default('0'),
+    pieceRateAmount: decimal('piece_rate_amount', { precision: 15, scale: 2 })
+      .notNull()
+      .default('0'),
     grossSalary: text('gross_salary').notNull().default(''),
     pfEmployee: decimal('pf_employee', { precision: 15, scale: 2 }).notNull().default('0'),
     pfEmployer: decimal('pf_employer', { precision: 15, scale: 2 }).notNull().default('0'),
     epsAmount: decimal('eps_amount', { precision: 15, scale: 2 }).notNull().default('0'),
     esiEmployee: decimal('esi_employee', { precision: 15, scale: 2 }).notNull().default('0'),
     esiEmployer: decimal('esi_employer', { precision: 15, scale: 2 }).notNull().default('0'),
-    professionalTax: decimal('professional_tax', { precision: 15, scale: 2 }).notNull().default('0'),
+    professionalTax: decimal('professional_tax', { precision: 15, scale: 2 })
+      .notNull()
+      .default('0'),
     loanDeduction: decimal('loan_deduction', { precision: 15, scale: 2 }).notNull().default('0'),
     tdsDeduction: decimal('tds_deduction', { precision: 15, scale: 2 }).notNull().default('0'),
-    totalDeductions: decimal('total_deductions', { precision: 15, scale: 2 }).notNull().default('0'),
+    totalDeductions: decimal('total_deductions', { precision: 15, scale: 2 })
+      .notNull()
+      .default('0'),
     netSalary: text('net_salary').notNull().default(''),
     status: varchar('status', { length: 20 })
       .notNull()
@@ -439,10 +451,20 @@ export const alterationOrders = pgTable(
     status: varchar('status', { length: 30 })
       .notNull()
       .default('RECEIVED')
-      .$type<'RECEIVED' | 'ASSIGNED' | 'IN_PROGRESS' | 'QUALITY_CHECK' | 'READY' | 'DELIVERED' | 'CANCELLED'>(),
+      .$type<
+        | 'RECEIVED'
+        | 'ASSIGNED'
+        | 'IN_PROGRESS'
+        | 'QUALITY_CHECK'
+        | 'READY'
+        | 'DELIVERED'
+        | 'CANCELLED'
+      >(),
     notes: text('notes'),
     deliveredAt: timestamp('delivered_at', { withTimezone: true }),
-    deliveryPaymentReceived: decimal('delivery_payment_received', { precision: 15, scale: 2 }).notNull().default('0'),
+    deliveryPaymentReceived: decimal('delivery_payment_received', { precision: 15, scale: 2 })
+      .notNull()
+      .default('0'),
     cancelledAt: timestamp('cancelled_at', { withTimezone: true }),
     cancelReason: text('cancel_reason'),
     readyNotifiedAt: timestamp('ready_notified_at', { withTimezone: true }),
@@ -515,7 +537,9 @@ export const holidayCalendars = pgTable(
     tenantId: integer('tenant_id').notNull(),
     name: varchar('name', { length: 100 }).notNull(),
     holidayDate: date('holiday_date').notNull(),
-    holidayType: varchar('holiday_type', { length: 20 }).notNull().$type<'NATIONAL' | 'STATE' | 'OPTIONAL'>(),
+    holidayType: varchar('holiday_type', { length: 20 })
+      .notNull()
+      .$type<'NATIONAL' | 'STATE' | 'OPTIONAL'>(),
     branchId: integer('branch_id'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
@@ -539,7 +563,12 @@ export const statutoryChallanFilings = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => [
-    unique('statutory_challan_filings_tenant_type_period').on(t.tenantId, t.challanType, t.periodMonth, t.periodYear),
+    unique('statutory_challan_filings_tenant_type_period').on(
+      t.tenantId,
+      t.challanType,
+      t.periodMonth,
+      t.periodYear
+    ),
     index('idx_statutory_challan_filings_tenant').on(t.tenantId, t.challanType, t.periodYear),
   ]
 );
@@ -561,9 +590,7 @@ export const ptSlabs = pgTable(
     effectiveTo: date('effective_to'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
-  (t) => [
-    index('idx_pt_slabs_state_effective').on(t.stateCode, t.effectiveFrom, t.effectiveTo),
-  ]
+  (t) => [index('idx_pt_slabs_state_effective').on(t.stateCode, t.effectiveFrom, t.effectiveTo)]
 );
 
 // ─── Employee Loans (PG-045) ────────────────────────────────────────────────
@@ -591,9 +618,7 @@ export const employeeLoans = pgTable(
     createdBy: integer('created_by').notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
-  (t) => [
-    index('idx_employee_loans_active').on(t.tenantId, t.employeeId, t.status),
-  ]
+  (t) => [index('idx_employee_loans_active').on(t.tenantId, t.employeeId, t.status)]
 );
 
 // ─── Loan Deduction History (PG-045) ────────────────────────────────────────
@@ -613,6 +638,11 @@ export const loanDeductionHistory = pgTable(
   (t) => [
     index('idx_loan_deduction_history_loan').on(t.employeeLoanId, t.tenantId),
     index('idx_loan_deduction_history_slip').on(t.payrollSlipId, t.tenantId),
+    // Defense-in-depth alongside the atomic guarded status transition in payroll.routes.ts'
+    // approve() handler: EmployeeLoanService.applyMonthlyDeduction() must only ever apply one
+    // EMI per loan per payroll slip — this rejects a second attempt at the DB level even if
+    // some other future code path calls it again for the same (loan, slip) pair.
+    unique('loan_deduction_history_loan_slip').on(t.employeeLoanId, t.payrollSlipId),
   ]
 );
 
