@@ -60,7 +60,9 @@ test('LIVE — full real POS workflow: Login, Branch/Warehouse, Open Shift, Chec
   let invoiceNumber = '';
 
   await test.step('Add a real item to the cart from the real quick-items list', async () => {
-    await expect(page.getByPlaceholder('Scan barcode or type item name…')).toBeVisible({
+    await expect(
+      page.getByPlaceholder('Scan barcode, or type name / SKU / alias / code…')
+    ).toBeVisible({
       timeout: 10000,
     });
     // The real /pos/quick-items endpoint returns the tenant's first 20 ACTIVE items —
@@ -126,7 +128,9 @@ async function goPastSetup(page: Page): Promise<void> {
     await expect(page.getByText('Shift opened')).toBeVisible({ timeout: 10000 });
   }
 
-  await expect(page.getByPlaceholder('Scan barcode or type item name…')).toBeVisible({
+  await expect(
+    page.getByPlaceholder('Scan barcode, or type name / SKU / alias / code…')
+  ).toBeVisible({
     timeout: 10000,
   });
 }

@@ -46,7 +46,16 @@ async function seedDeviceBranch(page: Page): Promise<void> {
 }
 
 async function login(page: Page): Promise<void> {
-  const accessToken = fakeJwt({ sub: '1', tenantId: 1, branchIds: [1], roles: ['CASHIER'] });
+  // Pre-existing bug fixed here: `hasPermission()` (auth.ts) reads the JWT's `permissions`
+  // claim, not `roles` — without this, RequirePermission (main.tsx) always rendered
+  // AccessDeniedScreen and every assertion below this point was unreachable dead test code.
+  const accessToken = fakeJwt({
+    sub: '1',
+    tenantId: 1,
+    branchIds: [1],
+    roles: ['CASHIER'],
+    permissions: ['POS_ACCESS'],
+  });
 
   await page.route('**/auth/login', (route) =>
     mockJson(route, { accessToken, refreshToken: 'fake-refresh-token' })
@@ -101,7 +110,9 @@ test.describe('Quick-sale checkout smoke', () => {
       mockJson(route, { invoiceId: 501, invoiceNumber: 'INV-0501', grandTotal: 118 })
     );
 
-    await expect(page.getByPlaceholder('Scan barcode or type item name…')).toBeVisible();
+    await expect(
+      page.getByPlaceholder('Scan barcode, or type name / SKU / alias / code…')
+    ).toBeVisible();
     await page.getByRole('button', { name: /Test Item/i }).click();
 
     await page.getByRole('button', { name: 'Charge (F8)' }).click();

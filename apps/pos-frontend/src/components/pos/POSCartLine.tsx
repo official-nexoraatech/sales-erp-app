@@ -9,11 +9,17 @@ interface Props {
   line: CartItem;
   onUpdateQty: (itemId: number, qty: number) => void;
   onUpdateDiscount: (itemId: number, discountPct: number) => void;
+  /** Arrow-key cart navigation (F5/6/7/Ctrl+D keyboard map) highlights one line at a time. */
+  highlighted?: boolean;
 }
 
-export function POSCartLine({ line, onUpdateQty, onUpdateDiscount }: Props) {
+export function POSCartLine({ line, onUpdateQty, onUpdateDiscount, highlighted }: Props) {
   return (
-    <div className="flex items-center gap-2 bg-surface-subtle rounded-xl p-2.5">
+    <div
+      className={`flex items-center gap-2 rounded-xl p-2.5 transition-colors ${
+        highlighted ? 'bg-primary-subtle ring-2 ring-focus' : 'bg-surface-subtle'
+      }`}
+    >
       <div className="flex-1 min-w-0">
         <div className="text-sm font-medium text-primary truncate">{line.itemName}</div>
         <div className="text-xs text-secondary flex items-center gap-1 mt-0.5">
@@ -21,6 +27,7 @@ export function POSCartLine({ line, onUpdateQty, onUpdateDiscount }: Props) {
             ₹{line.unitPrice.toFixed(2)} × {line.quantity}
           </span>
           <input
+            id={`pos-cart-discount-${line.itemId}`}
             type="number"
             min="0"
             max="100"

@@ -6,9 +6,10 @@ interface Props {
   items: CartItem[];
   onUpdateQty: (itemId: number, qty: number) => void;
   onUpdateDiscount: (itemId: number, discountPct: number) => void;
+  highlightedItemId?: number | null;
 }
 
-export function POSCart({ items, onUpdateQty, onUpdateDiscount }: Props) {
+export function POSCart({ items, onUpdateQty, onUpdateDiscount, highlightedItemId }: Props) {
   if (items.length === 0) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center gap-2 text-disabled">
@@ -21,7 +22,13 @@ export function POSCart({ items, onUpdateQty, onUpdateDiscount }: Props) {
   return (
     <div className="flex-1 overflow-y-auto p-4 space-y-2">
       {items.map((line) => (
-        <POSCartLine key={line.itemId} line={line} onUpdateQty={onUpdateQty} onUpdateDiscount={onUpdateDiscount} />
+        <POSCartLine
+          key={line.itemId}
+          line={line}
+          onUpdateQty={onUpdateQty}
+          onUpdateDiscount={onUpdateDiscount}
+          highlighted={line.itemId === highlightedItemId}
+        />
       ))}
     </div>
   );

@@ -521,6 +521,13 @@
       "breakpoints": true
     },
     {
+      "idx": 74,
+      "version": "7",
+      "when": 1788986135804,
+      "tag": "0074_pos_item_search_fields",
+      "breakpoints": true
+    },
+    {
       "idx": 75,
       "version": "7",
       "when": 1789072535804,

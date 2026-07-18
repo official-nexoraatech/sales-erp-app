@@ -181,6 +181,11 @@ export const items = pgTable(
     barcodeType: varchar('barcode_type', { length: 20 })
       .default('EAN13')
       .$type<'EAN13' | 'CODE128' | 'QR' | 'CUSTOM'>(),
+    // POS search — alternate names/codes a cashier may type instead of the item name
+    // (regional/shorthand name, the supplier's own code, an internal code that isn't itemCode)
+    alias: varchar('alias', { length: 150 }),
+    supplierCode: varchar('supplier_code', { length: 50 }),
+    customCode: varchar('custom_code', { length: 50 }),
     // Inventory config
     trackInventory: boolean('track_inventory').notNull().default(true),
     reorderLevel: decimal('reorder_level', { precision: 15, scale: 3 }).notNull().default('0'),
@@ -207,7 +212,9 @@ export const items = pgTable(
       .default('WACC')
       .$type<'FIFO' | 'WACC'>(),
     waccCost: decimal('wacc_cost', { precision: 15, scale: 2 }).notNull().default('0'),
-    currentStockValue: decimal('current_stock_value', { precision: 15, scale: 2 }).notNull().default('0'),
+    currentStockValue: decimal('current_stock_value', { precision: 15, scale: 2 })
+      .notNull()
+      .default('0'),
     tags: jsonb('tags').$type<string[]>().default([]),
     customFields: jsonb('custom_fields').$type<Record<string, unknown>>().default({}),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
@@ -226,6 +233,11 @@ export const items = pgTable(
     index('idx_items_barcode').on(t.barcode),
     index('idx_items_hsn').on(t.hsnCode, t.tenantId),
     index('idx_items_status').on(t.status, t.tenantId),
+    // POS search — GIN trigram on alias (fuzzy, same as idx_items_name_trgm from Phase 13);
+    // plain indexes on supplier/custom code (exact/prefix lookups, not fuzzy)
+    index('idx_items_alias_trgm').on(t.alias),
+    index('idx_items_supplier_code').on(t.supplierCode),
+    index('idx_items_custom_code').on(t.customCode),
   ]
 );
 

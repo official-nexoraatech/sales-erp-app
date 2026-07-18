@@ -8,6 +8,7 @@ import {
   History,
   ArrowLeftRight,
   Search as SearchIcon,
+  LayoutGrid,
   Sun,
   Moon,
   UserPlus,
@@ -57,7 +58,10 @@ import type { CachedCustomer, PendingSale } from './db.js';
 import { SyncStatusPanel } from './components/pos/SyncStatusPanel.js';
 import { StockConflictModal } from './components/pos/StockConflictModal.js';
 import { ReceiptOverlay } from './components/pos/ReceiptOverlay.js';
-import { POSSearch } from './components/pos/POSSearch.js';
+import { POSOmnibox } from './components/pos/POSOmnibox.js';
+import { POSItemLookupModal } from './components/pos/POSItemLookupModal.js';
+import { useCart } from './hooks/useCart.js';
+import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts.js';
 import { POSProductCard } from './components/pos/POSProductCard.js';
 import POSInput from './components/pos/POSInput.js';
 import POSButton from './components/pos/POSButton.js';
@@ -107,11 +111,6 @@ function round2(n: number) {
   return Math.round(n * 100) / 100;
 }
 
-function computeLineTotal(qty: number, price: number, gst: number, discountPct = 0): number {
-  const taxable = round2(qty * price * (1 - discountPct / 100));
-  return round2(taxable + (taxable * gst) / 100);
-}
-
 // OFFLINE-06: Background Sync is Chromium/Android-only (no Safari/iOS support) — always
 // feature-detect before relying on it. Where unsupported, the existing tab-open triggers
 // (window.online listener, manual "Sync now") are the only sync path, unchanged.
@@ -138,7 +137,20 @@ export default function POSScreen() {
   const { isDark, toggleTheme } = useTheme();
   const barcodeRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
-  const [cart, setCart] = useState<CartItem[]>([]);
+  const {
+    cart,
+    lastAddedItem,
+    highlightedLineItemId,
+    grandTotal,
+    addItem,
+    updateQty,
+    updateDiscount,
+    applyOrderDiscount,
+    undoLastLine,
+    moveLineSelection,
+    clearCart,
+    restoreCart,
+  } = useCart();
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [customerSearch, setCustomerSearch] = useState('');
   const [paymentMode, setPaymentMode] = useState<'CASH' | 'CARD' | 'UPI'>('CASH');
@@ -168,7 +180,7 @@ export default function POSScreen() {
   const [redeemPoints, setRedeemPoints] = useState('');
   const [showHeldSales, setShowHeldSales] = useState(false);
   const [showNewCustomer, setShowNewCustomer] = useState(false);
-  const [lastAddedItem, setLastAddedItem] = useState<POSItem | null>(null);
+  const [showLookup, setShowLookup] = useState(false);
   const [drawerOpening, setDrawerOpening] = useState(false);
 
   const { data: upiData } = useQuery({
@@ -466,40 +478,7 @@ export default function POSScreen() {
     barcodeRef.current?.focus();
   }, []);
 
-  const grandTotal = cart.reduce((s, l) => s + l.lineTotal, 0);
   const change = Math.max(0, round2((parseFloat(amountTendered) || 0) - grandTotal));
-
-  const addItem = (item: POSItem) => {
-    const price = parseFloat(item.salePrice ?? '0');
-    const gstRate = item.gstRate !== undefined && item.gstRate !== null ? Number(item.gstRate) : 18;
-    setLastAddedItem(item);
-    setCart((prev) => {
-      const existing = prev.find((l) => l.itemId === item.id);
-      if (existing) {
-        return prev.map((l) =>
-          l.itemId === item.id
-            ? {
-                ...l,
-                quantity: l.quantity + 1,
-                lineTotal: computeLineTotal(l.quantity + 1, l.unitPrice, l.gstRate, l.discountPct),
-              }
-            : l
-        );
-      }
-      return [
-        ...prev,
-        {
-          itemId: item.id,
-          itemName: item.name,
-          quantity: 1,
-          unitPrice: price,
-          gstRate,
-          discountPct: 0,
-          lineTotal: computeLineTotal(1, price, gstRate, 0),
-        },
-      ];
-    });
-  };
 
   // Sends just the drawer-kick ESC/POS command to the currently paired printer,
   // pairing on demand if nothing is paired yet — independent of printing a receipt.
@@ -587,50 +566,6 @@ export default function POSScreen() {
       controls?.stop();
     };
   }, [cameraOpen, resolveAndAddItem]);
-
-  const updateQty = (itemId: number, qty: number) => {
-    if (qty <= 0) {
-      setCart((prev) => prev.filter((l) => l.itemId !== itemId));
-    } else {
-      setCart((prev) =>
-        prev.map((l) =>
-          l.itemId === itemId
-            ? {
-                ...l,
-                quantity: qty,
-                lineTotal: computeLineTotal(qty, l.unitPrice, l.gstRate, l.discountPct),
-              }
-            : l
-        )
-      );
-    }
-  };
-
-  const updateDiscount = (itemId: number, discountPct: number) => {
-    const clamped = Math.max(0, Math.min(100, discountPct));
-    setCart((prev) =>
-      prev.map((l) =>
-        l.itemId === itemId
-          ? {
-              ...l,
-              discountPct: clamped,
-              lineTotal: computeLineTotal(l.quantity, l.unitPrice, l.gstRate, clamped),
-            }
-          : l
-      )
-    );
-  };
-
-  const applyOrderDiscount = (discountPct: number) => {
-    const clamped = Math.max(0, Math.min(100, discountPct));
-    setCart((prev) =>
-      prev.map((l) => ({
-        ...l,
-        discountPct: clamped,
-        lineTotal: computeLineTotal(l.quantity, l.unitPrice, l.gstRate, clamped),
-      }))
-    );
-  };
 
   const salePayload = () => ({
     sessionId,
@@ -726,7 +661,7 @@ export default function POSScreen() {
         }
       }
       void refreshPendingCount();
-      setCart([]);
+      clearCart();
       setCustomer(null);
       setShowPayment(false);
       setAmountTendered('');
@@ -775,7 +710,7 @@ export default function POSScreen() {
     },
     onSuccess: () => {
       toast.success('Sale held');
-      setCart([]);
+      clearCart();
       setCustomer(null);
       barcodeRef.current?.focus();
     },
@@ -788,7 +723,7 @@ export default function POSScreen() {
       toast.error('Failed to resume held sale');
       return;
     }
-    setCart(held.cart as CartItem[]);
+    restoreCart(held.cart as CartItem[]);
     if (held.customerId) {
       const cached = await getCustomerById(held.customerId);
       if (cached)
@@ -867,31 +802,31 @@ export default function POSScreen() {
     onError: (e: Error) => toast.error(e.message),
   });
 
-  // Keyboard shortcuts (documented in docs/training/CASHIER_GUIDE.md): F2 new bill,
-  // F8 process payment, F9 repeat last item, Esc cancel/back.
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === 'F2') {
-        e.preventDefault();
-        setCart([]);
-        setCustomer(null);
-        setShowPayment(false);
-        barcodeRef.current?.focus();
-      } else if (e.key === 'F8') {
-        e.preventDefault();
-        if (cart.length > 0) setShowPayment(true);
-      } else if (e.key === 'F9') {
-        e.preventDefault();
-        if (lastAddedItem) addItem(lastAddedItem);
-      } else if (e.key === 'Escape') {
-        if (showPayment) setShowPayment(false);
-        else if (showHeldSales) setShowHeldSales(false);
-        else if (showNewCustomer) setShowNewCustomer(false);
-      }
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [cart.length, showPayment, showHeldSales, showNewCustomer, lastAddedItem]);
+  useKeyboardShortcuts({
+    barcodeRef,
+    cartLength: cart.length,
+    highlightedLineItemId,
+    lastAddedItem,
+    showPayment,
+    showHeldSales,
+    showNewCustomer,
+    isHolding: holdSaleMutation.isPending,
+    onNewBill: () => {
+      clearCart();
+      setCustomer(null);
+      setShowPayment(false);
+      barcodeRef.current?.focus();
+    },
+    onOpenLookup: () => setShowLookup(true),
+    onHold: () => holdSaleMutation.mutate(),
+    onSetPaymentMode: setPaymentMode,
+    onShowPayment: setShowPayment,
+    onShowHeldSales: setShowHeldSales,
+    onShowNewCustomer: setShowNewCustomer,
+    onRepeatLast: addItem,
+    onUndoLastLine: undoLastLine,
+    onMoveLineSelection: moveLineSelection,
+  });
 
   return (
     <>
@@ -921,6 +856,13 @@ export default function POSScreen() {
                 <ArrowLeftRight size={14} />
                 Returns / Exchange
               </a>
+              <button
+                onClick={() => setShowLookup(true)}
+                className="flex items-center gap-1 text-xs font-medium text-link hover:text-[var(--text-link-hover)]"
+              >
+                <LayoutGrid size={14} />
+                Browse Catalog (F3)
+              </button>
               <Link
                 to="/lookup"
                 className="flex items-center gap-1 text-xs font-medium text-link hover:text-[var(--text-link-hover)]"
@@ -966,25 +908,47 @@ export default function POSScreen() {
             </div>
           </div>
 
-          <POSSearch
+          <POSOmnibox
             barcodeRef={barcodeRef}
             videoRef={videoRef}
             scanFlash={scanFlash}
             cameraOpen={cameraOpen}
             onToggleCamera={() => setCameraOpen((v) => !v)}
             onSubmit={(value) => void resolveAndAddItem(value)}
+            onSelectItem={(item) => {
+              addItem(item);
+              flashFeedback('success');
+            }}
           />
 
           {/* Keyboard shortcut hints — the handlers for these live in the useEffect above */}
-          <div className="flex items-center gap-4 text-xs text-secondary">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-secondary">
             <span className="flex items-center gap-1">
               <Kbd>F2</Kbd> New bill
+            </span>
+            <span className="flex items-center gap-1">
+              <Kbd>F3</Kbd> Browse catalog
+            </span>
+            <span className="flex items-center gap-1">
+              <Kbd>F4</Kbd> Hold sale
+            </span>
+            <span className="flex items-center gap-1">
+              <Kbd>F5</Kbd>/<Kbd>F6</Kbd>/<Kbd>F7</Kbd> Cash/Card/UPI
             </span>
             <span className="flex items-center gap-1">
               <Kbd>F8</Kbd> Charge
             </span>
             <span className="flex items-center gap-1">
               <Kbd>F9</Kbd> Repeat last item
+            </span>
+            <span className="flex items-center gap-1">
+              <Kbd>Ctrl</Kbd>+<Kbd>Z</Kbd> Undo last
+            </span>
+            <span className="flex items-center gap-1">
+              <Kbd>Ctrl</Kbd>+<Kbd>F</Kbd> Focus search
+            </span>
+            <span className="flex items-center gap-1">
+              <Kbd>↑</Kbd>/<Kbd>↓</Kbd>+<Kbd>Ctrl</Kbd>+<Kbd>D</Kbd> Line discount
             </span>
           </div>
 
@@ -1057,7 +1021,12 @@ export default function POSScreen() {
             {customer && <p className="text-sm text-secondary">{customer.displayName}</p>}
           </div>
 
-          <POSCart items={cart} onUpdateQty={updateQty} onUpdateDiscount={updateDiscount} />
+          <POSCart
+            items={cart}
+            onUpdateQty={updateQty}
+            onUpdateDiscount={updateDiscount}
+            highlightedItemId={highlightedLineItemId}
+          />
 
           <div className="p-4 border-t border-default space-y-3">
             <POSSummary
@@ -1208,6 +1177,18 @@ export default function POSScreen() {
           </POSButton>
         </div>
       </POSDialog>
+
+      <POSItemLookupModal
+        open={showLookup}
+        onClose={() => {
+          setShowLookup(false);
+          barcodeRef.current?.focus();
+        }}
+        onSelectItem={(item) => {
+          addItem(item);
+          flashFeedback('success');
+        }}
+      />
     </>
   );
 }

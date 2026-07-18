@@ -7,7 +7,7 @@ interface Props {
   onClose: () => void;
   title: string;
   children: ReactNode;
-  size?: 'sm' | 'md' | 'lg' | 'xl';
+  size?: 'sm' | 'md' | 'lg' | 'xl' | 'full';
   closeOnBackdropClick?: boolean;
 }
 
@@ -16,6 +16,16 @@ const SIZES: Record<NonNullable<Props['size']>, string> = {
   md: 'max-w-lg',
   lg: 'max-w-2xl',
   xl: 'max-w-4xl',
+  // Full-screen item lookup (Phase 3) — near-viewport rather than a fixed max-width.
+  full: 'max-w-[96vw]',
+};
+
+const MAX_HEIGHT: Record<NonNullable<Props['size']>, string> = {
+  sm: 'max-h-[85vh]',
+  md: 'max-h-[85vh]',
+  lg: 'max-h-[85vh]',
+  xl: 'max-h-[85vh]',
+  full: 'max-h-[94vh]',
 };
 
 let titleIdCounter = 0;
@@ -66,7 +76,7 @@ export default function POSDialog({
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className={`relative w-full ${SIZES[size]} max-h-[85vh] flex flex-col bg-surface-card rounded-2xl shadow-token-modal`}
+        className={`relative w-full ${SIZES[size]} ${MAX_HEIGHT[size]} flex flex-col bg-surface-card rounded-2xl shadow-token-modal`}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-5 py-4 border-b border-default shrink-0">
@@ -81,7 +91,15 @@ export default function POSDialog({
             <X size={20} />
           </button>
         </div>
-        <div className="px-5 py-4 overflow-y-auto">{children}</div>
+        <div
+          className={
+            size === 'full'
+              ? 'flex-1 min-h-0 flex flex-col px-5 py-4 overflow-y-auto'
+              : 'px-5 py-4 overflow-y-auto'
+          }
+        >
+          {children}
+        </div>
       </div>
     </div>
   );

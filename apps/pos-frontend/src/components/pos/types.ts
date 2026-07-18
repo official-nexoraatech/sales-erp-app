@@ -16,6 +16,21 @@ export interface POSItem {
   barcode?: string;
 }
 
+// GET /pos/items/search result row — see pos.routes.ts
+export interface POSSearchResult {
+  itemId: number;
+  name: string;
+  sku: string | null;
+  barcode: string | null;
+  alias: string | null;
+  supplierCode: string | null;
+  customCode: string | null;
+  price: number;
+  gstRate: number;
+  stock: { qty: number };
+  matchedOn: 'code' | 'supplierCode' | 'customCode' | 'alias' | 'name';
+}
+
 export interface Customer {
   id: number;
   displayName: string;

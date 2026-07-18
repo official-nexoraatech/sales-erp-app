@@ -9,8 +9,14 @@ import {
   customers,
   organizationSettings,
   paymentAllocations,
+  categories,
+  brands,
+  priceLists,
+  priceListItems,
+  warehouses,
+  projectionStockLevel,
 } from '@erp/db';
-import { and, desc, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, isNull, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { PERMISSIONS } from '@erp/types';
 import { authenticate } from '../middleware/authenticate.js';
@@ -53,6 +59,45 @@ const OpenSessionSchema = z.object({
 
 const CloseSessionSchema = z.object({
   closingCash: z.number().nonnegative(),
+});
+
+// POS search-first redesign, Phase 1 — opaque cursor is just a base64'd offset. Trigram
+// similarity ordering has no stable keyset, so offset pagination (not the usual id-based
+// cursor) is the simplest correct approach at this result-set size (top few hundred matches
+// even against a 100k-row catalog).
+function decodeSearchCursor(cursor: string | undefined): number {
+  if (!cursor) return 0;
+  try {
+    const parsed = JSON.parse(Buffer.from(cursor, 'base64').toString('utf8')) as {
+      offset?: number;
+    };
+    return typeof parsed.offset === 'number' && parsed.offset >= 0 ? parsed.offset : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function encodeSearchCursor(offset: number): string {
+  return Buffer.from(JSON.stringify({ offset })).toString('base64');
+}
+
+// Phase 3 — q is now optional: the full-screen lookup modal browses by filter alone (e.g.
+// "everything in Sarees, in stock"), with no text typed. The omnibox itself still gates at
+// >=2 chars client-side, so this relaxation only ever takes effect from the lookup modal.
+const SearchItemsQuerySchema = z.object({
+  q: z.string().trim().default(''),
+  cursor: z.string().optional(),
+  limit: z.coerce.number().int().min(1).max(50).default(20),
+  category: z.coerce.number().int().positive().optional(),
+  brand: z.coerce.number().int().positive().optional(),
+  priceListId: z.coerce.number().int().positive().optional(),
+  warehouseId: z.coerce.number().int().positive().optional(),
+  // z.coerce.boolean() would turn the string "false" into `true` (Boolean("false") === true),
+  // so this checks the literal value instead.
+  inStockOnly: z
+    .string()
+    .optional()
+    .transform((v) => v === 'true'),
 });
 
 const POSSaleSchema = z.object({
@@ -526,6 +571,204 @@ export async function posRoutes(
         .where(and(eq(items.tenantId, req.auth.tenantId), eq(items.status, 'ACTIVE')))
         .limit(20);
       return reply.send({ data: rows });
+    },
+  });
+
+  // POS search-first redesign — the omnibox's typed/fuzzy search path (Phase 1; the scanner
+  // fast lane stays on production-service's /items/by-barcode, untouched) AND the Phase 3
+  // full-screen lookup modal's filtered/browse-by-facet path share this one endpoint. Matches
+  // item name/SKU/barcode/alias/supplier-code/custom-code; ranked exact-code matches first,
+  // then trigram similarity on name/alias. Relies on idx_items_name_trgm (Phase 13) and the
+  // alias/supplier/custom-code indexes added in migration 0074.
+  fastify.get('/pos/items/search', {
+    preHandler: requireAnyPermission([PERMISSIONS.POS_MANAGE, PERMISSIONS.POS_ACCESS]),
+    handler: async (req, reply) => {
+      const parsed = SearchItemsQuerySchema.safeParse(req.query);
+      if (!parsed.success) {
+        return sendError(reply, 400, 'INVALID_QUERY', 'Invalid search parameters');
+      }
+      const { q, limit, category, brand, priceListId, warehouseId, inStockOnly } = parsed.data;
+      const offset = decodeSearchCursor(parsed.data.cursor);
+      const ctx = ctxFactory.create({
+        tenantId: req.auth.tenantId,
+        userId: req.auth.userId,
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+      });
+
+      const prefix = `${q}%`;
+      const contains = `%${q}%`;
+      const startedAt = Date.now();
+
+      // Only sourced from a joined table when the matching filter is actually present —
+      // joining unconditionally would fan a single item out into one row per price-list
+      // entry / per warehouse it has stock in, duplicating results.
+      const priceExpr =
+        priceListId !== undefined
+          ? sql<string>`COALESCE(${priceListItems.salePrice}, ${items.salePrice})`
+          : sql<string>`${items.salePrice}`;
+      const stockExpr =
+        warehouseId !== undefined
+          ? sql<string>`COALESCE(${projectionStockLevel.availableQty}, 0)`
+          : sql<string>`${items.availableQty}`;
+      const matchedOnExpr = q
+        ? sql<string>`CASE
+            WHEN ${items.itemCode} = ${q} OR ${items.barcode} = ${q} THEN 'code'
+            WHEN ${items.supplierCode} ILIKE ${prefix} THEN 'supplierCode'
+            WHEN ${items.customCode} ILIKE ${prefix} THEN 'customCode'
+            WHEN ${items.alias} ILIKE ${contains} THEN 'alias'
+            ELSE 'name'
+          END`
+        : sql<string>`'name'`;
+
+      let query = ctx.db.raw
+        .select({
+          itemId: items.id,
+          name: items.name,
+          sku: items.itemCode,
+          barcode: items.barcode,
+          alias: items.alias,
+          supplierCode: items.supplierCode,
+          customCode: items.customCode,
+          price: priceExpr,
+          gstRate: items.gstRate,
+          stockQty: stockExpr,
+          matchedOn: matchedOnExpr,
+        })
+        .from(items)
+        .$dynamic();
+
+      if (priceListId !== undefined) {
+        query = query.leftJoin(
+          priceListItems,
+          and(
+            eq(priceListItems.itemId, items.id),
+            eq(priceListItems.tenantId, items.tenantId),
+            eq(priceListItems.priceListId, priceListId)
+          )
+        );
+      }
+      if (warehouseId !== undefined) {
+        query = query.leftJoin(
+          projectionStockLevel,
+          and(
+            eq(projectionStockLevel.itemId, items.id),
+            eq(projectionStockLevel.tenantId, items.tenantId),
+            isNull(projectionStockLevel.variantId),
+            eq(projectionStockLevel.warehouseId, warehouseId)
+          )
+        );
+      }
+
+      const conditions = [
+        eq(items.tenantId, req.auth.tenantId),
+        eq(items.status, 'ACTIVE'),
+        ...(q
+          ? [
+              sql`(
+                ${items.itemCode} ILIKE ${prefix}
+                OR ${items.barcode} = ${q}
+                OR ${items.alias} ILIKE ${contains}
+                OR ${items.supplierCode} ILIKE ${prefix}
+                OR ${items.customCode} ILIKE ${prefix}
+                OR ${items.name} % ${q}
+              )`,
+            ]
+          : []),
+        ...(category !== undefined ? [eq(items.categoryId, category)] : []),
+        ...(brand !== undefined ? [eq(items.brandId, brand)] : []),
+        ...(priceListId !== undefined ? [sql`${priceListItems.id} IS NOT NULL`] : []),
+        ...(inStockOnly ? [sql`${stockExpr} > 0`] : []),
+      ];
+
+      const orderExprs = q
+        ? [
+            sql`(${items.itemCode} = ${q} OR ${items.barcode} = ${q}) DESC`,
+            sql`GREATEST(similarity(${items.name}, ${q}), similarity(COALESCE(${items.alias}, ''), ${q})) DESC`,
+          ]
+        : [items.name];
+
+      const rows = await query
+        .where(and(...conditions))
+        .orderBy(...orderExprs)
+        .limit(limit + 1)
+        .offset(offset);
+
+      const hasMore = rows.length > limit;
+      const page = hasMore ? rows.slice(0, limit) : rows;
+
+      return reply.send({
+        data: page.map((r) => ({
+          itemId: r.itemId,
+          name: r.name,
+          sku: r.sku,
+          barcode: r.barcode,
+          alias: r.alias,
+          supplierCode: r.supplierCode,
+          customCode: r.customCode,
+          price: parseFloat(String(r.price)),
+          gstRate: r.gstRate !== null ? Number(r.gstRate) : 18,
+          stock: { qty: parseFloat(String(r.stockQty)) },
+          matchedOn: r.matchedOn,
+        })),
+        nextCursor: hasMore ? encodeSearchCursor(offset + limit) : null,
+        tookMs: Date.now() - startedAt,
+      });
+    },
+  });
+
+  // Phase 3 — lightweight option lists for the full-screen lookup modal's filter row.
+  // Deliberately POS_ACCESS/POS_MANAGE-gated rather than reusing inventory-service's
+  // /categories, /brands, /warehouses (which require CATEGORY_VIEW/BRAND_VIEW/WAREHOUSE_VIEW)
+  // — the CASHIER role default doesn't grant any of those, so calling those endpoints
+  // directly from POS would 403 for every ordinary cashier trying to open the filter row.
+  fastify.get('/pos/lookup-filters', {
+    preHandler: requireAnyPermission([PERMISSIONS.POS_MANAGE, PERMISSIONS.POS_ACCESS]),
+    handler: async (req, reply) => {
+      const ctx = ctxFactory.create({
+        tenantId: req.auth.tenantId,
+        userId: req.auth.userId,
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+      });
+
+      const [categoryRows, brandRows, priceListRows, warehouseRows] = await Promise.all([
+        ctx.db.raw
+          .select({ id: categories.id, name: categories.name })
+          .from(categories)
+          .where(and(eq(categories.tenantId, req.auth.tenantId), eq(categories.isActive, true)))
+          .orderBy(categories.name),
+        ctx.db.raw
+          .select({ id: brands.id, name: brands.name })
+          .from(brands)
+          .where(and(eq(brands.tenantId, req.auth.tenantId), eq(brands.isActive, true)))
+          .orderBy(brands.name),
+        ctx.db.raw
+          .select({ id: priceLists.id, name: priceLists.name })
+          .from(priceLists)
+          .where(and(eq(priceLists.tenantId, req.auth.tenantId), eq(priceLists.isActive, true)))
+          .orderBy(priceLists.name),
+        ctx.db.raw
+          .select({ id: warehouses.id, name: warehouses.name })
+          .from(warehouses)
+          .where(
+            and(
+              eq(warehouses.tenantId, req.auth.tenantId),
+              eq(warehouses.isActive, true),
+              isNull(warehouses.deletedAt)
+            )
+          )
+          .orderBy(warehouses.name),
+      ]);
+
+      return reply.send({
+        data: {
+          categories: categoryRows,
+          brands: brandRows,
+          priceLists: priceListRows,
+          warehouses: warehouseRows,
+        },
+      });
     },
   });
 
