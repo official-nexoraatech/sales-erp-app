@@ -89,7 +89,8 @@ public class ItemRequestDto {
     @Positive(message = ValidationMessage.QUANTITY_INVALID)
     private BigDecimal openingQuantity;
 
-    @DecimalMin(value = "0.0", message = ValidationMessage.PRICE_INVALID)
+    @NotNull(message = ValidationMessage.MINIMUM_STOCK_INVALID)
+    @Positive(message = ValidationMessage.MINIMUM_STOCK_INVALID)
     private BigDecimal minimumStock;
 
     @NotNull(message = ValidationMessage.ID_REQUIRED)

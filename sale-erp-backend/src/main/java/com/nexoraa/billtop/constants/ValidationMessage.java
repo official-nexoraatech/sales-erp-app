@@ -53,6 +53,7 @@ public class ValidationMessage {
     public static final String EXPIRY_DATE_REQUIRED = "Expiry date is required";
     public static final String MRP_REQUIRED = "MRP is required";
     public static final String QUANTITY_INVALID = "Opening quantity must be greater than 0";
+    public static final String MINIMUM_STOCK_INVALID = "Minimum stock is required and must be greater than 0";
 
     // Master Data Validation
     public static final String NAME_REQUIRED = "Name is required";

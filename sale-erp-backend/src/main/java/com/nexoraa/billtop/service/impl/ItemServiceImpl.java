@@ -350,11 +350,19 @@ public class ItemServiceImpl implements ItemService {
     }
 
     private Stock buildStock(Item item, Warehouse warehouse, ItemBatch batch, ItemRequestDto request, Stock stock) {
-        Stock target = stock == null ? new Stock() : stock;
+        boolean isNewStock = stock == null;
+        Stock target = isNewStock ? new Stock() : stock;
         target.setItem(item);
         target.setWarehouse(warehouse);
         target.setBatch(batch);
-        target.setAvailableQty(request.getOpeningQuantity());
+        if (isNewStock) {
+            // Opening quantity only seeds a brand-new stock row. On an update to an
+            // existing row it must never overwrite availableQty - that value must only
+            // ever change through real stock transactions (purchase/sale/return/
+            // adjustment/transfer), otherwise editing unrelated item fields silently
+            // reverts stock that was already sold or received since the edit form loaded.
+            target.setAvailableQty(request.getOpeningQuantity());
+        }
         target.setReservedQty(defaultZero(target.getReservedQty()));
         target.setMinimumStock(request.getMinimumStock());
         target.setReorderLevel(request.getMinimumStock());

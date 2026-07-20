@@ -126,6 +126,7 @@ export const ItemForm: React.FC<Props> = ({
     if (!form.itemName.trim()) return toast.error('Item name is required.');
     if (!form.batchNo.trim()) return toast.error('Batch number is required.');
     if (!Number.isInteger(form.openingQuantity) || form.openingQuantity <= 0) return toast.error('Opening quantity must be a positive whole number.');
+    if (!form.minimumStock || form.minimumStock <= 0) return toast.error('Minimum stock is required and must be greater than 0.');
     if (!form.categoryId) return toast.error('Category is required.');
     if (!form.brandId) return toast.error('Brand is required.');
     onSubmit(form, imageFile);
@@ -259,7 +260,7 @@ export const ItemForm: React.FC<Props> = ({
           {renderFieldError('warehouseId')}
         </div>
         <label className="text-sm text-gray-600">As of Date<input type="date" className={`${highlightControlClass('manufacturingDate')} mt-1`} value={form.manufacturingDate} onChange={(event) => set('manufacturingDate', event.target.value)} />{renderFieldError('manufacturingDate')}</label>
-        <label className="text-sm text-gray-600">Minimum Stock<NumericInput min={0} className={`${highlightControlClass('minimumStock')} mt-1`} value={form.minimumStock || ''} onValueChange={(value) => set('minimumStock', value)} />{renderFieldError('minimumStock')}</label>
+        <label className="text-sm text-gray-600">Minimum Stock <span className="text-red-500">*</span><NumericInput min={1} className={`${highlightControlClass('minimumStock')} mt-1`} value={form.minimumStock || ''} onValueChange={(value) => set('minimumStock', value)} />{renderFieldError('minimumStock')}</label>
         <label className="text-sm text-gray-600">Exp.Date<input type="date" className={`${highlightControlClass('expiryDate')} mt-1`} value={form.expiryDate} onChange={(event) => set('expiryDate', event.target.value)} />{renderFieldError('expiryDate')}</label>
       </div>}
       <div className="flex gap-3 border-t p-5"><Button onClick={submit} isLoading={loading}>{submitText}</Button><Button variant="secondary" onClick={onCancel}>Close</Button></div>
