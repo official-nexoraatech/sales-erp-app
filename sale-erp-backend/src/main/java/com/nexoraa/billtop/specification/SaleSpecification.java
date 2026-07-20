@@ -42,6 +42,15 @@ public final class SaleSpecification {
         };
     }
 
+    public static Specification<Sale> customer(Long customerId) {
+        return (root, query, criteriaBuilder) -> {
+            if (customerId == null) {
+                return criteriaBuilder.conjunction();
+            }
+            return criteriaBuilder.equal(root.get("customer").get("id"), customerId);
+        };
+    }
+
     public static Specification<Sale> search(String search) {
         return (root, query, criteriaBuilder) -> {
             if (!StringUtils.hasText(search)) {

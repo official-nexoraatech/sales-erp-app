@@ -84,8 +84,11 @@ public class ItemController {
     }
 
     @GetMapping("/{id}")
-    public ResponseEntity<ApiResponseDto<ItemDetailResponseDto>> getItemById(@PathVariable @Positive Long id) {
-        return ResponseEntity.ok(ApiResponseDto.success(ResponseMessage.ITEM_RETRIEVED, itemService.getItemById(id)));
+    public ResponseEntity<ApiResponseDto<ItemDetailResponseDto>> getItemById(
+            @PathVariable @Positive Long id,
+            @RequestParam(required = false) Long warehouseId
+    ) {
+        return ResponseEntity.ok(ApiResponseDto.success(ResponseMessage.ITEM_RETRIEVED, itemService.getItemById(id, warehouseId)));
     }
 
     @GetMapping

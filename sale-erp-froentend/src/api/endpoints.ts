@@ -272,8 +272,8 @@ export const dashboardApi = {
 export const itemApi = {
   getAll: (params?: ItemListQuery) =>
     axiosClient.get<ApiResponse<PageResponse<ItemListItem>>, ApiResponse<PageResponse<ItemListItem>>>('/api/v1/items', { params }),
-  getById: (id: number) =>
-    axiosClient.get<ApiResponse<ItemListItem>, ApiResponse<ItemListItem>>(`/api/v1/items/${id}`),
+  getById: (id: number, warehouseId?: number) =>
+    axiosClient.get<ApiResponse<ItemListItem>, ApiResponse<ItemListItem>>(`/api/v1/items/${id}`, { params: warehouseId ? { warehouseId } : undefined }),
   getStock: (id: number) =>
     axiosClient.get<ApiResponse<ItemStock>, ApiResponse<ItemStock>>(`/api/v1/items/${id}/stock`),
   create: (payload: ItemRequest) =>
@@ -465,6 +465,34 @@ export const adminRolesApi = {
 export const adminUsersApi = {
   getAll: (params?: { organizationId?: number; search?: string; page?: number; size?: number }) =>
     axiosClient.get<ApiResponse<PageResponse<UserListItem>>, ApiResponse<PageResponse<UserListItem>>>('/api/v2/admin/users', { params }),
+};
+
+export const adminItemsApi = {
+  getAll: (organizationId: number, params?: ItemListQuery) =>
+    axiosClient.get<ApiResponse<PageResponse<ItemListItem>>, ApiResponse<PageResponse<ItemListItem>>>(
+      `/api/v2/admin/organizations/${organizationId}/items`,
+      { params }
+    ),
+  getById: (organizationId: number, id: number, warehouseId?: number) =>
+    axiosClient.get<ApiResponse<ItemListItem>, ApiResponse<ItemListItem>>(
+      `/api/v2/admin/organizations/${organizationId}/items/${id}`,
+      { params: warehouseId ? { warehouseId } : undefined }
+    ),
+  getStock: (organizationId: number, id: number) =>
+    axiosClient.get<ApiResponse<ItemStock>, ApiResponse<ItemStock>>(
+      `/api/v2/admin/organizations/${organizationId}/items/${id}/stock`
+    ),
+};
+
+export const adminStockApi = {
+  getAll: (organizationId: number) =>
+    axiosClient.get<ApiResponse<StockReportItem[]>, ApiResponse<StockReportItem[]>>(
+      `/api/v2/admin/organizations/${organizationId}/stock`
+    ),
+  getLowStock: (organizationId: number) =>
+    axiosClient.get<ApiResponse<StockReportItem[]>, ApiResponse<StockReportItem[]>>(
+      `/api/v2/admin/organizations/${organizationId}/stock/low-stock`
+    ),
 };
 
 export const adminPermissionsApi = {

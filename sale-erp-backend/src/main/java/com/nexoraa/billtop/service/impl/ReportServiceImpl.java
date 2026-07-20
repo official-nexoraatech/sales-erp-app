@@ -34,12 +34,16 @@ import com.nexoraa.billtop.entity.SalesReturn;
 import com.nexoraa.billtop.entity.Stock;
 import com.nexoraa.billtop.entity.StockTransaction;
 import com.nexoraa.billtop.entity.Warehouse;
+import com.nexoraa.billtop.enums.Status;
+import com.nexoraa.billtop.exception.ResourceNotFoundException;
+import com.nexoraa.billtop.constants.ErrorMessage;
 import com.nexoraa.billtop.repository.BankAccountRepository;
 import com.nexoraa.billtop.repository.BankTransactionRepository;
 import com.nexoraa.billtop.repository.CashTransactionRepository;
 import com.nexoraa.billtop.repository.ExpenseRepository;
 import com.nexoraa.billtop.repository.ItemBatchRepository;
 import com.nexoraa.billtop.repository.ItemPriceRepository;
+import com.nexoraa.billtop.repository.OrganizationRepository;
 import com.nexoraa.billtop.repository.PaymentRepository;
 import com.nexoraa.billtop.repository.PurchasePaymentRepository;
 import com.nexoraa.billtop.repository.PurchaseRepository;
@@ -93,6 +97,7 @@ public class ReportServiceImpl implements ReportService {
     private final BankAccountRepository bankAccountRepository;
     private final StockTransactionRepository stockTransactionRepository;
     private final ItemBatchRepository itemBatchRepository;
+    private final OrganizationRepository organizationRepository;
 
     public ReportServiceImpl(
             SaleRepository saleRepository,
@@ -114,7 +119,8 @@ public class ReportServiceImpl implements ReportService {
             SalesPaymentRepository salesPaymentRepository,
             BankAccountRepository bankAccountRepository,
             StockTransactionRepository stockTransactionRepository,
-            ItemBatchRepository itemBatchRepository
+            ItemBatchRepository itemBatchRepository,
+            OrganizationRepository organizationRepository
     ) {
         this.saleRepository = saleRepository;
         this.purchaseRepository = purchaseRepository;
@@ -136,12 +142,13 @@ public class ReportServiceImpl implements ReportService {
         this.bankAccountRepository = bankAccountRepository;
         this.stockTransactionRepository = stockTransactionRepository;
         this.itemBatchRepository = itemBatchRepository;
+        this.organizationRepository = organizationRepository;
     }
 
     @Override
     @Transactional(readOnly = true)
-    public SummaryReportResponseDto<?> getSalesReport(LocalDate fromDate, LocalDate toDate) {
-        List<Sale> sales = salesBetween(fromDate, toDate);
+    public SummaryReportResponseDto<?> getSalesReport(LocalDate fromDate, LocalDate toDate, Long customerId) {
+        List<Sale> sales = salesBetween(fromDate, toDate, customerId);
         BigDecimal totalSales = sales.stream()
                 .map(Sale::getGrandTotal)
                 .map(support::defaultZero)
@@ -155,8 +162,8 @@ public class ReportServiceImpl implements ReportService {
 
     @Override
     @Transactional(readOnly = true)
-    public SummaryReportResponseDto<?> getPurchaseReport(LocalDate fromDate, LocalDate toDate) {
-        List<Purchase> purchases = purchasesBetween(fromDate, toDate);
+    public SummaryReportResponseDto<?> getPurchaseReport(LocalDate fromDate, LocalDate toDate, Long supplierId) {
+        List<Purchase> purchases = purchasesBetween(fromDate, toDate, supplierId);
         BigDecimal totalPurchase = purchases.stream()
                 .map(Purchase::getGrandTotal)
                 .map(support::defaultZero)
@@ -171,18 +178,44 @@ public class ReportServiceImpl implements ReportService {
     @Override
     @Transactional(readOnly = true)
     public List<StockReportResponseDto> getStockReport() {
-        return stockRepository.findByItem_Organization_Id(currentOrganizationService.getOrganizationId()).stream()
-                .map(this::toStockRecord)
-                .toList();
+        return stockReportForOrganization(currentOrganizationService.getOrganizationId());
     }
 
     @Override
     @Transactional(readOnly = true)
     public List<StockReportResponseDto> getLowStockReport() {
-        return getStockReport().stream()
+        return lowStockReportForOrganization(currentOrganizationService.getOrganizationId());
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<StockReportResponseDto> getStockReportForOrganization(Long organizationId) {
+        return stockReportForOrganization(getActiveOrganizationId(organizationId));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<StockReportResponseDto> getLowStockReportForOrganization(Long organizationId) {
+        return lowStockReportForOrganization(getActiveOrganizationId(organizationId));
+    }
+
+    private List<StockReportResponseDto> stockReportForOrganization(Long organizationId) {
+        return stockRepository.findByItem_Organization_Id(organizationId).stream()
+                .map(this::toStockRecord)
+                .toList();
+    }
+
+    private List<StockReportResponseDto> lowStockReportForOrganization(Long organizationId) {
+        return stockReportForOrganization(organizationId).stream()
                 .filter(record -> support.defaultZero(record.getAvailableQty())
                         .compareTo(support.defaultZero(record.getReorderLevel())) <= 0)
                 .toList();
+    }
+
+    private Long getActiveOrganizationId(Long organizationId) {
+        return organizationRepository.findByIdAndStatusAndIsDeletedFalse(organizationId, Status.ACTIVE)
+                .orElseThrow(() -> new ResourceNotFoundException(ErrorMessage.ORGANIZATION_NOT_FOUND, "ORGANIZATION_NOT_FOUND"))
+                .getId();
     }
 
     @Override
@@ -567,16 +600,26 @@ public class ReportServiceImpl implements ReportService {
     }
 
     private List<Sale> salesBetween(LocalDate fromDate, LocalDate toDate) {
+        return salesBetween(fromDate, toDate, null);
+    }
+
+    private List<Sale> salesBetween(LocalDate fromDate, LocalDate toDate, Long customerId) {
         return saleRepository.findAll(SaleSpecification.notCancelled()
                 .and(SaleSpecification.notDeleted())
                 .and(SaleSpecification.organization(currentOrganizationService.getOrganizationId()))
+                .and(SaleSpecification.customer(customerId))
                 .and(SaleSpecification.dateBetween(fromDate, toDate)));
     }
 
     private List<Purchase> purchasesBetween(LocalDate fromDate, LocalDate toDate) {
+        return purchasesBetween(fromDate, toDate, null);
+    }
+
+    private List<Purchase> purchasesBetween(LocalDate fromDate, LocalDate toDate, Long supplierId) {
         return purchaseRepository.findAll(PurchaseSpecification.notCancelled()
                 .and(PurchaseSpecification.notDeleted())
                 .and(PurchaseSpecification.organization(currentOrganizationService.getOrganizationId()))
+                .and(PurchaseSpecification.supplier(supplierId))
                 .and(PurchaseSpecification.dateBetween(fromDate, toDate)));
     }
 

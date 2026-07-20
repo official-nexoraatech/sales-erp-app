@@ -21,13 +21,21 @@ import java.util.List;
 
 public interface ReportService {
 
-    SummaryReportResponseDto<?> getSalesReport(LocalDate fromDate, LocalDate toDate);
+    SummaryReportResponseDto<?> getSalesReport(LocalDate fromDate, LocalDate toDate, Long customerId);
 
-    SummaryReportResponseDto<?> getPurchaseReport(LocalDate fromDate, LocalDate toDate);
+    SummaryReportResponseDto<?> getPurchaseReport(LocalDate fromDate, LocalDate toDate, Long supplierId);
 
     List<StockReportResponseDto> getStockReport();
 
     List<StockReportResponseDto> getLowStockReport();
+
+    /**
+     * Super Admin lookups: {@code organizationId} identifies the organization explicitly
+     * rather than the caller's token, so these bypass {@code CurrentOrganizationService}.
+     */
+    List<StockReportResponseDto> getStockReportForOrganization(Long organizationId);
+
+    List<StockReportResponseDto> getLowStockReportForOrganization(Long organizationId);
 
     LedgerResponseDto getCustomerLedger(Long customerId);
 

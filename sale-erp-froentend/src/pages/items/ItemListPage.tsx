@@ -40,6 +40,15 @@ const itemStatusLabel = (status: ItemListItem['status'] | '') =>
   itemStatusOptions.find((option) => option.value === status)?.label || text(status);
 
 const itemColumns: TableColumn[] = [
+  {
+    heading: 'Image',
+    render: (item) => (
+      item.imageUrl
+        ? <img src={item.imageUrl} alt={item.itemName} className="h-10 w-10 rounded border border-gray-200 object-cover" />
+        : <div className="flex h-10 w-10 items-center justify-center rounded border border-dashed border-gray-300 bg-gray-50 text-gray-300"><PackageSearch size={16} /></div>
+    ),
+    exportValue: (item) => text(item.imageUrl),
+  },
   { heading: 'Name', render: (item) => <span className="font-semibold">{item.itemName}</span>, exportValue: (item) => item.itemName },
   { heading: 'Item Code', render: (item) => text(item.itemCode), exportValue: (item) => text(item.itemCode) },
   { heading: 'HSN', render: (item) => text(item.hsnCode), exportValue: (item) => text(item.hsnCode) },
