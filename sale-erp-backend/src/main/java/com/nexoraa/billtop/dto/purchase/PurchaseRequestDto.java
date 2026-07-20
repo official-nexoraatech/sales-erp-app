@@ -38,6 +38,8 @@ public class PurchaseRequestDto {
     @Size(max = 500, message = ValidationMessage.DESCRIPTION_INVALID)
     private String notes;
 
+    private String status;
+
     @Valid
     @NotEmpty(message = ValidationMessage.ITEMS_REQUIRED)
     private List<PurchaseItemRequestDto> items;

@@ -21,4 +21,5 @@ public class PurchaseCreateResponseDto {
     private BigDecimal grandTotal;
     private BigDecimal paidAmount;
     private BigDecimal dueAmount;
+    private String status;
 }

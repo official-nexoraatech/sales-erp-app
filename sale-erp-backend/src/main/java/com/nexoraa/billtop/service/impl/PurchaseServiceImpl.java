@@ -69,9 +69,11 @@ public class PurchaseServiceImpl implements PurchaseService {
     public PurchaseCreateResponseDto createPurchase(PurchaseRequestDto request) {
         Organization organization = currentOrganizationService.getOrganizationReference();
         String purchaseNo = nextPurchaseNo();
-        PreparedPurchase preparedPurchase = preparePurchase(new Purchase(), request, purchaseNo, organization, false);
+        String status = resolveRequestedStatus(request.getStatus());
+        boolean commitStock = !TransactionSupport.STATUS_CREATED.equals(status);
+        PreparedPurchase preparedPurchase = preparePurchase(new Purchase(), request, purchaseNo, organization, status);
         Purchase savedPurchase = purchaseRepository.save(preparedPurchase.purchase());
-        saveItems(savedPurchase, preparedPurchase.items(), TX_PURCHASE, organization, false);
+        saveItems(savedPurchase, preparedPurchase.items(), TX_PURCHASE, organization, commitStock);
         return toCreateResponse(savedPurchase);
     }
 
@@ -122,7 +124,8 @@ public class PurchaseServiceImpl implements PurchaseService {
         }
         purchaseItemRepository.deleteByPurchaseIdAndOrganizationId(id, currentOrganizationService.getOrganizationId());
 
-        PreparedPurchase preparedPurchase = preparePurchase(purchase, request, purchase.getPurchaseNo(), organization, commitStock);
+        String status = commitStock ? TransactionSupport.STATUS_ACTIVE : TransactionSupport.STATUS_CREATED;
+        PreparedPurchase preparedPurchase = preparePurchase(purchase, request, purchase.getPurchaseNo(), organization, status);
         Purchase savedPurchase = purchaseRepository.save(preparedPurchase.purchase());
         saveItems(savedPurchase, preparedPurchase.items(), TX_PURCHASE, organization, commitStock);
     }
@@ -182,9 +185,7 @@ public class PurchaseServiceImpl implements PurchaseService {
     @Override
     @Transactional
     public void setPurchaseStatus(Long id, String status) {
-        if (!MANUAL_STATUSES.contains(status)) {
-            throw new BadRequestException("Invalid purchase status", "INVALID_PURCHASE_STATUS");
-        }
+        validateStatus(status);
         Purchase purchase = getPurchase(id);
         ensureNotCancelled(purchase);
         if (isCreated(purchase) && !TransactionSupport.STATUS_CREATED.equals(status)) {
@@ -200,7 +201,7 @@ public class PurchaseServiceImpl implements PurchaseService {
             PurchaseRequestDto request,
             String purchaseNo,
             Organization organization,
-            boolean commitStock
+            String status
     ) {
         Contact supplier = support.getActiveSupplier(request.getSupplierId());
         Warehouse warehouse = support.getActiveWarehouse(request.getWarehouseId());
@@ -243,7 +244,7 @@ public class PurchaseServiceImpl implements PurchaseService {
         purchase.setGrandTotal(support.money(grandTotal));
         purchase.setPaidAmount(paidAmount);
         purchase.setDueAmount(support.money(grandTotal.subtract(paidAmount)));
-        purchase.setStatus(commitStock ? TransactionSupport.STATUS_ACTIVE : TransactionSupport.STATUS_CREATED);
+        purchase.setStatus(status);
         purchase.setNotes(request.getNotes());
         return new PreparedPurchase(purchase, items);
     }
@@ -316,6 +317,20 @@ public class PurchaseServiceImpl implements PurchaseService {
         return TransactionSupport.STATUS_CREATED.equals(purchase.getStatus());
     }
 
+    private String resolveRequestedStatus(String status) {
+        if (status == null || status.isBlank()) {
+            return TransactionSupport.STATUS_CREATED;
+        }
+        validateStatus(status);
+        return status;
+    }
+
+    private void validateStatus(String status) {
+        if (!MANUAL_STATUSES.contains(status)) {
+            throw new BadRequestException("Invalid purchase status", "INVALID_PURCHASE_STATUS");
+        }
+    }
+
     private String nextPurchaseNo() {
         String currentNumber = purchaseRepository.findTopByPurchaseNoStartingWithAndOrganizationIdOrderByIdDesc(
                         PURCHASE_PREFIX,
@@ -336,6 +351,7 @@ public class PurchaseServiceImpl implements PurchaseService {
                 .grandTotal(purchase.getGrandTotal())
                 .paidAmount(purchase.getPaidAmount())
                 .dueAmount(purchase.getDueAmount())
+                .status(purchase.getStatus())
                 .build();
     }
 

@@ -274,7 +274,17 @@ export const QuotationListPage: React.FC = () => {
                       <td className="p-3">{formatOptionalDate(quotation.quotationDate)}</td>
                       <td className="p-3">
                         <div className="flex gap-2">
-                          {quotation.convertedInvoiceNo && <FileText size={17} className="text-indigo-600" />}
+                          {quotation.convertedInvoiceNo && quotation.convertedSaleId && (
+                            <button
+                              type="button"
+                              onClick={() => navigate(`/sales/invoices/${quotation.convertedSaleId}`)}
+                              className="text-indigo-600 hover:text-indigo-800"
+                              title={`View invoice ${quotation.convertedInvoiceNo}`}
+                              aria-label="View invoice"
+                            >
+                              <FileText size={17} />
+                            </button>
+                          )}
                           {convertible && <button type="button" onClick={() => convertQuotation(quotation)} disabled={convert.isPending} className="text-green-600 disabled:opacity-50" title="Convert to invoice" aria-label="Convert to invoice"><CheckCircle2 size={17} /></button>}
                           {canDelete && deletable && <button type="button" onClick={() => deleteOne(quotation)} disabled={deleteQuotation.isPending} className="text-red-600 disabled:opacity-50" title="Delete quotation" aria-label="Delete quotation"><Trash2 size={17} /></button>}
                         </div>

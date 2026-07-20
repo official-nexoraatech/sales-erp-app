@@ -84,8 +84,13 @@ const toIsoDate = (date: Date) => {
   return `${year}-${month}-${day}`;
 };
 const today = new Date();
-const defaultFrom = toIsoDate(new Date(today.getFullYear(), today.getMonth(), 1));
-const defaultTo = toIsoDate(today);
+const todayIso = toIsoDate(today);
+const defaultFrom = todayIso;
+const defaultTo = todayIso;
+
+// Ledger reports need a valid customer/supplier ID before they can fetch anything
+// meaningful, so unlike other reports they must wait for an explicit Submit.
+const requiresManualSubmit = (report: ReportKey) => report === 'supplierLedger' || report === 'customerLedger';
 
 const formatDateForApi = (value: string) => value;
 
@@ -113,12 +118,12 @@ const valueByColumn = (row: any, column: string) => {
     if (row?.[key] !== undefined && row?.[key] !== null) return row[key];
   }
   const aliases: Record<string, string[]> = {
-    date: ['date', 'invoiceDate', 'purchaseDate', 'transactionDate', 'createdAt'],
+    date: ['date', 'invoiceDate', 'purchaseDate', 'expenseDate', 'transactionDate', 'createdAt'],
     invoicereferenceno: ['invoiceNo', 'referenceNo', 'purchaseNo', 'saleNo', 'invoiceReferenceNo'],
     supplier: ['supplierName', 'supplier'],
     customer: ['customerName', 'customer'],
     partyname: ['partyName', 'customerName', 'supplierName'],
-    grandtotal: ['grandTotal', 'totalAmount', 'total'],
+    grandtotal: ['grandTotal', 'totalAmount', 'total', 'amount'],
     paidamount: ['paidAmount', 'paid', 'amount'],
     balance: ['balance', 'dueAmount'],
     itemname: ['itemName', 'name'],
@@ -132,7 +137,7 @@ const valueByColumn = (row: any, column: string) => {
     taxamount: ['taxAmount', 'gstAmount'],
     transfercode: ['transferCode', 'transferNo'],
     adjustmentcode: ['adjustmentCode', 'adjustmentNo'],
-    referenceno: ['referenceNo', 'invoiceNo', 'purchaseNo', 'saleNo'],
+    referenceno: ['referenceNo', 'invoiceNo', 'purchaseNo', 'saleNo', 'expenseNo', 'expenseNumber'],
     expensecode: ['expenseCode', 'expenseNo', 'expenseNumber'],
     category: ['categoryName', 'category'],
     subcategory: ['subCategoryName', 'subcategoryName', 'subCategory', 'subcategory'],
@@ -168,6 +173,27 @@ const valueByColumn = (row: any, column: string) => {
     if (row?.[key] !== undefined && row?.[key] !== null) return typeof row[key] === 'object' ? row[key]?.name || '' : row[key];
   }
   return '';
+};
+
+const rowDateValue = (row: any) => {
+  const raw = valueByColumn(row, 'DATE');
+  if (!raw) return '';
+  return String(raw).slice(0, 10);
+};
+
+// Client-side date-range filtering for reports whose fetch endpoint does not
+// filter by date server-side (e.g. Expense, Stock Transfer, Stock Adjustment).
+// Rows without a parseable date are kept so reports that lack a date column are
+// never emptied out.
+const applyClientDateFilter = (rows: any[], fromDate?: string, toDate?: string) => {
+  if (!fromDate && !toDate) return rows;
+  return rows.filter((row) => {
+    const date = rowDateValue(row);
+    if (!date) return true;
+    if (fromDate && date < fromDate) return false;
+    if (toDate && date > toDate) return false;
+    return true;
+  });
 };
 
 const exportRows = (columns: string[], rows: any[]) => rows.map((row) => columns.map((column) => String(valueByColumn(row, column) ?? '')));
@@ -251,7 +277,7 @@ const configs: Record<ReportKey, ReportConfig> = {
       { key: 'supplier', label: 'Supplier', type: 'select', placeholder: 'Select Supplier' },
     ],
     columns: ['#', 'DATE', 'INVOICE/REFERENCE NO.', 'SUPPLIER', 'GRAND TOTAL', 'PAID AMOUNT', 'BALANCE'],
-    fetch: (filters) => reportsApi.purchases({ fromDate: formatDateForApi(filters.fromDate), toDate: formatDateForApi(filters.toDate) }),
+    fetch: (filters) => reportsApi.purchases({ fromDate: formatDateForApi(filters.fromDate), toDate: formatDateForApi(filters.toDate), supplierId: filters.supplier || undefined }),
   },
   itemPurchase: {
     title: 'Item Purchase Report',
@@ -264,7 +290,7 @@ const configs: Record<ReportKey, ReportConfig> = {
       { key: 'warehouse', label: 'Warehouse', type: 'select', placeholder: 'Select Warehouse' },
     ],
     columns: ['#', 'DATE', 'INVOICE/REFERENCE NO.', 'SUPPLIER', 'WAREHOUSE', 'ITEM NAME', 'BRAND', 'UNIT PRICE', 'QUANTITY', 'DISCOUNT AMOUNT'],
-    fetch: (filters) => reportsApi.purchases({ fromDate: formatDateForApi(filters.fromDate), toDate: formatDateForApi(filters.toDate) }),
+    fetch: (filters) => reportsApi.purchases({ fromDate: formatDateForApi(filters.fromDate), toDate: formatDateForApi(filters.toDate), supplierId: filters.supplier || undefined }),
   },
   purchasePayment: {
     title: 'Purchase Payment Report',
@@ -290,7 +316,7 @@ const configs: Record<ReportKey, ReportConfig> = {
       { key: 'customer', label: 'Customer', type: 'select', placeholder: 'Select Customer' },
     ],
     columns: ['#', 'DATE', 'INVOICE/REFERENCE NO.', 'CUSTOMER', 'GRAND TOTAL', 'PAID AMOUNT', 'BALANCE'],
-    fetch: (filters) => reportsApi.sales({ fromDate: formatDateForApi(filters.fromDate), toDate: formatDateForApi(filters.toDate) }),
+    fetch: (filters) => reportsApi.sales({ fromDate: formatDateForApi(filters.fromDate), toDate: formatDateForApi(filters.toDate), customerId: filters.customer || undefined }),
   },
   itemSale: {
     title: 'Item Sale Report',
@@ -303,7 +329,7 @@ const configs: Record<ReportKey, ReportConfig> = {
       { key: 'warehouse', label: 'Warehouse', type: 'select', placeholder: 'Select Warehouse' },
     ],
     columns: ['#', 'DATE', 'INVOICE/REFERENCE NO.', 'CUSTOMER', 'WAREHOUSE', 'ITEM NAME', 'BRAND', 'UNIT PRICE', 'QUANTITY', 'DISCOUNT AMOUNT'],
-    fetch: (filters) => reportsApi.sales({ fromDate: formatDateForApi(filters.fromDate), toDate: formatDateForApi(filters.toDate) }),
+    fetch: (filters) => reportsApi.sales({ fromDate: formatDateForApi(filters.fromDate), toDate: formatDateForApi(filters.toDate), customerId: filters.customer || undefined }),
   },
   salePayment: {
     title: 'Sale Payment Report',
@@ -630,14 +656,19 @@ const useLookupOptions = () => {
 export const ReportPage: React.FC<{ report: ReportKey }> = ({ report }) => {
   const config = configs[report];
   const [filters, setFilters] = useState<Record<string, string>>(() => initialFilters(config));
-  const [submittedFilters, setSubmittedFilters] = useState<Record<string, string> | null>(config.fields?.length ? null : filters);
+  const [submittedFilters, setSubmittedFilters] = useState<Record<string, string> | null>(
+    requiresManualSubmit(report) ? null : initialFilters(config)
+  );
   const lookupOptions = useLookupOptions();
   const rowsQuery = useQuery({
     queryKey: ['report', report, submittedFilters],
     queryFn: () => config.fetch(submittedFilters || filters),
     enabled: Boolean(submittedFilters),
   });
-  const rows = useMemo(() => unwrapRows(rowsQuery.data), [rowsQuery.data]);
+  const rows = useMemo(() => {
+    const unwrapped = unwrapRows(rowsQuery.data);
+    return applyClientDateFilter(unwrapped, submittedFilters?.fromDate, submittedFilters?.toDate);
+  }, [rowsQuery.data, submittedFilters]);
 
   const submit = () => {
     if (['supplierLedger', 'customerLedger'].includes(report)) {
@@ -647,13 +678,17 @@ export const ReportPage: React.FC<{ report: ReportKey }> = ({ report }) => {
         return;
       }
     }
+    if (filters.fromDate && filters.toDate && filters.fromDate > filters.toDate) {
+      toast.error('From Date cannot be after To Date');
+      return;
+    }
     setSubmittedFilters({ ...filters });
   };
 
   const close = () => {
     const reset = initialFilters(config);
     setFilters(reset);
-    setSubmittedFilters(config.fields?.length ? null : reset);
+    setSubmittedFilters(requiresManualSubmit(report) ? null : reset);
   };
 
   return (

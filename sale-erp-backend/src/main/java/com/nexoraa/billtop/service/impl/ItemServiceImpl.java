@@ -19,6 +19,7 @@ import com.nexoraa.billtop.entity.SubCategory;
 import com.nexoraa.billtop.entity.Unit;
 import com.nexoraa.billtop.entity.Warehouse;
 import com.nexoraa.billtop.enums.ItemStatus;
+import com.nexoraa.billtop.enums.Status;
 import com.nexoraa.billtop.exception.BadRequestException;
 import com.nexoraa.billtop.exception.ResourceNotFoundException;
 import com.nexoraa.billtop.mapper.ItemMapper;
@@ -27,6 +28,7 @@ import com.nexoraa.billtop.repository.CategoryRepository;
 import com.nexoraa.billtop.repository.ItemBatchRepository;
 import com.nexoraa.billtop.repository.ItemPriceRepository;
 import com.nexoraa.billtop.repository.ItemRepository;
+import com.nexoraa.billtop.repository.OrganizationRepository;
 import com.nexoraa.billtop.repository.StockRepository;
 import com.nexoraa.billtop.repository.SubCategoryRepository;
 import com.nexoraa.billtop.repository.UnitRepository;
@@ -62,6 +64,7 @@ public class ItemServiceImpl implements ItemService {
     private final ItemPriceRepository itemPriceRepository;
     private final ItemBatchRepository itemBatchRepository;
     private final StockRepository stockRepository;
+    private final OrganizationRepository organizationRepository;
     private final ItemMapper itemMapper;
     private final ItemStockStatusService itemStockStatusService;
     private final CurrentOrganizationService currentOrganizationService;
@@ -77,6 +80,7 @@ public class ItemServiceImpl implements ItemService {
             ItemPriceRepository itemPriceRepository,
             ItemBatchRepository itemBatchRepository,
             StockRepository stockRepository,
+            OrganizationRepository organizationRepository,
             ItemMapper itemMapper,
             ItemStockStatusService itemStockStatusService,
             CurrentOrganizationService currentOrganizationService,
@@ -91,6 +95,7 @@ public class ItemServiceImpl implements ItemService {
         this.itemPriceRepository = itemPriceRepository;
         this.itemBatchRepository = itemBatchRepository;
         this.stockRepository = stockRepository;
+        this.organizationRepository = organizationRepository;
         this.itemMapper = itemMapper;
         this.itemStockStatusService = itemStockStatusService;
         this.currentOrganizationService = currentOrganizationService;
@@ -141,17 +146,15 @@ public class ItemServiceImpl implements ItemService {
 
     @Override
     @Transactional(readOnly = true)
-    public ItemDetailResponseDto getItemById(Long id) {
-        Item item = getActiveItem(id);
-        ItemDetailResponseDto response = itemMapper.toDetailResponse(item);
-        itemPriceRepository.findTopByItemIdOrderByIdDesc(id)
-                .ifPresent(price -> applyPrice(response, price));
-        itemBatchRepository.findTopByItemIdOrderByIdDesc(id)
-                .ifPresent(batch -> applyBatch(response, batch));
-        stockRepository.findByItemId(id).stream()
-                .findFirst()
-                .ifPresent(stock -> applyStock(response, stock));
-        return response;
+    public ItemDetailResponseDto getItemById(Long id, Long warehouseId) {
+        return buildDetailResponse(getActiveItem(id), warehouseId);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public ItemDetailResponseDto getItemByIdForOrganization(Long organizationId, Long id, Long warehouseId) {
+        Organization organization = getActiveOrganization(organizationId);
+        return buildDetailResponse(getActiveItem(id, organization.getId()), warehouseId);
     }
 
     @Override
@@ -165,7 +168,35 @@ public class ItemServiceImpl implements ItemService {
             Long warehouseId,
             ItemStatus status
     ) {
-        Long organizationId = currentOrganizationService.getOrganizationId();
+        return listItems(currentOrganizationService.getOrganizationId(), page, size, search, categoryId, brandId, warehouseId, status);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public PageResponseDto<ItemListResponseDto> getItemsForAdmin(
+            Long organizationId,
+            int page,
+            int size,
+            String search,
+            Long categoryId,
+            Long brandId,
+            Long warehouseId,
+            ItemStatus status
+    ) {
+        Organization organization = getActiveOrganization(organizationId);
+        return listItems(organization.getId(), page, size, search, categoryId, brandId, warehouseId, status);
+    }
+
+    private PageResponseDto<ItemListResponseDto> listItems(
+            Long organizationId,
+            int page,
+            int size,
+            String search,
+            Long categoryId,
+            Long brandId,
+            Long warehouseId,
+            ItemStatus status
+    ) {
         Specification<Item> specification = ItemSpecification.notDeleted()
                 .and(ItemSpecification.organization(organizationId))
                 .and(ItemSpecification.category(categoryId))
@@ -188,6 +219,16 @@ public class ItemServiceImpl implements ItemService {
             return itemResponse;
         });
         return PageResponseDto.from(response);
+    }
+
+    private ItemDetailResponseDto buildDetailResponse(Item item, Long warehouseId) {
+        ItemDetailResponseDto response = itemMapper.toDetailResponse(item);
+        itemPriceRepository.findTopByItemIdOrderByIdDesc(item.getId())
+                .ifPresent(price -> applyPrice(response, price));
+        itemBatchRepository.findTopByItemIdOrderByIdDesc(item.getId())
+                .ifPresent(batch -> applyBatch(response, batch));
+        applyStock(response, item.getId(), warehouseId);
+        return response;
     }
 
     @Override
@@ -237,8 +278,18 @@ public class ItemServiceImpl implements ItemService {
     @Override
     @Transactional(readOnly = true)
     public ItemStockResponseDto getItemStock(Long id) {
-        Item item = getActiveItem(id);
-        List<Stock> stocks = stockRepository.findByItemId(id);
+        return buildStockResponse(getActiveItem(id));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public ItemStockResponseDto getItemStockForOrganization(Long organizationId, Long id) {
+        Organization organization = getActiveOrganization(organizationId);
+        return buildStockResponse(getActiveItem(id, organization.getId()));
+    }
+
+    private ItemStockResponseDto buildStockResponse(Item item) {
+        List<Stock> stocks = stockRepository.findByItemId(item.getId());
         BigDecimal availableQty = stocks.stream()
                 .map(Stock::getAvailableQty)
                 .map(this::defaultZero)
@@ -328,20 +379,47 @@ public class ItemServiceImpl implements ItemService {
         response.setExpiryDate(batch.getExpiryDate());
     }
 
-    private void applyStock(ItemDetailResponseDto response, Stock stock) {
-        response.setOpeningQuantity(stock.getAvailableQty());
-        response.setAvailableQty(stock.getAvailableQty());
-        response.setReservedQty(stock.getReservedQty());
-        response.setMinimumStock(stock.getMinimumStock());
-        if (stock.getWarehouse() != null) {
-            response.setWarehouseId(stock.getWarehouse().getId());
-            response.setWarehouseName(stock.getWarehouse().getName());
+    private void applyStock(ItemDetailResponseDto response, Long itemId, Long warehouseId) {
+        List<Stock> stocks = warehouseId == null || warehouseId <= 0
+                ? stockRepository.findByItemId(itemId)
+                : stockRepository.findByItemIdAndWarehouseIdOrderByIdAsc(itemId, warehouseId);
+        if (stocks.isEmpty()) {
+            response.setOpeningQuantity(ZERO);
+            response.setAvailableQty(ZERO);
+            response.setReservedQty(ZERO);
+            return;
+        }
+        BigDecimal availableQty = stocks.stream()
+                .map(Stock::getAvailableQty)
+                .map(this::defaultZero)
+                .reduce(ZERO, BigDecimal::add);
+        BigDecimal reservedQty = stocks.stream()
+                .map(Stock::getReservedQty)
+                .map(this::defaultZero)
+                .reduce(ZERO, BigDecimal::add);
+        Stock first = stocks.get(0);
+        response.setOpeningQuantity(availableQty);
+        response.setAvailableQty(availableQty);
+        response.setReservedQty(reservedQty);
+        response.setMinimumStock(first.getMinimumStock());
+        if (first.getWarehouse() != null) {
+            response.setWarehouseId(first.getWarehouse().getId());
+            response.setWarehouseName(first.getWarehouse().getName());
         }
     }
 
     private Item getActiveItem(Long id) {
-        return itemRepository.findByIdAndOrganizationIdAndIsDeletedFalse(id, currentOrganizationService.getOrganizationId())
+        return getActiveItem(id, currentOrganizationService.getOrganizationId());
+    }
+
+    private Item getActiveItem(Long id, Long organizationId) {
+        return itemRepository.findByIdAndOrganizationIdAndIsDeletedFalse(id, organizationId)
                 .orElseThrow(() -> new ResourceNotFoundException(ErrorMessage.ITEM_NOT_FOUND, "ITEM_NOT_FOUND"));
+    }
+
+    private Organization getActiveOrganization(Long organizationId) {
+        return organizationRepository.findByIdAndStatusAndIsDeletedFalse(organizationId, Status.ACTIVE)
+                .orElseThrow(() -> new ResourceNotFoundException(ErrorMessage.ORGANIZATION_NOT_FOUND, "ORGANIZATION_NOT_FOUND"));
     }
 
     private Category getActiveCategory(Long id) {

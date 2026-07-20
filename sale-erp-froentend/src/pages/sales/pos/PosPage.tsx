@@ -225,12 +225,12 @@ export const PosPage: React.FC = () => {
       const itemId = parseScannedItemId(scannedValue);
       if (itemId) {
         console.log('[POS Scanner] Calling get item API:', `/api/v1/items/${itemId}`);
-        const response = await itemApi.getById(itemId);
+        const response = await itemApi.getById(itemId, warehouseId || undefined);
         return response.data || null;
       }
 
       console.log('[POS Scanner] Non-numeric barcode. Searching items by value:', scannedValue);
-      const response = await itemApi.getAll({ page: 0, size: 5, search: scannedValue });
+      const response = await itemApi.getAll({ page: 0, size: 5, search: scannedValue, warehouseId: warehouseId || undefined });
       const results = response.data?.content || [];
       const exactMatch = results.find((item) =>
         String(item.itemCode || '') === scannedValue ||
@@ -239,7 +239,7 @@ export const PosPage: React.FC = () => {
       const matchedItem = exactMatch || results[0] || null;
       if (!matchedItem) return null;
       console.log('[POS Scanner] Calling get item API:', `/api/v1/items/${matchedItem.id}`);
-      const itemResponse = await itemApi.getById(matchedItem.id);
+      const itemResponse = await itemApi.getById(matchedItem.id, warehouseId || undefined);
       return itemResponse.data || matchedItem;
     },
     onSuccess: (item) => {

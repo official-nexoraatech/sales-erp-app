@@ -45,17 +45,19 @@ public class ReportController {
     @GetMapping("/sales")
     public ResponseEntity<ApiResponseDto<SummaryReportResponseDto<?>>> getSalesReport(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fromDate,
-            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate toDate
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate toDate,
+            @RequestParam(required = false) Long customerId
     ) {
-        return ResponseEntity.ok(ApiResponseDto.success(ResponseMessage.REPORT_RETRIEVED, reportService.getSalesReport(fromDate, toDate)));
+        return ResponseEntity.ok(ApiResponseDto.success(ResponseMessage.REPORT_RETRIEVED, reportService.getSalesReport(fromDate, toDate, customerId)));
     }
 
     @GetMapping("/purchases")
     public ResponseEntity<ApiResponseDto<SummaryReportResponseDto<?>>> getPurchaseReport(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fromDate,
-            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate toDate
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate toDate,
+            @RequestParam(required = false) Long supplierId
     ) {
-        return ResponseEntity.ok(ApiResponseDto.success(ResponseMessage.REPORT_RETRIEVED, reportService.getPurchaseReport(fromDate, toDate)));
+        return ResponseEntity.ok(ApiResponseDto.success(ResponseMessage.REPORT_RETRIEVED, reportService.getPurchaseReport(fromDate, toDate, supplierId)));
     }
 
     @GetMapping("/stocks")
