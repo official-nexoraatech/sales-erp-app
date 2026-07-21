@@ -205,7 +205,7 @@ export const ItemForm: React.FC<Props> = ({
           </div>
           {renderFieldError('brandId')}
         </label>
-        <label className="text-sm text-gray-600">Opening Quantity
+        <label className="text-sm text-gray-600">Opening Quantity <span className="text-red-500">*</span>
           <NumericInput integer min={1} className={`${controlClass('openingQuantity')} mt-1`} value={form.openingQuantity || ''} onValueChange={(value) => set('openingQuantity', Math.trunc(value))} />
           {renderFieldError('openingQuantity')}
         </label>
