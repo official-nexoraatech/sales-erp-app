@@ -206,6 +206,9 @@ public class ResponseMessage {
     public static final String SMS_TEMPLATES_RETRIEVED = "SMS templates retrieved successfully";
     public static final String SMS_SENT = "SMS sent successfully";
 
+    // WhatsApp Messages
+    public static final String WHATSAPP_SENT = "WhatsApp message sent successfully";
+
     // Email Messages
     public static final String EMAIL_TEMPLATE_CREATED = "Email template created successfully";
     public static final String EMAIL_TEMPLATE_UPDATED = "Email template updated successfully";

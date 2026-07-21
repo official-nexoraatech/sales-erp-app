@@ -101,6 +101,12 @@ public class ErrorMessage {
     public static final String INVALID_MOBILE_NUMBERS = "One or more mobile numbers are invalid";
     public static final String SMS_SEND_FAILED = "SMS send failed";
 
+    // WhatsApp Errors
+    public static final String INVALID_WHATSAPP_NUMBERS = "One or more WhatsApp numbers are invalid";
+    public static final String WHATSAPP_SEND_FAILED = "WhatsApp message send failed";
+    public static final String WHATSAPP_TEMPLATE_NOT_CONFIGURED = "WhatsApp invoice template is not configured";
+    public static final String WHATSAPP_NUMBER_NOT_FOUND = "Customer does not have a WhatsApp or mobile number on file";
+
     // Email Errors
     public static final String EMAIL_TEMPLATE_NOT_FOUND = "Email template not found";
     public static final String EMAIL_TEMPLATE_ALREADY_EXISTS = "Email template already exists";

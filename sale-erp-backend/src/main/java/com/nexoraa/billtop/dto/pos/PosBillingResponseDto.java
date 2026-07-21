@@ -13,6 +13,7 @@ import java.math.BigDecimal;
 @Builder
 public class PosBillingResponseDto {
 
+    private Long saleId;
     private String invoiceNo;
     private BigDecimal grandTotal;
     private String paymentStatus;
