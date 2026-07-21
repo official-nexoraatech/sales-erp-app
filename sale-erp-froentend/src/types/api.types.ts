@@ -266,6 +266,7 @@ export interface PosBillingRequest {
 }
 
 export interface PosBillingResponse {
+  saleId: number;
   invoiceNo: string;
   grandTotal: number;
   paymentStatus: string;

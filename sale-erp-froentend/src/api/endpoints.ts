@@ -517,6 +517,8 @@ export const adminPermissionsApi = {
 export const posApi = {
   createBill: (payload: PosBillingRequest) =>
     axiosClient.post<ApiResponse<PosBillingResponse>, ApiResponse<PosBillingResponse>>('/api/v1/pos/billing', payload),
+  downloadInvoicePdf: (saleId: number) =>
+    axiosClient.get<Blob, Blob>(`/api/v1/pos/billing/${saleId}/invoice-pdf`, { responseType: 'blob' }),
 };
 
 export const salesApi = {

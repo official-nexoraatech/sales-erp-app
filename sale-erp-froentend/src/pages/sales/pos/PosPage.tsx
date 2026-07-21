@@ -3,15 +3,13 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { Box, ChevronDown, CreditCard, LayoutDashboard, Loader2, Minus, PackageSearch, Plus, Search, Trash2, UserRound, Users } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { customerApi, itemApi, organizationApi, paymentMethodApi, posApi, warehouseApi } from '../../../api/endpoints';
+import { customerApi, itemApi, paymentMethodApi, posApi, warehouseApi } from '../../../api/endpoints';
 import type { ItemListItem } from '../../../api/endpoints';
 import { getDefaultAuthorizedPath } from '../../../auth/featurePermissions';
 import { PERMISSIONS } from '../../../auth/permissions';
 import { NumericInput } from '../../../components/ui/NumericInput';
 import { useAuth } from '../../../hooks/useAuth';
 import { useDebounce } from '../../../hooks/useDebounce';
-import { formatOrganizationAddress } from '../../organizations/organization.utils';
-import type { PosBillingResponse } from '../../../types/api.types';
 import type { CustomerListItem } from '../../../types/customer.types';
 
 interface CartLine extends ItemListItem { quantity: number }
@@ -45,13 +43,6 @@ const formatPercent = (value: number | null | undefined) => {
 const getCustomerLabel = (customer: CustomerListItem) =>
   `${customer.customerName}${customer.mobile ? ` - ${customer.mobile}` : ''}`;
 
-const escapeHtml = (value: unknown) => String(value ?? '')
-  .replaceAll('&', '&amp;')
-  .replaceAll('<', '&lt;')
-  .replaceAll('>', '&gt;')
-  .replaceAll('"', '&quot;')
-  .replaceAll("'", '&#039;');
-
 const getItemImageUrl = (item: ItemListItem) => {
   const imageItem = item as ItemListItem & {
     imageUrl?: string;
@@ -68,39 +59,6 @@ const getLineDiscountAmount = (line: CartLine) => getLineBaseAmount(line) * Numb
 const getLineTaxableAmount = (line: CartLine) => Math.max(0, getLineBaseAmount(line) - getLineDiscountAmount(line));
 const getLineTaxAmount = (line: CartLine) => getLineTaxableAmount(line) * Number(line.taxPercentage || 0) / 100;
 const getLineTotal = (line: CartLine) => getLineTaxableAmount(line) + getLineTaxAmount(line);
-
-const formatReceiptMoney = (value: number | null | undefined) => {
-  const numberValue = Number(value || 0);
-  return Number.isFinite(numberValue) ? numberValue.toFixed(2) : '0.00';
-};
-
-const formatReceiptQuantity = (value: number | null | undefined) => {
-  const numberValue = Number(value || 0);
-  if (!Number.isFinite(numberValue)) return '0';
-  return Number.isInteger(numberValue) ? String(numberValue) : numberValue.toFixed(2);
-};
-
-const formatReceiptRate = (value: number) =>
-  Number.isInteger(value) ? String(value) : value.toFixed(2);
-
-const formatReceiptDate = (value = new Date()) =>
-  value.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).replaceAll(' ', ' - ');
-
-const formatReceiptStatus = (value?: string) => {
-  const status = value?.trim() || 'PAID';
-  return status.toLowerCase().replaceAll('_', ' ').replace(/\b\w/g, (char) => char.toUpperCase());
-};
-
-const getReceiptTaxRows = (lines: CartLine[]) => {
-  const taxRows = new Map<number, number>();
-  lines.forEach((line) => {
-    const rate = Number(line.taxPercentage || 0);
-    const normalizedRate = Number.isFinite(rate) ? rate : 0;
-    taxRows.set(normalizedRate, (taxRows.get(normalizedRate) || 0) + getLineTaxAmount(line));
-  });
-  if (!taxRows.has(0)) taxRows.set(0, 0);
-  return [...taxRows.entries()].sort(([left], [right]) => left - right);
-};
 
 export const PosPage: React.FC = () => {
   const navigate = useNavigate();
@@ -137,12 +95,6 @@ export const PosPage: React.FC = () => {
   const customers = useQuery({ queryKey: ['pos-customers', debouncedCustomerSearch], queryFn: () => customerApi.getAll({ page: 0, size: 100, search: debouncedCustomerSearch }) });
   const warehouses = useQuery({ queryKey: ['pos-warehouses'], queryFn: () => warehouseApi.getAll() });
   const paymentMethods = useQuery({ queryKey: ['pos-payment-methods'], queryFn: () => paymentMethodApi.getAll('') });
-  const organization = useQuery({
-    queryKey: ['pos-organization', user?.organizationId],
-    queryFn: () => organizationApi.getById(user!.organizationId),
-    enabled: Boolean(user?.organizationId),
-  });
-  const organizationDetails = organization.data?.data;
   const customerRows = customers.data?.data?.content || [];
   const selectedCustomer = customerRows.find((customer) => customer.id === customerId);
   const customerDisplayLabel = selectedCustomerLabel || (selectedCustomer ? getCustomerLabel(selectedCustomer) : '');
@@ -374,243 +326,35 @@ export const PosPage: React.FC = () => {
       window.setTimeout(() => scanAndAddItem(value, 'input-paste'), 0);
     }
   };
-  const printReceipt = (cartSnapshot: CartLine[], billingResult?: PosBillingResponse, popup = window.open('', '_blank')) => {
-    if (!popup) return;
-    const customer = customerRows.find((entry) => entry.id === customerId);
-    const customerLabel = selectedCustomerLabel || (customer ? getCustomerLabel(customer) : 'Walk in Customer');
-    const method = paymentMethodRows.find((entry) => entry.id === paymentMethodId);
-    const organizationAddress = formatOrganizationAddress(organizationDetails?.address);
-    const organizationAddressLine = organizationAddress === 'N/A' ? '' : organizationAddress;
-    const receiptQuantity = cartSnapshot.reduce((sum, line) => sum + line.quantity, 0);
-    const receiptSubTotal = cartSnapshot.reduce((sum, line) => sum + getLineBaseAmount(line), 0);
-    const receiptDiscount = cartSnapshot.reduce((sum, line) => sum + getLineDiscountAmount(line), 0);
-    const receiptTaxRows = getReceiptTaxRows(cartSnapshot);
-    const receiptTotal = cartSnapshot.reduce((sum, line) => sum + getLineTotal(line), 0);
-    const receiptGrandTotal = roundOff ? Math.round(receiptTotal) : receiptTotal;
-    const receiptStatus = formatReceiptStatus(billingResult?.paymentStatus);
-    const rows = cartSnapshot.map((line, index) => {
-      const amount = getLineTotal(line);
-      return `<tr>
-        <td class="sn">${index + 1}</td>
-        <td class="item">${escapeHtml(line.itemName)}</td>
-        <td class="qty">${formatReceiptQuantity(line.quantity)}</td>
-        <td class="price">${formatReceiptMoney(line.salePrice)}</td>
-        <td class="amount">${formatReceiptMoney(amount)}</td>
-      </tr>`;
-    }).join('');
-    const taxRows = receiptTaxRows.map(([rate, taxAmount]) =>
-      `<div class="summary-row tax-row"><span>IGST at ${formatReceiptRate(rate)}%</span><span>${formatReceiptMoney(taxAmount)}</span></div>`
-    ).join('');
-
-    popup.document.write(`<!doctype html>
-<html>
-<head>
-  <title>${escapeHtml(billingResult?.invoiceNo || 'POS Receipt')}</title>
-  <style>
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      background: #f3f4f6;
-      color: #000;
-      font-family: Arial, Helvetica, sans-serif;
-      font-size: 18px;
+  const downloadInvoicePdf = async (saleId: number) => {
+    try {
+      const blob = await posApi.downloadInvoicePdf(saleId);
+      const customer = customerRows.find((entry) => entry.id === customerId);
+      const customerName = (selectedCustomerLabel || customer?.customerName || 'Walk-in_Customer')
+        .replace(/[^a-z0-9]+/gi, '_')
+        .replace(/^_+|_+$/g, '') || 'Customer';
+      const pad = (value: number) => String(value).padStart(2, '0');
+      const now = new Date();
+      const timestamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${customerName}_${timestamp}.pdf`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (error: any) {
+      toast.error(error?.message || 'Failed to download invoice PDF');
     }
-    .receipt-shell {
-      width: 86mm;
-      margin: 24px auto;
-      padding: 8px;
-      background: #eeeeee;
-    }
-    .receipt {
-      position: relative;
-      min-height: 152mm;
-      overflow: hidden;
-      background: #fff;
-      padding: 14px;
-    }
-    .ribbon {
-      position: absolute;
-      top: 22px;
-      left: -46px;
-      width: 160px;
-      padding: 9px 0;
-      transform: rotate(-45deg);
-      background: #1187c9;
-      color: #fff;
-      text-align: center;
-      font-size: 18px;
-      font-weight: 700;
-    }
-    .header-spacer { height: 116px; }
-    .store {
-      text-align: center;
-      line-height: 1.12;
-    }
-    .store h1 {
-      margin: 0 0 8px;
-      font-size: 28px;
-      font-weight: 500;
-      letter-spacing: 0;
-    }
-    .store p {
-      margin: 2px 0;
-      font-size: 17px;
-    }
-    .meta {
-      display: flex;
-      justify-content: space-between;
-      gap: 12px;
-      margin-top: 22px;
-      font-size: 17px;
-      font-weight: 500;
-    }
-    .dash {
-      border-top: 2px dashed #000;
-      margin: 14px 0 0;
-    }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      table-layout: fixed;
-      margin-top: 8px;
-      font-size: 18px;
-    }
-    th {
-      padding: 0 0 10px;
-      text-align: left;
-      font-size: 19px;
-      font-weight: 700;
-    }
-    td {
-      padding: 12px 0;
-      vertical-align: top;
-    }
-    .sn { width: 10%; }
-    .item { width: 34%; word-break: break-word; }
-    .qty { width: 13%; text-align: center; }
-    .price { width: 20%; text-align: right; }
-    .amount { width: 23%; text-align: right; }
-    .summary {
-      margin-top: 4px;
-      font-size: 18px;
-    }
-    .summary-row {
-      display: grid;
-      grid-template-columns: 1fr 52px 104px;
-      align-items: center;
-      gap: 8px;
-      padding: 7px 0;
-    }
-    .summary-row .right { text-align: right; }
-    .tax-row {
-      grid-template-columns: 1fr 104px;
-      text-align: right;
-    }
-    .total-row {
-      display: flex;
-      justify-content: space-between;
-      gap: 12px;
-      padding: 8px 0;
-      font-size: 18px;
-      font-weight: 600;
-    }
-    .footer {
-      padding-top: 24px;
-      text-align: center;
-      font-size: 18px;
-      font-weight: 500;
-    }
-    .muted {
-      margin-top: 6px;
-      font-size: 12px;
-      color: #444;
-      text-align: center;
-    }
-    @page { size: 86mm auto; margin: 0; }
-    @media print {
-      body { background: #fff; }
-      .receipt-shell {
-        width: 86mm;
-        margin: 0;
-        padding: 0;
-        background: #fff;
-      }
-      .receipt { min-height: auto; }
-    }
-  </style>
-</head>
-<body>
-  <div class="receipt-shell">
-    <section class="receipt">
-      <div class="ribbon">${escapeHtml(receiptStatus)}</div>
-      <div class="header-spacer"></div>
-      <header class="store">
-        <h1>${escapeHtml(organizationDetails?.name || user?.organizationName || 'SLEEK BILL')}</h1>
-        ${organizationAddressLine ? `<p>${escapeHtml(organizationAddressLine)}</p>` : ''}
-        ${organizationDetails?.phone ? `<p>PHONE : ${escapeHtml(organizationDetails.phone)}</p>` : ''}
-        ${organizationDetails?.gstNumber ? `<p>GSTIN : ${escapeHtml(organizationDetails.gstNumber)}</p>` : ''}
-      </header>
-      <div class="meta">
-        <span>Bill No: ${escapeHtml(billingResult?.invoiceNo || '-')}</span>
-        <span>Date: ${formatReceiptDate()}</span>
-      </div>
-      <div class="dash"></div>
-      <table>
-        <thead>
-          <tr>
-            <th class="sn">SN</th>
-            <th class="item">Item</th>
-            <th class="qty">Qty</th>
-            <th class="price">Price</th>
-            <th class="amount">Amt</th>
-          </tr>
-        </thead>
-        <tbody>${rows}</tbody>
-      </table>
-      <div class="dash"></div>
-      <section class="summary">
-        <div class="summary-row">
-          <span>Subtotal</span>
-          <span>${formatReceiptQuantity(receiptQuantity)}</span>
-          <span class="right">&#8377; ${formatReceiptMoney(receiptSubTotal)}</span>
-        </div>
-        ${receiptDiscount > 0 ? `<div class="summary-row"><span>Discount</span><span></span><span class="right">- &#8377; ${formatReceiptMoney(receiptDiscount)}</span></div>` : ''}
-      </section>
-      <div class="dash"></div>
-      <section class="summary">${taxRows}</section>
-      <div class="dash"></div>
-      <div class="total-row"><span>TOTAL</span><span>&#8377; ${formatReceiptMoney(receiptGrandTotal)}</span></div>
-      <div class="dash"></div>
-      <div class="footer">Thank You</div>
-      <div class="muted">Customer: ${escapeHtml(customerLabel)} | Payment: ${escapeHtml(method?.name || '-')}</div>
-    </section>
-  </div>
-  <script>
-    window.onload = () => {
-      window.focus();
-      window.print();
-    };
-  </script>
-</body>
-</html>`);
-    popup.document.close();
   };
-  const submitBill = async (print = false) => {
+  const submitBill = async (download = false) => {
     if (!customerId) return toast.error('Please select a customer');
     if (!warehouseId) return toast.error('Please select a warehouse');
     if (!paymentMethodId) return toast.error('Please select a payment method');
     if (!cart.length) return toast.error('Please add at least one item');
-    const cartSnapshot = [...cart];
-    const receiptWindow = print ? window.open('', '_blank') : null;
-    if (print && !receiptWindow) {
-      toast.error('Please allow popups to print the bill');
-      return;
-    }
     try {
       const response = await billing.mutateAsync();
-      if (print) printReceipt(cartSnapshot, response.data, receiptWindow);
+      if (download && response.data?.saleId) await downloadInvoicePdf(response.data.saleId);
     } catch {
-      if (receiptWindow && !receiptWindow.closed) receiptWindow.close();
       // The mutation onError handler already reports the API error.
     }
   };
@@ -901,7 +645,7 @@ export const PosPage: React.FC = () => {
       <footer className="fixed inset-x-0 bottom-0 z-20 flex h-12 items-center justify-end gap-3 border-t bg-white px-4 shadow-[0_-2px_8px_rgba(0,0,0,0.06)]">
         <button onClick={() => navigate(defaultPath)} className="rounded bg-slate-100 px-5 py-2 text-sm">Close</button>
         <button onClick={() => setCart([])} className="rounded bg-slate-600 px-5 py-2 text-sm text-white">New</button>
-        <button onClick={() => submitBill(true)} disabled={billing.isPending} className="rounded bg-blue-500 px-5 py-2 text-sm text-white">Save &amp; Print</button>
+        <button onClick={() => submitBill(true)} disabled={billing.isPending} className="rounded bg-blue-500 px-5 py-2 text-sm text-white">Save &amp; Download Invoice</button>
         <button onClick={() => submitBill(false)} disabled={billing.isPending} className="rounded bg-green-500 px-5 py-2 text-sm text-white">Save</button>
       </footer>
     </div>

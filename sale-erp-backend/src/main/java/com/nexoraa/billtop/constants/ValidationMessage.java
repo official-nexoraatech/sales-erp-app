@@ -72,6 +72,7 @@ public class ValidationMessage {
     public static final String SUBJECT_REQUIRED = "Subject is required";
     public static final String SUBJECT_INVALID = "Subject must be 200 characters or less";
     public static final String MOBILE_NUMBERS_REQUIRED = "At least one mobile number is required";
+    public static final String DOCUMENT_URL_REQUIRED = "Document URL is required";
 
     // Role Validation
     public static final String ROLE_NAME_REQUIRED = "Role name is required";

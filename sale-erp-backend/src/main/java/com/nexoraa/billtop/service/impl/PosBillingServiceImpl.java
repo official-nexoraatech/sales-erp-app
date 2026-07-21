@@ -141,6 +141,7 @@ public class PosBillingServiceImpl implements PosBillingService {
                 .build());
 
         return PosBillingResponseDto.builder()
+                .saleId(savedSale.getId())
                 .invoiceNo(savedSale.getInvoiceNo())
                 .grandTotal(savedSale.getGrandTotal())
                 .paymentStatus(savedSale.getStatus())

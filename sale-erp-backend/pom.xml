@@ -33,6 +33,7 @@
 		<lombok.version>1.18.46</lombok.version>
 		<springdoc.version>3.0.3</springdoc.version>
 		<poi.version>5.5.1</poi.version>
+		<openpdf.version>1.3.42</openpdf.version>
 		<aws.sdk.version>2.46.5</aws.sdk.version>
 	</properties>
 
@@ -137,6 +138,13 @@
 			<groupId>org.apache.poi</groupId>
 			<artifactId>poi-ooxml</artifactId>
 			<version>${poi.version}</version>
+		</dependency>
+
+		<!-- PDF generation (invoice) -->
+		<dependency>
+			<groupId>com.github.librepdf</groupId>
+			<artifactId>openpdf</artifactId>
+			<version>${openpdf.version}</version>
 		</dependency>
 
 		<!-- AWS SDK v2 -->
