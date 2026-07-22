@@ -5,7 +5,6 @@ import com.nexoraa.billtop.dto.ApiResponseDto;
 import com.nexoraa.billtop.dto.whatsapp.WhatsAppSendDocumentRequestDto;
 import com.nexoraa.billtop.service.WhatsAppService;
 import jakarta.validation.Valid;
-import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Positive;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
@@ -36,9 +35,9 @@ public class WhatsAppController {
     @PostMapping("/sales/{saleId}/send-invoice")
     public ResponseEntity<ApiResponseDto<Void>> sendInvoice(
             @PathVariable @Positive Long saleId,
-            @RequestParam @NotBlank String documentUrl
+            @RequestParam(required = false) String mobileNumber
     ) {
-        whatsAppService.sendInvoice(saleId, documentUrl);
+        whatsAppService.sendInvoice(saleId, mobileNumber);
         return ResponseEntity.ok(ApiResponseDto.success(ResponseMessage.WHATSAPP_SENT));
     }
 }

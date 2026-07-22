@@ -146,15 +146,15 @@ public class ItemServiceImpl implements ItemService {
 
     @Override
     @Transactional(readOnly = true)
-    public ItemDetailResponseDto getItemById(Long id, Long warehouseId) {
-        return buildDetailResponse(getActiveItem(id), warehouseId);
+    public ItemDetailResponseDto getItemById(Long id) {
+        return buildDetailResponse(getActiveItem(id));
     }
 
     @Override
     @Transactional(readOnly = true)
-    public ItemDetailResponseDto getItemByIdForOrganization(Long organizationId, Long id, Long warehouseId) {
+    public ItemDetailResponseDto getItemByIdForOrganization(Long organizationId, Long id) {
         Organization organization = getActiveOrganization(organizationId);
-        return buildDetailResponse(getActiveItem(id, organization.getId()), warehouseId);
+        return buildDetailResponse(getActiveItem(id, organization.getId()));
     }
 
     @Override
@@ -221,13 +221,13 @@ public class ItemServiceImpl implements ItemService {
         return PageResponseDto.from(response);
     }
 
-    private ItemDetailResponseDto buildDetailResponse(Item item, Long warehouseId) {
+    private ItemDetailResponseDto buildDetailResponse(Item item) {
         ItemDetailResponseDto response = itemMapper.toDetailResponse(item);
         itemPriceRepository.findTopByItemIdOrderByIdDesc(item.getId())
                 .ifPresent(price -> applyPrice(response, price));
         itemBatchRepository.findTopByItemIdOrderByIdDesc(item.getId())
                 .ifPresent(batch -> applyBatch(response, batch));
-        applyStock(response, item.getId(), warehouseId);
+        applyStock(response, item.getId());
         return response;
     }
 
@@ -387,10 +387,8 @@ public class ItemServiceImpl implements ItemService {
         response.setExpiryDate(batch.getExpiryDate());
     }
 
-    private void applyStock(ItemDetailResponseDto response, Long itemId, Long warehouseId) {
-        List<Stock> stocks = warehouseId == null || warehouseId <= 0
-                ? stockRepository.findByItemId(itemId)
-                : stockRepository.findByItemIdAndWarehouseIdOrderByIdAsc(itemId, warehouseId);
+    private void applyStock(ItemDetailResponseDto response, Long itemId) {
+        List<Stock> stocks = stockRepository.findByItemId(itemId);
         if (stocks.isEmpty()) {
             response.setOpeningQuantity(ZERO);
             response.setAvailableQty(ZERO);

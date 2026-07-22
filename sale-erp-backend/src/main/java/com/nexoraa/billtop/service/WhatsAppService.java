@@ -6,5 +6,5 @@ public interface WhatsAppService {
 
     void sendDocument(WhatsAppSendDocumentRequestDto request);
 
-    void sendInvoice(Long saleId, String documentUrl);
+    void sendInvoice(Long saleId, String mobileNumberOverride);
 }

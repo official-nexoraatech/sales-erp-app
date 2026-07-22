@@ -177,7 +177,7 @@ export const PosPage: React.FC = () => {
       const itemId = parseScannedItemId(scannedValue);
       if (itemId) {
         console.log('[POS Scanner] Calling get item API:', `/api/v1/items/${itemId}`);
-        const response = await itemApi.getById(itemId, warehouseId || undefined);
+        const response = await itemApi.getById(itemId);
         return response.data || null;
       }
 
@@ -191,7 +191,7 @@ export const PosPage: React.FC = () => {
       const matchedItem = exactMatch || results[0] || null;
       if (!matchedItem) return null;
       console.log('[POS Scanner] Calling get item API:', `/api/v1/items/${matchedItem.id}`);
-      const itemResponse = await itemApi.getById(matchedItem.id, warehouseId || undefined);
+      const itemResponse = await itemApi.getById(matchedItem.id);
       return itemResponse.data || matchedItem;
     },
     onSuccess: (item) => {
