@@ -8,4 +8,6 @@ public interface FileStorageService {
     FileUploadResponseDto uploadImage(MultipartFile file, String folderPath);
 
     FileUploadResponseDto uploadFile(MultipartFile file, String folderPath);
+
+    FileUploadResponseDto uploadFile(byte[] content, String fileName, String contentType, String folderPath);
 }

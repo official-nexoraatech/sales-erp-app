@@ -1,6 +1,7 @@
 package com.nexoraa.billtop.service.impl;
 
 import com.nexoraa.billtop.constants.ErrorMessage;
+import com.nexoraa.billtop.dto.common.FileUploadResponseDto;
 import com.nexoraa.billtop.dto.whatsapp.WhatsAppSendDocumentRequestDto;
 import com.nexoraa.billtop.entity.Contact;
 import com.nexoraa.billtop.entity.Sale;
@@ -8,10 +9,13 @@ import com.nexoraa.billtop.exception.BadRequestException;
 import com.nexoraa.billtop.exception.ResourceNotFoundException;
 import com.nexoraa.billtop.repository.SaleRepository;
 import com.nexoraa.billtop.security.CurrentOrganizationService;
+import com.nexoraa.billtop.service.FileStorageService;
+import com.nexoraa.billtop.service.PosInvoicePdfService;
 import com.nexoraa.billtop.service.WhatsAppService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import org.springframework.web.client.RestClient;
@@ -27,8 +31,12 @@ public class WhatsAppServiceImpl implements WhatsAppService {
     private static final Logger LOGGER = LoggerFactory.getLogger(WhatsAppServiceImpl.class);
     private static final String MOBILE_PATTERN = "^\\+?[0-9]{10,15}$";
 
+    private static final String INVOICE_UPLOAD_FOLDER = "invoices/whatsapp";
+
     private final SaleRepository saleRepository;
     private final CurrentOrganizationService currentOrganizationService;
+    private final PosInvoicePdfService posInvoicePdfService;
+    private final FileStorageService fileStorageService;
     private final String apiBaseUrl;
     private final String apiKey;
     private final String invoiceTemplateName;
@@ -37,6 +45,8 @@ public class WhatsAppServiceImpl implements WhatsAppService {
     public WhatsAppServiceImpl(
             SaleRepository saleRepository,
             CurrentOrganizationService currentOrganizationService,
+            PosInvoicePdfService posInvoicePdfService,
+            FileStorageService fileStorageService,
             @Value("${app.whatsapp.api-base-url:}") String apiBaseUrl,
             @Value("${app.whatsapp.api-key:}") String apiKey,
             @Value("${app.whatsapp.invoice-template-name:}") String invoiceTemplateName,
@@ -44,6 +54,8 @@ public class WhatsAppServiceImpl implements WhatsAppService {
     ) {
         this.saleRepository = saleRepository;
         this.currentOrganizationService = currentOrganizationService;
+        this.posInvoicePdfService = posInvoicePdfService;
+        this.fileStorageService = fileStorageService;
         this.apiBaseUrl = apiBaseUrl;
         this.apiKey = apiKey;
         this.invoiceTemplateName = invoiceTemplateName;
@@ -98,26 +110,37 @@ public class WhatsAppServiceImpl implements WhatsAppService {
     }
 
     @Override
-    public void sendInvoice(Long saleId, String documentUrl) {
+    public void sendInvoice(Long saleId, String mobileNumberOverride) {
         Sale sale = saleRepository.findByIdAndOrganizationIdAndIsDeletedFalse(saleId, currentOrganizationService.getOrganizationId())
                 .orElseThrow(() -> new ResourceNotFoundException(ErrorMessage.SALE_NOT_FOUND, "SALE_NOT_FOUND"));
 
         Contact customer = sale.getCustomer();
-        String mobileNumber = customer == null ? null
-                : StringUtils.hasText(customer.getWhatsappNo()) ? customer.getWhatsappNo() : customer.getMobile();
+        String mobileNumber = StringUtils.hasText(mobileNumberOverride) ? mobileNumberOverride : resolveWhatsAppNumber(customer);
 
         if (!StringUtils.hasText(mobileNumber)) {
             throw new BadRequestException(ErrorMessage.WHATSAPP_NUMBER_NOT_FOUND, "WHATSAPP_NUMBER_NOT_FOUND");
         }
 
+        PosInvoicePdfService.InvoicePdf invoicePdf = posInvoicePdfService.generateInvoicePdf(saleId);
+        FileUploadResponseDto uploaded = fileStorageService.uploadFile(
+                invoicePdf.content(), invoicePdf.fileName(), MediaType.APPLICATION_PDF_VALUE, INVOICE_UPLOAD_FOLDER
+        );
+
         sendDocument(WhatsAppSendDocumentRequestDto.builder()
                 .mobileNumbers(List.of(mobileNumber))
-                .documentUrl(documentUrl)
-                .fileName(sale.getInvoiceNo())
+                .documentUrl(uploaded.getObjectUrl())
+                .fileName(invoicePdf.fileName())
                 .templateParams(Map.of(
-                        "1", customer.getFirstName() == null ? "" : customer.getFirstName(),
+                        "1", customer == null || customer.getFirstName() == null ? "Customer" : customer.getFirstName(),
                         "2", sale.getInvoiceNo() == null ? "" : sale.getInvoiceNo()
                 ))
                 .build());
+    }
+
+    private String resolveWhatsAppNumber(Contact customer) {
+        if (customer == null) {
+            return null;
+        }
+        return StringUtils.hasText(customer.getWhatsappNo()) ? customer.getWhatsappNo() : customer.getMobile();
     }
 }

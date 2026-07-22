@@ -55,12 +55,11 @@ public class AdminItemController {
     @GetMapping("/{id}")
     public ResponseEntity<ApiResponseDto<ItemDetailResponseDto>> getItemById(
             @PathVariable @Positive Long organizationId,
-            @PathVariable @Positive Long id,
-            @RequestParam(required = false) Long warehouseId
+            @PathVariable @Positive Long id
     ) {
         return ResponseEntity.ok(ApiResponseDto.success(
                 ResponseMessage.ITEM_RETRIEVED,
-                itemService.getItemByIdForOrganization(organizationId, id, warehouseId)
+                itemService.getItemByIdForOrganization(organizationId, id)
         ));
     }
 

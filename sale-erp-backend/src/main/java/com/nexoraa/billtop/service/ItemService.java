@@ -16,7 +16,7 @@ public interface ItemService {
 
     FileUploadResponseDto uploadItemLogo(Long id, MultipartFile file);
 
-    ItemDetailResponseDto getItemById(Long id, Long warehouseId);
+    ItemDetailResponseDto getItemById(Long id);
 
     PageResponseDto<ItemListResponseDto> getItems(
             int page,
@@ -38,7 +38,7 @@ public interface ItemService {
      * Super Admin lookups: {@code organizationId} identifies the organization explicitly
      * rather than the caller's token, so these bypass {@code CurrentOrganizationService}.
      */
-    ItemDetailResponseDto getItemByIdForOrganization(Long organizationId, Long id, Long warehouseId);
+    ItemDetailResponseDto getItemByIdForOrganization(Long organizationId, Long id);
 
     PageResponseDto<ItemListResponseDto> getItemsForAdmin(
             Long organizationId,

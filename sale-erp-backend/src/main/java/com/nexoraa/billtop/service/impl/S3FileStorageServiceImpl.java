@@ -53,6 +53,48 @@ public class S3FileStorageServiceImpl implements FileStorageService {
         return upload(file, folderPath);
     }
 
+    @Override
+    public FileUploadResponseDto uploadFile(byte[] content, String fileName, String contentType, String folderPath) {
+        if (content == null || content.length == 0) {
+            throw new BadRequestException(ErrorMessage.FILE_REQUIRED, "FILE_REQUIRED");
+        }
+        if (content.length > properties.getMaxImageSize().toBytes()) {
+            throw new BadRequestException(ErrorMessage.FILE_SIZE_EXCEEDED, "FILE_SIZE_EXCEEDED");
+        }
+
+        String sanitizedFileName = sanitizeFileName(fileName, contentType);
+        String objectKey = normalizeFolderPath(folderPath) + "/" + sanitizedFileName;
+
+        PutObjectRequest request = PutObjectRequest.builder()
+                .bucket(properties.getBucket())
+                .key(objectKey)
+                .contentType(contentType)
+                .contentLength((long) content.length)
+                .metadata(Map.of("original-filename", fileName))
+                .build();
+
+        try {
+            s3Client.putObject(request, RequestBody.fromBytes(content));
+        } catch (S3Exception ex) {
+            log.error(
+                    "S3 upload failed. bucket={}, key={}, statusCode={}, awsErrorCode={}, requestId={}, awsMessage={}",
+                    properties.getBucket(), objectKey, ex.statusCode(), resolveAwsErrorCode(ex), ex.requestId(), resolveAwsErrorMessage(ex), ex
+            );
+            throw new FileStorageException(ErrorMessage.FILE_UPLOAD_FAILED, "FILE_UPLOAD_FAILED", ex);
+        } catch (SdkClientException ex) {
+            log.error("S3 client upload failed. bucket={}, key={}, message={}", properties.getBucket(), objectKey, ex.getMessage(), ex);
+            throw new FileStorageException(ErrorMessage.FILE_UPLOAD_FAILED, "FILE_UPLOAD_FAILED", ex);
+        }
+
+        return FileUploadResponseDto.builder()
+                .fileName(sanitizedFileName)
+                .objectKey(objectKey)
+                .objectUrl(buildObjectUrl(objectKey))
+                .contentType(contentType)
+                .size((long) content.length)
+                .build();
+    }
+
     private FileUploadResponseDto upload(MultipartFile file, String folderPath) {
         String fileName = sanitizeFileName(file);
         String objectKey = normalizeFolderPath(folderPath) + "/" + fileName;
@@ -135,7 +177,10 @@ public class S3FileStorageServiceImpl implements FileStorageService {
     }
 
     private String sanitizeFileName(MultipartFile file) {
-        String originalFileName = resolveOriginalFileName(file);
+        return sanitizeFileName(resolveOriginalFileName(file), file.getContentType());
+    }
+
+    private String sanitizeFileName(String originalFileName, String contentType) {
         String fileName = originalFileName.replace('\\', '/');
         int lastSlash = fileName.lastIndexOf('/');
         if (lastSlash >= 0) {
@@ -150,11 +195,11 @@ public class S3FileStorageServiceImpl implements FileStorageService {
                 .replaceAll("^\\.+", "");
 
         if (!StringUtils.hasText(fileName)) {
-            fileName = "file-" + Instant.now().toEpochMilli() + extensionFromContentType(file.getContentType());
+            fileName = "file-" + Instant.now().toEpochMilli() + extensionFromContentType(contentType);
         }
 
         if (!fileName.contains(".")) {
-            fileName = fileName + extensionFromContentType(file.getContentType());
+            fileName = fileName + extensionFromContentType(contentType);
         }
 
         return truncateFileName(fileName);
