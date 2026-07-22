@@ -2,6 +2,7 @@ package com.nexoraa.billtop.controller;
 
 import com.nexoraa.billtop.constants.ResponseMessage;
 import com.nexoraa.billtop.dto.ApiResponseDto;
+import com.nexoraa.billtop.dto.branch.BranchResponseDto;
 import com.nexoraa.billtop.dto.common.FileUploadResponseDto;
 import com.nexoraa.billtop.dto.user.ChangePasswordRequestDto;
 import com.nexoraa.billtop.dto.user.CreateUserRequestDto;
@@ -9,6 +10,7 @@ import com.nexoraa.billtop.dto.user.UpdateProfileRequestDto;
 import com.nexoraa.billtop.dto.user.UpdateUserRequestDto;
 import com.nexoraa.billtop.dto.user.UserProfileResponseDto;
 import com.nexoraa.billtop.dto.user.UserResponseDto;
+import com.nexoraa.billtop.service.BranchService;
 import com.nexoraa.billtop.service.UserService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Positive;
@@ -34,9 +36,11 @@ import java.util.List;
 public class UserController {
 
     private final UserService userService;
+    private final BranchService branchService;
 
-    public UserController(UserService userService) {
+    public UserController(UserService userService, BranchService branchService) {
         this.userService = userService;
+        this.branchService = branchService;
     }
 
     @PostMapping
@@ -54,6 +58,14 @@ public class UserController {
         return ResponseEntity.ok(ApiResponseDto.success(
                 ResponseMessage.USERS_RETRIEVED,
                 userService.getUsersByOrganization(search)
+        ));
+    }
+
+    @GetMapping("/me/branches")
+    public ResponseEntity<ApiResponseDto<List<BranchResponseDto>>> getMyBranches() {
+        return ResponseEntity.ok(ApiResponseDto.success(
+                ResponseMessage.BRANCHES_RETRIEVED,
+                branchService.getMyBranches()
         ));
     }
 

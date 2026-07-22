@@ -5,6 +5,7 @@ import com.nexoraa.billtop.entity.RolePermissionMapping;
 import com.nexoraa.billtop.entity.UserPermissionMapping;
 import com.nexoraa.billtop.entity.User;
 import com.nexoraa.billtop.repository.RolePermissionMappingRepository;
+import com.nexoraa.billtop.repository.UserBranchMappingRepository;
 import com.nexoraa.billtop.repository.UserPermissionMappingRepository;
 import com.nexoraa.billtop.repository.UserRepository;
 import org.springframework.security.core.userdetails.UserDetails;
@@ -21,15 +22,18 @@ public class CustomUserDetailsService implements UserDetailsService {
     private final UserRepository userRepository;
     private final RolePermissionMappingRepository rolePermissionMappingRepository;
     private final UserPermissionMappingRepository userPermissionMappingRepository;
+    private final UserBranchMappingRepository userBranchMappingRepository;
 
     public CustomUserDetailsService(
             UserRepository userRepository,
             RolePermissionMappingRepository rolePermissionMappingRepository,
-            UserPermissionMappingRepository userPermissionMappingRepository
+            UserPermissionMappingRepository userPermissionMappingRepository,
+            UserBranchMappingRepository userBranchMappingRepository
     ) {
         this.userRepository = userRepository;
         this.rolePermissionMappingRepository = rolePermissionMappingRepository;
         this.userPermissionMappingRepository = userPermissionMappingRepository;
+        this.userBranchMappingRepository = userBranchMappingRepository;
     }
 
     @Override
@@ -61,6 +65,8 @@ public class CustomUserDetailsService implements UserDetailsService {
                 .sorted()
                 .toList();
 
+        List<Long> branchIds = userBranchMappingRepository.findBranchIdsByUserId(user.getId());
+
         return new BillTopUserDetails(
                 user.getId(),
                 user.getOrganization() != null ? user.getOrganization().getId() : null,
@@ -70,6 +76,7 @@ public class CustomUserDetailsService implements UserDetailsService {
                 user.getPassword(),
                 user.getRole().getName(),
                 permissions,
+                branchIds,
                 com.nexoraa.billtop.enums.Status.ACTIVE.equals(user.getStatus()),
                 user.getOrganization() == null || Boolean.TRUE.equals(user.getOrganization().getIsSubscribed())
         );

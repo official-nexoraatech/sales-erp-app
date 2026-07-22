@@ -17,6 +17,7 @@ public record BillTopUserDetails(
         String password,
         String role,
         List<String> permissions,
+        List<Long> branchIds,
         boolean enabled,
         boolean organizationSubscribed
 ) implements UserDetails {
@@ -31,6 +32,20 @@ public record BillTopUserDetails(
 
     public boolean isAdmin() {
         return role != null && role.trim().equalsIgnoreCase(ADMIN_ROLE_NAME);
+    }
+
+    /**
+     * Org-level admins implicitly manage every branch in their organization;
+     * regular staff are restricted to the branches they're explicitly mapped to.
+     */
+    public boolean hasBranchAccess(Long branchId) {
+        if (branchId == null) {
+            return false;
+        }
+        if (isSuperAdmin() || isAdmin()) {
+            return true;
+        }
+        return branchIds != null && branchIds.contains(branchId);
     }
 
     @Override

@@ -10,6 +10,7 @@ import { Button } from '../../components/ui/Button';
 import { useAuth } from '../../hooks/useAuth';
 import { OrganizationSelector } from './OrganizationSelector';
 import { RoleSelector } from './RoleSelector';
+import { BranchSelector } from './BranchSelector';
 import { PERMISSIONS } from '../../auth/permissions';
 import { isSuperAdminRole } from '../../auth/featurePermissions';
 
@@ -34,6 +35,7 @@ export const UserCreatePage: React.FC<Props> = ({ mode = 'create' }) => {
     roleId: state?.roleId || 0,
     organizationId: Number(searchParams.get('organizationId')) || user?.organizationId || 0,
     status: state?.status === false || state?.status === 'INACTIVE' ? 'INACTIVE' : 'ACTIVE',
+    branchIds: state?.branchIds || [],
   });
 
   const mutation = useMutation({
@@ -98,6 +100,7 @@ export const UserCreatePage: React.FC<Props> = ({ mode = 'create' }) => {
                 ...current,
                 organizationId,
                 roleId: organizationId === current.organizationId ? current.roleId : 0,
+                branchIds: organizationId === current.organizationId ? current.branchIds : [],
               }))}
               onCreate={() => navigate('/organizations/create?returnTo=/users/create')}
               canCreate={hasPermission(PERMISSIONS.ORGANIZATION_CREATE)}
@@ -114,6 +117,14 @@ export const UserCreatePage: React.FC<Props> = ({ mode = 'create' }) => {
             onChange={(roleId) => setForm((current) => ({ ...current, roleId }))}
             onCreate={() => navigate(
               `/users/roles/create?organizationId=${form.organizationId}&returnTo=${encodeURIComponent(`/users/create?organizationId=${form.organizationId}`)}`
+            )}
+          />
+          <BranchSelector
+            organizationId={form.organizationId}
+            value={form.branchIds || []}
+            onChange={(branchIds) => setForm((current) => ({ ...current, branchIds }))}
+            onCreate={() => navigate(
+              `/branches/create?returnTo=${encodeURIComponent(`/users/create?organizationId=${form.organizationId}`)}`
             )}
           />
           <label className="text-sm text-gray-600">

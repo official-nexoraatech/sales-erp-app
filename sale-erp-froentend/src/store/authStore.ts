@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { devtools, persist } from 'zustand/middleware';
 import type { AuthUser } from '../types/auth.types';
 import { isTokenExpired } from '../utils/authToken';
+import { useBranchStore } from './branchStore';
 
 const isSuperAdmin = (role?: string) => role?.trim().toLowerCase() === 'super admin';
 
@@ -41,6 +42,7 @@ const useAuthStore = create<AuthStore>()(
         logout: () => {
           localStorage.removeItem('authToken');
           localStorage.removeItem('authUser');
+          useBranchStore.getState().clearSelectedBranch();
           set({
             token: null,
             user: null,

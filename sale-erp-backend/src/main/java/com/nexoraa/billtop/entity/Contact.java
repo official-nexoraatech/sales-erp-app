@@ -30,6 +30,10 @@ public class Contact extends BaseEntity {
     @JoinColumn(name = "organization_id", nullable = false)
     private Organization organization;
 
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "branch_id", nullable = false)
+    private Branch branch;
+
     @Column(name = "contact_type", length = 50)
     private String contactType;
 

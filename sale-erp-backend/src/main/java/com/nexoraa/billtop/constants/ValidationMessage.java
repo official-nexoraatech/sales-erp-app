@@ -63,6 +63,10 @@ public class ValidationMessage {
     public static final String SHORT_NAME_INVALID = "Short name must be 20 characters or less";
     public static final String WAREHOUSE_CODE_REQUIRED = "Warehouse code is required";
     public static final String WAREHOUSE_CODE_INVALID = "Warehouse code must be 50 characters or less";
+    public static final String BRANCH_CODE_REQUIRED = "Branch code is required";
+    public static final String BRANCH_CODE_INVALID = "Branch code must be 50 characters or less";
+    public static final String BRANCH_NAME_REQUIRED = "Branch name is required";
+    public static final String BRANCH_NAME_INVALID = "Branch name must be between 2 and 150 characters";
     public static final String ITEMS_REQUIRED = "At least one item is required";
     public static final String DATE_REQUIRED = "Date is required";
     public static final String QUANTITY_REQUIRED = "Quantity is required";

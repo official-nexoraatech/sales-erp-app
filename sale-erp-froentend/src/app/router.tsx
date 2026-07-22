@@ -71,6 +71,9 @@ import { ChequesPage } from '../pages/cash-bank/ChequesPage';
 import { WarehouseListPage } from '../pages/warehouses/WarehouseListPage';
 import { WarehouseFormPage } from '../pages/warehouses/WarehouseFormPage';
 import { WarehouseViewPage } from '../pages/warehouses/WarehouseViewPage';
+import { BranchListPage } from '../pages/branches/BranchListPage';
+import { BranchFormPage } from '../pages/branches/BranchFormPage';
+import { BranchViewPage } from '../pages/branches/BranchViewPage';
 import { OrganizationListPage } from '../pages/organizations/OrganizationListPage';
 import { OrganizationCreatePage } from '../pages/organizations/OrganizationCreatePage';
 import { OrganizationEditPage } from '../pages/organizations/OrganizationEditPage';
@@ -309,6 +312,10 @@ export const router = createBrowserRouter([
   { path: '/warehouses/create', element: <ProtectedRoute permissions={PERMISSIONS.WAREHOUSE_CREATE}><AppLayout><WarehouseFormPage mode="create" /></AppLayout></ProtectedRoute> },
   { path: '/warehouses/:id/edit', element: <ProtectedRoute permissions={[PERMISSIONS.WAREHOUSE_UPDATE, PERMISSIONS.WAREHOUSE_VIEW]} requireAll><AppLayout><WarehouseFormPage mode="edit" /></AppLayout></ProtectedRoute> },
   { path: '/warehouses/:id', element: <ProtectedRoute permissions={PERMISSIONS.WAREHOUSE_VIEW}><AppLayout><WarehouseViewPage /></AppLayout></ProtectedRoute> },
+  { path: '/branches', element: <ProtectedRoute permissions={PERMISSIONS.BRANCH_VIEW}><AppLayout><BranchListPage /></AppLayout></ProtectedRoute> },
+  { path: '/branches/create', element: <ProtectedRoute permissions={PERMISSIONS.BRANCH_CREATE}><AppLayout><BranchFormPage mode="create" /></AppLayout></ProtectedRoute> },
+  { path: '/branches/:id/edit', element: <ProtectedRoute permissions={[PERMISSIONS.BRANCH_UPDATE, PERMISSIONS.BRANCH_VIEW]} requireAll><AppLayout><BranchFormPage mode="edit" /></AppLayout></ProtectedRoute> },
+  { path: '/branches/:id', element: <ProtectedRoute permissions={PERMISSIONS.BRANCH_VIEW}><AppLayout><BranchViewPage /></AppLayout></ProtectedRoute> },
   { path: '/organizations', element: <ProtectedRoute permissions={PERMISSIONS.ORGANIZATION_VIEW}><AppLayout><OrganizationListPage /></AppLayout></ProtectedRoute> },
   { path: '/organizations/create', element: <ProtectedRoute permissions={PERMISSIONS.ORGANIZATION_CREATE}><AppLayout><OrganizationCreatePage /></AppLayout></ProtectedRoute> },
   { path: '/organizations/:id/edit', element: <ProtectedRoute permissions={[PERMISSIONS.ORGANIZATION_UPDATE, PERMISSIONS.ORGANIZATION_VIEW]} requireAll><AppLayout><OrganizationEditPage /></AppLayout></ProtectedRoute> },

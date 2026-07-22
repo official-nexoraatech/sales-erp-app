@@ -79,6 +79,13 @@ public class ResponseMessage {
     public static final String WAREHOUSE_RETRIEVED = "Warehouse retrieved successfully";
     public static final String WAREHOUSES_RETRIEVED = "Warehouses retrieved successfully";
 
+    // Branch Messages
+    public static final String BRANCH_CREATED = "Branch created successfully";
+    public static final String BRANCH_UPDATED = "Branch updated successfully";
+    public static final String BRANCH_DELETED = "Branch deleted successfully";
+    public static final String BRANCH_RETRIEVED = "Branch retrieved successfully";
+    public static final String BRANCHES_RETRIEVED = "Branches retrieved successfully";
+
     // Location Messages
     public static final String COUNTRIES_RETRIEVED = "Countries retrieved successfully";
     public static final String STATES_RETRIEVED = "States retrieved successfully";

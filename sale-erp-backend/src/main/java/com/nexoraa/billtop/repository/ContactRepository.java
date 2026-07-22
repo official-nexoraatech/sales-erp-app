@@ -15,6 +15,13 @@ public interface ContactRepository extends JpaRepository<Contact, Long>, JpaSpec
             Long organizationId,
     Status status);
 
+    Optional<Contact> findByIdAndContactTypeAndOrganizationIdAndBranchIdAndStatus(
+            Long id,
+            String contactType,
+            Long organizationId,
+            Long branchId,
+    Status status);
+
     long countByContactTypeAndOrganizationIdAndStatus(String contactType, Long organizationId, Status status);
 
     Optional<Contact> findFirstByContactTypeAndMobileAndOrganizationIdAndStatus(
@@ -40,6 +47,35 @@ public interface ContactRepository extends JpaRepository<Contact, Long>, JpaSpec
             String contactType,
             String firstName,
             Long organizationId,
+    Status status);
+
+    Optional<Contact> findFirstByContactTypeAndMobileAndOrganizationIdAndBranchIdAndStatus(
+            String contactType,
+            String mobile,
+            Long organizationId,
+            Long branchId,
+    Status status);
+
+    Optional<Contact> findFirstByContactTypeAndEmailIgnoreCaseAndOrganizationIdAndBranchIdAndStatus(
+            String contactType,
+            String email,
+            Long organizationId,
+            Long branchId,
+    Status status);
+
+    Optional<Contact> findFirstByContactTypeAndFirstNameIgnoreCaseAndLastNameIgnoreCaseAndOrganizationIdAndBranchIdAndStatus(
+            String contactType,
+            String firstName,
+            String lastName,
+            Long organizationId,
+            Long branchId,
+    Status status);
+
+    Optional<Contact> findFirstByContactTypeAndFirstNameIgnoreCaseAndOrganizationIdAndBranchIdAndStatus(
+            String contactType,
+            String firstName,
+            Long organizationId,
+            Long branchId,
     Status status);
 }
 

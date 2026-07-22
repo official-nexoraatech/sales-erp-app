@@ -12,6 +12,7 @@ import com.nexoraa.billtop.dto.ledger.LedgerResponseDto;
 import com.nexoraa.billtop.dto.ledger.LedgerTransactionResponseDto;
 import com.nexoraa.billtop.entity.Contact;
 import com.nexoraa.billtop.entity.Address;
+import com.nexoraa.billtop.entity.Branch;
 import com.nexoraa.billtop.entity.Organization;
 import com.nexoraa.billtop.entity.Payment;
 import com.nexoraa.billtop.entity.Sale;
@@ -25,6 +26,7 @@ import com.nexoraa.billtop.repository.PaymentRepository;
 import com.nexoraa.billtop.repository.SaleRepository;
 import com.nexoraa.billtop.repository.SalesReturnRepository;
 import com.nexoraa.billtop.repository.StateRepository;
+import com.nexoraa.billtop.security.CurrentBranchService;
 import com.nexoraa.billtop.security.CurrentOrganizationService;
 import com.nexoraa.billtop.service.CustomerService;
 import com.nexoraa.billtop.specification.ContactSpecification;
@@ -61,6 +63,7 @@ public class CustomerServiceImpl implements CustomerService {
     private final PaymentRepository paymentRepository;
     private final CustomerMapper customerMapper;
     private final CurrentOrganizationService currentOrganizationService;
+    private final CurrentBranchService currentBranchService;
 
     public CustomerServiceImpl(
             ContactRepository contactRepository,
@@ -70,7 +73,8 @@ public class CustomerServiceImpl implements CustomerService {
             SalesReturnRepository salesReturnRepository,
             PaymentRepository paymentRepository,
             CustomerMapper customerMapper,
-            CurrentOrganizationService currentOrganizationService
+            CurrentOrganizationService currentOrganizationService,
+            CurrentBranchService currentBranchService
     ) {
         this.contactRepository = contactRepository;
         this.addressRepository = addressRepository;
@@ -80,6 +84,7 @@ public class CustomerServiceImpl implements CustomerService {
         this.paymentRepository = paymentRepository;
         this.customerMapper = customerMapper;
         this.currentOrganizationService = currentOrganizationService;
+        this.currentBranchService = currentBranchService;
     }
 
     @Override
@@ -88,6 +93,7 @@ public class CustomerServiceImpl implements CustomerService {
         Organization organization = currentOrganizationService.getOrganizationReference();
         Contact contact = customerMapper.toEntity(request);
         contact.setOrganization(organization);
+        contact.setBranch(currentBranchService.getBranchReference());
         Contact savedContact = contactRepository.save(contact);
 
         saveAddress(savedContact, request.getBillingAddress(), BILLING, organization);
@@ -101,9 +107,10 @@ public class CustomerServiceImpl implements CustomerService {
 
     @Override
     @Transactional
-    public void createWalkInCustomerForOrganization(Organization organization) {
+    public void createWalkInCustomerForOrganization(Organization organization, Branch branch) {
         Contact contact = Contact.builder()
                 .organization(organization)
+                .branch(branch)
                 .contactType(CUSTOMER)
                 .firstName(WALK_IN_FIRST_NAME)
                 .lastName(WALK_IN_LAST_NAME)
@@ -141,6 +148,7 @@ public class CustomerServiceImpl implements CustomerService {
     public PageResponseDto<CustomerListResponseDto> getCustomers(int page, int size, String search) {
         Specification<Contact> specification = ContactSpecification.activeByType(CUSTOMER)
                 .and(ContactSpecification.organization(currentOrganizationService.getOrganizationId()))
+                .and(ContactSpecification.branch(currentBranchService.getBranchId()))
                 .and(ContactSpecification.search(search));
         Page<Contact> customers = contactRepository.findAll(
                 specification,
@@ -216,10 +224,11 @@ public class CustomerServiceImpl implements CustomerService {
     }
 
     private Contact getActiveCustomer(Long id) {
-        return contactRepository.findByIdAndContactTypeAndOrganizationIdAndStatus(
+        return contactRepository.findByIdAndContactTypeAndOrganizationIdAndBranchIdAndStatus(
                         id,
                         CUSTOMER,
                         currentOrganizationService.getOrganizationId(),
+                        currentBranchService.getBranchId(),
                 com.nexoraa.billtop.enums.Status.ACTIVE)
                 .orElseThrow(() -> new ResourceNotFoundException(ErrorMessage.CUSTOMER_NOT_FOUND, "CUSTOMER_NOT_FOUND"));
     }

@@ -42,6 +42,7 @@ public class JwtService {
         claims.put("userName", userDetails.username());
         claims.put("role", userDetails.role());
         claims.put("permissions", userDetails.permissions());
+        claims.put("branchIds", userDetails.branchIds());
         return buildToken(claims, userDetails.username());
     }
 

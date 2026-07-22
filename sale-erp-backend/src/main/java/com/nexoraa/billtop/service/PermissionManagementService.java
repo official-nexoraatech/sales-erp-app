@@ -66,11 +66,43 @@ public class PermissionManagementService {
         this.currentOrganizationService = currentOrganizationService;
     }
 
+    /**
+     * The calling user's own permissions (role + direct grants), grouped by
+     * group name. An org Admin can only ever grant a staff member a permission
+     * they hold themselves — this is what backs the non-admin "Users →
+     * Permissions" picker, so a permission never appears there as grantable
+     * until the Admin's own role/account already has it.
+     */
     @Transactional(readOnly = true)
     public Map<String, List<PermissionSummaryResponseDto>> getAllDatabasePermissionsGroupedByName() {
         BillTopUserDetails userDetails = getCurrentUserDetails();
         Map<String, List<PermissionSummaryResponseDto>> groupedPermissions = new LinkedHashMap<>();
         getUserPermissionEntities(currentOrganizationService.getOrganizationId(), userDetails.userId())
+                .forEach(permission -> groupedPermissions
+                        .computeIfAbsent(permission.getGroupName(), groupName -> new java.util.ArrayList<>())
+                        .add(toSummaryResponse(permission)));
+        return groupedPermissions;
+    }
+
+    /**
+     * The full assignable permission catalog (every active permission in the
+     * system), grouped by group name — used only by the Super Admin's
+     * platform-wide permission picker (AdminPermissionController), since a
+     * Super Admin manages the entire catalog rather than delegating from
+     * their own permission set.
+     */
+    @Transactional(readOnly = true)
+    public Map<String, List<PermissionSummaryResponseDto>> getFullPermissionCatalogGroupedByName() {
+        Map<String, List<PermissionSummaryResponseDto>> groupedPermissions = new LinkedHashMap<>();
+        permissionRepository.findAllByStatusAndIsDeletedFalse(Status.ACTIVE)
+                .stream()
+                .sorted((left, right) -> {
+                    int groupCompare = left.getGroupName().compareToIgnoreCase(right.getGroupName());
+                    if (groupCompare != 0) {
+                        return groupCompare;
+                    }
+                    return left.getName().compareToIgnoreCase(right.getName());
+                })
                 .forEach(permission -> groupedPermissions
                         .computeIfAbsent(permission.getGroupName(), groupName -> new java.util.ArrayList<>())
                         .add(toSummaryResponse(permission)));

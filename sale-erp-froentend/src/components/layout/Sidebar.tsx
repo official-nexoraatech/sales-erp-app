@@ -9,6 +9,7 @@ import {
   Package,
   Warehouse,
   Building2,
+  GitBranch,
   DollarSign,
   CircleMinus,
   Wrench,
@@ -151,6 +152,12 @@ const menuItems: MenuItem[] = [
       { label: 'Roles', href: '/users/roles', icon: <Users size={18} />, access: rule(FEATURE_PERMISSIONS.role.view) },
       { label: 'Permissions', href: '/users/permissions', icon: <ShieldCheck size={18} />, access: rule([FEATURE_PERMISSIONS.user.view, FEATURE_PERMISSIONS.user.update], 'all') },
     ],
+  },
+  {
+    label: 'Branches',
+    icon: <GitBranch size={20} />,
+    href: '/branches',
+    access: rule(FEATURE_PERMISSIONS.branch.view),
   },
   {
     label: 'SMS',

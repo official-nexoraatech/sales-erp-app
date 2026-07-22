@@ -31,6 +31,7 @@ public class SecurityConfig {
     };
 
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
+    private final BranchAuthorizationFilter branchAuthorizationFilter;
     private final CustomAuthenticationProvider customAuthenticationProvider;
     private final RestAuthenticationEntryPoint authenticationEntryPoint;
     private final RestAccessDeniedHandler accessDeniedHandler;
@@ -38,12 +39,14 @@ public class SecurityConfig {
 
     public SecurityConfig(
             JwtAuthenticationFilter jwtAuthenticationFilter,
+            BranchAuthorizationFilter branchAuthorizationFilter,
             CustomAuthenticationProvider customAuthenticationProvider,
             RestAuthenticationEntryPoint authenticationEntryPoint,
             RestAccessDeniedHandler accessDeniedHandler,
             @Value("${app.cors.allowed-origin-patterns}") String allowedOriginPatterns
     ) {
         this.jwtAuthenticationFilter = jwtAuthenticationFilter;
+        this.branchAuthorizationFilter = branchAuthorizationFilter;
         this.customAuthenticationProvider = customAuthenticationProvider;
         this.authenticationEntryPoint = authenticationEntryPoint;
         this.accessDeniedHandler = accessDeniedHandler;
@@ -80,6 +83,7 @@ public class SecurityConfig {
                         .anyRequest().authenticated()
                 )
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
+                .addFilterAfter(branchAuthorizationFilter, JwtAuthenticationFilter.class)
                 .build();
     }
 
@@ -88,7 +92,7 @@ public class SecurityConfig {
         CorsConfiguration configuration = new CorsConfiguration();
         configuration.setAllowedOriginPatterns(allowedOriginPatterns);
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"));
-        configuration.setAllowedHeaders(List.of("Authorization", "Content-Type", "Accept"));
+        configuration.setAllowedHeaders(List.of("Authorization", "Content-Type", "Accept", "X-Branch-Id"));
         configuration.setExposedHeaders(List.of("Authorization"));
         configuration.setAllowCredentials(true);
 

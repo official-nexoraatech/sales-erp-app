@@ -17,6 +17,7 @@ public interface CustomerMapper {
 
     @Mapping(target = "id", ignore = true)
     @Mapping(target = "organization", ignore = true)
+    @Mapping(target = "branch", ignore = true)
     @Mapping(target = "contactType", constant = "CUSTOMER")
     @Mapping(target = "status", constant = "ACTIVE")
     @Mapping(target = "isWholesale", source = "isWholesale", defaultValue = "false")
@@ -26,6 +27,7 @@ public interface CustomerMapper {
 
     @Mapping(target = "id", ignore = true)
     @Mapping(target = "organization", ignore = true)
+    @Mapping(target = "branch", ignore = true)
     @Mapping(target = "contactType", ignore = true)
     @Mapping(target = "status", ignore = true)
     @Mapping(target = "isWholesale", source = "isWholesale", defaultValue = "false")

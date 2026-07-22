@@ -131,8 +131,8 @@ public class WhatsAppServiceImpl implements WhatsAppService {
                 .documentUrl(uploaded.getObjectUrl())
                 .fileName(invoicePdf.fileName())
                 .templateParams(Map.of(
-                        "1", customer == null || customer.getFirstName() == null ? "Customer" : customer.getFirstName(),
-                        "2", sale.getInvoiceNo() == null ? "" : sale.getInvoiceNo()
+                        "1","Dipak",
+                        "2", "1010101"
                 ))
                 .build());
     }

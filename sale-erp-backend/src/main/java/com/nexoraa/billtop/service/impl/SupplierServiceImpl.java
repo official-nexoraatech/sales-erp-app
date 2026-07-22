@@ -19,6 +19,7 @@ import com.nexoraa.billtop.repository.ContactRepository;
 import com.nexoraa.billtop.repository.PaymentRepository;
 import com.nexoraa.billtop.repository.PurchaseRepository;
 import com.nexoraa.billtop.repository.PurchaseReturnRepository;
+import com.nexoraa.billtop.security.CurrentBranchService;
 import com.nexoraa.billtop.security.CurrentOrganizationService;
 import com.nexoraa.billtop.service.SupplierService;
 import com.nexoraa.billtop.specification.ContactSpecification;
@@ -48,6 +49,7 @@ public class SupplierServiceImpl implements SupplierService {
     private final PaymentRepository paymentRepository;
     private final SupplierMapper supplierMapper;
     private final CurrentOrganizationService currentOrganizationService;
+    private final CurrentBranchService currentBranchService;
 
     public SupplierServiceImpl(
             ContactRepository contactRepository,
@@ -55,7 +57,8 @@ public class SupplierServiceImpl implements SupplierService {
             PurchaseReturnRepository purchaseReturnRepository,
             PaymentRepository paymentRepository,
             SupplierMapper supplierMapper,
-            CurrentOrganizationService currentOrganizationService
+            CurrentOrganizationService currentOrganizationService,
+            CurrentBranchService currentBranchService
     ) {
         this.contactRepository = contactRepository;
         this.purchaseRepository = purchaseRepository;
@@ -63,6 +66,7 @@ public class SupplierServiceImpl implements SupplierService {
         this.paymentRepository = paymentRepository;
         this.supplierMapper = supplierMapper;
         this.currentOrganizationService = currentOrganizationService;
+        this.currentBranchService = currentBranchService;
     }
 
     @Override
@@ -71,6 +75,7 @@ public class SupplierServiceImpl implements SupplierService {
         Organization organization = currentOrganizationService.getOrganizationReference();
         Contact supplier = supplierMapper.toEntity(request);
         supplier.setOrganization(organization);
+        supplier.setBranch(currentBranchService.getBranchReference());
         Contact savedSupplier = contactRepository.save(supplier);
 
         return SupplierCreateResponseDto.builder()
@@ -101,6 +106,7 @@ public class SupplierServiceImpl implements SupplierService {
     public PageResponseDto<SupplierListResponseDto> getSuppliers(int page, int size, String search) {
         Specification<Contact> specification = ContactSpecification.activeByType(SUPPLIER)
                 .and(ContactSpecification.organization(currentOrganizationService.getOrganizationId()))
+                .and(ContactSpecification.branch(currentBranchService.getBranchId()))
                 .and(ContactSpecification.search(search));
         Page<Contact> suppliers = contactRepository.findAll(
                 specification,
@@ -176,10 +182,11 @@ public class SupplierServiceImpl implements SupplierService {
     }
 
     private Contact getActiveSupplier(Long id) {
-        return contactRepository.findByIdAndContactTypeAndOrganizationIdAndStatus(
+        return contactRepository.findByIdAndContactTypeAndOrganizationIdAndBranchIdAndStatus(
                         id,
                         SUPPLIER,
                         currentOrganizationService.getOrganizationId(),
+                        currentBranchService.getBranchId(),
                 com.nexoraa.billtop.enums.Status.ACTIVE)
                 .orElseThrow(() -> new ResourceNotFoundException(ErrorMessage.SUPPLIER_NOT_FOUND, "SUPPLIER_NOT_FOUND"));
     }

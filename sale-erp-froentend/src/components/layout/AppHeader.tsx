@@ -15,6 +15,7 @@ import { useAuth } from '../../hooks/useAuth';
 import { LANGUAGE_OPTIONS, usePageTranslation } from '../../hooks/usePageTranslation';
 import type { AppLanguage } from '../../hooks/usePageTranslation';
 import { useTheme } from '../../contexts/ThemeContext';
+import { BranchSwitcher } from './BranchSwitcher';
 
 const getStoredLanguage = (): AppLanguage => {
   const language = localStorage.getItem('language');
@@ -67,8 +68,9 @@ export const AppHeader: React.FC = () => {
 
   return (
     <header className="relative z-20 flex h-16 shrink-0 items-center justify-between border-b border-slate-200 bg-white px-4 shadow-sm dark:border-slate-700 dark:bg-slate-800 dark:shadow-slate-900/40 md:px-6">
-      <div className="pl-10 text-sm font-semibold text-slate-700 dark:text-slate-200 md:pl-0">
+      <div className="flex items-center gap-3 pl-10 text-sm font-semibold text-slate-700 dark:text-slate-200 md:pl-0">
         <span className="hidden sm:inline">{user?.organizationName || 'Texmintra'}</span>
+        <BranchSwitcher />
       </div>
 
       <div className="flex items-center gap-1.5">

@@ -46,6 +46,12 @@ export const FEATURE_PERMISSIONS = {
     view: PERMISSIONS.BANK_ACCOUNT_VIEW,
     create: PERMISSIONS.BANK_ACCOUNT_CREATE,
   },
+  branch: {
+    view: PERMISSIONS.BRANCH_VIEW,
+    create: PERMISSIONS.BRANCH_CREATE,
+    update: PERMISSIONS.BRANCH_UPDATE,
+    delete: PERMISSIONS.BRANCH_DELETE,
+  },
   brand: {
     view: PERMISSIONS.BRAND_VIEW,
     create: PERMISSIONS.BRAND_CREATE,
@@ -237,6 +243,7 @@ export const DEFAULT_ROUTE_RULES: Array<{ path: string; access: AccessRule }> = 
   { path: '/stock/adjustments', access: rule(FEATURE_PERMISSIONS.stockAdjustment.view) },
   { path: '/expenses', access: rule(FEATURE_PERMISSIONS.expense.view) },
   { path: '/warehouses', access: rule(FEATURE_PERMISSIONS.warehouse.view) },
+  { path: '/branches', access: rule(FEATURE_PERMISSIONS.branch.view) },
   { path: '/cash-bank/cash-in-hand', access: rule(FEATURE_PERMISSIONS.cash.view) },
   { path: '/cash-bank/bank-accounts', access: rule(FEATURE_PERMISSIONS.bankAccount.view) },
   { path: '/users', access: rule(FEATURE_PERMISSIONS.user.view) },
