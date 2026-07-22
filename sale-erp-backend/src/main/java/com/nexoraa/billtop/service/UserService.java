@@ -9,15 +9,20 @@ import com.nexoraa.billtop.dto.user.UpdateProfileRequestDto;
 import com.nexoraa.billtop.dto.user.UpdateUserRequestDto;
 import com.nexoraa.billtop.dto.user.UserProfileResponseDto;
 import com.nexoraa.billtop.dto.user.UserResponseDto;
+import com.nexoraa.billtop.entity.Branch;
 import com.nexoraa.billtop.entity.Organization;
 import com.nexoraa.billtop.entity.Role;
 import com.nexoraa.billtop.entity.User;
+import com.nexoraa.billtop.entity.UserBranchMapping;
+import com.nexoraa.billtop.entity.UserBranchMappingId;
 import com.nexoraa.billtop.enums.Status;
 import com.nexoraa.billtop.exception.BadRequestException;
 import com.nexoraa.billtop.exception.ResourceNotFoundException;
 import com.nexoraa.billtop.mapper.UserMapper;
+import com.nexoraa.billtop.repository.BranchRepository;
 import com.nexoraa.billtop.repository.OrganizationRepository;
 import com.nexoraa.billtop.repository.RoleRepository;
+import com.nexoraa.billtop.repository.UserBranchMappingRepository;
 import com.nexoraa.billtop.repository.UserRepository;
 import com.nexoraa.billtop.security.BillTopUserDetails;
 import com.nexoraa.billtop.security.CurrentOrganizationService;
@@ -35,8 +40,12 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 @Service
 public class UserService {
@@ -47,6 +56,8 @@ public class UserService {
     private final UserRepository userRepository;
     private final RoleRepository roleRepository;
     private final OrganizationRepository organizationRepository;
+    private final BranchRepository branchRepository;
+    private final UserBranchMappingRepository userBranchMappingRepository;
     private final PasswordEncoder passwordEncoder;
     private final UserMapper userMapper;
     private final CurrentOrganizationService currentOrganizationService;
@@ -56,6 +67,8 @@ public class UserService {
             UserRepository userRepository,
             RoleRepository roleRepository,
             OrganizationRepository organizationRepository,
+            BranchRepository branchRepository,
+            UserBranchMappingRepository userBranchMappingRepository,
             PasswordEncoder passwordEncoder,
             UserMapper userMapper,
             CurrentOrganizationService currentOrganizationService,
@@ -64,6 +77,8 @@ public class UserService {
         this.userRepository = userRepository;
         this.roleRepository = roleRepository;
         this.organizationRepository = organizationRepository;
+        this.branchRepository = branchRepository;
+        this.userBranchMappingRepository = userBranchMappingRepository;
         this.passwordEncoder = passwordEncoder;
         this.userMapper = userMapper;
         this.currentOrganizationService = currentOrganizationService;
@@ -102,7 +117,12 @@ public class UserService {
                 .password(passwordEncoder.encode(defaultPassword(request.getFirstName())))
                 .build();
 
-        return userMapper.toResponseDto(userRepository.save(user));
+        user = userRepository.save(user);
+        replaceBranchAssignments(user, request.getBranchIds(), organization.getId());
+
+        UserResponseDto response = userMapper.toResponseDto(user);
+        response.setBranchIds(userBranchMappingRepository.findBranchIdsByUserId(user.getId()));
+        return response;
     }
 
     @Transactional(readOnly = true)
@@ -116,15 +136,19 @@ public class UserService {
                 ? "%" + search.trim().toLowerCase(Locale.ROOT) + "%"
                 : null;
 
-        return userRepository.findUsersByOrganization(organizationId, searchPattern)
+        List<UserResponseDto> responses = userRepository.findUsersByOrganization(organizationId, searchPattern)
                 .stream()
                 .map(userMapper::toResponseDto)
                 .toList();
+        attachBranchIds(responses);
+        return responses;
     }
 
     @Transactional(readOnly = true)
     public UserResponseDto getUserByIdForOrganization(Long organizationId, Long id) {
-        return userMapper.toResponseDto(getActiveUser(id, organizationId));
+        UserResponseDto response = userMapper.toResponseDto(getActiveUser(id, organizationId));
+        response.setBranchIds(userBranchMappingRepository.findBranchIdsByUserId(response.getId()));
+        return response;
     }
 
     /**
@@ -152,7 +176,29 @@ public class UserService {
                 specification,
                 PageRequest.of(page, size, Sort.by(Sort.Direction.ASC, "firstName", "lastName", "id"))
         );
-        return PageResponseDto.from(users.map(userMapper::toResponseDto));
+        Page<UserResponseDto> responses = users.map(userMapper::toResponseDto);
+        attachBranchIds(responses.getContent());
+        return PageResponseDto.from(responses);
+    }
+
+    /**
+     * Batches branch-mapping lookups for a page/list of users instead of
+     * querying per-user, mirroring the enrichment style used for warehouse summaries.
+     */
+    private void attachBranchIds(List<UserResponseDto> responses) {
+        if (responses.isEmpty()) {
+            return;
+        }
+        List<Long> userIds = responses.stream().map(UserResponseDto::getId).toList();
+        Map<Long, List<Long>> branchIdsByUserId = new HashMap<>();
+        for (UserBranchMapping mapping : userBranchMappingRepository.findByUserIdIn(userIds)) {
+            branchIdsByUserId
+                    .computeIfAbsent(mapping.getUser().getId(), key -> new ArrayList<>())
+                    .add(mapping.getBranch().getId());
+        }
+        for (UserResponseDto response : responses) {
+            response.setBranchIds(branchIdsByUserId.getOrDefault(response.getId(), List.of()));
+        }
     }
 
     @Transactional(readOnly = true)
@@ -198,6 +244,34 @@ public class UserService {
         }
 
         userRepository.save(user);
+        if (request.getBranchIds() != null) {
+            replaceBranchAssignments(user, request.getBranchIds(), organizationId);
+        }
+    }
+
+    /**
+     * Wholesale-replaces a user's branch assignments (delete-then-insert),
+     * matching how role assignment is already replaced outright rather than diffed.
+     */
+    private void replaceBranchAssignments(User user, List<Long> branchIds, Long organizationId) {
+        userBranchMappingRepository.deleteByUser_Id(user.getId());
+        if (branchIds == null || branchIds.isEmpty()) {
+            return;
+        }
+
+        List<Branch> branches = branchRepository.findAllByIdInAndOrganizationId(branchIds, organizationId);
+        if (branches.size() != new HashSet<>(branchIds).size()) {
+            throw new BadRequestException(ErrorMessage.BRANCH_NOT_IN_ORGANIZATION, "BRANCH_NOT_IN_ORGANIZATION");
+        }
+
+        List<UserBranchMapping> mappings = branches.stream()
+                .map(branch -> UserBranchMapping.builder()
+                        .id(new UserBranchMappingId(user.getId(), branch.getId()))
+                        .user(user)
+                        .branch(branch)
+                        .build())
+                .toList();
+        userBranchMappingRepository.saveAll(mappings);
     }
 
     @Transactional

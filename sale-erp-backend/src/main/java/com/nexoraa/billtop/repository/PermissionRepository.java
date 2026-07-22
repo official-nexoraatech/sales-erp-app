@@ -10,4 +10,6 @@ import java.util.List;
 public interface PermissionRepository extends JpaRepository<Permission, Long> {
 
     List<Permission> findAllByIdInAndStatusAndIsDeletedFalse(Collection<Long> ids, Status status);
+
+    List<Permission> findAllByStatusAndIsDeletedFalse(Status status);
 }

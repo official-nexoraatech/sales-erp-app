@@ -6,6 +6,8 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.util.List;
+
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
@@ -24,5 +26,6 @@ public class UserResponseDto {
     private String roleName;
     private Long organizationId;
     private String organizationName;
+    private List<Long> branchIds;
 }
 

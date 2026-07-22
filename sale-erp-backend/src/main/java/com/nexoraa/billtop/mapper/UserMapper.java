@@ -14,6 +14,7 @@ public interface UserMapper {
     @Mapping(target = "roleName", source = "role.name")
     @Mapping(target = "organizationId", source = "organization.id")
     @Mapping(target = "organizationName", source = "organization.name")
+    @Mapping(target = "branchIds", ignore = true)
     UserResponseDto toResponseDto(User user);
 
     @Mapping(target = "roleName", source = "role.name")

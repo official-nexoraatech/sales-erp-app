@@ -187,6 +187,39 @@ export interface WarehouseRequest {
   address: string;
 }
 
+export interface Branch {
+  id: number;
+  organizationId: number;
+  branchCode: string;
+  branchName: string;
+  email?: string;
+  phone?: string;
+  address?: string;
+  city?: string;
+  state?: string;
+  country?: string;
+  pincode?: string;
+  gstNumber?: string;
+  isActive: boolean;
+  createdBy?: string;
+  updatedBy?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface BranchRequest {
+  branchCode: string;
+  branchName: string;
+  email?: string;
+  phone?: string;
+  address?: string;
+  city?: string;
+  state?: string;
+  country?: string;
+  pincode?: string;
+  gstNumber?: string;
+}
+
 export interface CreateUserRequest {
   firstName: string;
   lastName: string;
@@ -197,6 +230,7 @@ export interface CreateUserRequest {
   organizationId: number;
   password?: string;
   status: 'ACTIVE' | 'INACTIVE';
+  branchIds?: number[];
 }
 
 export type UpdateUserRequest = Omit<CreateUserRequest, 'organizationId'>;
@@ -243,6 +277,7 @@ export interface UserListItem {
   organizationName?: string;
   status?: boolean | string;
   createdAt?: string;
+  branchIds?: number[];
 }
 
 export interface Role {

@@ -23,6 +23,10 @@ public final class ContactSpecification {
         return (root, query, criteriaBuilder) -> criteriaBuilder.equal(root.get("organization").get("id"), organizationId);
     }
 
+    public static Specification<Contact> branch(Long branchId) {
+        return (root, query, criteriaBuilder) -> criteriaBuilder.equal(root.get("branch").get("id"), branchId);
+    }
+
     public static Specification<Contact> search(String search) {
         return (root, query, criteriaBuilder) -> {
             if (!StringUtils.hasText(search)) {

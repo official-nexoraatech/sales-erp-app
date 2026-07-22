@@ -29,6 +29,10 @@ public class Warehouse extends BaseEntity {
     @JoinColumn(name = "organization_id", nullable = false)
     private Organization organization;
 
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "branch_id", nullable = false)
+    private Branch branch;
+
     @Column(nullable = false, length = 100)
     private String name;
 

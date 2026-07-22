@@ -2,6 +2,7 @@ package com.nexoraa.billtop.service;
 
 import com.nexoraa.billtop.dto.contact.excel.ContactExcelImportMessageDto;
 import com.nexoraa.billtop.dto.contact.excel.ContactExcelImportResponseDto;
+import com.nexoraa.billtop.entity.Branch;
 import com.nexoraa.billtop.entity.Contact;
 import com.nexoraa.billtop.entity.Address;
 import com.nexoraa.billtop.entity.Organization;
@@ -10,6 +11,7 @@ import com.nexoraa.billtop.exception.BadRequestException;
 import com.nexoraa.billtop.repository.AddressRepository;
 import com.nexoraa.billtop.repository.ContactRepository;
 import com.nexoraa.billtop.repository.StateRepository;
+import com.nexoraa.billtop.security.CurrentBranchService;
 import com.nexoraa.billtop.security.CurrentOrganizationService;
 import org.apache.poi.ss.usermodel.BorderStyle;
 import org.apache.poi.ss.usermodel.Cell;
@@ -80,17 +82,20 @@ public class ContactExcelService {
     private final AddressRepository addressRepository;
     private final StateRepository stateRepository;
     private final CurrentOrganizationService currentOrganizationService;
+    private final CurrentBranchService currentBranchService;
 
     public ContactExcelService(
             ContactRepository contactRepository,
             AddressRepository addressRepository,
             StateRepository stateRepository,
-            CurrentOrganizationService currentOrganizationService
+            CurrentOrganizationService currentOrganizationService,
+            CurrentBranchService currentBranchService
     ) {
         this.contactRepository = contactRepository;
         this.addressRepository = addressRepository;
         this.stateRepository = stateRepository;
         this.currentOrganizationService = currentOrganizationService;
+        this.currentBranchService = currentBranchService;
     }
 
     public byte[] generateTemplate() {
@@ -123,6 +128,8 @@ public class ContactExcelService {
 
         Long organizationId = currentOrganizationService.getOrganizationId();
         Organization organization = currentOrganizationService.getOrganizationReference();
+        Long branchId = currentBranchService.getBranchId();
+        Branch branch = currentBranchService.getBranchReference();
         ContactExcelImportResponseDto response = ContactExcelImportResponseDto.builder().build();
         DataFormatter formatter = new DataFormatter();
 
@@ -132,7 +139,7 @@ public class ContactExcelService {
                 throw new BadRequestException("Workbook must contain a contact sheet", "INVALID_CONTACT_EXCEL_FORMAT");
             }
 
-            importRows(sheet, formatter, organizationId, organization, response);
+            importRows(sheet, formatter, organizationId, organization, branchId, branch, response);
             response.setFailedRows((int) response.getErrors().stream()
                     .map(ContactExcelImportMessageDto::getRowNumber)
                     .distinct()
@@ -148,6 +155,8 @@ public class ContactExcelService {
             DataFormatter formatter,
             Long organizationId,
             Organization organization,
+            Long branchId,
+            Branch branch,
             ContactExcelImportResponseDto response
     ) {
         for (int rowIndex = 1; rowIndex <= sheet.getLastRowNum(); rowIndex++) {
@@ -184,11 +193,12 @@ public class ContactExcelService {
 
             String email = text(row, EMAIL, formatter);
             String mobile = text(row, MOBILE, formatter);
-            Contact contact = findExistingContact(contactType, mobile, email, firstName, lastName, organizationId)
-                    .orElseGet(() -> newContact(organization));
+            Contact contact = findExistingContact(contactType, mobile, email, firstName, lastName, organizationId, branchId)
+                    .orElseGet(() -> newContact(organization, branch));
             boolean created = contact.getId() == null;
 
             contact.setOrganization(organization);
+            contact.setBranch(branch);
             contact.setContactType(contactType);
             contact.setFirstName(limit(firstName, 100));
             contact.setLastName(limit(lastName, 100));
@@ -229,46 +239,52 @@ public class ContactExcelService {
             String email,
             String firstName,
             String lastName,
-            Long organizationId
+            Long organizationId,
+            Long branchId
     ) {
         if (StringUtils.hasText(mobile)) {
-            Optional<Contact> contact = contactRepository.findFirstByContactTypeAndMobileAndOrganizationIdAndStatus(
+            Optional<Contact> contact = contactRepository.findFirstByContactTypeAndMobileAndOrganizationIdAndBranchIdAndStatus(
                     contactType,
                     mobile,
                     organizationId,
+                    branchId,
             com.nexoraa.billtop.enums.Status.ACTIVE);
             if (contact.isPresent()) {
                 return contact;
             }
         }
         if (StringUtils.hasText(email)) {
-            Optional<Contact> contact = contactRepository.findFirstByContactTypeAndEmailIgnoreCaseAndOrganizationIdAndStatus(
+            Optional<Contact> contact = contactRepository.findFirstByContactTypeAndEmailIgnoreCaseAndOrganizationIdAndBranchIdAndStatus(
                     contactType,
                     email,
                     organizationId,
+                    branchId,
             com.nexoraa.billtop.enums.Status.ACTIVE);
             if (contact.isPresent()) {
                 return contact;
             }
         }
         if (StringUtils.hasText(lastName)) {
-            return contactRepository.findFirstByContactTypeAndFirstNameIgnoreCaseAndLastNameIgnoreCaseAndOrganizationIdAndStatus(
+            return contactRepository.findFirstByContactTypeAndFirstNameIgnoreCaseAndLastNameIgnoreCaseAndOrganizationIdAndBranchIdAndStatus(
                     contactType,
                     firstName,
                     lastName,
                     organizationId,
+                    branchId,
             com.nexoraa.billtop.enums.Status.ACTIVE);
         }
-        return contactRepository.findFirstByContactTypeAndFirstNameIgnoreCaseAndOrganizationIdAndStatus(
+        return contactRepository.findFirstByContactTypeAndFirstNameIgnoreCaseAndOrganizationIdAndBranchIdAndStatus(
                 contactType,
                 firstName,
                 organizationId,
+                branchId,
         com.nexoraa.billtop.enums.Status.ACTIVE);
     }
 
-    private Contact newContact(Organization organization) {
+    private Contact newContact(Organization organization, Branch branch) {
         Contact contact = new Contact();
         contact.setOrganization(organization);
+        contact.setBranch(branch);
         contact.setStatus(com.nexoraa.billtop.enums.Status.ACTIVE);
         contact.setIsWholesale(false);
         return contact;

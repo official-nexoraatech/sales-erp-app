@@ -14,6 +14,7 @@ public interface SupplierMapper {
 
     @Mapping(target = "id", ignore = true)
     @Mapping(target = "organization", ignore = true)
+    @Mapping(target = "branch", ignore = true)
     @Mapping(target = "contactType", constant = "SUPPLIER")
     @Mapping(target = "phone", ignore = true)
     @Mapping(target = "whatsappNo", ignore = true)
@@ -27,6 +28,7 @@ public interface SupplierMapper {
 
     @Mapping(target = "id", ignore = true)
     @Mapping(target = "organization", ignore = true)
+    @Mapping(target = "branch", ignore = true)
     @Mapping(target = "contactType", ignore = true)
     @Mapping(target = "phone", ignore = true)
     @Mapping(target = "whatsappNo", ignore = true)

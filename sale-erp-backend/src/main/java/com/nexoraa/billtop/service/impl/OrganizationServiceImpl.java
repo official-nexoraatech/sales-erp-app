@@ -6,6 +6,7 @@ import com.nexoraa.billtop.dto.organization.OrganizationAddressRequestDto;
 import com.nexoraa.billtop.dto.organization.OrganizationRequestDto;
 import com.nexoraa.billtop.dto.organization.OrganizationResponseDto;
 import com.nexoraa.billtop.entity.Address;
+import com.nexoraa.billtop.entity.Branch;
 import com.nexoraa.billtop.entity.Organization;
 import com.nexoraa.billtop.entity.State;
 import com.nexoraa.billtop.enums.Status;
@@ -15,6 +16,7 @@ import com.nexoraa.billtop.mapper.OrganizationMapper;
 import com.nexoraa.billtop.repository.AddressRepository;
 import com.nexoraa.billtop.repository.OrganizationRepository;
 import com.nexoraa.billtop.repository.StateRepository;
+import com.nexoraa.billtop.service.BranchService;
 import com.nexoraa.billtop.service.CustomerService;
 import com.nexoraa.billtop.service.FileStorageService;
 import com.nexoraa.billtop.service.OrganizationService;
@@ -43,6 +45,7 @@ public class OrganizationServiceImpl implements OrganizationService {
     private final OrganizationMapper organizationMapper;
     private final FileStorageService fileStorageService;
     private final CustomerService customerService;
+    private final BranchService branchService;
 
     public OrganizationServiceImpl(
             OrganizationRepository organizationRepository,
@@ -50,7 +53,8 @@ public class OrganizationServiceImpl implements OrganizationService {
             StateRepository stateRepository,
             OrganizationMapper organizationMapper,
             FileStorageService fileStorageService,
-            CustomerService customerService
+            CustomerService customerService,
+            BranchService branchService
     ) {
         this.organizationRepository = organizationRepository;
         this.addressRepository = addressRepository;
@@ -58,6 +62,7 @@ public class OrganizationServiceImpl implements OrganizationService {
         this.organizationMapper = organizationMapper;
         this.fileStorageService = fileStorageService;
         this.customerService = customerService;
+        this.branchService = branchService;
     }
 
     @Override
@@ -68,7 +73,8 @@ public class OrganizationServiceImpl implements OrganizationService {
         }
         Organization organization = organizationRepository.save(organizationMapper.toEntity(request));
         saveAddress(organization, request.getAddress());
-        customerService.createWalkInCustomerForOrganization(organization);
+        Branch mainBranch = branchService.createDefaultBranch(organization);
+        customerService.createWalkInCustomerForOrganization(organization, mainBranch);
     }
 
     @Override

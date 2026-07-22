@@ -18,6 +18,12 @@ public interface WarehouseRepository extends JpaRepository<Warehouse, Long>, Jpa
     Status status);
 
     Optional<Warehouse> findByIdAndOrganizationIdAndStatus(Long id, Long organizationId, Status status);
+
+    Optional<Warehouse> findByIdAndOrganizationIdAndBranchIdAndStatus(
+            Long id,
+            Long organizationId,
+            Long branchId,
+            Status status);
 }
 
 

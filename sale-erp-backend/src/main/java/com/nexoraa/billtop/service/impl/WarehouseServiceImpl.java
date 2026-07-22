@@ -14,6 +14,7 @@ import com.nexoraa.billtop.repository.ItemPriceRepository;
 import com.nexoraa.billtop.repository.ItemPriceSummaryProjection;
 import com.nexoraa.billtop.repository.StockRepository;
 import com.nexoraa.billtop.repository.WarehouseRepository;
+import com.nexoraa.billtop.security.CurrentBranchService;
 import com.nexoraa.billtop.security.CurrentOrganizationService;
 import com.nexoraa.billtop.service.WarehouseService;
 import com.nexoraa.billtop.specification.MasterDataSpecification;
@@ -39,6 +40,7 @@ public class WarehouseServiceImpl implements WarehouseService {
     private final WarehouseMapper warehouseMapper;
     private final TransactionSupport support;
     private final CurrentOrganizationService currentOrganizationService;
+    private final CurrentBranchService currentBranchService;
 
     public WarehouseServiceImpl(
             WarehouseRepository warehouseRepository,
@@ -46,7 +48,8 @@ public class WarehouseServiceImpl implements WarehouseService {
             ItemPriceRepository itemPriceRepository,
             WarehouseMapper warehouseMapper,
             TransactionSupport support,
-            CurrentOrganizationService currentOrganizationService
+            CurrentOrganizationService currentOrganizationService,
+            CurrentBranchService currentBranchService
     ) {
         this.warehouseRepository = warehouseRepository;
         this.stockRepository = stockRepository;
@@ -54,6 +57,7 @@ public class WarehouseServiceImpl implements WarehouseService {
         this.warehouseMapper = warehouseMapper;
         this.support = support;
         this.currentOrganizationService = currentOrganizationService;
+        this.currentBranchService = currentBranchService;
     }
 
     @Override
@@ -69,6 +73,7 @@ public class WarehouseServiceImpl implements WarehouseService {
         }
         Warehouse warehouse = warehouseMapper.toEntity(request);
         warehouse.setOrganization(organization);
+        warehouse.setBranch(currentBranchService.getBranchReference());
         return IdResponseDto.builder().id(warehouseRepository.save(warehouse).getId()).build();
     }
 
@@ -77,6 +82,7 @@ public class WarehouseServiceImpl implements WarehouseService {
     public List<WarehouseResponseDto> getWarehouses(String search) {
         Specification<Warehouse> specification = MasterDataSpecification.<Warehouse>active()
                 .and(MasterDataSpecification.organization(currentOrganizationService.getOrganizationId()))
+                .and(MasterDataSpecification.branch(currentBranchService.getBranchId()))
                 .and(MasterDataSpecification.search(search, "name", "warehouseCode", "address"));
         List<Warehouse> warehouses = warehouseRepository.findAll(specification, Sort.by(Sort.Direction.ASC, "name"));
         return toEnrichedResponses(warehouses);
@@ -113,9 +119,10 @@ public class WarehouseServiceImpl implements WarehouseService {
     }
 
     private Warehouse getActiveWarehouse(Long id) {
-        return warehouseRepository.findByIdAndOrganizationIdAndStatus(
+        return warehouseRepository.findByIdAndOrganizationIdAndBranchIdAndStatus(
                         id,
                         currentOrganizationService.getOrganizationId(),
+                        currentBranchService.getBranchId(),
                 com.nexoraa.billtop.enums.Status.ACTIVE)
                 .orElseThrow(() -> new ResourceNotFoundException(ErrorMessage.WAREHOUSE_NOT_FOUND, "WAREHOUSE_NOT_FOUND"));
     }

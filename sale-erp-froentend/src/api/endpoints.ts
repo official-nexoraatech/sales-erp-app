@@ -9,6 +9,8 @@ import type { Carrier, CreateCarrierRequest, UpdateCarrierRequest } from '../typ
 import type {
   BankAccount,
   BankAccountRequest,
+  Branch,
+  BranchRequest,
   CashSummary,
   ChangePasswordRequest,
   Country,
@@ -89,6 +91,8 @@ import type {
 export type {
   BankAccount,
   BankAccountRequest,
+  Branch,
+  BranchRequest,
   CashSummary,
   ChangePasswordRequest,
   Country,
@@ -338,6 +342,23 @@ export const warehouseApi = {
     axiosClient.put<ApiResponse<void>, ApiResponse<void>>(`/api/v1/warehouses/${id}`, payload),
   delete: (id: number) =>
     axiosClient.delete<ApiResponse<void>, ApiResponse<void>>(`/api/v1/warehouses/${id}`),
+};
+
+export const branchApi = {
+  getAll: (search = '') =>
+    axiosClient.get<ApiResponse<Branch[]>, ApiResponse<Branch[]>>('/api/v1/branches', { params: { search } }),
+  getByOrganizationId: (organizationId: number) =>
+    axiosClient.get<ApiResponse<Branch[]>, ApiResponse<Branch[]>>(`/api/v1/branches/organization/${organizationId}`),
+  getById: (id: number) =>
+    axiosClient.get<ApiResponse<Branch>, ApiResponse<Branch>>(`/api/v1/branches/${id}`),
+  create: (payload: BranchRequest) =>
+    axiosClient.post<ApiResponse<void>, ApiResponse<void>>('/api/v1/branches', payload),
+  update: (id: number, payload: BranchRequest) =>
+    axiosClient.put<ApiResponse<void>, ApiResponse<void>>(`/api/v1/branches/${id}`, payload),
+  delete: (id: number) =>
+    axiosClient.delete<ApiResponse<void>, ApiResponse<void>>(`/api/v1/branches/${id}`),
+  getMine: () =>
+    axiosClient.get<ApiResponse<Branch[]>, ApiResponse<Branch[]>>('/api/v1/users/me/branches'),
 };
 
 export const excelImportApi = {

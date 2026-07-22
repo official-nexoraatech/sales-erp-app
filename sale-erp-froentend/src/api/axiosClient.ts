@@ -1,6 +1,7 @@
 import axios, { AxiosError } from 'axios';
 import type { AxiosInstance, InternalAxiosRequestConfig } from 'axios';
 import { useAuthStore } from '../store/authStore';
+import { useBranchStore } from '../store/branchStore';
 import toast from 'react-hot-toast';
 import type { ApiErrorResponse } from './apiResponse';
 
@@ -26,6 +27,10 @@ axiosClient.interceptors.request.use(
     const token = auth.token;
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
+    }
+    const selectedBranchId = useBranchStore.getState().selectedBranchId;
+    if (selectedBranchId) {
+      config.headers['X-Branch-Id'] = String(selectedBranchId);
     }
     return config;
   },

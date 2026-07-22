@@ -50,6 +50,13 @@ public class ErrorMessage {
     public static final String WAREHOUSE_NOT_FOUND = "Warehouse not found";
     public static final String WAREHOUSE_ALREADY_EXISTS = "Warehouse already exists";
 
+    // Branch Errors
+    public static final String BRANCH_NOT_FOUND = "Branch not found";
+    public static final String BRANCH_ALREADY_EXISTS = "Branch already exists";
+    public static final String BRANCH_REQUIRED = "Branch is required";
+    public static final String BRANCH_ACCESS_DENIED = "You do not have access to the selected branch";
+    public static final String BRANCH_NOT_IN_ORGANIZATION = "Branch does not belong to your organization";
+
     // Carrier Errors
     public static final String CARRIER_ALREADY_EXISTS = "Carrier already exists";
 

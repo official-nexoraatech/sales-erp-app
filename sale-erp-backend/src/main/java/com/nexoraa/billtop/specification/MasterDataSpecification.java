@@ -19,6 +19,10 @@ public final class MasterDataSpecification {
         return (root, query, criteriaBuilder) -> criteriaBuilder.equal(root.get("organization").get("id"), organizationId);
     }
 
+    public static <T> Specification<T> branch(Long branchId) {
+        return (root, query, criteriaBuilder) -> criteriaBuilder.equal(root.get("branch").get("id"), branchId);
+    }
+
     public static <T> Specification<T> search(String search, String... fields) {
         return (root, query, criteriaBuilder) -> {
             if (!StringUtils.hasText(search)) {

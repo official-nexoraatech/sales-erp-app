@@ -43,7 +43,7 @@ public class AdminPermissionController {
     public ResponseEntity<ApiResponseDto<Map<String, List<PermissionSummaryResponseDto>>>> getAllPermissions() {
         return ResponseEntity.ok(ApiResponseDto.success(
                 ResponseMessage.PERMISSIONS_RETRIEVED,
-                permissionManagementService.getAllDatabasePermissionsGroupedByName()
+                permissionManagementService.getFullPermissionCatalogGroupedByName()
         ));
     }
 
