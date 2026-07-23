@@ -9,6 +9,7 @@ import com.nexoraa.billtop.dto.report.ExpenseReportResponseDto;
 import com.nexoraa.billtop.dto.report.ExpiredItemResponseDto;
 import com.nexoraa.billtop.dto.report.GstReportResponseDto;
 import com.nexoraa.billtop.dto.report.InventoryValuationResponseDto;
+import com.nexoraa.billtop.dto.report.ItemInvoiceLineResponseDto;
 import com.nexoraa.billtop.dto.report.ItemTransactionResponseDto;
 import com.nexoraa.billtop.dto.report.PaymentReportResponseDto;
 import com.nexoraa.billtop.dto.report.ProfitLossReportResponseDto;
@@ -25,6 +26,7 @@ import com.nexoraa.billtop.entity.Item;
 import com.nexoraa.billtop.entity.ItemBatch;
 import com.nexoraa.billtop.entity.Payment;
 import com.nexoraa.billtop.entity.Purchase;
+import com.nexoraa.billtop.entity.PurchaseItem;
 import com.nexoraa.billtop.entity.PurchasePayment;
 import com.nexoraa.billtop.entity.PurchaseReturn;
 import com.nexoraa.billtop.entity.Sale;
@@ -45,6 +47,7 @@ import com.nexoraa.billtop.repository.ItemBatchRepository;
 import com.nexoraa.billtop.repository.ItemPriceRepository;
 import com.nexoraa.billtop.repository.OrganizationRepository;
 import com.nexoraa.billtop.repository.PaymentRepository;
+import com.nexoraa.billtop.repository.PurchaseItemRepository;
 import com.nexoraa.billtop.repository.PurchasePaymentRepository;
 import com.nexoraa.billtop.repository.PurchaseRepository;
 import com.nexoraa.billtop.repository.PurchaseReturnRepository;
@@ -98,6 +101,7 @@ public class ReportServiceImpl implements ReportService {
     private final StockTransactionRepository stockTransactionRepository;
     private final ItemBatchRepository itemBatchRepository;
     private final OrganizationRepository organizationRepository;
+    private final PurchaseItemRepository purchaseItemRepository;
 
     public ReportServiceImpl(
             SaleRepository saleRepository,
@@ -120,7 +124,8 @@ public class ReportServiceImpl implements ReportService {
             BankAccountRepository bankAccountRepository,
             StockTransactionRepository stockTransactionRepository,
             ItemBatchRepository itemBatchRepository,
-            OrganizationRepository organizationRepository
+            OrganizationRepository organizationRepository,
+            PurchaseItemRepository purchaseItemRepository
     ) {
         this.saleRepository = saleRepository;
         this.purchaseRepository = purchaseRepository;
@@ -143,6 +148,7 @@ public class ReportServiceImpl implements ReportService {
         this.stockTransactionRepository = stockTransactionRepository;
         this.itemBatchRepository = itemBatchRepository;
         this.organizationRepository = organizationRepository;
+        this.purchaseItemRepository = purchaseItemRepository;
     }
 
     @Override
@@ -173,6 +179,86 @@ public class ReportServiceImpl implements ReportService {
                 .purchaseCount(purchases.size())
                 .records(purchases.stream().map(this::toPurchaseRecord).toList())
                 .build();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<ItemInvoiceLineResponseDto> getItemPurchaseReport(
+            LocalDate fromDate, LocalDate toDate, Long supplierId, Long itemId, Long brandId, Long warehouseId
+    ) {
+        List<ItemInvoiceLineResponseDto> lines = new ArrayList<>();
+        for (Purchase purchase : purchasesBetween(fromDate, toDate, supplierId)) {
+            if (!matchesWarehouse(purchase.getWarehouse(), warehouseId)) {
+                continue;
+            }
+            for (PurchaseItem line : purchaseItemRepository.findByPurchaseId(purchase.getId())) {
+                if (!matchesItemFilters(line.getItem(), itemId, brandId)) {
+                    continue;
+                }
+                lines.add(ItemInvoiceLineResponseDto.builder()
+                        .date(purchase.getPurchaseDate())
+                        .invoiceNo(purchase.getPurchaseNo())
+                        .supplierName(support.contactDisplayName(purchase.getSupplier()))
+                        .warehouseName(purchase.getWarehouse() == null ? null : purchase.getWarehouse().getName())
+                        .itemName(line.getItem() == null ? null : line.getItem().getItemName())
+                        .brandName(line.getItem() == null || line.getItem().getBrand() == null
+                                ? null : line.getItem().getBrand().getName())
+                        .unitPrice(line.getUnitPrice())
+                        .quantity(line.getQty())
+                        .discountAmount(line.getDiscountAmount())
+                        .taxAmount(line.getTaxAmount())
+                        .totalAmount(line.getTotalAmount())
+                        .build());
+            }
+        }
+        return lines;
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<ItemInvoiceLineResponseDto> getItemSaleReport(
+            LocalDate fromDate, LocalDate toDate, Long customerId, Long itemId, Long brandId, Long warehouseId
+    ) {
+        List<ItemInvoiceLineResponseDto> lines = new ArrayList<>();
+        for (Sale sale : salesBetween(fromDate, toDate, customerId)) {
+            if (!matchesWarehouse(sale.getWarehouse(), warehouseId)) {
+                continue;
+            }
+            for (SalesItem line : salesItemRepository.findBySaleId(sale.getId())) {
+                if (!matchesItemFilters(line.getItem(), itemId, brandId)) {
+                    continue;
+                }
+                lines.add(ItemInvoiceLineResponseDto.builder()
+                        .date(sale.getInvoiceDate())
+                        .invoiceNo(sale.getInvoiceNo())
+                        .customerName(support.contactDisplayName(sale.getCustomer()))
+                        .warehouseName(sale.getWarehouse() == null ? null : sale.getWarehouse().getName())
+                        .itemName(line.getItem() == null ? null : line.getItem().getItemName())
+                        .brandName(line.getItem() == null || line.getItem().getBrand() == null
+                                ? null : line.getItem().getBrand().getName())
+                        .unitPrice(line.getUnitPrice())
+                        .quantity(line.getQty())
+                        .discountAmount(line.getDiscountAmount())
+                        .taxAmount(line.getTaxAmount())
+                        .totalAmount(line.getTotalAmount())
+                        .build());
+            }
+        }
+        return lines;
+    }
+
+    private boolean matchesWarehouse(Warehouse warehouse, Long warehouseId) {
+        return warehouseId == null || (warehouse != null && warehouseId.equals(warehouse.getId()));
+    }
+
+    private boolean matchesItemFilters(Item item, Long itemId, Long brandId) {
+        if (item == null) {
+            return false;
+        }
+        if (itemId != null && !itemId.equals(item.getId())) {
+            return false;
+        }
+        return brandId == null || (item.getBrand() != null && brandId.equals(item.getBrand().getId()));
     }
 
     @Override

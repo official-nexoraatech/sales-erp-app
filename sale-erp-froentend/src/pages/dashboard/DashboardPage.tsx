@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   ArrowDownCircle,
@@ -321,6 +321,14 @@ export const DashboardPage: React.FC = () => {
   );
   const { fromDate, toDate } = selectedDateRange;
   const dashboardDateParams = useMemo(() => ({ fromDate, toDate }), [fromDate, toDate]);
+
+  // Keep the From/To inputs showing the active preset's range so editing them
+  // starts from the right baseline instead of a stale leftover custom range.
+  useEffect(() => {
+    if (datePreset === 'custom') return;
+    setCustomFromDate(fromDate);
+    setCustomToDate(toDate);
+  }, [datePreset, fromDate, toDate]);
   const trendBuckets = useMemo(() => buildTrendBuckets(fromDate, toDate), [fromDate, toDate]);
 
   const canViewDashboard   = hasPermission(PERMISSIONS.DASHBOARD_VIEW);
@@ -540,9 +548,8 @@ export const DashboardPage: React.FC = () => {
             <input
               type="date"
               value={customFromDate}
-              disabled={datePreset !== 'custom'}
-              onChange={(event) => setCustomFromDate(event.target.value)}
-              className="h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100 disabled:bg-slate-50 disabled:text-slate-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:disabled:bg-slate-800 dark:focus:ring-sky-900/40"
+              onChange={(event) => { setCustomFromDate(event.target.value); setDatePreset('custom'); }}
+              className="h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:focus:ring-sky-900/40"
             />
           </label>
           <label className="block">
@@ -550,9 +557,8 @@ export const DashboardPage: React.FC = () => {
             <input
               type="date"
               value={customToDate}
-              disabled={datePreset !== 'custom'}
-              onChange={(event) => setCustomToDate(event.target.value)}
-              className="h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100 disabled:bg-slate-50 disabled:text-slate-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:disabled:bg-slate-800 dark:focus:ring-sky-900/40"
+              onChange={(event) => { setCustomToDate(event.target.value); setDatePreset('custom'); }}
+              className="h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:focus:ring-sky-900/40"
             />
           </label>
         </div>

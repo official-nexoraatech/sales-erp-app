@@ -474,9 +474,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   </div>
                 )}
 
-                {/* Submenu (expanded) */}
-                {!collapsed && item.submenu && expandedMenu === item.label && (
-                  <div className="mt-0.5 space-y-0.5 pl-7 pb-1">
+                {/* Submenu (expanded). Always mounted (never unmounted) once the sidebar
+                    isn't collapsed, and only hidden via CSS - the Google Translate widget
+                    only sweeps text once close to page load, so subcategory labels that
+                    only mount into the DOM on click never get translated. */}
+                {!collapsed && item.submenu && (
+                  <div className={`mt-0.5 space-y-0.5 pl-7 pb-1 ${expandedMenu === item.label ? '' : 'hidden'}`}>
                     {item.submenu.map((sub) => (
                       <Link
                         key={sub.label}

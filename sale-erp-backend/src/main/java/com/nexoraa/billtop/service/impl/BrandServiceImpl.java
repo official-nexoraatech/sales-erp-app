@@ -1,6 +1,7 @@
 package com.nexoraa.billtop.service.impl;
 
 import com.nexoraa.billtop.constants.ErrorMessage;
+import com.nexoraa.billtop.dto.PageResponseDto;
 import com.nexoraa.billtop.dto.brand.BrandRequestDto;
 import com.nexoraa.billtop.dto.brand.BrandResponseDto;
 import com.nexoraa.billtop.dto.common.IdResponseDto;
@@ -14,6 +15,8 @@ import com.nexoraa.billtop.repository.CategoryRepository;
 import com.nexoraa.billtop.security.CurrentOrganizationService;
 import com.nexoraa.billtop.service.BrandService;
 import com.nexoraa.billtop.specification.MasterDataSpecification;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
@@ -61,7 +64,7 @@ public class BrandServiceImpl implements BrandService {
 
     @Override
     @Transactional(readOnly = true)
-    public List<BrandResponseDto> getBrands(String search) {
+    public PageResponseDto<BrandResponseDto> getBrands(int page, int size, String search) {
         Specification<Brand> specification = MasterDataSpecification.<Brand>active()
                 .and((root, query, criteriaBuilder) -> criteriaBuilder.equal(
                         root.get("category").get("organization").get("id"),
@@ -69,10 +72,11 @@ public class BrandServiceImpl implements BrandService {
                 ))
                 .and((root, query, criteriaBuilder) -> criteriaBuilder.isFalse(root.get("isDeleted")))
                 .and(MasterDataSpecification.search(search, "name", "description"));
-        return brandRepository.findAll(specification, Sort.by(Sort.Direction.ASC, "name"))
-                .stream()
-                .map(brandMapper::toResponse)
-                .toList();
+        Page<Brand> brands = brandRepository.findAll(
+                specification,
+                PageRequest.of(page, size, Sort.by(Sort.Direction.ASC, "name"))
+        );
+        return PageResponseDto.from(brands.map(brandMapper::toResponse));
     }
 
     @Override

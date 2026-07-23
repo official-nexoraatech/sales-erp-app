@@ -8,6 +8,7 @@ import com.nexoraa.billtop.dto.report.ExpenseReportResponseDto;
 import com.nexoraa.billtop.dto.report.ExpiredItemResponseDto;
 import com.nexoraa.billtop.dto.report.GstReportResponseDto;
 import com.nexoraa.billtop.dto.report.InventoryValuationResponseDto;
+import com.nexoraa.billtop.dto.report.ItemInvoiceLineResponseDto;
 import com.nexoraa.billtop.dto.report.ItemTransactionResponseDto;
 import com.nexoraa.billtop.dto.report.PaymentReportResponseDto;
 import com.nexoraa.billtop.dto.report.ProfitLossReportResponseDto;
@@ -24,6 +25,14 @@ public interface ReportService {
     SummaryReportResponseDto<?> getSalesReport(LocalDate fromDate, LocalDate toDate, Long customerId);
 
     SummaryReportResponseDto<?> getPurchaseReport(LocalDate fromDate, LocalDate toDate, Long supplierId);
+
+    List<ItemInvoiceLineResponseDto> getItemPurchaseReport(
+            LocalDate fromDate, LocalDate toDate, Long supplierId, Long itemId, Long brandId, Long warehouseId
+    );
+
+    List<ItemInvoiceLineResponseDto> getItemSaleReport(
+            LocalDate fromDate, LocalDate toDate, Long customerId, Long itemId, Long brandId, Long warehouseId
+    );
 
     List<StockReportResponseDto> getStockReport();
 

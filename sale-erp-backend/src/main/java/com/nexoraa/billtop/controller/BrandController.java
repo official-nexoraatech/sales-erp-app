@@ -2,10 +2,12 @@ package com.nexoraa.billtop.controller;
 
 import com.nexoraa.billtop.constants.ResponseMessage;
 import com.nexoraa.billtop.dto.ApiResponseDto;
+import com.nexoraa.billtop.dto.PageResponseDto;
 import com.nexoraa.billtop.dto.brand.BrandRequestDto;
 import com.nexoraa.billtop.dto.brand.BrandResponseDto;
 import com.nexoraa.billtop.service.BrandService;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.Positive;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
@@ -39,10 +41,12 @@ public class BrandController {
     }
 
     @GetMapping
-    public ResponseEntity<ApiResponseDto<List<BrandResponseDto>>> getBrands(
+    public ResponseEntity<ApiResponseDto<PageResponseDto<BrandResponseDto>>> getBrands(
+            @RequestParam(defaultValue = "0") @Min(0) int page,
+            @RequestParam(defaultValue = "20") @Positive int size,
             @RequestParam(required = false) String search
     ) {
-        return ResponseEntity.ok(ApiResponseDto.success(ResponseMessage.BRANDS_RETRIEVED, brandService.getBrands(search)));
+        return ResponseEntity.ok(ApiResponseDto.success(ResponseMessage.BRANDS_RETRIEVED, brandService.getBrands(page, size, search)));
     }
 
     @GetMapping("/category/{categoryId}")

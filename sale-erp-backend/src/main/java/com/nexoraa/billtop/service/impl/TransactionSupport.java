@@ -221,15 +221,18 @@ class TransactionSupport {
                 item.getId(),
                 warehouse.getId(),
                 batch.getId()
-        ).orElseGet(() -> Stock.builder()
-                .item(item)
-                .warehouse(warehouse)
-                .batch(batch)
-                .availableQty(ZERO)
-                .reservedQty(ZERO)
-                .minimumStock(ZERO)
-                .reorderLevel(ZERO)
-                .build());
+        ).orElseGet(() -> {
+            BigDecimal inheritedMinimumStock = existingMinimumStockFor(item.getId());
+            return Stock.builder()
+                    .item(item)
+                    .warehouse(warehouse)
+                    .batch(batch)
+                    .availableQty(ZERO)
+                    .reservedQty(ZERO)
+                    .minimumStock(inheritedMinimumStock)
+                    .reorderLevel(inheritedMinimumStock)
+                    .build();
+        });
 
         stock.setAvailableQty(quantity(defaultZero(stock.getAvailableQty()).add(quantity)));
         stock.setReservedQty(quantity(defaultZero(stock.getReservedQty())));
@@ -237,6 +240,21 @@ class TransactionSupport {
         itemStockStatusService.refreshStatus(item);
         createStockTransaction(item, warehouse, batch, transactionType, referenceId, quantity, ZERO, savedStock.getAvailableQty(), remarks);
         return savedStock;
+    }
+
+    /**
+     * A new batch/warehouse stock row previously always started with a zero reorder
+     * threshold, so the low-stock alert only ever fired once an item hit zero rather
+     * than its configured minimum stock. Carry forward whatever minimum stock is
+     * already set on any other stock row for this item instead.
+     */
+    private BigDecimal existingMinimumStockFor(Long itemId) {
+        return stockRepository.findByItemId(itemId)
+                .stream()
+                .map(Stock::getMinimumStock)
+                .filter(value -> value != null && value.compareTo(ZERO) > 0)
+                .findFirst()
+                .orElse(ZERO);
     }
 
     Stock decreaseStock(
