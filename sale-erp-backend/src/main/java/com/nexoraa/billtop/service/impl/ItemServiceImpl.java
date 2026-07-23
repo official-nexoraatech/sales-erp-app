@@ -257,11 +257,19 @@ public class ItemServiceImpl implements ItemService {
                 .orElse(null);
         ItemBatch savedBatch = itemBatchRepository.save(buildBatch(savedItem, request, batch));
 
+        // If this exact (warehouse, batch) combination has no stock row yet, prefer
+        // reusing whatever stock row this item already has in that warehouse instead
+        // of creating a new one - otherwise an edit that touches an older item's
+        // latest batch (which may not be the batch tied to its real stock) silently
+        // forks a duplicate, near-empty stock row and orphans the real inventory.
         Stock stock = stockRepository.findFirstByItemIdAndWarehouseIdAndBatchId(
                         id,
                         warehouse.getId(),
                         savedBatch.getId()
                 )
+                .or(() -> stockRepository.findByItemIdAndWarehouseIdOrderByIdAsc(id, warehouse.getId())
+                        .stream()
+                        .findFirst())
                 .orElse(null);
         stockRepository.save(buildStock(savedItem, warehouse, savedBatch, request, stock));
         itemStockStatusService.refreshStatus(savedItem);
@@ -289,7 +297,7 @@ public class ItemServiceImpl implements ItemService {
     }
 
     private ItemStockResponseDto buildStockResponse(Item item) {
-        List<Stock> stocks = stockRepository.findByItemId(item.getId());
+        List<Stock> stocks = stockRepository.findByItemIdOrderByIdAsc(item.getId());
         BigDecimal availableQty = stocks.stream()
                 .map(Stock::getAvailableQty)
                 .map(this::defaultZero)
@@ -388,7 +396,7 @@ public class ItemServiceImpl implements ItemService {
     }
 
     private void applyStock(ItemDetailResponseDto response, Long itemId) {
-        List<Stock> stocks = stockRepository.findByItemId(itemId);
+        List<Stock> stocks = stockRepository.findByItemIdOrderByIdAsc(itemId);
         if (stocks.isEmpty()) {
             response.setOpeningQuantity(ZERO);
             response.setAvailableQty(ZERO);
@@ -469,7 +477,7 @@ public class ItemServiceImpl implements ItemService {
 
     private void applyListStock(ItemListResponseDto response, Long itemId, Long warehouseId) {
         List<Stock> stocks = warehouseId == null || warehouseId <= 0
-                ? stockRepository.findByItemId(itemId)
+                ? stockRepository.findByItemIdOrderByIdAsc(itemId)
                 : stockRepository.findByItemIdAndWarehouseIdOrderByIdAsc(itemId, warehouseId);
         BigDecimal availableQty = stocks.stream()
                 .map(Stock::getAvailableQty)

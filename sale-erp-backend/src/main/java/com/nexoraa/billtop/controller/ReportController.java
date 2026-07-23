@@ -10,6 +10,7 @@ import com.nexoraa.billtop.dto.report.ExpenseReportResponseDto;
 import com.nexoraa.billtop.dto.report.ExpiredItemResponseDto;
 import com.nexoraa.billtop.dto.report.GstReportResponseDto;
 import com.nexoraa.billtop.dto.report.InventoryValuationResponseDto;
+import com.nexoraa.billtop.dto.report.ItemInvoiceLineResponseDto;
 import com.nexoraa.billtop.dto.report.ItemTransactionResponseDto;
 import com.nexoraa.billtop.dto.report.PaymentReportResponseDto;
 import com.nexoraa.billtop.dto.report.ProfitLossReportResponseDto;
@@ -58,6 +59,36 @@ public class ReportController {
             @RequestParam(required = false) Long supplierId
     ) {
         return ResponseEntity.ok(ApiResponseDto.success(ResponseMessage.REPORT_RETRIEVED, reportService.getPurchaseReport(fromDate, toDate, supplierId)));
+    }
+
+    @GetMapping("/item-purchases")
+    public ResponseEntity<ApiResponseDto<List<ItemInvoiceLineResponseDto>>> getItemPurchaseReport(
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fromDate,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate toDate,
+            @RequestParam(required = false) Long supplierId,
+            @RequestParam(required = false) Long itemId,
+            @RequestParam(required = false) Long brandId,
+            @RequestParam(required = false) Long warehouseId
+    ) {
+        return ResponseEntity.ok(ApiResponseDto.success(
+                ResponseMessage.REPORT_RETRIEVED,
+                reportService.getItemPurchaseReport(fromDate, toDate, supplierId, itemId, brandId, warehouseId)
+        ));
+    }
+
+    @GetMapping("/item-sales")
+    public ResponseEntity<ApiResponseDto<List<ItemInvoiceLineResponseDto>>> getItemSaleReport(
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fromDate,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate toDate,
+            @RequestParam(required = false) Long customerId,
+            @RequestParam(required = false) Long itemId,
+            @RequestParam(required = false) Long brandId,
+            @RequestParam(required = false) Long warehouseId
+    ) {
+        return ResponseEntity.ok(ApiResponseDto.success(
+                ResponseMessage.REPORT_RETRIEVED,
+                reportService.getItemSaleReport(fromDate, toDate, customerId, itemId, brandId, warehouseId)
+        ));
     }
 
     @GetMapping("/stocks")

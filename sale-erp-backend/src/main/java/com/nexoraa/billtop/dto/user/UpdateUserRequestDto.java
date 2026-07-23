@@ -5,6 +5,7 @@ import com.nexoraa.billtop.enums.Status;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -36,7 +37,7 @@ public class UpdateUserRequestDto {
     @Size(max = 150, message = ValidationMessage.EMAIL_INVALID)
     private String email;
 
-    @Size(max = 20, message = ValidationMessage.MOBILE_INVALID)
+    @Pattern(regexp = "^$|^[0-9]{10,15}$", message = ValidationMessage.MOBILE_INVALID)
     private String mobileNo;
 
     @NotNull(message = ValidationMessage.ID_REQUIRED)

@@ -1,6 +1,7 @@
 package com.nexoraa.billtop.service.impl;
 
 import com.nexoraa.billtop.constants.ErrorMessage;
+import com.nexoraa.billtop.dto.PageResponseDto;
 import com.nexoraa.billtop.dto.category.CategoryRequestDto;
 import com.nexoraa.billtop.dto.category.CategoryResponseDto;
 import com.nexoraa.billtop.dto.common.IdResponseDto;
@@ -13,12 +14,12 @@ import com.nexoraa.billtop.repository.CategoryRepository;
 import com.nexoraa.billtop.security.CurrentOrganizationService;
 import com.nexoraa.billtop.service.CategoryService;
 import com.nexoraa.billtop.specification.MasterDataSpecification;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-
-import java.util.List;
 
 @Service
 public class CategoryServiceImpl implements CategoryService {
@@ -56,15 +57,16 @@ public class CategoryServiceImpl implements CategoryService {
 
     @Override
     @Transactional(readOnly = true)
-    public List<CategoryResponseDto> getCategories(String search) {
+    public PageResponseDto<CategoryResponseDto> getCategories(int page, int size, String search) {
         Specification<Category> specification = MasterDataSpecification.<Category>active()
                 .and(MasterDataSpecification.organization(currentOrganizationService.getOrganizationId()))
                 .and((root, query, criteriaBuilder) -> criteriaBuilder.isFalse(root.get("isDeleted")))
                 .and(MasterDataSpecification.search(search, "name", "description"));
-        return categoryRepository.findAll(specification, Sort.by(Sort.Direction.ASC, "name"))
-                .stream()
-                .map(categoryMapper::toResponse)
-                .toList();
+        Page<Category> categories = categoryRepository.findAll(
+                specification,
+                PageRequest.of(page, size, Sort.by(Sort.Direction.ASC, "name"))
+        );
+        return PageResponseDto.from(categories.map(categoryMapper::toResponse));
     }
 
     @Override
