@@ -89,6 +89,11 @@ public class ErrorMessage {
     public static final String SALE_ALREADY_CANCELLED = "Sales invoice is already cancelled";
     public static final String SALE_HAS_PAYMENTS = "Cannot delete a sale that has payments applied to it";
     public static final String PURCHASE_HAS_PAYMENTS = "Cannot delete a purchase that has payments applied to it";
+    public static final String PAYMENT_NOT_FOUND = "Payment not found";
+
+    // Payment Note Errors
+    public static final String PAYMENT_NOTE_NOT_FOUND = "Payment note not found";
+    public static final String INVALID_PAYMENT_NOTE_STATUS = "Invalid payment note status";
 
     // Role Errors
     public static final String ROLE_NOT_FOUND = "Role not found";

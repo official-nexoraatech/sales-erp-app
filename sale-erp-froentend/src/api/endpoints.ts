@@ -7,6 +7,14 @@ import type { SupplierDetail, SupplierListItem } from '../types/supplier.types';
 import type { CreateSupplierRequest, UpdateSupplierRequest } from '../types/supplier.types';
 import type { Carrier, CreateCarrierRequest, UpdateCarrierRequest } from '../types/carrier.types';
 import type {
+  PaymentNoteAssignRequest,
+  PaymentNoteAuditEntry,
+  PaymentNoteDetail,
+  PaymentNoteListItem,
+  PaymentNoteRequest,
+  PaymentNoteStatusUpdateRequest,
+} from '../types/payment-note.types';
+import type {
   BankAccount,
   BankAccountRequest,
   Branch,
@@ -168,6 +176,15 @@ export type {
   AssignUserPermissionsRequest,
   PermissionGroups,
 } from '../types/api.types';
+
+export type {
+  PaymentNoteAssignRequest,
+  PaymentNoteAuditEntry,
+  PaymentNoteDetail,
+  PaymentNoteListItem,
+  PaymentNoteRequest,
+  PaymentNoteStatusUpdateRequest,
+} from '../types/payment-note.types';
 
 const normalizeLocationResponse = <T,>(response: ApiResponse<T[]> | T[]): ApiResponse<T[]> => {
   if (Array.isArray(response)) {
@@ -578,6 +595,25 @@ export const paymentInApi = {
     axiosClient.put<ApiResponse<void>, ApiResponse<void>>(`/api/v1/payment-in/${id}`, payload),
   delete: (id: number) =>
     axiosClient.delete<ApiResponse<void>, ApiResponse<void>>(`/api/v1/payment-in/${id}`),
+};
+
+export const paymentNoteApi = {
+  getAll: (params?: any) =>
+    axiosClient.get<ApiResponse<PageResponse<PaymentNoteListItem>>, ApiResponse<PageResponse<PaymentNoteListItem>>>('/api/v1/payment-notes', { params }),
+  getById: (id: number) =>
+    axiosClient.get<ApiResponse<PaymentNoteDetail>, ApiResponse<PaymentNoteDetail>>(`/api/v1/payment-notes/${id}`),
+  create: (payload: PaymentNoteRequest) =>
+    axiosClient.post<ApiResponse<PaymentNoteDetail>, ApiResponse<PaymentNoteDetail>>('/api/v1/payment-notes', payload),
+  update: (id: number, payload: PaymentNoteRequest) =>
+    axiosClient.put<ApiResponse<void>, ApiResponse<void>>(`/api/v1/payment-notes/${id}`, payload),
+  updateStatus: (id: number, payload: PaymentNoteStatusUpdateRequest) =>
+    axiosClient.put<ApiResponse<void>, ApiResponse<void>>(`/api/v1/payment-notes/${id}/status`, payload),
+  assign: (id: number, payload: PaymentNoteAssignRequest) =>
+    axiosClient.put<ApiResponse<void>, ApiResponse<void>>(`/api/v1/payment-notes/${id}/assign`, payload),
+  delete: (id: number) =>
+    axiosClient.delete<ApiResponse<void>, ApiResponse<void>>(`/api/v1/payment-notes/${id}`),
+  getAuditTrail: (id: number) =>
+    axiosClient.get<ApiResponse<PaymentNoteAuditEntry[]>, ApiResponse<PaymentNoteAuditEntry[]>>(`/api/v1/payment-notes/${id}/audit`),
 };
 
 export const purchaseApi = {

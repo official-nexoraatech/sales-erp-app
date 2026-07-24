@@ -24,6 +24,9 @@ import { PaymentInListPage } from '../pages/sales/payment-in/PaymentInListPage';
 import { PaymentInCreatePage } from '../pages/sales/payment-in/PaymentInCreatePage';
 import { PaymentInEditPage } from '../pages/sales/payment-in/PaymentInEditPage';
 import { PaymentInViewPage } from '../pages/sales/payment-in/PaymentInViewPage';
+import { PaymentNoteListPage } from '../pages/sales/payment-notes/PaymentNoteListPage';
+import { PaymentNoteCreatePage } from '../pages/sales/payment-notes/PaymentNoteCreatePage';
+import { PaymentNoteViewPage } from '../pages/sales/payment-notes/PaymentNoteViewPage';
 import { SaleOrderListPage } from '../pages/sales/orders/SaleOrderListPage';
 import { SaleOrderCreatePage } from '../pages/sales/orders/SaleOrderCreatePage';
 import { SaleOrderEditPage } from '../pages/sales/orders/SaleOrderEditPage';
@@ -245,6 +248,9 @@ export const router = createBrowserRouter([
   { path: '/sales/payment-in/create', element: <ProtectedRoute permissions={PERMISSIONS.PAYMENT_IN_CREATE}><AppLayout><PaymentInCreatePage /></AppLayout></ProtectedRoute> },
   { path: '/sales/payment-in/:id/edit', element: <ProtectedRoute permissions={[PERMISSIONS.PAYMENT_IN_UPDATE, PERMISSIONS.PAYMENT_IN_VIEW]} requireAll><AppLayout><PaymentInEditPage /></AppLayout></ProtectedRoute> },
   { path: '/sales/payment-in/:id', element: <ProtectedRoute permissions={PERMISSIONS.PAYMENT_IN_VIEW}><AppLayout><PaymentInViewPage /></AppLayout></ProtectedRoute> },
+  { path: '/sales/payment-notes', element: <ProtectedRoute permissions={PERMISSIONS.PAYMENT_NOTE_VIEW}><AppLayout><PaymentNoteListPage /></AppLayout></ProtectedRoute> },
+  { path: '/sales/payment-notes/create', element: <ProtectedRoute permissions={PERMISSIONS.PAYMENT_NOTE_CREATE}><AppLayout><PaymentNoteCreatePage /></AppLayout></ProtectedRoute> },
+  { path: '/sales/payment-notes/:id', element: <ProtectedRoute permissions={PERMISSIONS.PAYMENT_NOTE_VIEW}><AppLayout><PaymentNoteViewPage /></AppLayout></ProtectedRoute> },
   { path: '/sales/orders', element: <ProtectedRoute permissions={PERMISSIONS.SALES_VIEW}><AppLayout><SaleOrderListPage /></AppLayout></ProtectedRoute> },
   { path: '/sales/orders/create', element: <ProtectedRoute permissions={PERMISSIONS.SALES_CREATE}><AppLayout><SaleOrderCreatePage /></AppLayout></ProtectedRoute> },
   { path: '/sales/orders/:id/edit', element: <ProtectedRoute permissions={[PERMISSIONS.SALES_UPDATE, PERMISSIONS.SALES_VIEW]} requireAll><AppLayout><SaleOrderEditPage /></AppLayout></ProtectedRoute> },
