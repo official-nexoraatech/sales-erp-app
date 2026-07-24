@@ -66,7 +66,7 @@ export const BranchSwitcher: React.FC = () => {
       <button
         type="button"
         onClick={() => setIsOpen((current) => !current)}
-        className="flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 px-2.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-700"
+        className="flex h-8 items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50 px-2.5 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-100 dark:border-indigo-800 dark:bg-indigo-950/40 dark:text-indigo-300 dark:hover:bg-indigo-900/40"
         title="Switch branch"
         aria-haspopup="menu"
         aria-expanded={isOpen}
@@ -91,7 +91,7 @@ export const BranchSwitcher: React.FC = () => {
                 onClick={() => selectBranch(branch.id)}
                 className={`flex w-full items-center justify-between gap-2 px-4 py-2.5 text-left text-sm transition ${
                   selected
-                    ? 'bg-blue-50 font-semibold text-blue-700 dark:bg-blue-900/20 dark:text-blue-400'
+                    ? 'bg-indigo-50 font-semibold text-indigo-700 dark:bg-indigo-900/20 dark:text-indigo-400'
                     : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-700 dark:hover:text-slate-100'
                 }`}
               >

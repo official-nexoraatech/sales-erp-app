@@ -24,6 +24,8 @@ const STATUS_MAP: Record<string, { variant: BadgeVariant; label: string }> = {
   REJECTED:     { variant: 'danger',     label: 'Rejected' },
   PARTIAL:      { variant: 'warning',    label: 'Partial' },
   OPEN:         { variant: 'info',       label: 'Open' },
+  IN_PROGRESS:  { variant: 'processing', label: 'In Progress' },
+  RESOLVED:     { variant: 'success',    label: 'Resolved' },
   CLOSED:       { variant: 'neutral',    label: 'Closed' },
   CONFIRMED:    { variant: 'info',       label: 'Confirmed' },
   SHIPPED:      { variant: 'processing', label: 'Shipped' },

@@ -136,6 +136,16 @@ public class ResponseMessage {
     public static final String PAYMENT_OUT_UPDATED = "Payment out updated successfully";
     public static final String PAYMENT_OUT_DELETED = "Payment out deleted successfully";
 
+    // Payment Note Messages
+    public static final String PAYMENT_NOTE_CREATED = "Payment note created successfully";
+    public static final String PAYMENT_NOTE_UPDATED = "Payment note updated successfully";
+    public static final String PAYMENT_NOTE_DELETED = "Payment note deleted successfully";
+    public static final String PAYMENT_NOTE_RETRIEVED = "Payment note retrieved successfully";
+    public static final String PAYMENT_NOTES_RETRIEVED = "Payment notes retrieved successfully";
+    public static final String PAYMENT_NOTE_STATUS_UPDATED = "Payment note status updated successfully";
+    public static final String PAYMENT_NOTE_ASSIGNED = "Payment note assigned successfully";
+    public static final String PAYMENT_NOTE_AUDIT_RETRIEVED = "Payment note audit trail retrieved successfully";
+
     // Stock Movement Messages
     public static final String STOCK_ADJUSTMENT_COMPLETED = "Stock adjustment completed";
     public static final String STOCK_ADJUSTMENT_UPDATED = "Stock adjustment updated successfully";

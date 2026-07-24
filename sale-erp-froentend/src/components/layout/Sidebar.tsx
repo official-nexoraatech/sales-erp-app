@@ -79,6 +79,7 @@ const menuItems: MenuItem[] = [
       { label: 'Invoices', href: '/sales/invoices', icon: <ShoppingCart size={18} />, access: rule(FEATURE_PERMISSIONS.sales.view) },
       { label: 'Quotations', href: '/sales/quotations', icon: <ShoppingCart size={18} />, access: rule(FEATURE_PERMISSIONS.sales.view) },
       { label: 'Payment In', href: '/sales/payment-in', icon: <ShoppingCart size={18} />, access: rule(FEATURE_PERMISSIONS.paymentIn.view) },
+      { label: 'Payment Notes', href: '/sales/payment-notes', icon: <ShoppingCart size={18} />, access: rule(FEATURE_PERMISSIONS.paymentNote.view) },
       { label: 'Sale Orders', href: '/sales/orders', icon: <ShoppingCart size={18} />, access: rule(FEATURE_PERMISSIONS.sales.view) },
     ],
   },
