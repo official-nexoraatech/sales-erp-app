@@ -78,7 +78,6 @@ export const StockAdjustmentCreatePage: React.FC = () => {
         <div className="border-b px-5 py-4"><h1 className="text-xl font-semibold text-gray-900">{isEdit ? 'Edit Stock Adjustment' : 'Stock Adjustment Details'}</h1></div>
         <div className="grid grid-cols-1 gap-4 p-5 md:grid-cols-3">
           <label className="text-sm text-gray-600">Date<input type="date" className={`${inputClass} mt-1`} value={adjustmentDate} onChange={(event) => setAdjustmentDate(event.target.value)} /></label>
-          <label className="text-sm text-gray-600">Adjustment Code<div className="mt-1 flex"><input className={`${inputClass} rounded-r-none`} value={adjustment.data?.data?.adjustmentNo || 'SA/'} readOnly /><span className="flex h-10 items-center border-y border-gray-300 px-3">#</span><input className={`${inputClass} rounded-l-none`} value={isEdit ? id : 'New'} readOnly /></div></label>
           <label className="text-sm text-gray-600">Reference No.<input className={`${inputClass} mt-1`} placeholder="(Optional)" value={referenceNo} onChange={(event) => setReferenceNo(event.target.value)} /></label>
         </div>
         <h2 className="border-y px-5 py-4 text-lg font-semibold">Items</h2>
