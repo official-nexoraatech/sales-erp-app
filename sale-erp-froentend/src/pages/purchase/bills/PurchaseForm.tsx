@@ -251,17 +251,19 @@ export const PurchaseForm: React.FC<Props> = ({ initial, submitText, loading, on
         <label className="text-sm text-gray-600">Date
           <input type="date" className={`${inputClass} mt-1`} value={purchaseDate} onChange={(event) => setPurchaseDate(event.target.value)} />
         </label>
-        <label className="text-sm text-gray-600">{isOrder ? 'Shipping Carrier' : 'Purchase Code'}
-          {isOrder ? (
+        {isOrder && (
+          <label className="text-sm text-gray-600">Shipping Carrier
             <select className={`${inputClass} mt-1`} value={carrierId} onChange={(event) => setCarrierId(Number(event.target.value))}>
               <option value={0}>Choose one thing</option>
               {carriers.data?.data?.content.map((carrier) => <option key={carrier.id} value={carrier.id}>{carrier.name}</option>)}
             </select>
-          ) : <div className="mt-1 flex"><input className={`${inputClass} rounded-r-none`} value="PB/" readOnly /><span className="flex h-10 items-center border-y border-gray-300 px-3">#</span><input className={`${inputClass} rounded-l-none`} value="3" readOnly /></div>}
-        </label>
-        <label className="text-sm text-gray-600">{isOrder ? 'Order ID' : 'Ref No.'}
-          {isOrder ? <input className={`${inputClass} mt-1`} value={loadedBill?.purchaseNo || initial?.purchaseNo || 'New (unsaved)'} readOnly /> : <input className={`${inputClass} mt-1`} placeholder="(Optional)" value={referenceNo} onChange={(event) => setReferenceNo(event.target.value)} />}
-        </label>
+          </label>
+        )}
+        {!isOrder && (
+          <label className="text-sm text-gray-600">Ref No.
+            <input className={`${inputClass} mt-1`} placeholder="(Optional)" value={referenceNo} onChange={(event) => setReferenceNo(event.target.value)} />
+          </label>
+        )}
         <CountryStateSelect stateId={stateId} onStateChange={setStateId} className={inputClass} />
         <label className="text-sm text-gray-600">{isOrder ? 'Order Status' : 'Shipping Carrier'}
           {isOrder ? (
