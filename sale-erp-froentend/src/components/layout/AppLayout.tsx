@@ -65,7 +65,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
 
         {/* Footer — same slate-800 as sidebar and header for unified chrome */}
         <footer className="flex h-8 shrink-0 items-center justify-center border-t border-slate-200 bg-white px-4 text-[11px] text-slate-400 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-500">
-          Copyright &copy; Texmintra &mdash; {new Date().getFullYear()} (v2.4)
+          Copyright &copy; Texmitra &mdash; {new Date().getFullYear()} (v2.4)
         </footer>
       </div>
     </div>

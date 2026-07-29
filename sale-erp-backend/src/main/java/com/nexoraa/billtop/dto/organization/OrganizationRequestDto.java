@@ -27,7 +27,7 @@ public class OrganizationRequestDto {
     @Size(max = 500, message = ValidationMessage.URL_INVALID)
     private String logoUrl;
 
-    @Size(max = 20, message = ValidationMessage.MOBILE_INVALID)
+    @Pattern(regexp = "^$|^[6-9]\\d{9}$", message = ValidationMessage.MOBILE_INVALID)
     private String phone;
 
     @Pattern(regexp = "^$|^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$", message = ValidationMessage.GST_NUMBER_INVALID)

@@ -88,8 +88,8 @@ export const LoginPage: React.FC = () => {
           Built for retail and wholesale teams
         </div>
         <img
-          src="/texmintra-login-visual.svg"
-          alt="Texmintra textile inventory illustration"
+          src="/texmitra-login-visual.svg"
+          alt="Texmitra textile inventory illustration"
           className="relative z-10 max-h-[82vh] w-full max-w-[860px] object-contain drop-shadow-[0_24px_55px_rgba(15,118,110,0.14)] dark:opacity-80"
         />
       </section>
@@ -101,13 +101,13 @@ export const LoginPage: React.FC = () => {
           <div className="mb-8 text-center">
             <div className="mx-auto mb-5 flex h-20 items-center justify-center">
               <img
-                src="/texmintra-logo.svg"
-                alt="Texmintra logo"
+                src="/texmitra-logo.svg"
+                alt="Texmitra logo"
                 className="h-full max-w-[240px] object-contain dark:brightness-110"
               />
             </div>
             <h1 className="text-2xl font-bold tracking-tight text-slate-800 dark:text-slate-100">
-              Texmintra
+              Texmitra
             </h1>
             <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
               Sign in to manage billing, stock and customer orders

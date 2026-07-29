@@ -49,7 +49,7 @@ export const OrganizationForm: React.FC<OrganizationFormProps> = ({
       </label>
       <label className="text-sm text-gray-600">
         Phone
-        <input className={`${inputClass} mt-1`} value={form.phone || ''} onChange={(event) => onChange('phone', event.target.value)} />
+        <input className={`${inputClass} mt-1`} type="tel" maxLength={10} value={form.phone || ''} onChange={(event) => onChange('phone', event.target.value)} />
       </label>
       <label className="text-sm text-gray-600">
         GSTIN

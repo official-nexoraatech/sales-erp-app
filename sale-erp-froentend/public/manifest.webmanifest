@@ -1,6 +1,6 @@
 {
-  "name": "Texmintra",
-  "short_name": "Texmintra",
+  "name": "Texmitra",
+  "short_name": "Texmitra",
   "description": "Retail ERP for textile trade",
   "start_url": "/",
   "scope": "/",
@@ -10,7 +10,7 @@
   "orientation": "any",
   "icons": [
     {
-      "src": "/texmintra-favicon.svg",
+      "src": "/texmitra-favicon.svg",
       "sizes": "any",
       "type": "image/svg+xml",
       "purpose": "any"

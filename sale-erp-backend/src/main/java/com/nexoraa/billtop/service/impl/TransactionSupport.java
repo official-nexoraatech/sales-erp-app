@@ -217,7 +217,7 @@ class TransactionSupport {
      * already set on any other stock row for this item instead.
      */
     private BigDecimal existingMinimumStockFor(Long itemId) {
-        Stock stock = stockRepository.findByItemIdOrderByIdAsc(itemId);
+        Stock stock = stockRepository.findFirstByItemIdOrderByIdAsc(itemId);
         BigDecimal minimumStock = stock != null ? stock.getMinimumStock() : null;
         return minimumStock != null && minimumStock.compareTo(ZERO) > 0 ? minimumStock : ZERO;
     }

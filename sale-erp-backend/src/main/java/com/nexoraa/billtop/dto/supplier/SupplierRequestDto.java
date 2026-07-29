@@ -28,7 +28,7 @@ public class SupplierRequestDto {
     private String lastName;
 
     @NotBlank(message = ValidationMessage.MOBILE_REQUIRED)
-    @Pattern(regexp = "^[0-9]{10,15}$", message = ValidationMessage.MOBILE_INVALID)
+    @Pattern(regexp = "^[6-9]\\d{9}$", message = ValidationMessage.MOBILE_INVALID)
     private String mobile;
 
     @Email(message = ValidationMessage.EMAIL_INVALID)

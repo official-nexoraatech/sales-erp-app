@@ -6,6 +6,7 @@ import { branchApi } from '../../api/endpoints';
 import type { Branch, BranchRequest } from '../../api/endpoints';
 import { queryClient } from '../../app/queryClient';
 import { Button } from '../../components/ui/Button';
+import { isValidMobileNumber, PHONE_VALIDATION_MESSAGE } from '../../utils/validation';
 
 interface Props { mode: 'create' | 'edit' }
 const inputClass = 'h-10 w-full rounded border border-gray-300 bg-white px-3 text-sm text-gray-900 outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-gray-50';
@@ -45,6 +46,7 @@ export const BranchFormPage: React.FC<Props> = ({ mode }) => {
   const submit = () => {
     if (!form.branchCode.trim()) return toast.error('Branch code is required.');
     if (!form.branchName.trim()) return toast.error('Branch name is required.');
+    if (form.phone && !isValidMobileNumber(form.phone)) return toast.error(PHONE_VALIDATION_MESSAGE);
     mutation.mutate();
   };
   return (
@@ -56,7 +58,7 @@ export const BranchFormPage: React.FC<Props> = ({ mode }) => {
           <label className="text-sm text-gray-600">Branch Code *<input className={`${inputClass} mt-1`} value={form.branchCode} onChange={(event) => set('branchCode', event.target.value)} /></label>
           <label className="text-sm text-gray-600">Branch Name *<input className={`${inputClass} mt-1`} value={form.branchName} onChange={(event) => set('branchName', event.target.value)} /></label>
           <label className="text-sm text-gray-600">Email<input className={`${inputClass} mt-1`} type="email" value={form.email} onChange={(event) => set('email', event.target.value)} /></label>
-          <label className="text-sm text-gray-600">Phone<input className={`${inputClass} mt-1`} value={form.phone} onChange={(event) => set('phone', event.target.value)} /></label>
+          <label className="text-sm text-gray-600">Phone<input className={`${inputClass} mt-1`} type="tel" maxLength={10} value={form.phone} onChange={(event) => set('phone', event.target.value)} /></label>
           <label className="text-sm text-gray-600">City<input className={`${inputClass} mt-1`} value={form.city} onChange={(event) => set('city', event.target.value)} /></label>
           <label className="text-sm text-gray-600">State<input className={`${inputClass} mt-1`} value={form.state} onChange={(event) => set('state', event.target.value)} /></label>
           <label className="text-sm text-gray-600">Country<input className={`${inputClass} mt-1`} value={form.country} onChange={(event) => set('country', event.target.value)} /></label>

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { CreateCustomerRequest } from '../../../types/customer.types';
+import { optionalMobileNumberSchema, requiredMobileNumberSchema, PHONE_VALIDATION_MESSAGE, WHATSAPP_VALIDATION_MESSAGE } from '../../../utils/validation';
 
 const optionalAmount = z.preprocess(
   (value) => (value === '' || value == null ? undefined : String(value).trim()),
@@ -53,9 +54,9 @@ export const customerSchema = z.object({
   firstName: z.string().min(2, 'First name must have at least 2 characters').max(100),
   lastName: z.string().min(2, 'Last name must have at least 2 characters').max(100),
   email: z.string().email('Invalid email').max(150).optional().or(z.literal('')),
-  phone: z.string().max(20).optional().or(z.literal('')),
-  mobile: z.string().regex(/^[0-9]{10,15}$/, 'Mobile must contain 10 to 15 digits'),
-  whatsappNo: z.string().regex(/^[0-9]{10,15}$/, 'WhatsApp number must contain 10 to 15 digits'),
+  phone: optionalMobileNumberSchema(PHONE_VALIDATION_MESSAGE),
+  mobile: requiredMobileNumberSchema(),
+  whatsappNo: requiredMobileNumberSchema(WHATSAPP_VALIDATION_MESSAGE),
   gstNumber: z.string().regex(/^$|^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/, 'Invalid GST number').optional().or(z.literal('')),
   panNumber: z.string().regex(/^$|^[A-Z]{5}[0-9]{4}[A-Z]$/, 'Invalid PAN number').optional().or(z.literal('')),
   creditLimit: optionalAmount,

@@ -362,7 +362,7 @@ export const PosPage: React.FC = () => {
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-[#f5f6ff] text-slate-700">
       <header className="flex h-12 shrink-0 items-center justify-between border-b bg-white px-3 shadow-sm">
-        <button onClick={() => navigate(defaultPath)} className="text-xl font-semibold text-blue-600">Texmintra</button>
+        <button onClick={() => navigate(defaultPath)} className="text-xl font-semibold text-blue-600">Texmitra</button>
         <nav className="hidden items-center gap-5 text-xs text-slate-600 md:flex">
           {canViewDashboard && <button onClick={() => navigate('/dashboard')} className="flex items-center gap-1 hover:text-blue-600"><LayoutDashboard size={13} />Dashboard</button>}
           {canViewCustomers && <button onClick={() => navigate('/contacts/customers')} className="flex items-center gap-1 hover:text-blue-600"><Users size={13} />Customer List</button>}

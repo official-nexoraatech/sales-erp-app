@@ -10,6 +10,7 @@ import { PERMISSIONS } from '../../auth/permissions';
 import { Button } from '../../components/ui/Button';
 import { Loader } from '../../components/ui/Loader';
 import { useAuth } from '../../hooks/useAuth';
+import { isValidMobileNumber, MOBILE_VALIDATION_MESSAGE } from '../../utils/validation';
 
 const inputClass = 'h-10 w-full rounded border border-gray-300 bg-white px-3 text-sm text-gray-900 outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-gray-50';
 
@@ -73,6 +74,7 @@ export const UserProfilePage: React.FC = () => {
     if (!profileForm.userName.trim()) return toast.error('Username is required');
     if (!profileForm.email.trim()) return toast.error('Email is required');
     if (!profileForm.mobileNo.trim()) return toast.error('Mobile is required');
+    if (!isValidMobileNumber(profileForm.mobileNo)) return toast.error(MOBILE_VALIDATION_MESSAGE);
     updateProfile.mutate();
   };
 
@@ -141,7 +143,7 @@ export const UserProfilePage: React.FC = () => {
                     <label className="block text-sm text-gray-600">Last Name<input disabled={!canUpdateProfile} className={`${inputClass} mt-1`} value={profileForm.lastName} onChange={(event) => setProfileField('lastName', event.target.value)} /></label>
                     <label className="block text-sm text-gray-600">Username<input disabled={!canUpdateProfile} className={`${inputClass} mt-1`} value={profileForm.userName} onChange={(event) => setProfileField('userName', event.target.value)} /></label>
                     <label className="block text-sm text-gray-600">Email Address<input disabled={!canUpdateProfile} className={`${inputClass} mt-1`} type="email" value={profileForm.email} onChange={(event) => setProfileField('email', event.target.value)} /></label>
-                    <label className="block text-sm text-gray-600">Mobile<input disabled={!canUpdateProfile} className={`${inputClass} mt-1`} value={profileForm.mobileNo} onChange={(event) => setProfileField('mobileNo', event.target.value)} /></label>
+                    <label className="block text-sm text-gray-600">Mobile<input disabled={!canUpdateProfile} className={`${inputClass} mt-1`} type="tel" maxLength={10} value={profileForm.mobileNo} onChange={(event) => setProfileField('mobileNo', event.target.value)} /></label>
                     <label className="block text-sm text-gray-600">Status<input className={`${inputClass} mt-1 bg-gray-50`} value={profile.data?.data?.status || ''} readOnly /></label>
                     <label className="block text-sm text-gray-600">Role Name<input className={`${inputClass} mt-1 bg-gray-50`} value={profile.data?.data?.roleName || ''} readOnly /></label>
                   </div>

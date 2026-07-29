@@ -1,4 +1,4 @@
-const CACHE_NAME = 'texmintra-shell-v1';
+const CACHE_NAME = 'texmitra-shell-v1';
 
 self.addEventListener('install', () => {
   self.skipWaiting();

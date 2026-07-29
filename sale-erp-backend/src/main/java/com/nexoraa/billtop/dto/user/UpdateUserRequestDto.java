@@ -37,7 +37,7 @@ public class UpdateUserRequestDto {
     @Size(max = 150, message = ValidationMessage.EMAIL_INVALID)
     private String email;
 
-    @Pattern(regexp = "^$|^[0-9]{10,15}$", message = ValidationMessage.MOBILE_INVALID)
+    @Pattern(regexp = "^$|^[6-9]\\d{9}$", message = ValidationMessage.MOBILE_INVALID)
     private String mobileNo;
 
     @NotNull(message = ValidationMessage.ID_REQUIRED)

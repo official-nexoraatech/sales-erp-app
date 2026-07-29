@@ -26,9 +26,9 @@ public class ItemStockStatusService {
         if (item == null || item.getId() == null) {
             return;
         }
-        Stock stock=stockRepository.findByItemId(item.getId());
-        BigDecimal available = defaultZero(stock.getAvailableQty());
-        BigDecimal minimum = defaultZero(stock.getMinimumStock());
+        Stock stock = stockRepository.findFirstByItemIdOrderByIdAsc(item.getId());
+        BigDecimal available = stock != null ? defaultZero(stock.getAvailableQty()) : ZERO;
+        BigDecimal minimum = stock != null ? defaultZero(stock.getMinimumStock()) : ZERO;
         if (available.compareTo(ZERO) <= 0) {
             item.setStatus(ItemStatus.OUT_OF_STOCK);
         } else if (available.compareTo(minimum) <= 0) {
