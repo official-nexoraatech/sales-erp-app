@@ -36,10 +36,6 @@ public class StockTransaction extends BaseEntity {
     @JoinColumn(name = "warehouse_id")
     private Warehouse warehouse;
 
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "batch_id")
-    private ItemBatch batch;
-
     @Column(name = "transaction_type", length = 50)
     private String transactionType;
 

@@ -11,11 +11,9 @@ import com.nexoraa.billtop.dto.item.ItemStockResponseDto;
 import com.nexoraa.billtop.entity.Brand;
 import com.nexoraa.billtop.entity.Category;
 import com.nexoraa.billtop.entity.Item;
-import com.nexoraa.billtop.entity.ItemBatch;
 import com.nexoraa.billtop.entity.ItemPrice;
 import com.nexoraa.billtop.entity.Organization;
 import com.nexoraa.billtop.entity.Stock;
-import com.nexoraa.billtop.entity.SubCategory;
 import com.nexoraa.billtop.entity.Unit;
 import com.nexoraa.billtop.entity.Warehouse;
 import com.nexoraa.billtop.enums.ItemStatus;
@@ -25,12 +23,10 @@ import com.nexoraa.billtop.exception.ResourceNotFoundException;
 import com.nexoraa.billtop.mapper.ItemMapper;
 import com.nexoraa.billtop.repository.BrandRepository;
 import com.nexoraa.billtop.repository.CategoryRepository;
-import com.nexoraa.billtop.repository.ItemBatchRepository;
 import com.nexoraa.billtop.repository.ItemPriceRepository;
 import com.nexoraa.billtop.repository.ItemRepository;
 import com.nexoraa.billtop.repository.OrganizationRepository;
 import com.nexoraa.billtop.repository.StockRepository;
-import com.nexoraa.billtop.repository.SubCategoryRepository;
 import com.nexoraa.billtop.repository.UnitRepository;
 import com.nexoraa.billtop.repository.WarehouseRepository;
 import com.nexoraa.billtop.security.CurrentOrganizationService;
@@ -57,12 +53,10 @@ public class ItemServiceImpl implements ItemService {
 
     private final ItemRepository itemRepository;
     private final CategoryRepository categoryRepository;
-    private final SubCategoryRepository subCategoryRepository;
     private final BrandRepository brandRepository;
     private final UnitRepository unitRepository;
     private final WarehouseRepository warehouseRepository;
     private final ItemPriceRepository itemPriceRepository;
-    private final ItemBatchRepository itemBatchRepository;
     private final StockRepository stockRepository;
     private final OrganizationRepository organizationRepository;
     private final ItemMapper itemMapper;
@@ -73,12 +67,10 @@ public class ItemServiceImpl implements ItemService {
     public ItemServiceImpl(
             ItemRepository itemRepository,
             CategoryRepository categoryRepository,
-            SubCategoryRepository subCategoryRepository,
             BrandRepository brandRepository,
             UnitRepository unitRepository,
             WarehouseRepository warehouseRepository,
             ItemPriceRepository itemPriceRepository,
-            ItemBatchRepository itemBatchRepository,
             StockRepository stockRepository,
             OrganizationRepository organizationRepository,
             ItemMapper itemMapper,
@@ -88,12 +80,10 @@ public class ItemServiceImpl implements ItemService {
     ) {
         this.itemRepository = itemRepository;
         this.categoryRepository = categoryRepository;
-        this.subCategoryRepository = subCategoryRepository;
         this.brandRepository = brandRepository;
         this.unitRepository = unitRepository;
         this.warehouseRepository = warehouseRepository;
         this.itemPriceRepository = itemPriceRepository;
-        this.itemBatchRepository = itemBatchRepository;
         this.stockRepository = stockRepository;
         this.organizationRepository = organizationRepository;
         this.itemMapper = itemMapper;
@@ -108,22 +98,21 @@ public class ItemServiceImpl implements ItemService {
         validateItemDates(request);
         Organization organization = currentOrganizationService.getOrganizationReference();
         Long organizationId = organization.getId();
-        if (itemRepository.existsByItemCodeIgnoreCaseAndOrganizationIdAndIsDeletedFalse(
+        boolean isItemPresent= itemRepository.existsByItemCodeIgnoreCaseAndOrganizationIdAndIsDeletedFalse(
                 request.getItemCode(),
-                organizationId)) {
+                organizationId);
+        if (isItemPresent) {
             throw new BadRequestException(ErrorMessage.ITEM_ALREADY_EXISTS, "ITEM_ALREADY_EXISTS");
         }
-
-        Warehouse warehouse = getActiveWarehouse(request.getWarehouseId());
         Item item = itemMapper.toEntity(request);
         item.setOrganization(organization);
         applyRelationships(item, request);
         Item savedItem = itemRepository.save(item);
 
         itemPriceRepository.save(buildPrice(savedItem, request, null));
-        ItemBatch batch = itemBatchRepository.save(buildBatch(savedItem, request, null));
-        stockRepository.save(buildStock(savedItem, warehouse, batch, request, null));
-        itemStockStatusService.refreshStatus(savedItem);
+        Warehouse warehouse = getActiveWarehouse(request.getWarehouseId());
+        stockRepository.save(buildStock(savedItem, warehouse, request, null));
+        itemStockStatusService.SaveItemStockStatus(savedItem);
 
         return ItemCreateResponseDto.builder()
                 .id(savedItem.getId())
@@ -213,8 +202,8 @@ public class ItemServiceImpl implements ItemService {
             ItemListResponseDto itemResponse = itemMapper.toListResponse(item);
             itemPriceRepository.findTopByItemIdOrderByIdDesc(item.getId())
                     .ifPresent(price -> applyListPrice(itemResponse, price));
-            itemBatchRepository.findTopByItemIdOrderByIdDesc(item.getId())
-                    .ifPresent(batch -> applyListBatch(itemResponse, batch));
+            itemResponse.setManufacturingDate(item.getManufacturingDate());
+            itemResponse.setExpiryDate(item.getExpiryDate());
             applyListStock(itemResponse, item.getId(), warehouseId);
             return itemResponse;
         });
@@ -225,8 +214,8 @@ public class ItemServiceImpl implements ItemService {
         ItemDetailResponseDto response = itemMapper.toDetailResponse(item);
         itemPriceRepository.findTopByItemIdOrderByIdDesc(item.getId())
                 .ifPresent(price -> applyPrice(response, price));
-        itemBatchRepository.findTopByItemIdOrderByIdDesc(item.getId())
-                .ifPresent(batch -> applyBatch(response, batch));
+        response.setManufacturingDate(item.getManufacturingDate());
+        response.setExpiryDate(item.getExpiryDate());
         applyStock(response, item.getId());
         return response;
     }
@@ -244,7 +233,7 @@ public class ItemServiceImpl implements ItemService {
             throw new BadRequestException(ErrorMessage.ITEM_ALREADY_EXISTS, "ITEM_ALREADY_EXISTS");
         }
 
-        Warehouse warehouse = getActiveWarehouse(request.getWarehouseId());
+
         itemMapper.updateEntity(request, item);
         applyRelationships(item, request);
         Item savedItem = itemRepository.save(item);
@@ -252,27 +241,11 @@ public class ItemServiceImpl implements ItemService {
         ItemPrice price = itemPriceRepository.findTopByItemIdOrderByIdDesc(id)
                 .orElse(null);
         itemPriceRepository.save(buildPrice(savedItem, request, price));
-
-        ItemBatch batch = itemBatchRepository.findTopByItemIdOrderByIdDesc(id)
+        Warehouse warehouse = getActiveWarehouse(request.getWarehouseId());
+        Stock stock = stockRepository.findByItemIdAndWarehouseId(id, warehouse.getId())
                 .orElse(null);
-        ItemBatch savedBatch = itemBatchRepository.save(buildBatch(savedItem, request, batch));
-
-        // If this exact (warehouse, batch) combination has no stock row yet, prefer
-        // reusing whatever stock row this item already has in that warehouse instead
-        // of creating a new one - otherwise an edit that touches an older item's
-        // latest batch (which may not be the batch tied to its real stock) silently
-        // forks a duplicate, near-empty stock row and orphans the real inventory.
-        Stock stock = stockRepository.findFirstByItemIdAndWarehouseIdAndBatchId(
-                        id,
-                        warehouse.getId(),
-                        savedBatch.getId()
-                )
-                .or(() -> stockRepository.findByItemIdAndWarehouseIdOrderByIdAsc(id, warehouse.getId())
-                        .stream()
-                        .findFirst())
-                .orElse(null);
-        stockRepository.save(buildStock(savedItem, warehouse, savedBatch, request, stock));
-        itemStockStatusService.refreshStatus(savedItem);
+        stockRepository.save(buildStock(savedItem, warehouse, request, stock));
+        itemStockStatusService.SaveItemStockStatus(savedItem);
     }
 
     @Override
@@ -297,21 +270,12 @@ public class ItemServiceImpl implements ItemService {
     }
 
     private ItemStockResponseDto buildStockResponse(Item item) {
-        List<Stock> stocks = stockRepository.findByItemIdOrderByIdAsc(item.getId());
-        BigDecimal availableQty = stocks.stream()
-                .map(Stock::getAvailableQty)
-                .map(this::defaultZero)
-                .reduce(ZERO, BigDecimal::add);
-        BigDecimal reservedQty = stocks.stream()
-                .map(Stock::getReservedQty)
-                .map(this::defaultZero)
-                .reduce(ZERO, BigDecimal::add);
-        String warehouse = stocks.stream()
-                .findFirst()
-                .map(Stock::getWarehouse)
-                .map(Warehouse::getName)
-                .orElse(null);
+        Stock stock = stockRepository.findByItemIdOrderByIdAsc(item.getId());
 
+        BigDecimal availableQty = stock != null ? defaultZero(stock.getAvailableQty()) : ZERO;
+        BigDecimal reservedQty = stock != null ? defaultZero(stock.getReservedQty()) : ZERO;
+
+        String warehouse = stock != null ? stock.getWarehouse().getName() : null;
         return ItemStockResponseDto.builder()
                 .itemId(item.getId())
                 .itemName(item.getItemName())
@@ -331,50 +295,31 @@ public class ItemServiceImpl implements ItemService {
     }
 
     private ItemPrice buildPrice(Item item, ItemRequestDto request, ItemPrice price) {
-        ItemPrice target = price == null ? new ItemPrice() : price;
-        target.setItem(item);
-        target.setPurchasePrice(request.getPurchasePrice());
-        target.setPurchasePriceWithTax(request.getPurchasePriceWithTax());
-        target.setTaxPercentage(request.getTaxPercentage());
-        target.setSalePrice(request.getSalePrice());
-        target.setWholesalePrice(request.getWholesalePrice());
-        target.setMrp(request.getMrp());
-        target.setMsp(request.getMsp());
-        target.setDiscountPercentage(request.getDiscountPercentage());
-        target.setProfitMargin(request.getProfitMargin());
-        if (target.getEffectiveFrom() == null) {
-            target.setEffectiveFrom(LocalDate.now());
+        ItemPrice itemPrice = price == null ? new ItemPrice() : price;
+        itemPrice.setItem(item);
+        itemPrice.setPurchasePrice(request.getPurchasePrice());
+        itemPrice.setTaxPercentage(request.getTaxPercentage());
+        itemPrice.setSalePrice(request.getSalePrice());
+        itemPrice.setWholesalePrice(request.getWholesalePrice());
+        itemPrice.setMrp(request.getMrp());
+        itemPrice.setMsp(request.getMsp());
+        itemPrice.setDiscountPercentage(request.getDiscountPercentage());
+        itemPrice.setProfitMargin(request.getProfitMargin());
+        if (itemPrice.getEffectiveFrom() == null) {
+            itemPrice.setEffectiveFrom(LocalDate.now());
         }
-        return target;
+        return itemPrice;
     }
 
-    private ItemBatch buildBatch(Item item, ItemRequestDto request, ItemBatch batch) {
-        ItemBatch target = batch == null ? new ItemBatch() : batch;
-        target.setItem(item);
-        target.setBatchNo(request.getBatchNo());
-        target.setManufacturingDate(request.getManufacturingDate());
-        target.setExpiryDate(request.getExpiryDate());
-        return target;
-    }
-
-    private Stock buildStock(Item item, Warehouse warehouse, ItemBatch batch, ItemRequestDto request, Stock stock) {
-        boolean isNewStock = stock == null;
-        Stock target = isNewStock ? new Stock() : stock;
-        target.setItem(item);
-        target.setWarehouse(warehouse);
-        target.setBatch(batch);
-        if (isNewStock) {
-            // Opening quantity only seeds a brand-new stock row. On an update to an
-            // existing row it must never overwrite availableQty - that value must only
-            // ever change through real stock transactions (purchase/sale/return/
-            // adjustment/transfer), otherwise editing unrelated item fields silently
-            // reverts stock that was already sold or received since the edit form loaded.
-            target.setAvailableQty(request.getOpeningQuantity());
-        }
-        target.setReservedQty(defaultZero(target.getReservedQty()));
-        target.setMinimumStock(request.getMinimumStock());
-        target.setReorderLevel(request.getMinimumStock());
-        return target;
+    private Stock buildStock(Item item, Warehouse warehouse, ItemRequestDto request, Stock stock) {
+        Stock stockRequest = new Stock();
+        stockRequest.setItem(item);
+        stockRequest.setWarehouse(warehouse);
+        stockRequest.setAvailableQty(request.getOpeningQuantity());
+        stockRequest.setReservedQty(request.getMinimumStock());
+        stockRequest.setMinimumStock(request.getMinimumStock());
+        stockRequest.setReorderLevel(request.getMinimumStock());
+        return stockRequest;
     }
 
     private void applyPrice(ItemDetailResponseDto response, ItemPrice price) {
@@ -389,36 +334,23 @@ public class ItemServiceImpl implements ItemService {
         response.setProfitMargin(price.getProfitMargin());
     }
 
-    private void applyBatch(ItemDetailResponseDto response, ItemBatch batch) {
-        response.setBatchNo(batch.getBatchNo());
-        response.setManufacturingDate(batch.getManufacturingDate());
-        response.setExpiryDate(batch.getExpiryDate());
-    }
-
     private void applyStock(ItemDetailResponseDto response, Long itemId) {
-        List<Stock> stocks = stockRepository.findByItemIdOrderByIdAsc(itemId);
-        if (stocks.isEmpty()) {
+        Stock stock = stockRepository.findByItemIdOrderByIdAsc(itemId);
+        if (stock == null) {
             response.setOpeningQuantity(ZERO);
             response.setAvailableQty(ZERO);
             response.setReservedQty(ZERO);
             return;
         }
-        BigDecimal availableQty = stocks.stream()
-                .map(Stock::getAvailableQty)
-                .map(this::defaultZero)
-                .reduce(ZERO, BigDecimal::add);
-        BigDecimal reservedQty = stocks.stream()
-                .map(Stock::getReservedQty)
-                .map(this::defaultZero)
-                .reduce(ZERO, BigDecimal::add);
-        Stock first = stocks.get(0);
+        BigDecimal availableQty = defaultZero(stock.getAvailableQty());
+        BigDecimal reservedQty = defaultZero(stock.getReservedQty());
         response.setOpeningQuantity(availableQty);
         response.setAvailableQty(availableQty);
         response.setReservedQty(reservedQty);
-        response.setMinimumStock(first.getMinimumStock());
-        if (first.getWarehouse() != null) {
-            response.setWarehouseId(first.getWarehouse().getId());
-            response.setWarehouseName(first.getWarehouse().getName());
+        response.setMinimumStock(stock.getMinimumStock());
+        if (stock.getWarehouse() != null) {
+            response.setWarehouseId(stock.getWarehouse().getId());
+            response.setWarehouseName(stock.getWarehouse().getName());
         }
     }
 
@@ -476,28 +408,19 @@ public class ItemServiceImpl implements ItemService {
     }
 
     private void applyListStock(ItemListResponseDto response, Long itemId, Long warehouseId) {
-        List<Stock> stocks = warehouseId == null || warehouseId <= 0
+        Stock stock = warehouseId == null || warehouseId <= 0
                 ? stockRepository.findByItemIdOrderByIdAsc(itemId)
-                : stockRepository.findByItemIdAndWarehouseIdOrderByIdAsc(itemId, warehouseId);
-        BigDecimal availableQty = stocks.stream()
-                .map(Stock::getAvailableQty)
-                .map(this::defaultZero)
-                .reduce(ZERO, BigDecimal::add);
-        BigDecimal reservedQty = stocks.stream()
-                .map(Stock::getReservedQty)
-                .map(this::defaultZero)
-                .reduce(ZERO, BigDecimal::add);
+                : stockRepository.findByItemIdAndWarehouseId(itemId, warehouseId).orElse(null);
+        BigDecimal availableQty = stock != null ? defaultZero(stock.getAvailableQty()) : ZERO;
+        BigDecimal reservedQty = stock != null ? defaultZero(stock.getReservedQty()) : ZERO;
         response.setOpeningQuantity(availableQty);
         response.setAvailableQty(availableQty);
         response.setReservedQty(reservedQty);
-        stocks.stream()
-                .filter(stock -> stock.getWarehouse() != null)
-                .findFirst()
-                .ifPresent(stock -> {
-                    response.setMinimumStock(stock.getMinimumStock());
-                    response.setWarehouseId(stock.getWarehouse().getId());
-                    response.setWarehouseName(stock.getWarehouse().getName());
-                });
+        if (stock != null && stock.getWarehouse() != null) {
+            response.setMinimumStock(stock.getMinimumStock());
+            response.setWarehouseId(stock.getWarehouse().getId());
+            response.setWarehouseName(stock.getWarehouse().getName());
+        }
     }
 
     private void applyListPrice(ItemListResponseDto response, ItemPrice price) {
@@ -510,12 +433,6 @@ public class ItemServiceImpl implements ItemService {
         response.setMsp(price.getMsp());
         response.setDiscountPercentage(price.getDiscountPercentage());
         response.setProfitMargin(price.getProfitMargin());
-    }
-
-    private void applyListBatch(ItemListResponseDto response, ItemBatch batch) {
-        response.setBatchNo(batch.getBatchNo());
-        response.setManufacturingDate(batch.getManufacturingDate());
-        response.setExpiryDate(batch.getExpiryDate());
     }
 
     private BigDecimal defaultZero(BigDecimal value) {

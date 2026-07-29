@@ -5,7 +5,6 @@ import com.nexoraa.billtop.dto.item.excel.ItemExcelImportResponseDto;
 import com.nexoraa.billtop.entity.Brand;
 import com.nexoraa.billtop.entity.Category;
 import com.nexoraa.billtop.entity.Item;
-import com.nexoraa.billtop.entity.ItemBatch;
 import com.nexoraa.billtop.entity.ItemPrice;
 import com.nexoraa.billtop.entity.Organization;
 import com.nexoraa.billtop.entity.Stock;
@@ -16,7 +15,6 @@ import com.nexoraa.billtop.exception.BadRequestException;
 import com.nexoraa.billtop.exception.ResourceNotFoundException;
 import com.nexoraa.billtop.repository.BrandRepository;
 import com.nexoraa.billtop.repository.CategoryRepository;
-import com.nexoraa.billtop.repository.ItemBatchRepository;
 import com.nexoraa.billtop.repository.ItemPriceRepository;
 import com.nexoraa.billtop.repository.ItemRepository;
 import com.nexoraa.billtop.repository.StockRepository;
@@ -58,7 +56,6 @@ import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
@@ -106,7 +103,6 @@ public class ItemExcelService {
     private final UnitRepository unitRepository;
     private final WarehouseRepository warehouseRepository;
     private final ItemPriceRepository itemPriceRepository;
-    private final ItemBatchRepository itemBatchRepository;
     private final StockRepository stockRepository;
     private final ItemStockStatusService itemStockStatusService;
     private final CurrentOrganizationService currentOrganizationService;
@@ -118,7 +114,6 @@ public class ItemExcelService {
             UnitRepository unitRepository,
             WarehouseRepository warehouseRepository,
             ItemPriceRepository itemPriceRepository,
-            ItemBatchRepository itemBatchRepository,
             StockRepository stockRepository,
             ItemStockStatusService itemStockStatusService,
             CurrentOrganizationService currentOrganizationService
@@ -129,7 +124,6 @@ public class ItemExcelService {
         this.unitRepository = unitRepository;
         this.warehouseRepository = warehouseRepository;
         this.itemPriceRepository = itemPriceRepository;
-        this.itemBatchRepository = itemBatchRepository;
         this.stockRepository = stockRepository;
         this.itemStockStatusService = itemStockStatusService;
         this.currentOrganizationService = currentOrganizationService;
@@ -283,12 +277,6 @@ public class ItemExcelService {
 
             warnUnsupportedBatchColumns(row, formatter, response, rowIndex, itemName);
 
-            String batchNo = text(row, BATCH_NUMBER, formatter);
-            if (!StringUtils.hasText(batchNo)) {
-                batchNo = "DEFAULT-" + item.getId();
-                addWarning(response, BATCH_SHEET, rowIndex, itemName, "Batch Number is blank. Generated " + batchNo + ".");
-            }
-
             LocalDate manufacturingDate = parseDate(row, BATCH_MANUFACTURE_DATE, formatter, response, rowIndex, itemName);
             LocalDate expiryDate = parseDate(row, BATCH_EXPIRY_DATE, formatter, response, rowIndex, itemName);
             if (hasRowError(response, BATCH_SHEET, rowIndex)) {
@@ -302,29 +290,28 @@ public class ItemExcelService {
             }
 
             Item batchItem = item;
-            ItemBatch batch = itemBatchRepository.findByItemIdAndBatchNo(batchItem.getId(), batchNo)
-                    .orElseGet(() -> newBatch(batchItem));
-            boolean createdBatch = batch.getId() == null;
-            batch.setBatchNo(limit(batchNo, 80));
-            batch.setManufacturingDate(manufacturingDate);
-            batch.setExpiryDate(expiryDate);
-            ItemBatch savedBatch = itemBatchRepository.save(batch);
+            if (manufacturingDate != null || expiryDate != null) {
+                if (manufacturingDate != null) {
+                    batchItem.setManufacturingDate(manufacturingDate);
+                }
+                if (expiryDate != null) {
+                    batchItem.setExpiryDate(expiryDate);
+                }
+                itemRepository.save(batchItem);
+            }
 
-            ItemBatch stockBatch = savedBatch;
-            Stock stock = stockRepository.findFirstByItemIdAndWarehouseIdAndBatchId(
-                            batchItem.getId(),
-                            warehouse.getId(),
-                            stockBatch.getId()
-                    )
-                    .orElseGet(() -> newStock(batchItem, warehouse, stockBatch));
-            stock.setAvailableQty(openingQty);
+            Stock stock = stockRepository.findByItemIdAndWarehouseId(batchItem.getId(), warehouse.getId())
+                    .orElseGet(() -> newStock(batchItem, warehouse));
+            boolean createdStock = stock.getId() == null;
+            BigDecimal existingQty = stock.getAvailableQty() == null ? ZERO : stock.getAvailableQty();
+            stock.setAvailableQty(existingQty.add(openingQty));
             stock.setReservedQty(stock.getReservedQty() == null ? ZERO : stock.getReservedQty());
             stock.setMinimumStock(stock.getMinimumStock() == null ? ZERO : stock.getMinimumStock());
             stock.setReorderLevel(stock.getReorderLevel() == null ? ZERO : stock.getReorderLevel());
             stockRepository.save(stock);
-            itemStockStatusService.refreshStatus(batchItem);
+            itemStockStatusService.SaveItemStockStatus(batchItem);
 
-            if (createdBatch) {
+            if (createdStock) {
                 response.setCreatedBatches(response.getCreatedBatches() + 1);
             } else {
                 response.setUpdatedBatches(response.getUpdatedBatches() + 1);
@@ -393,17 +380,10 @@ public class ItemExcelService {
         return item;
     }
 
-    private ItemBatch newBatch(Item item) {
-        return ItemBatch.builder()
-                .item(item)
-                .build();
-    }
-
-    private Stock newStock(Item item, Warehouse warehouse, ItemBatch batch) {
+    private Stock newStock(Item item, Warehouse warehouse) {
         return Stock.builder()
                 .item(item)
                 .warehouse(warehouse)
-                .batch(batch)
                 .reservedQty(ZERO)
                 .minimumStock(ZERO)
                 .reorderLevel(ZERO)

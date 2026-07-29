@@ -582,7 +582,7 @@ export const PosPage: React.FC = () => {
                           <p className="font-medium text-slate-800">{formatValue(line.sku || line.itemCode)}</p>
                           <p className="mt-1 text-[11px] text-slate-500">{formatValue(line.hsnCode)}</p>
                         </td>
-                        <td className="border-r border-slate-100 px-3 py-3 font-medium text-slate-700">{formatValue(line.batchNo)}</td>
+                        <td className="border-r border-slate-100 px-3 py-3 font-medium text-slate-700">{formatValue(line.itemCode)}</td>
                         <td className="border-r border-slate-100 px-3 py-3">
                           <div className="mx-auto inline-flex h-8 items-center overflow-hidden rounded-md border border-slate-200 bg-white shadow-sm">
                             <button type="button" onClick={() => updateQuantity(line.id, line.quantity - 1)} className="flex h-8 w-8 items-center justify-center text-slate-500 transition hover:bg-slate-50" title="Decrease quantity"><Minus size={13} /></button>

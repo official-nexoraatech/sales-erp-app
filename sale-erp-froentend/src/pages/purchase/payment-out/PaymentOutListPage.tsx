@@ -29,7 +29,6 @@ export const PaymentOutListPage: React.FC = () => {
   const { confirmAction, confirmationDialog } = useConfirmation();
   const { page, setPage, handlePageChange } = usePagination();
   const [pageSize, setPageSize] = useState(10);
-  const [agent, setAgent] = useState('');
   const [supplierId, setSupplierId] = useState(0);
   const [selectedUser, setSelectedUser] = useState(user?.userName || '');
   const [fromDate, setFromDate] = useState('');
@@ -86,7 +85,6 @@ export const PaymentOutListPage: React.FC = () => {
           {canCreate && <Button onClick={() => navigate('/purchase/payment-out/create')} className="min-w-[170px]">Create Payment Out</Button>}
         </div>
         <div className="grid grid-cols-1 gap-x-4 gap-y-3 p-5 md:grid-cols-2 xl:grid-cols-4">
-          <label className="text-sm text-gray-600">Agents<select className="mt-1 h-10 w-full rounded border border-gray-300 px-3" value={agent} onChange={(event) => setAgent(event.target.value)}><option value="">Select Agent</option></select></label>
           <label className="text-sm text-gray-600">Suppliers<select className="mt-1 h-10 w-full rounded border border-gray-300 px-3" value={supplierId} onChange={(event) => setSupplierId(Number(event.target.value))}><option value={0}>Select Supplier</option>{suppliers.data?.data?.content.map((supplier) => <option key={supplier.id} value={supplier.id}>{supplier.supplierName}</option>)}</select></label>
           <label className="text-sm text-gray-600">User<select className="mt-1 h-10 w-full rounded border border-gray-300 px-3" value={selectedUser} onChange={(event) => setSelectedUser(event.target.value)}><option value="">Choose one thing</option>{user?.userName && <option value={user.userName}>{user.userName}</option>}</select></label>
           <label className="text-sm text-gray-600">From Date<input type="date" className="mt-1 h-10 w-full rounded border border-gray-300 px-3" value={fromDate} onChange={(event) => setFromDate(event.target.value)} /></label>

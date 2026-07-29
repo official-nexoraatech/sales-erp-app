@@ -9,25 +9,19 @@ import java.util.Optional;
 
 public interface StockRepository extends JpaRepository<Stock, Long> {
 
-    List<Stock> findByItemId(Long itemId);
+    Stock findByItemId(Long itemId);
 
-    List<Stock> findByItemIdOrderByIdAsc(Long itemId);
+    Stock findByItemIdOrderByIdAsc(Long itemId);
 
-    List<Stock> findByItem_Organization_Id(Long organizationId);
+    Stock findByItem_Organization_Id(Long organizationId);
 
     List<Stock> findByWarehouse_IdInAndItem_Organization_Id(
             Collection<Long> warehouseIds,
             Long organizationId
     );
 
-    List<Stock> findByItemIdAndWarehouseIdOrderByIdAsc(
+    Optional<Stock> findByItemIdAndWarehouseId(
             Long itemId,
             Long warehouseId
-    );
-
-    Optional<Stock> findFirstByItemIdAndWarehouseIdAndBatchId(
-            Long itemId,
-            Long warehouseId,
-            Long batchId
     );
 }

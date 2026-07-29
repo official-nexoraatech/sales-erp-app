@@ -35,10 +35,6 @@ public class StockAdjustmentItem extends BaseEntity {
     @JoinColumn(name = "item_id")
     private Item item;
 
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "batch_id")
-    private ItemBatch batch;
-
     @Column(name = "current_qty", precision = 15, scale = 3)
     private BigDecimal currentQty;
 

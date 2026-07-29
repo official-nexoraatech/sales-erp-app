@@ -10,7 +10,6 @@ import com.nexoraa.billtop.dto.purchase.PurchaseListResponseDto;
 import com.nexoraa.billtop.dto.purchase.PurchaseRequestDto;
 import com.nexoraa.billtop.entity.Contact;
 import com.nexoraa.billtop.entity.Item;
-import com.nexoraa.billtop.entity.ItemBatch;
 import com.nexoraa.billtop.entity.Organization;
 import com.nexoraa.billtop.entity.Purchase;
 import com.nexoraa.billtop.entity.PurchaseItem;
@@ -171,7 +170,6 @@ public class PurchaseServiceImpl implements PurchaseService {
             support.increaseStock(
                     item.getItem(),
                     purchase.getWarehouse(),
-                    item.getBatch(),
                     item.getQty(),
                     TX_PURCHASE,
                     purchase.getId(),
@@ -215,7 +213,6 @@ public class PurchaseServiceImpl implements PurchaseService {
 
         for (PurchaseItemRequestDto itemRequest : request.getItems()) {
             Item item = support.getActiveItem(itemRequest.getItemId());
-            ItemBatch batch = support.getOrCreateBatch(item, itemRequest);
             TransactionSupport.LineTotals lineTotals = support.calculateLine(
                     itemRequest.getQuantity(),
                     itemRequest.getUnitPrice(),
@@ -226,7 +223,7 @@ public class PurchaseServiceImpl implements PurchaseService {
             discountAmount = discountAmount.add(lineTotals.discountAmount());
             taxAmount = taxAmount.add(lineTotals.taxAmount());
             grandTotal = grandTotal.add(lineTotals.totalAmount());
-            items.add(new PreparedPurchaseItem(item, batch, itemRequest, lineTotals));
+            items.add(new PreparedPurchaseItem(item, itemRequest, lineTotals));
         }
 
         BigDecimal paidAmount = support.money(support.defaultZero(purchase.getPaidAmount()));
@@ -261,7 +258,6 @@ public class PurchaseServiceImpl implements PurchaseService {
                     .organization(organization)
                     .purchase(purchase)
                     .item(preparedItem.item())
-                    .batch(preparedItem.batch())
                     .qty(support.quantity(preparedItem.request().getQuantity()))
                     .unitPrice(support.money(preparedItem.request().getUnitPrice()))
                     .discountPercent(support.defaultZero(preparedItem.request().getDiscountPercent()))
@@ -275,7 +271,6 @@ public class PurchaseServiceImpl implements PurchaseService {
                 support.increaseStock(
                         preparedItem.item(),
                         purchase.getWarehouse(),
-                        preparedItem.batch(),
                         preparedItem.request().getQuantity(),
                         transactionType,
                         purchase.getId(),
@@ -293,7 +288,6 @@ public class PurchaseServiceImpl implements PurchaseService {
             support.decreaseStock(
                     purchaseItem.getItem(),
                     purchase.getWarehouse(),
-                    purchaseItem.getBatch(),
                     purchaseItem.getQty(),
                     transactionType,
                     purchase.getId(),
@@ -400,12 +394,9 @@ public class PurchaseServiceImpl implements PurchaseService {
 
     private PurchaseItemResponseDto toItemResponse(PurchaseItem purchaseItem) {
         Item item = purchaseItem.getItem();
-        ItemBatch batch = purchaseItem.getBatch();
         return PurchaseItemResponseDto.builder()
                 .itemId(item == null ? null : item.getId())
                 .itemName(item == null ? null : item.getItemName())
-                .batchId(batch == null ? null : batch.getId())
-                .batchNo(batch == null ? null : batch.getBatchNo())
                 .qty(purchaseItem.getQty())
                 .unitPrice(purchaseItem.getUnitPrice())
                 .discountAmount(purchaseItem.getDiscountAmount())
@@ -419,7 +410,6 @@ public class PurchaseServiceImpl implements PurchaseService {
 
     private record PreparedPurchaseItem(
             Item item,
-            ItemBatch batch,
             PurchaseItemRequestDto request,
             TransactionSupport.LineTotals totals
     ) {

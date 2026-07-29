@@ -5,6 +5,8 @@ import com.nexoraa.billtop.entity.Expense;
 import com.nexoraa.billtop.entity.Payment;
 import com.nexoraa.billtop.entity.Purchase;
 import com.nexoraa.billtop.entity.Sale;
+import com.nexoraa.billtop.entity.Stock;
+import com.nexoraa.billtop.entity.Warehouse;
 import com.nexoraa.billtop.repository.ContactRepository;
 import com.nexoraa.billtop.repository.ExpenseRepository;
 import com.nexoraa.billtop.repository.ItemPriceRepository;
@@ -12,9 +14,11 @@ import com.nexoraa.billtop.repository.PaymentRepository;
 import com.nexoraa.billtop.repository.PurchaseRepository;
 import com.nexoraa.billtop.repository.SaleRepository;
 import com.nexoraa.billtop.repository.StockRepository;
+import com.nexoraa.billtop.repository.WarehouseRepository;
 import com.nexoraa.billtop.security.CurrentOrganizationService;
 import com.nexoraa.billtop.service.DashboardService;
 import com.nexoraa.billtop.specification.ExpenseSpecification;
+import com.nexoraa.billtop.specification.MasterDataSpecification;
 import com.nexoraa.billtop.specification.PurchaseSpecification;
 import com.nexoraa.billtop.specification.SaleSpecification;
 import org.springframework.data.jpa.domain.Specification;
@@ -33,6 +37,7 @@ public class DashboardServiceImpl implements DashboardService {
     private final ExpenseRepository expenseRepository;
     private final PaymentRepository paymentRepository;
     private final StockRepository stockRepository;
+    private final WarehouseRepository warehouseRepository;
     private final ItemPriceRepository itemPriceRepository;
     private final ContactRepository contactRepository;
     private final TransactionSupport support;
@@ -45,6 +50,7 @@ public class DashboardServiceImpl implements DashboardService {
             ExpenseRepository expenseRepository,
             PaymentRepository paymentRepository,
             StockRepository stockRepository,
+            WarehouseRepository warehouseRepository,
             ItemPriceRepository itemPriceRepository,
             ContactRepository contactRepository,
             TransactionSupport support,
@@ -56,6 +62,7 @@ public class DashboardServiceImpl implements DashboardService {
         this.expenseRepository = expenseRepository;
         this.paymentRepository = paymentRepository;
         this.stockRepository = stockRepository;
+        this.warehouseRepository = warehouseRepository;
         this.itemPriceRepository = itemPriceRepository;
         this.contactRepository = contactRepository;
         this.support = support;
@@ -176,16 +183,29 @@ public class DashboardServiceImpl implements DashboardService {
     }
 
     private BigDecimal stockValue() {
-        return support.money(stockRepository.findByItem_Organization_Id(currentOrganizationService.getOrganizationId()).stream()
+        return support.money(organizationStocks().stream()
                 .map(stock -> support.defaultZero(stock.getAvailableQty()).multiply(itemPurchasePrice(stock.getItem().getId())))
                 .reduce(TransactionSupport.ZERO, BigDecimal::add));
     }
 
     private long lowStockCount() {
-        return stockRepository.findByItem_Organization_Id(currentOrganizationService.getOrganizationId()).stream()
+        return organizationStocks().stream()
                 .filter(stock -> support.defaultZero(stock.getAvailableQty())
                         .compareTo(support.defaultZero(stock.getReorderLevel())) <= 0)
                 .count();
+    }
+
+    private List<Stock> organizationStocks() {
+        Long organizationId = currentOrganizationService.getOrganizationId();
+        List<Long> warehouseIds = warehouseRepository.findAll(
+                        MasterDataSpecification.<Warehouse>organization(organizationId))
+                .stream()
+                .map(Warehouse::getId)
+                .toList();
+        if (warehouseIds.isEmpty()) {
+            return List.of();
+        }
+        return stockRepository.findByWarehouse_IdInAndItem_Organization_Id(warehouseIds, organizationId);
     }
 
     private BigDecimal itemPurchasePrice(Long itemId) {

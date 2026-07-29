@@ -59,6 +59,12 @@ public class Item extends BaseEntity {
     @Column(name = "image_url", length = 500)
     private String imageUrl;
 
+    @Column(name = "manufacturing_date")
+    private java.time.LocalDate manufacturingDate;
+
+    @Column(name = "expiry_date")
+    private java.time.LocalDate expiryDate;
+
     @Builder.Default
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)

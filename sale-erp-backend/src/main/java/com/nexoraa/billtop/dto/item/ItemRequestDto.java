@@ -74,10 +74,6 @@ public class ItemRequestDto {
     @DecimalMin(value = "0.0", message = ValidationMessage.PRICE_INVALID)
     private BigDecimal profitMargin;
 
-    @NotBlank(message = ValidationMessage.BATCH_NO_REQUIRED)
-    @Size(max = 80, message = ValidationMessage.BATCH_NO_REQUIRED)
-    private String batchNo;
-
     @NotNull(message = ValidationMessage.MANUFACTURE_DATE_REQUIRED)
     @PastOrPresent(message = ValidationMessage.MANUFACTURE_DATE_REQUIRED)
     private LocalDate manufacturingDate;

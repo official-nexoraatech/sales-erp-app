@@ -520,9 +520,6 @@ public class PosInvoicePdfService {
         if (item.getItem() != null && StringUtils.hasText(item.getItem().getHsnCode())) {
             parts.add("HSN " + item.getItem().getHsnCode());
         }
-        if (item.getBatch() != null && StringUtils.hasText(item.getBatch().getBatchNo())) {
-            parts.add("Batch " + item.getBatch().getBatchNo());
-        }
         return String.join(" · ", parts);
     }
 

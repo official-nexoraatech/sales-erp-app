@@ -24,7 +24,7 @@ const today = new Date().toISOString().slice(0, 10);
 const numberValue = (value: unknown) => Number(value || 0);
 const buildFormState = (initial?: ItemFormInitial): ItemRequest => ({
   itemName: initial?.itemName || '',
-  itemCode: initial?.itemCode || initial?.batchNo || '',
+  itemCode: initial?.itemCode || '',
   sku: initial?.sku || '',
   hsnCode: initial?.hsnCode || '',
   categoryId: numberValue(initial?.categoryId),
@@ -40,7 +40,6 @@ const buildFormState = (initial?: ItemFormInitial): ItemRequest => ({
   msp: numberValue(initial?.msp),
   discountPercentage: numberValue(initial?.discountPercentage),
   profitMargin: numberValue(initial?.profitMargin),
-  batchNo: initial?.batchNo || initial?.itemCode || '',
   manufacturingDate: initial?.manufacturingDate || today,
   expiryDate: initial?.expiryDate || today,
   openingQuantity: numberValue(initial?.openingQuantity ?? initial?.availableQty),
@@ -92,13 +91,58 @@ export const ItemForm: React.FC<Props> = ({
     onFieldChange?.();
     setForm((current) => ({ ...current, [field]: value }));
   };
-  const setBatchNo = (batchNo: string) => {
-    onFieldChange?.();
-    setForm((current) => ({ ...current, batchNo, itemCode: batchNo }));
-  };
   const setCategory = (categoryId: number) => {
     onFieldChange?.();
     setForm((current) => ({ ...current, categoryId, brandId: 0 }));
+  };
+  const roundMoney = (value: number) => Math.round(value * 100) / 100;
+  const setPurchasePrice = (value: number) => {
+    onFieldChange?.();
+    setForm((current) => {
+      const next = { ...current, purchasePrice: value };
+      if (value > 0 && current.profitMargin > 0) {
+        const computed = roundMoney(value + (value * current.profitMargin) / 100);
+        next.salePrice = computed;
+        next.wholesalePrice = computed;
+      }
+      return next;
+    });
+  };
+  const setProfitMargin = (value: number) => {
+    onFieldChange?.();
+    setForm((current) => {
+      const next = { ...current, profitMargin: value };
+      if (current.purchasePrice > 0 && value > 0) {
+        const computed = roundMoney(current.purchasePrice + (current.purchasePrice * value) / 100);
+        next.salePrice = computed;
+        next.wholesalePrice = computed;
+      }
+      return next;
+    });
+  };
+  const setDiscountPercentage = (value: number) => {
+    if (form.mrp > 0 && form.purchasePrice > 0) {
+      const effectivePrice = roundMoney(form.mrp * (1 - value / 100));
+      if (effectivePrice < form.purchasePrice) {
+        toast.error('Discount on MRP cannot bring the price below purchase price.');
+        return;
+      }
+    }
+    set('discountPercentage', value);
+  };
+  const setSalePrice = (value: number) => {
+    if (form.purchasePrice > 0 && form.mrp > 0 && (value < form.purchasePrice || value > form.mrp)) {
+      toast.error('Sale price must be between purchase price and MRP.');
+      return;
+    }
+    set('salePrice', value);
+  };
+  const setWholesalePrice = (value: number) => {
+    if (form.purchasePrice > 0 && form.mrp > 0 && (value < form.purchasePrice || value > form.mrp)) {
+      toast.error('Wholesale price must be between purchase price and MRP.');
+      return;
+    }
+    set('wholesalePrice', value);
   };
   const unitRows = units.data?.data?.content || [];
   useEffect(() => {
@@ -109,7 +153,7 @@ export const ItemForm: React.FC<Props> = ({
   }, [initial?.id]);
   useEffect(() => {
     const errorFields = Object.keys(validationErrors);
-    const pricingFields = ['purchasePrice', 'purchasePriceWithTax', 'taxPercentage', 'profitMargin', 'mrp', 'wholesalePrice', 'discountPercentage', 'salePrice', 'msp'];
+    const pricingFields = ['purchasePrice', 'profitMargin', 'mrp', 'wholesalePrice', 'discountPercentage', 'salePrice', 'msp'];
     const stockFields = ['warehouseId', 'manufacturingDate', 'openingQuantity', 'minimumStock', 'expiryDate'];
     if (errorFields.some((field) => pricingFields.includes(field))) setActiveTab('pricing');
     else if (errorFields.some((field) => stockFields.includes(field))) setActiveTab('stock');
@@ -124,7 +168,7 @@ export const ItemForm: React.FC<Props> = ({
   }, [form.warehouseId, warehouseRows]);
   const submit = () => {
     if (!form.itemName.trim()) return toast.error('Item name is required.');
-    if (!form.batchNo.trim()) return toast.error('Batch number is required.');
+    if (!form.itemCode.trim()) return toast.error('Item code is required.');
     if (!Number.isInteger(form.openingQuantity) || form.openingQuantity <= 0) return toast.error('Opening quantity must be a positive whole number.');
     if (!form.minimumStock || form.minimumStock <= 0) return toast.error('Minimum stock is required and must be greater than 0.');
     if (!form.categoryId) return toast.error('Category is required.');
@@ -181,9 +225,9 @@ export const ItemForm: React.FC<Props> = ({
           <input className={`${controlClass('sku')} mt-1`} value={form.sku} onChange={(event) => set('sku', event.target.value)} />
           {renderFieldError('sku')}
         </label>
-        <label className="text-sm text-gray-600">Batch No
-          <input className={`${controlClass('batchNo', inputClass, ['itemCode'])} mt-1`} value={form.batchNo} onChange={(event) => setBatchNo(event.target.value)} />
-          {renderFieldError('batchNo', ['itemCode'])}
+        <label className="text-sm text-gray-600">Item Code
+          <input className={`${controlClass('itemCode')} mt-1`} value={form.itemCode} onChange={(event) => set('itemCode', event.target.value)} />
+          {renderFieldError('itemCode')}
         </label>
         <label className="text-sm text-gray-600">Category
           <div className="mt-1 flex">
@@ -238,14 +282,13 @@ export const ItemForm: React.FC<Props> = ({
       <div className="border-t px-5 py-4"><label className="inline-flex items-center gap-2 text-sm font-semibold"><input type="radio" defaultChecked />Regular</label></div>
       <div className="px-5 pt-3"><button onClick={() => setActiveTab('pricing')} className={`rounded-t border px-4 py-2 text-sm ${activeTab === 'pricing' ? 'border-green-500 text-green-600' : 'text-blue-600'}`}>$ Pricing</button><button onClick={() => setActiveTab('stock')} className={`rounded-t border px-4 py-2 text-sm ${activeTab === 'stock' ? 'border-green-500 text-green-600' : 'text-blue-600'}`}>▣ Stock</button></div>
       {activeTab === 'pricing' ? <div className="grid grid-cols-1 gap-4 border-t p-5 md:grid-cols-3">
-        <label className="text-sm text-gray-600">Purchase Price<div className="mt-1 flex"><NumericInput min={0} className={`${highlightControlClass('purchasePrice')} rounded-r-none`} value={form.purchasePrice || ''} onValueChange={(value) => set('purchasePrice', value)} /><select className="h-10 rounded-r border border-l-0 px-3"><option>With Tax</option></select></div>{renderFieldError('purchasePrice')}</label>
-        <label className="text-sm text-gray-600">Tax<div className="mt-1 flex"><select className={`${highlightControlClass('taxPercentage')} rounded-r-none`} value={form.taxPercentage} onChange={(event) => set('taxPercentage', Number(event.target.value))}><option value={0}>None</option><option value={5}>5%</option><option value={18}>18%</option></select><button type="button" className="flex h-10 w-10 items-center justify-center rounded-r border border-l-0 border-blue-400 text-blue-500"><CirclePlus size={17} /></button></div>{renderFieldError('taxPercentage')}</label>
-        <label className="text-sm text-gray-600">Sale Profit Margin (%)<NumericInput min={0} className={`${highlightControlClass('profitMargin')} mt-1`} value={form.profitMargin || ''} onValueChange={(value) => set('profitMargin', value)} />{renderFieldError('profitMargin')}</label>
-        <label className="text-sm text-gray-600">MRP<div className="mt-1 flex"><NumericInput min={0} className={`${highlightControlClass('mrp')} rounded-r-none`} value={form.mrp || ''} onValueChange={(value) => set('mrp', value)} /><select className="h-10 rounded-r border border-l-0 px-3"><option>With Tax</option></select></div>{renderFieldError('mrp')}</label>
-        <label className="text-sm text-gray-600">Wholesale Price<div className="mt-1 flex"><NumericInput min={0} className={`${highlightControlClass('wholesalePrice')} rounded-r-none`} value={form.wholesalePrice || ''} onValueChange={(value) => set('wholesalePrice', value)} /><select className="h-10 rounded-r border border-l-0 px-3"><option>With Tax</option></select></div>{renderFieldError('wholesalePrice')}</label>
-        <label className="text-sm text-gray-600">Discount on MRP<div className="mt-1 flex"><NumericInput min={0} className={`${highlightControlClass('discountPercentage')} rounded-r-none`} value={form.discountPercentage || ''} onValueChange={(value) => set('discountPercentage', value)} /><select className="h-10 rounded-r border border-l-0 px-3"><option>Percentage</option></select></div>{renderFieldError('discountPercentage')}</label>
-        <label className="text-sm text-gray-600">Sale Price<div className="mt-1 flex"><NumericInput min={0} className={`${highlightControlClass('salePrice')} rounded-r-none`} value={form.salePrice || ''} onValueChange={(value) => set('salePrice', value)} /><select className="h-10 rounded-r border border-l-0 px-3"><option>With Tax</option></select></div>{renderFieldError('salePrice')}</label>
         <label className="text-sm text-gray-600">MSP<NumericInput min={0} className={`${highlightControlClass('msp')} mt-1`} value={form.msp || ''} onValueChange={(value) => set('msp', value)} />{renderFieldError('msp')}</label>
+        <label className="text-sm text-gray-600">MRP<NumericInput min={0} className={`${highlightControlClass('mrp')} mt-1`} value={form.mrp || ''} onValueChange={(value) => set('mrp', value)} />{renderFieldError('mrp')}</label>
+        <label className="text-sm text-gray-600">Purchase Price<NumericInput min={0} className={`${highlightControlClass('purchasePrice')} mt-1`} value={form.purchasePrice || ''} onValueChange={setPurchasePrice} />{renderFieldError('purchasePrice')}</label>
+        <label className="text-sm text-gray-600">Sale Profit Margin (%)<NumericInput min={0} className={`${highlightControlClass('profitMargin')} mt-1`} value={form.profitMargin || ''} onValueChange={setProfitMargin} />{renderFieldError('profitMargin')}</label>
+        <label className="text-sm text-gray-600">Discount on MRP<NumericInput min={0} className={`${highlightControlClass('discountPercentage')} mt-1`} value={form.discountPercentage || ''} onValueChange={setDiscountPercentage} />{renderFieldError('discountPercentage')}</label>
+        <label className="text-sm text-gray-600">Sale Price<NumericInput min={0} className={`${highlightControlClass('salePrice')} mt-1`} value={form.salePrice || ''} onValueChange={setSalePrice} />{renderFieldError('salePrice')}</label>
+        <label className="text-sm text-gray-600">Wholesale Price<NumericInput min={0} className={`${highlightControlClass('wholesalePrice')} mt-1`} value={form.wholesalePrice || ''} onValueChange={setWholesalePrice} />{renderFieldError('wholesalePrice')}</label>
       </div> : <div className="grid grid-cols-1 gap-4 border-t p-5 md:grid-cols-2">
         <div>
           <WarehouseSelector

@@ -10,7 +10,6 @@ import com.nexoraa.billtop.dto.sales.SalesReturnCreateResponseDto;
 import com.nexoraa.billtop.dto.sales.SalesReturnRequestDto;
 import com.nexoraa.billtop.entity.Contact;
 import com.nexoraa.billtop.entity.Item;
-import com.nexoraa.billtop.entity.ItemBatch;
 import com.nexoraa.billtop.entity.Organization;
 import com.nexoraa.billtop.entity.Sale;
 import com.nexoraa.billtop.entity.SalesReturn;
@@ -76,10 +75,9 @@ public class SalesReturnServiceImpl implements SalesReturnService {
         BigDecimal grandTotal = TransactionSupport.ZERO;
         for (ReturnItemRequestDto itemRequest : request.getItems()) {
             Item item = support.getActiveItem(itemRequest.getItemId());
-            ItemBatch batch = support.getBatchForItem(itemRequest.getBatchId(), item.getId());
             BigDecimal amount = support.amount(itemRequest.getQuantity(), itemRequest.getRate());
             grandTotal = grandTotal.add(amount);
-            items.add(new PreparedReturnItem(item, batch, itemRequest, amount));
+            items.add(new PreparedReturnItem(item, itemRequest, amount));
         }
 
         SalesReturn salesReturn = SalesReturn.builder()
@@ -100,7 +98,6 @@ public class SalesReturnServiceImpl implements SalesReturnService {
                     .organization(organization)
                     .salesReturn(savedReturn)
                     .item(item.item())
-                    .batch(item.batch())
                     .qty(support.quantity(item.request().getQuantity()))
                     .rate(support.money(item.request().getRate()))
                     .amount(item.amount())
@@ -108,7 +105,6 @@ public class SalesReturnServiceImpl implements SalesReturnService {
             support.increaseStock(
                     item.item(),
                     sale.getWarehouse(),
-                    item.batch(),
                     item.request().getQuantity(),
                     TX_SALES_RETURN,
                     savedReturn.getId(),
@@ -186,12 +182,9 @@ public class SalesReturnServiceImpl implements SalesReturnService {
 
     private ReturnItemResponseDto toItemResponse(SalesReturnItem salesReturnItem) {
         Item item = salesReturnItem.getItem();
-        ItemBatch batch = salesReturnItem.getBatch();
         return ReturnItemResponseDto.builder()
                 .itemId(item == null ? null : item.getId())
                 .itemName(item == null ? null : item.getItemName())
-                .batchId(batch == null ? null : batch.getId())
-                .batchNo(batch == null ? null : batch.getBatchNo())
                 .quantity(salesReturnItem.getQty())
                 .rate(salesReturnItem.getRate())
                 .amount(salesReturnItem.getAmount())
@@ -200,7 +193,6 @@ public class SalesReturnServiceImpl implements SalesReturnService {
 
     private record PreparedReturnItem(
             Item item,
-            ItemBatch batch,
             ReturnItemRequestDto request,
             BigDecimal amount
     ) {

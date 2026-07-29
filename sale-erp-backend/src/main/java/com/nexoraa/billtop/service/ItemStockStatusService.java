@@ -22,34 +22,22 @@ public class ItemStockStatusService {
         this.stockRepository = stockRepository;
     }
 
-    public void refreshStatus(Item item) {
+    public void SaveItemStockStatus(Item item) {
         if (item == null || item.getId() == null) {
             return;
         }
-        item.setStatus(calculateStatus(item.getId()));
-        itemRepository.save(item);
-    }
-
-    public ItemStatus calculateStatus(Long itemId) {
-        BigDecimal availableQty = ZERO;
-        BigDecimal minimumStock = ZERO;
-        for (Stock stock : stockRepository.findByItemId(itemId)) {
-            availableQty = availableQty.add(defaultZero(stock.getAvailableQty()));
-            minimumStock = minimumStock.add(defaultZero(stock.getMinimumStock()));
-        }
-        return calculateStatus(availableQty, minimumStock);
-    }
-
-    public ItemStatus calculateStatus(BigDecimal availableQty, BigDecimal minimumStock) {
-        BigDecimal available = defaultZero(availableQty);
-        BigDecimal minimum = defaultZero(minimumStock);
+        Stock stock=stockRepository.findByItemId(item.getId());
+        BigDecimal available = defaultZero(stock.getAvailableQty());
+        BigDecimal minimum = defaultZero(stock.getMinimumStock());
         if (available.compareTo(ZERO) <= 0) {
-            return ItemStatus.OUT_OF_STOCK;
+            item.setStatus(ItemStatus.OUT_OF_STOCK);
+        } else if (available.compareTo(minimum) <= 0) {
+            item.setStatus(ItemStatus.LOW_STOCK);
+        } else {
+            item.setStatus(ItemStatus.IN_STOCK);
         }
-        if (minimum.compareTo(ZERO) > 0 && available.compareTo(minimum) <= 0) {
-            return ItemStatus.LOW_STOCK;
-        }
-        return ItemStatus.IN_STOCK;
+        itemRepository.save(item);
+
     }
 
     private BigDecimal defaultZero(BigDecimal value) {

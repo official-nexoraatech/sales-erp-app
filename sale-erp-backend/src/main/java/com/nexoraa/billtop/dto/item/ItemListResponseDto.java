@@ -38,7 +38,6 @@ public class ItemListResponseDto {
     private BigDecimal msp;
     private BigDecimal discountPercentage;
     private BigDecimal profitMargin;
-    private String batchNo;
     private LocalDate manufacturingDate;
     private LocalDate expiryDate;
     private BigDecimal openingQuantity;

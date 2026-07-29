@@ -11,7 +11,6 @@ import com.nexoraa.billtop.dto.sales.SalesListResponseDto;
 import com.nexoraa.billtop.dto.sales.SalesRequestDto;
 import com.nexoraa.billtop.entity.Contact;
 import com.nexoraa.billtop.entity.Item;
-import com.nexoraa.billtop.entity.ItemBatch;
 import com.nexoraa.billtop.entity.Organization;
 import com.nexoraa.billtop.entity.Sale;
 import com.nexoraa.billtop.entity.SalesItem;
@@ -161,20 +160,18 @@ public class SalesServiceImpl implements SalesService {
         salesItemRepository.deleteAll(placeholders);
         for (SalesItem placeholder : placeholders) {
             Item item = placeholder.getItem();
-            List<BatchAllocation> allocations = getAvailableBatches(item, sale.getWarehouse(), placeholder.getQty());
-            for (BatchAllocation allocation : allocations) {
-                saveAllocatedItem(
-                        sale,
-                        item,
-                        allocation,
-                        placeholder.getUnitPrice(),
-                        placeholder.getDiscountPercent(),
-                        placeholder.getTaxPercent(),
-                        TX_SALE,
-                        organization,
-                        true
-                );
-            }
+            validateAvailableStock(item, sale.getWarehouse(), placeholder.getQty());
+            saveAllocatedItem(
+                    sale,
+                    item,
+                    placeholder.getQty(),
+                    placeholder.getUnitPrice(),
+                    placeholder.getDiscountPercent(),
+                    placeholder.getTaxPercent(),
+                    TX_SALE,
+                    organization,
+                    true
+            );
         }
         sale.setStatus(TransactionSupport.STATUS_ACTIVE);
         saleRepository.save(sale);
@@ -210,9 +207,9 @@ public class SalesServiceImpl implements SalesService {
 
         for (SalesItemRequestDto itemRequest : request.getItems()) {
             Item item = support.getActiveItem(itemRequest.getItemId());
-            List<BatchAllocation> allocations = commitStock
-                    ? getAvailableBatches(item, warehouse, itemRequest.getQuantity())
-                    : List.of(new BatchAllocation(null, itemRequest.getQuantity()));
+            if (commitStock) {
+                validateAvailableStock(item, warehouse, itemRequest.getQuantity());
+            }
             TransactionSupport.LineTotals lineTotals = support.calculateLine(
                     itemRequest.getQuantity(),
                     itemRequest.getUnitPrice(),
@@ -223,7 +220,7 @@ public class SalesServiceImpl implements SalesService {
             discountAmount = discountAmount.add(lineTotals.discountAmount());
             taxAmount = taxAmount.add(lineTotals.taxAmount());
             grandTotal = grandTotal.add(lineTotals.totalAmount());
-            items.add(new PreparedSalesItem(item, allocations, itemRequest));
+            items.add(new PreparedSalesItem(item, itemRequest));
         }
 
         BigDecimal paidAmount = support.money(support.defaultZero(sale.getPaidAmount()));
@@ -247,28 +244,12 @@ public class SalesServiceImpl implements SalesService {
         return new PreparedSale(sale, items);
     }
 
-    private List<BatchAllocation> getAvailableBatches(Item item, Warehouse warehouse, BigDecimal requiredQuantity) {
-        List<BatchAllocation> allocations = new ArrayList<>();
-        BigDecimal remaining = requiredQuantity;
-        for (Stock stock : support.getStocksForItemAndWarehouse(item.getId(), warehouse.getId())) {
-            if (remaining.compareTo(TransactionSupport.ZERO) <= 0) {
-                break;
-            }
-            if (stock.getBatch() == null) {
-                continue;
-            }
-            BigDecimal availableQty = support.defaultZero(stock.getAvailableQty());
-            if (availableQty.compareTo(TransactionSupport.ZERO) <= 0) {
-                continue;
-            }
-            BigDecimal allocatedQty = availableQty.min(remaining);
-            allocations.add(new BatchAllocation(stock.getBatch(), allocatedQty));
-            remaining = remaining.subtract(allocatedQty);
-        }
-        if (remaining.compareTo(TransactionSupport.ZERO) > 0) {
+    private void validateAvailableStock(Item item, Warehouse warehouse, BigDecimal requiredQuantity) {
+        Stock stock = support.getStockForItemAndWarehouse(item.getId(), warehouse.getId());
+        BigDecimal availableQty = stock == null ? TransactionSupport.ZERO : support.defaultZero(stock.getAvailableQty());
+        if (availableQty.compareTo(requiredQuantity) < 0) {
             throw new BadRequestException(ErrorMessage.INSUFFICIENT_STOCK, "INSUFFICIENT_STOCK");
         }
-        return allocations;
     }
 
     private void saveItems(
@@ -279,26 +260,24 @@ public class SalesServiceImpl implements SalesService {
             boolean commitStock
     ) {
         for (PreparedSalesItem preparedItem : items) {
-            for (BatchAllocation allocation : preparedItem.allocations()) {
-                saveAllocatedItem(
-                        sale,
-                        preparedItem.item(),
-                        allocation,
-                        preparedItem.request().getUnitPrice(),
-                        preparedItem.request().getDiscountPercent(),
-                        preparedItem.request().getTaxPercent(),
-                        transactionType,
-                        organization,
-                        commitStock
-                );
-            }
+            saveAllocatedItem(
+                    sale,
+                    preparedItem.item(),
+                    preparedItem.request().getQuantity(),
+                    preparedItem.request().getUnitPrice(),
+                    preparedItem.request().getDiscountPercent(),
+                    preparedItem.request().getTaxPercent(),
+                    transactionType,
+                    organization,
+                    commitStock
+            );
         }
     }
 
     private void saveAllocatedItem(
             Sale sale,
             Item item,
-            BatchAllocation allocation,
+            BigDecimal qty,
             BigDecimal unitPrice,
             BigDecimal discountPercent,
             BigDecimal taxPercent,
@@ -306,13 +285,12 @@ public class SalesServiceImpl implements SalesService {
             Organization organization,
             boolean commitStock
     ) {
-        TransactionSupport.LineTotals lineTotals = support.calculateLine(allocation.qty(), unitPrice, discountPercent, taxPercent);
+        TransactionSupport.LineTotals lineTotals = support.calculateLine(qty, unitPrice, discountPercent, taxPercent);
         SalesItem salesItem = SalesItem.builder()
                 .organization(organization)
                 .sale(sale)
                 .item(item)
-                .batch(allocation.batch())
-                .qty(support.quantity(allocation.qty()))
+                .qty(support.quantity(qty))
                 .unitPrice(support.money(unitPrice))
                 .discountPercent(support.defaultZero(discountPercent))
                 .discountAmount(lineTotals.discountAmount())
@@ -325,8 +303,7 @@ public class SalesServiceImpl implements SalesService {
             support.decreaseStock(
                     item,
                     sale.getWarehouse(),
-                    allocation.batch(),
-                    allocation.qty(),
+                    qty,
                     transactionType,
                     sale.getId(),
                     "Sales invoice " + sale.getInvoiceNo()
@@ -342,7 +319,6 @@ public class SalesServiceImpl implements SalesService {
             support.increaseStock(
                     salesItem.getItem(),
                     sale.getWarehouse(),
-                    salesItem.getBatch(),
                     salesItem.getQty(),
                     transactionType,
                     sale.getId(),
@@ -433,12 +409,9 @@ public class SalesServiceImpl implements SalesService {
 
     private SalesItemResponseDto toItemResponse(SalesItem salesItem) {
         Item item = salesItem.getItem();
-        ItemBatch batch = salesItem.getBatch();
         return SalesItemResponseDto.builder()
                 .itemId(item == null ? null : item.getId())
                 .itemName(item == null ? null : item.getItemName())
-                .batchId(batch == null ? null : batch.getId())
-                .batchNo(batch == null ? null : batch.getBatchNo())
                 .qty(salesItem.getQty())
                 .unitPrice(salesItem.getUnitPrice())
                 .discountAmount(salesItem.getDiscountAmount())
@@ -452,12 +425,8 @@ public class SalesServiceImpl implements SalesService {
 
     private record PreparedSalesItem(
             Item item,
-            List<BatchAllocation> allocations,
             SalesItemRequestDto request
     ) {
-    }
-
-    private record BatchAllocation(ItemBatch batch, BigDecimal qty) {
     }
 }
 

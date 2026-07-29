@@ -66,15 +66,15 @@ export const AppHeader: React.FC = () => {
               Expenses
             </button>
           )}
-          {/* Routing intentionally left unwired - payment module is still being built. */}
-          <button
-            type="button"
-            disabled
-            title="Coming soon"
-            className="inline-flex h-8 min-w-[92px] cursor-not-allowed items-center justify-center rounded-full border border-fuchsia-300 px-3.5 text-xs font-semibold text-fuchsia-400 opacity-70 dark:border-fuchsia-800 dark:text-fuchsia-500"
-          >
-            Payment
-          </button>
+          {hasPermission(PERMISSIONS.PAYMENT_NOTE_VIEW) && (
+            <button
+              type="button"
+              onClick={() => navigate('/sales/payment-notes')}
+              className="inline-flex h-8 min-w-[92px] items-center justify-center rounded-full border border-fuchsia-400 px-3.5 text-xs font-semibold text-fuchsia-600 transition hover:bg-fuchsia-50 dark:border-fuchsia-500 dark:text-fuchsia-400 dark:hover:bg-fuchsia-900/20"
+            >
+              Payment
+            </button>
+          )}
           {hasPermission(PERMISSIONS.PURCHASE_CREATE) && (
             <button
               type="button"

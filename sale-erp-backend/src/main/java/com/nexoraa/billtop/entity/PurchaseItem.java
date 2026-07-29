@@ -35,10 +35,6 @@ public class PurchaseItem extends BaseEntity {
     @JoinColumn(name = "item_id")
     private Item item;
 
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "batch_id")
-    private ItemBatch batch;
-
     @Column(precision = 15, scale = 3)
     private BigDecimal qty;
 

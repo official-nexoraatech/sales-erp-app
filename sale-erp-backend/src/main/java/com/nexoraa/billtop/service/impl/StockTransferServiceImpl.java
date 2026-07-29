@@ -8,7 +8,6 @@ import com.nexoraa.billtop.dto.stock.StockTransferItemResponseDto;
 import com.nexoraa.billtop.dto.stock.StockTransferRequestDto;
 import com.nexoraa.billtop.dto.stock.StockTransferResponseDto;
 import com.nexoraa.billtop.entity.Item;
-import com.nexoraa.billtop.entity.ItemBatch;
 import com.nexoraa.billtop.entity.Organization;
 import com.nexoraa.billtop.entity.Stock;
 import com.nexoraa.billtop.entity.StockTransfer;
@@ -28,6 +27,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.util.List;
 
 @Service
 public class StockTransferServiceImpl implements StockTransferService {
@@ -67,18 +67,19 @@ public class StockTransferServiceImpl implements StockTransferService {
         }
         Warehouse fromWarehouse = support.getActiveWarehouse(request.getFromWarehouseId());
         Warehouse toWarehouse = support.getActiveWarehouse(request.getToWarehouseId());
-        StockTransfer transfer = stockTransferRepository.save(StockTransfer.builder()
+        StockTransfer transfer = StockTransfer.builder()
                 .organization(organization)
                 .transferNo(nextTransferNo())
                 .fromWarehouse(fromWarehouse)
                 .toWarehouse(toWarehouse)
                 .transferDate(request.getTransferDate())
                 .notes(request.getNotes())
-                .build());
+                .build();
 
         for (StockTransferItemRequestDto itemRequest : request.getItems()) {
             transferItem(transfer, support.getActiveItem(itemRequest.getItemId()), itemRequest.getQuantity());
         }
+        transfer = stockTransferRepository.save(transfer);
 
         return StockTransferCreateResponseDto.builder()
                 .transferId(transfer.getId())
@@ -139,51 +140,40 @@ public class StockTransferServiceImpl implements StockTransferService {
         return toResponse(getTransfer(id));
     }
 
-    private void transferItem(StockTransfer transfer, Item item, BigDecimal quantity) {
-        BigDecimal remainingQty = quantity;
-        for (Stock stock : stockRepository.findByItemIdAndWarehouseIdOrderByIdAsc(
-                item.getId(),
-                transfer.getFromWarehouse().getId()
-        )) {
-            if (remainingQty.compareTo(TransactionSupport.ZERO) <= 0) {
-                break;
-            }
-            BigDecimal availableQty = support.defaultZero(stock.getAvailableQty());
-            if (availableQty.compareTo(TransactionSupport.ZERO) <= 0) {
-                continue;
-            }
-            BigDecimal allocatedQty = availableQty.min(remainingQty);
-            ItemBatch batch = stock.getBatch();
-            support.decreaseStock(
-                    item,
-                    transfer.getFromWarehouse(),
-                    batch,
-                    allocatedQty,
-                    TX_TRANSFER_OUT,
-                    transfer.getId(),
-                    "Stock transfer " + transfer.getTransferNo()
-            );
-            support.increaseStock(
-                    item,
-                    transfer.getToWarehouse(),
-                    batch,
-                    allocatedQty,
-                    TX_TRANSFER_IN,
-                    transfer.getId(),
-                    "Stock transfer " + transfer.getTransferNo()
-            );
-            stockTransferItemRepository.save(StockTransferItem.builder()
-                    .stockTransfer(transfer)
-                    .item(item)
-                    .batch(batch)
-                    .qty(support.quantity(allocatedQty))
-                    .build());
-            remainingQty = remainingQty.subtract(allocatedQty);
+    private void transferItem(StockTransfer stockTransfer, Item item, BigDecimal quantity) {
+        if (quantity.compareTo(TransactionSupport.ZERO) <= 0) {
+            return;
+        }
+        Warehouse fromWarehouse = stockTransfer.getFromWarehouse();
+        Warehouse toWarehouse = stockTransfer.getToWarehouse();
+        Stock stockFromWarehouse = stockRepository.findByItemIdAndWarehouseId(item.getId(), fromWarehouse.getId())
+                .orElse(null);
+        BigDecimal availableQty = stockFromWarehouse == null ? TransactionSupport.ZERO : support.defaultZero(stockFromWarehouse.getAvailableQty());
+        if (availableQty.compareTo(quantity) < 0) {
+            throw new BadRequestException("In Warehouse " + fromWarehouse.getName() + " available quantity is less than transfer quantity", "INSUFFICIENT_STOCK");
         }
 
-        if (remainingQty.compareTo(TransactionSupport.ZERO) > 0) {
-            throw new BadRequestException(ErrorMessage.INSUFFICIENT_STOCK, "INSUFFICIENT_STOCK");
-        }
+        support.decreaseStock(
+                item,
+                fromWarehouse,
+                quantity,
+                TX_TRANSFER_OUT,
+                stockTransfer.getId(),
+                "Stock transfer " + stockTransfer.getTransferNo()
+        );
+        support.increaseStock(
+                item,
+                toWarehouse,
+                quantity,
+                TX_TRANSFER_IN,
+                stockTransfer.getId(),
+                "Stock transfer " + stockTransfer.getTransferNo()
+        );
+        stockTransferItemRepository.save(StockTransferItem.builder()
+                .stockTransfer(stockTransfer)
+                .item(item)
+                .qty(support.quantity(quantity))
+                .build());
     }
 
     private String nextTransferNo() {
@@ -209,7 +199,6 @@ public class StockTransferServiceImpl implements StockTransferService {
             support.increaseStock(
                     item.getItem(),
                     transfer.getFromWarehouse(),
-                    item.getBatch(),
                     item.getQty(),
                     reverseInType,
                     transfer.getId(),
@@ -218,7 +207,6 @@ public class StockTransferServiceImpl implements StockTransferService {
             support.decreaseStock(
                     item.getItem(),
                     transfer.getToWarehouse(),
-                    item.getBatch(),
                     item.getQty(),
                     reverseOutType,
                     transfer.getId(),
@@ -243,12 +231,9 @@ public class StockTransferServiceImpl implements StockTransferService {
 
     private StockTransferItemResponseDto toItemResponse(StockTransferItem transferItem) {
         Item item = transferItem.getItem();
-        ItemBatch batch = transferItem.getBatch();
         return StockTransferItemResponseDto.builder()
                 .itemId(item == null ? null : item.getId())
                 .itemName(item == null ? null : item.getItemName())
-                .batchId(batch == null ? null : batch.getId())
-                .batchNo(batch == null ? null : batch.getBatchNo())
                 .quantity(transferItem.getQty())
                 .build();
     }
