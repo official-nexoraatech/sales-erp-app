@@ -1,4 +1,4 @@
-# Texmintra Frontend Application - Complete Build Summary
+# Texmitra Frontend Application - Complete Build Summary
 
 ## Project Overview
 A complete React-based billing and inventory management system frontend built with modern technologies.
@@ -20,7 +20,7 @@ A complete React-based billing and inventory management system frontend built wi
 ## Project Structure Created
 
 ```
-texmintra-frontend/
+texmitra-frontend/
 ├── src/
 │   ├── app/
 │   │   ├── router.tsx           # React Router configuration
@@ -201,7 +201,7 @@ VITE_API_BASE_URL=http://localhost:8081
 
 ### Installation
 ```bash
-cd texmintra-frontend
+cd texmitra-frontend
 npm install
 ```
 

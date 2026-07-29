@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import toast from 'react-hot-toast';
 import { Button } from '../../components/ui/Button';
+import { getInvalidMobileNumbers } from '../../utils/validation';
 
 const inputClass = 'h-10 w-full rounded border border-gray-300 bg-white px-3 text-sm text-gray-900 outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-gray-50';
 
@@ -10,6 +11,8 @@ export const CreateSmsPage: React.FC = () => {
 
   const send = () => {
     if (!mobileNumbers.trim()) return toast.error('Mobile number is required');
+    const invalidNumbers = getInvalidMobileNumbers(mobileNumbers);
+    if (invalidNumbers.length) return toast.error(`Invalid mobile number: ${invalidNumbers.join(', ')}`);
     if (!message.trim()) return toast.error('Message is required');
     toast('Create SMS API is required to send this message.');
   };

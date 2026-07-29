@@ -3,6 +3,7 @@ package com.nexoraa.billtop.dto.user;
 import com.nexoraa.billtop.constants.ValidationMessage;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -32,6 +33,7 @@ public class UpdateProfileRequestDto {
     @Size(max = 150, message = ValidationMessage.EMAIL_INVALID)
     private String email;
 
-    @Size(max = 20, message = ValidationMessage.MOBILE_INVALID)
+    @NotBlank(message = ValidationMessage.MOBILE_REQUIRED)
+    @Pattern(regexp = "^[6-9]\\d{9}$", message = ValidationMessage.MOBILE_INVALID)
     private String mobileNo;
 }

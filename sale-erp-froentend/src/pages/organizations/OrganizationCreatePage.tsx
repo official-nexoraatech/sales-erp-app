@@ -8,6 +8,7 @@ import { queryClient } from '../../app/queryClient';
 import { Button } from '../../components/ui/Button';
 import { OrganizationForm } from './OrganizationForm';
 import { emptyOrganizationAddress, emptyOrganizationForm, toCreateOrganizationRequest } from './organization.utils';
+import { isValidMobileNumber, PHONE_VALIDATION_MESSAGE } from '../../utils/validation';
 
 const createEmptyForm = (): UpdateOrganizationRequest => ({
   ...emptyOrganizationForm,
@@ -44,6 +45,10 @@ export const OrganizationCreatePage: React.FC = () => {
   const submit = () => {
     if (!form.name.trim()) {
       toast.error('Organization name is required');
+      return;
+    }
+    if (form.phone && !isValidMobileNumber(form.phone)) {
+      toast.error(PHONE_VALIDATION_MESSAGE);
       return;
     }
     mutation.mutate();

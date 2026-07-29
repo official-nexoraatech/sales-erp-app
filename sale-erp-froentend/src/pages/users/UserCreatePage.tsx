@@ -13,6 +13,7 @@ import { RoleSelector } from './RoleSelector';
 import { BranchSelector } from './BranchSelector';
 import { PERMISSIONS } from '../../auth/permissions';
 import { isSuperAdminRole } from '../../auth/featurePermissions';
+import { isValidMobileNumber, MOBILE_VALIDATION_MESSAGE } from '../../utils/validation';
 
 const inputClass = 'h-10 w-full rounded border border-gray-300 bg-white px-3 text-sm text-gray-900 outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-gray-50';
 
@@ -62,6 +63,7 @@ export const UserCreatePage: React.FC<Props> = ({ mode = 'create' }) => {
     if (!form.lastName.trim()) return toast.error('Last name is required');
     if (!form.userName.trim()) return toast.error('Username is required');
     if (!form.email.trim()) return toast.error('Email is required');
+    if (form.mobileNo && !isValidMobileNumber(form.mobileNo)) return toast.error(MOBILE_VALIDATION_MESSAGE);
     if (!form.roleId) return toast.error('Role is required');
     if (mode === 'create' && isSuperAdmin && !form.organizationId) return toast.error('Organization is required');
     mutation.mutate();
@@ -110,7 +112,7 @@ export const UserCreatePage: React.FC<Props> = ({ mode = 'create' }) => {
           <label className="text-sm text-gray-600">Last Name *<input className={`${inputClass} mt-1`} value={form.lastName} onChange={(event) => setText('lastName', event.target.value)} /></label>
           <label className="text-sm text-gray-600">Username *<input className={`${inputClass} mt-1`} value={form.userName} onChange={(event) => setText('userName', event.target.value)} /></label>
           <label className="text-sm text-gray-600">Email Address *<input className={`${inputClass} mt-1`} type="email" value={form.email} onChange={(event) => setText('email', event.target.value)} /></label>
-          <label className="text-sm text-gray-600">Mobile<input className={`${inputClass} mt-1`} value={form.mobileNo} onChange={(event) => setText('mobileNo', event.target.value)} /></label>
+          <label className="text-sm text-gray-600">Mobile<input className={`${inputClass} mt-1`} type="tel" maxLength={10} value={form.mobileNo} onChange={(event) => setText('mobileNo', event.target.value)} /></label>
           <RoleSelector
             organizationId={form.organizationId}
             value={form.roleId}

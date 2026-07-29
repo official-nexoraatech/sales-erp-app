@@ -9,9 +9,7 @@ import java.util.Optional;
 
 public interface StockRepository extends JpaRepository<Stock, Long> {
 
-    Stock findByItemId(Long itemId);
-
-    Stock findByItemIdOrderByIdAsc(Long itemId);
+    Stock findFirstByItemIdOrderByIdAsc(Long itemId);
 
     Stock findByItem_Organization_Id(Long organizationId);
 

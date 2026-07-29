@@ -270,7 +270,7 @@ public class ItemServiceImpl implements ItemService {
     }
 
     private ItemStockResponseDto buildStockResponse(Item item) {
-        Stock stock = stockRepository.findByItemIdOrderByIdAsc(item.getId());
+        Stock stock = stockRepository.findFirstByItemIdOrderByIdAsc(item.getId());
 
         BigDecimal availableQty = stock != null ? defaultZero(stock.getAvailableQty()) : ZERO;
         BigDecimal reservedQty = stock != null ? defaultZero(stock.getReservedQty()) : ZERO;
@@ -335,7 +335,7 @@ public class ItemServiceImpl implements ItemService {
     }
 
     private void applyStock(ItemDetailResponseDto response, Long itemId) {
-        Stock stock = stockRepository.findByItemIdOrderByIdAsc(itemId);
+        Stock stock = stockRepository.findFirstByItemIdOrderByIdAsc(itemId);
         if (stock == null) {
             response.setOpeningQuantity(ZERO);
             response.setAvailableQty(ZERO);
@@ -408,9 +408,8 @@ public class ItemServiceImpl implements ItemService {
     }
 
     private void applyListStock(ItemListResponseDto response, Long itemId, Long warehouseId) {
-        Stock stock = warehouseId == null || warehouseId <= 0
-                ? stockRepository.findByItemIdOrderByIdAsc(itemId)
-                : stockRepository.findByItemIdAndWarehouseId(itemId, warehouseId).orElse(null);
+
+        Stock stock = stockRepository.findFirstByItemIdOrderByIdAsc(itemId);
         BigDecimal availableQty = stock != null ? defaultZero(stock.getAvailableQty()) : ZERO;
         BigDecimal reservedQty = stock != null ? defaultZero(stock.getReservedQty()) : ZERO;
         response.setOpeningQuantity(availableQty);

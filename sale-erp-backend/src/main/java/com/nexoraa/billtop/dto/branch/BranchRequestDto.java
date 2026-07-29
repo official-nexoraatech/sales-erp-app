@@ -3,6 +3,7 @@ package com.nexoraa.billtop.dto.branch;
 import com.nexoraa.billtop.constants.ValidationMessage;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -27,7 +28,7 @@ public class BranchRequestDto {
     @Size(max = 150)
     private String email;
 
-    @Size(max = 20, message = ValidationMessage.MOBILE_INVALID)
+    @Pattern(regexp = "^$|^[6-9]\\d{9}$", message = ValidationMessage.MOBILE_INVALID)
     private String phone;
 
     @Size(max = 500, message = ValidationMessage.ADDRESS_INVALID)

@@ -32,14 +32,14 @@ public class CustomerRequestDto {
     @Size(max = 150, message = ValidationMessage.EMAIL_INVALID)
     private String email;
 
-    @Size(max = 20, message = ValidationMessage.MOBILE_INVALID)
+    @Pattern(regexp = "^$|^[6-9]\\d{9}$", message = ValidationMessage.MOBILE_INVALID)
     private String phone;
 
     @NotBlank(message = ValidationMessage.MOBILE_REQUIRED)
-    @Pattern(regexp = "^[0-9]{10,15}$", message = ValidationMessage.MOBILE_INVALID)
+    @Pattern(regexp = "^[6-9]\\d{9}$", message = ValidationMessage.MOBILE_INVALID)
     private String mobile;
 
-    @Pattern(regexp = "^[0-9]{10,15}$", message = ValidationMessage.MOBILE_INVALID)
+    @Pattern(regexp = "^[6-9]\\d{9}$", message = ValidationMessage.MOBILE_INVALID)
     private String whatsappNo;
 
     @Pattern(regexp = "^$|^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$", message = ValidationMessage.GST_NUMBER_INVALID)

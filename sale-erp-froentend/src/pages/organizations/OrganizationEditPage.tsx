@@ -18,6 +18,7 @@ import {
   normalizeOrganizationAddress,
   toOrganizationAddressRequest,
 } from './organization.utils';
+import { isValidMobileNumber, PHONE_VALIDATION_MESSAGE } from '../../utils/validation';
 
 const createEmptyForm = (): UpdateOrganizationRequest => ({
   ...emptyOrganizationForm,
@@ -88,6 +89,10 @@ export const OrganizationEditPage: React.FC = () => {
     }
     if (!form.name.trim()) {
       toast.error('Organization name is required');
+      return;
+    }
+    if (form.phone && !isValidMobileNumber(form.phone)) {
+      toast.error(PHONE_VALIDATION_MESSAGE);
       return;
     }
     mutation.mutate();

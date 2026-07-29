@@ -29,7 +29,7 @@ public class ValidationMessage {
 
     // Mobile Validation
     public static final String MOBILE_REQUIRED = "Mobile number is required";
-    public static final String MOBILE_INVALID = "Mobile number must be valid";
+    public static final String MOBILE_INVALID = "Mobile number must be a valid 10-digit number starting with 6-9";
 
     // Contact Validation
     public static final String GST_NUMBER_INVALID = "GST number must be valid";
