@@ -26,10 +26,6 @@ public class Stock extends BaseEntity {
     @JoinColumn(name = "warehouse_id")
     private Warehouse warehouse;
 
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "batch_id")
-    private ItemBatch batch;
-
     @Column(name = "available_qty", precision = 15, scale = 3)
     private BigDecimal availableQty;
 

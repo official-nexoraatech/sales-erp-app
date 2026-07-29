@@ -42,7 +42,7 @@ public class PosBillingServiceImpl implements PosBillingService {
     private final SalesItemRepository salesItemRepository;
     private final PaymentRepository paymentRepository;
     private final SalesPaymentRepository salesPaymentRepository;
-    private final TransactionSupport support;
+    private final TransactionSupport transactionSupport;
     private final CurrentOrganizationService currentOrganizationService;
 
     public PosBillingServiceImpl(
@@ -50,14 +50,14 @@ public class PosBillingServiceImpl implements PosBillingService {
             SalesItemRepository salesItemRepository,
             PaymentRepository paymentRepository,
             SalesPaymentRepository salesPaymentRepository,
-            TransactionSupport support,
+            TransactionSupport transactionSupport,
             CurrentOrganizationService currentOrganizationService
     ) {
         this.saleRepository = saleRepository;
         this.salesItemRepository = salesItemRepository;
         this.paymentRepository = paymentRepository;
         this.salesPaymentRepository = salesPaymentRepository;
-        this.support = support;
+        this.transactionSupport = transactionSupport;
         this.currentOrganizationService = currentOrganizationService;
     }
 
@@ -65,9 +65,9 @@ public class PosBillingServiceImpl implements PosBillingService {
     @Transactional
     public PosBillingResponseDto createBill(PosBillingRequestDto request) {
         Organization organization = currentOrganizationService.getOrganizationReference();
-        Contact customer = support.getActiveCustomer(request.getCustomerId());
-        Warehouse warehouse = support.getActiveWarehouse(request.getWarehouseId());
-        PaymentMethod paymentMethod = support.getActivePaymentMethod(request.getPaymentMethodId());
+        Contact customer = transactionSupport.getActiveCustomer(request.getCustomerId());
+        Warehouse warehouse = transactionSupport.getActiveWarehouse(request.getWarehouseId());
+        PaymentMethod paymentMethod = transactionSupport.getActivePaymentMethod(request.getPaymentMethodId());
 
         List<PreparedPosItem> items = new ArrayList<>();
         BigDecimal subTotal = TransactionSupport.ZERO;
@@ -75,14 +75,16 @@ public class PosBillingServiceImpl implements PosBillingService {
         BigDecimal taxAmount = TransactionSupport.ZERO;
         BigDecimal grandTotal = TransactionSupport.ZERO;
         for (PosBillingItemRequestDto itemRequest : request.getItems()) {
-            Item item = support.getActiveItem(itemRequest.getItemId());
-            BigDecimal unitPrice = support.getSalePrice(item);
-            TransactionSupport.LineTotals lineTotals = support.calculateLine(
+            Item item = transactionSupport.getActiveItem(itemRequest.getItemId());
+            BigDecimal unitPrice = transactionSupport.getSalePrice(item);
+
+            TransactionSupport.LineTotals lineTotals = transactionSupport.calculateLine(
                     itemRequest.getQuantity(),
                     unitPrice,
                     itemRequest.getDiscountPercent(),
                     itemRequest.getTaxPercent()
             );
+
             subTotal = subTotal.add(lineTotals.grossAmount());
             discountAmount = discountAmount.add(lineTotals.discountAmount());
             taxAmount = taxAmount.add(lineTotals.taxAmount());
@@ -91,14 +93,14 @@ public class PosBillingServiceImpl implements PosBillingService {
                     item,
                     itemRequest.getQuantity(),
                     unitPrice,
-                    support.defaultZero(itemRequest.getDiscountPercent()),
-                    support.defaultZero(itemRequest.getTaxPercent())
+                    transactionSupport.defaultZero(itemRequest.getDiscountPercent()),
+                    transactionSupport.defaultZero(itemRequest.getTaxPercent())
             ));
         }
-        subTotal = support.money(subTotal);
-        discountAmount = support.money(discountAmount);
-        taxAmount = support.money(taxAmount);
-        grandTotal = support.money(grandTotal);
+        subTotal = transactionSupport.money(subTotal);
+        discountAmount = transactionSupport.money(discountAmount);
+        taxAmount = transactionSupport.money(taxAmount);
+        grandTotal = transactionSupport.money(grandTotal);
 
         Sale sale = Sale.builder()
                 .organization(organization)
@@ -154,50 +156,38 @@ public class PosBillingServiceImpl implements PosBillingService {
             PreparedPosItem item,
             Organization organization
     ) {
-        BigDecimal remainingQty = item.quantity();
-        for (Stock stock : support.getStocksForItemAndWarehouse(item.item().getId(), warehouse.getId())) {
-            if (remainingQty.compareTo(TransactionSupport.ZERO) <= 0) {
-                break;
-            }
-            BigDecimal availableQty = support.defaultZero(stock.getAvailableQty());
-            if (availableQty.compareTo(TransactionSupport.ZERO) <= 0) {
-                continue;
-            }
-            BigDecimal allocatedQty = availableQty.min(remainingQty);
-            TransactionSupport.LineTotals lineTotals = support.calculateLine(
-                    allocatedQty,
-                    item.unitPrice(),
-                    item.discountPercent(),
-                    item.taxPercent()
-            );
-            salesItemRepository.save(SalesItem.builder()
-                    .organization(organization)
-                    .sale(sale)
-                    .item(item.item())
-                    .batch(stock.getBatch())
-                    .qty(support.quantity(allocatedQty))
-                    .unitPrice(item.unitPrice())
-                    .discountPercent(item.discountPercent())
-                    .discountAmount(lineTotals.discountAmount())
-                    .taxPercent(item.taxPercent())
-                    .taxAmount(lineTotals.taxAmount())
-                    .totalAmount(lineTotals.totalAmount())
-                    .build());
-            support.decreaseStock(
-                    item.item(),
-                    warehouse,
-                    stock.getBatch(),
-                    allocatedQty,
-                    TX_POS_SALE,
-                    sale.getId(),
-                    "POS bill " + sale.getInvoiceNo()
-            );
-            remainingQty = remainingQty.subtract(allocatedQty);
-        }
-
-        if (remainingQty.compareTo(TransactionSupport.ZERO) > 0) {
+        Stock stock = transactionSupport.getStockForItemAndWarehouse(item.item().getId(), warehouse.getId());
+        BigDecimal availableQty = stock == null ? TransactionSupport.ZERO : transactionSupport.defaultZero(stock.getAvailableQty());
+        if (availableQty.compareTo(item.quantity()) < 0) {
             throw new BadRequestException(ErrorMessage.INSUFFICIENT_STOCK, "INSUFFICIENT_STOCK");
         }
+
+        TransactionSupport.LineTotals lineTotals = transactionSupport.calculateLine(
+                item.quantity(),
+                item.unitPrice(),
+                item.discountPercent(),
+                item.taxPercent()
+        );
+        salesItemRepository.save(SalesItem.builder()
+                .organization(organization)
+                .sale(sale)
+                .item(item.item())
+                .qty(transactionSupport.quantity(item.quantity()))
+                .unitPrice(item.unitPrice())
+                .discountPercent(item.discountPercent())
+                .discountAmount(lineTotals.discountAmount())
+                .taxPercent(item.taxPercent())
+                .taxAmount(lineTotals.taxAmount())
+                .totalAmount(lineTotals.totalAmount())
+                .build());
+        transactionSupport.decreaseStock(
+                item.item(),
+                warehouse,
+                item.quantity(),
+                TX_POS_SALE,
+                sale.getId(),
+                "POS bill " + sale.getInvoiceNo()
+        );
     }
 
     private String nextNumber(String prefix) {
@@ -207,7 +197,7 @@ public class PosBillingServiceImpl implements PosBillingService {
                 )
                 .map(Sale::getInvoiceNo)
                 .orElse(null);
-        return support.nextNumber(prefix, currentNumber);
+        return transactionSupport.nextNumber(prefix, currentNumber);
     }
 
     private String nextPaymentNo() {
@@ -217,7 +207,7 @@ public class PosBillingServiceImpl implements PosBillingService {
                 )
                 .map(Payment::getPaymentNo)
                 .orElse(null);
-        return support.nextNumber(PAYMENT_PREFIX, currentNumber);
+        return transactionSupport.nextNumber(PAYMENT_PREFIX, currentNumber);
     }
 
     private record PreparedPosItem(

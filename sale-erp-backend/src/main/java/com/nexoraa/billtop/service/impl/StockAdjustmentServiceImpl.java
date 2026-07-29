@@ -1,6 +1,5 @@
 package com.nexoraa.billtop.service.impl;
 
-import com.nexoraa.billtop.constants.ErrorMessage;
 import com.nexoraa.billtop.dto.PageResponseDto;
 import com.nexoraa.billtop.dto.stock.StockAdjustmentCreateResponseDto;
 import com.nexoraa.billtop.dto.stock.StockAdjustmentItemRequestDto;
@@ -8,18 +7,13 @@ import com.nexoraa.billtop.dto.stock.StockAdjustmentItemResponseDto;
 import com.nexoraa.billtop.dto.stock.StockAdjustmentRequestDto;
 import com.nexoraa.billtop.dto.stock.StockAdjustmentResponseDto;
 import com.nexoraa.billtop.entity.Item;
-import com.nexoraa.billtop.entity.ItemBatch;
 import com.nexoraa.billtop.entity.Organization;
-import com.nexoraa.billtop.entity.Stock;
 import com.nexoraa.billtop.entity.StockAdjustment;
 import com.nexoraa.billtop.entity.StockAdjustmentItem;
 import com.nexoraa.billtop.entity.Warehouse;
-import com.nexoraa.billtop.exception.BadRequestException;
 import com.nexoraa.billtop.exception.ResourceNotFoundException;
-import com.nexoraa.billtop.repository.ItemBatchRepository;
 import com.nexoraa.billtop.repository.StockAdjustmentItemRepository;
 import com.nexoraa.billtop.repository.StockAdjustmentRepository;
-import com.nexoraa.billtop.repository.StockRepository;
 import com.nexoraa.billtop.security.CurrentOrganizationService;
 import com.nexoraa.billtop.service.StockAdjustmentService;
 import org.springframework.data.domain.Page;
@@ -42,23 +36,17 @@ public class StockAdjustmentServiceImpl implements StockAdjustmentService {
 
     private final StockAdjustmentRepository stockAdjustmentRepository;
     private final StockAdjustmentItemRepository stockAdjustmentItemRepository;
-    private final StockRepository stockRepository;
-    private final ItemBatchRepository itemBatchRepository;
     private final TransactionSupport support;
     private final CurrentOrganizationService currentOrganizationService;
 
     public StockAdjustmentServiceImpl(
             StockAdjustmentRepository stockAdjustmentRepository,
             StockAdjustmentItemRepository stockAdjustmentItemRepository,
-            StockRepository stockRepository,
-            ItemBatchRepository itemBatchRepository,
             TransactionSupport support,
             CurrentOrganizationService currentOrganizationService
     ) {
         this.stockAdjustmentRepository = stockAdjustmentRepository;
         this.stockAdjustmentItemRepository = stockAdjustmentItemRepository;
-        this.stockRepository = stockRepository;
-        this.itemBatchRepository = itemBatchRepository;
         this.support = support;
         this.currentOrganizationService = currentOrganizationService;
     }
@@ -150,13 +138,11 @@ public class StockAdjustmentServiceImpl implements StockAdjustmentService {
             BigDecimal currentQty = support.quantity(itemRequest.getCurrentQty());
             BigDecimal actualQty = support.quantity(itemRequest.getActualQty());
             BigDecimal differenceQty = actualQty.subtract(currentQty);
-            ItemBatch batch = resolveBatch(item, warehouse);
 
             stockAdjustmentItemRepository.save(StockAdjustmentItem.builder()
                     .organization(organization)
                     .stockAdjustment(adjustment)
                     .item(item)
-                    .batch(batch)
                     .currentQty(currentQty)
                     .actualQty(actualQty)
                     .differenceQty(support.quantity(differenceQty))
@@ -166,60 +152,22 @@ public class StockAdjustmentServiceImpl implements StockAdjustmentService {
                 support.increaseStock(
                         item,
                         warehouse,
-                        batch,
                         differenceQty,
                         TX_ADJUSTMENT_IN,
                         adjustment.getId(),
                         "Stock adjustment " + adjustment.getAdjustmentNo()
                 );
             } else if (differenceQty.compareTo(TransactionSupport.ZERO) < 0) {
-                decreaseAcrossBatches(item, warehouse, differenceQty.abs(), adjustment);
+                support.decreaseStock(
+                        item,
+                        warehouse,
+                        differenceQty.abs(),
+                        TX_ADJUSTMENT_OUT,
+                        adjustment.getId(),
+                        "Stock adjustment " + adjustment.getAdjustmentNo()
+                );
             }
         }
-    }
-
-    private void decreaseAcrossBatches(Item item, Warehouse warehouse, BigDecimal quantity, StockAdjustment adjustment) {
-        BigDecimal remainingQty = quantity;
-        for (Stock stock : stockRepository.findByItemIdAndWarehouseIdOrderByIdAsc(
-                item.getId(),
-                warehouse.getId()
-        )) {
-            if (remainingQty.compareTo(TransactionSupport.ZERO) <= 0) {
-                break;
-            }
-            BigDecimal availableQty = support.defaultZero(stock.getAvailableQty());
-            if (availableQty.compareTo(TransactionSupport.ZERO) <= 0) {
-                continue;
-            }
-            BigDecimal allocatedQty = availableQty.min(remainingQty);
-            support.decreaseStock(
-                    item,
-                    warehouse,
-                    stock.getBatch(),
-                    allocatedQty,
-                    TX_ADJUSTMENT_OUT,
-                    adjustment.getId(),
-                    "Stock adjustment " + adjustment.getAdjustmentNo()
-            );
-            remainingQty = remainingQty.subtract(allocatedQty);
-        }
-        if (remainingQty.compareTo(TransactionSupport.ZERO) > 0) {
-            throw new BadRequestException(ErrorMessage.INSUFFICIENT_STOCK, "INSUFFICIENT_STOCK");
-        }
-    }
-
-    private ItemBatch resolveBatch(Item item, Warehouse warehouse) {
-        return stockRepository.findByItemIdAndWarehouseIdOrderByIdAsc(
-                        item.getId(),
-                        warehouse.getId()
-                ).stream()
-                .map(Stock::getBatch)
-                .findFirst()
-                .orElseGet(() -> itemBatchRepository.findTopByItemIdOrderByIdDesc(item.getId())
-                        .orElseGet(() -> itemBatchRepository.save(ItemBatch.builder()
-                                .item(item)
-                                .batchNo("ADJ-" + item.getId())
-                                .build())));
     }
 
     private String nextAdjustmentNo() {
@@ -252,7 +200,6 @@ public class StockAdjustmentServiceImpl implements StockAdjustmentService {
                 support.decreaseStock(
                         item.getItem(),
                         adjustment.getWarehouse(),
-                        item.getBatch(),
                         differenceQty,
                         TX_ADJUSTMENT_REVERSE_OUT,
                         adjustment.getId(),
@@ -262,7 +209,6 @@ public class StockAdjustmentServiceImpl implements StockAdjustmentService {
                 support.increaseStock(
                         item.getItem(),
                         adjustment.getWarehouse(),
-                        item.getBatch(),
                         differenceQty.abs(),
                         TX_ADJUSTMENT_REVERSE_IN,
                         adjustment.getId(),
@@ -290,12 +236,9 @@ public class StockAdjustmentServiceImpl implements StockAdjustmentService {
 
     private StockAdjustmentItemResponseDto toItemResponse(StockAdjustmentItem item) {
         Item stockItem = item.getItem();
-        ItemBatch batch = item.getBatch();
         return StockAdjustmentItemResponseDto.builder()
                 .itemId(stockItem == null ? null : stockItem.getId())
                 .itemName(stockItem == null ? null : stockItem.getItemName())
-                .batchId(batch == null ? null : batch.getId())
-                .batchNo(batch == null ? null : batch.getBatchNo())
                 .currentQty(item.getCurrentQty())
                 .actualQty(item.getActualQty())
                 .differenceQty(item.getDifferenceQty())

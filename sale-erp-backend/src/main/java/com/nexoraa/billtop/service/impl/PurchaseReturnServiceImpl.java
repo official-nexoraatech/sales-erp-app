@@ -10,7 +10,6 @@ import com.nexoraa.billtop.dto.returning.ReturnItemResponseDto;
 import com.nexoraa.billtop.dto.returning.ReturnListResponseDto;
 import com.nexoraa.billtop.entity.Contact;
 import com.nexoraa.billtop.entity.Item;
-import com.nexoraa.billtop.entity.ItemBatch;
 import com.nexoraa.billtop.entity.Organization;
 import com.nexoraa.billtop.entity.Purchase;
 import com.nexoraa.billtop.entity.PurchaseReturn;
@@ -76,10 +75,9 @@ public class PurchaseReturnServiceImpl implements PurchaseReturnService {
         BigDecimal grandTotal = TransactionSupport.ZERO;
         for (ReturnItemRequestDto itemRequest : request.getItems()) {
             Item item = support.getActiveItem(itemRequest.getItemId());
-            ItemBatch batch = support.getBatchForItem(itemRequest.getBatchId(), item.getId());
             BigDecimal amount = support.amount(itemRequest.getQuantity(), itemRequest.getRate());
             grandTotal = grandTotal.add(amount);
-            items.add(new PreparedReturnItem(item, batch, itemRequest, amount));
+            items.add(new PreparedReturnItem(item, itemRequest, amount));
         }
 
         PurchaseReturn purchaseReturn = PurchaseReturn.builder()
@@ -100,7 +98,6 @@ public class PurchaseReturnServiceImpl implements PurchaseReturnService {
                     .organization(organization)
                     .purchaseReturn(savedReturn)
                     .item(item.item())
-                    .batch(item.batch())
                     .qty(support.quantity(item.request().getQuantity()))
                     .rate(support.money(item.request().getRate()))
                     .amount(item.amount())
@@ -108,7 +105,6 @@ public class PurchaseReturnServiceImpl implements PurchaseReturnService {
             support.decreaseStock(
                     item.item(),
                     purchase.getWarehouse(),
-                    item.batch(),
                     item.request().getQuantity(),
                     TX_PURCHASE_RETURN,
                     savedReturn.getId(),
@@ -186,12 +182,9 @@ public class PurchaseReturnServiceImpl implements PurchaseReturnService {
 
     private ReturnItemResponseDto toItemResponse(PurchaseReturnItem purchaseReturnItem) {
         Item item = purchaseReturnItem.getItem();
-        ItemBatch batch = purchaseReturnItem.getBatch();
         return ReturnItemResponseDto.builder()
                 .itemId(item == null ? null : item.getId())
                 .itemName(item == null ? null : item.getItemName())
-                .batchId(batch == null ? null : batch.getId())
-                .batchNo(batch == null ? null : batch.getBatchNo())
                 .quantity(purchaseReturnItem.getQty())
                 .rate(purchaseReturnItem.getRate())
                 .amount(purchaseReturnItem.getAmount())
@@ -200,7 +193,6 @@ public class PurchaseReturnServiceImpl implements PurchaseReturnService {
 
     private record PreparedReturnItem(
             Item item,
-            ItemBatch batch,
             ReturnItemRequestDto request,
             BigDecimal amount
     ) {

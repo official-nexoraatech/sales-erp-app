@@ -97,7 +97,6 @@ export interface ItemListItem {
   msp?: number;
   discountPercentage?: number;
   profitMargin?: number;
-  batchNo?: string;
   manufacturingDate?: string;
   expiryDate?: string;
   openingQuantity?: number;
@@ -145,7 +144,6 @@ export interface ItemRequest {
   msp: number;
   discountPercentage: number;
   profitMargin: number;
-  batchNo: string;
   manufacturingDate: string;
   expiryDate: string;
   openingQuantity: number;
@@ -160,7 +158,6 @@ export interface ItemStock {
   availableQty?: number;
   quantity?: number;
   warehouseName?: string;
-  batchNo?: string;
   minimumStock?: number;
 }
 

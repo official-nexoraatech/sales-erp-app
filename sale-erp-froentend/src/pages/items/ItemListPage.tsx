@@ -65,7 +65,6 @@ const itemColumns: TableColumn[] = [
   { heading: 'MSP', render: (item) => formatCurrency(number(item.msp)), exportValue: (item) => number(item.msp) },
   { heading: 'Discount %', render: (item) => number(item.discountPercentage), exportValue: (item) => number(item.discountPercentage) },
   { heading: 'Profit %', render: (item) => number(item.profitMargin), exportValue: (item) => number(item.profitMargin) },
-  { heading: 'Batch No', render: (item) => text(item.batchNo), exportValue: (item) => text(item.batchNo) },
   { heading: 'Mfg Date', render: (item) => date(item.manufacturingDate), exportValue: (item) => date(item.manufacturingDate) },
   { heading: 'Exp Date', render: (item) => date(item.expiryDate), exportValue: (item) => date(item.expiryDate) },
   { heading: 'Opening Qty', render: (item) => number(item.openingQuantity), exportValue: (item) => number(item.openingQuantity) },

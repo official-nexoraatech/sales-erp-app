@@ -21,7 +21,6 @@ export const ItemStockPage: React.FC = () => {
           <div><p className="text-sm text-gray-500">Warehouse</p><p className="font-semibold">{data?.warehouseName || 'N/A'}</p></div>
           <div><p className="text-sm text-gray-500">Available Quantity</p><p className="font-semibold">{data?.availableQty ?? data?.quantity ?? 0}</p></div>
           <div><p className="text-sm text-gray-500">Minimum Stock</p><p className="font-semibold">{data?.minimumStock || 0}</p></div>
-          <div><p className="text-sm text-gray-500">Batch No.</p><p className="font-semibold">{data?.batchNo || 'N/A'}</p></div>
         </div>
       </Card>
     </div>

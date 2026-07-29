@@ -2,10 +2,8 @@ package com.nexoraa.billtop.service.impl;
 
 import com.nexoraa.billtop.constants.ErrorMessage;
 import com.nexoraa.billtop.dto.common.NameIdResponseDto;
-import com.nexoraa.billtop.dto.purchase.PurchaseItemRequestDto;
 import com.nexoraa.billtop.entity.Contact;
 import com.nexoraa.billtop.entity.Item;
-import com.nexoraa.billtop.entity.ItemBatch;
 import com.nexoraa.billtop.entity.ItemPrice;
 import com.nexoraa.billtop.entity.PaymentMethod;
 import com.nexoraa.billtop.entity.ShippingCarrier;
@@ -17,7 +15,6 @@ import com.nexoraa.billtop.entity.Warehouse;
 import com.nexoraa.billtop.exception.BadRequestException;
 import com.nexoraa.billtop.exception.ResourceNotFoundException;
 import com.nexoraa.billtop.repository.ContactRepository;
-import com.nexoraa.billtop.repository.ItemBatchRepository;
 import com.nexoraa.billtop.repository.ItemPriceRepository;
 import com.nexoraa.billtop.repository.ItemRepository;
 import com.nexoraa.billtop.repository.PaymentMethodRepository;
@@ -58,7 +55,6 @@ class TransactionSupport {
     private final StateRepository stateRepository;
     private final UserRepository userRepository;
     private final ItemRepository itemRepository;
-    private final ItemBatchRepository itemBatchRepository;
     private final ItemPriceRepository itemPriceRepository;
     private final StockRepository stockRepository;
     private final StockTransactionRepository stockTransactionRepository;
@@ -73,7 +69,6 @@ class TransactionSupport {
             StateRepository stateRepository,
             UserRepository userRepository,
             ItemRepository itemRepository,
-            ItemBatchRepository itemBatchRepository,
             ItemPriceRepository itemPriceRepository,
             StockRepository stockRepository,
             StockTransactionRepository stockTransactionRepository,
@@ -87,7 +82,6 @@ class TransactionSupport {
         this.stateRepository = stateRepository;
         this.userRepository = userRepository;
         this.itemRepository = itemRepository;
-        this.itemBatchRepository = itemBatchRepository;
         this.itemPriceRepository = itemPriceRepository;
         this.stockRepository = stockRepository;
         this.stockTransactionRepository = stockTransactionRepository;
@@ -171,26 +165,6 @@ class TransactionSupport {
                 ));
     }
 
-    ItemBatch getBatchForItem(Long batchId, Long itemId) {
-        ItemBatch batch = itemBatchRepository.findByIdAndItemId(batchId, itemId)
-                .orElseThrow(() -> new ResourceNotFoundException("Item batch not found", "ITEM_BATCH_NOT_FOUND"));
-        return batch;
-    }
-
-    ItemBatch getOrCreateBatch(Item item, PurchaseItemRequestDto request) {
-        validateBatchDates(request.getManufacturingDate(), request.getExpiryDate());
-        return itemBatchRepository.findByItemIdAndBatchNo(
-                        item.getId(),
-                        request.getBatchNo()
-                )
-                .orElseGet(() -> itemBatchRepository.save(ItemBatch.builder()
-                        .item(item)
-                        .batchNo(request.getBatchNo())
-                        .manufacturingDate(request.getManufacturingDate())
-                        .expiryDate(request.getExpiryDate())
-                        .build()));
-    }
-
     BigDecimal getSalePrice(Item item) {
         ItemPrice price = itemPriceRepository.findTopByItemIdOrderByIdDesc(item.getId())
                 .orElseThrow(() -> new BadRequestException("Sale price is not configured", "SALE_PRICE_NOT_CONFIGURED"));
@@ -201,32 +175,26 @@ class TransactionSupport {
         return money(salePrice);
     }
 
-    List<Stock> getStocksForItemAndWarehouse(Long itemId, Long warehouseId) {
-        return stockRepository.findByItemIdAndWarehouseIdOrderByIdAsc(
-                itemId,
-                warehouseId
-        );
+    Stock getStockForItemAndWarehouse(Long itemId, Long warehouseId) {
+        return stockRepository.findByItemIdAndWarehouseId(itemId, warehouseId).orElse(null);
     }
 
     Stock increaseStock(
             Item item,
             Warehouse warehouse,
-            ItemBatch batch,
             BigDecimal quantity,
             String transactionType,
             Long referenceId,
             String remarks
     ) {
-        Stock stock = stockRepository.findFirstByItemIdAndWarehouseIdAndBatchId(
+        Stock stock = stockRepository.findByItemIdAndWarehouseId(
                 item.getId(),
-                warehouse.getId(),
-                batch.getId()
+                warehouse.getId()
         ).orElseGet(() -> {
             BigDecimal inheritedMinimumStock = existingMinimumStockFor(item.getId());
             return Stock.builder()
                     .item(item)
                     .warehouse(warehouse)
-                    .batch(batch)
                     .availableQty(ZERO)
                     .reservedQty(ZERO)
                     .minimumStock(inheritedMinimumStock)
@@ -237,8 +205,8 @@ class TransactionSupport {
         stock.setAvailableQty(quantity(defaultZero(stock.getAvailableQty()).add(quantity)));
         stock.setReservedQty(quantity(defaultZero(stock.getReservedQty())));
         Stock savedStock = stockRepository.save(stock);
-        itemStockStatusService.refreshStatus(item);
-        createStockTransaction(item, warehouse, batch, transactionType, referenceId, quantity, ZERO, savedStock.getAvailableQty(), remarks);
+            itemStockStatusService.SaveItemStockStatus(item);
+        createStockTransaction(item, warehouse, transactionType, referenceId, quantity, ZERO, savedStock.getAvailableQty(), remarks);
         return savedStock;
     }
 
@@ -249,27 +217,22 @@ class TransactionSupport {
      * already set on any other stock row for this item instead.
      */
     private BigDecimal existingMinimumStockFor(Long itemId) {
-        return stockRepository.findByItemId(itemId)
-                .stream()
-                .map(Stock::getMinimumStock)
-                .filter(value -> value != null && value.compareTo(ZERO) > 0)
-                .findFirst()
-                .orElse(ZERO);
+        Stock stock = stockRepository.findByItemIdOrderByIdAsc(itemId);
+        BigDecimal minimumStock = stock != null ? stock.getMinimumStock() : null;
+        return minimumStock != null && minimumStock.compareTo(ZERO) > 0 ? minimumStock : ZERO;
     }
 
     Stock decreaseStock(
             Item item,
             Warehouse warehouse,
-            ItemBatch batch,
             BigDecimal quantity,
             String transactionType,
             Long referenceId,
             String remarks
     ) {
-        Stock stock = stockRepository.findFirstByItemIdAndWarehouseIdAndBatchId(
+        Stock stock = stockRepository.findByItemIdAndWarehouseId(
                 item.getId(),
-                warehouse.getId(),
-                batch.getId()
+                warehouse.getId()
         ).orElseThrow(() -> new BadRequestException(ErrorMessage.INSUFFICIENT_STOCK, "INSUFFICIENT_STOCK"));
 
         BigDecimal availableQty = defaultZero(stock.getAvailableQty());
@@ -280,8 +243,8 @@ class TransactionSupport {
         stock.setAvailableQty(quantity(availableQty.subtract(quantity)));
         stock.setReservedQty(quantity(defaultZero(stock.getReservedQty())));
         Stock savedStock = stockRepository.save(stock);
-        itemStockStatusService.refreshStatus(item);
-        createStockTransaction(item, warehouse, batch, transactionType, referenceId, ZERO, quantity, savedStock.getAvailableQty(), remarks);
+        itemStockStatusService.SaveItemStockStatus(item);
+        createStockTransaction(item, warehouse, transactionType, referenceId, ZERO, quantity, savedStock.getAvailableQty(), remarks);
         return savedStock;
     }
 
@@ -356,12 +319,6 @@ class TransactionSupport {
         return STATUS_CANCELLED.equalsIgnoreCase(status);
     }
 
-    void validateBatchDates(java.time.LocalDate manufacturingDate, java.time.LocalDate expiryDate) {
-        if (manufacturingDate != null && expiryDate != null && expiryDate.isBefore(manufacturingDate)) {
-            throw new BadRequestException(ErrorMessage.INVALID_EXPIRY_DATE, "INVALID_EXPIRY_DATE");
-        }
-    }
-
     private BigDecimal percentAmount(BigDecimal amount, BigDecimal percent) {
         return money(amount.multiply(defaultZero(percent)).divide(HUNDRED, 6, RoundingMode.HALF_UP));
     }
@@ -369,7 +326,6 @@ class TransactionSupport {
     private void createStockTransaction(
             Item item,
             Warehouse warehouse,
-            ItemBatch batch,
             String transactionType,
             Long referenceId,
             BigDecimal qtyIn,
@@ -381,7 +337,6 @@ class TransactionSupport {
                 .organization(item.getOrganization())
                 .item(item)
                 .warehouse(warehouse)
-                .batch(batch)
                 .transactionType(transactionType)
                 .referenceId(referenceId)
                 .qtyIn(quantity(qtyIn))

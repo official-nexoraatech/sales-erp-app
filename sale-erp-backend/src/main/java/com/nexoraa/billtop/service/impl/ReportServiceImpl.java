@@ -23,7 +23,6 @@ import com.nexoraa.billtop.entity.BankTransaction;
 import com.nexoraa.billtop.entity.Contact;
 import com.nexoraa.billtop.entity.Expense;
 import com.nexoraa.billtop.entity.Item;
-import com.nexoraa.billtop.entity.ItemBatch;
 import com.nexoraa.billtop.entity.Payment;
 import com.nexoraa.billtop.entity.Purchase;
 import com.nexoraa.billtop.entity.PurchaseItem;
@@ -43,7 +42,6 @@ import com.nexoraa.billtop.repository.BankAccountRepository;
 import com.nexoraa.billtop.repository.BankTransactionRepository;
 import com.nexoraa.billtop.repository.CashTransactionRepository;
 import com.nexoraa.billtop.repository.ExpenseRepository;
-import com.nexoraa.billtop.repository.ItemBatchRepository;
 import com.nexoraa.billtop.repository.ItemPriceRepository;
 import com.nexoraa.billtop.repository.OrganizationRepository;
 import com.nexoraa.billtop.repository.PaymentRepository;
@@ -57,10 +55,12 @@ import com.nexoraa.billtop.repository.SalesPaymentRepository;
 import com.nexoraa.billtop.repository.SalesReturnRepository;
 import com.nexoraa.billtop.repository.StockRepository;
 import com.nexoraa.billtop.repository.StockTransactionRepository;
+import com.nexoraa.billtop.repository.WarehouseRepository;
 import com.nexoraa.billtop.security.CurrentOrganizationService;
 import com.nexoraa.billtop.service.CustomerService;
 import com.nexoraa.billtop.service.ReportService;
 import com.nexoraa.billtop.service.SupplierService;
+import com.nexoraa.billtop.specification.MasterDataSpecification;
 import com.nexoraa.billtop.specification.PurchaseSpecification;
 import com.nexoraa.billtop.specification.SaleSpecification;
 import org.springframework.stereotype.Service;
@@ -99,9 +99,9 @@ public class ReportServiceImpl implements ReportService {
     private final SalesPaymentRepository salesPaymentRepository;
     private final BankAccountRepository bankAccountRepository;
     private final StockTransactionRepository stockTransactionRepository;
-    private final ItemBatchRepository itemBatchRepository;
     private final OrganizationRepository organizationRepository;
     private final PurchaseItemRepository purchaseItemRepository;
+    private final WarehouseRepository warehouseRepository;
 
     public ReportServiceImpl(
             SaleRepository saleRepository,
@@ -123,9 +123,9 @@ public class ReportServiceImpl implements ReportService {
             SalesPaymentRepository salesPaymentRepository,
             BankAccountRepository bankAccountRepository,
             StockTransactionRepository stockTransactionRepository,
-            ItemBatchRepository itemBatchRepository,
             OrganizationRepository organizationRepository,
-            PurchaseItemRepository purchaseItemRepository
+            PurchaseItemRepository purchaseItemRepository,
+            WarehouseRepository warehouseRepository
     ) {
         this.saleRepository = saleRepository;
         this.purchaseRepository = purchaseRepository;
@@ -146,9 +146,9 @@ public class ReportServiceImpl implements ReportService {
         this.salesPaymentRepository = salesPaymentRepository;
         this.bankAccountRepository = bankAccountRepository;
         this.stockTransactionRepository = stockTransactionRepository;
-        this.itemBatchRepository = itemBatchRepository;
         this.organizationRepository = organizationRepository;
         this.purchaseItemRepository = purchaseItemRepository;
+        this.warehouseRepository = warehouseRepository;
     }
 
     @Override
@@ -286,9 +286,21 @@ public class ReportServiceImpl implements ReportService {
     }
 
     private List<StockReportResponseDto> stockReportForOrganization(Long organizationId) {
-        return stockRepository.findByItem_Organization_Id(organizationId).stream()
+        return organizationStocks(organizationId).stream()
                 .map(this::toStockRecord)
                 .toList();
+    }
+
+    private List<Stock> organizationStocks(Long organizationId) {
+        List<Long> warehouseIds = warehouseRepository.findAll(
+                        MasterDataSpecification.<Warehouse>organization(organizationId))
+                .stream()
+                .map(Warehouse::getId)
+                .toList();
+        if (warehouseIds.isEmpty()) {
+            return List.of();
+        }
+        return stockRepository.findByWarehouse_IdInAndItem_Organization_Id(warehouseIds, organizationId);
     }
 
     private List<StockReportResponseDto> lowStockReportForOrganization(Long organizationId) {
@@ -610,10 +622,7 @@ public class ReportServiceImpl implements ReportService {
             LocalDate fromDate, LocalDate toDate, Long itemId, Long brandId, String batchNo, Long warehouseId
     ) {
         return stockTransactionsBetween(fromDate, toDate).stream()
-                .filter(transaction -> transaction.getBatch() != null)
                 .filter(transaction -> matchesItemFilters(transaction, itemId, brandId, warehouseId))
-                .filter(transaction -> batchNo == null
-                        || batchNo.equalsIgnoreCase(transaction.getBatch().getBatchNo()))
                 .map(this::toItemTransactionRecord)
                 .toList();
     }
@@ -634,8 +643,8 @@ public class ReportServiceImpl implements ReportService {
     public List<ItemTransactionResponseDto> getItemTransactionsSerial(
             LocalDate fromDate, LocalDate toDate, Long itemId, Long brandId, String serialImei, Long warehouseId
     ) {
-        // No serial/IMEI tracking table exists in the schema today (only batch-level tracking
-        // via ItemBatch) — this endpoint responds correctly but has no data source to draw from.
+        // No serial/IMEI tracking table exists in the schema today, so this endpoint
+        // responds correctly but has no data source to draw from.
         return List.of();
     }
 
@@ -647,40 +656,33 @@ public class ReportServiceImpl implements ReportService {
         Long organizationId = currentOrganizationService.getOrganizationId();
         LocalDate today = LocalDate.now();
         List<ExpiredItemResponseDto> results = new ArrayList<>();
-        for (ItemBatch batch : itemBatchRepository.findByItem_Organization_Id(organizationId)) {
-            LocalDate expiryDate = batch.getExpiryDate();
-            Item item = batch.getItem();
-            if (expiryDate == null || item == null) {
+        for (Stock stock : organizationStocks(organizationId)) {
+            Item item = stock.getItem();
+            LocalDate expiryDate = item == null ? null : item.getExpiryDate();
+            if (expiryDate == null) {
                 continue;
             }
             if (!isExpiryInScope(filterType, expiryDate, fromDate, toDate, today)) {
                 continue;
             }
             if ((itemId != null && !itemId.equals(item.getId()))
-                    || (brandId != null && (item.getBrand() == null || !brandId.equals(item.getBrand().getId())))
-                    || (batchNo != null && !batchNo.equalsIgnoreCase(batch.getBatchNo()))) {
+                    || (brandId != null && (item.getBrand() == null || !brandId.equals(item.getBrand().getId())))) {
                 continue;
             }
-            for (Stock stock : stockRepository.findByItemId(item.getId())) {
-                if (stock.getBatch() == null || !batch.getId().equals(stock.getBatch().getId())) {
-                    continue;
-                }
-                Warehouse warehouse = stock.getWarehouse();
-                if (warehouseId != null && (warehouse == null || !warehouseId.equals(warehouse.getId()))) {
-                    continue;
-                }
-                results.add(ExpiredItemResponseDto.builder()
-                        .warehouseId(warehouse == null ? null : warehouse.getId())
-                        .warehouseName(warehouse == null ? null : warehouse.getName())
-                        .itemId(item.getId())
-                        .itemName(item.getItemName())
-                        .brandName(item.getBrand() == null ? null : item.getBrand().getName())
-                        .batchNo(batch.getBatchNo())
-                        .expiryDate(expiryDate)
-                        .daysUntilExpiry(ChronoUnit.DAYS.between(today, expiryDate))
-                        .availableQty(support.quantity(stock.getAvailableQty()))
-                        .build());
+            Warehouse warehouse = stock.getWarehouse();
+            if (warehouseId != null && (warehouse == null || !warehouseId.equals(warehouse.getId()))) {
+                continue;
             }
+            results.add(ExpiredItemResponseDto.builder()
+                    .warehouseId(warehouse == null ? null : warehouse.getId())
+                    .warehouseName(warehouse == null ? null : warehouse.getName())
+                    .itemId(item.getId())
+                    .itemName(item.getItemName())
+                    .brandName(item.getBrand() == null ? null : item.getBrand().getName())
+                    .expiryDate(expiryDate)
+                    .daysUntilExpiry(ChronoUnit.DAYS.between(today, expiryDate))
+                    .availableQty(support.quantity(stock.getAvailableQty()))
+                    .build());
         }
         return results;
     }
@@ -796,7 +798,6 @@ public class ReportServiceImpl implements ReportService {
     private StockReportResponseDto toStockRecord(Stock stock) {
         Item item = stock.getItem();
         Warehouse warehouse = stock.getWarehouse();
-        ItemBatch batch = stock.getBatch();
         BigDecimal availableQty = support.defaultZero(stock.getAvailableQty());
         BigDecimal stockValue = availableQty.multiply(itemPurchasePrice(item == null ? null : item.getId()));
         return StockReportResponseDto.builder()
@@ -804,8 +805,6 @@ public class ReportServiceImpl implements ReportService {
                 .itemName(item == null ? null : item.getItemName())
                 .warehouseId(warehouse == null ? null : warehouse.getId())
                 .warehouseName(warehouse == null ? null : warehouse.getName())
-                .batchId(batch == null ? null : batch.getId())
-                .batchNo(batch == null ? null : batch.getBatchNo())
                 .availableQty(stock.getAvailableQty())
                 .reorderLevel(stock.getReorderLevel())
                 .stockValue(support.money(stockValue))
@@ -849,7 +848,6 @@ public class ReportServiceImpl implements ReportService {
     private ItemTransactionResponseDto toItemTransactionRecord(StockTransaction transaction) {
         Item item = transaction.getItem();
         Warehouse warehouse = transaction.getWarehouse();
-        ItemBatch batch = transaction.getBatch();
         BigDecimal quantity = support.defaultZero(transaction.getQtyIn()).subtract(support.defaultZero(transaction.getQtyOut()));
         return ItemTransactionResponseDto.builder()
                 .date(transaction.getTransactionDate() == null ? null : transaction.getTransactionDate().toLocalDate())
@@ -859,7 +857,6 @@ public class ReportServiceImpl implements ReportService {
                 .warehouseName(warehouse == null ? null : warehouse.getName())
                 .itemName(item == null ? null : item.getItemName())
                 .brandName(item == null || item.getBrand() == null ? null : item.getBrand().getName())
-                .batchNo(batch == null ? null : batch.getBatchNo())
                 .quantity(support.quantity(quantity))
                 .stock(support.quantity(transaction.getBalanceQty()))
                 .build();
