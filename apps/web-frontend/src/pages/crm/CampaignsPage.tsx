@@ -203,6 +203,7 @@ export default function CampaignsPage() {
   const canCreate = hasPermission(PERMISSIONS.CRM_CAMPAIGN_CREATE);
   const canSend = hasPermission(PERMISSIONS.CRM_CAMPAIGN_SEND);
   const canApprove = hasPermission(PERMISSIONS.CRM_CAMPAIGN_APPROVE);
+  const canViewAnalytics = hasPermission(PERMISSIONS.CRM_CAMPAIGN_ANALYTICS_VIEW);
 
   const [statusFilter, setStatusFilter] = useState('');
   const [scheduleModal, setScheduleModal] = useState<{ open: boolean; id: number }>({
@@ -298,9 +299,21 @@ export default function CampaignsPage() {
         title="Campaigns"
         subtitle="SMS, WhatsApp, Email and in-app marketing campaigns"
         actions={
-          canCreate ? (
-            <Button onClick={() => navigate('/crm/campaigns/new')}>+ New Campaign</Button>
-          ) : undefined
+          <div className="flex gap-2">
+            {canViewAnalytics && (
+              <Button variant="secondary" onClick={() => navigate('/crm/campaigns/roi-report')}>
+                ROI Report
+              </Button>
+            )}
+            {canCreate && (
+              <Button
+                data-tour-id="crm-campaigns-create-button"
+                onClick={() => navigate('/crm/campaigns/new')}
+              >
+                + New Campaign
+              </Button>
+            )}
+          </div>
         }
       />
 
@@ -409,6 +422,7 @@ export default function CampaignsPage() {
                       c.approvalStatus !== 'PENDING_APPROVAL' &&
                       c.approvalStatus !== 'APPROVED' && (
                         <Button
+                          data-tour-id="crm-campaign-submit-approval-button"
                           variant="secondary"
                           size="sm"
                           onClick={() => submitForApprovalMut.mutate(c.id)}
@@ -420,6 +434,7 @@ export default function CampaignsPage() {
                     {canApprove && c.approvalStatus === 'PENDING_APPROVAL' && (
                       <>
                         <Button
+                          data-tour-id="crm-campaign-approve-button"
                           size="sm"
                           onClick={() => approveMut.mutate(c.id)}
                           disabled={approveMut.isPending}
@@ -427,6 +442,7 @@ export default function CampaignsPage() {
                           Approve
                         </Button>
                         <Button
+                          data-tour-id="crm-campaign-reject-button"
                           variant="danger"
                           size="sm"
                           onClick={() => {
@@ -441,6 +457,7 @@ export default function CampaignsPage() {
                     {canSend && c.status === 'DRAFT' && (
                       <>
                         <Button
+                          data-tour-id="crm-campaign-schedule-button"
                           variant="secondary"
                           size="sm"
                           onClick={() => {
@@ -451,11 +468,12 @@ export default function CampaignsPage() {
                           Schedule
                         </Button>
                         <Button
+                          data-tour-id="crm-campaign-send-now-button"
                           size="sm"
                           onClick={async () => {
                             const ok = await confirm({
                               title: 'Send Campaign',
-                              message: 'Send campaign now?',
+                              message: `This will send "${c.name}" via ${c.channel} to ${c.totalRecipients ?? 'all matching'} recipient(s) right now. This can't be undone.`,
                               confirmLabel: 'Send Now',
                             });
                             if (ok) sendMut.mutate(c.id);
@@ -468,6 +486,7 @@ export default function CampaignsPage() {
                     )}
                     {canCreate && (c.status === 'DRAFT' || c.status === 'SCHEDULED') && (
                       <Button
+                        data-tour-id="crm-campaign-cancel-button"
                         variant="danger"
                         size="sm"
                         onClick={async () => {

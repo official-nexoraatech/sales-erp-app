@@ -10,11 +10,16 @@ const logger = createLogger({ serviceName: 'search-service' });
 export async function syncSearchIndex(event: ERPEventPayload, engine: SearchEngine): Promise<void> {
   const mapping = EVENT_ENTITY_MAP[event.eventType];
   if (!mapping) {
-    logger.warn({ eventType: event.eventType }, 'search-service consumer: no entity mapping for event type — skipping');
+    logger.warn(
+      { eventType: event.eventType },
+      'search-service consumer: no entity mapping for event type — skipping'
+    );
     return;
   }
 
-  const id = `${mapping.idPrefix ?? ''}${event.aggregateId}`;
+  const id = mapping.idFromPayload
+    ? mapping.idFromPayload(event.payload)
+    : `${mapping.idPrefix ?? ''}${event.aggregateId}`;
 
   if (mapping.op === 'delete') {
     await engine.delete(event.tenantId, mapping.entity, id);

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { Eye, Copy, IndianRupee, Ban } from 'lucide-react';
 import { invoiceApi } from '../../api/endpoints.js';
@@ -12,6 +12,7 @@ import ERPDataGrid, {
   type ERPColumnDef,
   type ERPRowAction,
 } from '../../components/erp/ERPDataGrid.js';
+import ERPEmptyState from '../../components/erp/ERPEmptyState.js';
 import Button from '../../components/ui/Button.js';
 import Badge from '../../components/ui/Badge.js';
 import Input from '../../components/ui/Input.js';
@@ -39,9 +40,17 @@ const STATUS_COLORS: Record<string, 'default' | 'success' | 'warning' | 'danger'
   OVERDUE: 'danger',
 };
 
+const STATUS_DESCRIPTIONS: Record<string, string> = {
+  DRAFT: 'Saved but not yet real — no stock or accounting effect until confirmed.',
+  CONFIRMED: 'Booked — stock deducted, accounting posted, awaiting payment.',
+  PARTIALLY_PAID: 'Some payment received and allocated; balance still due.',
+  PAID: 'Fully paid — balance due is zero.',
+  CANCELLED: 'Reversed — the accounting entry was reversed automatically.',
+  OVERDUE: 'Confirmed and past its due date with balance still owing.',
+};
+
 export default function InvoicesPage() {
   const navigate = useNavigate();
-  const qc = useQueryClient();
   const hasPermission = useAuthStore((s) => s.hasPermission);
   const canCreateInvoice = hasPermission(PERMISSIONS.INVOICE_CREATE);
   const canCreatePayment = hasPermission(PERMISSIONS.PAYMENT_CREATE);
@@ -70,16 +79,6 @@ export default function InvoicesPage() {
 
   const rows: Invoice[] = ((data as Record<string, unknown>)?.content as Invoice[]) ?? [];
   const totalElements = ((data as Record<string, unknown>)?.totalElements as number) ?? 0;
-
-  const cancelMutation = useMutation({
-    mutationFn: ({ id, reason }: { id: number; reason: string }) =>
-      invoiceApi.cancel(id, { reason }),
-    onSuccess: () => {
-      toast.success('Invoice cancelled');
-      qc.invalidateQueries({ queryKey: ['invoices'] });
-    },
-    onError: (e: Error) => toast.error(e.message),
-  });
 
   const duplicateMutation = useMutation({
     mutationFn: (id: number) => invoiceApi.duplicate(id),
@@ -134,7 +133,11 @@ export default function InvoicesPage() {
       key: 'status',
       header: 'Status',
       sortable: true,
-      render: (r) => <Badge variant={STATUS_COLORS[r.status] ?? 'default'}>{r.status}</Badge>,
+      render: (r) => (
+        <Badge variant={STATUS_COLORS[r.status] ?? 'default'} title={STATUS_DESCRIPTIONS[r.status]}>
+          {r.status}
+        </Badge>
+      ),
     },
   ];
 
@@ -171,9 +174,12 @@ export default function InvoicesPage() {
             label: 'Cancel',
             icon: Ban,
             type: 'delete' as const,
-            onClick: (r: Invoice) =>
-              cancelMutation.mutate({ id: r.id, reason: 'Cancelled by user' }),
-            hidden: (r: Invoice) => r.status !== 'DRAFT',
+            // Routes to the detail page's Cancel dialog (which prompts for a real reason)
+            // rather than firing a hardcoded-reason mutation directly from the list — also
+            // fixes a previous inconsistency where the list only allowed cancelling DRAFT
+            // invoices while the detail page allowed DRAFT and CONFIRMED.
+            onClick: (r: Invoice) => navigate(`/sales/invoices/${r.id}`),
+            hidden: (r: Invoice) => !['DRAFT', 'CONFIRMED'].includes(r.status),
           },
         ]
       : []),
@@ -183,26 +189,33 @@ export default function InvoicesPage() {
     <div>
       <ERPPageHeader variant="list" title="Invoices" subtitle="Create and manage sales invoices">
         {canCreateInvoice && (
-          <Button onClick={() => navigate('/sales/invoices/new')}>+ New Invoice</Button>
+          <Button
+            data-tour-id="sales-invoices-create-button"
+            onClick={() => navigate('/sales/invoices/new')}
+          >
+            + New Invoice
+          </Button>
         )}
       </ERPPageHeader>
 
       <div className="flex flex-col sm:flex-row gap-4 mb-4">
-        <div className="flex-1 max-w-sm">
+        <div className="flex-1 max-w-sm" data-tour-id="sales-invoices-search-input">
           <Input
             placeholder="Search by invoice number..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
-        <Select value={status} onChange={(e) => setStatus(e.target.value)} className="w-44">
-          <option value="">All Statuses</option>
-          {['DRAFT', 'CONFIRMED', 'PARTIALLY_PAID', 'PAID', 'OVERDUE', 'CANCELLED'].map((s) => (
-            <option key={s} value={s}>
-              {s}
-            </option>
-          ))}
-        </Select>
+        <div data-tour-id="sales-invoices-status-filter">
+          <Select value={status} onChange={(e) => setStatus(e.target.value)} className="w-44">
+            <option value="">All Statuses</option>
+            {['DRAFT', 'CONFIRMED', 'PARTIALLY_PAID', 'PAID', 'OVERDUE', 'CANCELLED'].map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+          </Select>
+        </div>
       </div>
 
       <ERPDataGrid
@@ -210,6 +223,25 @@ export default function InvoicesPage() {
         data={rows}
         isLoading={isLoading}
         rowKey="id"
+        emptyState={
+          debouncedSearch || status ? (
+            <ERPEmptyState type="no-results" />
+          ) : (
+            <ERPEmptyState
+              type="no-data"
+              title="No invoices yet"
+              description="Create your first invoice to start billing customers."
+              {...(canCreateInvoice
+                ? {
+                    action: {
+                      label: '+ New Invoice',
+                      onClick: () => navigate('/sales/invoices/new'),
+                    },
+                  }
+                : {})}
+            />
+          )
+        }
         pagination={{ page, pageSize, total: totalElements }}
         onPageChange={setPage}
         onPageSizeChange={(size) => {

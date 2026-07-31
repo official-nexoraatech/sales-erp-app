@@ -1,12 +1,16 @@
 /**
  * PG-050 — ShiftCloseScreen.
  */
+import 'fake-indexeddb/auto';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { setActiveSessionId, getActiveSessionId } from '../session.js';
 import ShiftCloseScreen from '../ShiftCloseScreen.js';
 import { runAxe, formatViolations } from '../testUtils/axe.js';
+import { db } from '../db.js';
+import { queueSale } from '../offlineDb.js';
+import { mirrorTokens } from '../tokenStore.js';
 
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -31,10 +35,12 @@ const SUMMARY_ROW = {
   closedAt: null,
 };
 
-beforeEach(() => {
+beforeEach(async () => {
   localStorage.clear();
   vi.restoreAllMocks();
   setActiveSessionId(55);
+  await db.pendingSales.clear();
+  await db.authTokens.clear();
 });
 
 function renderShiftClose() {
@@ -96,10 +102,41 @@ describe('ShiftCloseScreen', () => {
     await waitFor(() => expect(getActiveSessionId()).toBeNull());
   });
 
+  it('blocks closing while sales are still queued offline, and unblocks once synced', async () => {
+    await mirrorTokens('access-token', 'refresh-token');
+    await queueSale({ sessionId: 55, lines: [] });
+
+    const fetchMock = vi.fn((url: string) => {
+      const u = String(url);
+      if (u.includes('/pos/sales')) return Promise.resolve(jsonResponse(200, { data: { id: 1 } }));
+      return Promise.resolve(jsonResponse(200, { data: SUMMARY_ROW }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderShiftClose();
+
+    const input = await screen.findByLabelText(/Closing Cash Counted/);
+    fireEvent.change(input, { target: { value: '2300' } });
+
+    expect(await screen.findByText(/haven't synced to the server yet/)).toBeInTheDocument();
+    expect(screen.getByText('Close Shift')).toBeDisabled();
+
+    fireEvent.click(screen.getByText('Sync now'));
+
+    await waitFor(async () => expect(await db.pendingSales.count()).toBe(0));
+    await waitFor(() =>
+      expect(screen.queryByText(/haven't synced to the server yet/)).not.toBeInTheDocument()
+    );
+    expect(screen.getByText('Close Shift')).not.toBeDisabled();
+  });
+
   it('has no axe accessibility violations', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(200, { data: SUMMARY_ROW })));
     const { container } = renderShiftClose();
     await screen.findByLabelText(/Closing Cash Counted/);
+    await waitFor(() =>
+      expect(screen.queryByText(/haven't synced to the server yet/)).not.toBeInTheDocument()
+    );
 
     const violations = await runAxe(container);
     expect(violations, formatViolations(violations)).toHaveLength(0);

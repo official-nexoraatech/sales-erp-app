@@ -8,7 +8,6 @@ import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
 import { ERPDetailSkeleton } from '../../components/erp/ERPSkeleton.js';
 import ERPEmptyState from '../../components/erp/ERPEmptyState.js';
 import Button from '../../components/ui/Button.js';
-import Badge from '../../components/ui/Badge.js';
 import { formatDate, formatCurrency } from '../../lib/format.js';
 
 interface MaterialLine {
@@ -119,15 +118,14 @@ export default function JobWorkOrderDetailPage() {
         title={order.orderNumber}
         entityType="Job Work Order"
         entityNumber={order.orderNumber}
-        status={order.status}
+        status={order.status.replace(/_/g, ' ')}
+        statusVariant={STATUS_VARIANT[order.status] ?? 'default'}
         backTo="/production/job-work"
       >
         <div className="flex flex-wrap items-center gap-3">
-          <Badge variant={STATUS_VARIANT[order.status] ?? 'default'}>
-            {order.status.replace(/_/g, ' ')}
-          </Badge>
           {hasPermission(PERMISSIONS.JOB_WORK_ISSUE_MATERIALS) && order.status === 'DRAFT' && (
             <Button
+              data-tour-id="production-job-work-detail-issue-materials-button"
               isLoading={issueMaterialsMutation.isPending}
               onClick={() => issueMaterialsMutation.mutate()}
             >
@@ -137,6 +135,7 @@ export default function JobWorkOrderDetailPage() {
           {hasPermission(PERMISSIONS.JOB_WORK_QUALITY_CHECK) &&
             ['MATERIAL_ISSUED', 'IN_PROGRESS'].includes(order.status) && (
               <Button
+                data-tour-id="production-job-work-detail-start-qc-button"
                 isLoading={startQcMutation.isPending}
                 onClick={() => startQcMutation.mutate()}
               >
@@ -145,13 +144,17 @@ export default function JobWorkOrderDetailPage() {
             )}
           {hasPermission(PERMISSIONS.JOB_WORK_QUALITY_CHECK) &&
             order.status === 'QUALITY_CHECK' && (
-              <Button onClick={() => navigate(`/production/job-work/${id}/qc`)}>
+              <Button
+                data-tour-id="production-job-work-detail-qc-complete-link-button"
+                onClick={() => navigate(`/production/job-work/${id}/qc`)}
+              >
                 Quality Check / Complete
               </Button>
             )}
           {hasPermission(PERMISSIONS.JOB_WORK_CANCEL) &&
             !['COMPLETED', 'CANCELLED'].includes(order.status) && (
               <Button
+                data-tour-id="production-job-work-detail-cancel-button"
                 variant="danger-outline"
                 onClick={() => {
                   const reason = prompt('Cancellation reason:');

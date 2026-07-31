@@ -138,6 +138,8 @@ test.describe('Keyboard-first billing shortcuts', () => {
     await expect(customerSearch).toBeFocused();
 
     await page.keyboard.press('Control+f');
-    await expect(page.getByRole('combobox')).toBeFocused();
+    await expect(
+      page.getByPlaceholder('Scan barcode, or type name / SKU / alias / code…')
+    ).toBeFocused();
   });
 });

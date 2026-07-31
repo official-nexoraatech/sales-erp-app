@@ -38,9 +38,21 @@ export function clearActiveSessionId(): void {
 // Used by the RequireSession route guard to recover "does this user already have an open
 // session" after a page reload — the only other lookup is by numeric :id, which isn't known
 // at that point.
-export async function fetchActiveSession(): Promise<PosSession | null> {
-  const res = await authFetch(`${SALES_API}/pos/sessions/active`);
-  if (!res.ok) return null;
-  const body = (await res.json()) as { data: PosSession | null };
-  return body.data;
+//
+// Distinguishes "the server confirmed no open session" from "the server is unreachable" —
+// the two must not be treated the same, otherwise a cashier who reloads mid-outage would be
+// bounced to /shift/open (which itself requires connectivity) instead of continuing to work
+// offline against their already-known, locally-persisted session.
+export type SessionCheckResult =
+  { status: 'found'; session: PosSession } | { status: 'not-found' } | { status: 'offline' };
+
+export async function fetchActiveSession(): Promise<SessionCheckResult> {
+  try {
+    const res = await authFetch(`${SALES_API}/pos/sessions/active`);
+    if (!res.ok) return { status: 'not-found' };
+    const body = (await res.json()) as { data: PosSession | null };
+    return body.data ? { status: 'found', session: body.data } : { status: 'not-found' };
+  } catch {
+    return { status: 'offline' };
+  }
 }

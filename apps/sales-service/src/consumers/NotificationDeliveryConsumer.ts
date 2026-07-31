@@ -8,18 +8,24 @@ const logger = createLogger({ serviceName: 'sales-service' });
 
 interface NotificationDeliveryUpdatedPayload {
   notificationLogId: number;
-  status: 'DELIVERED' | 'FAILED';
+  status: 'SENT' | 'DELIVERED' | 'FAILED';
   errorMessage: string | null;
 }
 
 // CP-6 (Campaign Management Platform initiative): sales-service's first-ever Kafka consumer —
-// syncs notification-service's delivery-webhook outcome (see
-// apps/notification-service/src/api/webhook.routes.ts) onto the campaign_recipients row that
+// syncs notification-service's delivery outcome onto the campaign_recipients row that
 // originated the send, joined via notificationLogId (set at send time in
 // CampaignService.send()), and rolls up campaigns.deliveredCount. Not every notification
 // originates from a campaign (transactional notifications go through the same
 // notification_log/webhook path) — a miss on the join is the normal, expected case, not an
 // error.
+//
+// Notification-service audit 2026-07-23 (architectural tier): this event now arrives twice per
+// notification instead of once — first 'SENT' (or terminal 'FAILED') from notification-service's
+// DeliveryQueue worker once it actually attempts delivery (see DeliveryQueue.ts), then later
+// 'DELIVERED'/'FAILED' from the provider's own delivery-status webhook (see webhook.routes.ts),
+// if that provider supports one. campaignRecipients.status just tracks whichever arrived most
+// recently — SENT -> DELIVERED is a normal progression, not a conflict.
 export async function handleNotificationDeliveryUpdated(
   event: ERPEventPayload,
   db: TenantScopedDatabase

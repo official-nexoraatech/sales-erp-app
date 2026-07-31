@@ -2,6 +2,7 @@ import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
+import multipart from '@fastify/multipart';
 import { createDatabaseClient } from '@erp/db';
 import {
   HELMET_OPTIONS,
@@ -30,6 +31,7 @@ import { branchRoutes } from './api/branch.routes.js';
 import { searchSyncInternalRoutes } from './api/search-sync.internal.routes.js';
 import { usageRoutes } from './api/usage.routes.js';
 import { faqRoutes } from './api/faq.routes.js';
+import { demoRequestRoutes } from './api/demo-request.routes.js';
 
 initializeTelemetry({ serviceName: 'tenant-service' });
 
@@ -86,6 +88,9 @@ async function bootstrap(): Promise<void> {
     timeWindow: '1 minute',
     keyGenerator: tenantOrIpKeyGenerator,
   });
+  // F14: real server-side upload for POST /organization/logo/upload (mirrors hr-service's
+  // employee photo/document upload — small logo images only, well under hr-service's 10MB cap).
+  await fastify.register(multipart, { limits: { fileSize: 2 * 1024 * 1024 } });
   fastify.addHook('onResponse', createHttpMetricsHook('tenant-service'));
 
   registerHealthRoute(fastify, 'tenant-service', {
@@ -101,12 +106,13 @@ async function bootstrap(): Promise<void> {
     async (sub) => {
       await tenantRoutes(sub, db, config, ctxFactory);
       await approvalRoutes(sub, db);
-      await organizationRoutes(sub, ctxFactory);
+      await organizationRoutes(sub, ctxFactory, config);
       await ssoConfigRoutes(sub, ctxFactory);
       await branchRoutes(sub, ctxFactory);
       await searchSyncInternalRoutes(sub, db);
       await usageRoutes(sub, db);
       await faqRoutes(sub, db);
+      await demoRequestRoutes(sub, db, config);
     },
     { prefix: '/api/v2' }
   );

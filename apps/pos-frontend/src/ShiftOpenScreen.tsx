@@ -5,6 +5,7 @@ import { Wallet } from 'lucide-react';
 import { authFetch } from './auth.js';
 import { setActiveSessionId } from './session.js';
 import { getSelectedBranch } from './branchStore.js';
+import { getCachedSellerStateCode, refreshCachedSellerStateCode } from './orgStore.js';
 import { friendlyErrorMessage } from './posErrorMessages.js';
 import POSInput from './components/pos/POSInput.js';
 import POSButton from './components/pos/POSButton.js';
@@ -51,6 +52,12 @@ export default function ShiftOpenScreen() {
       }
       const body = (await res.json()) as { data: { id: number } };
       setActiveSessionId(body.data.id);
+
+      // Opening a shift is inherently online — the perfect, no-extra-friction point to make
+      // sure the seller's GST state code is cached before this device can ever reach
+      // POSScreen, so a brand-new device never falls back to a blind default at sale time.
+      if (!getCachedSellerStateCode()) await refreshCachedSellerStateCode();
+
       toast.success('Shift opened');
       navigate('/', { replace: true });
     } catch (err) {

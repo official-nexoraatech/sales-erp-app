@@ -50,7 +50,11 @@ export default function JournalsPage() {
         subtitle={`${total} journal(s) total`}
         actions={
           canCreateJournal ? (
-            <Button variant="primary" onClick={() => navigate('/accounting/journals/new')}>
+            <Button
+              data-tour-id="accounting-journals-create-button"
+              variant="primary"
+              onClick={() => navigate('/accounting/journals/new')}
+            >
               + Manual Journal
             </Button>
           ) : undefined

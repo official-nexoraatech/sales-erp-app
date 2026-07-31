@@ -5,9 +5,19 @@ function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
-function computeLineTotal(qty: number, price: number, gst: number, discountPct = 0): number {
+// Mirrors apps/sales-service/src/domain/GSTCalculator.ts's computeLine exactly (taxable *
+// (1 + (gstRate + cessRate) / 100)) — cess was previously omitted here, so the on-screen
+// running total under-counted (and the sale payload sent an implicit cessRate: 0) for any
+// cess-liable item, diverging from the server-authoritative invoice total.
+function computeLineTotal(
+  qty: number,
+  price: number,
+  gst: number,
+  discountPct = 0,
+  cess = 0
+): number {
   const taxable = round2(qty * price * (1 - discountPct / 100));
-  return round2(taxable + (taxable * gst) / 100);
+  return round2(taxable + (taxable * gst) / 100 + (taxable * cess) / 100);
 }
 
 // The current-sale domain, extracted out of POSScreen.tsx (Phase 4) so it's independently
@@ -25,9 +35,25 @@ export function useCart() {
     safeSelectedLineIndex !== null ? (cart[safeSelectedLineIndex]?.itemId ?? null) : null;
   const grandTotal = cart.reduce((s, l) => s + l.lineTotal, 0);
 
+  // Display-only breakdown of the same figures computeLineTotal already folds into lineTotal —
+  // re-derived per line for the Current Sale summary, not a second source of truth.
+  const totalItems = cart.length;
+  const totalQuantity = cart.reduce((s, l) => s + l.quantity, 0);
+  const subtotal = cart.reduce((s, l) => s + round2(l.quantity * l.unitPrice), 0);
+  const discountAmount = cart.reduce(
+    (s, l) => s + round2(l.quantity * l.unitPrice * (l.discountPct / 100)),
+    0
+  );
+  const taxAmount = cart.reduce((s, l) => {
+    const taxable = round2(l.quantity * l.unitPrice * (1 - l.discountPct / 100));
+    return s + round2((taxable * (l.gstRate + l.cessRate)) / 100);
+  }, 0);
+
   const addItem = useCallback((item: POSItem) => {
     const price = parseFloat(item.salePrice ?? '0');
     const gstRate = item.gstRate !== undefined && item.gstRate !== null ? Number(item.gstRate) : 18;
+    const cessRate =
+      item.cessRate !== undefined && item.cessRate !== null ? Number(item.cessRate) : 0;
     setLastAddedItem(item);
     setCart((prev) => {
       const existing = prev.find((l) => l.itemId === item.id);
@@ -37,7 +63,13 @@ export function useCart() {
             ? {
                 ...l,
                 quantity: l.quantity + 1,
-                lineTotal: computeLineTotal(l.quantity + 1, l.unitPrice, l.gstRate, l.discountPct),
+                lineTotal: computeLineTotal(
+                  l.quantity + 1,
+                  l.unitPrice,
+                  l.gstRate,
+                  l.discountPct,
+                  l.cessRate
+                ),
               }
             : l
         );
@@ -50,8 +82,9 @@ export function useCart() {
           quantity: 1,
           unitPrice: price,
           gstRate,
+          cessRate,
           discountPct: 0,
-          lineTotal: computeLineTotal(1, price, gstRate, 0),
+          lineTotal: computeLineTotal(1, price, gstRate, 0, cessRate),
         },
       ];
     });
@@ -67,7 +100,7 @@ export function useCart() {
             ? {
                 ...l,
                 quantity: qty,
-                lineTotal: computeLineTotal(qty, l.unitPrice, l.gstRate, l.discountPct),
+                lineTotal: computeLineTotal(qty, l.unitPrice, l.gstRate, l.discountPct, l.cessRate),
               }
             : l
         )
@@ -83,7 +116,7 @@ export function useCart() {
           ? {
               ...l,
               discountPct: clamped,
-              lineTotal: computeLineTotal(l.quantity, l.unitPrice, l.gstRate, clamped),
+              lineTotal: computeLineTotal(l.quantity, l.unitPrice, l.gstRate, clamped, l.cessRate),
             }
           : l
       )
@@ -96,7 +129,7 @@ export function useCart() {
       prev.map((l) => ({
         ...l,
         discountPct: clamped,
-        lineTotal: computeLineTotal(l.quantity, l.unitPrice, l.gstRate, clamped),
+        lineTotal: computeLineTotal(l.quantity, l.unitPrice, l.gstRate, clamped, l.cessRate),
       }))
     );
   }, []);
@@ -116,7 +149,13 @@ export function useCart() {
           ? {
               ...l,
               quantity,
-              lineTotal: computeLineTotal(quantity, l.unitPrice, l.gstRate, l.discountPct),
+              lineTotal: computeLineTotal(
+                quantity,
+                l.unitPrice,
+                l.gstRate,
+                l.discountPct,
+                l.cessRate
+              ),
             }
           : l
       );
@@ -154,6 +193,11 @@ export function useCart() {
     lastAddedItem,
     highlightedLineItemId,
     grandTotal,
+    totalItems,
+    totalQuantity,
+    subtotal,
+    discountAmount,
+    taxAmount,
     addItem,
     updateQty,
     updateDiscount,

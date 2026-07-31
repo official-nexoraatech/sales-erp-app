@@ -2,7 +2,7 @@ import { and, eq, lt, inArray, getTableColumns } from 'drizzle-orm';
 import { quotations, quotationLines, outboxEvents, customers, items } from '@erp/db';
 import type { ErpDatabase } from '@erp/db';
 import { BusinessError, NotFoundError } from '@erp/types';
-import { GSTCalculator } from './GSTCalculator.js';
+import { GSTCalculator } from '@erp/utils';
 import { ulid } from 'ulid';
 
 export interface QuotationLineInput {
@@ -37,6 +37,28 @@ export class QuotationService {
 
   async create(params: CreateQuotationParams): Promise<number> {
     return this.db.transaction(async (trx) => {
+      // H-3 fix: QuotationService.create() never looked up the customer row at all, so a
+      // blocked or inactive customer could still receive a new quotation.
+      if (params.customerId > 0) {
+        const [customer] = await trx
+          .select({ status: customers.status })
+          .from(customers)
+          .where(and(eq(customers.id, params.customerId), eq(customers.tenantId, params.tenantId)));
+        if (!customer) throw new NotFoundError('Customer not found');
+        if (customer.status === 'BLOCKED') {
+          throw new BusinessError(
+            'CUSTOMER_BLOCKED',
+            `Customer ${params.customerId} is blocked and cannot receive a quotation`
+          );
+        }
+        if (customer.status === 'INACTIVE') {
+          throw new BusinessError(
+            'CUSTOMER_INACTIVE',
+            `Customer ${params.customerId} is inactive and cannot receive a quotation`
+          );
+        }
+      }
+
       const computedLines = params.lines.map((l, i) => {
         const gst = GSTCalculator.computeLine({
           unitPrice: l.unitPrice,
@@ -50,13 +72,10 @@ export class QuotationService {
         return { ...l, ...gst, lineNumber: i + 1 };
       });
 
-      const totals = GSTCalculator.sumTotals(
-        computedLines.map((l) => ({
-          discountPct: l.discountPct ?? 0,
-          discountAmount: l.discountAmount ?? 0,
-          ...l,
-        }))
-      );
+      // computedLines already carries every GSTLineResult field (subtotal/discountAmount/
+      // taxableAmount/etc.) via the ...gst spread above — no need to reconstruct a
+      // discount-input-plus-result shape the way the old per-service sumTotals required.
+      const totals = GSTCalculator.sumTotals(computedLines);
 
       const [row] = await trx
         .insert(quotations)
@@ -137,6 +156,14 @@ export class QuotationService {
     if (!q) throw new NotFoundError('Quotation not found');
     if (!['SENT', 'VIEWED'].includes(q.status))
       throw new BusinessError('INVALID_STATUS', `Cannot accept quotation in status ${q.status}`);
+    // M-10 fix: accept() didn't check validUntil itself — it relied entirely on the separate
+    // expireStale() cron sweep, leaving a same-day race where an already-expired quotation
+    // could still be accepted before that job next runs.
+    if (new Date(q.validUntil) < new Date())
+      throw new BusinessError(
+        'QUOTATION_EXPIRED',
+        'This quotation has expired and can no longer be accepted'
+      );
 
     await this.db
       .update(quotations)

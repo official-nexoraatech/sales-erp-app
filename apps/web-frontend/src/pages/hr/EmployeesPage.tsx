@@ -2,10 +2,11 @@ import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { Eye, Pencil } from 'lucide-react';
+import { Eye, Pencil, Trash2 } from 'lucide-react';
 import { employeeApi, departmentApi, designationApi } from '../../api/endpoints.js';
 import { useDebounce } from '../../hooks/useDebounce.js';
 import { useAuthStore } from '../../store/auth.store.js';
+import { useConfirm } from '../../context/ConfirmContext.js';
 import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
 import ERPDataGrid, {
@@ -150,7 +151,12 @@ export default function EmployeesPage() {
               Departments
             </Button>
             {hasPermission(PERMISSIONS.EMPLOYEE_CREATE) && (
-              <Button onClick={() => navigate('/hr/employees/new')}>+ New Employee</Button>
+              <Button
+                data-tour-id="hr-employees-create-button"
+                onClick={() => navigate('/hr/employees/new')}
+              >
+                + New Employee
+              </Button>
             )}
           </div>
         }
@@ -231,16 +237,47 @@ function DepartmentDesignationModal({
   onChanged: () => void;
 }) {
   const canCreate = useAuthStore((s) => s.hasPermission(PERMISSIONS.EMPLOYEE_CREATE));
+  const canDelete = useAuthStore((s) => s.hasPermission(PERMISSIONS.EMPLOYEE_DELETE));
+  const confirm = useConfirm();
   const [tab, setTab] = useState<'department' | 'designation'>('department');
   const [name, setName] = useState('');
   const [code, setCode] = useState('');
+  const [editingId, setEditingId] = useState<number | null>(null);
+
+  function resetForm() {
+    setEditingId(null);
+    setName('');
+    setCode('');
+  }
+
+  function startEdit(item: Department | Designation) {
+    setEditingId(item.id);
+    setName(item.name);
+    setCode(item.code);
+  }
 
   const createDept = useMutation({
     mutationFn: () => departmentApi.create({ name, code }),
     onSuccess: () => {
       toast.success('Department added');
-      setName('');
-      setCode('');
+      resetForm();
+      onChanged();
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+  const updateDept = useMutation({
+    mutationFn: (id: number) => departmentApi.update(id, { name, code }),
+    onSuccess: () => {
+      toast.success('Department updated');
+      resetForm();
+      onChanged();
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+  const deleteDept = useMutation({
+    mutationFn: (id: number) => departmentApi.delete(id),
+    onSuccess: () => {
+      toast.success('Department deleted');
       onChanged();
     },
     onError: (e: Error) => toast.error(e.message),
@@ -250,12 +287,55 @@ function DepartmentDesignationModal({
     mutationFn: () => designationApi.create({ name, code }),
     onSuccess: () => {
       toast.success('Designation added');
-      setName('');
-      setCode('');
+      resetForm();
       onChanged();
     },
     onError: (e: Error) => toast.error(e.message),
   });
+  const updateDesig = useMutation({
+    mutationFn: (id: number) => designationApi.update(id, { name, code }),
+    onSuccess: () => {
+      toast.success('Designation updated');
+      resetForm();
+      onChanged();
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+  const deleteDesig = useMutation({
+    mutationFn: (id: number) => designationApi.delete(id),
+    onSuccess: () => {
+      toast.success('Designation deleted');
+      onChanged();
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const isSaving =
+    createDept.isPending || createDesig.isPending || updateDept.isPending || updateDesig.isPending;
+
+  function handleSave() {
+    if (tab === 'department') {
+      if (editingId !== null) updateDept.mutate(editingId);
+      else createDept.mutate();
+    } else {
+      if (editingId !== null) updateDesig.mutate(editingId);
+      else createDesig.mutate();
+    }
+  }
+
+  async function handleDelete(item: Department | Designation) {
+    const ok = await confirm({
+      title: `Delete ${tab === 'department' ? 'department' : 'designation'}?`,
+      message: `Delete "${item.name}"? Employees currently assigned to it will keep their existing assignment on record.`,
+      confirmLabel: 'Delete',
+      variant: 'danger',
+    });
+    if (!ok) return;
+    if (tab === 'department') deleteDept.mutate(item.id);
+    else deleteDesig.mutate(item.id);
+  }
+
+  const items = tab === 'department' ? departments : designations;
 
   return (
     <Modal open={open} onClose={onClose} title="Departments & Designations" size="md">
@@ -263,14 +343,20 @@ function DepartmentDesignationModal({
         <Button
           size="sm"
           variant={tab === 'department' ? 'primary' : 'secondary'}
-          onClick={() => setTab('department')}
+          onClick={() => {
+            setTab('department');
+            resetForm();
+          }}
         >
           Departments
         </Button>
         <Button
           size="sm"
           variant={tab === 'designation' ? 'primary' : 'secondary'}
-          onClick={() => setTab('designation')}
+          onClick={() => {
+            setTab('designation');
+            resetForm();
+          }}
         >
           Designations
         </Button>
@@ -285,24 +371,47 @@ function DepartmentDesignationModal({
             onChange={(e) => setCode(e.target.value)}
             className="max-w-[120px]"
           />
-          <Button
-            onClick={() => (tab === 'department' ? createDept.mutate() : createDesig.mutate())}
-            loading={createDept.isPending || createDesig.isPending}
-            disabled={!name || !code}
-          >
-            Add
+          <Button onClick={handleSave} loading={isSaving} disabled={!name || !code}>
+            {editingId !== null ? 'Save' : 'Add'}
           </Button>
+          {editingId !== null && (
+            <Button variant="secondary" onClick={resetForm}>
+              Cancel
+            </Button>
+          )}
         </div>
       )}
 
       <ul className="divide-y divide-default max-h-64 overflow-y-auto">
-        {(tab === 'department' ? departments : designations).map((item) => (
-          <li key={item.id} className="py-2 flex justify-between text-sm">
+        {items.map((item) => (
+          <li key={item.id} className="py-2 flex items-center justify-between text-sm">
             <span>{item.name}</span>
-            <span className="text-secondary font-mono text-xs">{item.code}</span>
+            <div className="flex items-center gap-3">
+              <span className="text-secondary font-mono text-xs">{item.code}</span>
+              {canCreate && (
+                <button
+                  type="button"
+                  onClick={() => startEdit(item)}
+                  className="p-1 rounded hover:bg-surface-hover text-secondary hover:text-primary"
+                  title="Edit"
+                >
+                  <Pencil size={14} />
+                </button>
+              )}
+              {canDelete && (
+                <button
+                  type="button"
+                  onClick={() => void handleDelete(item)}
+                  className="p-1 rounded hover:bg-surface-hover text-secondary hover:text-danger"
+                  title="Delete"
+                >
+                  <Trash2 size={14} />
+                </button>
+              )}
+            </div>
           </li>
         ))}
-        {(tab === 'department' ? departments : designations).length === 0 && (
+        {items.length === 0 && (
           <li className="py-4 text-center text-disabled text-sm">None yet.</li>
         )}
       </ul>

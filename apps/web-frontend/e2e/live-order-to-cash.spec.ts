@@ -49,9 +49,9 @@ test('LIVE — full real Order-to-Cash workflow: Owner onboarding through Quotat
 }) => {
   test.setTimeout(150_000);
   let quotationUrl = '';
-  // Unique per run — invoiceNumber has a real uniqueness constraint, and re-running this spec
-  // against a persistent dev DB means a fixed literal collides with a prior run's confirmed row.
-  const invoiceNumber = `INV-QA-${Date.now()}`;
+  // C-7 fix: invoiceNumber is now generated server-side (gap-free, FY-scoped sequence,
+  // e.g. "INV/25-26/00001") — captured from the page after confirming rather than typed in.
+  let invoiceNumber = '';
 
   await test.step('Login', async () => {
     await realLogin(page, OWNER);
@@ -187,11 +187,17 @@ test('LIVE — full real Order-to-Cash workflow: Owner onboarding through Quotat
 
     await page.getByRole('button', { name: 'Confirm Invoice' }).click();
     const confirmDialog = page.getByRole('dialog', { name: 'Confirm Invoice' });
-    await confirmDialog.getByRole('textbox', { name: 'Invoice Number' }).fill(invoiceNumber);
     await confirmDialog.getByRole('button', { name: 'Confirm Invoice' }).click();
     await expect(page.getByRole('dialog', { name: 'Confirm Invoice' })).toHaveCount(0, {
       timeout: 10000,
     });
+
+    // Capture the server-generated number from the page header now that confirming assigned one.
+    await expect(page.getByRole('heading', { level: 1 })).not.toHaveText('Draft Invoice', {
+      timeout: 10000,
+    });
+    invoiceNumber = (await page.getByRole('heading', { level: 1 }).textContent()) ?? '';
+    expect(invoiceNumber).toBeTruthy();
   });
 
   await test.step('Seed the default Chart of Accounts — a fresh tenant has zero accounts until this deliberate, explicit step', async () => {

@@ -1,4 +1,5 @@
 import type { ERPEventPayload } from '@erp/types';
+import { BusinessError } from '@erp/types';
 import type { TenantScopedDatabase } from '@erp/sdk';
 import { createLogger } from '@erp/logger';
 import { JournalEngine } from '../domain/JournalEngine.js';
@@ -43,8 +44,13 @@ export async function handleInvoiceConfirmed(
   // dropped from every invoice-confirmation journal (found in live QA 2026-07-17).
   const isInterstate = p.isInterstate ?? false;
 
+  // Tag the journal to the period the event actually occurred in, not whichever period this
+  // Kafka consumer happens to be processing it in (a backlog/retry could otherwise post a
+  // March-dated invoice into April's period and let it slip past a March period-close).
+  const postingDate = new Date(event.occurredAt);
+
   try {
-    await JournalEngine.checkPeriodOpen(db, event.tenantId, new Date());
+    await JournalEngine.checkPeriodOpen(db, event.tenantId, postingDate);
 
     const journalEntry = await PostingMatrixService.buildJournalEntry(db, event.tenantId, {
       eventType: 'INVOICE_CONFIRMED',
@@ -57,6 +63,7 @@ export async function handleInvoiceConfirmed(
       sgstAmount,
       igstAmount,
       isInterstate,
+      postingDate,
     });
 
     const result = await JournalEngine.post(db, event.tenantId, event.userId, journalEntry);
@@ -77,36 +84,50 @@ export async function handleInvoiceCancelled(
   const p = event.payload as unknown as InvoiceCancelledPayload;
 
   try {
-    // Find the original journal for this invoice
-    const [original] = (await db.raw.execute(
+    // A confirmed, costed invoice has up to two independently-posted journals sharing this
+    // same reference pair: the revenue/AR/GST journal (INVOICE_CONFIRMED, this consumer) and
+    // the COGS/Inventory journal (COGS_CALCULATED, CogsAccountingConsumer). Both must be
+    // reversed on cancellation — reversing only one leaves Inventory/COGS permanently
+    // misstated relative to the (correctly reversed) physical stock ledger.
+    const originals = (await db.raw.execute(
       `SELECT journal_id FROM journals
        WHERE tenant_id = ${event.tenantId}
          AND reference_type = 'INVOICE'
          AND reference_id = ${p.invoiceId}
          AND is_reversal = false
-         AND status = 'POSTED'
-       LIMIT 1`
+         AND status = 'POSTED'`
     )) as { journal_id: string }[];
 
-    if (!original?.journal_id) {
-      logger.warn(
-        { invoiceId: p.invoiceId },
-        'Accounting: no posted journal found for cancelled invoice — skipping reversal'
+    if (originals.length === 0) {
+      // The producer only emits INVOICE_CANCELLED for a previously-CONFIRMED invoice
+      // (InvoiceService.cancel, guarded on invoice.status === 'CONFIRMED'), which always posts
+      // a journal first — so zero posted journals here means something upstream genuinely went
+      // wrong (e.g. accounting-service was down when INVOICE_CONFIRMED fired), not a normal
+      // "cancel a draft" path. Throwing lets Kafka retry/DLQ this instead of silently treating
+      // an unreconciled cancellation as handled.
+      throw new BusinessError(
+        'JOURNAL_NOT_FOUND_FOR_REVERSAL',
+        `No posted journal found for cancelled invoice ${p.invoiceId} — cannot reverse`
       );
-      return;
     }
 
-    const result = await JournalEngine.reverse(
-      db,
-      event.tenantId,
-      event.userId,
-      original.journal_id,
-      `Reversal: Invoice ${p.invoiceNumber} cancelled`
-    );
-    logger.info(
-      { journalId: result.journalId, invoiceId: p.invoiceId },
-      'Accounting: INVOICE_CANCELLED reversed'
-    );
+    for (const original of originals) {
+      const result = await JournalEngine.reverse(
+        db,
+        event.tenantId,
+        event.userId,
+        original.journal_id,
+        `Reversal: Invoice ${p.invoiceNumber} cancelled`
+      );
+      logger.info(
+        {
+          journalId: result.journalId,
+          originalJournalId: original.journal_id,
+          invoiceId: p.invoiceId,
+        },
+        'Accounting: INVOICE_CANCELLED reversed'
+      );
+    }
   } catch (err) {
     logger.error(
       { err, invoiceId: p.invoiceId },

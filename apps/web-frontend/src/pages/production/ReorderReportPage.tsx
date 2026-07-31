@@ -8,6 +8,7 @@ import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
 import { ERPTableSkeleton } from '../../components/erp/ERPSkeleton.js';
 import Button from '../../components/ui/Button.js';
 import Select from '../../components/ui/Select.js';
+import { formatCurrency } from '../../lib/format.js';
 
 interface ReorderItem {
   itemId: number;
@@ -79,11 +80,15 @@ export default function ReorderReportPage() {
       toast.error('Select at least one item');
       return;
     }
-    const wId = warehouseId ? parseInt(warehouseId, 10) : warehouses[0]?.id;
-    if (!wId) {
-      toast.error('Please select a warehouse');
+    // Falling back to the first warehouse when "All Warehouses" is active would silently book
+    // stock into a warehouse unrelated to which one is actually low — require an explicit pick.
+    if (!warehouseId) {
+      toast.error(
+        'Select a specific warehouse first — "All Warehouses" can\'t be used to create POs'
+      );
       return;
     }
+    const wId = parseInt(warehouseId, 10);
     // Was hardcoded to 1 — only "worked" for tenants whose first-ever branch happened to get
     // global id 1. Derive the real branch from the warehouse being ordered into instead.
     const branchId = warehouses.find((w) => w.id === wId)?.branchId;
@@ -92,18 +97,29 @@ export default function ReorderReportPage() {
       return;
     }
 
+    const orderableItems = selectedItems.filter((i) => i.defaultSupplierId);
+    const skippedItems = selectedItems.filter((i) => !i.defaultSupplierId);
+    if (!orderableItems.length) {
+      toast.error('None of the selected items have a known supplier — nothing to order');
+      return;
+    }
+    if (skippedItems.length) {
+      toast(
+        `Skipping ${skippedItems.length} item(s) with no known supplier: ${skippedItems.map((i) => i.itemName).join(', ')}`,
+        { icon: '⚠️' }
+      );
+    }
+
     createPOMutation.mutate({
       branchId,
       warehouseId: wId,
       placeOfSupply: '27',
-      items: selectedItems
-        .filter((i) => i.defaultSupplierId)
-        .map((i) => ({
-          itemId: i.itemId,
-          supplierId: i.defaultSupplierId!,
-          quantity: i.reorderQty,
-          unitPrice: parseFloat(i.lastPurchasePrice ?? '0'),
-        })),
+      items: orderableItems.map((i) => ({
+        itemId: i.itemId,
+        supplierId: i.defaultSupplierId!,
+        quantity: i.reorderQty,
+        unitPrice: parseFloat(i.lastPurchasePrice ?? '0'),
+      })),
     });
   }
 
@@ -115,7 +131,11 @@ export default function ReorderReportPage() {
         subtitle="Items below reorder level — create purchase orders with one click."
         actions={
           hasPermission(PERMISSIONS.REORDER_CREATE_PO) && selected.size > 0 ? (
-            <Button onClick={handleCreatePOs} disabled={createPOMutation.isPending}>
+            <Button
+              data-tour-id="production-reorder-create-pos-button"
+              onClick={handleCreatePOs}
+              disabled={createPOMutation.isPending}
+            >
               {createPOMutation.isPending ? 'Creating POs…' : `Create POs (${selected.size} items)`}
             </Button>
           ) : undefined
@@ -207,7 +227,9 @@ export default function ReorderReportPage() {
                       {item.supplierName ?? <span className="text-warning">No supplier</span>}
                     </td>
                     <td className="px-4 py-3 text-right font-mono">
-                      {item.lastPurchasePrice ? `₹${item.lastPurchasePrice}` : '—'}
+                      {item.lastPurchasePrice
+                        ? formatCurrency(parseFloat(item.lastPurchasePrice))
+                        : '—'}
                     </td>
                   </tr>
                 ))}

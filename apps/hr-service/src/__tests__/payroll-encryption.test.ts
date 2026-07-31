@@ -99,4 +99,73 @@ describe('PayrollEngine encryption', () => {
     expect(decryptField(gross, MOCK_ENC_KEY)).toBe('40000');
     expect(decryptField(net, MOCK_ENC_KEY)).toBe('38000');
   });
+
+  it('encrypts every payslip component column, not just grossSalary/netSalary (2026-07-20 audit fix G5)', async () => {
+    let capturedValues: Record<string, unknown> = {};
+
+    const mockDb = {
+      raw: {
+        select: () => ({ from: () => ({ where: () => Promise.resolve([]) }) }),
+        insert: () => ({
+          values: (vals: Record<string, unknown>) => {
+            capturedValues = vals;
+            return { returning: () => Promise.resolve([{ id: 1 }]) };
+          },
+        }),
+      },
+    };
+
+    const { PayrollEngine } = await import('../domain/PayrollEngine.js');
+
+    await PayrollEngine.upsertSlip(mockDb as never, 1, 1, {
+      employeeId: 10,
+      presentDays: 26,
+      paidLeaveDays: 0,
+      lopDays: 0,
+      workingDays: 26,
+      basicSalary: 25000,
+      hraAmount: 10000,
+      daAmount: 5000,
+      otherAllowances: 0,
+      pieceRateAmount: 0,
+      grossSalary: 40000,
+      pfEmployee: 1800,
+      pfEmployer: 1800,
+      epsAmount: 1250,
+      esiEmployee: 0,
+      esiEmployer: 0,
+      professionalTax: 200,
+      loanDeduction: 0,
+      tdsDeduction: 0,
+      totalDeductions: 2000,
+      netSalary: 38000,
+    });
+
+    // Previously, everything except grossSalary/netSalary was plaintext — an attacker with
+    // row-level DB access could sum basicSalary+hraAmount+daAmount+otherAllowances+
+    // pieceRateAmount and reconstruct the "encrypted" gross exactly. All of these must now
+    // be ciphertext too.
+    const componentColumns = [
+      'basicSalary',
+      'hraAmount',
+      'daAmount',
+      'otherAllowances',
+      'pieceRateAmount',
+      'pfEmployee',
+      'pfEmployer',
+      'epsAmount',
+      'esiEmployee',
+      'esiEmployer',
+      'professionalTax',
+      'loanDeduction',
+      'tdsDeduction',
+      'totalDeductions',
+    ] as const;
+    for (const col of componentColumns) {
+      const value = capturedValues[col] as string;
+      expect(value).toContain(':');
+    }
+    expect(decryptField(capturedValues['basicSalary'] as string, MOCK_ENC_KEY)).toBe('25000');
+    expect(decryptField(capturedValues['tdsDeduction'] as string, MOCK_ENC_KEY)).toBe('0');
+  });
 });

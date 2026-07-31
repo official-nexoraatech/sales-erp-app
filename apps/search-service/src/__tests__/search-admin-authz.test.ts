@@ -78,7 +78,7 @@ describe('ES-21 — search-service admin route tenant-trust fix (H1)', () => {
     await app.close();
   });
 
-  it('creates indices only for the caller\'s own tenantId — there is no tenantId in the URL to override', async () => {
+  it("creates indices only for the caller's own tenantId — there is no tenantId in the URL to override", async () => {
     const engine = makeEngine();
     const app = Fastify({ logger: false });
     await searchRoutes(app, engine);
@@ -118,7 +118,7 @@ describe('ES-21 — search-service admin route tenant-trust fix (H1)', () => {
     await app.close();
   });
 
-  it('DELETE /admin/search/indices removes only the caller\'s own tenant indices', async () => {
+  it("DELETE /admin/search/indices removes only the caller's own tenant indices", async () => {
     const engine = makeEngine();
     const app = Fastify({ logger: false });
     await searchRoutes(app, engine);
@@ -131,6 +131,28 @@ describe('ES-21 — search-service admin route tenant-trust fix (H1)', () => {
 
     expect(res.statusCode).toBe(200);
     expect(engine.deleteTenantIndices).toHaveBeenCalledWith(7);
+    await app.close();
+  });
+
+  // Previously this destructive route (wipes every index for a tenant) left no audit trail
+  // at all, unlike every other admin/destructive action elsewhere in this codebase.
+  it('DELETE /admin/search/indices writes an audit-log entry when a db is supplied', async () => {
+    const engine = makeEngine();
+    const insertValues = vi.fn().mockResolvedValue(undefined);
+    const db = { insert: vi.fn(() => ({ values: insertValues })) };
+    const app = Fastify({ logger: false });
+    await searchRoutes(app, engine, db as never);
+
+    const res = await app.inject({
+      method: 'DELETE',
+      url: '/admin/search/indices',
+      headers: authHeader({ tenantId: 7, permissions: ['SEARCH_REINDEX'] }),
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(insertValues).toHaveBeenCalledWith(
+      expect.objectContaining({ tenantId: 7, action: 'DELETE_INDICES', entityType: 'search_index' })
+    );
     await app.close();
   });
 });

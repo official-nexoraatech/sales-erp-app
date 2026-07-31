@@ -10,6 +10,7 @@ import Button from '../../components/ui/Button.js';
 interface TransferLine {
   id: number;
   itemId: number;
+  itemName?: string;
   requestedQty: string;
   dispatchedQty: string;
   receivedQty: string;
@@ -72,7 +73,7 @@ export default function StockTransferReceivePage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-secondary border-b border-default">
-                <th className="pb-2 font-medium">Item ID</th>
+                <th className="pb-2 font-medium">Item</th>
                 <th className="pb-2 font-medium">Requested</th>
                 <th className="pb-2 font-medium">Dispatched</th>
                 <th className="pb-2 font-medium">Received Qty</th>
@@ -84,7 +85,7 @@ export default function StockTransferReceivePage() {
                 const value = receivedQtys[line.id] ?? dispatched;
                 return (
                   <tr key={line.id}>
-                    <td className="py-2">{line.itemId}</td>
+                    <td className="py-2">{line.itemName ?? `Item ${line.itemId}`}</td>
                     <td className="py-2">{parseFloat(line.requestedQty).toFixed(3)}</td>
                     <td className="py-2">{dispatched.toFixed(3)}</td>
                     <td className="py-2">

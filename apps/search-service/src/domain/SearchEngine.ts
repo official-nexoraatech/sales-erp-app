@@ -1,4 +1,4 @@
-import { createLogger } from '@erp/logger';
+import { createLogger, erpSearchReindexTotal } from '@erp/logger';
 
 const logger = createLogger({ serviceName: 'search-service' });
 
@@ -12,6 +12,16 @@ function normalizeDocumentFields(document: Record<string, unknown>): Record<stri
     return { ...document, name: document.displayName };
   }
   return document;
+}
+
+// A PUT against an index that already exists is the one 400 that's genuinely fine to treat
+// as success (idempotent create). Any other 400 (invalid mapping, illegal analyzer settings,
+// etc.) must not be swallowed the same way — that exact conflation is what hid the
+// max_ngram_diff bug above: every real failure logged as "ES index created" because it also
+// happened to arrive as a 400.
+function isIndexAlreadyExistsError(data: unknown): boolean {
+  const error = (data as { error?: { type?: string } } | undefined)?.error;
+  return error?.type === 'resource_already_exists_exception';
 }
 
 // Entities indexed in Elasticsearch per §4.9
@@ -59,6 +69,12 @@ export interface SearchResult {
   hits: SearchHit[];
   total: number;
   took: number;
+  // True per-entity match counts across ALL matching documents, not just the returned page —
+  // only populated for a multi-index (`entities`) search. Without this, a caller grouping the
+  // flat, `size`-capped `hits` array by entity only sees whatever fraction of that one page
+  // happens to be each type: an entity with many matches but a lower average relevance score
+  // could be entirely absent from a small page even though it has real results.
+  entityCounts?: Partial<Record<SearchEntity, number>>;
 }
 
 export interface SearchOptions {
@@ -96,7 +112,14 @@ export interface SearchOptions {
 }
 
 // ── Custom analyzer definition (erp_name_analyzer) ────────────────────────────
+// max_ngram_diff: erp_ngram_tokenizer/erp_ngram below span min_gram 3 to max_gram 12 (a
+// diff of 9), but Elasticsearch's default `index.max_ngram_diff` is 1 — every index PUT
+// using this analysis block 400'd with an illegal_argument_exception until this was added.
+// Found live 2026-07-19 against a real ES 8.17 cluster: createTenantIndices()/fullReindex()
+// had been silently failing for every tenant/entity ever, masked by a logging bug (next to
+// esRequest's callers) that treated any 400 response as "index already exists" success.
 const ERP_ANALYSIS_SETTINGS = {
+  max_ngram_diff: 9,
   analysis: {
     filter: {
       erp_synonyms: {
@@ -553,7 +576,7 @@ export class SearchEngine {
         settings: { number_of_shards: 1, number_of_replicas: 0, ...ERP_ANALYSIS_SETTINGS },
         mappings: { properties: ENTITY_MAPPINGS[entity] },
       });
-      if (!result.ok && (result.data as { status?: number }).status !== 400) {
+      if (!result.ok && !isIndexAlreadyExistsError(result.data)) {
         logger.warn({ index, result: result.data }, 'Index creation returned non-ok');
       } else {
         logger.info({ index }, 'ES index created');
@@ -627,6 +650,7 @@ export class SearchEngine {
         { index, status: result.status, result: result.data },
         'Bulk index request failed'
       );
+      erpSearchReindexTotal.inc({ entity, outcome: 'failed' }, documents.length);
       return { indexed: 0, failed: documents.length };
     }
     const resp = result.data as {
@@ -634,7 +658,10 @@ export class SearchEngine {
       items?: Array<{ index?: { error?: unknown } }>;
     };
     const failed = resp.items?.filter((i) => i.index?.error).length ?? 0;
-    return { indexed: documents.length - failed, failed };
+    const indexed = documents.length - failed;
+    if (indexed > 0) erpSearchReindexTotal.inc({ entity, outcome: 'indexed' }, indexed);
+    if (failed > 0) erpSearchReindexTotal.inc({ entity, outcome: 'failed' }, failed);
+    return { indexed, failed };
   }
 
   async delete(tenantId: number, entity: SearchEntity, id: string): Promise<void> {
@@ -762,10 +789,19 @@ export class SearchEngine {
     // ENTITY_MAPPINGS after the tenant was provisioned, with no reindex backfill run) must
     // not fail the *entire* multi-index search — ES's default behavior for an explicit,
     // comma-joined index list is to 404 the whole request if any named index is missing.
+    // Real per-entity totals across every match, not just the returned page — see
+    // SearchResult.entityCounts. `_index` is a keyword metadata field, always aggregatable
+    // without needing `fielddata`. Only meaningful for a multi-index (`entities`) search —
+    // a single-`entity` search already has exactly one index, so `total` already covers it.
+    const aggs = entities
+      ? { by_entity: { terms: { field: '_index', size: Math.max(entities.length, 1) } } }
+      : undefined;
+
     const result = await this.esRequest('POST', `/${indices}/_search?ignore_unavailable=true`, {
       from,
       size,
       query: esQuery,
+      ...(aggs ? { aggs } : {}),
       highlight: {
         fields: {
           name: {},
@@ -813,19 +849,35 @@ export class SearchEngine {
           highlight?: Record<string, string[]>;
         }>;
       };
+      aggregations?: { by_entity?: { buckets?: Array<{ key: string; doc_count: number }> } };
     };
+
+    // Index name is `erp_${tenantId}_${entity}` — entity itself may contain underscores
+    // (e.g. 'purchase_order'), so drop only the fixed 'erp'/tenantId prefix segments.
+    const entityFromIndexName = (indexName: string): SearchEntity =>
+      indexName.split('_').slice(2).join('_') as SearchEntity;
 
     const hits: SearchHit[] = (resp.hits?.hits ?? []).map((h) => ({
       id: h._id,
-      // Index name is `erp_${tenantId}_${entity}` — entity itself may contain underscores
-      // (e.g. 'purchase_order'), so drop only the fixed 'erp'/tenantId prefix segments.
-      entity: h._index.split('_').slice(2).join('_') as SearchEntity,
+      entity: entityFromIndexName(h._index),
       score: h._score,
       ...(h.highlight !== undefined ? { highlight: h.highlight } : {}),
       source: h._source,
     }));
 
-    return { hits, total: resp.hits?.total?.value ?? 0, took };
+    const entityCounts = resp.aggregations?.by_entity?.buckets?.reduce<
+      Partial<Record<SearchEntity, number>>
+    >((acc, bucket) => {
+      acc[entityFromIndexName(bucket.key)] = bucket.doc_count;
+      return acc;
+    }, {});
+
+    return {
+      hits,
+      total: resp.hits?.total?.value ?? 0,
+      took,
+      ...(entityCounts ? { entityCounts } : {}),
+    };
   }
 
   async fullReindex(
@@ -838,10 +890,16 @@ export class SearchEngine {
     // Delete and recreate index for clean reindex
     await this.esRequest('DELETE', `/${index}`);
     // number_of_replicas: 0 — see createTenantIndices() for rationale.
-    await this.esRequest('PUT', `/${index}`, {
+    const createResult = await this.esRequest('PUT', `/${index}`, {
       settings: { number_of_shards: 1, number_of_replicas: 0, ...ERP_ANALYSIS_SETTINGS },
       mappings: { properties: ENTITY_MAPPINGS[entity] },
     });
+    // This PUT previously went unchecked — a failure (e.g. an invalid analyzer setting) left
+    // the index missing, so the bulk-index calls below fell through to ES's auto-create-index
+    // default (no custom mapping/analyzers) instead of visibly failing the reindex.
+    if (!createResult.ok && !isIndexAlreadyExistsError(createResult.data)) {
+      logger.error({ index, result: createResult.data }, 'fullReindex: index (re)creation failed');
+    }
 
     const documents = await dataFetcher();
     const BATCH_SIZE = 500;

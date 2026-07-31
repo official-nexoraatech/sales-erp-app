@@ -15,9 +15,19 @@ export function fakeJwt(payload: Record<string, unknown>): string {
 // Access-Control-Allow-Origin header, or the browser blocks it as a network error before our
 // mock body is ever seen by application code. apiClient (client.ts) also unwraps every
 // response as `data.data`, so payloads must be wrapped accordingly.
+//
+// client.ts now sends `credentials: 'include'` on every auth-service call (the access token
+// moved out of localStorage; refresh goes via an httpOnly cookie instead — see
+// WEB-FRONTEND-AUDIT-2026-07-24.md). A credentialed request can never be paired with a wildcard
+// `Access-Control-Allow-Origin: '*'` — browsers reject that combination outright as a CORS
+// violation before the app ever sees the response, surfacing as a generic network error. Echoing
+// the request's actual Origin back (plus Allow-Credentials) is valid whether or not a given
+// request happens to be credentialed, so every mocked route gets it, not just auth ones.
 export async function mockJson(route: Route, data: unknown, status = 200): Promise<void> {
+  const origin = (await route.request().headerValue('origin')) ?? '*';
   const corsHeaders = {
-    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Origin': origin,
+    'Access-Control-Allow-Credentials': 'true',
     'Access-Control-Allow-Methods': 'GET,POST,PUT,PATCH,DELETE,OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type,Authorization',
   };
@@ -28,11 +38,36 @@ export async function mockJson(route: Route, data: unknown, status = 200): Promi
   await route.fulfill({ status, headers: corsHeaders, json: { data } });
 }
 
+// refreshAccessToken() (client.ts) reads `body.accessToken` directly, unlike every other route —
+// it's the one endpoint that returns tokens unenveloped, so it needs its own mock that doesn't
+// wrap the payload in `{ data: ... }` the way mockJson() does.
+async function mockRawJson(route: Route, data: unknown, status = 200): Promise<void> {
+  const origin = (await route.request().headerValue('origin')) ?? '*';
+  const corsHeaders = {
+    'Access-Control-Allow-Origin': origin,
+    'Access-Control-Allow-Credentials': 'true',
+    'Access-Control-Allow-Methods': 'GET,POST,PUT,PATCH,DELETE,OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type,Authorization',
+  };
+  if (route.request().method() === 'OPTIONS') {
+    await route.fulfill({ status: 204, headers: corsHeaders });
+    return;
+  }
+  await route.fulfill({ status, headers: corsHeaders, json: data });
+}
+
 export async function login(page: Page, permissions: string[]): Promise<void> {
   const accessToken = fakeJwt({ sub: '1', tenantId: 1, roles: ['OWNER'], permissions });
 
   await page.route('**/auth/login', (route) =>
     mockJson(route, { accessToken, refreshToken: 'fake-refresh-token' })
+  );
+  // AuthBootstrap (App.tsx) calls this on every app mount when a persisted `user` exists but
+  // the (no-longer-persisted) access token doesn't — a fresh test has no persisted user, so
+  // this doesn't fire during login() itself, but mocking it defensively avoids a network-error
+  // cascade for any test that reloads or re-mounts the app after logging in.
+  await page.route('**/auth/refresh', (route) =>
+    mockRawJson(route, { accessToken, refreshToken: 'fake-refresh-token' })
   );
   await page.route('**/users/me', (route) =>
     mockJson(route, {

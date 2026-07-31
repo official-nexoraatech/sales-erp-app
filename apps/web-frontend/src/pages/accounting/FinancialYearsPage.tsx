@@ -127,10 +127,16 @@ export default function FinancialYearsPage() {
       render: (fy) =>
         canCloseYear && fy.status === 'OPEN' ? (
           <div className="flex gap-2 justify-end">
-            <Button variant="ghost" size="sm" onClick={() => runChecklist(fy.id)}>
+            <Button
+              data-tour-id="accounting-financial-year-checklist-button"
+              variant="ghost"
+              size="sm"
+              onClick={() => runChecklist(fy.id)}
+            >
               Run Checklist
             </Button>
             <Button
+              data-tour-id="accounting-financial-year-close-button"
               variant="danger"
               size="sm"
               disabled={closeYearMutation.isPending}
@@ -159,7 +165,10 @@ export default function FinancialYearsPage() {
         subtitle="Manage fiscal periods and year-end close"
         actions={
           canOpenYear ? (
-            <Button onClick={() => setShowCreateForm((v) => !v)}>
+            <Button
+              data-tour-id="accounting-financial-years-create-button"
+              onClick={() => setShowCreateForm((v) => !v)}
+            >
               {showCreateForm ? 'Cancel' : '+ New Financial Year'}
             </Button>
           ) : undefined

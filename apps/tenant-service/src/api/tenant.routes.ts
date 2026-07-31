@@ -34,7 +34,7 @@ export async function tenantRoutes(
     useSSL: config.minioUseSSL,
     bucket: config.minioBucket,
   });
-  const provisioner = new TenantProvisioner(db, config.elasticsearchUrl, storageClient);
+  const provisioner = new TenantProvisioner(db, config.searchServiceUrl, storageClient);
 
   // PG-012: the suspend/activate/close actions themselves were never audit-logged (only
   // the tenant row's own suspendedBy/suspendedReason/closedBy/closedReason columns tracked
@@ -46,14 +46,17 @@ export async function tenantRoutes(
   // under the *affected* tenant's own audit trail (tenantId = the tenant being changed),
   // matching how every other audit_log entry in this codebase is scoped to the tenant whose
   // data changed, not the actor's tenant.
+  // F11 (2026-07-22 enterprise audit): also used for TENANT_CREATED — provisioning previously
+  // wrote no append-only audit_log entry at all (only structured logger.info calls), unlike
+  // every other sensitive tenant-lifecycle mutation in this file.
   async function logTenantLifecycleAudit(
-    action: 'TENANT_SUSPENDED' | 'TENANT_ACTIVATED' | 'TENANT_CLOSED',
+    action: 'TENANT_CREATED' | 'TENANT_SUSPENDED' | 'TENANT_ACTIVATED' | 'TENANT_CLOSED',
     tenantId: number,
     actingUserId: number,
     actorEmail: string,
     ipAddress: string,
-    before: { status: string },
-    after: { status: string },
+    before: Record<string, unknown>,
+    after: Record<string, unknown>,
     metadata?: Record<string, unknown>
   ): Promise<void> {
     await db.insert(auditLog).values({
@@ -67,7 +70,7 @@ export async function tenantRoutes(
       metadata: metadata ?? null,
       actorEmail,
       ipAddress,
-      changedFields: ['status'],
+      changedFields: Object.keys(after),
     });
   }
 
@@ -94,6 +97,16 @@ export async function tenantRoutes(
 
       try {
         const result = await provisioner.provision({ ...body.data, plan: 'STARTER' });
+        await logTenantLifecycleAudit(
+          'TENANT_CREATED',
+          result.tenantId,
+          result.adminUserId,
+          result.adminEmail,
+          request.ip,
+          {},
+          { status: 'ACTIVE', plan: 'STARTER' },
+          { source: 'public_signup', slug: body.data.slug }
+        );
         return reply.code(201).send({
           data: {
             tenantId: result.tenantId,
@@ -130,6 +143,16 @@ export async function tenantRoutes(
     try {
       const result = await provisioner.provision(
         body.data as unknown as Parameters<typeof provisioner.provision>[0]
+      );
+      await logTenantLifecycleAudit(
+        'TENANT_CREATED',
+        result.tenantId,
+        request.auth.userId,
+        request.auth.email,
+        request.ip,
+        {},
+        { status: 'ACTIVE', plan: body.data.plan },
+        { source: 'admin_provisioning', slug: body.data.slug, adminUserId: result.adminUserId }
       );
       return reply.code(201).send({
         data: {

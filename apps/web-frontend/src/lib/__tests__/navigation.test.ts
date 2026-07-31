@@ -92,6 +92,16 @@ describe('every permission-gated App.tsx route has a navigation.ts entry', () =>
     '/reports/sales-analytics',
     '/reports/inventory-analytics',
     '/reports/hr-analytics',
+    // Same class as the three above — reachable via ReportsPage's ANALYTICS_DASHBOARDS
+    // cards, not the sidebar/command palette. Added alongside them, not a new regression.
+    '/reports/purchase-analytics',
+    // Purchase audit 2026-07-21: reachable via SuppliersPage's "Import" button, not the
+    // sidebar — same pattern as the analytics-dashboard cards above.
+    '/suppliers/import',
+    // CRM-ROADMAP Phase 1, Feature 7: reachable via CrmAccountsPage's/LeadsKanbanPage's
+    // "Import" button, not the sidebar — same pattern as the imports above.
+    '/crm/accounts/import',
+    '/crm/leads/import',
   ]);
 
   const routeRegex = /<Route\s+path="([^"]+)"\s+element=\{\s*<Page>\s*<PermissionRoute/g;

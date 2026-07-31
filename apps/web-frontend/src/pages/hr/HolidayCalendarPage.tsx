@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { holidayApi } from '../../api/endpoints.js';
 import { useAuthStore } from '../../store/auth.store.js';
+import { useConfirm } from '../../context/ConfirmContext.js';
 import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
 import ERPErrorBoundary from '../../components/erp/ERPErrorBoundary.js';
@@ -30,6 +31,7 @@ const TYPE_VARIANT: Record<string, 'default' | 'info' | 'warning'> = {
 export default function HolidayCalendarPage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const confirm = useConfirm();
   const hasPermission = useAuthStore((s) => s.hasPermission);
   const [year, setYear] = useState(new Date().getFullYear());
 
@@ -87,7 +89,12 @@ export default function HolidayCalendarPage() {
                   >
                     Seed 2026-27
                   </Button>
-                  <Button onClick={() => navigate('/hr/holidays/new')}>+ Add Holiday</Button>
+                  <Button
+                    data-tour-id="hr-holidays-create-button"
+                    onClick={() => navigate('/hr/holidays/new')}
+                  >
+                    + Add Holiday
+                  </Button>
                 </>
               )}
             </div>
@@ -135,7 +142,15 @@ export default function HolidayCalendarPage() {
                         <Button
                           size="sm"
                           variant="danger"
-                          onClick={() => deleteMutation.mutate(h.id)}
+                          onClick={async () => {
+                            const ok = await confirm({
+                              title: 'Remove holiday?',
+                              message: `Remove "${h.name}" (${h.holidayDate}) from the calendar?`,
+                              confirmLabel: 'Remove',
+                              variant: 'danger',
+                            });
+                            if (ok) deleteMutation.mutate(h.id);
+                          }}
                           loading={deleteMutation.isPending}
                         >
                           Remove

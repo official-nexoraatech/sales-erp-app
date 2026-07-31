@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
@@ -10,10 +10,13 @@ import Button from '../../components/ui/Button.js';
 import Input from '../../components/ui/Input.js';
 import Select from '../../components/ui/Select.js';
 import { formatCurrency } from '../../lib/format.js';
+import { toFieldErrors } from '../../lib/zodFieldErrors.js';
+import { purchaseReturnFormSchema } from '../../schemas/purchase-transactions.schema.js';
 
 interface GRNLine {
   id: number;
   itemId: number;
+  itemName?: string;
   variantId?: number | null;
   receivedQty: string;
   grnRate: string;
@@ -47,6 +50,7 @@ export default function PurchaseReturnFormPage() {
   const [reason, setReason] = useState<string>('QUALITY_ISSUE');
   const [returnDate, setReturnDate] = useState<string>(new Date().toISOString().substring(0, 10));
   const [returnNotes, setReturnNotes] = useState('');
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   const { data: grnData, isFetching: loadingGrn } = useQuery({
     queryKey: ['grn-for-return', loadedGrnId],
@@ -70,8 +74,45 @@ export default function PurchaseReturnFormPage() {
     onError: (e: Error) => toast.error(e.message),
   });
 
+  const handleSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    if (!grn) return;
+    const result = purchaseReturnFormSchema.safeParse({
+      grnId: grn.id,
+      reason,
+      lines: selectedLines.map(({ line, qty }) => ({
+        grnLineId: line.id,
+        itemId: line.itemId,
+        quantity: qty,
+      })),
+    });
+    if (!result.success) {
+      setFieldErrors(toFieldErrors(result.error));
+      toast.error('Fix the highlighted fields before saving');
+      return;
+    }
+    setFieldErrors({});
+    createMutation.mutate({
+      grnId: grn.id,
+      supplierId: grn.supplierId,
+      branchId: grn.branchId,
+      warehouseId: grn.warehouseId,
+      returnDate: new Date(returnDate).toISOString(),
+      reason,
+      returnNotes: returnNotes || undefined,
+      lines: selectedLines.map(({ line, qty }) => ({
+        grnLineId: line.id,
+        itemId: line.itemId,
+        variantId: line.variantId ?? undefined,
+        returnQty: qty,
+        unitPrice: parseFloat(line.grnRate),
+        gstRate: parseFloat(line.gstRate),
+      })),
+    });
+  };
+
   return (
-    <div>
+    <form onSubmit={handleSubmit} noValidate>
       <ERPPageHeader
         variant="detail"
         title="New Purchase Return"
@@ -90,9 +131,17 @@ export default function PurchaseReturnFormPage() {
               setGrnId(e.target.value);
               setReturnQtys({});
             }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                if (grnId) setLoadedGrnId(Number(grnId));
+              }
+            }}
+            error={fieldErrors.grnId}
             wrapperClassName="flex-1"
           />
           <Button
+            type="button"
             variant="outline"
             disabled={!grnId}
             isLoading={loadingGrn}
@@ -101,6 +150,11 @@ export default function PurchaseReturnFormPage() {
             Load GRN
           </Button>
         </div>
+        {fieldErrors.lines && (
+          <p className="text-xs text-danger" role="alert">
+            {fieldErrors.lines}
+          </p>
+        )}
 
         {grn && (
           <div className="border border-default rounded-lg p-3 space-y-2">
@@ -108,7 +162,8 @@ export default function PurchaseReturnFormPage() {
             {grn.lines.map((l) => (
               <div key={l.id} className="grid grid-cols-3 gap-2 items-center text-sm">
                 <span>
-                  Item #{l.itemId} ({l.receivedQty} @ {formatCurrency(parseFloat(l.grnRate))})
+                  {l.itemName ?? `Item #${l.itemId}`} ({l.receivedQty} @{' '}
+                  {formatCurrency(parseFloat(l.grnRate))})
                 </span>
                 <Input
                   type="number"
@@ -136,6 +191,7 @@ export default function PurchaseReturnFormPage() {
           label="Reason *"
           value={reason}
           onChange={(e) => setReason(e.target.value)}
+          error={fieldErrors.reason}
           options={RETURN_REASONS.map((r) => ({ value: r, label: r.replace(/_/g, ' ') }))}
         />
         <Input
@@ -152,36 +208,17 @@ export default function PurchaseReturnFormPage() {
       </p>
 
       <ERPStickyFooter>
-        <Button variant="secondary" onClick={() => navigate(LIST_PATH)}>
+        <Button type="button" variant="secondary" onClick={() => navigate(LIST_PATH)}>
           Cancel
         </Button>
         <Button
+          type="submit"
           isLoading={createMutation.isPending}
           disabled={!grn || selectedLines.length === 0}
-          onClick={() =>
-            grn &&
-            createMutation.mutate({
-              grnId: grn.id,
-              supplierId: grn.supplierId,
-              branchId: grn.branchId,
-              warehouseId: grn.warehouseId,
-              returnDate: new Date(returnDate).toISOString(),
-              reason,
-              returnNotes: returnNotes || undefined,
-              lines: selectedLines.map(({ line, qty }) => ({
-                grnLineId: line.id,
-                itemId: line.itemId,
-                variantId: line.variantId ?? undefined,
-                returnQty: qty,
-                unitPrice: parseFloat(line.grnRate),
-                gstRate: parseFloat(line.gstRate),
-              })),
-            })
-          }
         >
           Create Return
         </Button>
       </ERPStickyFooter>
-    </div>
+    </form>
   );
 }

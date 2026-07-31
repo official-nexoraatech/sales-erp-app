@@ -161,6 +161,10 @@ export default function Combobox<T extends ComboboxOption = ComboboxOption>({
 
   function handleKeyDown(e: KeyboardEvent<HTMLInputElement>) {
     if (!isOpen && (e.key === 'ArrowDown' || e.key === 'Enter')) {
+      // Enter here only opens the dropdown — without preventDefault, a Combobox nested in a
+      // <form> (any transactional-document item/customer/supplier picker) would also trigger
+      // native form submission the moment this input is focused and Enter is pressed.
+      if (e.key === 'Enter') e.preventDefault();
       setIsOpen(true);
       return;
     }
@@ -171,10 +175,15 @@ export default function Combobox<T extends ComboboxOption = ComboboxOption>({
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
       setActiveIndex((i) => Math.max(i - 1, 0));
-    } else if (e.key === 'Enter' && activeIndex >= 0) {
+    } else if (e.key === 'Enter') {
+      // Always prevent the native form-submit default while the listbox is open, even with
+      // nothing highlighted yet (activeIndex still -1 right after typing, before any arrow
+      // key) — otherwise Enter here can submit an ancestor <form> instead of this widget.
       e.preventDefault();
-      const opt = visibleOptions[activeIndex];
-      if (opt) handleSelect(opt);
+      if (activeIndex >= 0) {
+        const opt = visibleOptions[activeIndex];
+        if (opt) handleSelect(opt);
+      }
     } else if (e.key === 'Escape') {
       setIsOpen(false);
     }

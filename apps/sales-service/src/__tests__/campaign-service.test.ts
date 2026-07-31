@@ -2,19 +2,24 @@
 // regression tests for CampaignService's CURRENT behavior, written before any later phase (CP-2+)
 // changes this file. Pure-function tests always run; DB-backed tests are skipped without
 // DATABASE_URL, matching the convention in es18-crm-gaps.test.ts / customer.integration.test.ts.
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
 import { createDatabaseClient } from '@erp/db';
 import {
   branches,
   campaigns,
   campaignAutomationRules,
   campaignRecipients,
+  crmCampaignVariants,
+  crmCampaignMessageTranslations,
+  crmLinkClicks,
   customers,
   customerSegments,
+  invoices,
   tenantCommunicationSettings,
   customerCommunicationPreferences,
+  crmDltTemplates,
 } from '@erp/db';
-import { eq } from 'drizzle-orm';
+import { and, eq, isNull, notInArray } from 'drizzle-orm';
 import type { PlatformContext } from '@erp/sdk';
 import {
   checkChannelLimits,
@@ -25,6 +30,9 @@ import {
   detectFallbackTokens,
   computeNextFireDate,
   isSameCalendarDay,
+  checkDltCompliance,
+  assignVariant,
+  resolveRecipientTemplate,
   CampaignService,
 } from '../domain/CampaignService.js';
 
@@ -104,6 +112,90 @@ describe('renderCampaignMessage', () => {
       vars
     );
     expect(out).toBe('Last order: no purchases yet for 0.00');
+  });
+
+  // CRM-ROADMAP Phase 2, Feature 6 — the one token whose value is unique per recipient
+  // (a tracking URL), not a shared value like every other token.
+  it('substitutes {{link}} with the provided trackingUrl', () => {
+    const out = renderCampaignMessage('Visit: {{link}}', {
+      ...vars,
+      trackingUrl: 'https://t.example/abc123',
+    });
+    expect(out).toBe('Visit: https://t.example/abc123');
+  });
+
+  it('renders an empty string for {{link}} when no trackingUrl is provided (unchanged behavior for every pre-existing template with no link)', () => {
+    const out = renderCampaignMessage('No link here', vars);
+    expect(out).toBe('No link here');
+    const outWithToken = renderCampaignMessage('Link: {{link}}', vars);
+    expect(outWithToken).toBe('Link: ');
+  });
+});
+
+describe('assignVariant — pure weighting math', () => {
+  const variants = [
+    { id: 1, label: 'A', messageTemplate: 'Template A', weight: 70 },
+    { id: 2, label: 'B', messageTemplate: 'Template B', weight: 30 },
+  ];
+
+  it('returns null for an empty variant list (a non-A/B campaign)', () => {
+    expect(assignVariant([], 0)).toBeNull();
+  });
+
+  it('is deterministic — the same seed always yields the same variant', () => {
+    expect(assignVariant(variants, 42)?.label).toBe(assignVariant(variants, 42)?.label);
+  });
+
+  it('splits exactly according to the configured weight ratio across many seeds (not random noise)', () => {
+    const counts = { A: 0, B: 0 };
+    for (let seed = 0; seed < 1000; seed++) {
+      const label = assignVariant(variants, seed)!.label as 'A' | 'B';
+      counts[label]++;
+    }
+    // Deterministic modulo assignment over 1000 seeds against a 70/30 weight split — exact,
+    // not approximate, since this isn't Math.random()-based.
+    expect(counts.A).toBe(700);
+    expect(counts.B).toBe(300);
+  });
+});
+
+describe('resolveRecipientTemplate (CRM-ROADMAP Phase 3, Feature 5)', () => {
+  const variants = [
+    { id: 1, label: 'A', messageTemplate: 'Variant A', weight: 70 },
+    { id: 2, label: 'B', messageTemplate: 'Variant B', weight: 30 },
+  ];
+  const translations = new Map([
+    ['hi', 'Hindi message'],
+    ['ta', 'Tamil message'],
+  ]);
+
+  it('uses the matching-language translation when the recipient has a preference for it', () => {
+    const result = resolveRecipientTemplate('hi', translations, variants, 'Base template', 0);
+    expect(result.template).toBe('Hindi message');
+    expect(result.variant).toBeNull();
+  });
+
+  it('falls back to A/B variant assignment when the preferred language has no translation', () => {
+    const result = resolveRecipientTemplate('fr', translations, variants, 'Base template', 0);
+    expect(result.template).toBe('Variant A');
+    expect(result.variant?.label).toBe('A');
+  });
+
+  it('falls back to the base template when there is no preferred language and no variants', () => {
+    const result = resolveRecipientTemplate(null, translations, [], 'Base template', 0);
+    expect(result.template).toBe('Base template');
+    expect(result.variant).toBeNull();
+  });
+
+  it('falls back to A/B variant assignment when the recipient has no preferred language at all', () => {
+    const result = resolveRecipientTemplate(null, translations, variants, 'Base template', 0);
+    expect(result.variant?.label).toBe('A');
+  });
+
+  it('never assigns an A/B variant for a recipient whose language matched a translation, even when variants are configured', () => {
+    const result = resolveRecipientTemplate('ta', translations, variants, 'Base template', 5);
+    expect(result.template).toBe('Tamil message');
+    expect(result.variant).toBeNull();
   });
 });
 
@@ -342,6 +434,11 @@ describe.skipIf(!DB_URL)('CampaignService — integration (CP-1 baseline)', () =
   });
 
   afterAll(async () => {
+    // CRM-ROADMAP Phase 2, Feature 6 — new tables this feature added; no DB-enforced FK to
+    // campaign_recipients/campaigns, so deletion order relative to those doesn't matter.
+    await db.delete(crmLinkClicks).where(eq(crmLinkClicks.tenantId, TEST_TENANT));
+    await db.delete(crmCampaignVariants).where(eq(crmCampaignVariants.tenantId, TEST_TENANT));
+    await db.delete(invoices).where(eq(invoices.tenantId, TEST_TENANT));
     await db.delete(campaignRecipients).where(eq(campaignRecipients.tenantId, TEST_TENANT));
     await db.delete(campaigns).where(eq(campaigns.tenantId, TEST_TENANT));
     await db
@@ -351,8 +448,61 @@ describe.skipIf(!DB_URL)('CampaignService — integration (CP-1 baseline)', () =
     await db
       .delete(tenantCommunicationSettings)
       .where(eq(tenantCommunicationSettings.tenantId, TEST_TENANT));
+    await db.delete(crmDltTemplates).where(eq(crmDltTemplates.tenantId, TEST_TENANT));
     await db.delete(customers).where(eq(customers.tenantId, TEST_TENANT));
     await db.delete(branches).where(eq(branches.tenantId, TEST_TENANT));
+  });
+
+  // CRM-ROADMAP Phase 1, Feature 6 — DLT/TRAI SMS Compliance: the earlier, best-effort
+  // campaign creation/preview-time check (the authoritative gate is
+  // NotificationEngine.sendRaw, covered separately in notification-service's own
+  // dlt-compliance.test.ts).
+  describe('checkDltCompliance', () => {
+    afterAll(async () => {
+      await db.delete(crmDltTemplates).where(eq(crmDltTemplates.tenantId, TEST_TENANT));
+    });
+
+    it('is always compliant for non-SMS channels regardless of registered templates', async () => {
+      const result = await checkDltCompliance(
+        makeCtx(),
+        'EMAIL',
+        'Anything at all, no template needed'
+      );
+      expect(result.compliant).toBe(true);
+    });
+
+    it('reports non-compliant with an actionable reason when zero templates are registered', async () => {
+      const result = await checkDltCompliance(makeCtx(), 'SMS', 'Diwali Sale! Flat 50% off.');
+      expect(result.compliant).toBe(false);
+      expect(result.reason).toMatch(/no dlt templates are registered/i);
+    });
+
+    it('is compliant once a matching template is registered', async () => {
+      await db.insert(crmDltTemplates).values({
+        tenantId: TEST_TENANT,
+        createdBy: 1,
+        templateId: 'DLT-TEST-001',
+        header: 'TXTIND',
+        messagePattern: 'Dear {#var#}, enjoy {#var#}% off this festive season.',
+      });
+
+      const result = await checkDltCompliance(
+        makeCtx(),
+        'SMS',
+        'Dear Ramesh, enjoy 50% off this festive season.'
+      );
+      expect(result.compliant).toBe(true);
+    });
+
+    it('reports non-compliant with a specific reason when content does not match any registered template', async () => {
+      const result = await checkDltCompliance(
+        makeCtx(),
+        'SMS',
+        'Completely unrelated wording here.'
+      );
+      expect(result.compliant).toBe(false);
+      expect(result.reason).toMatch(/does not match any registered dlt template/i);
+    });
   });
 
   describe('resolveRecipients', () => {
@@ -1275,6 +1425,705 @@ describe.skipIf(!DB_URL)('CampaignService — integration (CP-1 baseline)', () =
         channel: 'EMAIL',
       });
       expect(rows.map((r) => r.id)).toEqual([branch2CustomerId]);
+    });
+
+    // CRM-ROADMAP Phase 3, Feature 2 (Self-Service Customer Portal) — proves the portal's own
+    // PUT /portal/preferences write (consentSource: 'CUSTOMER_PORTAL') is honored by the next
+    // campaign send exactly like a staff-recorded one: applyGranularConsentFilter's query never
+    // references consentSource at all, only channel/category/consented, so no extra wiring was
+    // needed for this to already work. Uses WHATSAPP specifically to avoid any interference with
+    // the EMAIL-channel row the first test in this describe block already inserted.
+    it('excludes a customer whose opt-out was recorded via the customer portal, same as a staff-recorded one', async () => {
+      await db.insert(customerCommunicationPreferences).values({
+        tenantId: TEST_TENANT,
+        customerId: optedInCustomerId,
+        channel: 'WHATSAPP',
+        category: 'PROMOTIONAL',
+        consented: false,
+        consentSource: 'CUSTOMER_PORTAL',
+      });
+
+      const ctx = makeCtx();
+      const rows = await CampaignService.resolveRecipients(ctx, {
+        segmentId: null,
+        customerIds: [optedInCustomerId, branch2CustomerId],
+        channel: 'WHATSAPP',
+      });
+      expect(rows.map((r) => r.id)).toEqual([branch2CustomerId]);
+    });
+  });
+
+  // CRM-ROADMAP Phase 2, Feature 6 — Campaign Studio — Engagement Tracking Activation.
+  describe('engagement tracking', () => {
+    async function createCampaign(overrides: Record<string, unknown> = {}) {
+      const [campaign] = await db
+        .insert(campaigns)
+        .values({
+          tenantId: TEST_TENANT,
+          name: `Engagement Test ${Date.now()}-${Math.random()}`,
+          customerIds: [optedInCustomerId],
+          channel: 'EMAIL',
+          messageTemplate: 'Hi {{customerName}}, click: {{link}}',
+          status: 'DRAFT',
+          createdBy: 1,
+          ...overrides,
+        })
+        .returning();
+      return campaign!;
+    }
+
+    describe('link wrapping', () => {
+      it("creates one crm_link_clicks row per recipient with the campaign's linkUrl as destinationUrl", async () => {
+        const campaign = await createCampaign({ linkUrl: 'https://example.com/sale' });
+        await CampaignService.send(makeCtx(), campaign.id);
+
+        const [recipient] = await db
+          .select()
+          .from(campaignRecipients)
+          .where(
+            and(
+              eq(campaignRecipients.campaignId, campaign.id),
+              eq(campaignRecipients.customerId, optedInCustomerId)
+            )
+          );
+        expect(recipient).toBeDefined();
+
+        const [linkClick] = await db
+          .select()
+          .from(crmLinkClicks)
+          .where(eq(crmLinkClicks.campaignRecipientId, recipient!.id));
+        expect(linkClick).toBeDefined();
+        expect(linkClick!.destinationUrl).toBe('https://example.com/sale');
+        expect(linkClick!.trackingToken).toBeTruthy();
+        expect(linkClick!.clickCount).toBe(0);
+      });
+
+      it('creates no crm_link_clicks row for a channel/campaign needing neither click nor open tracking (unchanged behavior)', async () => {
+        const campaign = await createCampaign({
+          channel: 'WHATSAPP',
+          linkUrl: null,
+          messageTemplate: 'Hi {{customerName}}',
+        });
+        await CampaignService.send(makeCtx(), campaign.id);
+
+        const [recipient] = await db
+          .select()
+          .from(campaignRecipients)
+          .where(
+            and(
+              eq(campaignRecipients.campaignId, campaign.id),
+              eq(campaignRecipients.customerId, optedInCustomerId)
+            )
+          );
+        const linkClicks = await db
+          .select()
+          .from(crmLinkClicks)
+          .where(eq(crmLinkClicks.campaignRecipientId, recipient!.id));
+        expect(linkClicks).toHaveLength(0);
+      });
+    });
+
+    describe('A/B variants', () => {
+      it('assigns every recipient a variantId when the campaign has variants configured', async () => {
+        const campaign = await createCampaign({
+          customerIds: [optedInCustomerId, branch2CustomerId],
+          messageTemplate: 'BASE {{customerName}}',
+        });
+        await db.insert(crmCampaignVariants).values([
+          {
+            tenantId: TEST_TENANT,
+            campaignId: campaign.id,
+            label: 'A',
+            messageTemplate: 'VARIANT-A {{customerName}}',
+            weight: 50,
+          },
+          {
+            tenantId: TEST_TENANT,
+            campaignId: campaign.id,
+            label: 'B',
+            messageTemplate: 'VARIANT-B {{customerName}}',
+            weight: 50,
+          },
+        ]);
+        await CampaignService.send(makeCtx(), campaign.id);
+
+        const recipients = await db
+          .select()
+          .from(campaignRecipients)
+          .where(eq(campaignRecipients.campaignId, campaign.id));
+        expect(recipients).toHaveLength(2);
+        expect(recipients.every((r) => r.variantId !== null)).toBe(true);
+      });
+
+      it('leaves variantId null when the campaign has no variants (unchanged behavior)', async () => {
+        const campaign = await createCampaign();
+        await CampaignService.send(makeCtx(), campaign.id);
+        const [recipient] = await db
+          .select()
+          .from(campaignRecipients)
+          .where(
+            and(
+              eq(campaignRecipients.campaignId, campaign.id),
+              eq(campaignRecipients.customerId, optedInCustomerId)
+            )
+          );
+        expect(recipient!.variantId).toBeNull();
+      });
+    });
+
+    describe('getStats — engagement metrics', () => {
+      it('computes opened/clicked/converted counts and rates from campaignRecipients', async () => {
+        const campaign = await createCampaign();
+        await CampaignService.send(makeCtx(), campaign.id);
+        const [recipient] = await db
+          .select()
+          .from(campaignRecipients)
+          .where(
+            and(
+              eq(campaignRecipients.campaignId, campaign.id),
+              eq(campaignRecipients.customerId, optedInCustomerId)
+            )
+          );
+        await db
+          .update(campaignRecipients)
+          .set({ openedAt: new Date(), clickedAt: new Date(), convertedAt: new Date() })
+          .where(eq(campaignRecipients.id, recipient!.id));
+
+        const stats = await CampaignService.getStats(makeCtx(), campaign.id);
+        expect(stats.opened).toBe(1);
+        expect(stats.clicked).toBe(1);
+        expect(stats.converted).toBe(1);
+        expect(stats.openRate).toBe(100);
+        expect(stats.clickRate).toBe(100);
+        expect(stats.conversionRate).toBe(100);
+      });
+
+      it('returns a variant breakdown when the campaign has variants, empty otherwise', async () => {
+        const campaign = await createCampaign({
+          customerIds: [optedInCustomerId, branch2CustomerId],
+        });
+        await db.insert(crmCampaignVariants).values({
+          tenantId: TEST_TENANT,
+          campaignId: campaign.id,
+          label: 'A',
+          messageTemplate: 'A',
+          weight: 100,
+        });
+        await CampaignService.send(makeCtx(), campaign.id);
+
+        const stats = await CampaignService.getStats(makeCtx(), campaign.id);
+        expect(stats.variants).toHaveLength(1);
+        expect(stats.variants[0]!.label).toBe('A');
+        expect(stats.variants[0]!.sent).toBe(2);
+
+        const noVariantCampaign = await createCampaign();
+        await CampaignService.send(makeCtx(), noVariantCampaign.id);
+        const statsNoVariants = await CampaignService.getStats(makeCtx(), noVariantCampaign.id);
+        expect(statsNoVariants.variants).toEqual([]);
+      });
+    });
+
+    describe('attributeConversions', () => {
+      afterEach(async () => {
+        await db.delete(invoices).where(eq(invoices.tenantId, TEST_TENANT));
+      });
+
+      it('sets convertedAt when the customer purchases after the send, within the window', async () => {
+        const campaign = await createCampaign({ customerIds: [optedInCustomerId] });
+        await CampaignService.send(makeCtx(), campaign.id);
+        const [recipient] = await db
+          .select()
+          .from(campaignRecipients)
+          .where(
+            and(
+              eq(campaignRecipients.campaignId, campaign.id),
+              eq(campaignRecipients.customerId, optedInCustomerId)
+            )
+          );
+        const sentAt = new Date(Date.now() - 60_000);
+        await db
+          .update(campaignRecipients)
+          .set({ sentAt })
+          .where(eq(campaignRecipients.id, recipient!.id));
+
+        await db.insert(invoices).values({
+          tenantId: TEST_TENANT,
+          branchId,
+          warehouseId: branchId,
+          customerId: optedInCustomerId,
+          invoiceNumber: `CONV-POS-${Date.now()}`,
+          placeOfSupply: '27',
+          invoiceDate: new Date(),
+          dueDate: new Date(Date.now() + 30 * 86_400_000),
+          status: 'CONFIRMED',
+          subtotal: '100',
+          taxableAmount: '100',
+          grandTotal: '100',
+          paidAmount: '0',
+          createdBy: 1,
+        } as unknown as typeof invoices.$inferInsert);
+
+        await CampaignService.attributeConversions(db, TEST_TENANT, 30);
+        const [reloaded] = await db
+          .select()
+          .from(campaignRecipients)
+          .where(eq(campaignRecipients.id, recipient!.id));
+        expect(reloaded!.convertedAt).not.toBeNull();
+      });
+
+      it('does not set convertedAt when the only purchase predates the send', async () => {
+        const campaign = await createCampaign({ customerIds: [branch2CustomerId] });
+        await CampaignService.send(makeCtx(), campaign.id);
+        const [recipient] = await db
+          .select()
+          .from(campaignRecipients)
+          .where(
+            and(
+              eq(campaignRecipients.campaignId, campaign.id),
+              eq(campaignRecipients.customerId, branch2CustomerId)
+            )
+          );
+        const sentAt = new Date();
+        await db
+          .update(campaignRecipients)
+          .set({ sentAt })
+          .where(eq(campaignRecipients.id, recipient!.id));
+
+        await db.insert(invoices).values({
+          tenantId: TEST_TENANT,
+          branchId: branchId2,
+          warehouseId: branchId2,
+          customerId: branch2CustomerId,
+          invoiceNumber: `CONV-NEG-${Date.now()}`,
+          placeOfSupply: '27',
+          invoiceDate: new Date(Date.now() - 60 * 86_400_000),
+          dueDate: new Date(Date.now() + 30 * 86_400_000),
+          status: 'CONFIRMED',
+          subtotal: '100',
+          taxableAmount: '100',
+          grandTotal: '100',
+          paidAmount: '0',
+          createdBy: 1,
+        } as unknown as typeof invoices.$inferInsert);
+
+        await CampaignService.attributeConversions(db, TEST_TENANT, 30);
+        const [reloaded] = await db
+          .select()
+          .from(campaignRecipients)
+          .where(eq(campaignRecipients.id, recipient!.id));
+        expect(reloaded!.convertedAt).toBeNull();
+      });
+
+      // CRM-ROADMAP Phase 3, Feature 3 — snapshots the invoice + its revenue on attribution.
+      it('snapshots convertedInvoiceId and convertedAmount, not just a timestamp', async () => {
+        const campaign = await createCampaign({ customerIds: [optedInCustomerId] });
+        await CampaignService.send(makeCtx(), campaign.id);
+        const [recipient] = await db
+          .select()
+          .from(campaignRecipients)
+          .where(
+            and(
+              eq(campaignRecipients.campaignId, campaign.id),
+              eq(campaignRecipients.customerId, optedInCustomerId)
+            )
+          );
+        await db
+          .update(campaignRecipients)
+          .set({ sentAt: new Date(Date.now() - 60_000) })
+          .where(eq(campaignRecipients.id, recipient!.id));
+
+        const [invoice] = await db
+          .insert(invoices)
+          .values({
+            tenantId: TEST_TENANT,
+            branchId,
+            warehouseId: branchId,
+            customerId: optedInCustomerId,
+            invoiceNumber: `CONV-SNAP-${Date.now()}`,
+            placeOfSupply: '27',
+            invoiceDate: new Date(),
+            dueDate: new Date(Date.now() + 30 * 86_400_000),
+            status: 'CONFIRMED',
+            subtotal: '250',
+            taxableAmount: '250',
+            grandTotal: '250',
+            paidAmount: '0',
+            createdBy: 1,
+          } as unknown as typeof invoices.$inferInsert)
+          .returning();
+
+        await CampaignService.attributeConversions(db, TEST_TENANT, 30);
+        const [reloaded] = await db
+          .select()
+          .from(campaignRecipients)
+          .where(eq(campaignRecipients.id, recipient!.id));
+        expect(reloaded!.convertedInvoiceId).toBe(invoice!.id);
+        expect(parseFloat(reloaded!.convertedAmount ?? '0')).toBe(250);
+      });
+
+      // CRM-ROADMAP Phase 3, Feature 3 — the roadmap's own explicit boundary-condition example.
+      it('does not attribute a purchase that falls outside the attribution window, even though it is after the send', async () => {
+        const campaign = await createCampaign({ customerIds: [branch2CustomerId] });
+        await CampaignService.send(makeCtx(), campaign.id);
+        const [recipient] = await db
+          .select()
+          .from(campaignRecipients)
+          .where(
+            and(
+              eq(campaignRecipients.campaignId, campaign.id),
+              eq(campaignRecipients.customerId, branch2CustomerId)
+            )
+          );
+        // Sent 35 days ago; the purchase below is 5 days ago — 30 days after the send, 5 days
+        // past a 30-day window (>, not >=, is the boundary — 30 days exactly still attributes).
+        const sentAt = new Date(Date.now() - 35 * 86_400_000);
+        await db
+          .update(campaignRecipients)
+          .set({ sentAt })
+          .where(eq(campaignRecipients.id, recipient!.id));
+
+        await db.insert(invoices).values({
+          tenantId: TEST_TENANT,
+          branchId: branchId2,
+          warehouseId: branchId2,
+          customerId: branch2CustomerId,
+          invoiceNumber: `CONV-OUTWINDOW-${Date.now()}`,
+          placeOfSupply: '27',
+          invoiceDate: new Date(Date.now() - 5 * 86_400_000),
+          dueDate: new Date(Date.now() + 30 * 86_400_000),
+          status: 'CONFIRMED',
+          subtotal: '100',
+          taxableAmount: '100',
+          grandTotal: '100',
+          paidAmount: '0',
+          createdBy: 1,
+        } as unknown as typeof invoices.$inferInsert);
+
+        await CampaignService.attributeConversions(db, TEST_TENANT, 30);
+        const [reloaded] = await db
+          .select()
+          .from(campaignRecipients)
+          .where(eq(campaignRecipients.id, recipient!.id));
+        expect(reloaded!.convertedAt).toBeNull();
+      });
+
+      // CRM-ROADMAP Phase 3, Feature 3 — last-click-wins tie-break: a customer engaging with two
+      // campaigns before purchasing must credit only the one they engaged with LAST, not both.
+      it('credits only the most-recently-clicked campaign when two campaigns are both eligible', async () => {
+        const campaignA = await createCampaign({ customerIds: [optedInCustomerId] });
+        const campaignB = await createCampaign({ customerIds: [optedInCustomerId] });
+        await CampaignService.send(makeCtx(), campaignA.id);
+        await CampaignService.send(makeCtx(), campaignB.id);
+
+        const [recipientA] = await db
+          .select()
+          .from(campaignRecipients)
+          .where(
+            and(
+              eq(campaignRecipients.campaignId, campaignA.id),
+              eq(campaignRecipients.customerId, optedInCustomerId)
+            )
+          );
+        const [recipientB] = await db
+          .select()
+          .from(campaignRecipients)
+          .where(
+            and(
+              eq(campaignRecipients.campaignId, campaignB.id),
+              eq(campaignRecipients.customerId, optedInCustomerId)
+            )
+          );
+
+        // Other tests in this file also target optedInCustomerId and leave behind unconverted
+        // (pending) campaignRecipients rows with recent sentAt values, since only `invoices` is
+        // cleaned between tests — those would otherwise out-compete A/B in the last-click-wins
+        // comparison below and win by virtue of being more recent, not by design.
+        await db
+          .delete(campaignRecipients)
+          .where(
+            and(
+              eq(campaignRecipients.tenantId, TEST_TENANT),
+              eq(campaignRecipients.customerId, optedInCustomerId),
+              isNull(campaignRecipients.convertedAt),
+              notInArray(campaignRecipients.id, [recipientA!.id, recipientB!.id])
+            )
+          );
+
+        // A: sent 5 days ago, clicked 4 days ago. B: sent 3 days ago, clicked 1 day ago (later).
+        await db
+          .update(campaignRecipients)
+          .set({
+            sentAt: new Date(Date.now() - 5 * 86_400_000),
+            clickedAt: new Date(Date.now() - 4 * 86_400_000),
+          })
+          .where(eq(campaignRecipients.id, recipientA!.id));
+        await db
+          .update(campaignRecipients)
+          .set({
+            sentAt: new Date(Date.now() - 3 * 86_400_000),
+            clickedAt: new Date(Date.now() - 1 * 86_400_000),
+          })
+          .where(eq(campaignRecipients.id, recipientB!.id));
+
+        await db.insert(invoices).values({
+          tenantId: TEST_TENANT,
+          branchId,
+          warehouseId: branchId,
+          customerId: optedInCustomerId,
+          invoiceNumber: `CONV-LASTCLICK-${Date.now()}`,
+          placeOfSupply: '27',
+          invoiceDate: new Date(),
+          dueDate: new Date(Date.now() + 30 * 86_400_000),
+          status: 'CONFIRMED',
+          subtotal: '100',
+          taxableAmount: '100',
+          grandTotal: '100',
+          paidAmount: '0',
+          createdBy: 1,
+        } as unknown as typeof invoices.$inferInsert);
+
+        await CampaignService.attributeConversions(db, TEST_TENANT, 30);
+
+        const [reloadedA] = await db
+          .select()
+          .from(campaignRecipients)
+          .where(eq(campaignRecipients.id, recipientA!.id));
+        const [reloadedB] = await db
+          .select()
+          .from(campaignRecipients)
+          .where(eq(campaignRecipients.id, recipientB!.id));
+        expect(reloadedA!.convertedAt).toBeNull();
+        expect(reloadedB!.convertedAt).not.toBeNull();
+      });
+
+      // CRM-ROADMAP Phase 3, Feature 3 — the roadmap's own explicit "must reverse, not leave
+      // stale revenue counted" edge case.
+      it('reverses a previously-attributed conversion when its invoice is later cancelled', async () => {
+        const campaign = await createCampaign({ customerIds: [optedInCustomerId] });
+        await CampaignService.send(makeCtx(), campaign.id);
+        const [recipient] = await db
+          .select()
+          .from(campaignRecipients)
+          .where(
+            and(
+              eq(campaignRecipients.campaignId, campaign.id),
+              eq(campaignRecipients.customerId, optedInCustomerId)
+            )
+          );
+        await db
+          .update(campaignRecipients)
+          .set({ sentAt: new Date(Date.now() - 60_000) })
+          .where(eq(campaignRecipients.id, recipient!.id));
+
+        const [invoice] = await db
+          .insert(invoices)
+          .values({
+            tenantId: TEST_TENANT,
+            branchId,
+            warehouseId: branchId,
+            customerId: optedInCustomerId,
+            invoiceNumber: `CONV-REVERSE-${Date.now()}`,
+            placeOfSupply: '27',
+            invoiceDate: new Date(),
+            dueDate: new Date(Date.now() + 30 * 86_400_000),
+            status: 'CONFIRMED',
+            subtotal: '100',
+            taxableAmount: '100',
+            grandTotal: '100',
+            paidAmount: '0',
+            createdBy: 1,
+          } as unknown as typeof invoices.$inferInsert)
+          .returning();
+
+        await CampaignService.attributeConversions(db, TEST_TENANT, 30);
+        const [attributed] = await db
+          .select()
+          .from(campaignRecipients)
+          .where(eq(campaignRecipients.id, recipient!.id));
+        expect(attributed!.convertedAt).not.toBeNull();
+
+        await db.update(invoices).set({ status: 'CANCELLED' }).where(eq(invoices.id, invoice!.id));
+        await CampaignService.attributeConversions(db, TEST_TENANT, 30);
+
+        const [reversed] = await db
+          .select()
+          .from(campaignRecipients)
+          .where(eq(campaignRecipients.id, recipient!.id));
+        expect(reversed!.convertedAt).toBeNull();
+        expect(reversed!.convertedInvoiceId).toBeNull();
+        expect(reversed!.convertedAmount).toBeNull();
+      });
+    });
+
+    describe('getRoiReport', () => {
+      afterEach(async () => {
+        await db.delete(invoices).where(eq(invoices.tenantId, TEST_TENANT));
+        await db
+          .delete(tenantCommunicationSettings)
+          .where(eq(tenantCommunicationSettings.tenantId, TEST_TENANT));
+      });
+
+      it('computes revenue, cost, and roi correctly for a campaign with a configured per-message rate', async () => {
+        await db.insert(tenantCommunicationSettings).values({
+          tenantId: TEST_TENANT,
+          costPerMessage: { EMAIL: 2 },
+        });
+
+        const campaign = await createCampaign({ customerIds: [optedInCustomerId] });
+        await CampaignService.send(makeCtx(), campaign.id);
+        const [recipient] = await db
+          .select()
+          .from(campaignRecipients)
+          .where(
+            and(
+              eq(campaignRecipients.campaignId, campaign.id),
+              eq(campaignRecipients.customerId, optedInCustomerId)
+            )
+          );
+        await db
+          .update(campaignRecipients)
+          .set({ sentAt: new Date(Date.now() - 60_000) })
+          .where(eq(campaignRecipients.id, recipient!.id));
+        // send()'s HTTP call to notification-service isn't reachable in this test environment,
+        // so campaigns.sentCount (only incremented on a successful queue confirmation) stays 0;
+        // set it directly so the cost/roi math under test is exercised deterministically.
+        await db.update(campaigns).set({ sentCount: 1 }).where(eq(campaigns.id, campaign.id));
+
+        await db.insert(invoices).values({
+          tenantId: TEST_TENANT,
+          branchId,
+          warehouseId: branchId,
+          customerId: optedInCustomerId,
+          invoiceNumber: `ROI-${Date.now()}`,
+          placeOfSupply: '27',
+          invoiceDate: new Date(),
+          dueDate: new Date(Date.now() + 30 * 86_400_000),
+          status: 'CONFIRMED',
+          subtotal: '300',
+          taxableAmount: '300',
+          grandTotal: '300',
+          paidAmount: '0',
+          createdBy: 1,
+        } as unknown as typeof invoices.$inferInsert);
+        await CampaignService.attributeConversions(db, TEST_TENANT, 30);
+
+        const report = await CampaignService.getRoiReport(makeCtx());
+        const row = report.find((r) => r.campaignId === campaign.id);
+        expect(row).toBeDefined();
+        expect(row!.revenue).toBe(300);
+        // sentCount is 1 (single recipient), rate is 2 per message -> cost 2.
+        expect(row!.cost).toBe(2);
+        expect(row!.roi).toBe((300 - 2) / 2);
+      });
+
+      it('reports a null roi (not a divide-by-zero) when no cost rate is configured for the channel', async () => {
+        const campaign = await createCampaign({ customerIds: [optedInCustomerId] });
+        await CampaignService.send(makeCtx(), campaign.id);
+        // No tenantCommunicationSettings row exists in this test — proves the "no rate
+        // configured" path specifically, regardless of how many messages were actually sent.
+        await db.update(campaigns).set({ sentCount: 1 }).where(eq(campaigns.id, campaign.id));
+
+        const report = await CampaignService.getRoiReport(makeCtx());
+        const row = report.find((r) => r.campaignId === campaign.id);
+        expect(row).toBeDefined();
+        expect(row!.cost).toBe(0);
+        expect(row!.roi).toBeNull();
+      });
+    });
+
+    describe('send() — multi-language translations (CRM-ROADMAP Phase 3, Feature 5)', () => {
+      let hindiCustomerId: number;
+      let noLangCustomerId: number;
+
+      beforeAll(async () => {
+        const [hindiCustomer] = await db
+          .insert(customers)
+          .values({
+            tenantId: TEST_TENANT,
+            branchId,
+            displayName: 'Hindi Preference Customer',
+            phone: '9800000001',
+            creditLimit: '0',
+            openingBalance: '0',
+            preferredLanguage: 'hi',
+            createdBy: 1,
+          })
+          .returning();
+        hindiCustomerId = hindiCustomer!.id;
+
+        const [noLangCustomer] = await db
+          .insert(customers)
+          .values({
+            tenantId: TEST_TENANT,
+            branchId,
+            displayName: 'No Language Preference Customer',
+            phone: '9800000002',
+            creditLimit: '0',
+            openingBalance: '0',
+            createdBy: 1,
+          })
+          .returning();
+        noLangCustomerId = noLangCustomer!.id;
+      });
+
+      afterAll(async () => {
+        await db.delete(customers).where(eq(customers.id, hindiCustomerId));
+        await db.delete(customers).where(eq(customers.id, noLangCustomerId));
+      });
+
+      it('sends the matching-language translation to a recipient with that preference, bypassing A/B variant assignment even when variants are configured', async () => {
+        const campaign = await createCampaign({
+          customerIds: [hindiCustomerId, noLangCustomerId],
+        });
+        await db.insert(crmCampaignVariants).values([
+          {
+            tenantId: TEST_TENANT,
+            campaignId: campaign.id,
+            label: 'A',
+            messageTemplate: 'VARIANT-A {{customerName}}',
+            weight: 50,
+          },
+          {
+            tenantId: TEST_TENANT,
+            campaignId: campaign.id,
+            label: 'B',
+            messageTemplate: 'VARIANT-B {{customerName}}',
+            weight: 50,
+          },
+        ]);
+        await db.insert(crmCampaignMessageTranslations).values({
+          tenantId: TEST_TENANT,
+          campaignId: campaign.id,
+          language: 'hi',
+          messageTemplate: 'Hindi message for {{customerName}}',
+        });
+
+        await CampaignService.send(makeCtx(), campaign.id);
+
+        const [hindiRecipient] = await db
+          .select()
+          .from(campaignRecipients)
+          .where(
+            and(
+              eq(campaignRecipients.campaignId, campaign.id),
+              eq(campaignRecipients.customerId, hindiCustomerId)
+            )
+          );
+        const [noLangRecipient] = await db
+          .select()
+          .from(campaignRecipients)
+          .where(
+            and(
+              eq(campaignRecipients.campaignId, campaign.id),
+              eq(campaignRecipients.customerId, noLangCustomerId)
+            )
+          );
+
+        // A matched-language recipient never enters A/B variant assignment — no variantId set.
+        expect(hindiRecipient!.variantId).toBeNull();
+        // A recipient with no matching translation still falls through to normal A/B assignment.
+        expect(noLangRecipient!.variantId).not.toBeNull();
+      });
     });
   });
 });

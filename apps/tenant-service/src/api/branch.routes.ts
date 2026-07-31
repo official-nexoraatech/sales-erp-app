@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { BusinessError, NotFoundError, ValidationError } from '@erp/types';
 import { PERMISSIONS, OptionalGSTINSchema } from '@erp/types';
 import type { PlatformContextFactory } from '@erp/sdk';
-import { assertUnderBranchLimit } from '@erp/sdk';
+import { assertUnderBranchLimit, acquireTenantLimitLock } from '@erp/sdk';
 import { authenticate } from '../middleware/authenticate.js';
 import { requirePermission } from '../middleware/authorize.js';
 
@@ -153,23 +153,31 @@ export async function branchRoutes(
         throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
       }
 
-      await assertUnderBranchLimit(ctx.db.raw, tenantId);
+      // Regression guard (TOCTOU race): the limit check and the insert must happen inside
+      // the same transaction, serialized per-tenant by an advisory lock — otherwise two
+      // concurrent requests can both pass the count check right at the cap and jointly
+      // overshoot the plan's maxBranches limit before either insert commits.
+      const created = await ctx.db.transaction(async (trx) => {
+        await acquireTenantLimitLock(trx.raw, tenantId, 'maxBranches');
+        await assertUnderBranchLimit(trx.raw, tenantId);
 
-      if (body.data.isHeadOffice) {
-        await ctx.db.raw
-          .update(branches)
-          .set({ isHeadOffice: false, updatedAt: new Date() })
-          .where(and(eq(branches.tenantId, tenantId), eq(branches.isHeadOffice, true)));
-      }
+        if (body.data.isHeadOffice) {
+          await trx.raw
+            .update(branches)
+            .set({ isHeadOffice: false, updatedAt: new Date() })
+            .where(and(eq(branches.tenantId, tenantId), eq(branches.isHeadOffice, true)));
+        }
 
-      const [created] = await ctx.db.raw
-        .insert(branches)
-        .values({
-          tenantId,
-          createdBy: userId,
-          ...body.data,
-        } as unknown as typeof branches.$inferInsert)
-        .returning();
+        const [row] = await trx.raw
+          .insert(branches)
+          .values({
+            tenantId,
+            createdBy: userId,
+            ...body.data,
+          } as unknown as typeof branches.$inferInsert)
+          .returning();
+        return row;
+      });
 
       if (created) {
         await ctx.events.publish(
@@ -178,6 +186,14 @@ export async function branchRoutes(
           'BRANCH_CREATED',
           created as unknown as Record<string, unknown>
         );
+        await ctx.audit.log({
+          action: 'CREATE',
+          entityType: 'branch',
+          entityId: created.id,
+          after: created as unknown as Record<string, unknown>,
+          actorEmail: request.auth.email,
+          ipAddress: request.ip,
+        });
       }
 
       return reply.code(201).send({ data: created });
@@ -227,7 +243,10 @@ export async function branchRoutes(
           updatedBy: userId,
           version: existing.version + 1,
         } as unknown as Partial<typeof branches.$inferInsert>)
-        .where(eq(branches.id, id))
+        // Defense-in-depth (F19): re-include tenantId in the mutating statement itself,
+        // rather than relying solely on the preceding SELECT having proven ownership —
+        // the write is now tenant-scoped on its own, not just via control flow.
+        .where(and(eq(branches.id, id), eq(branches.tenantId, tenantId)))
         .returning();
 
       if (updated) {
@@ -237,6 +256,15 @@ export async function branchRoutes(
           'BRANCH_UPDATED',
           updated as unknown as Record<string, unknown>
         );
+        await ctx.audit.log({
+          action: 'UPDATE',
+          entityType: 'branch',
+          entityId: id,
+          before: existing as unknown as Record<string, unknown>,
+          after: updated as unknown as Record<string, unknown>,
+          actorEmail: request.auth.email,
+          ipAddress: request.ip,
+        });
       }
 
       return reply.code(200).send({ data: updated });
@@ -270,9 +298,19 @@ export async function branchRoutes(
       await ctx.db.raw
         .update(branches)
         .set({ deletedAt: new Date(), deletedBy: userId, isActive: false })
-        .where(eq(branches.id, id));
+        // Defense-in-depth (F19): see the matching comment on PUT /branches/:id above.
+        .where(and(eq(branches.id, id), eq(branches.tenantId, tenantId)));
 
       await ctx.events.publish('branch', id, 'BRANCH_DELETED', { id });
+      await ctx.audit.log({
+        action: 'DELETE',
+        entityType: 'branch',
+        entityId: id,
+        before: existing as unknown as Record<string, unknown>,
+        after: { isActive: false },
+        actorEmail: request.auth.email,
+        ipAddress: request.ip,
+      });
 
       return reply.code(200).send({ data: { message: 'Branch deleted', id } });
     }

@@ -2,18 +2,22 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { CheckCircle2 } from 'lucide-react';
+import { Eye, CheckCircle2, IndianRupee } from 'lucide-react';
 import { purchaseReturnApi } from '../../api/endpoints.js';
 import { useAuthStore } from '../../store/auth.store.js';
 import { PERMISSIONS } from '../../constants/permissions.js';
+import { useConfirm } from '../../context/ConfirmContext.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
 import ERPDataGrid, {
   type ERPColumnDef,
   type ERPRowAction,
 } from '../../components/erp/ERPDataGrid.js';
 import ERPTabs from '../../components/erp/ERPTabs.js';
+import ERPEmptyState from '../../components/erp/ERPEmptyState.js';
 import Button from '../../components/ui/Button.js';
 import Badge from '../../components/ui/Badge.js';
+import Modal from '../../components/ui/Modal.js';
+import Input from '../../components/ui/Input.js';
 import { formatDate, formatCurrency } from '../../lib/format.js';
 
 interface PurchaseReturn {
@@ -22,6 +26,7 @@ interface PurchaseReturn {
   supplierId: number;
   supplierName?: string;
   grnId: number;
+  grnNumber?: string;
   status: string;
   grandTotal: string;
   returnDate: string;
@@ -34,7 +39,9 @@ interface DebitNote {
   supplierId: number;
   supplierName?: string;
   status: string;
-  total: string;
+  amount: string;
+  appliedAmount: string;
+  balanceAmount: string;
   issueDate: string;
 }
 
@@ -43,16 +50,20 @@ const STATUS_COLORS: Record<string, 'default' | 'success' | 'warning' | 'danger'
   APPROVED: 'success',
 };
 
+// Was DRAFT/ISSUED/ADJUSTED/REFUNDED — none of those match debit_notes.status's actual
+// enum (OPEN/PARTIALLY_APPLIED/APPLIED/CANCELLED, packages/db-client/src/schema/purchase.ts),
+// so every debit note badge silently fell through to the 'default' color.
 const DN_STATUS_COLORS: Record<string, 'default' | 'success' | 'warning' | 'danger'> = {
-  DRAFT: 'default',
-  ISSUED: 'warning',
-  ADJUSTED: 'success',
-  REFUNDED: 'success',
+  OPEN: 'warning',
+  PARTIALLY_APPLIED: 'default',
+  APPLIED: 'success',
+  CANCELLED: 'danger',
 };
 
 export default function PurchaseReturnsPage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const confirm = useConfirm();
   const hasPermission = useAuthStore((s) => s.hasPermission);
   const canCreateReturn = hasPermission(PERMISSIONS.PURCHASE_RETURN_CREATE);
   const canApproveReturn = hasPermission(PERMISSIONS.PURCHASE_RETURN_APPROVE);
@@ -61,6 +72,9 @@ export default function PurchaseReturnsPage() {
   const [returnsPageSize, setReturnsPageSize] = useState(20);
   const [dnPage, setDnPage] = useState(1);
   const [dnPageSize, setDnPageSize] = useState(20);
+  const [applyDn, setApplyDn] = useState<DebitNote | null>(null);
+  const [applyAmount, setApplyAmount] = useState('');
+  const [applyNotes, setApplyNotes] = useState('');
 
   const { data: returnsData, isLoading: returnsLoading } = useQuery({
     queryKey: ['purchase-returns', returnsPage, returnsPageSize],
@@ -85,6 +99,19 @@ export default function PurchaseReturnsPage() {
     onError: (e: Error) => toast.error(e.message),
   });
 
+  const applyMutation = useMutation({
+    mutationFn: ({ id, amount, notes }: { id: number; amount: number; notes: string }) =>
+      purchaseReturnApi.applyDebitNote(id, { amount, ...(notes ? { notes } : {}) }),
+    onSuccess: () => {
+      toast.success('Debit note applied');
+      qc.invalidateQueries({ queryKey: ['debit-notes'] });
+      setApplyDn(null);
+      setApplyAmount('');
+      setApplyNotes('');
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
   const returns: PurchaseReturn[] =
     ((returnsData as Record<string, unknown>)?.content as PurchaseReturn[]) ?? [];
   const returnsTotal = ((returnsData as Record<string, unknown>)?.totalElements as number) ?? 0;
@@ -95,8 +122,8 @@ export default function PurchaseReturnsPage() {
   const returnColumns: ERPColumnDef<PurchaseReturn>[] = [
     { key: 'returnNumber', header: 'Return #', mono: true, sortable: true },
     { key: 'supplierName', header: 'Supplier', render: (r) => r.supplierName ?? r.supplierId },
-    { key: 'grnId', header: 'GRN #', render: (r) => `GRN-${r.grnId}` },
-    { key: 'reason', header: 'Reason', render: (r) => r.reason.replace('_', ' ') },
+    { key: 'grnId', header: 'GRN #', render: (r) => r.grnNumber ?? `GRN-${r.grnId}` },
+    { key: 'reason', header: 'Reason', render: (r) => r.reason.replace(/_/g, ' ') },
     {
       key: 'grandTotal',
       header: 'Amount',
@@ -114,26 +141,48 @@ export default function PurchaseReturnsPage() {
   ];
 
   const returnRowActions: ERPRowAction<PurchaseReturn>[] = [
+    {
+      label: 'View',
+      icon: Eye,
+      onClick: (r: PurchaseReturn) => navigate(`/purchase/returns/${r.id}`),
+    },
     ...(canApproveReturn
       ? [
           {
             label: 'Approve',
             icon: CheckCircle2,
-            onClick: (r: PurchaseReturn) => approveMutation.mutate(r.id),
+            tourId: 'purchase-return-approve-row-action',
+            onClick: async (r: PurchaseReturn) => {
+              const ok = await confirm({
+                title: 'Approve purchase return?',
+                message: `This will deduct the returned quantity from stock and generate a debit note against ${r.supplierName ?? 'this supplier'}. This cannot be undone.`,
+                confirmLabel: 'Approve',
+                variant: 'primary',
+              });
+              if (ok) approveMutation.mutate(r.id);
+            },
             hidden: (r: PurchaseReturn) => r.status !== 'DRAFT',
           },
         ]
       : []),
   ];
 
+  const canApplyDebitNote = hasPermission(PERMISSIONS.PURCHASE_RETURN_APPROVE);
+
   const dnColumns: ERPColumnDef<DebitNote>[] = [
     { key: 'debitNoteNumber', header: 'DN #', mono: true },
     { key: 'supplierName', header: 'Supplier', render: (r) => r.supplierName ?? r.supplierId },
     {
-      key: 'total',
+      key: 'amount',
       header: 'Amount',
       align: 'right',
-      render: (r) => formatCurrency(parseFloat(r.total)),
+      render: (r) => formatCurrency(parseFloat(r.amount)),
+    },
+    {
+      key: 'balanceAmount',
+      header: 'Balance',
+      align: 'right',
+      render: (r) => formatCurrency(parseFloat(r.balanceAmount)),
     },
     { key: 'issueDate', header: 'Issue Date', render: (r) => formatDate(r.issueDate) },
     {
@@ -141,6 +190,23 @@ export default function PurchaseReturnsPage() {
       header: 'Status',
       render: (r) => <Badge variant={DN_STATUS_COLORS[r.status] ?? 'default'}>{r.status}</Badge>,
     },
+  ];
+
+  const dnRowActions: ERPRowAction<DebitNote>[] = [
+    ...(canApplyDebitNote
+      ? [
+          {
+            label: 'Apply',
+            icon: IndianRupee,
+            onClick: (r: DebitNote) => {
+              setApplyDn(r);
+              setApplyAmount(r.balanceAmount);
+              setApplyNotes('');
+            },
+            hidden: (r: DebitNote) => r.status !== 'OPEN' && r.status !== 'PARTIALLY_APPLIED',
+          },
+        ]
+      : []),
   ];
 
   return (
@@ -151,7 +217,12 @@ export default function PurchaseReturnsPage() {
         subtitle="Manage returns to suppliers and debit notes"
       >
         {canCreateReturn && (
-          <Button onClick={() => navigate('/purchase/returns/new')}>+ New Return</Button>
+          <Button
+            data-tour-id="purchase-returns-create-button"
+            onClick={() => navigate('/purchase/returns/new')}
+          >
+            + New Return
+          </Button>
         )}
       </ERPPageHeader>
 
@@ -171,6 +242,8 @@ export default function PurchaseReturnsPage() {
           data={returns}
           isLoading={returnsLoading}
           rowKey="id"
+          enableExport
+          exportFilename="purchase-returns"
           pagination={{ page: returnsPage, pageSize: returnsPageSize, total: returnsTotal }}
           onPageChange={setReturnsPage}
           onPageSizeChange={(size) => {
@@ -178,6 +251,21 @@ export default function PurchaseReturnsPage() {
             setReturnsPage(1);
           }}
           actions={returnRowActions}
+          emptyState={
+            <ERPEmptyState
+              type="no-data"
+              title="No purchase returns yet"
+              description="Return goods received from a supplier against a GRN — this deducts the returned stock and generates a debit note."
+              {...(canCreateReturn
+                ? {
+                    action: {
+                      label: '+ New Return',
+                      onClick: () => navigate('/purchase/returns/new'),
+                    },
+                  }
+                : {})}
+            />
+          }
         />
       )}
       {tab === 'debit-notes' && (
@@ -192,8 +280,64 @@ export default function PurchaseReturnsPage() {
             setDnPageSize(size);
             setDnPage(1);
           }}
+          actions={dnRowActions}
+          emptyState={
+            <ERPEmptyState
+              type="no-data"
+              title="No debit notes yet"
+              description="A debit note is generated automatically when a purchase return is approved."
+            />
+          }
         />
       )}
+
+      <Modal isOpen={applyDn !== null} onClose={() => setApplyDn(null)} title="Apply Debit Note">
+        {applyDn && (
+          <div className="space-y-4">
+            <p className="text-sm text-secondary">
+              Record that {formatCurrency(parseFloat(applyAmount || '0'))} of debit note{' '}
+              <span className="font-mono">{applyDn.debitNoteNumber}</span> (balance{' '}
+              {formatCurrency(parseFloat(applyDn.balanceAmount))}) has been matched against a
+              supplier bill or payment.
+            </p>
+            <Input
+              label="Amount to Apply (₹)"
+              type="number"
+              step="0.01"
+              min="0"
+              max={applyDn.balanceAmount}
+              value={applyAmount}
+              onChange={(e) => setApplyAmount(e.target.value)}
+              required
+            />
+            <Input
+              label="Notes"
+              placeholder="e.g. Adjusted against Payment #123"
+              value={applyNotes}
+              onChange={(e) => setApplyNotes(e.target.value)}
+            />
+            <div className="flex justify-end gap-2">
+              <Button variant="ghost" onClick={() => setApplyDn(null)}>
+                Cancel
+              </Button>
+              <Button
+                isLoading={applyMutation.isPending}
+                disabled={!applyAmount || parseFloat(applyAmount) <= 0}
+                onClick={() =>
+                  applyDn &&
+                  applyMutation.mutate({
+                    id: applyDn.id,
+                    amount: parseFloat(applyAmount),
+                    notes: applyNotes,
+                  })
+                }
+              >
+                Apply
+              </Button>
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }

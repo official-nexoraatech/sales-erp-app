@@ -67,6 +67,7 @@ async function makeToken(permissions: string[]): Promise<string> {
     .setProtectedHeader({ alg: 'RS256' })
     .setSubject('1')
     .setIssuedAt(nowSec)
+    .setIssuer('erp-auth-service')
     .setExpirationTime(nowSec + 900)
     .sign(privateKey);
 }

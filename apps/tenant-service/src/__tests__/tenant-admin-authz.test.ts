@@ -20,6 +20,8 @@ vi.mock('@erp/db', () => ({
 vi.mock('drizzle-orm', () => ({
   eq: vi.fn((a: unknown, b: unknown) => ({ __eq__: [a, b] })),
   and: vi.fn((...args: unknown[]) => ({ __and__: args })),
+  ne: vi.fn((a: unknown, b: unknown) => ({ __ne__: [a, b] })),
+  sql: vi.fn(() => '__sql__'),
 }));
 
 // See security.test.ts / es20-admin-routes.test.ts for why this is needed: vitest's
@@ -65,6 +67,7 @@ async function signToken(opts: {
     .setProtectedHeader({ alg: 'RS256' })
     .setSubject(opts.sub)
     .setIssuedAt(nowSec)
+    .setIssuer('erp-auth-service')
     .setExpirationTime(nowSec + 900)
     .sign(privateKey);
 }

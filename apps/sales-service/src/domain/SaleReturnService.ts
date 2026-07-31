@@ -8,11 +8,14 @@ import {
   items,
   outboxEvents,
   projectionCustomerBalance,
+  projectionStockLevel,
   inventoryLedger,
+  customers,
 } from '@erp/db';
 import type { ErpDatabase } from '@erp/db';
 import { BusinessError, NotFoundError } from '@erp/types';
 import { ulid } from 'ulid';
+import { ValuationService } from './ValuationService.js';
 
 export interface SaleReturnLineInput {
   invoiceLineId: number;
@@ -70,6 +73,7 @@ export class SaleReturnService {
         quantity: number;
         quantityBefore: number;
         quantityAfter: number;
+        reversalUnitCost: number;
       }> = [];
 
       for (const rl of params.lines) {
@@ -143,6 +147,24 @@ export class SaleReturnService {
             .returning({ availableQty: items.availableQty });
 
           const afterQty = parseFloat(String(itemResult?.availableQty ?? '0'));
+
+          // Restore the value that the original sale's STOCK_OUT removed — previously this
+          // path restored quantity only, leaving currentStockValue/waccCost unchanged, which
+          // silently understates WACC going forward (same qty divides into an unchanged, now
+          // too-small value) and leaves FIFO items with no layer to re-consume from later.
+          const [originalOut] = await trx
+            .select({ cogsPerUnit: inventoryLedger.cogsPerUnit })
+            .from(inventoryLedger)
+            .where(
+              and(
+                eq(inventoryLedger.tenantId, params.tenantId),
+                eq(inventoryLedger.referenceType, 'INVOICE'),
+                eq(inventoryLedger.referenceId, params.invoiceId),
+                eq(inventoryLedger.referenceLineId, rl.invoiceLineId),
+                eq(inventoryLedger.movementType, 'STOCK_OUT')
+              )
+            );
+
           stockRestorations.push({
             itemId: rl.itemId,
             variantId: rl.variantId,
@@ -151,6 +173,7 @@ export class SaleReturnService {
             quantity: rl.returnQty,
             quantityBefore: afterQty - rl.returnQty,
             quantityAfter: afterQty,
+            reversalUnitCost: parseFloat(String(originalOut?.cogsPerUnit ?? '0')),
           });
         }
       }
@@ -185,10 +208,11 @@ export class SaleReturnService {
         .insert(saleReturnLines)
         .values(returnLineValues.map((l) => ({ ...l, returnId: returnRow.id })));
 
-      // Write STOCK_IN inventory ledger rows for stock restored above
-      if (stockRestorations.length > 0) {
-        await trx.insert(inventoryLedger).values(
-          stockRestorations.map((r) => ({
+      // Write STOCK_IN inventory ledger rows for stock restored above, and value/project them
+      for (const r of stockRestorations) {
+        const [ledgerRow] = await trx
+          .insert(inventoryLedger)
+          .values({
             tenantId: params.tenantId,
             itemId: r.itemId,
             variantId: r.variantId ?? undefined,
@@ -202,8 +226,49 @@ export class SaleReturnService {
             referenceLineId: r.invoiceLineId,
             unitCost: '0',
             createdBy: params.createdBy,
-          }))
-        );
+          })
+          .returning({ id: inventoryLedger.id });
+
+        if (r.reversalUnitCost > 0) {
+          await ValuationService.applyStockIn(trx, {
+            tenantId: params.tenantId,
+            itemId: r.itemId,
+            variantId: r.variantId ?? undefined,
+            warehouseId: r.warehouseId,
+            quantity: r.quantity,
+            unitCost: r.reversalUnitCost,
+            qtyBeforeStockIn: r.quantityBefore,
+            sourceLedgerId: ledgerRow!.id,
+          });
+        }
+
+        // Same per-warehouse projection_stock_level gap as GRN/invoice-confirm had —
+        // a physical sale return never incremented it, leaving the Stock Levels page and
+        // Physical Verification's snapshot under-reporting the returning warehouse's stock.
+        await trx
+          .insert(projectionStockLevel)
+          .values({
+            tenantId: params.tenantId,
+            itemId: r.itemId,
+            variantId: r.variantId ?? undefined,
+            warehouseId: r.warehouseId,
+            availableQty: String(Math.max(0, r.quantity)),
+            reservedQty: '0',
+            lastMovementAt: new Date(),
+          })
+          .onConflictDoUpdate({
+            target: [
+              projectionStockLevel.tenantId,
+              projectionStockLevel.itemId,
+              projectionStockLevel.warehouseId,
+              projectionStockLevel.variantId,
+            ],
+            set: {
+              availableQty: sql`projection_stock_level.available_qty + ${r.quantity}`,
+              lastMovementAt: new Date(),
+              updatedAt: new Date(),
+            },
+          });
       }
 
       // Auto-create credit note
@@ -245,6 +310,18 @@ export class SaleReturnService {
           )
         );
 
+      // G7 fix: SaleReturnGstConsumer.ts's own payload interface has always declared
+      // customerGstin/customerName, and its handler already reads them (`p.customerGstin`/
+      // `p.customerName`) — but this producer never fetched or sent either, so every credit
+      // note's gst_ledger row got gstinOfCounterparty=null regardless of whether the
+      // customer was B2B or B2C, which silently routed 100% of credit notes into GSTR-1's
+      // CDNUR bucket (unregistered) instead of correctly splitting CDNR (registered) vs
+      // CDNUR — the same outbox-payload-truncation shape as the other GST producer fixes.
+      const [customer] = await trx
+        .select({ displayName: customers.displayName, gstin: customers.gstin })
+        .from(customers)
+        .where(and(eq(customers.id, params.customerId), eq(customers.tenantId, params.tenantId)));
+
       // Outbox events
       await trx.insert(outboxEvents).values([
         {
@@ -274,6 +351,8 @@ export class SaleReturnService {
             returnNumber: params.returnNumber,
             invoiceId: params.invoiceId,
             customerId: params.customerId,
+            customerName: customer?.displayName ?? null,
+            customerGstin: customer?.gstin ?? null,
             grandTotal: totalAmount,
             creditNoteNumber: params.creditNoteNumber,
             creditNoteDate: params.returnDate.toISOString(),
@@ -352,6 +431,36 @@ export class SaleReturnService {
           updatedAt: new Date(),
         })
         .where(and(eq(invoices.id, invoiceId), eq(invoices.tenantId, tenantId)));
+    });
+  }
+
+  // C-6 fix: the route this replaces set status='REFUNDED' directly with no status guard and
+  // no transaction/lock — unlike applyCreditNote just above, which was already hardened
+  // (ES-23 [C5]) against exactly this class of race. Two concurrent refund requests against
+  // the same credit note could both succeed, a real double-refund financial-loss vector.
+  async refundCreditNote(creditNoteId: number, tenantId: number, _userId: number): Promise<void> {
+    await this.db.transaction(async (trx) => {
+      const [cn] = await trx
+        .select()
+        .from(creditNotes)
+        .where(and(eq(creditNotes.id, creditNoteId), eq(creditNotes.tenantId, tenantId)))
+        .for('update');
+      if (!cn) throw new NotFoundError('Credit note not found');
+      if (!['OPEN', 'PARTIALLY_USED'].includes(cn.status))
+        throw new BusinessError(
+          'CREDIT_NOTE_EXHAUSTED',
+          'Credit note has no remaining balance to refund'
+        );
+
+      await trx
+        .update(creditNotes)
+        .set({
+          status: 'REFUNDED',
+          usedAmount: creditNotes.amount,
+          remainingAmount: '0',
+          updatedAt: new Date(),
+        })
+        .where(and(eq(creditNotes.id, creditNoteId), eq(creditNotes.tenantId, tenantId)));
     });
   }
 }

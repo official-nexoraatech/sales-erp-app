@@ -38,6 +38,8 @@ import { rulesRoutes } from './routes/rules.js';
 import { userRoutes } from './routes/users.js';
 import { mfaVerifyRoute, mfaManagementRoutes } from './routes/mfa.routes.js';
 import { impersonateRoutes } from './routes/impersonate.routes.js';
+import { portalAuthRoutes } from './routes/portal-auth.routes.js';
+import { portalImpersonateRoutes } from './routes/portal-impersonate.routes.js';
 import { adminUsersRoutes } from './routes/admin-users.routes.js';
 import { sessionsRoutes } from './routes/sessions.routes.js';
 import { securityAuditLogRoutes } from './routes/security-audit-log.routes.js';
@@ -135,11 +137,14 @@ async function bootstrap(): Promise<void> {
   // own stricter per-route override (config.rateLimit, set from LOGIN_RATE_LIMIT_MAX/
   // WINDOW_MS in loginRoute()) — a route-level config always wins over this default,
   // so flipping `global` on here does not change login's 10/15min behavior.
+  // Redis-backed (the `redis` client above is already connected for MFA/feature-flag
+  // caching) so the 200/min budget is shared across horizontally-scaled replicas instead
+  // of each process enforcing its own independent in-memory counter.
   await fastify.register(rateLimit, {
     global: true,
     max: 200,
     timeWindow: '1 minute',
-    redis: undefined, // no Redis connection in this service; in-memory store for now
+    redis,
     keyGenerator: tenantOrIpKeyGenerator,
   });
   fastify.addHook('onResponse', createHttpMetricsHook('auth-service'));
@@ -165,6 +170,9 @@ async function bootstrap(): Promise<void> {
     await forgotPasswordRoute(sub, db, config);
     await resetPasswordRoute(sub, db);
     await mfaVerifyRoute(sub, db, config, redis);
+    // CRM-ROADMAP Phase 3, Feature 2 (Self-Service Customer Portal): public, same as the
+    // staff auth routes above — these ARE the portal's own login/refresh/logout surface.
+    await portalAuthRoutes(sub, db, config, redis);
     // Internal-only, guarded by x-internal-key rather than JWT — must stay outside the
     // `authenticate` scope below (scheduler-service has no user JWT to present).
     await searchSyncInternalRoutes(sub, db);
@@ -178,6 +186,7 @@ async function bootstrap(): Promise<void> {
       await userRoutes(scope, ctxFactory);
       await mfaManagementRoutes(scope, db, config);
       await impersonateRoutes(scope, db);
+      await portalImpersonateRoutes(scope, db);
       await adminUsersRoutes(scope, db);
       await sessionsRoutes(scope, db);
       await securityAuditLogRoutes(scope, db);

@@ -1,4 +1,6 @@
+import { Quote } from 'lucide-react';
 import MarketingSection from '../../../components/marketing/MarketingSection.js';
+import { useScrollReveal } from '../../../hooks/useScrollReveal.js';
 
 // Illustrative example quotes only — not real customers. Replace with real testimonials
 // once available.
@@ -23,6 +25,32 @@ const TESTIMONIALS = [
   },
 ];
 
+function TestimonialCard({
+  quote,
+  name,
+  role,
+  index,
+}: (typeof TESTIMONIALS)[number] & { index: number }) {
+  const { ref, isVisible } = useScrollReveal<HTMLElement>();
+  return (
+    <figure
+      ref={ref}
+      style={{ transitionDelay: isVisible ? `${Math.min(index, 6) * 60}ms` : '0ms' }}
+      className={`rounded-2xl border border-default bg-surface-page p-6 shadow-token-sm transition-all duration-slow hover:-translate-y-1 hover:border-brand hover:shadow-token-lg ${
+        isVisible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-3'
+      }`}
+    >
+      <Quote className="h-6 w-6 text-brand/40" aria-hidden="true" />
+      <blockquote className="mt-3 text-sm text-primary leading-relaxed">
+        &ldquo;{quote}&rdquo;
+      </blockquote>
+      <figcaption className="mt-4 text-xs text-secondary">
+        <span className="font-semibold text-primary">{name}</span> &middot; {role}
+      </figcaption>
+    </figure>
+  );
+}
+
 export default function TestimonialsSection() {
   return (
     <MarketingSection surface="card" className="py-24">
@@ -38,15 +66,8 @@ export default function TestimonialsSection() {
         </p>
       </div>
       <div className="mt-14 grid md:grid-cols-3 gap-6">
-        {TESTIMONIALS.map(({ quote, name, role }) => (
-          <figure key={name} className="rounded-2xl border border-default bg-surface-page p-6">
-            <blockquote className="text-sm text-primary leading-relaxed">
-              &ldquo;{quote}&rdquo;
-            </blockquote>
-            <figcaption className="mt-4 text-xs text-secondary">
-              <span className="font-semibold text-primary">{name}</span> &middot; {role}
-            </figcaption>
-          </figure>
+        {TESTIMONIALS.map((testimonial, index) => (
+          <TestimonialCard key={testimonial.name} {...testimonial} index={index} />
         ))}
       </div>
     </MarketingSection>

@@ -22,6 +22,8 @@ import {
   createCorrelationIdHook,
 } from '@erp/logger';
 import { employeeRoutes } from './api/employee.routes.js';
+import { employeeLifecycleRoutes } from './api/employee-lifecycle.routes.js';
+import { employeeSelfServiceRoutes } from './api/employee-self-service.routes.js';
 import { attendanceRoutes } from './api/attendance.routes.js';
 import { attendanceImportConfigRoutes } from './api/attendance-import-config.routes.js';
 import { leaveRoutes } from './api/leave.routes.js';
@@ -114,6 +116,8 @@ async function bootstrap(): Promise<void> {
   await fastify.register(
     async (sub) => {
       await employeeRoutes(sub, ctxFactory);
+      await employeeLifecycleRoutes(sub, ctxFactory);
+      await employeeSelfServiceRoutes(sub, ctxFactory);
       await attendanceRoutes(sub, ctxFactory);
       await attendanceImportConfigRoutes(sub, ctxFactory);
       await leaveRoutes(sub, ctxFactory);

@@ -1,7 +1,8 @@
-import { eq, and, sql, inArray } from 'drizzle-orm';
-import { stockAdjustments, stockAdjustmentLines, items } from '@erp/db';
-import { ERPError } from '@erp/types';
+import { eq, and, sql, inArray, getTableColumns } from 'drizzle-orm';
+import { stockAdjustments, stockAdjustmentLines, items, outboxEvents, warehouses } from '@erp/db';
+import { ERPError, BusinessError } from '@erp/types';
 import type { ErpDatabase } from '@erp/db';
+import { ulid } from 'ulid';
 import { InventoryLedgerService } from './InventoryLedgerService.js';
 
 const APPROVAL_THRESHOLD = 50_000; // ₹ — adjustments above this require approval
@@ -36,9 +37,22 @@ export class StockAdjustmentService {
 
       for (const l of params.lines) {
         const [item] = await db
-          .select({ purchasePrice: items.purchasePrice })
+          .select({
+            purchasePrice: items.purchasePrice,
+            status: items.status,
+            deletedAt: items.deletedAt,
+          })
           .from(items)
           .where(and(eq(items.id, l.itemId), eq(items.tenantId, params.tenantId)));
+
+        // Previously unchecked anywhere — a DISCONTINUED or soft-deleted item could still be
+        // adjusted, undermining the whole point of discontinuing/deleting it.
+        if (!item || item.deletedAt || item.status === 'DISCONTINUED') {
+          throw new BusinessError(
+            'ITEM_NOT_TRANSACTABLE',
+            `Item ${l.itemId} is discontinued or deleted and cannot be adjusted`
+          );
+        }
 
         const [currentStock] = await db
           .select({ availableQty: items.availableQty })
@@ -154,8 +168,9 @@ export class StockAdjustmentService {
       }
 
       const ledgerTrx = new InventoryLedgerService(db);
+      let netCostImpact = 0;
       for (const line of lines) {
-        await ledgerTrx.adjustStock(
+        const { costImpact } = await ledgerTrx.adjustStock(
           {
             tenantId,
             itemId: line.itemId,
@@ -172,6 +187,31 @@ export class StockAdjustmentService {
           },
           db
         );
+        netCostImpact += costImpact;
+      }
+
+      // Post the net stock write-off/write-on to accounting — previously a Stock Adjustment
+      // approval never emitted any event at all, so damage/shortage/excess never reached the
+      // P&L or reduced the Inventory Asset account (PostingMatrixService's STOCK_ADJUSTMENT_LOSS
+      // rule existed but nothing ever triggered it).
+      if (Math.abs(netCostImpact) > 0.001) {
+        await db.insert(outboxEvents).values({
+          eventId: ulid(),
+          eventType: 'STOCK_ADJUSTMENT_POSTED',
+          aggregateType: 'StockAdjustment',
+          aggregateId: id,
+          tenantId,
+          payload: {
+            adjustmentId: id,
+            adjustmentNumber: claimed.adjustmentNumber,
+            adjustmentType: claimed.adjustmentType,
+            warehouseId: claimed.warehouseId,
+            netValue: String(Math.abs(netCostImpact)),
+            direction: netCostImpact < 0 ? 'LOSS' : 'GAIN',
+            createdBy: userId,
+          },
+          published: false,
+        });
       }
     });
 
@@ -206,5 +246,25 @@ export class StockAdjustmentService {
       .where(and(eq(stockAdjustments.id, id), eq(stockAdjustments.tenantId, tenantId)));
     if (!adj) throw new ERPError('ADJUSTMENT_NOT_FOUND', 'Adjustment not found', 404);
     return adj;
+  }
+
+  // Stock Adjustments previously had no detail page at all, so this never mattered — now that
+  // one exists, resolve warehouse/item names rather than showing raw ids (same "raw ID instead
+  // of name" gap already fixed for stock transfers).
+  async getWithLines(id: number, tenantId: number) {
+    const adj = await this.get(id, tenantId);
+
+    const [warehouse] = await this.db
+      .select({ name: warehouses.name })
+      .from(warehouses)
+      .where(and(eq(warehouses.id, adj.warehouseId), eq(warehouses.tenantId, tenantId)));
+
+    const lines = await this.db
+      .select({ ...getTableColumns(stockAdjustmentLines), itemName: items.name })
+      .from(stockAdjustmentLines)
+      .leftJoin(items, eq(stockAdjustmentLines.itemId, items.id))
+      .where(eq(stockAdjustmentLines.adjustmentId, id));
+
+    return { ...adj, warehouseName: warehouse?.name, lines };
   }
 }

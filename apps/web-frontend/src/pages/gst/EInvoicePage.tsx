@@ -174,6 +174,7 @@ function EInvoiceListTable() {
                     {canGenerateEInvoice &&
                       (row.irnStatus === 'FAILED_IRN' || row.irnStatus === 'PENDING_IRN') && (
                         <Button
+                          data-tour-id="gst-einvoice-retry-button"
                           variant="primary"
                           size="sm"
                           onClick={() => retryMutation.mutate(row.invoiceId)}
@@ -222,7 +223,7 @@ function InvoiceStatusLookup() {
           onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
           className="flex-1 px-3 py-2 text-sm bg-surface-card border border-default rounded-lg text-primary focus:outline-none focus:ring-2 focus:ring-focus"
         />
-        <Button variant="primary" onClick={handleSearch}>
+        <Button data-tour-id="gst-einvoice-lookup-button" variant="primary" onClick={handleSearch}>
           <Search size={16} />
           Lookup
         </Button>

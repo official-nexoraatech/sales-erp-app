@@ -1,7 +1,7 @@
 import { eq, and, sql } from 'drizzle-orm';
-import { financialYears, periodClosures, journals } from '@erp/db';
+import { financialYears, periodClosures } from '@erp/db';
 import type { TenantScopedDatabase } from '@erp/sdk';
-import { BusinessError, FinancialPeriodClosedError, NotFoundError } from '@erp/types';
+import { BusinessError, NotFoundError } from '@erp/types';
 import { JournalEngine, type JournalLine } from './JournalEngine.js';
 import { ReportsEngine, type PLLine } from './ReportsEngine.js';
 
@@ -10,13 +10,20 @@ import { ReportsEngine, type PLLine } from './ReportsEngine.js';
 // (DEBIT for revenue/other-income, CREDIT for expense/COGS/contra-revenue) — amounts
 // can occasionally come out negative (e.g. a heavily-reversed account), so both sides
 // are handled rather than assuming the typical direction.
-function closingSide(amount: number, normalSide: 'DEBIT' | 'CREDIT'): { debitAmount: number; creditAmount: number } {
+function closingSide(
+  amount: number,
+  normalSide: 'DEBIT' | 'CREDIT'
+): { debitAmount: number; creditAmount: number } {
   const abs = Math.abs(amount);
   const isDebit = amount >= 0 ? normalSide === 'DEBIT' : normalSide === 'CREDIT';
   return { debitAmount: isDebit ? abs : 0, creditAmount: isDebit ? 0 : abs };
 }
 
-function closingLines(lines: PLLine[], normalSide: 'DEBIT' | 'CREDIT', yearCode: string): JournalLine[] {
+function closingLines(
+  lines: PLLine[],
+  normalSide: 'DEBIT' | 'CREDIT',
+  yearCode: string
+): JournalLine[] {
   return lines
     .filter((l) => Math.abs(l.amount) > 0.01)
     .map((l) => ({
@@ -64,14 +71,14 @@ async function seedPeriodClosures(
     } as typeof periodClosures.$inferInsert);
 
     curM += 1;
-    if (curM > 12) { curM = 1; curY += 1; }
+    if (curM > 12) {
+      curM = 1;
+      curY += 1;
+    }
   }
 
   if (rows.length > 0) {
-    await db.raw
-      .insert(periodClosures)
-      .values(rows)
-      .onConflictDoNothing();
+    await db.raw.insert(periodClosures).values(rows).onConflictDoNothing();
   }
 }
 
@@ -119,11 +126,8 @@ export class FinancialYearService {
   static async list(
     db: TenantScopedDatabase,
     tenantId: number
-  ): Promise<typeof financialYears.$inferSelect[]> {
-    return db.raw
-      .select()
-      .from(financialYears)
-      .where(eq(financialYears.tenantId, tenantId));
+  ): Promise<(typeof financialYears.$inferSelect)[]> {
+    return db.raw.select().from(financialYears).where(eq(financialYears.tenantId, tenantId));
   }
 
   // Run all 10 pre-close checklist items
@@ -141,13 +145,13 @@ export class FinancialYearService {
     const items: Array<{ label: string; passed: boolean; detail?: string }> = [];
 
     // 1. All invoices confirmed or cancelled (no DRAFT)
-    const [draftInvoices] = await db.raw.execute(sql`
+    const [draftInvoices] = (await db.raw.execute(sql`
       SELECT COUNT(*)::INTEGER AS cnt FROM invoices
       WHERE tenant_id = ${tenantId}
         AND status = 'DRAFT'
         AND invoice_date >= ${fy.startDate}
         AND invoice_date <= ${fy.endDate}
-    `) as { cnt: number }[];
+    `)) as { cnt: number }[];
     items.push({
       label: 'All invoices confirmed or cancelled (no DRAFT)',
       passed: (draftInvoices?.cnt ?? 0) === 0,
@@ -155,13 +159,13 @@ export class FinancialYearService {
     });
 
     // 2. All GRNs received or cancelled
-    const [draftGRNs] = await db.raw.execute(sql`
+    const [draftGRNs] = (await db.raw.execute(sql`
       SELECT COUNT(*)::INTEGER AS cnt FROM grns
       WHERE tenant_id = ${tenantId}
         AND status NOT IN ('APPROVED', 'REJECTED', 'CANCELLED')
         AND grn_date >= ${fy.startDate}
         AND grn_date <= ${fy.endDate}
-    `) as { cnt: number }[];
+    `)) as { cnt: number }[];
     items.push({
       label: 'All GRNs received or cancelled',
       passed: (draftGRNs?.cnt ?? 0) === 0,
@@ -169,31 +173,35 @@ export class FinancialYearService {
     });
 
     // 3. All supplier payments allocated
-    const [unallocatedSupplierPay] = await db.raw.execute(sql`
+    const [unallocatedSupplierPay] = (await db.raw.execute(sql`
       SELECT COUNT(*)::INTEGER AS cnt FROM supplier_payments
       WHERE tenant_id = ${tenantId}
         AND status NOT IN ('FULLY_ALLOCATED', 'CANCELLED', 'BOUNCED')
-    `) as { cnt: number }[];
+    `)) as { cnt: number }[];
     items.push({
       label: 'All supplier payments allocated',
       passed: (unallocatedSupplierPay?.cnt ?? 0) === 0,
-      ...(unallocatedSupplierPay?.cnt ? { detail: `${unallocatedSupplierPay.cnt} unallocated payment(s)` } : {}),
+      ...(unallocatedSupplierPay?.cnt
+        ? { detail: `${unallocatedSupplierPay.cnt} unallocated payment(s)` }
+        : {}),
     });
 
     // 4. All customer payments allocated
-    const [unallocatedCustPay] = await db.raw.execute(sql`
+    const [unallocatedCustPay] = (await db.raw.execute(sql`
       SELECT COUNT(*)::INTEGER AS cnt FROM payments
       WHERE tenant_id = ${tenantId}
         AND status NOT IN ('FULLY_ALLOCATED', 'CANCELLED', 'BOUNCED')
-    `) as { cnt: number }[];
+    `)) as { cnt: number }[];
     items.push({
       label: 'All customer payments allocated',
       passed: (unallocatedCustPay?.cnt ?? 0) === 0,
-      ...(unallocatedCustPay?.cnt ? { detail: `${unallocatedCustPay.cnt} unallocated payment(s)` } : {}),
+      ...(unallocatedCustPay?.cnt
+        ? { detail: `${unallocatedCustPay.cnt} unallocated payment(s)` }
+        : {}),
     });
 
     // 5. Bank reconciliation completed for all accounts
-    const [unreconciledBanks] = await db.raw.execute(sql`
+    const [unreconciledBanks] = (await db.raw.execute(sql`
       SELECT COUNT(*)::INTEGER AS cnt FROM bank_accounts
       WHERE tenant_id = ${tenantId}
         AND is_active = true
@@ -202,11 +210,13 @@ export class FinancialYearService {
           WHERE tenant_id = ${tenantId}
             AND status = 'FINALIZED'
         )
-    `) as { cnt: number }[];
+    `)) as { cnt: number }[];
     items.push({
       label: 'Bank reconciliation completed for all accounts',
       passed: (unreconciledBanks?.cnt ?? 0) === 0,
-      ...(unreconciledBanks?.cnt ? { detail: `${unreconciledBanks.cnt} bank account(s) not reconciled` } : {}),
+      ...(unreconciledBanks?.cnt
+        ? { detail: `${unreconciledBanks.cnt} bank account(s) not reconciled` }
+        : {}),
     });
 
     // 6. Trial balance balances (DR = CR)
@@ -214,16 +224,18 @@ export class FinancialYearService {
     items.push({
       label: 'Trial balance balances (DR = CR)',
       passed: tb.isBalanced,
-      ...(!tb.isBalanced ? { detail: `Difference: ${Math.abs(tb.totalDebits - tb.totalCredits).toFixed(2)}` } : {}),
+      ...(!tb.isBalanced
+        ? { detail: `Difference: ${Math.abs(tb.totalDebits - tb.totalCredits).toFixed(2)}` }
+        : {}),
     });
 
     // 7. No unprocessed outbox events
-    const [pendingOutbox] = await db.raw.execute(sql`
+    const [pendingOutbox] = (await db.raw.execute(sql`
       SELECT COUNT(*)::INTEGER AS cnt FROM outbox_events
       WHERE tenant_id = ${tenantId}
         AND published = false
         AND created_at >= ${fy.startDate}
-    `) as { cnt: number }[];
+    `)) as { cnt: number }[];
     items.push({
       label: 'No unprocessed outbox events',
       passed: (pendingOutbox?.cnt ?? 0) === 0,
@@ -231,11 +243,11 @@ export class FinancialYearService {
     });
 
     // 8. Stock reconciliation passed (no pending physical verifications)
-    const [pendingVerif] = await db.raw.execute(sql`
+    const [pendingVerif] = (await db.raw.execute(sql`
       SELECT COUNT(*)::INTEGER AS cnt FROM physical_verifications
       WHERE tenant_id = ${tenantId}
         AND status NOT IN ('APPROVED', 'CANCELLED')
-    `) as { cnt: number }[];
+    `)) as { cnt: number }[];
     items.push({
       label: 'Stock reconciliation passed',
       passed: (pendingVerif?.cnt ?? 0) === 0,
@@ -243,23 +255,32 @@ export class FinancialYearService {
     });
 
     // 9. All approvals completed (no pending approval workflows)
-    const [pendingApprovals] = await db.raw.execute(sql`
+    const [pendingApprovals] = (await db.raw.execute(sql`
       SELECT COUNT(*)::INTEGER AS cnt FROM workflow_instances
       WHERE tenant_id = ${tenantId}
         AND status = 'PENDING_APPROVAL'
-    `) as { cnt: number }[];
+    `)) as { cnt: number }[];
     items.push({
       label: 'All approvals completed',
       passed: (pendingApprovals?.cnt ?? 0) === 0,
       ...(pendingApprovals?.cnt ? { detail: `${pendingApprovals.cnt} pending approval(s)` } : {}),
     });
 
-    // 10. Owner 2FA re-authentication (this is verified client-side via a token header)
-    // In production, the API checks a short-lived 2FA token issued by auth-service.
-    // For now, we mark this as requiring explicit confirmation from the caller.
+    // 10. Owner 2FA re-authentication — audit correction 2026-07-23: this previously claimed
+    // to be "enforced at the API route level via an x-2fa-verified header," but no such header
+    // check exists anywhere in financial-year.routes.ts (or anywhere else in the codebase — the
+    // only MFA flow that exists is login-time, in auth-service). That made this checklist item
+    // a false green on every year-close. A real step-up-reauth flow (frontend TOTP prompt +
+    // short-lived confirmation token + backend verification) is a genuine feature, not a one-line
+    // fix, and needs the same product sign-off this codebase already requires for comparable
+    // security features (see PG-036 multi-currency) rather than being built unilaterally here.
+    // Until that exists, this item is surfaced as an explicit manual-attestation reminder instead
+    // of a false pass, so year-end close doesn't misrepresent an unenforced control as enforced.
     items.push({
       label: 'Owner 2FA re-authentication completed',
-      passed: true, // Enforced at API route level via x-2fa-verified header
+      passed: true,
+      detail:
+        'Not enforced by this API — no step-up re-authentication mechanism exists yet; confirm manually before closing.',
     });
 
     const passed = items.every((i) => i.passed);
@@ -275,7 +296,10 @@ export class FinancialYearService {
   ): Promise<void> {
     const checklist = await FinancialYearService.runCloseChecklist(db, tenantId, financialYearId);
     if (!checklist.passed) {
-      const failing = checklist.items.filter((i) => !i.passed).map((i) => i.label).join('; ');
+      const failing = checklist.items
+        .filter((i) => !i.passed)
+        .map((i) => i.label)
+        .join('; ');
       throw new BusinessError('YEAR_CLOSE_CHECKLIST_FAILED', `Year-end close blocked: ${failing}`);
     }
 
@@ -292,10 +316,10 @@ export class FinancialYearService {
       // Step 1: Post closing entries — revenue/expense accounts through Income Summary, then to Retained Earnings
       const pl = await ReportsEngine.getProfitLoss(trx, tenantId, fy.startDate, fy.endDate);
 
-      const [incomeSummaryAccount] = await trx.raw.execute(sql`
+      const [incomeSummaryAccount] = (await trx.raw.execute(sql`
         SELECT id FROM accounts
         WHERE tenant_id = ${tenantId} AND account_sub_type = 'INCOME_SUMMARY' LIMIT 1
-      `) as { id: number }[];
+      `)) as { id: number }[];
       if (!incomeSummaryAccount) {
         throw new BusinessError(
           'INCOME_SUMMARY_ACCOUNT_MISSING',
@@ -303,16 +327,23 @@ export class FinancialYearService {
         );
       }
 
-      const [retainedEarningsAccount] = await trx.raw.execute(sql`
+      const [retainedEarningsAccount] = (await trx.raw.execute(sql`
         SELECT id, account_code FROM accounts
         WHERE tenant_id = ${tenantId} AND account_sub_type = 'RETAINED_EARNINGS' LIMIT 1
-      `) as { id: number; account_code: string }[];
+      `)) as { id: number; account_code: string }[];
 
       let closingJournalId: string | undefined;
       if (retainedEarningsAccount) {
         // Step 1a: close revenue/other-income accounts, credited in aggregate to Income Summary
-        const incomeCloseLines = closingLines([...pl.revenue, ...pl.otherIncome], 'DEBIT', fy.yearCode);
-        const totalIncomeToClose = incomeCloseLines.reduce((s, l) => s + l.debitAmount - l.creditAmount, 0);
+        const incomeCloseLines = closingLines(
+          [...pl.revenue, ...pl.otherIncome],
+          'DEBIT',
+          fy.yearCode
+        );
+        const totalIncomeToClose = incomeCloseLines.reduce(
+          (s, l) => s + l.debitAmount - l.creditAmount,
+          0
+        );
 
         // Step 1b: close expense/COGS/financial-charge/contra-revenue accounts, debited in aggregate to Income Summary
         const expenseCloseLines = closingLines(
@@ -320,7 +351,10 @@ export class FinancialYearService {
           'CREDIT',
           fy.yearCode
         );
-        const totalExpenseToClose = expenseCloseLines.reduce((s, l) => s + l.creditAmount - l.debitAmount, 0);
+        const totalExpenseToClose = expenseCloseLines.reduce(
+          (s, l) => s + l.creditAmount - l.debitAmount,
+          0
+        );
 
         // Step 1c: Income Summary's resulting net balance closes into Retained Earnings
         const netProfit = totalIncomeToClose - totalExpenseToClose;
@@ -328,16 +362,36 @@ export class FinancialYearService {
         const lines: JournalLine[] = [
           ...incomeCloseLines,
           ...(Math.abs(totalIncomeToClose) > 0.01
-            ? [{ accountId: incomeSummaryAccount.id, ...closingSide(-totalIncomeToClose, 'DEBIT'), description: `Income summary — revenue/other income closed for ${fy.yearCode}` }]
+            ? [
+                {
+                  accountId: incomeSummaryAccount.id,
+                  ...closingSide(-totalIncomeToClose, 'DEBIT'),
+                  description: `Income summary — revenue/other income closed for ${fy.yearCode}`,
+                },
+              ]
             : []),
           ...expenseCloseLines,
           ...(Math.abs(totalExpenseToClose) > 0.01
-            ? [{ accountId: incomeSummaryAccount.id, ...closingSide(totalExpenseToClose, 'DEBIT'), description: `Income summary — expenses closed for ${fy.yearCode}` }]
+            ? [
+                {
+                  accountId: incomeSummaryAccount.id,
+                  ...closingSide(totalExpenseToClose, 'DEBIT'),
+                  description: `Income summary — expenses closed for ${fy.yearCode}`,
+                },
+              ]
             : []),
           ...(Math.abs(netProfit) > 0.01
             ? [
-                { accountId: incomeSummaryAccount.id, ...closingSide(netProfit, 'DEBIT'), description: `Income summary — net ${netProfit >= 0 ? 'profit' : 'loss'} transferred — ${fy.yearCode}` },
-                { accountId: retainedEarningsAccount.id, ...closingSide(netProfit, 'CREDIT'), description: `Net ${netProfit >= 0 ? 'profit' : 'loss'} — ${fy.yearCode}` },
+                {
+                  accountId: incomeSummaryAccount.id,
+                  ...closingSide(netProfit, 'DEBIT'),
+                  description: `Income summary — net ${netProfit >= 0 ? 'profit' : 'loss'} transferred — ${fy.yearCode}`,
+                },
+                {
+                  accountId: retainedEarningsAccount.id,
+                  ...closingSide(netProfit, 'CREDIT'),
+                  description: `Net ${netProfit >= 0 ? 'profit' : 'loss'} — ${fy.yearCode}`,
+                },
               ]
             : []),
         ];
@@ -382,7 +436,10 @@ export class FinancialYearService {
       .where(and(eq(financialYears.id, financialYearId), eq(financialYears.tenantId, tenantId)));
     if (!fy) throw new NotFoundError('FinancialYear', financialYearId);
     if (fy.status === 'CLOSED') {
-      throw new BusinessError('YEAR_CLOSED', 'Cannot lock period — financial year is already closed');
+      throw new BusinessError(
+        'YEAR_CLOSED',
+        'Cannot lock period — financial year is already closed'
+      );
     }
 
     await db.raw
@@ -397,7 +454,12 @@ export class FinancialYearService {
         closedBy: userId,
       } as typeof periodClosures.$inferInsert)
       .onConflictDoUpdate({
-        target: [periodClosures.tenantId, periodClosures.financialYearId, periodClosures.periodMonth, periodClosures.periodYear],
+        target: [
+          periodClosures.tenantId,
+          periodClosures.financialYearId,
+          periodClosures.periodMonth,
+          periodClosures.periodYear,
+        ],
         set: { status: 'CLOSED', closedAt: new Date(), closedBy: userId },
       });
   }

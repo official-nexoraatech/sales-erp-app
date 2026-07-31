@@ -8,6 +8,7 @@ import PublicLayout from './PublicLayout.js';
 import { Textarea } from '@erp/ui';
 import Input from '../../components/ui/Input.js';
 import Button from '../../components/ui/Button.js';
+import { demoRequestApi } from '../../api/endpoints.js';
 
 const schema = z.object({
   name: z.string().min(1, 'Required'),
@@ -19,17 +20,27 @@ type FormData = z.infer<typeof schema>;
 
 export default function ContactPage() {
   const [submitted, setSubmitted] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const {
     register,
     handleSubmit,
     formState: { errors, isSubmitting },
   } = useForm<FormData>({ resolver: zodResolver(schema) });
 
-  async function onSubmit() {
-    // No backend lead-capture endpoint exists yet — this simply confirms receipt locally.
-    // Wiring this to a real CRM/email destination is a follow-up item.
-    await new Promise((resolve) => setTimeout(resolve, 400));
-    setSubmitted(true);
+  async function onSubmit(data: FormData) {
+    setSubmitError(null);
+    try {
+      await demoRequestApi.submit({
+        fullName: data.name,
+        email: data.email,
+        company: data.company,
+        message: data.message,
+        source: 'CONTACT_PAGE',
+      });
+      setSubmitted(true);
+    } catch {
+      setSubmitError('Something went wrong — please try again.');
+    }
   }
 
   return (
@@ -79,6 +90,7 @@ export default function ContactPage() {
                 {...register('message')}
                 error={errors.message?.message}
               />
+              {submitError && <p className="text-sm text-danger">{submitError}</p>}
               <Button
                 type="submit"
                 className="w-full justify-center"

@@ -270,6 +270,20 @@ export default function ERPCommandPalette({ open, onClose, initialQuery = '' }: 
     return groups;
   }, [data]);
 
+  // True per-entity totals across every match (not just the returned page) rolled up to the
+  // group label the palette actually renders — e.g. 'purchase_order'/'grn'/'purchase_return'
+  // all fold into "Purchase". Only present for an untyped (multi-entity) search; a group whose
+  // real total exceeds its visible row count means there are more matches than fit this page.
+  const groupTotalCounts = useMemo(() => {
+    const totals = new Map<string, number>();
+    if (!data?.entityCounts) return totals;
+    for (const [entity, count] of Object.entries(data.entityCounts)) {
+      const groupLabel = SEARCH_ENTITY_CONFIG[entity]?.groupLabel ?? entity;
+      totals.set(groupLabel, (totals.get(groupLabel) ?? 0) + count);
+    }
+    return totals;
+  }, [data]);
+
   const flatRows: FlatRow[] = useMemo(() => {
     if (isActionMode) return actionRows;
     if (!isSearching) {
@@ -575,41 +589,48 @@ export default function ERPCommandPalette({ open, onClose, initialQuery = '' }: 
             <div className="py-2">
               {Array.from(new Set(flatRows.map((r) => r.groupLabel))).map((groupLabel) => {
                 let renderedGroupHeader = false;
-                return flatRows
-                  .filter((r) => r.groupLabel === groupLabel)
-                  .map((row) => {
-                    const idx = flatRows.indexOf(row);
-                    const showHeader = !renderedGroupHeader;
-                    renderedGroupHeader = true;
-                    return (
-                      <div key={row.key}>
-                        {showHeader && (
-                          <div className="flex items-center justify-between px-4 pt-2 pb-1">
-                            <p className="text-[10px] font-semibold uppercase tracking-widest text-secondary select-none">
-                              {groupLabel}
-                            </p>
-                            {groupLabel === 'Recent' && (
-                              <button
-                                onClick={clearRecent}
-                                className="text-xs text-secondary hover:text-primary transition-colors"
-                              >
-                                Clear
-                              </button>
+                const groupRows = flatRows.filter((r) => r.groupLabel === groupLabel);
+                const realTotal = groupTotalCounts.get(groupLabel);
+                const hasMoreThanShown =
+                  isSearching && realTotal !== undefined && realTotal > groupRows.length;
+                return groupRows.map((row) => {
+                  const idx = flatRows.indexOf(row);
+                  const showHeader = !renderedGroupHeader;
+                  renderedGroupHeader = true;
+                  return (
+                    <div key={row.key}>
+                      {showHeader && (
+                        <div className="flex items-center justify-between px-4 pt-2 pb-1">
+                          <p className="text-[10px] font-semibold uppercase tracking-widest text-secondary select-none">
+                            {groupLabel}
+                            {hasMoreThanShown && (
+                              <span className="ml-1.5 normal-case tracking-normal text-disabled">
+                                {realTotal} total
+                              </span>
                             )}
-                          </div>
-                        )}
-                        <CommandRow
-                          row={row}
-                          highlighted={idx === highlightedIndex}
-                          onSelect={() => selectRow(row)}
-                          onMouseEnter={() => setHighlightedIndex(idx)}
-                          {...(row.savedSearch
-                            ? { onDelete: () => deleteSavedSearch.mutate(row.savedSearch!.id) }
-                            : {})}
-                        />
-                      </div>
-                    );
-                  });
+                          </p>
+                          {groupLabel === 'Recent' && (
+                            <button
+                              onClick={clearRecent}
+                              className="text-xs text-secondary hover:text-primary transition-colors"
+                            >
+                              Clear
+                            </button>
+                          )}
+                        </div>
+                      )}
+                      <CommandRow
+                        row={row}
+                        highlighted={idx === highlightedIndex}
+                        onSelect={() => selectRow(row)}
+                        onMouseEnter={() => setHighlightedIndex(idx)}
+                        {...(row.savedSearch
+                          ? { onDelete: () => deleteSavedSearch.mutate(row.savedSearch!.id) }
+                          : {})}
+                      />
+                    </div>
+                  );
+                });
               })}
             </div>
           )}

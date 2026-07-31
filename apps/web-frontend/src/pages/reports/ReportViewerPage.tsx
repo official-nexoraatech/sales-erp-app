@@ -7,7 +7,6 @@ import { reportsEngineApi, type ReportRunPending } from '../../api/endpoints.js'
 import { ERPDetailSkeleton } from '../../components/erp/ERPSkeleton.js';
 import ERPEmptyState from '../../components/erp/ERPEmptyState.js';
 import Button from '../../components/ui/Button.js';
-import { useAuthStore } from '../../store/auth.store.js';
 
 interface ParamDef {
   key: string;
@@ -82,18 +81,25 @@ export default function ReportViewerPage() {
   const today = new Date().toISOString().slice(0, 10);
   const monthStart = today.slice(0, 7) + '-01';
 
-  const [paramValues, setParamValues] = useState<Record<string, string>>(() => {
-    const defaults: Record<string, string> = {};
-    if (definition?.params) {
+  const [paramValues, setParamValues] = useState<Record<string, string>>({});
+
+  // `definition` loads asynchronously, so the params it defines aren't known on first render —
+  // this needs to re-run once the real definition arrives, not just once at mount, or every
+  // date field starts blank and has to be filled in by hand every time.
+  useEffect(() => {
+    if (!definition?.params) return;
+    setParamValues((prev) => {
+      const defaults: Record<string, string> = { ...prev };
       for (const p of definition.params) {
+        if (p.key in defaults) continue;
         if (p.key === 'fromDate') defaults[p.key] = monthStart;
         else if (p.key === 'toDate' || p.key === 'asOfDate' || p.key === 'date')
           defaults[p.key] = today;
         else if (p.default) defaults[p.key] = p.default;
       }
-    }
-    return defaults;
-  });
+      return defaults;
+    });
+  }, [definition, monthStart, today]);
 
   const [result, setResult] = useState<ReportResult | null>(null);
   const [page, setPage] = useState(0);
@@ -152,14 +158,10 @@ export default function ReportViewerPage() {
 
   const downloadMutation = useMutation({
     mutationFn: async (fmt: 'CSV' | 'EXCEL') => {
-      const baseUrl = import.meta.env.VITE_REPORT_URL ?? 'http://localhost:3015';
-      const token = useAuthStore.getState().accessToken ?? '';
-      const res = await fetch(`${baseUrl}/api/v2/reports/${slug}/run`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ params: paramValues, format: fmt }),
-      });
-      const blob = await res.blob();
+      // Routed through apiClient.postBlob (gateway + auth header), not a direct fetch to
+      // the report-service's own port — a hardcoded localhost fallback here previously made
+      // export silently fail outside local dev (see WEB-FRONTEND-AUDIT-2026-07-24.md, High #2).
+      const blob = await reportsEngineApi.runBlob(slug!, paramValues, fmt);
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -197,6 +199,7 @@ export default function ReportViewerPage() {
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <Button
+            data-tour-id="reports-viewer-export-csv-button"
             variant="outline"
             size="sm"
             onClick={() => downloadMutation.mutate('CSV')}
@@ -205,6 +208,7 @@ export default function ReportViewerPage() {
             <Download size={14} /> CSV
           </Button>
           <Button
+            data-tour-id="reports-viewer-export-excel-button"
             variant="outline"
             size="sm"
             onClick={() => downloadMutation.mutate('EXCEL')}
@@ -213,6 +217,7 @@ export default function ReportViewerPage() {
             <Download size={14} /> Excel
           </Button>
           <Button
+            data-tour-id="reports-viewer-run-button"
             variant="primary"
             size="sm"
             onClick={() => runMutation.mutate()}

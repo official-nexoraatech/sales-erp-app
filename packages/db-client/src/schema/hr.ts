@@ -97,6 +97,11 @@ export const employees = pgTable(
     branchId: integer('branch_id'),
     managerId: integer('manager_id'),
     shiftId: integer('shift_id'),
+    // 2026-07-20 HR audit: links this employee record to the login user who IS that
+    // employee, so hr-service's self-service ("/me/...") routes can resolve "the caller's
+    // own employee record" without any cross-service JWT claim — auth-service/users stays
+    // untouched, this is purely an hr-service-local lookup.
+    userId: integer('user_id'),
     joiningDate: date('joining_date').notNull(),
     exitDate: date('exit_date'),
     exitReason: text('exit_reason'),
@@ -119,6 +124,7 @@ export const employees = pgTable(
     index('idx_employees_department').on(t.departmentId, t.tenantId),
     index('idx_employees_pan_hash').on(t.panHash, t.tenantId),
     index('idx_employees_phone').on(t.phone, t.tenantId),
+    index('idx_employees_user').on(t.userId, t.tenantId),
   ]
 );
 
@@ -388,29 +394,26 @@ export const payrollSlips = pgTable(
     paidLeaveDays: decimal('paid_leave_days', { precision: 4, scale: 1 }).notNull().default('0'),
     lopDays: decimal('lop_days', { precision: 4, scale: 1 }).notNull().default('0'),
     workingDays: integer('working_days').notNull().default(26),
-    basicSalary: decimal('basic_salary', { precision: 15, scale: 2 }).notNull().default('0'),
-    hraAmount: decimal('hra_amount', { precision: 15, scale: 2 }).notNull().default('0'),
-    daAmount: decimal('da_amount', { precision: 15, scale: 2 }).notNull().default('0'),
-    otherAllowances: decimal('other_allowances', { precision: 15, scale: 2 })
-      .notNull()
-      .default('0'),
-    pieceRateAmount: decimal('piece_rate_amount', { precision: 15, scale: 2 })
-      .notNull()
-      .default('0'),
+    // basicSalary..totalDeductions are AES-256-GCM ciphertext (text), not plain decimal — see
+    // migration 0085. Previously only grossSalary/netSalary were encrypted, but since
+    // grossSalary === basicSalary + hraAmount + daAmount + otherAllowances + pieceRateAmount
+    // exactly, leaving the components plaintext let anyone with row-level DB access
+    // reconstruct the "encrypted" gross/net trivially by summing them.
+    basicSalary: text('basic_salary').notNull().default(''),
+    hraAmount: text('hra_amount').notNull().default(''),
+    daAmount: text('da_amount').notNull().default(''),
+    otherAllowances: text('other_allowances').notNull().default(''),
+    pieceRateAmount: text('piece_rate_amount').notNull().default(''),
     grossSalary: text('gross_salary').notNull().default(''),
-    pfEmployee: decimal('pf_employee', { precision: 15, scale: 2 }).notNull().default('0'),
-    pfEmployer: decimal('pf_employer', { precision: 15, scale: 2 }).notNull().default('0'),
-    epsAmount: decimal('eps_amount', { precision: 15, scale: 2 }).notNull().default('0'),
-    esiEmployee: decimal('esi_employee', { precision: 15, scale: 2 }).notNull().default('0'),
-    esiEmployer: decimal('esi_employer', { precision: 15, scale: 2 }).notNull().default('0'),
-    professionalTax: decimal('professional_tax', { precision: 15, scale: 2 })
-      .notNull()
-      .default('0'),
-    loanDeduction: decimal('loan_deduction', { precision: 15, scale: 2 }).notNull().default('0'),
-    tdsDeduction: decimal('tds_deduction', { precision: 15, scale: 2 }).notNull().default('0'),
-    totalDeductions: decimal('total_deductions', { precision: 15, scale: 2 })
-      .notNull()
-      .default('0'),
+    pfEmployee: text('pf_employee').notNull().default(''),
+    pfEmployer: text('pf_employer').notNull().default(''),
+    epsAmount: text('eps_amount').notNull().default(''),
+    esiEmployee: text('esi_employee').notNull().default(''),
+    esiEmployer: text('esi_employer').notNull().default(''),
+    professionalTax: text('professional_tax').notNull().default(''),
+    loanDeduction: text('loan_deduction').notNull().default(''),
+    tdsDeduction: text('tds_deduction').notNull().default(''),
+    totalDeductions: text('total_deductions').notNull().default(''),
     netSalary: text('net_salary').notNull().default(''),
     status: varchar('status', { length: 20 })
       .notNull()
@@ -555,7 +558,7 @@ export const statutoryChallanFilings = pgTable(
   {
     id: bigserial('id', { mode: 'number' }).primaryKey(),
     tenantId: integer('tenant_id').notNull(),
-    challanType: varchar('challan_type', { length: 10 }).notNull().$type<'PF' | 'ESI'>(),
+    challanType: varchar('challan_type', { length: 10 }).notNull().$type<'PF' | 'ESI' | 'PT'>(),
     periodMonth: integer('period_month').notNull(),
     periodYear: integer('period_year').notNull(),
     filedAt: timestamp('filed_at', { withTimezone: true }).notNull(),
@@ -646,6 +649,104 @@ export const loanDeductionHistory = pgTable(
   ]
 );
 
+// ─── Employee Nominees (2026-07-20 HR audit) ────────────────────────────────
+export const employeeNominees = pgTable(
+  'employee_nominees',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    tenantId: integer('tenant_id').notNull(),
+    employeeId: integer('employee_id').notNull(),
+    name: varchar('name', { length: 200 }).notNull(),
+    relationship: varchar('relationship', { length: 50 })
+      .notNull()
+      .$type<'SPOUSE' | 'PARENT' | 'CHILD' | 'SIBLING' | 'OTHER'>(),
+    dateOfBirth: date('date_of_birth'),
+    contactNumber: varchar('contact_number', { length: 20 }),
+    address: text('address'),
+    sharePercentage: decimal('share_percentage', { precision: 5, scale: 2 })
+      .notNull()
+      .default('100'),
+    isPrimary: boolean('is_primary').notNull().default(false),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    createdBy: integer('created_by').notNull(),
+  },
+  (t) => [index('idx_employee_nominees_employee').on(t.employeeId, t.tenantId)]
+);
+
+// ─── Employee Exit / Full & Final Settlement (2026-07-20 HR audit) ──────────
+// employees.status/exitDate/exitReason record THAT an employee exited; this table records
+// the actual exit workflow — notice period, clearance, and Full & Final settlement math.
+export const employeeExits = pgTable(
+  'employee_exits',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    tenantId: integer('tenant_id').notNull(),
+    employeeId: integer('employee_id').notNull(),
+    resignationDate: date('resignation_date').notNull(),
+    lastWorkingDate: date('last_working_date').notNull(),
+    noticePeriodDays: integer('notice_period_days').notNull().default(30),
+    exitReason: text('exit_reason'),
+    clearanceStatus: varchar('clearance_status', { length: 20 })
+      .notNull()
+      .default('PENDING')
+      .$type<'PENDING' | 'CLEARED'>(),
+    clearedBy: integer('cleared_by'),
+    clearedAt: timestamp('cleared_at', { withTimezone: true }),
+    // Full & Final settlement components — computed at settlement time from real data
+    // (last drawn pro-rated salary, unused earned-leave encashment, outstanding loan
+    // recovery), not just a single lump figure with no breakup.
+    proRatedSalaryAmount: decimal('pro_rated_salary_amount', { precision: 15, scale: 2 }),
+    leaveEncashmentAmount: decimal('leave_encashment_amount', { precision: 15, scale: 2 }),
+    loanRecoveryAmount: decimal('loan_recovery_amount', { precision: 15, scale: 2 }),
+    fnfTotalAmount: decimal('fnf_total_amount', { precision: 15, scale: 2 }),
+    fnfStatus: varchar('fnf_status', { length: 20 })
+      .notNull()
+      .default('PENDING')
+      .$type<'PENDING' | 'SETTLED'>(),
+    fnfSettledBy: integer('fnf_settled_by'),
+    fnfSettledAt: timestamp('fnf_settled_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    createdBy: integer('created_by').notNull(),
+  },
+  (t) => [
+    unique('employee_exits_employee').on(t.tenantId, t.employeeId),
+    index('idx_employee_exits_tenant').on(t.tenantId, t.fnfStatus),
+  ]
+);
+
+// ─── Employee History: Increment / Promotion / Transfer (2026-07-20 HR audit) ─
+// Employees only ever stored current-state department/designation/branch/manager/salary —
+// zero history of past changes. This is an append-only audit trail, written whenever one of
+// those fields changes.
+export const employeeHistory = pgTable(
+  'employee_history',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    tenantId: integer('tenant_id').notNull(),
+    employeeId: integer('employee_id').notNull(),
+    changeType: varchar('change_type', { length: 30 })
+      .notNull()
+      .$type<
+        | 'PROMOTION'
+        | 'TRANSFER'
+        | 'INCREMENT'
+        | 'DEPARTMENT_CHANGE'
+        | 'DESIGNATION_CHANGE'
+        | 'MANAGER_CHANGE'
+      >(),
+    effectiveDate: date('effective_date').notNull(),
+    previousValue: jsonb('previous_value').notNull(),
+    newValue: jsonb('new_value').notNull(),
+    reason: text('reason'),
+    approvedBy: integer('approved_by'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    createdBy: integer('created_by').notNull(),
+  },
+  (t) => [index('idx_employee_history_employee').on(t.employeeId, t.tenantId, t.effectiveDate)]
+);
+
 // ─── Type Exports ──────────────────────────────────────────────────────────────
 export type Department = typeof departments.$inferSelect;
 export type NewDepartment = typeof departments.$inferInsert;
@@ -684,3 +785,9 @@ export type EmployeeLoan = typeof employeeLoans.$inferSelect;
 export type NewEmployeeLoan = typeof employeeLoans.$inferInsert;
 export type LoanDeductionHistory = typeof loanDeductionHistory.$inferSelect;
 export type NewLoanDeductionHistory = typeof loanDeductionHistory.$inferInsert;
+export type EmployeeNominee = typeof employeeNominees.$inferSelect;
+export type NewEmployeeNominee = typeof employeeNominees.$inferInsert;
+export type EmployeeExit = typeof employeeExits.$inferSelect;
+export type NewEmployeeExit = typeof employeeExits.$inferInsert;
+export type EmployeeHistory = typeof employeeHistory.$inferSelect;
+export type NewEmployeeHistory = typeof employeeHistory.$inferInsert;

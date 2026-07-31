@@ -7,8 +7,12 @@ import Fastify from 'fastify';
 import type Redis from 'ioredis';
 import type * as ErpTypes from '@erp/types';
 import type { ErpDatabase } from '@erp/db';
-import type { NotificationServiceConfig } from '../config.js';
+import type { DeliveryEnqueuer } from '../domain/DeliveryQueue.js';
 import { notificationRoutes } from '../api/notification.routes.js';
+
+function mockQueue(): DeliveryEnqueuer {
+  return { enqueue: vi.fn().mockResolvedValue(undefined) };
+}
 
 vi.mock('../middleware/authenticate.js', () => ({
   authenticate: async (
@@ -42,7 +46,7 @@ function authHeader(auth: { tenantId: number; permissions: string[] }): Record<s
 describe('ES-33 — POST /notifications/send requires NOTIFICATION_SEND', () => {
   it('authenticated but missing NOTIFICATION_SEND → 403', async () => {
     const app = Fastify({ logger: false });
-    await notificationRoutes(app, {} as ErpDatabase, {} as NotificationServiceConfig, {} as Redis);
+    await notificationRoutes(app, {} as ErpDatabase, mockQueue(), {} as Redis);
 
     const res = await app.inject({
       method: 'POST',

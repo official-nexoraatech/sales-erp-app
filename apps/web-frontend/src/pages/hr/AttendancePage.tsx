@@ -141,6 +141,7 @@ export default function AttendancePage() {
             </Select>
           </div>
           <Button
+            data-tour-id="hr-attendance-mark-button"
             onClick={() => markMutation.mutate()}
             loading={markMutation.isPending}
             disabled={!selectedEmployeeId}

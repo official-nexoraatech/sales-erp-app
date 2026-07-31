@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { BarChart3, Search, ChevronRight } from 'lucide-react';
 import { reportsEngineApi } from '../../api/endpoints.js';
+import { useAuthStore } from '../../store/auth.store.js';
 import { useDebounce } from '../../hooks/useDebounce.js';
 import { ERPCardSkeleton } from '../../components/erp/ERPSkeleton.js';
 import ERPEmptyState from '../../components/erp/ERPEmptyState.js';
@@ -39,6 +40,11 @@ const ANALYTICS_DASHBOARDS = [
     description: 'Stock levels, days of supply, fast/slow movers and stockout alerts',
   },
   {
+    path: '/reports/purchase-analytics',
+    name: 'Purchase Analytics',
+    description: 'Spend trend, GRN volume, and supplier performance',
+  },
+  {
     path: '/reports/hr-analytics',
     name: 'HR Analytics',
     description: 'Headcount, salary cost trend, hiring activity and diversity',
@@ -47,6 +53,7 @@ const ANALYTICS_DASHBOARDS = [
 
 export default function ReportsPage() {
   const navigate = useNavigate();
+  const hasPermission = useAuthStore((s) => s.hasPermission);
   const [search, setSearch] = useState('');
   const debouncedSearch = useDebounce(search, 250);
   const [activeCategory, setActiveCategory] = useState('ALL');
@@ -56,7 +63,12 @@ export default function ReportsPage() {
     queryFn: reportsEngineApi.list,
   });
 
-  const allReports: ReportDef[] = data ? (Object.values(data.grouped).flat() as ReportDef[]) : [];
+  // Each report additionally carries its own required permission, enforced server-side —
+  // without this filter, a user without a specific report's permission could open it, fill in
+  // parameters, and only find out it's blocked after clicking Run.
+  const allReports: ReportDef[] = data
+    ? (Object.values(data.grouped).flat() as ReportDef[]).filter((r) => hasPermission(r.permission))
+    : [];
 
   const filtered = allReports.filter((r) => {
     const matchesSearch =
@@ -81,7 +93,7 @@ export default function ReportsPage() {
             <BarChart3 size={22} className="text-brand" /> Reports Browser
           </h1>
           <p className="text-sm text-secondary mt-0.5">
-            {data?.total ?? 0} reports across 7 categories
+            {allReports.length} report{allReports.length === 1 ? '' : 's'} you have access to
           </p>
         </div>
       </div>

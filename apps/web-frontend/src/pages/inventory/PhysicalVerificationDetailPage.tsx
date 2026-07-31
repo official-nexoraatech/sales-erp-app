@@ -3,6 +3,7 @@ import { useParams, useNavigate, Navigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { physicalVerifApi } from '../../api/endpoints.js';
+import { useConfirm } from '../../context/ConfirmContext.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
 import { ERPDetailSkeleton } from '../../components/erp/ERPSkeleton.js';
 import Button from '../../components/ui/Button.js';
@@ -20,6 +21,7 @@ interface Verification {
 interface VerifLine {
   id: number;
   itemId: number;
+  itemName?: string;
   systemQty: string;
   physicalQty?: string;
   variance?: string;
@@ -29,6 +31,7 @@ export default function PhysicalVerificationDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const confirm = useConfirm();
   const [counts, setCounts] = useState<Record<number, number>>({});
 
   // No dedicated /new route exists — the real "start a verification" flow is a modal on
@@ -108,7 +111,11 @@ export default function PhysicalVerificationDetailPage() {
 
       <div className="bg-surface-card rounded-xl border border-default p-6 space-y-6">
         {verif.status === 'DRAFT' && (
-          <Button onClick={() => startMutation.mutate()} isLoading={startMutation.isPending}>
+          <Button
+            data-tour-id="inventory-pv-detail-start-counting-button"
+            onClick={() => startMutation.mutate()}
+            isLoading={startMutation.isPending}
+          >
             Start Counting (Take Snapshot)
           </Button>
         )}
@@ -124,7 +131,7 @@ export default function PhysicalVerificationDetailPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="text-left text-secondary border-b border-default">
-                    <th className="pb-2">Item ID</th>
+                    <th className="pb-2">Item</th>
                     <th className="pb-2">System Qty</th>
                     <th className="pb-2">Physical Qty</th>
                     <th className="pb-2">Variance</th>
@@ -139,7 +146,7 @@ export default function PhysicalVerificationDetailPage() {
                     const variance = physical !== undefined ? physical - systemQty : undefined;
                     return (
                       <tr key={line.id}>
-                        <td className="py-2">{line.itemId}</td>
+                        <td className="py-2">{line.itemName ?? `Item ${line.itemId}`}</td>
                         <td className="py-2">{systemQty.toFixed(3)}</td>
                         <td className="py-2">
                           <input
@@ -172,6 +179,7 @@ export default function PhysicalVerificationDetailPage() {
 
             <div className="flex gap-3">
               <Button
+                data-tour-id="inventory-pv-detail-save-counts-button"
                 variant="ghost"
                 onClick={() => {
                   const payload = Object.entries(counts).map(([lineId, physicalQty]) => ({
@@ -185,7 +193,17 @@ export default function PhysicalVerificationDetailPage() {
                 Save Counts
               </Button>
               <Button
-                onClick={() => approveMutation.mutate()}
+                data-tour-id="inventory-pv-detail-approve-button"
+                onClick={async () => {
+                  const ok = await confirm({
+                    title: 'Approve this verification?',
+                    message:
+                      "Every line with a variance automatically becomes an approved stock adjustment, applied immediately — no separate review step, and there's no undo.",
+                    confirmLabel: 'Approve',
+                    variant: 'primary',
+                  });
+                  if (ok) approveMutation.mutate();
+                }}
                 isLoading={approveMutation.isPending}
               >
                 Approve & Generate Adjustment
@@ -197,6 +215,19 @@ export default function PhysicalVerificationDetailPage() {
         {verif.status === 'APPROVED' && (
           <p className="text-success font-medium">
             Verification approved. Stock adjustments have been created automatically.
+          </p>
+        )}
+
+        {verif.status === 'CANCELLED' && (
+          <p className="text-secondary">
+            This verification was cancelled — no adjustments were created.
+          </p>
+        )}
+
+        {verif.status === 'REVIEW' && (
+          <p className="text-secondary">
+            This verification is under review. There's no action available here yet — check back
+            once it moves to Approved.
           </p>
         )}
       </div>

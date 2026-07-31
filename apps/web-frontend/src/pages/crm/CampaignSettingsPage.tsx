@@ -12,8 +12,11 @@ import Input from '../../components/ui/Input.js';
 
 interface CommunicationSettings {
   approvalRequired: boolean;
+  paymentReminderEnabled: boolean;
   maxPerDayFrequencyCap: number | null;
   notificationRateLimitPerMinute: number | null;
+  // CRM-ROADMAP Phase 3, Feature 3
+  costPerMessage: Partial<Record<'SMS' | 'WHATSAPP' | 'EMAIL' | 'IN_APP', number>> | null;
 }
 
 const PLATFORM_DEFAULT_RATE_LIMIT = 200;
@@ -35,12 +38,14 @@ function ApprovalSection() {
   const settings = data as CommunicationSettings | undefined;
 
   const [approvalRequired, setApprovalRequired] = useState(false);
+  const [paymentReminderEnabled, setPaymentReminderEnabled] = useState(false);
   const [frequencyCap, setFrequencyCap] = useState('');
   const [rateLimit, setRateLimit] = useState('');
 
   useEffect(() => {
     if (!settings) return;
     setApprovalRequired(settings.approvalRequired);
+    setPaymentReminderEnabled(settings.paymentReminderEnabled);
     setFrequencyCap(
       settings.maxPerDayFrequencyCap != null ? String(settings.maxPerDayFrequencyCap) : ''
     );
@@ -55,6 +60,7 @@ function ApprovalSection() {
     mutationFn: () =>
       crmApi.updateCommunicationSettings({
         approvalRequired,
+        paymentReminderEnabled,
         maxPerDayFrequencyCap: frequencyCap ? Number(frequencyCap) : null,
         notificationRateLimitPerMinute: rateLimit ? Number(rateLimit) : null,
       }),
@@ -75,6 +81,14 @@ function ApprovalSection() {
           onChange={(e) => setApprovalRequired(e.target.checked)}
           label="Require approval before a campaign can be scheduled or sent"
           description="When enabled, a campaign must move through Submit for Approval → Approved by someone holding the Approve Campaigns permission before it can be scheduled or sent. When disabled (the default), Submit for Approval auto-approves immediately."
+        />
+      </div>
+      <div>
+        <Checkbox
+          checked={paymentReminderEnabled}
+          onChange={(e) => setPaymentReminderEnabled(e.target.checked)}
+          label="Send automatic overdue-invoice payment reminders"
+          description="When enabled, customers with an overdue invoice receive an email reminder at 0, 7, 15, and 30 days overdue (each stage sent once). Disabled by default — this sends real customer-facing messages, so review the cadence before turning it on."
         />
       </div>
       <div>
@@ -243,6 +257,78 @@ function WebhooksMovedNotice() {
   );
 }
 
+// CRM-ROADMAP Phase 3, Feature 3 — per-message cost rate per channel, feeding the ROI report's
+// spend calculation. No cost/spend concept existed anywhere in this codebase before this feature.
+function CostSection() {
+  const { data } = useQuery({
+    queryKey: ['crm-communication-settings'],
+    queryFn: () => crmApi.getCommunicationSettings(),
+  });
+  const settings = data as CommunicationSettings | undefined;
+
+  const [rates, setRates] = useState<Record<(typeof CHANNELS)[number], string>>({
+    SMS: '',
+    WHATSAPP: '',
+    EMAIL: '',
+    IN_APP: '',
+  });
+
+  useEffect(() => {
+    if (!settings?.costPerMessage) return;
+    setRates((prev) => ({
+      ...prev,
+      ...Object.fromEntries(
+        CHANNELS.map((c) => [
+          c,
+          settings.costPerMessage?.[c] != null ? String(settings.costPerMessage[c]) : '',
+        ])
+      ),
+    }));
+  }, [settings]);
+
+  const saveMut = useMutation({
+    mutationFn: () =>
+      crmApi.updateCommunicationSettings({
+        costPerMessage: Object.fromEntries(
+          CHANNELS.filter((c) => rates[c] !== '').map((c) => [c, Number(rates[c])])
+        ),
+      }),
+    onSuccess: () => toast.success('Cost rates saved'),
+    onError: () => toast.error('Failed to save cost rates'),
+  });
+
+  return (
+    <div className="bg-surface-card rounded-xl border border-default p-5 space-y-4">
+      <h2 className="text-sm font-semibold text-secondary uppercase tracking-wide">
+        Cost Per Message
+      </h2>
+      <p className="text-xs text-secondary">
+        Used to estimate campaign spend on the ROI report — a live rate applied to sent count, not a
+        historical snapshot per send. Leave a channel blank for $0 cost.
+      </p>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {CHANNELS.map((c) => (
+          <Input
+            key={c}
+            label={c}
+            type="number"
+            min={0}
+            step="0.01"
+            value={rates[c]}
+            onChange={(e) => setRates((prev) => ({ ...prev, [c]: e.target.value }))}
+            placeholder="0.00"
+          />
+        ))}
+      </div>
+      <div className="flex justify-end pt-2">
+        <Button onClick={() => saveMut.mutate()} disabled={saveMut.isPending}>
+          {saveMut.isPending ? 'Saving…' : 'Save Rates'}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 export default function CampaignSettingsPage() {
   return (
     <div>
@@ -254,6 +340,7 @@ export default function CampaignSettingsPage() {
       <div className="space-y-5 max-w-3xl">
         <ApprovalSection />
         <SenderIdentitySection />
+        <CostSection />
         <WebhooksMovedNotice />
       </div>
     </div>

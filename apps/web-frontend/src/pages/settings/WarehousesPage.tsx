@@ -115,12 +115,13 @@ export default function WarehousesPage() {
             onClick: async (r: Warehouse) => {
               const ok = await confirm({
                 title: 'Delete Warehouse',
-                message: `Are you sure you want to delete warehouse "${r.name}"? This cannot be undone.`,
+                message: `Are you sure you want to delete warehouse "${r.name}"? This cannot be undone. Note: warehouses with any stock movement history can't be deleted — you'll get an error if this one has any.`,
                 confirmLabel: 'Delete',
                 variant: 'danger',
               });
               if (ok) deleteMutation.mutate(r.id);
             },
+            hidden: (r: Warehouse) => r.isDefault,
           },
         ]
       : []),
@@ -134,7 +135,12 @@ export default function WarehousesPage() {
         subtitle="Manage warehouse/godown locations."
         actions={
           canManageWarehouse ? (
-            <Button onClick={() => navigate('/settings/warehouses/new')}>+ New Warehouse</Button>
+            <Button
+              data-tour-id="settings-warehouses-create-button"
+              onClick={() => navigate('/settings/warehouses/new')}
+            >
+              + New Warehouse
+            </Button>
           ) : undefined
         }
       />

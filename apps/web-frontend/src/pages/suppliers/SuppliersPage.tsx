@@ -2,10 +2,11 @@ import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { Pencil, Trash2 } from 'lucide-react';
+import { Eye, Pencil, Trash2 } from 'lucide-react';
 import { supplierApi } from '../../api/endpoints.js';
 import { useDebounce } from '../../hooks/useDebounce.js';
 import { useAuthStore } from '../../store/auth.store.js';
+import { useConfirm } from '../../context/ConfirmContext.js';
 import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
 import ERPEmptyState from '../../components/erp/ERPEmptyState.js';
@@ -24,15 +25,18 @@ interface Supplier {
   phone?: string;
   gstin?: string;
   status: string;
+  rating?: string | null;
 }
 
 export default function SuppliersPage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const confirm = useConfirm();
   const hasPermission = useAuthStore((s) => s.hasPermission);
   const canCreateSupplier = hasPermission(PERMISSIONS.SUPPLIER_CREATE);
   const canEditSupplier = hasPermission(PERMISSIONS.SUPPLIER_EDIT);
   const canDeleteSupplier = hasPermission(PERMISSIONS.SUPPLIER_DELETE);
+  const canImport = hasPermission(PERMISSIONS.IMPORT_EXECUTE);
   const [search, setSearch] = useState('');
   const debouncedSearch = useDebounce(search, 250);
   const [page, setPage] = useState(1);
@@ -68,7 +72,7 @@ export default function SuppliersPage() {
       render: (r) => (
         <div>
           <button
-            onClick={() => navigate(`/suppliers/${r.id}/edit`)}
+            onClick={() => navigate(`/suppliers/${r.id}`)}
             className="font-medium text-link hover:underline text-left"
           >
             {r.displayName}
@@ -78,6 +82,11 @@ export default function SuppliersPage() {
       ),
     },
     { key: 'gstin', header: 'GSTIN', mono: true },
+    {
+      key: 'rating',
+      header: 'Rating',
+      render: (r) => (r.rating ? `★ ${parseFloat(r.rating).toFixed(1)}` : '—'),
+    },
     {
       key: 'status',
       header: 'Status',
@@ -89,6 +98,11 @@ export default function SuppliersPage() {
   ];
 
   const rowActions: ERPRowAction<Supplier>[] = [
+    {
+      label: 'View',
+      icon: Eye,
+      onClick: (r: Supplier) => navigate(`/suppliers/${r.id}`),
+    },
     ...(canEditSupplier
       ? [
           {
@@ -105,7 +119,15 @@ export default function SuppliersPage() {
             label: 'Delete',
             icon: Trash2,
             type: 'delete' as const,
-            onClick: (r: Supplier) => deleteMutation.mutate(r.id),
+            onClick: async (r: Supplier) => {
+              const ok = await confirm({
+                title: 'Delete supplier?',
+                message: `Deactivates "${r.displayName}". There's no check for existing purchase orders, GRNs, or payments against this supplier — their history stays intact, but you won't be warned if this supplier still has open activity.`,
+                confirmLabel: 'Delete',
+                variant: 'danger',
+              });
+              if (ok) deleteMutation.mutate(r.id);
+            },
           },
         ]
       : []),
@@ -118,9 +140,21 @@ export default function SuppliersPage() {
         title="Suppliers"
         subtitle="Manage your supplier / vendor database."
         actions={
-          canCreateSupplier ? (
-            <Button onClick={() => navigate('/suppliers/new')}>+ New Supplier</Button>
-          ) : undefined
+          <div className="flex gap-2">
+            {canImport && (
+              <Button variant="secondary" onClick={() => navigate('/suppliers/import')}>
+                Import
+              </Button>
+            )}
+            {canCreateSupplier && (
+              <Button
+                data-tour-id="suppliers-create-button"
+                onClick={() => navigate('/suppliers/new')}
+              >
+                + New Supplier
+              </Button>
+            )}
+          </div>
         }
       />
       <div className="mb-4">
@@ -139,6 +173,8 @@ export default function SuppliersPage() {
           data={suppliers}
           isLoading={isLoading}
           rowKey="id"
+          enableExport
+          exportFilename="suppliers"
           pagination={{ page, pageSize, total: totalElements }}
           onPageChange={setPage}
           onPageSizeChange={(size) => {

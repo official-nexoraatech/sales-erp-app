@@ -1,6 +1,7 @@
 import { Lock, Layers, Cloud, Building2, Workflow, Smartphone } from 'lucide-react';
 import ModuleGlyph from '../../../components/marketing/ModuleGlyph.js';
 import MarketingSection from '../../../components/marketing/MarketingSection.js';
+import { useScrollReveal } from '../../../hooks/useScrollReveal.js';
 
 const REASONS = [
   {
@@ -37,6 +38,33 @@ const REASONS = [
   },
 ];
 
+function ReasonTile({
+  icon,
+  title,
+  description,
+  featured,
+  index,
+}: (typeof REASONS)[number] & { index: number }) {
+  const { ref, isVisible } = useScrollReveal<HTMLDivElement>();
+  return (
+    <div
+      ref={ref}
+      style={{ transitionDelay: isVisible ? `${Math.min(index, 6) * 60}ms` : '0ms' }}
+      className={`rounded-2xl border p-6 flex flex-col shadow-token-sm transition-all duration-slow hover:-translate-y-1 hover:border-brand hover:shadow-token-lg ${
+        featured
+          ? 'lg:col-span-2 lg:row-span-2 justify-center border-accent/30 bg-[image:linear-gradient(135deg,var(--surface-card),var(--brand-accent-subtle))]'
+          : 'justify-start border-default bg-surface-page'
+      } ${isVisible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-3'}`}
+    >
+      <ModuleGlyph icon={icon} size={featured ? 'lg' : 'md'} variant="accent" />
+      <h3 className={`mt-4 font-semibold text-primary ${featured ? 'text-xl' : 'text-sm'}`}>
+        {title}
+      </h3>
+      <p className={`mt-1.5 text-secondary ${featured ? 'text-base' : 'text-sm'}`}>{description}</p>
+    </div>
+  );
+}
+
 export default function WhyChooseUs() {
   return (
     <MarketingSection surface="card" className="py-24">
@@ -49,21 +77,8 @@ export default function WhyChooseUs() {
         </h2>
       </div>
       <div className="mt-14 grid sm:grid-cols-2 lg:grid-cols-4 lg:grid-rows-2 gap-5">
-        {REASONS.map(({ icon, title, description, featured }) => (
-          <div
-            key={title}
-            className={`rounded-2xl border border-default bg-surface-page p-6 flex flex-col ${
-              featured ? 'lg:col-span-2 lg:row-span-2 justify-center' : 'justify-start'
-            }`}
-          >
-            <ModuleGlyph icon={icon} size={featured ? 'lg' : 'md'} variant="accent" />
-            <h3 className={`mt-4 font-semibold text-primary ${featured ? 'text-xl' : 'text-sm'}`}>
-              {title}
-            </h3>
-            <p className={`mt-1.5 text-secondary ${featured ? 'text-base' : 'text-sm'}`}>
-              {description}
-            </p>
-          </div>
+        {REASONS.map((reason, index) => (
+          <ReasonTile key={reason.title} {...reason} index={index} />
         ))}
       </div>
     </MarketingSection>

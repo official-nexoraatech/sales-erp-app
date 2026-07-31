@@ -61,7 +61,7 @@ export async function dashboardRoutes(
       FROM invoices i
       JOIN invoice_lines il ON il.invoice_id = i.id AND il.tenant_id = ${tid}
       JOIN items it ON it.id = il.item_id AND it.tenant_id = ${tid}
-      WHERE i.tenant_id = ${tid} AND i.invoice_date >= ${monthStart}::date AND i.status != 'CANCELLED'
+      WHERE i.tenant_id = ${tid} AND i.invoice_date >= ${monthStart}::date AND i.status NOT IN ('CANCELLED', 'DRAFT')
     `)) as unknown as Record<string, unknown>[];
 
       // Outstanding receivables & payables from projections
@@ -124,7 +124,7 @@ export async function dashboardRoutes(
       JOIN invoice_lines il ON il.invoice_id = i.id AND il.tenant_id = ${tid}
       JOIN items it ON it.id = il.item_id AND it.tenant_id = ${tid}
       WHERE i.tenant_id = ${tid} AND i.invoice_date BETWEEN ${thirtyDaysAgo}::date AND ${today}::date
-        AND i.status != 'CANCELLED'
+        AND i.status NOT IN ('CANCELLED', 'DRAFT')
       GROUP BY i.invoice_date::date
     `)) as unknown as Record<string, unknown>[];
       const profitByDate = new Map(dailyProfit.map((r) => [r.date as string, r.gross_profit]));
@@ -143,7 +143,7 @@ export async function dashboardRoutes(
       LEFT JOIN categories cat ON cat.id = it.category_id
       WHERE i.tenant_id = ${tid}
         AND i.invoice_date >= ${monthStart}::date
-        AND i.status != 'CANCELLED'
+        AND i.status NOT IN ('CANCELLED', 'DRAFT')
       GROUP BY cat.id, cat.name
       ORDER BY revenue DESC
       LIMIT 8
@@ -192,7 +192,7 @@ export async function dashboardRoutes(
       FROM invoices i
       JOIN invoice_lines il ON il.invoice_id = i.id AND il.tenant_id = ${tid}
       JOIN items it ON it.id = il.item_id AND it.tenant_id = ${tid}
-      WHERE i.tenant_id = ${tid} AND i.invoice_date >= ${prevMonthStart}::date AND i.status != 'CANCELLED'
+      WHERE i.tenant_id = ${tid} AND i.invoice_date >= ${prevMonthStart}::date AND i.status NOT IN ('CANCELLED', 'DRAFT')
     `)) as unknown as Record<string, unknown>[];
 
       const monthlyComparison = { ...(monthlySales ?? {}), ...(monthlyProfit ?? {}) };
@@ -206,7 +206,7 @@ export async function dashboardRoutes(
       LEFT JOIN customers c ON c.id = i.customer_id AND c.tenant_id = ${tid}
       WHERE i.tenant_id = ${tid}
         AND i.invoice_date >= ${monthStart}::date
-        AND i.status != 'CANCELLED'
+        AND i.status NOT IN ('CANCELLED', 'DRAFT')
       GROUP BY c.id, c.display_name
       ORDER BY revenue DESC
       LIMIT 5
@@ -226,7 +226,7 @@ export async function dashboardRoutes(
       FROM invoices i
       WHERE i.tenant_id = ${tid}
         AND (i.grand_total - COALESCE(i.paid_amount, 0)) > 0
-        AND i.status NOT IN ('CANCELLED', 'PAID')
+        AND i.status NOT IN ('CANCELLED', 'PAID', 'DRAFT')
       GROUP BY bucket
       ORDER BY MIN(CASE
         WHEN (${today}::date - i.due_date::date) <= 0 THEN 1
@@ -304,6 +304,15 @@ export async function dashboardRoutes(
         AND status = 'PENDING_APPROVAL'
     `)) as unknown as Record<string, unknown>[];
 
+      // M-13 fix: no widget tracked undispatched Delivery Challans at all, despite
+      // delivery_challans.status directly supporting it.
+      const [pendingDeliveries] = (await readDb.execute(sql`
+      SELECT COUNT(*)::int AS count
+      FROM delivery_challans
+      WHERE tenant_id = ${tid}
+        AND status = 'DRAFT'
+    `)) as unknown as Record<string, unknown>[];
+
       // Supplier payables have no due-date tracking on grns — the projection's
       // overdue_amount (maintained from supplier payment terms) is the real source.
       const [pendingPayments] = (await readDb.execute(sql`
@@ -318,6 +327,7 @@ export async function dashboardRoutes(
           overdueReceivables: overdueInvoices ?? { count: 0, total_amount: 0 },
           pendingPurchaseOrders: pendingPOs ?? { count: 0 },
           pendingGRNs: pendingGRNs ?? { count: 0 },
+          pendingDeliveries: pendingDeliveries ?? { count: 0 },
           overduePayables: pendingPayments ?? { count: 0, total_amount: 0 },
         },
       });

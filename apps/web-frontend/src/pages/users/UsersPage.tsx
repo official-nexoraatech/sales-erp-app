@@ -5,6 +5,7 @@ import toast from 'react-hot-toast';
 import { Pencil, Lock, Unlock, UserX, UserCog } from 'lucide-react';
 import { userApi, adminSecurityApi } from '../../api/endpoints.js';
 import { useAuthStore, type AuthUser } from '../../store/auth.store.js';
+import { useConfirm } from '../../context/ConfirmContext.js';
 import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
 import ERPDataGrid, {
@@ -44,6 +45,7 @@ interface User {
 export default function UsersPage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const confirm = useConfirm();
   const hasPermission = useAuthStore((s) => s.hasPermission);
   const canCreateUser = hasPermission(PERMISSIONS.USER_CREATE);
   const canUpdateUser = hasPermission(PERMISSIONS.USER_UPDATE);
@@ -193,7 +195,15 @@ export default function UsersPage() {
             icon: UserX,
             label: 'Deactivate',
             type: 'delete' as const,
-            onClick: (r: User) => deleteMutation.mutate(r.id),
+            onClick: async (r: User) => {
+              const ok = await confirm({
+                title: 'Deactivate this user?',
+                message: `Blocks ${r.firstName} ${r.lastName} from logging in again. Note: their current session isn't revoked immediately — it keeps working until their access token naturally expires (usually within 15 minutes).`,
+                confirmLabel: 'Deactivate',
+                variant: 'danger',
+              });
+              if (ok) deleteMutation.mutate(r.id);
+            },
           },
         ]
       : []),
@@ -207,7 +217,9 @@ export default function UsersPage() {
         subtitle="Manage staff accounts and permissions."
         actions={
           canCreateUser ? (
-            <Button onClick={() => navigate('/users/new')}>+ New User</Button>
+            <Button data-tour-id="users-create-button" onClick={() => navigate('/users/new')}>
+              + New User
+            </Button>
           ) : undefined
         }
       />

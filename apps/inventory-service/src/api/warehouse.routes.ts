@@ -1,12 +1,14 @@
 import type { FastifyInstance } from 'fastify';
 import type { PlatformContextFactory } from '@erp/sdk';
 import { warehouses, inventoryLedger } from '@erp/db';
-import { and, eq, isNull, or, ilike, sql } from 'drizzle-orm';
+import { and, eq, isNull, or, ilike, sql, inArray } from 'drizzle-orm';
 import { z } from 'zod';
 import { BusinessError, NotFoundError, OptimisticLockError, ValidationError } from '@erp/types';
 import { PERMISSIONS } from '@erp/types';
 import { authenticate } from '../middleware/authenticate.js';
 import { requirePermission, requireAnyPermission } from '../middleware/authorize.js';
+import { getBranchScope } from '@erp/sdk';
+import { assertBranchInScope } from '../domain/WarehouseBranchScope.js';
 
 const WarehouseSchema = z.object({
   name: z.string().min(2).max(200),
@@ -30,7 +32,7 @@ const WarehouseUpdateSchema = WarehouseSchema.extend({
 });
 
 type AuthedRequest = {
-  auth: { tenantId: number; userId: number };
+  auth: { tenantId: number; userId: number; permissions: string[]; branchIds: number[] };
 };
 
 export async function warehouseRoutes(
@@ -45,10 +47,11 @@ export async function warehouseRoutes(
     '/warehouses',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.WAREHOUSE_VIEW)] },
     async (request, reply) => {
-      const { tenantId } = (request as unknown as AuthedRequest).auth;
+      const auth = (request as unknown as AuthedRequest).auth;
+      const { tenantId } = auth;
       const ctx = ctxFactory.create({
         tenantId,
-        userId: (request as unknown as AuthedRequest).auth.userId,
+        userId: auth.userId,
         correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
       });
       const query = request.query as {
@@ -61,7 +64,18 @@ export async function warehouseRoutes(
       let whereClause = and(eq(warehouses.tenantId, tenantId), isNull(warehouses.deletedAt));
       if (query.branchId) {
         const bId = parseInt(query.branchId, 10);
+        assertBranchInScope(bId, auth);
         whereClause = and(whereClause, eq(warehouses.branchId, bId));
+      } else {
+        // Inventory module audit 2026-07-21: previously unfiltered — any user with
+        // WAREHOUSE_VIEW saw every branch's warehouses, not just their own.
+        const branchScope = getBranchScope(auth);
+        if (branchScope !== 'all') {
+          if (branchScope.length === 0) {
+            return reply.code(200).send({ data: { content: [], totalElements: 0 } });
+          }
+          whereClause = and(whereClause, inArray(warehouses.branchId, branchScope));
+        }
       }
       if (query.search) {
         whereClause = and(
@@ -103,10 +117,11 @@ export async function warehouseRoutes(
     '/warehouses/:id',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.WAREHOUSE_VIEW)] },
     async (request, reply) => {
-      const { tenantId } = (request as unknown as AuthedRequest).auth;
+      const auth = (request as unknown as AuthedRequest).auth;
+      const { tenantId } = auth;
       const ctx = ctxFactory.create({
         tenantId,
-        userId: (request as unknown as AuthedRequest).auth.userId,
+        userId: auth.userId,
         correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
       });
       const id = parseInt(request.params.id, 10);
@@ -123,6 +138,7 @@ export async function warehouseRoutes(
         );
 
       if (!wh) throw new NotFoundError('Warehouse', id);
+      assertBranchInScope(wh.branchId, auth);
       return reply.code(200).send({ data: wh });
     }
   );
@@ -137,7 +153,8 @@ export async function warehouseRoutes(
       ],
     },
     async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
+      const auth = (request as unknown as AuthedRequest).auth;
+      const { tenantId, userId } = auth;
       const ctx = ctxFactory.create({
         tenantId,
         userId,
@@ -147,6 +164,7 @@ export async function warehouseRoutes(
       const body = WarehouseSchema.safeParse(request.body);
       if (!body.success)
         throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
+      assertBranchInScope(body.data.branchId, auth);
 
       if (body.data.isDefault) {
         await ctx.db.raw
@@ -198,7 +216,8 @@ export async function warehouseRoutes(
       ],
     },
     async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
+      const auth = (request as unknown as AuthedRequest).auth;
+      const { tenantId, userId } = auth;
       const ctx = ctxFactory.create({
         tenantId,
         userId,
@@ -222,6 +241,10 @@ export async function warehouseRoutes(
         );
 
       if (!existing) throw new NotFoundError('Warehouse', id);
+      assertBranchInScope(existing.branchId, auth);
+      // Also block moving a warehouse OUT of the caller's scope (into a branch they can't
+      // manage) when they're branch-restricted — the target branchId needs the same check.
+      assertBranchInScope(body.data.branchId, auth);
 
       if (body.data.isDefault && !existing.isDefault) {
         await ctx.db.raw
@@ -284,7 +307,8 @@ export async function warehouseRoutes(
     '/warehouses/:id',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.WAREHOUSE_MANAGE)] },
     async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
+      const auth = (request as unknown as AuthedRequest).auth;
+      const { tenantId, userId } = auth;
       const ctx = ctxFactory.create({
         tenantId,
         userId,
@@ -304,6 +328,7 @@ export async function warehouseRoutes(
         );
 
       if (!existing) throw new NotFoundError('Warehouse', id);
+      assertBranchInScope(existing.branchId, auth);
       if (existing.isDefault) {
         throw new BusinessError(
           'CANNOT_DELETE_DEFAULT_WAREHOUSE',

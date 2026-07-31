@@ -13,9 +13,9 @@ groups:
           severity: critical
           channel: pagerduty
         annotations:
-          summary: "High API error rate on {{ $labels.service }}"
-          description: "{{ $labels.service }} error rate is {{ $value | humanizePercentage }} (threshold: 5%) for 5+ minutes."
-          runbook: "Check service logs: kubectl logs -n erp-system -l app={{ $labels.service }} --tail=100"
+          summary: 'High API error rate on {{ $labels.service }}'
+          description: '{{ $labels.service }} error rate is {{ $value | humanizePercentage }} (threshold: 5%) for 5+ minutes.'
+          runbook: 'Check service logs: kubectl logs -n erp-system -l app={{ $labels.service }} --tail=100'
 
       - alert: APILatencyP95High
         expr: |
@@ -26,8 +26,8 @@ groups:
           severity: warning
           channel: slack-infra-alerts
         annotations:
-          summary: "P95 latency above 2000ms on {{ $labels.service }}"
-          description: "{{ $labels.service }} P95 latency is {{ $value | humanizeDuration }} — performance degradation."
+          summary: 'P95 latency above 2000ms on {{ $labels.service }}'
+          description: '{{ $labels.service }} P95 latency is {{ $value | humanizeDuration }} — performance degradation.'
 
   # ─── Dead Letter Queue Alerts ─────────────────────────────────────────────
   - name: erp.kafka.dlq
@@ -40,20 +40,20 @@ groups:
           severity: warning
           channel: slack-infra-alerts
         annotations:
-          summary: "DLQ depth > 10 on topic {{ $labels.topic }}"
-          description: "{{ $value }} unprocessed messages in DLQ for topic {{ $labels.topic }}. Manual replay required."
-          runbook: "Navigate to: ERP Admin → Distributed Systems → Dead Letter Queue → Replay messages"
+          summary: 'DLQ depth > 10 on topic {{ $labels.topic }}'
+          description: '{{ $value }} unprocessed messages in DLQ for topic {{ $labels.topic }}. Manual replay required.'
+          runbook: 'Navigate to: ERP Admin → Distributed Systems → Dead Letter Queue → Replay messages'
 
       - alert: KafkaConsumerLagHigh
         expr: |
-          sum(kafka_consumer_group_lag) by (consumergroup, topic) > 1000
+          sum(kafka_consumergroup_lag) by (consumergroup, topic) > 1000
         for: 5m
         labels:
           severity: warning
           channel: slack-infra-alerts
         annotations:
-          summary: "Kafka consumer lag > 1000 for {{ $labels.consumergroup }}"
-          description: "Consumer group {{ $labels.consumergroup }} on topic {{ $labels.topic }} is {{ $value }} messages behind."
+          summary: 'Kafka consumer lag > 1000 for {{ $labels.consumergroup }}'
+          description: 'Consumer group {{ $labels.consumergroup }} on topic {{ $labels.topic }} is {{ $value }} messages behind.'
 
   # ─── Outbox Relay Alerts ──────────────────────────────────────────────────
   - name: erp.outbox
@@ -66,9 +66,9 @@ groups:
           severity: warning
           channel: slack-infra-alerts
         annotations:
-          summary: "Outbox relay backlog > 100 pending events"
-          description: "{{ $value }} events pending in the outbox for 5+ minutes. The relay worker may be stuck or Kafka may be unreachable. (erp_outbox_pending_count is a global gauge with no tenant_id label.)"
-          runbook: "Navigate to: ERP Admin → Distributed Systems → Outbox Monitor; check event-service relay worker logs."
+          summary: 'Outbox relay backlog > 100 pending events'
+          description: '{{ $value }} events pending in the outbox for 5+ minutes. The relay worker may be stuck or Kafka may be unreachable. (erp_outbox_pending_count is a global gauge with no tenant_id label.)'
+          runbook: 'Navigate to: ERP Admin → Distributed Systems → Outbox Monitor; check event-service relay worker logs.'
 
   # ─── Database Alerts ──────────────────────────────────────────────────────
   - name: erp.database
@@ -81,8 +81,8 @@ groups:
           severity: warning
           channel: slack-infra-alerts
         annotations:
-          summary: "PostgreSQL replication lag > 30s"
-          description: "Replication lag is {{ $value | humanizeDuration }}. Replica is falling behind primary."
+          summary: 'PostgreSQL replication lag > 30s'
+          description: 'Replication lag is {{ $value | humanizeDuration }}. Replica is falling behind primary.'
           runbook: "Check: docker exec erp-postgres-replica psql -U erp -c 'SELECT now() - pg_last_xact_replay_timestamp();'"
 
       - alert: DBConnectionPoolExhausted
@@ -93,8 +93,8 @@ groups:
           severity: critical
           channel: pagerduty
         annotations:
-          summary: "DB connection pool near exhaustion ({{ $value }} active connections)"
-          description: "PostgreSQL has {{ $value }} active connections. Max is 100. Connection pool exhaustion imminent."
+          summary: 'DB connection pool near exhaustion ({{ $value }} active connections)'
+          description: 'PostgreSQL has {{ $value }} active connections. Max is 100. Connection pool exhaustion imminent.'
 
       - alert: SlowQueryDetected
         expr: |
@@ -104,8 +104,8 @@ groups:
           severity: warning
           channel: slack-infra-alerts
         annotations:
-          summary: "Slow query detected (avg > 500ms)"
-          description: "A query is averaging {{ $value }}ms execution time. Check pg_stat_statements."
+          summary: 'Slow query detected (avg > 500ms)'
+          description: 'A query is averaging {{ $value }}ms execution time. Check pg_stat_statements.'
 
   # ─── Saga Health Alerts ───────────────────────────────────────────────────
   - name: erp.sagas
@@ -118,9 +118,9 @@ groups:
           severity: warning
           channel: slack-engineering
         annotations:
-          summary: "{{ $value }} saga(s) stalled for > 30 minutes"
-          description: "Sagas stuck in non-terminal state for 30+ minutes. Manual intervention may be needed."
-          runbook: "Navigate to: ERP Admin → Distributed Systems → Saga Monitor → View stalled sagas"
+          summary: '{{ $value }} saga(s) stalled for > 30 minutes'
+          description: 'Sagas stuck in non-terminal state for 30+ minutes. Manual intervention may be needed.'
+          runbook: 'Navigate to: ERP Admin → Distributed Systems → Saga Monitor → View stalled sagas'
 
       - alert: SagaCompensationRateHigh
         expr: |
@@ -130,8 +130,8 @@ groups:
           severity: warning
           channel: slack-engineering
         annotations:
-          summary: "High saga compensation rate ({{ $value | humanizePercentage }})"
-          description: "More than 10% of sagas are compensating — indicates systemic business or infra issue."
+          summary: 'High saga compensation rate ({{ $value | humanizePercentage }})'
+          description: 'More than 10% of sagas are compensating — indicates systemic business or infra issue.'
 
   # ─── Business Health Alerts ───────────────────────────────────────────────
   - name: erp.business
@@ -144,9 +144,9 @@ groups:
           severity: critical
           channel: pagerduty
         annotations:
-          summary: "CRITICAL: Stock went negative for item {{ $labels.item_id }}"
-          description: "Stock quantity is {{ $value }} for item {{ $labels.item_id }} in warehouse {{ $labels.warehouse_id }} (tenant {{ $labels.tenant_id }}). This should NEVER happen — data integrity issue."
-          runbook: "IMMEDIATE: Check inventory_ledger for item={{ $labels.item_id }}, investigate concurrent write issue."
+          summary: 'CRITICAL: Stock went negative for item {{ $labels.item_id }}'
+          description: 'Stock quantity is {{ $value }} for item {{ $labels.item_id }} in warehouse {{ $labels.warehouse_id }} (tenant {{ $labels.tenant_id }}). This should NEVER happen — data integrity issue.'
+          runbook: 'IMMEDIATE: Check inventory_ledger for item={{ $labels.item_id }}, investigate concurrent write issue.'
 
       - alert: StockNegativeEventDetected
         expr: |
@@ -156,9 +156,9 @@ groups:
           severity: critical
           channel: pagerduty
         annotations:
-          summary: "CRITICAL: Negative-stock event recorded for item {{ $labels.item_id }}"
-          description: "{{ $value }} negative-stock event(s) in the last 5 minutes for item {{ $labels.item_id }} (tenant {{ $labels.tenant_id }}) — complements StockWentNegative by catching transient dips between scrapes."
-          runbook: "IMMEDIATE: Check inventory_ledger for item={{ $labels.item_id }}, investigate concurrent write issue."
+          summary: 'CRITICAL: Negative-stock event recorded for item {{ $labels.item_id }}'
+          description: '{{ $value }} negative-stock event(s) in the last 5 minutes for item {{ $labels.item_id }} (tenant {{ $labels.tenant_id }}) — complements StockWentNegative by catching transient dips between scrapes.'
+          runbook: 'IMMEDIATE: Check inventory_ledger for item={{ $labels.item_id }}, investigate concurrent write issue.'
 
       - alert: InvoiceCreateFailureRateHigh
         expr: |
@@ -169,8 +169,8 @@ groups:
           severity: warning
           channel: slack-engineering
         annotations:
-          summary: "Invoice creation failing at > 5% rate"
-          description: "{{ $value | humanizePercentage }} of invoice create attempts are failing."
+          summary: 'Invoice creation failing at > 5% rate'
+          description: '{{ $value | humanizePercentage }} of invoice create attempts are failing.'
 
   # ─── Security Alerts ───────────────────────────────────────────────────────
   - name: erp.security
@@ -183,9 +183,46 @@ groups:
           severity: critical
           channel: pagerduty
         annotations:
-          summary: "Brute-force lockout spike for tenant {{ $labels.tenant_id }}"
-          description: "{{ $value }} account(s) locked due to brute force in the last 5 minutes for tenant {{ $labels.tenant_id }} — possible live credential-stuffing attack."
-          runbook: "Navigate to: ERP Admin → Security → Auth Audit Log, filter by tenant_id={{ $labels.tenant_id }}"
+          summary: 'Brute-force lockout spike for tenant {{ $labels.tenant_id }}'
+          description: '{{ $value }} account(s) locked due to brute force in the last 5 minutes for tenant {{ $labels.tenant_id }} — possible live credential-stuffing attack.'
+          runbook: 'Navigate to: ERP Admin → Security → Auth Audit Log, filter by tenant_id={{ $labels.tenant_id }}'
+
+  # ─── Scheduled Job Alerts (scheduler-service JobRegistry) ─────────────────
+  # Until now, none of scheduler-service's 44 cron jobs (GSTR filings, payroll, low-stock
+  # alerts, etc.) emitted a metric on failure — a silently-broken job was invisible outside
+  # of grepping service logs. erp_job_execution_total{status="failed"} is only incremented
+  # after BullMQ's own 3 retries with exponential backoff are exhausted, so a single
+  # increment here already represents a real, non-transient failure worth paging on.
+  - name: erp.scheduler
+    rules:
+      - alert: JobExecutionFailing
+        expr: |
+          increase(erp_job_execution_total{status="failed"}[1h]) > 0
+        for: 0m
+        labels:
+          severity: warning
+          channel: slack-infra-alerts
+        annotations:
+          summary: 'Scheduled job {{ $labels.job_name }} failed'
+          description: '{{ $labels.job_name }} exhausted all retry attempts in the last hour. Check apps/scheduler-service logs and GET /jobs/{{ $labels.job_name }}/history for the error.'
+          runbook: 'Navigate to: ERP Admin → Scheduler → Jobs → {{ $labels.job_name }} → History'
+
+      # Scoped only to jobs expected to run at least daily — a single fixed threshold can't
+      # fit monthly/yearly jobs (hr.payroll.prepare, hr.leave.year-end-carry-forward,
+      # platform.partition-maintenance, the quarterly DR/chaos-drill reminders, etc.) without
+      # constant false positives, so those are deliberately excluded from this generic rule
+      # rather than forcing a one-size-fits-all window across wildly different cron cadences.
+      - alert: DailyJobStale
+        expr: |
+          (time() - erp_job_last_success_timestamp{job_name=~"inventory\\.reservation-expiry|inventory\\.nightly-reconciliation|inventory\\.low-stock-alert|inventory\\.stock-value-report|gst\\.e-invoice-retry|gst\\.eway-bill-expiry-alert|hr\\.attendance\\.biometric-auto-import|hr\\.alteration\\.promised-today-alert|hr\\.alteration\\.overdue-alert|sales\\.quotation-expiry|sales\\.loyalty-points-expiry|sales\\.overdue-invoice-update|crm\\.birthday-anniversary-trigger|crm\\.campaign-dispatch|purchase\\.po-delivery-reminder|purchase\\.pending-grn-alert|purchase\\.pdc-alert|workflow\\.approval-expiry|platform\\.outbox-cleanup|platform\\.token-cleanup|platform\\.export-cleanup|search\\.full-reindex|search\\.incremental-sync|production\\.reorder-report|production\\.job-work-overdue-alert|accounting\\.trial-balance\\.snapshot|accounting\\.outstanding-report"}) > 172800
+        for: 0m
+        labels:
+          severity: critical
+          channel: pagerduty
+        annotations:
+          summary: 'Job {{ $labels.job_name }} has not succeeded in over 48 hours'
+          description: '{{ $labels.job_name }} runs at least daily but has had no successful completion in {{ $value | humanizeDuration }}. The scheduler may be stuck, or this job may be failing every attempt.'
+          runbook: 'Navigate to: ERP Admin → Scheduler → Jobs → {{ $labels.job_name }} → History'
 
   # ─── Backup / DR Alerts (PG-024) ──────────────────────────────────────────
   - name: erp.backup
@@ -198,9 +235,9 @@ groups:
           severity: critical
           channel: pagerduty
         annotations:
-          summary: "Backup has not succeeded in over 25 hours"
-          description: "erp_backup_last_success_timestamp is {{ $value | humanizeDuration }} old — daily backup.sh (BACKUP_INTERVAL_SECONDS=86400) has silently stopped succeeding. Every invoice/ledger/customer record depends on this backup being current."
-          runbook: "See infrastructure/runbooks/dr-runbook.md §Backup Monitoring — check the `backup` container/CronJob logs first (docker logs erp-backup / kubectl logs -n erp-system -l app=erp-backup)."
+          summary: 'Backup has not succeeded in over 25 hours'
+          description: 'erp_backup_last_success_timestamp is {{ $value | humanizeDuration }} old — daily backup.sh (BACKUP_INTERVAL_SECONDS=86400) has silently stopped succeeding. Every invoice/ledger/customer record depends on this backup being current.'
+          runbook: 'See infrastructure/runbooks/dr-runbook.md §Backup Monitoring — check the `backup` container/CronJob logs first (docker logs erp-backup / kubectl logs -n erp-system -l app=erp-backup).'
 
       - alert: BackupDurationHigh
         expr: |
@@ -210,7 +247,7 @@ groups:
           severity: warning
           channel: slack-infra-alerts
         annotations:
-          summary: "Backup took longer than 30 minutes ({{ $value | humanizeDuration }})"
+          summary: 'Backup took longer than 30 minutes ({{ $value | humanizeDuration }})'
           description: "backup.sh's own run duration is approaching BACKUP_INTERVAL_SECONDS (86400s/24h) — an early-warning sign the backup is becoming a bottleneck before it becomes an outright failure. dr-drill-report.md's baseline was ~4m30s total for 1.4GB."
 
   # ─── Infrastructure Alerts ────────────────────────────────────────────────
@@ -225,8 +262,8 @@ groups:
           severity: warning
           channel: slack-infra-alerts
         annotations:
-          summary: "Pod {{ $labels.pod }} memory at {{ $value | humanizePercentage }}"
-          description: "Container {{ $labels.container }} in pod {{ $labels.pod }} is using {{ $value | humanizePercentage }} of memory limit."
+          summary: 'Pod {{ $labels.pod }} memory at {{ $value | humanizePercentage }}'
+          description: 'Container {{ $labels.container }} in pod {{ $labels.pod }} is using {{ $value | humanizePercentage }} of memory limit.'
 
       - alert: PodCrashLooping
         expr: |
@@ -236,8 +273,8 @@ groups:
           severity: critical
           channel: pagerduty
         annotations:
-          summary: "Pod {{ $labels.pod }} is crash-looping"
-          description: "Pod {{ $labels.pod }} has restarted more than 3 times in the last 15 minutes."
+          summary: 'Pod {{ $labels.pod }} is crash-looping'
+          description: 'Pod {{ $labels.pod }} has restarted more than 3 times in the last 15 minutes.'
 
       - alert: RedisDown
         expr: |
@@ -247,5 +284,5 @@ groups:
           severity: critical
           channel: pagerduty
         annotations:
-          summary: "Redis appears to be down"
-          description: "No Redis clients detected — auth token cache and distributed locks are unavailable."
+          summary: 'Redis appears to be down'
+          description: 'No Redis clients detected — auth token cache and distributed locks are unavailable.'

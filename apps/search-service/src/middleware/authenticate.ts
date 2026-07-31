@@ -10,14 +10,28 @@ declare module 'fastify' {
 export async function authenticate(request: FastifyRequest, reply: FastifyReply): Promise<void> {
   const authHeader = request.headers.authorization;
   if (!authHeader?.startsWith('Bearer ')) {
-    await reply.code(401).send({ error: { code: 'UNAUTHORIZED', message: 'Missing or invalid Authorization header' } });
+    await reply.code(401).send({
+      error: { code: 'UNAUTHORIZED', message: 'Missing or invalid Authorization header' },
+    });
     return;
   }
 
   try {
     request.auth = await verifyAccessToken(authHeader.slice(7));
   } catch {
-    await reply.code(401).send({ error: { code: 'UNAUTHORIZED', message: 'Invalid or expired token' } });
+    await reply
+      .code(401)
+      .send({ error: { code: 'UNAUTHORIZED', message: 'Invalid or expired token' } });
+    return;
+  }
+
+  // CRM-ROADMAP Phase 3, Feature 2 (Self-Service Customer Portal, Finding 1): a CUSTOMER-role
+  // portal JWT must never reach a staff-only service. Portal routes authenticate via their own
+  // requirePortalAuth preHandler instead of this one.
+  if (request.auth.roles.includes('CUSTOMER')) {
+    await reply.code(401).send({
+      error: { code: 'UNAUTHORIZED', message: 'Portal sessions cannot access staff endpoints' },
+    });
     return;
   }
 

@@ -100,6 +100,7 @@ export default function FaqManagementPage() {
         subtitle="Manage the public marketing site's FAQ content — categories, ordering and publish state."
         actions={
           <Button
+            data-tour-id="settings-faqs-create-button"
             size="sm"
             onClick={() => {
               reset({ category: '', question: '', answer: '', isPublished: true });

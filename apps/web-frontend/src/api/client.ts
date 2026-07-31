@@ -1,4 +1,5 @@
 import { useAuthStore } from '../store/auth.store.js';
+import { queryClient } from '../lib/queryClient.js';
 
 // Routed through api-gateway (apps/api-gateway) rather than calling each service
 // directly by port — the gateway strips its own `/api/<service>` prefix and rewrites
@@ -20,10 +21,19 @@ const BASE_URLS: Record<string, string> = {
   report: `${GATEWAY_URL}/api/report`,
   event: `${GATEWAY_URL}/api/event`,
   notification: `${GATEWAY_URL}/api/notification`,
+  scheduler: `${GATEWAY_URL}/api/scheduler`,
 };
 
 export function notificationServiceUrl(): string {
   return BASE_URLS['notification']!;
+}
+
+// Exposed for the field-visit offline write-queue (lib/offlineVisitQueue.ts), which issues its
+// own raw `fetch` calls outside `apiClient` — a queued action must be replayable long after the
+// request that originally queued it, so it needs an absolute URL to store, not a relative path
+// resolved through apiClient's own request() wrapper.
+export function salesServiceUrl(): string {
+  return BASE_URLS['sales']!;
 }
 
 // Every service's requirePermission()/requireAnyPermission() middleware throws a 403 with
@@ -71,7 +81,10 @@ export async function refreshAccessToken(): Promise<{
 
 let refreshPromise: Promise<string | null> | null = null;
 
-async function performRefresh(): Promise<string | null> {
+// Exported for App.tsx's AuthBootstrap, which calls this once on page load to silently
+// re-derive an in-memory access token from the httpOnly refresh cookie (the access token
+// itself is no longer persisted to localStorage — see auth.store.ts's partialize).
+export async function performRefresh(): Promise<string | null> {
   const { setTokens, setUser, user, logout } = useAuthStore.getState();
   const result = await refreshAccessToken();
   if (!result) {
@@ -136,6 +149,10 @@ async function request<T>(
     // permissions for the admin's own without the UI ever telling the user).
     if (useAuthStore.getState().realSession) {
       useAuthStore.getState().stopImpersonation();
+      // Cached queries were fetched as the impersonated user — without this, the admin's
+      // restored session can render that user's data on screen until each query's next
+      // background refetch (see WEB-FRONTEND-AUDIT-2026-07-24.md, Critical #1).
+      queryClient.clear();
       return request<T>(service, path, options, true);
     }
     if (!refreshPromise) {
@@ -220,6 +237,21 @@ export const apiClient = {
     const { accessToken } = useAuthStore.getState();
     const response = await fetch(`${BASE_URLS[service]}${path}`, {
       headers: { ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}) },
+    });
+    if (!response.ok)
+      throw new ApiError('DOWNLOAD_FAILED', 'Failed to download file', response.status);
+    return response.blob();
+  },
+
+  postBlob: async (service: keyof typeof BASE_URLS, path: string, body: unknown): Promise<Blob> => {
+    const { accessToken } = useAuthStore.getState();
+    const response = await fetch(`${BASE_URLS[service]}${path}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+      },
+      body: JSON.stringify(body),
     });
     if (!response.ok)
       throw new ApiError('DOWNLOAD_FAILED', 'Failed to download file', response.status);

@@ -11,8 +11,12 @@ import {
   warehouses,
   departments,
   designations,
+  crmLeads,
+  crmOpportunities,
+  crmAccounts,
+  crmAccountContacts,
 } from '@erp/db';
-import { eq, and, gte, lte, isNull, type SQL } from 'drizzle-orm';
+import { eq, and, gte, lte, isNull, desc, type SQL } from 'drizzle-orm';
 
 export type ExportEntity =
   | 'customer'
@@ -22,7 +26,12 @@ export type ExportEntity =
   | 'payment'
   | 'ledger'
   | 'stock'
-  | 'employee';
+  | 'employee'
+  // CRM-ROADMAP Phase 4, Feature 8 — Public CRM API & BI/Data-Warehouse Export.
+  | 'lead'
+  | 'opportunity'
+  | 'account'
+  | 'contact';
 
 export interface ExportColumn {
   key: string;
@@ -155,6 +164,42 @@ const EMPLOYEE_COLUMNS: ExportColumn[] = [
   { key: 'status', label: 'Status', type: 'string' },
 ];
 
+const LEAD_COLUMNS: ExportColumn[] = [
+  { key: 'displayName', label: 'Name', type: 'string' },
+  { key: 'companyName', label: 'Company', type: 'string' },
+  { key: 'phone', label: 'Phone', type: 'string' },
+  { key: 'email', label: 'Email', type: 'string' },
+  { key: 'source', label: 'Source', type: 'string' },
+  { key: 'stage', label: 'Stage', type: 'string' },
+  { key: 'createdAt', label: 'Created At', type: 'date' },
+];
+
+const OPPORTUNITY_COLUMNS: ExportColumn[] = [
+  { key: 'name', label: 'Name', type: 'string' },
+  { key: 'dealType', label: 'Deal Type', type: 'string' },
+  { key: 'stage', label: 'Stage', type: 'string' },
+  { key: 'probability', label: 'Probability', type: 'percent' },
+  { key: 'value', label: 'Value', type: 'currency' },
+  { key: 'expectedCloseDate', label: 'Expected Close', type: 'date' },
+  { key: 'createdAt', label: 'Created At', type: 'date' },
+];
+
+const ACCOUNT_COLUMNS: ExportColumn[] = [
+  { key: 'name', label: 'Name', type: 'string' },
+  { key: 'accountType', label: 'Type', type: 'string' },
+  { key: 'primaryPhone', label: 'Phone', type: 'string' },
+  { key: 'primaryEmail', label: 'Email', type: 'string' },
+  { key: 'createdAt', label: 'Created At', type: 'date' },
+];
+
+const CONTACT_COLUMNS: ExportColumn[] = [
+  { key: 'accountName', label: 'Account', type: 'string' },
+  { key: 'name', label: 'Name', type: 'string' },
+  { key: 'role', label: 'Role', type: 'string' },
+  { key: 'email', label: 'Email', type: 'string' },
+  { key: 'phone', label: 'Phone', type: 'string' },
+];
+
 export const ENTITY_COLUMNS: Record<ExportEntity, ExportColumn[]> = {
   customer: CUSTOMER_COLUMNS,
   supplier: SUPPLIER_COLUMNS,
@@ -164,6 +209,10 @@ export const ENTITY_COLUMNS: Record<ExportEntity, ExportColumn[]> = {
   ledger: LEDGER_COLUMNS,
   stock: STOCK_COLUMNS,
   employee: EMPLOYEE_COLUMNS,
+  lead: LEAD_COLUMNS,
+  opportunity: OPPORTUNITY_COLUMNS,
+  account: ACCOUNT_COLUMNS,
+  contact: CONTACT_COLUMNS,
 };
 
 export class ExportEngine {
@@ -201,6 +250,14 @@ export class ExportEngine {
         return this.queryStock(tenantId, filters);
       case 'employee':
         return this.queryEmployees(tenantId);
+      case 'lead':
+        return this.queryLeads(tenantId);
+      case 'opportunity':
+        return this.queryOpportunities(tenantId);
+      case 'account':
+        return this.queryAccounts(tenantId);
+      case 'contact':
+        return this.queryContacts(tenantId);
     }
   }
 
@@ -268,7 +325,8 @@ export class ExportEngine {
     const conditions: SQL[] = [eq(invoices.tenantId, tenantId)];
     if (filters.dateFrom) conditions.push(gte(invoices.invoiceDate, new Date(filters.dateFrom)));
     if (filters.dateTo) conditions.push(lte(invoices.invoiceDate, new Date(filters.dateTo)));
-    if (filters.status) conditions.push(eq(invoices.status, filters.status as typeof invoices.$inferSelect.status));
+    if (filters.status)
+      conditions.push(eq(invoices.status, filters.status as typeof invoices.$inferSelect.status));
 
     return this.db
       .select({
@@ -299,7 +357,8 @@ export class ExportEngine {
     const conditions: SQL[] = [eq(payments.tenantId, tenantId)];
     if (filters.dateFrom) conditions.push(gte(payments.paymentDate, new Date(filters.dateFrom)));
     if (filters.dateTo) conditions.push(lte(payments.paymentDate, new Date(filters.dateTo)));
-    if (filters.status) conditions.push(eq(payments.status, filters.status as typeof payments.$inferSelect.status));
+    if (filters.status)
+      conditions.push(eq(payments.status, filters.status as typeof payments.$inferSelect.status));
 
     return this.db
       .select({
@@ -323,9 +382,11 @@ export class ExportEngine {
     filters: ExportFilters
   ): Promise<Array<Record<string, unknown>>> {
     const conditions: SQL[] = [eq(inventoryLedger.tenantId, tenantId)];
-    if (filters.dateFrom) conditions.push(gte(inventoryLedger.createdAt, new Date(filters.dateFrom)));
+    if (filters.dateFrom)
+      conditions.push(gte(inventoryLedger.createdAt, new Date(filters.dateFrom)));
     if (filters.dateTo) conditions.push(lte(inventoryLedger.createdAt, new Date(filters.dateTo)));
-    if (filters.warehouseId !== undefined) conditions.push(eq(inventoryLedger.warehouseId, filters.warehouseId));
+    if (filters.warehouseId !== undefined)
+      conditions.push(eq(inventoryLedger.warehouseId, filters.warehouseId));
 
     return this.db
       .select({
@@ -352,7 +413,8 @@ export class ExportEngine {
     filters: ExportFilters
   ): Promise<Array<Record<string, unknown>>> {
     const conditions: SQL[] = [eq(projectionStockLevel.tenantId, tenantId)];
-    if (filters.warehouseId !== undefined) conditions.push(eq(projectionStockLevel.warehouseId, filters.warehouseId));
+    if (filters.warehouseId !== undefined)
+      conditions.push(eq(projectionStockLevel.warehouseId, filters.warehouseId));
 
     return this.db
       .select({
@@ -388,6 +450,70 @@ export class ExportEngine {
       .leftJoin(departments, eq(departments.id, employees.departmentId))
       .leftJoin(designations, eq(designations.id, employees.designationId))
       .where(and(eq(employees.tenantId, tenantId), isNull(employees.deletedAt)))
+      .limit(MAX_EXPORT_ROWS);
+  }
+
+  private async queryLeads(tenantId: number): Promise<Array<Record<string, unknown>>> {
+    return this.db
+      .select({
+        displayName: crmLeads.displayName,
+        companyName: crmLeads.companyName,
+        phone: crmLeads.phone,
+        email: crmLeads.email,
+        source: crmLeads.source,
+        stage: crmLeads.stage,
+        createdAt: crmLeads.createdAt,
+      })
+      .from(crmLeads)
+      .where(eq(crmLeads.tenantId, tenantId))
+      .orderBy(desc(crmLeads.createdAt))
+      .limit(MAX_EXPORT_ROWS);
+  }
+
+  private async queryOpportunities(tenantId: number): Promise<Array<Record<string, unknown>>> {
+    return this.db
+      .select({
+        name: crmOpportunities.name,
+        dealType: crmOpportunities.dealType,
+        stage: crmOpportunities.stage,
+        probability: crmOpportunities.probability,
+        value: crmOpportunities.value,
+        expectedCloseDate: crmOpportunities.expectedCloseDate,
+        createdAt: crmOpportunities.createdAt,
+      })
+      .from(crmOpportunities)
+      .where(eq(crmOpportunities.tenantId, tenantId))
+      .orderBy(desc(crmOpportunities.createdAt))
+      .limit(MAX_EXPORT_ROWS);
+  }
+
+  private async queryAccounts(tenantId: number): Promise<Array<Record<string, unknown>>> {
+    return this.db
+      .select({
+        name: crmAccounts.name,
+        accountType: crmAccounts.accountType,
+        primaryPhone: crmAccounts.primaryPhone,
+        primaryEmail: crmAccounts.primaryEmail,
+        createdAt: crmAccounts.createdAt,
+      })
+      .from(crmAccounts)
+      .where(eq(crmAccounts.tenantId, tenantId))
+      .orderBy(desc(crmAccounts.createdAt))
+      .limit(MAX_EXPORT_ROWS);
+  }
+
+  private async queryContacts(tenantId: number): Promise<Array<Record<string, unknown>>> {
+    return this.db
+      .select({
+        accountName: crmAccounts.name,
+        name: crmAccountContacts.name,
+        role: crmAccountContacts.role,
+        email: crmAccountContacts.email,
+        phone: crmAccountContacts.phone,
+      })
+      .from(crmAccountContacts)
+      .leftJoin(crmAccounts, eq(crmAccounts.id, crmAccountContacts.accountId))
+      .where(eq(crmAccountContacts.tenantId, tenantId))
       .limit(MAX_EXPORT_ROWS);
   }
 }

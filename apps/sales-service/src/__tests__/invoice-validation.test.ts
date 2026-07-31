@@ -43,6 +43,12 @@ vi.mock('@erp/db', () => ({
   projectionDashboardDaily: { tenantId: 'tenant_id', branchId: 'branch_id', date: 'date' },
   projectionCustomerBalance: { tenantId: 'tenant_id', customerId: 'customer_id' },
   quotations: {},
+  numberSeriesConfig: {
+    tenantId: 'tenant_id',
+    seriesType: 'series_type',
+    financialYear: 'financial_year',
+    currentSeq: 'current_seq',
+  },
   inventoryLedger: {},
   sagaLog: {},
   webhookSubscriptions: {
@@ -81,6 +87,7 @@ function makeTrx(script: unknown[]) {
     'update',
     'set',
     'onConflictDoUpdate',
+    'onConflictDoNothing',
   ]) {
     chainable[m] = vi.fn(() => chainable);
   }
@@ -213,7 +220,7 @@ describe('InvoiceService.create walk-in sale (customerId 0)', () => {
   });
 });
 
-describe('ES-14 — InvoiceService.confirm duplicate invoice number + period closure', () => {
+describe('ES-14/C-7 — InvoiceService.confirm number generation + period closure', () => {
   const invoiceRow = {
     id: 1,
     tenantId: 1,
@@ -224,24 +231,18 @@ describe('ES-14 — InvoiceService.confirm duplicate invoice number + period clo
     invoiceDate: new Date(),
     warehouseId: 7,
   };
+  // C-7: invoiceNumber is now server-generated (NumberSeriesEngine) — these two script
+  // entries (select existing config, update...returning) replace the old client-supplied-
+  // number duplicate check, which no longer exists as a code path.
+  const numberSeriesScript = [
+    [{ currentSeq: 0, formatTemplate: 'INV/{FY-SHORT}/{SEQ:5}' }],
+    [{ currentSeq: 1, formatTemplate: 'INV/{FY-SHORT}/{SEQ:5}' }],
+  ];
 
-  it('rejects confirm() when the invoice number already exists for another invoice', async () => {
+  it('confirms and returns the server-generated invoice number when the period is open', async () => {
     const script = [
       [invoiceRow], // select invoice
-      [{ id: 999 }], // duplicate check — a DIFFERENT invoice already has this number
-    ];
-    const db = makeDb(script);
-    const svc = new InvoiceService(db as never);
-
-    await expect(svc.confirm(1, 1, 'INV-DUPLICATE', 99)).rejects.toMatchObject({
-      code: 'INVOICE_NUMBER_DUPLICATE',
-    });
-  });
-
-  it('allows confirm() when the only invoice with that number is itself', async () => {
-    const script = [
-      [invoiceRow], // select invoice
-      [{ id: 1 }], // duplicate check — same invoice (not a real clash)
+      ...numberSeriesScript,
       [{ status: 'OPEN' }], // period closure check — period is open
       [], // select lines (none)
       undefined, // update invoices status
@@ -257,19 +258,19 @@ describe('ES-14 — InvoiceService.confirm duplicate invoice number + period clo
     const db = makeDb(script);
     const svc = new InvoiceService(db as never);
 
-    await expect(svc.confirm(1, 1, 'INV-0001', 99)).resolves.toBeUndefined();
+    await expect(svc.confirm(1, 1, 99)).resolves.toMatch(/^INV\/\d{2}-\d{2}\/00001$/);
   });
 
   it('rejects confirm() when the invoice date falls in a closed accounting period', async () => {
     const script = [
       [invoiceRow], // select invoice
-      [{ id: 1 }], // duplicate check — no real clash
+      ...numberSeriesScript,
       [{ status: 'CLOSED' }], // period closure check — period is closed
     ];
     const db = makeDb(script);
     const svc = new InvoiceService(db as never);
 
-    await expect(svc.confirm(1, 1, 'INV-0001', 99)).rejects.toMatchObject({
+    await expect(svc.confirm(1, 1, 99)).rejects.toMatchObject({
       code: 'PERIOD_CLOSED',
     });
   });

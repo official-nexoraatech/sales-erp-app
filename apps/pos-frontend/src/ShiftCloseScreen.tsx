@@ -1,10 +1,12 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { Wallet } from 'lucide-react';
+import { Wallet, AlertTriangle } from 'lucide-react';
 import { authFetch } from './auth.js';
 import { getActiveSessionId, clearActiveSessionId, type PosSession } from './session.js';
 import { friendlyErrorMessage } from './posErrorMessages.js';
+import { getPendingSales } from './offlineDb.js';
+import { runBackgroundSync } from './swSync.js';
 import POSInput from './components/pos/POSInput.js';
 import POSButton from './components/pos/POSButton.js';
 import POSLogoutLink from './components/pos/POSLogoutLink.js';
@@ -19,6 +21,9 @@ export default function ShiftCloseScreen() {
   const [session, setSession] = useState<PosSession | null>(null);
   const [closingCash, setClosingCash] = useState('');
   const [loading, setLoading] = useState(false);
+  const [pendingCount, setPendingCount] = useState<number | null>(null);
+  const [stuckCount, setStuckCount] = useState(0);
+  const [syncing, setSyncing] = useState(false);
 
   useEffect(() => {
     if (!sessionId) return;
@@ -27,12 +32,44 @@ export default function ShiftCloseScreen() {
       .then((body: { data: PosSession } | null) => setSession(body?.data ?? null));
   }, [sessionId]);
 
+  // Closing a shift with sales still queued offline would compute Expected Cash from the
+  // server's totalSales only (which excludes anything not yet synced) and, once the
+  // session is CLOSED, those queued sales can never sync afterward (the server rejects
+  // with NO_OPEN_SESSION) — a permanent, unreconcilable gap. Refuse to close until the
+  // queue is empty, or the cashier has gone back to POS to resolve any stuck items there.
+  const refreshPendingCount = useCallback(() => {
+    void getPendingSales().then((sales) => {
+      setPendingCount(sales.length);
+      setStuckCount(sales.filter((s) => s.status === 'stuck').length);
+    });
+  }, []);
+
+  useEffect(refreshPendingCount, [refreshPendingCount]);
+
+  async function handleSyncNow() {
+    setSyncing(true);
+    try {
+      const result = await runBackgroundSync();
+      if (result.syncedSales > 0) {
+        toast.success(`Synced ${result.syncedSales} pending sale(s)`);
+      }
+    } finally {
+      setSyncing(false);
+      refreshPendingCount();
+    }
+  }
+
   const runningExpectedCash = session
     ? Number(session.openingCash) + Number(session.totalSales)
     : null;
 
+  const hasPending = (pendingCount ?? 0) > 0;
+
   const canSubmit =
-    closingCash.trim() !== '' && !isNaN(Number(closingCash)) && Number(closingCash) >= 0;
+    closingCash.trim() !== '' &&
+    !isNaN(Number(closingCash)) &&
+    Number(closingCash) >= 0 &&
+    !hasPending;
 
   async function handleSubmit() {
     if (!sessionId || !canSubmit) return;
@@ -91,6 +128,38 @@ export default function ShiftCloseScreen() {
               <span>Expected cash</span>
               <span>₹{runningExpectedCash.toFixed(2)}</span>
             </div>
+          </div>
+        )}
+
+        {hasPending && (
+          <div className="rounded-xl border border-warning bg-warning-bg p-3 text-sm space-y-2">
+            <div className="flex items-start gap-2 text-warning font-medium">
+              <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+              <span>
+                {pendingCount} sale{pendingCount === 1 ? '' : 's'} haven&apos;t synced to the server
+                yet. Closing now would leave them out of Expected Cash and they can&apos;t sync
+                after the shift closes.
+              </span>
+            </div>
+            {stuckCount > 0 && (
+              <p className="text-secondary">
+                {stuckCount} of these need attention (e.g. a stock conflict) — go back to the till
+                to resolve them first.
+              </p>
+            )}
+            {(pendingCount ?? 0) - stuckCount > 0 && (
+              <POSButton
+                size="sm"
+                variant="outline"
+                loading={syncing}
+                onClick={() => void handleSyncNow()}
+              >
+                Sync now
+              </POSButton>
+            )}
+            <POSButton size="sm" variant="ghost" onClick={() => navigate('/')}>
+              Back to till
+            </POSButton>
           </div>
         )}
 

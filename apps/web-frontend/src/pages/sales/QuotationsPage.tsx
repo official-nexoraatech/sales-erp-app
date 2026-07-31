@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { Eye, Send, ArrowRightLeft, Check, X } from 'lucide-react';
-import { quotationApi } from '../../api/endpoints.js';
+import { quotationApi, whatsappCommerceApi } from '../../api/endpoints.js';
 import { useDebounce } from '../../hooks/useDebounce.js';
 import { useAuthStore } from '../../store/auth.store.js';
 import { PERMISSIONS } from '../../constants/permissions.js';
@@ -12,6 +12,7 @@ import ERPDataGrid, {
   type ERPColumnDef,
   type ERPRowAction,
 } from '../../components/erp/ERPDataGrid.js';
+import ERPEmptyState from '../../components/erp/ERPEmptyState.js';
 import Button from '../../components/ui/Button.js';
 import Badge from '../../components/ui/Badge.js';
 import Input from '../../components/ui/Input.js';
@@ -37,6 +38,16 @@ const STATUS_COLORS: Record<string, 'default' | 'success' | 'warning' | 'danger'
   CONVERTED: 'success',
   EXPIRED: 'danger',
   REJECTED: 'danger',
+};
+
+const STATUS_DESCRIPTIONS: Record<string, string> = {
+  DRAFT: 'Not yet sent to the customer.',
+  SENT: "Sent — awaiting the customer's response.",
+  VIEWED: 'The customer has opened it.',
+  ACCEPTED: 'Customer agreed — ready to convert to an invoice.',
+  CONVERTED: 'Already converted to an invoice.',
+  EXPIRED: 'Past its "Valid Until" date — can still be accepted or rejected.',
+  REJECTED: 'Customer declined.',
 };
 
 export default function QuotationsPage() {
@@ -69,6 +80,19 @@ export default function QuotationsPage() {
 
   const rows: Quotation[] = ((data as Record<string, unknown>)?.content as Quotation[]) ?? [];
   const totalElements = ((data as Record<string, unknown>)?.totalElements as number) ?? 0;
+
+  // CRM-ROADMAP Phase 4, Feature 2 — WhatsApp Commerce: minimal ERP-side UI, just an
+  // order-source indicator on this existing list, per the roadmap's own spec.
+  const { data: whatsappOrdersData } = useQuery({
+    queryKey: ['whatsapp-orders'],
+    queryFn: () => whatsappCommerceApi.listOrders(),
+    staleTime: 60_000,
+  });
+  const whatsappQuotationIds = new Set(
+    ((whatsappOrdersData as { content?: Array<{ quotationId: number | null }> })?.content ?? [])
+      .map((o) => o.quotationId)
+      .filter((id): id is number => id !== null)
+  );
 
   const sendMutation = useMutation({
     mutationFn: (id: number) => quotationApi.send(id),
@@ -110,6 +134,12 @@ export default function QuotationsPage() {
     { key: 'quotationNumber', header: 'Number', mono: true, sortable: true },
     { key: 'customerName', header: 'Customer', render: (r) => r.customerName ?? r.customerId },
     {
+      key: 'source',
+      header: 'Source',
+      render: (r) =>
+        whatsappQuotationIds.has(r.id) ? <Badge label="WhatsApp" color="green" /> : null,
+    },
+    {
       key: 'grandTotal',
       header: 'Total',
       align: 'right',
@@ -130,7 +160,11 @@ export default function QuotationsPage() {
       key: 'status',
       header: 'Status',
       sortable: true,
-      render: (r) => <Badge variant={STATUS_COLORS[r.status] ?? 'default'}>{r.status}</Badge>,
+      render: (r) => (
+        <Badge variant={STATUS_COLORS[r.status] ?? 'default'} title={STATUS_DESCRIPTIONS[r.status]}>
+          {r.status}
+        </Badge>
+      ),
     },
   ];
 
@@ -188,7 +222,12 @@ export default function QuotationsPage() {
     <div>
       <ERPPageHeader variant="list" title="Quotations" subtitle="Manage customer quotations">
         {canCreateQuotation && (
-          <Button onClick={() => navigate('/sales/quotations/new')}>+ New Quotation</Button>
+          <Button
+            data-tour-id="sales-quotations-create-button"
+            onClick={() => navigate('/sales/quotations/new')}
+          >
+            + New Quotation
+          </Button>
         )}
       </ERPPageHeader>
 
@@ -200,14 +239,18 @@ export default function QuotationsPage() {
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
-        <Select value={status} onChange={(e) => setStatus(e.target.value)} className="w-44">
-          <option value="">All Statuses</option>
-          {['DRAFT', 'SENT', 'VIEWED', 'ACCEPTED', 'CONVERTED', 'EXPIRED', 'REJECTED'].map((s) => (
-            <option key={s} value={s}>
-              {s}
-            </option>
-          ))}
-        </Select>
+        <div data-tour-id="sales-quotations-status-filter">
+          <Select value={status} onChange={(e) => setStatus(e.target.value)} className="w-44">
+            <option value="">All Statuses</option>
+            {['DRAFT', 'SENT', 'VIEWED', 'ACCEPTED', 'CONVERTED', 'EXPIRED', 'REJECTED'].map(
+              (s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              )
+            )}
+          </Select>
+        </div>
       </div>
 
       <ERPDataGrid
@@ -215,6 +258,25 @@ export default function QuotationsPage() {
         data={rows}
         isLoading={isLoading}
         rowKey="id"
+        emptyState={
+          debouncedSearch || status ? (
+            <ERPEmptyState type="no-results" />
+          ) : (
+            <ERPEmptyState
+              type="no-data"
+              title="No quotations yet"
+              description="Create a quotation to send pricing to a prospective customer before they commit."
+              {...(canCreateQuotation
+                ? {
+                    action: {
+                      label: '+ New Quotation',
+                      onClick: () => navigate('/sales/quotations/new'),
+                    },
+                  }
+                : {})}
+            />
+          )
+        }
         pagination={{ page, pageSize, total: totalElements }}
         onPageChange={setPage}
         onPageSizeChange={(size) => {

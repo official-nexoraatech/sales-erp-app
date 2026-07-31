@@ -38,7 +38,7 @@ export default function CTASection() {
           <Button
             size="lg"
             variant="ghost"
-            className="justify-center text-white hover:bg-white/10 hover:text-white"
+            className="justify-center text-marketing-ink hover:bg-white/10 hover:text-marketing-ink"
             onClick={() => navigate('/contact')}
           >
             Talk to Sales

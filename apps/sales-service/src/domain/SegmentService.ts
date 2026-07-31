@@ -1,5 +1,5 @@
 import { and, eq, gt, gte, ilike, lt, lte, ne, or, sql, type SQL } from 'drizzle-orm';
-import { customers } from '@erp/db';
+import { customers, crmSegmentMembershipCache } from '@erp/db';
 import type { ErpDatabase } from '@erp/db';
 import { NotFoundError, ValidationError } from '@erp/types';
 
@@ -16,7 +16,22 @@ export type PrebuiltSegmentCode = (typeof PREBUILT_SEGMENTS)[number];
 
 export interface SegmentFilterRule {
   field: string;
-  operator: 'eq' | 'neq' | 'gt' | 'gte' | 'lt' | 'lte' | 'contains';
+  operator:
+    | 'eq'
+    | 'neq'
+    | 'gt'
+    | 'gte'
+    | 'lt'
+    | 'lte'
+    | 'contains'
+    // CRM-ROADMAP Phase 2, Feature 7 (Advanced Segmentation Engine) — behavioral/RFM
+    // operators, handled entirely separately from the 7 above (see buildCondition) rather
+    // than folded into compareColumn/compareText/compareNumeric's switches, specifically so
+    // the existing 7 operators' evaluation logic is untouched by this feature (this feature's
+    // own DoD requires proving existing segments evaluate identically).
+    | 'between_dates'
+    | 'purchased_category'
+    | 'rfm_score';
   value: unknown;
 }
 
@@ -47,6 +62,11 @@ const FIELD_COLUMNS = {
 } as const;
 
 type FieldKey = keyof typeof FIELD_COLUMNS;
+
+// CRM-ROADMAP Phase 2, Feature 7 — the only FIELD_COLUMNS entries valid as a `between_dates`
+// target; every other column (numeric/text/enum) would silently accept the operator without
+// this explicit check, since drizzle's gte/lte don't themselves enforce a date type.
+const DATE_FIELDS = ['createdAt', 'dateOfBirth', 'anniversary'] as const;
 
 // CP-3: purchase-behavior aggregates, scoped per-tenant, matching the exact subquery shape
 // already used by prebuiltWhere's 'high-value'/'overdue-30'/'no-purchase-60-days' cases — kept
@@ -135,6 +155,19 @@ export class SegmentService {
   }
 
   private static buildCondition(tenantId: number, rule: SegmentFilterRule): SQL {
+    // CRM-ROADMAP Phase 2, Feature 7 — these three don't route through the
+    // customField/JSON/computed/column dispatch below at all (purchased_category/rfm_score
+    // don't meaningfully use `field`; between_dates only applies to a date-typed column).
+    if (rule.operator === 'between_dates') {
+      return SegmentService.betweenDatesCondition(rule.field, rule.value);
+    }
+    if (rule.operator === 'purchased_category') {
+      return SegmentService.purchasedCategoryCondition(tenantId, rule.value);
+    }
+    if (rule.operator === 'rfm_score') {
+      return SegmentService.rfmScoreCondition(tenantId, rule.value);
+    }
+
     if (rule.field.startsWith(CUSTOM_FIELD_PREFIX)) {
       const key = rule.field.slice(CUSTOM_FIELD_PREFIX.length);
       if (!key)
@@ -242,6 +275,134 @@ export class SegmentService {
       default:
         throw new ValidationError(`Unsupported segment operator: ${operator}`);
     }
+  }
+
+  // Inclusive on both ends — a customer whose date field falls exactly on `from` or `to` is
+  // included (the classic off-by-one this operator's DoD calls out explicitly). Only date-typed
+  // FIELD_COLUMNS entries are valid targets (createdAt, dateOfBirth, anniversary) — the other
+  // field categories (JSON text, computed numeric, custom) are never date-shaped in this schema.
+  private static betweenDatesCondition(field: string, value: unknown): SQL {
+    const { from, to } = (value ?? {}) as { from?: string; to?: string };
+    if (!from || !to) throw new ValidationError('between_dates requires a { from, to } value');
+    if (!DATE_FIELDS.includes(field as (typeof DATE_FIELDS)[number])) {
+      throw new ValidationError(
+        `between_dates is only supported on a date field (${DATE_FIELDS.join(', ')}), got: ${field}`
+      );
+    }
+    const col = FIELD_COLUMNS[field as FieldKey];
+    return and(gte(col, from as never), lte(col, to as never)) as SQL;
+  }
+
+  // No join to `categories` — filters on items.category_id directly, so a since-deleted
+  // category (categories.deletedAt set) still correctly matches historical purchases rather
+  // than crashing or silently excluding them (the roadmap's own stated edge case).
+  private static purchasedCategoryCondition(tenantId: number, value: unknown): SQL {
+    const { categoryId, withinDays } = (value ?? {}) as {
+      categoryId?: number;
+      withinDays?: number;
+    };
+    if (!categoryId) throw new ValidationError('purchased_category requires a categoryId');
+    const days = withinDays && withinDays > 0 ? withinDays : 36_500; // no window given = "ever"
+    return sql`EXISTS (
+      SELECT 1 FROM invoice_lines il
+      JOIN invoices i ON i.id = il.invoice_id AND i.tenant_id = ${tenantId}
+      JOIN items it ON it.id = il.item_id
+      WHERE i.customer_id = ${customers.id}
+        AND it.category_id = ${categoryId}
+        AND i.status NOT IN ('DRAFT','CANCELLED')
+        AND i.invoice_date >= now() - (${days} || ' days')::interval
+    )` as SQL;
+  }
+
+  // Raw-threshold RFM (Recency/Frequency/Monetary) filter — reuses the exact same subquery
+  // fragments COMPUTED_NUMERIC_FIELDS already exposes (daysSinceLastPurchase/orderCount/
+  // lifetimeValue), per "no new engine": this is deliberately NOT population-wide percentile/
+  // quintile RFM scoring (which would require ranking every customer against every other,
+  // expensive to do live on every preview keystroke — that style of RFM is exactly the kind of
+  // computation 07-PERFORMANCE-PLAN.md §6 wants nightly-cached, not recomputed live). A raw
+  // threshold filter is live-computable and is itself a legitimate, common RFM segmentation
+  // style; genuine percentile ranking is a documented follow-up, not built here.
+  private static rfmScoreCondition(tenantId: number, value: unknown): SQL {
+    const { maxRecencyDays, minFrequency, minMonetary } = (value ?? {}) as {
+      maxRecencyDays?: number;
+      minFrequency?: number;
+      minMonetary?: number;
+    };
+    const conditions: SQL[] = [];
+    if (maxRecencyDays !== undefined) {
+      conditions.push(
+        sql`${COMPUTED_NUMERIC_FIELDS['daysSinceLastPurchase']!(tenantId)} <= ${maxRecencyDays}`
+      );
+    }
+    if (minFrequency !== undefined) {
+      conditions.push(sql`${COMPUTED_NUMERIC_FIELDS['orderCount']!(tenantId)} >= ${minFrequency}`);
+    }
+    if (minMonetary !== undefined) {
+      conditions.push(
+        sql`${COMPUTED_NUMERIC_FIELDS['lifetimeValue']!(tenantId)} >= ${minMonetary}`
+      );
+    }
+    if (conditions.length === 0) {
+      throw new ValidationError(
+        'rfm_score requires at least one of maxRecencyDays/minFrequency/minMonetary'
+      );
+    }
+    return and(...conditions) as SQL;
+  }
+
+  /** True only for operators expensive enough to warrant nightly caching (07-PERFORMANCE-PLAN.md
+   * §6) — `between_dates` is a cheap indexed-column comparison and is deliberately excluded. */
+  static isBehavioralOperator(operator: SegmentFilterRule['operator']): boolean {
+    return operator === 'purchased_category' || operator === 'rfm_score';
+  }
+
+  static needsMembershipCache(def: SegmentFilterDefinition | null | undefined): boolean {
+    if (!def) return false;
+    return def.rules.some((r) => SegmentService.isBehavioralOperator(r.operator));
+  }
+
+  /** Recomputes and stores this segment's membership — the nightly job's entry point. Always
+   * a full delete-then-insert (segment membership is a snapshot, not incrementally maintained). */
+  static async refreshMembershipCache(
+    db: ErpDatabase,
+    tenantId: number,
+    segmentId: number,
+    where: SQL
+  ): Promise<number> {
+    const rows = await db.select({ id: customers.id }).from(customers).where(where);
+    await db.transaction(async (trx) => {
+      await trx
+        .delete(crmSegmentMembershipCache)
+        .where(
+          and(
+            eq(crmSegmentMembershipCache.tenantId, tenantId),
+            eq(crmSegmentMembershipCache.segmentId, segmentId)
+          )
+        );
+      if (rows.length > 0) {
+        await trx
+          .insert(crmSegmentMembershipCache)
+          .values(rows.map((r) => ({ tenantId, segmentId, customerId: r.id })));
+      }
+    });
+    return rows.length;
+  }
+
+  static async getCachedMembership(
+    db: ErpDatabase,
+    tenantId: number,
+    segmentId: number
+  ): Promise<number[]> {
+    const rows = await db
+      .select({ customerId: crmSegmentMembershipCache.customerId })
+      .from(crmSegmentMembershipCache)
+      .where(
+        and(
+          eq(crmSegmentMembershipCache.tenantId, tenantId),
+          eq(crmSegmentMembershipCache.segmentId, segmentId)
+        )
+      );
+    return rows.map((r) => r.customerId);
   }
 
   static async countMatching(db: ErpDatabase, where: SQL): Promise<number> {

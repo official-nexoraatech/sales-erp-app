@@ -58,6 +58,38 @@ describe.skipIf(!DB_URL)('Customer integration', () => {
     expect(created!.version).toBe(0);
   });
 
+  // CRM-ROADMAP Phase 3, Feature 5 (Multi-language Communication).
+  it('persists preferredLanguage and defaults to null when omitted', async () => {
+    const [withLanguage] = await db
+      .insert(customers)
+      .values({
+        tenantId: TEST_TENANT,
+        branchId,
+        displayName: 'Priya Silks',
+        phone: '9876500001',
+        creditLimit: '0',
+        openingBalance: '0',
+        preferredLanguage: 'ta',
+        createdBy: 1,
+      })
+      .returning();
+    expect(withLanguage!.preferredLanguage).toBe('ta');
+
+    const [withoutLanguage] = await db
+      .insert(customers)
+      .values({
+        tenantId: TEST_TENANT,
+        branchId,
+        displayName: 'No Preference Customer',
+        phone: '9876500002',
+        creditLimit: '0',
+        openingBalance: '0',
+        createdBy: 1,
+      })
+      .returning();
+    expect(withoutLanguage!.preferredLanguage).toBeNull();
+  });
+
   it('stores GSTIN as encrypted ciphertext', async () => {
     const encKey = process.env['FIELD_ENCRYPTION_KEY'] ?? '0'.repeat(64);
     const plainGstin = '27AAPFU0939F1ZV';

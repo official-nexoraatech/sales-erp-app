@@ -50,13 +50,18 @@ import {
   handleChequeBounced,
 } from './consumers/PaymentAccountingConsumer.js';
 import { handleSaleReturnApproved } from './consumers/SaleReturnAccountingConsumer.js';
+import { handlePurchaseReturnApproved } from './consumers/PurchaseReturnAccountingConsumer.js';
 import { handleExpenseApproved, handleExpensePaid } from './consumers/ExpenseAccountingConsumer.js';
 import {
   handlePayrollRunApproved,
   handlePayrollRunDisbursed,
 } from './consumers/PayrollAccountingConsumer.js';
-import { handleEmployeeLoanDisbursed } from './consumers/EmployeeLoanAccountingConsumer.js';
+import {
+  handleEmployeeLoanDisbursed,
+  handleEmployeeLoanRepaid,
+} from './consumers/EmployeeLoanAccountingConsumer.js';
 import { handleRcmLiabilityPosted } from './consumers/RcmAccountingConsumer.js';
+import { handleStockAdjustmentPosted } from './consumers/StockAdjustmentAccountingConsumer.js';
 
 initializeTelemetry({ serviceName: 'accounting-service' });
 
@@ -118,6 +123,9 @@ async function bootstrap(): Promise<void> {
       case 'SALE_RETURN_APPROVED':
         await handleSaleReturnApproved(event, db);
         break;
+      case 'PURCHASE_RETURN_APPROVED':
+        await handlePurchaseReturnApproved(event, db);
+        break;
       case 'EXPENSE_APPROVED':
         await handleExpenseApproved(event, db);
         break;
@@ -133,8 +141,14 @@ async function bootstrap(): Promise<void> {
       case 'EMPLOYEE_LOAN_DISBURSED':
         await handleEmployeeLoanDisbursed(event, db);
         break;
+      case 'EMPLOYEE_LOAN_REPAID':
+        await handleEmployeeLoanRepaid(event, db);
+        break;
       case 'RCM_LIABILITY_POSTED':
         await handleRcmLiabilityPosted(event, db);
+        break;
+      case 'STOCK_ADJUSTMENT_POSTED':
+        await handleStockAdjustmentPosted(event, db);
         break;
       default:
         logger.warn({ eventType: event.eventType }, 'Unhandled event type in accounting consumer');
@@ -150,12 +164,15 @@ async function bootstrap(): Promise<void> {
     'erp.supplier.payment.made',
     'erp.cheque.bounced',
     'erp.sale.return.approved',
+    'erp.purchase.return.approved',
     'erp.expense.approved',
     'erp.expense.paid',
     'erp.payroll.run.approved',
     'erp.payroll.run.disbursed',
     'erp.employee.loan.disbursed',
+    'erp.employee.loan.repaid',
     'erp.rcm.liability.posted',
+    'erp.stock.adjustment.posted',
   ];
 
   const consumer = new PlatformEventConsumer(

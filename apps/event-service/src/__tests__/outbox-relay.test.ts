@@ -13,12 +13,14 @@ function makeKafkaMock(opts: { shouldFail?: boolean } = {}) {
 
   const producer = {
     connect: vi.fn().mockResolvedValue(undefined),
-    send: vi.fn().mockImplementation(async (payload: { messages: { headers: { eventId: string } }[] }) => {
-      callCount++;
-      if (opts.shouldFail) throw new Error('Kafka broker unavailable');
-      const eventId = payload.messages[0]?.headers?.eventId as string | undefined;
-      if (eventId) published.push(eventId);
-    }),
+    send: vi
+      .fn()
+      .mockImplementation(async (payload: { messages: { headers: { eventId: string } }[] }) => {
+        callCount++;
+        if (opts.shouldFail) throw new Error('Kafka broker unavailable');
+        const eventId = payload.messages[0]?.headers?.eventId as string | undefined;
+        if (eventId) published.push(eventId);
+      }),
     disconnect: vi.fn().mockResolvedValue(undefined),
   };
 
@@ -41,6 +43,7 @@ describe.skipIf(!DB_URL)('OutboxRelayWorker integration', () => {
 
   afterAll(async () => {
     await db.execute(sql`DELETE FROM outbox_events WHERE tenant_id = ${TENANT}`);
+    await db.execute(sql`DELETE FROM dlq_items WHERE tenant_id = ${TENANT}`);
   });
 
   it('publishes a pending outbox event within 2000ms', async () => {
@@ -118,6 +121,45 @@ describe.skipIf(!DB_URL)('OutboxRelayWorker integration', () => {
     // retry_count was 4, maxRetryAttempts is 5, so nextRetry = 5 >= 5 → dead-lettered
     expect(row?.failed).toBe(true);
     expect(row?.retry_count).toBe(5);
+
+    // PG-DLQ-VISIBILITY: dead-lettering an outbox event must also make it visible/
+    // replayable via the admin DLQ console (dlq.routes.ts only ever reads dlq_items).
+    const dlqRows = await db.execute(sql`
+      SELECT status, retry_count, tenant_id FROM dlq_items WHERE "offset" = ${eventId} AND tenant_id = ${TENANT}
+    `);
+    const dlqRow = dlqRows[0] as
+      { status: string; retry_count: number; tenant_id: number } | undefined;
+    expect(dlqRow?.status).toBe('PENDING');
+    expect(dlqRow?.retry_count).toBe(5);
+  }, 5000);
+
+  it('does not retry a failed row before its backoff window elapses', async () => {
+    const eventId = `test-backoff-${Date.now()}`;
+
+    await db.execute(sql`
+      INSERT INTO outbox_events (event_id, event_type, aggregate_type, aggregate_id, tenant_id, payload, published, retry_count, next_retry_at)
+      VALUES (${eventId}, 'TEST_BACKOFF', 'test', 3, ${TENANT}, ${'{}'}::jsonb, false, 1, NOW() + INTERVAL '1 hour')
+    `);
+
+    const { producer, getCallCount } = makeKafkaMock();
+    const worker = new OutboxRelayWorker({
+      db,
+      kafkaBrokers: ['localhost:29092'],
+      kafkaClientId: 'test-outbox-backoff',
+      pollIntervalMs: 100,
+      batchSize: 10,
+      maxRetryAttempts: 5,
+    });
+    (worker as unknown as { producer: typeof producer }).producer = producer;
+
+    await (worker as unknown as { processBatch: () => Promise<void> }).processBatch();
+
+    expect(getCallCount()).toBe(0);
+
+    const rows = await db.execute(
+      sql`SELECT published FROM outbox_events WHERE event_id = ${eventId}`
+    );
+    expect((rows[0] as { published: boolean } | undefined)?.published).toBe(false);
   }, 5000);
 });
 
@@ -142,13 +184,17 @@ describe('OutboxRelayWorker.stop() waits for in-flight batch', () => {
 
     // Create a deferred promise to simulate an in-flight batch
     let resolveBatch!: () => void;
-    const batchPromise = new Promise<void>((resolve) => { resolveBatch = resolve; });
+    const batchPromise = new Promise<void>((resolve) => {
+      resolveBatch = resolve;
+    });
     (worker as unknown as { currentBatch: Promise<void> }).currentBatch = batchPromise;
 
     const stopPromise = worker.stop();
 
     let stopResolved = false;
-    void stopPromise.then(() => { stopResolved = true; });
+    void stopPromise.then(() => {
+      stopResolved = true;
+    });
 
     // Batch is still pending — stop must not have resolved yet
     await new Promise<void>((r) => setTimeout(r, 30));

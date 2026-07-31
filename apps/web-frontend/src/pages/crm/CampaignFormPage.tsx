@@ -63,6 +63,7 @@ const TEMPLATE_VARS = [
   '{{shopName}}',
   '{{lastPurchaseDate}}',
   '{{lastPurchaseAmount}}',
+  '{{link}}',
 ];
 
 // CP-4 (Campaign Management Platform initiative): default Clothing-vertical campaign type
@@ -108,12 +109,22 @@ export default function CampaignFormPage() {
     scheduledAt: '',
     campaignType: '',
     branchId: '',
+    // CRM-ROADMAP Phase 2, Feature 6 — the destination a {{link}} token in the template
+    // resolves to; leave blank for a template with no tracked link (unchanged default).
+    linkUrl: '',
   });
   const [version, setVersion] = useState<number | null>(null);
   const [templateId, setTemplateId] = useState('');
+  // CRM-ROADMAP Phase 2, Feature 6 — A/B test, create-only (matches how scheduling/template
+  // loading are also create-only above) — exactly two variants (A = the main Message Template
+  // above, B = this second one), split 50/50.
+  const [abTestEnabled, setAbTestEnabled] = useState(false);
+  const [variantBMessage, setVariantBMessage] = useState('');
   const [previewCount, setPreviewCount] = useState<number | null>(null);
   const [previewMsg, setPreviewMsg] = useState('');
   const [previewFallbacks, setPreviewFallbacks] = useState<string[]>([]);
+  // CRM-ROADMAP Phase 1, Feature 6 — DLT/TRAI SMS Compliance.
+  const [previewDltError, setPreviewDltError] = useState('');
 
   const { data: segData, isLoading: segmentsLoading } = useQuery({
     queryKey: ['crm-segments'],
@@ -162,6 +173,7 @@ export default function CampaignFormPage() {
       scheduledAt: '',
       campaignType: (c.campaignType as string) ?? '',
       branchId: c.branchId ? String(c.branchId) : '',
+      linkUrl: (c.linkUrl as string) ?? '',
     });
     setVersion((c.version as number) ?? 0);
   }, [existingCampaign]);
@@ -180,6 +192,7 @@ export default function CampaignFormPage() {
       setPreviewCount((d?.recipientCount as number) ?? 0);
       setPreviewMsg((d?.sampleMessage as string) ?? '');
       setPreviewFallbacks((d?.fallbackWarnings as string[]) ?? []);
+      setPreviewDltError(d?.dltCompliant === false ? String(d?.dltError ?? '') : '');
     },
   });
 
@@ -193,6 +206,15 @@ export default function CampaignFormPage() {
         campaignType: form.campaignType || undefined,
         templateId: templateId ? Number(templateId) : undefined,
         branchId: form.branchId ? Number(form.branchId) : undefined,
+        linkUrl: form.linkUrl || undefined,
+        ...(abTestEnabled && variantBMessage.trim()
+          ? {
+              variants: [
+                { label: 'A', messageTemplate: form.messageTemplate, weight: 50 },
+                { label: 'B', messageTemplate: variantBMessage, weight: 50 },
+              ],
+            }
+          : {}),
       })) as { id?: number };
       if (form.scheduledAt && created?.id) {
         await crmApi.scheduleCampaign(created.id, {
@@ -205,7 +227,11 @@ export default function CampaignFormPage() {
       toast.success(form.scheduledAt ? 'Campaign created and scheduled' : 'Campaign created');
       navigate('/crm/campaigns');
     },
-    onError: () => toast.error('Failed to create campaign'),
+    // CRM-ROADMAP Phase 1, Feature 6: a DLT-non-compliant SMS campaign is now rejected at
+    // creation with a specific message (e.g. "This message does not match any registered DLT
+    // template") — a generic "Failed to create campaign" toast would hide exactly the
+    // actionable detail this feature's acceptance criteria requires surfacing.
+    onError: (err: Error) => toast.error(err.message || 'Failed to create campaign'),
   });
 
   const updateMut = useMutation({
@@ -218,6 +244,7 @@ export default function CampaignFormPage() {
         segmentId: form.segmentId ? Number(form.segmentId) : null,
         campaignType: form.campaignType || null,
         branchId: form.branchId ? Number(form.branchId) : null,
+        linkUrl: form.linkUrl || null,
       }),
     onSuccess: () => {
       toast.success('Campaign updated');
@@ -445,6 +472,14 @@ export default function CampaignFormPage() {
               </div>
             </div>
 
+            {/* CRM-ROADMAP Phase 2, Feature 6 — the destination a {{link}} token resolves to. */}
+            <Input
+              label="Tracked Link URL (optional)"
+              value={form.linkUrl}
+              onChange={(e) => f('linkUrl', e.target.value)}
+              placeholder="https://example.com/sale"
+            />
+
             {!isEdit && (
               <div>
                 <DateTimePicker
@@ -452,6 +487,35 @@ export default function CampaignFormPage() {
                   value={form.scheduledAt}
                   onChange={(v) => f('scheduledAt', v)}
                 />
+              </div>
+            )}
+
+            {/* CRM-ROADMAP Phase 2, Feature 6 — A/B test, create-only (variants can't be added
+                to an already-created campaign in this pass). */}
+            {!isEdit && (
+              <div className="border-t border-default pt-4">
+                <label className="flex items-center gap-2 text-xs font-medium text-secondary mb-1.5">
+                  <input
+                    type="checkbox"
+                    checked={abTestEnabled}
+                    onChange={(e) => setAbTestEnabled(e.target.checked)}
+                  />
+                  A/B test two message variants (50/50 split)
+                </label>
+                {abTestEnabled && (
+                  <div className="mt-2">
+                    <p className="text-xs text-secondary mb-1.5">
+                      Variant A is the Message Template above. Enter Variant B below.
+                    </p>
+                    <textarea
+                      value={variantBMessage}
+                      onChange={(e) => setVariantBMessage(e.target.value)}
+                      rows={4}
+                      placeholder="Variant B message…"
+                      className="w-full rounded-lg border border-default bg-surface-card text-primary text-sm px-3 py-2 resize-y"
+                    />
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -503,6 +567,7 @@ export default function CampaignFormPage() {
               Preview
             </h2>
             <Button
+              data-tour-id="crm-campaign-preview-recipients-button"
               variant="secondary"
               onClick={() => previewMut.mutate()}
               disabled={previewMut.isPending || !form.segmentId || !form.messageTemplate}
@@ -535,6 +600,14 @@ export default function CampaignFormPage() {
                     </p>
                   </div>
                 )}
+                {previewDltError && (
+                  <div className="rounded-lg bg-danger/10 border border-danger/30 p-3">
+                    <p className="text-xs font-semibold text-danger mb-1">
+                      DLT compliance — this campaign cannot be sent
+                    </p>
+                    <p className="text-xs text-secondary">{previewDltError}</p>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -551,6 +624,7 @@ export default function CampaignFormPage() {
                 ['{{shopName}}', 'Your shop name'],
                 ['{{lastPurchaseDate}}', "Customer's last purchase date"],
                 ['{{lastPurchaseAmount}}', "Customer's last purchase amount"],
+                ['{{link}}', 'Tracked link (requires Tracked Link URL above)'],
               ].map(([v, d]) => (
                 <li key={v} className="flex items-start gap-2 text-xs">
                   <code className="font-mono text-brand">{v}</code>

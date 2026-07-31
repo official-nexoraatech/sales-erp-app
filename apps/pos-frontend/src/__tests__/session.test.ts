@@ -35,17 +35,22 @@ describe('fetchActiveSession', () => {
       'fetch',
       vi.fn().mockResolvedValue(jsonResponse(200, { data: { id: 5, sessionNumber: 'S-1' } }))
     );
-    const session = await fetchActiveSession();
-    expect(session?.id).toBe(5);
+    const result = await fetchActiveSession();
+    expect(result).toEqual({ status: 'found', session: { id: 5, sessionNumber: 'S-1' } });
   });
 
-  it('returns null when the server has no open session for the caller', async () => {
+  it('reports not-found when the server has no open session for the caller', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(200, { data: null })));
-    expect(await fetchActiveSession()).toBeNull();
+    expect(await fetchActiveSession()).toEqual({ status: 'not-found' });
   });
 
-  it('returns null (rather than throwing) on a non-2xx response', async () => {
+  it('reports not-found (rather than throwing) on a non-2xx response', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(500, {})));
-    expect(await fetchActiveSession()).toBeNull();
+    expect(await fetchActiveSession()).toEqual({ status: 'not-found' });
+  });
+
+  it('reports offline (rather than throwing) when the network request itself fails', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')));
+    expect(await fetchActiveSession()).toEqual({ status: 'offline' });
   });
 });

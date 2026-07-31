@@ -28,12 +28,20 @@ export async function handlePayrollRunApproved(
   const totalNet = Number(p.totalNet ?? 0);
 
   if (totalNet <= 0) {
-    logger.warn({ payrollRunId: p.payrollRunId }, 'Accounting: skipping PAYROLL_RUN_APPROVED journal — zero net amount');
+    logger.warn(
+      { payrollRunId: p.payrollRunId },
+      'Accounting: skipping PAYROLL_RUN_APPROVED journal — zero net amount'
+    );
     return;
   }
 
+  // The payroll run's own periodMonth/periodYear is a more precise business date than
+  // event.occurredAt (when the approval was clicked) — an accountant catching up on last
+  // month's payroll approval should post into last month's period, not today's.
+  const postingDate = new Date(p.periodYear, p.periodMonth - 1, 1);
+
   try {
-    await JournalEngine.checkPeriodOpen(db, event.tenantId, new Date());
+    await JournalEngine.checkPeriodOpen(db, event.tenantId, postingDate);
 
     const journalEntry = await PostingMatrixService.buildJournalEntry(db, event.tenantId, {
       eventType: 'PAYROLL_RUN_APPROVED',
@@ -41,12 +49,19 @@ export async function handlePayrollRunApproved(
       referenceType: 'PAYROLL_RUN',
       referenceId: p.payrollRunId,
       amount: totalNet,
+      postingDate,
     });
 
     const result = await JournalEngine.post(db, event.tenantId, event.userId, journalEntry);
-    logger.info({ journalId: result.journalId, payrollRunId: p.payrollRunId }, 'Accounting: PAYROLL_RUN_APPROVED posted');
+    logger.info(
+      { journalId: result.journalId, payrollRunId: p.payrollRunId },
+      'Accounting: PAYROLL_RUN_APPROVED posted'
+    );
   } catch (err) {
-    logger.error({ err, payrollRunId: p.payrollRunId }, 'Accounting: failed to post PAYROLL_RUN_APPROVED');
+    logger.error(
+      { err, payrollRunId: p.payrollRunId },
+      'Accounting: failed to post PAYROLL_RUN_APPROVED'
+    );
     throw err;
   }
 }
@@ -59,12 +74,17 @@ export async function handlePayrollRunDisbursed(
   const totalNet = Number(p.totalNet ?? 0);
 
   if (totalNet <= 0) {
-    logger.warn({ payrollRunId: p.payrollRunId }, 'Accounting: skipping PAYROLL_RUN_DISBURSED journal — zero net amount');
+    logger.warn(
+      { payrollRunId: p.payrollRunId },
+      'Accounting: skipping PAYROLL_RUN_DISBURSED journal — zero net amount'
+    );
     return;
   }
 
+  const postingDate = new Date(event.occurredAt);
+
   try {
-    await JournalEngine.checkPeriodOpen(db, event.tenantId, new Date());
+    await JournalEngine.checkPeriodOpen(db, event.tenantId, postingDate);
 
     const journalEntry = await PostingMatrixService.buildJournalEntry(db, event.tenantId, {
       eventType: 'PAYROLL_RUN_DISBURSED',
@@ -72,12 +92,19 @@ export async function handlePayrollRunDisbursed(
       referenceType: 'PAYROLL_RUN',
       referenceId: p.payrollRunId,
       amount: totalNet,
+      postingDate,
     });
 
     const result = await JournalEngine.post(db, event.tenantId, event.userId, journalEntry);
-    logger.info({ journalId: result.journalId, payrollRunId: p.payrollRunId }, 'Accounting: PAYROLL_RUN_DISBURSED posted');
+    logger.info(
+      { journalId: result.journalId, payrollRunId: p.payrollRunId },
+      'Accounting: PAYROLL_RUN_DISBURSED posted'
+    );
   } catch (err) {
-    logger.error({ err, payrollRunId: p.payrollRunId }, 'Accounting: failed to post PAYROLL_RUN_DISBURSED');
+    logger.error(
+      { err, payrollRunId: p.payrollRunId },
+      'Accounting: failed to post PAYROLL_RUN_DISBURSED'
+    );
     throw err;
   }
 }

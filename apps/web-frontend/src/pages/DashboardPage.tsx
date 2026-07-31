@@ -26,10 +26,12 @@ import {
   IndianRupee,
   BarChart3,
   RefreshCw,
+  Truck,
 } from 'lucide-react';
-import { dashboardApi, salesDashboardApi } from '../api/endpoints.js';
+import { dashboardApi, salesDashboardApi, employeeApi, leaveApi } from '../api/endpoints.js';
 import { Link } from 'react-router-dom';
 import { useAuthStore } from '../store/auth.store.js';
+import { PERMISSIONS } from '../constants/permissions.js';
 import { ERPCardSkeleton } from '../components/erp/ERPSkeleton.js';
 import ERPStatCard from '../components/erp/ERPStatCard.js';
 import ChartCard from '../components/erp/ChartCard.js';
@@ -97,6 +99,7 @@ interface AlertData {
   overdueReceivables: { count: number; total_amount: number };
   pendingPurchaseOrders: { count: number };
   pendingGRNs: { count: number };
+  pendingDeliveries: { count: number };
   overduePayables: { count: number; total_amount: number };
 }
 
@@ -183,6 +186,28 @@ function useDataStaleness(dataUpdatedAt: number): boolean {
 
 export default function DashboardPage() {
   const user = useAuthStore((s) => s.user);
+  const hasPermission = useAuthStore((s) => s.hasPermission);
+
+  // ── HR at a Glance (2026-07-20 HR audit — DashboardPage had zero HR widgets) ──
+  const canViewEmployees = hasPermission(PERMISSIONS.EMPLOYEE_VIEW);
+  const canApproveLeave = hasPermission(PERMISSIONS.LEAVE_APPROVE);
+  const { data: headcountData } = useQuery({
+    queryKey: ['dashboard-hr-headcount'],
+    queryFn: () => employeeApi.list({ status: 'ACTIVE', size: 1 }),
+    enabled: canViewEmployees,
+    staleTime: 60_000,
+  });
+  const headcount = (headcountData as Record<string, unknown>)?.totalElements as number | undefined;
+
+  const { data: pendingLeaveData } = useQuery({
+    queryKey: ['dashboard-hr-pending-leave'],
+    queryFn: () => leaveApi.pendingApprovals(),
+    enabled: canApproveLeave,
+    staleTime: 60_000,
+  });
+  const pendingLeaveCount = (
+    (pendingLeaveData as Record<string, unknown>)?.content as unknown[] | undefined
+  )?.length;
 
   const {
     data: kpisRaw,
@@ -262,9 +287,37 @@ export default function DashboardPage() {
         </div>
       </div>
 
+      {/* HR at a Glance */}
+      {(canViewEmployees || canApproveLeave) && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {canViewEmployees && (
+            <Link to="/hr/employees">
+              <ERPStatCard
+                label="Active Employees"
+                value={headcount !== undefined ? String(headcount) : '–'}
+                icon={Users}
+                color="text-brand"
+              />
+            </Link>
+          )}
+          {canApproveLeave && (
+            <Link to="/hr/leaves">
+              <ERPStatCard
+                label="Pending Leave Approvals"
+                value={pendingLeaveCount !== undefined ? String(pendingLeaveCount) : '–'}
+                icon={Clock}
+                color={pendingLeaveCount ? 'text-warning' : 'text-brand'}
+              />
+            </Link>
+          )}
+        </div>
+      )}
+
       {/* Today KPIs */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <ERPStatCard label="Today's Sales" value={fmt(today?.today_sales)} color="text-brand" />
+        <div data-tour-id="dashboard-todays-sales-card">
+          <ERPStatCard label="Today's Sales" value={fmt(today?.today_sales)} color="text-brand" />
+        </div>
         <ERPStatCard
           label="Today's Collection"
           value={fmt(today?.today_collection)}
@@ -293,7 +346,10 @@ export default function DashboardPage() {
 
       {/* Outstanding balances */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <div className="bg-surface-card border border-default rounded-xl p-4 flex items-center gap-4">
+        <div
+          data-tour-id="dashboard-receivables-widget"
+          className="bg-surface-card border border-default rounded-xl p-4 flex items-center gap-4"
+        >
           <div className="w-10 h-10 rounded-full bg-info-bg flex items-center justify-center shrink-0">
             <IndianRupee size={18} className="text-info" />
           </div>
@@ -555,6 +611,14 @@ export default function DashboardPage() {
               color="border-default bg-surface-raised text-secondary"
             />
           )}
+          {(alerts?.pendingDeliveries.count ?? 0) > 0 && (
+            <AlertWidget
+              icon={Truck}
+              label="deliveries not yet dispatched"
+              count={alerts!.pendingDeliveries.count}
+              color="border-info bg-info-bg text-info"
+            />
+          )}
           {!alerts && <p className="text-secondary text-sm col-span-full">Loading alerts...</p>}
           {alerts &&
             Object.values({
@@ -563,6 +627,7 @@ export default function DashboardPage() {
               c: alerts.overduePayables.count,
               d: alerts.pendingPurchaseOrders.count,
               e: alerts.pendingGRNs.count,
+              f: alerts.pendingDeliveries.count,
             }).every((v) => v === 0) && (
               <p className="text-success text-sm col-span-full font-medium">
                 All clear — no action items today!

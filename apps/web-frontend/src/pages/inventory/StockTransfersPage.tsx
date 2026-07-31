@@ -9,6 +9,7 @@ import ERPDataGrid, {
   type ERPColumnDef,
   type ERPRowAction,
 } from '../../components/erp/ERPDataGrid.js';
+import ERPEmptyState from '../../components/erp/ERPEmptyState.js';
 import Button from '../../components/ui/Button.js';
 import Badge from '../../components/ui/Badge.js';
 import Select from '../../components/ui/Select.js';
@@ -35,6 +36,20 @@ const STATUS_COLORS: Record<string, 'default' | 'success' | 'warning' | 'danger'
   IN_TRANSIT: 'warning',
   RECEIVED: 'success',
   CANCELLED: 'danger',
+};
+
+const STATUS_DESCRIPTIONS: Record<string, string> = {
+  DRAFT: 'Not yet submitted — stock is unaffected at either warehouse.',
+  SUBMITTED: 'Awaiting approval.',
+  PENDING_APPROVAL: 'Awaiting approval.',
+  APPROVED: 'Approved — ready to dispatch. Stock is still at the source warehouse.',
+  DISPATCHED:
+    "Stock has been deducted from the source warehouse — it won't appear at the destination until someone confirms receipt there.",
+  IN_TRANSIT:
+    "Stock has been deducted from the source warehouse — it won't appear at the destination until someone confirms receipt there.",
+  RECEIVED: 'Complete — stock is now at the destination warehouse.',
+  CANCELLED:
+    'Cancelled. If it had already been dispatched, the stock was automatically added back to the source warehouse.',
 };
 
 export default function StockTransfersPage() {
@@ -101,7 +116,11 @@ export default function StockTransfersPage() {
       key: 'status',
       header: 'Status',
       sortable: true,
-      render: (r) => <Badge variant={STATUS_COLORS[r.status] ?? 'default'}>{r.status}</Badge>,
+      render: (r) => (
+        <Badge variant={STATUS_COLORS[r.status] ?? 'default'} title={STATUS_DESCRIPTIONS[r.status]}>
+          {r.status}
+        </Badge>
+      ),
     },
     { key: 'notes', header: 'Notes', render: (r) => r.notes ?? '–' },
     { key: 'createdAt', header: 'Created', sortable: true, render: (r) => formatDate(r.createdAt) },
@@ -147,7 +166,12 @@ export default function StockTransfersPage() {
         title="Stock Transfers"
         subtitle="Move stock between warehouses"
       >
-        <Button onClick={() => navigate('/inventory/transfers/new')}>+ New Transfer</Button>
+        <Button
+          data-tour-id="inventory-transfers-create-button"
+          onClick={() => navigate('/inventory/transfers/new')}
+        >
+          + New Transfer
+        </Button>
       </ERPPageHeader>
 
       <div className="flex flex-wrap gap-4 mb-4">
@@ -181,6 +205,21 @@ export default function StockTransfersPage() {
         data={transfers}
         isLoading={isLoading}
         rowKey="id"
+        emptyState={
+          debouncedSearch || status ? (
+            <ERPEmptyState type="no-results" />
+          ) : (
+            <ERPEmptyState
+              type="no-data"
+              title="No transfers yet"
+              description="Move stock from one warehouse to another with a transfer."
+              action={{
+                label: '+ New Transfer',
+                onClick: () => navigate('/inventory/transfers/new'),
+              }}
+            />
+          )
+        }
         pagination={{ page, pageSize, total: totalElements }}
         onPageChange={setPage}
         onPageSizeChange={(size) => {

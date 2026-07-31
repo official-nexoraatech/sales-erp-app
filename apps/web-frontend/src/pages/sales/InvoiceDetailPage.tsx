@@ -13,6 +13,7 @@ import Button from '../../components/ui/Button.js';
 import Badge from '../../components/ui/Badge.js';
 import Modal from '../../components/ui/Modal.js';
 import Input from '../../components/ui/Input.js';
+import InfoTooltip from '../../components/ui/InfoTooltip.js';
 import { formatDate, formatCurrency } from '../../lib/format.js';
 
 interface InvoiceLine {
@@ -58,6 +59,20 @@ const STATUS_COLORS: Record<string, 'default' | 'success' | 'warning' | 'danger'
   OVERDUE: 'danger',
 };
 
+const STATUS_DESCRIPTIONS: Record<string, string> = {
+  DRAFT:
+    "Saved but not yet real — no stock or accounting effect until confirmed. Only you (and others with access) can see it; the customer hasn't been billed yet.",
+  CONFIRMED:
+    'Booked for real — stock deducted, accounting posted, GST recorded, customer balance increased. Awaiting payment.',
+  PARTIALLY_PAID:
+    'Some payment has been recorded and allocated against this invoice; the Balance Due above is what remains.',
+  PAID: 'Fully paid — Balance Due is zero.',
+  CANCELLED:
+    'Reversed — its accounting entry was automatically reversed. If the customer already has the goods, a Sale Return (not this) is what brings stock back.',
+  OVERDUE:
+    'Confirmed and past its due date with balance still owing — a candidate for a payment follow-up.',
+};
+
 function openPdfInNewTab(blob: Blob) {
   const url = URL.createObjectURL(blob);
   window.open(url, '_blank');
@@ -75,7 +90,6 @@ export default function InvoiceDetailPage() {
   const canCancelInvoice = hasPermission(PERMISSIONS.INVOICE_CANCEL);
   const [showConfirm, setShowConfirm] = useState(false);
   const [showCancel, setShowCancel] = useState(false);
-  const [invoiceNum, setInvoiceNum] = useState('');
   const [cancelReason, setCancelReason] = useState('');
 
   const { data, isLoading } = useQuery({
@@ -87,7 +101,7 @@ export default function InvoiceDetailPage() {
   const invoice = data as InvoiceDetail;
 
   const confirmMutation = useMutation({
-    mutationFn: () => invoiceApi.confirm(Number(id), { invoiceNumber: invoiceNum }),
+    mutationFn: () => invoiceApi.confirm(Number(id)),
     onSuccess: () => {
       toast.success('Invoice confirmed');
       qc.invalidateQueries({ queryKey: ['invoice', id] });
@@ -124,16 +138,31 @@ export default function InvoiceDetailPage() {
       >
         <div className="flex flex-wrap items-center gap-3">
           <Badge variant={STATUS_COLORS[invoice.status] ?? 'default'}>{invoice.status}</Badge>
+          {STATUS_DESCRIPTIONS[invoice.status] && (
+            <InfoTooltip label={`What does ${invoice.status} mean?`}>
+              {STATUS_DESCRIPTIONS[invoice.status]}
+            </InfoTooltip>
+          )}
           {canCreateInvoice && invoice.status === 'DRAFT' && (
-            <Button onClick={() => setShowConfirm(true)}>Confirm Invoice</Button>
+            <Button
+              data-tour-id="sales-invoice-detail-confirm-button"
+              onClick={() => setShowConfirm(true)}
+            >
+              Confirm Invoice
+            </Button>
           )}
           {canCreatePayment && ['CONFIRMED', 'PARTIALLY_PAID'].includes(invoice.status) && (
-            <Button onClick={() => navigate(`/sales/payments/new?invoiceId=${id}`)} variant="ghost">
+            <Button
+              data-tour-id="sales-invoice-detail-record-payment-button"
+              onClick={() => navigate(`/sales/payments/new?invoiceId=${id}`)}
+              variant="ghost"
+            >
               Record Payment
             </Button>
           )}
           {['CONFIRMED', 'PARTIALLY_PAID', 'PAID', 'OVERDUE'].includes(invoice.status) && (
             <Button
+              data-tour-id="sales-invoice-detail-print-button"
               variant="ghost"
               isLoading={pdfMutation.isPending}
               onClick={() => pdfMutation.mutate()}
@@ -142,7 +171,11 @@ export default function InvoiceDetailPage() {
             </Button>
           )}
           {canCancelInvoice && ['DRAFT', 'CONFIRMED'].includes(invoice.status) && (
-            <Button variant="danger" onClick={() => setShowCancel(true)}>
+            <Button
+              data-tour-id="sales-invoice-detail-cancel-button"
+              variant="danger"
+              onClick={() => setShowCancel(true)}
+            >
               Cancel
             </Button>
           )}
@@ -256,23 +289,14 @@ export default function InvoiceDetailPage() {
       <Modal isOpen={showConfirm} onClose={() => setShowConfirm(false)} title="Confirm Invoice">
         <div className="space-y-4">
           <p className="text-sm text-secondary">
-            Confirming will deduct stock and assign an invoice number. This cannot be undone easily.
+            Confirming will deduct stock and assign the next invoice number in sequence. This cannot
+            be undone easily.
           </p>
-          <Input
-            label="Invoice Number"
-            value={invoiceNum}
-            onChange={(e) => setInvoiceNum(e.target.value)}
-            placeholder="INV-2026-001"
-          />
           <div className="flex justify-end gap-2">
             <Button variant="ghost" onClick={() => setShowConfirm(false)}>
               Cancel
             </Button>
-            <Button
-              isLoading={confirmMutation.isPending}
-              onClick={() => confirmMutation.mutate()}
-              disabled={!invoiceNum}
-            >
+            <Button isLoading={confirmMutation.isPending} onClick={() => confirmMutation.mutate()}>
               Confirm Invoice
             </Button>
           </div>

@@ -82,19 +82,37 @@ export class ReservationEngine {
   async fulfill(reservationId: number, tenantId: number, trx?: ErpDatabase): Promise<void> {
     const db = trx ?? this.db;
 
-    const [reservation] = await db
-      .select()
-      .from(stockReservations)
+    // Atomically claim the row: this UPDATE only matches (and thus only takes effect) if the
+    // reservation is still ACTIVE. Two concurrent fulfill()/release() calls on the same
+    // reservation (retry, double-click, or an expireStale() run racing a real fulfill) serialize
+    // on Postgres's row lock; whichever commits second finds the WHERE no longer matches and
+    // claims nothing — previously this used a plain SELECT-then-UPDATE with no status guard in
+    // the WHERE clause, so both could pass the check and both double-apply the reservedQty
+    // shift (same race class fixed elsewhere in StockAdjustmentService/StockTransferService).
+    const [claimed] = await db
+      .update(stockReservations)
+      .set({ status: 'FULFILLED', fulfilledAt: new Date(), updatedAt: new Date() })
       .where(
-        and(eq(stockReservations.id, reservationId), eq(stockReservations.tenantId, tenantId))
-      );
+        and(
+          eq(stockReservations.id, reservationId),
+          eq(stockReservations.tenantId, tenantId),
+          eq(stockReservations.status, 'ACTIVE')
+        )
+      )
+      .returning();
 
-    if (!reservation) throw new ERPError('RESERVATION_NOT_FOUND', 'Reservation not found', 404);
-    if (reservation.status !== 'ACTIVE') {
-      throw new ERPError('RESERVATION_NOT_ACTIVE', `Reservation is ${reservation.status}`, 409);
+    if (!claimed) {
+      const [current] = await db
+        .select()
+        .from(stockReservations)
+        .where(
+          and(eq(stockReservations.id, reservationId), eq(stockReservations.tenantId, tenantId))
+        );
+      if (!current) throw new ERPError('RESERVATION_NOT_FOUND', 'Reservation not found', 404);
+      throw new ERPError('RESERVATION_NOT_ACTIVE', `Reservation is ${current.status}`, 409);
     }
 
-    const qty = parseFloat(reservation.quantity);
+    const qty = parseFloat(claimed.quantity);
 
     await db
       .update(items)
@@ -103,19 +121,14 @@ export class ReservationEngine {
         version: sql`${items.version} + 1`,
         updatedAt: new Date(),
       })
-      .where(and(eq(items.id, reservation.itemId), eq(items.tenantId, tenantId)));
-
-    await db
-      .update(stockReservations)
-      .set({ status: 'FULFILLED', fulfilledAt: new Date(), updatedAt: new Date() })
-      .where(eq(stockReservations.id, reservationId));
+      .where(and(eq(items.id, claimed.itemId), eq(items.tenantId, tenantId)));
 
     await this.shiftProjection(
       db,
       tenantId,
-      reservation.itemId,
-      reservation.variantId ?? undefined,
-      reservation.warehouseId,
+      claimed.itemId,
+      claimed.variantId ?? undefined,
+      claimed.warehouseId,
       0,
       -qty
     );
@@ -129,19 +142,36 @@ export class ReservationEngine {
   ): Promise<void> {
     const db = trx ?? this.db;
 
-    const [reservation] = await db
-      .select()
-      .from(stockReservations)
+    // Same atomic-claim pattern as fulfill() above.
+    const [claimed] = await db
+      .update(stockReservations)
+      .set({
+        status: 'RELEASED',
+        releasedAt: new Date(),
+        releaseReason: reason,
+        updatedAt: new Date(),
+      })
       .where(
-        and(eq(stockReservations.id, reservationId), eq(stockReservations.tenantId, tenantId))
-      );
+        and(
+          eq(stockReservations.id, reservationId),
+          eq(stockReservations.tenantId, tenantId),
+          eq(stockReservations.status, 'ACTIVE')
+        )
+      )
+      .returning();
 
-    if (!reservation) throw new ERPError('RESERVATION_NOT_FOUND', 'Reservation not found', 404);
-    if (reservation.status !== 'ACTIVE') {
-      throw new ERPError('RESERVATION_NOT_ACTIVE', `Reservation is ${reservation.status}`, 409);
+    if (!claimed) {
+      const [current] = await db
+        .select()
+        .from(stockReservations)
+        .where(
+          and(eq(stockReservations.id, reservationId), eq(stockReservations.tenantId, tenantId))
+        );
+      if (!current) throw new ERPError('RESERVATION_NOT_FOUND', 'Reservation not found', 404);
+      throw new ERPError('RESERVATION_NOT_ACTIVE', `Reservation is ${current.status}`, 409);
     }
 
-    const qty = parseFloat(reservation.quantity);
+    const qty = parseFloat(claimed.quantity);
 
     // Restore available_qty, decrease reserved_qty
     await db
@@ -152,24 +182,14 @@ export class ReservationEngine {
         version: sql`${items.version} + 1`,
         updatedAt: new Date(),
       })
-      .where(and(eq(items.id, reservation.itemId), eq(items.tenantId, tenantId)));
-
-    await db
-      .update(stockReservations)
-      .set({
-        status: 'RELEASED',
-        releasedAt: new Date(),
-        releaseReason: reason,
-        updatedAt: new Date(),
-      })
-      .where(eq(stockReservations.id, reservationId));
+      .where(and(eq(items.id, claimed.itemId), eq(items.tenantId, tenantId)));
 
     await this.shiftProjection(
       db,
       tenantId,
-      reservation.itemId,
-      reservation.variantId ?? undefined,
-      reservation.warehouseId,
+      claimed.itemId,
+      claimed.variantId ?? undefined,
+      claimed.warehouseId,
       qty,
       -qty
     );

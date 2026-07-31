@@ -3,6 +3,8 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { productionApi } from '../../api/endpoints.js';
+import { useAuthStore } from '../../store/auth.store.js';
+import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
 import { ERPFormSkeleton } from '../../components/erp/ERPSkeleton.js';
 import Button from '../../components/ui/Button.js';
@@ -28,6 +30,9 @@ export default function JobWorkQualityCheckPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const hasPermission = useAuthStore((s) => s.hasPermission);
+  const canSubmitQC = hasPermission(PERMISSIONS.JOB_WORK_QUALITY_CHECK);
+  const canComplete = hasPermission(PERMISSIONS.JOB_WORK_COMPLETE);
 
   const { data, isLoading } = useQuery({
     queryKey: ['job-work-order', id],
@@ -148,14 +153,16 @@ export default function JobWorkQualityCheckPage() {
             </div>
           ))}
         </div>
-        <Button
-          type="button"
-          variant="outline"
-          onClick={() => submitQCMutation.mutate()}
-          disabled={submitQCMutation.isPending}
-        >
-          {submitQCMutation.isPending ? 'Saving…' : 'Save QC Entries'}
-        </Button>
+        {canSubmitQC && (
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => submitQCMutation.mutate()}
+            disabled={submitQCMutation.isPending}
+          >
+            {submitQCMutation.isPending ? 'Saving…' : 'Save QC Entries'}
+          </Button>
+        )}
       </div>
 
       <div className="bg-surface-card rounded-xl border border-default p-6 space-y-4">
@@ -188,13 +195,16 @@ export default function JobWorkQualityCheckPage() {
           />
         </div>
         <div className="flex flex-wrap gap-3">
-          <Button
-            type="button"
-            disabled={!receivedQty || completeMutation.isPending}
-            onClick={() => completeMutation.mutate()}
-          >
-            {completeMutation.isPending ? 'Completing…' : 'Mark as Completed'}
-          </Button>
+          {canComplete && (
+            <Button
+              data-tour-id="production-job-work-qc-complete-button"
+              type="button"
+              disabled={!receivedQty || completeMutation.isPending}
+              onClick={() => completeMutation.mutate()}
+            >
+              {completeMutation.isPending ? 'Completing…' : 'Mark as Completed'}
+            </Button>
+          )}
           <Button type="button" variant="outline" onClick={() => navigate('/production/job-work')}>
             Back
           </Button>

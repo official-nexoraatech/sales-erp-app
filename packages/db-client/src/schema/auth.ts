@@ -178,6 +178,12 @@ export const securityAuditLog = pgTable(
         | 'SESSION_TERMINATED'
         | 'SUSPICIOUS_LOGIN'
         | 'ADMIN_PASSWORD_RESET'
+        | 'LOGIN_SUCCESS'
+        | 'LOGIN_FAILURE'
+        | 'PASSWORD_CHANGED'
+        | 'ACCOUNT_LOCKED'
+        | 'ACCOUNT_UNLOCKED'
+        | 'ROLE_ASSIGNED'
       >(),
     ipAddress: inet('ip_address'),
     details: jsonb('details'),

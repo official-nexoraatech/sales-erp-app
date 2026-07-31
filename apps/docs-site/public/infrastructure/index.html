@@ -1,0 +1,474 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ERP Docs — Infrastructure &amp; Deployment Module</title>
+<link rel="stylesheet" href="/shared/docs-shell.css">
+</head>
+<body data-module="Infrastructure &amp; Deployment">
+
+<header class="topbar">
+  <button class="icon-btn navtoggle" id="navToggle" aria-label="Toggle navigation">☰</button>
+  <a class="brand" href="/"><span class="mark">N</span> Nexoraa ERP Docs</a>
+  <div class="searchwrap">
+    <input type="text" class="searchbox" id="searchInput" placeholder="Search Infrastructure &amp; Deployment documentation…" autocomplete="off">
+    <div class="search-results" id="searchResults"></div>
+  </div>
+  <div class="topbar-actions">
+    <button class="icon-btn" id="themeToggle" aria-label="Toggle dark mode" title="Toggle dark mode">◐</button>
+    <button class="icon-btn" id="printBtn" aria-label="Print this page" title="Print this page">⎙</button>
+  </div>
+</header>
+
+<div class="shell">
+  <nav class="sidebar" id="sidebar">
+    <div class="sb-group">
+      <div class="sb-group-title">Modules</div>
+      <div class="sb-module active-module">
+        <div class="sb-module-head active-module">Infrastructure &amp; Deployment <span class="status">v1</span></div>
+        <div class="sb-track">
+          <div class="sb-track-title">Overview</div>
+          <a class="sb-link" data-page="infra-overview" href="#infrastructure/overview/summary">Summary</a>
+        </div>
+        <div class="sb-track">
+          <div class="sb-track-title">Services &amp; Config</div>
+          <a class="sb-link" data-page="infra-external-services" href="#infrastructure/services/external">External Services</a>
+          <a class="sb-link" data-page="infra-components" href="#infrastructure/services/components">Infrastructure Components</a>
+          <a class="sb-link" data-page="infra-envvars" href="#infrastructure/services/env-vars">Environment Variables</a>
+        </div>
+        <div class="sb-track">
+          <div class="sb-track-title">Operations</div>
+          <a class="sb-link" data-page="infra-tooling" href="#infrastructure/ops/tooling">Dev, Ops &amp; Admin Tooling</a>
+          <a class="sb-link" data-page="infra-cicd" href="#infrastructure/ops/cicd">CI/CD &amp; Deployment</a>
+          <a class="sb-link" data-page="infra-cost" href="#infrastructure/ops/cost">Cost Plans &amp; OSS Alternatives</a>
+        </div>
+        <div class="sb-track">
+          <div class="sb-track-title">Audit</div>
+          <a class="sb-link" data-page="infra-depaudit" href="#infrastructure/audit/dependencies">Dependency Audit</a>
+          <a class="sb-link" data-page="infra-issues" href="#infrastructure/audit/known-issues">Known Issues &amp; Punch List</a>
+        </div>
+      </div>
+    </div>
+    <div class="sb-group">
+      <div class="sb-group-title">Other modules</div>
+      <a class="sb-module-head" href="/pos/index.html">POS <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/sales/index.html">Sales &amp; Invoicing <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/purchase/index.html">Purchase <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/inventory/index.html">Inventory <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/products/index.html">Products &amp; Variants <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/customers/index.html">Customers &amp; Suppliers <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/accounting/index.html">Accounting &amp; GST <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/hr/index.html">HR &amp; Payroll <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/reports/index.html">Reports <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/tenants/index.html">Super Admin / Tenants <span class="status">Open →</span></a>
+      <a class="sb-module-head" href="/platform/index.html">Developer Platform <span class="status">Open →</span></a>
+    </div>
+  </nav>
+
+  <main class="content" id="content">
+    <div class="breadcrumb" id="breadcrumb"></div>
+
+    <!-- ============ OVERVIEW: SUMMARY ============ -->
+    <article class="page" id="page-infra-overview" data-track="dev" data-title="Summary">
+      <span class="track-pill dev">Infrastructure documentation</span>
+      <h1>Infrastructure &amp; Dependency Audit</h1>
+      <div class="pilot-banner">Twelfth module, and the only one about the system itself rather than a business capability inside it. Built from a direct, four-pass codebase audit (external integrations, environment variables, dependency health, and K8s/Helm/CI tooling) rather than from planning documents — every claim on these pages traces to a file path, config key, or container definition in this repository, verified 2026-07-19.</div>
+
+      <p>The short version: this stack is unusually complete for its stage. Real observability, a real tested backup/DR process, and a genuinely strict CI security pipeline already exist. The gaps that remain are specific and fixable — mostly concentrated at the edge of the cluster (ingress, TLS, network policy) rather than in the application layer itself.</p>
+
+      <div class="pill-row">
+        <span class="badge confirmed">4 real third-party APIs wired</span>
+        <span class="badge gap">0 payment gateway / APM / analytics SaaS in use</span>
+        <span class="badge confirmed">19 self-hosted infra containers</span>
+        <span class="badge gap">~135 env vars in code vs. 78 documented</span>
+        <span class="badge confirmed">1 moderate, dev-only CVE in the whole tree</span>
+        <span class="badge gap">2 frontends with no production Dockerfile</span>
+      </div>
+
+      <h2 id="whats-solid">What's genuinely production-shaped already</h2>
+      <div class="callout ok"><div class="callout-title">Observability is real, not scaffolded</div><p>Prometheus + Alertmanager + Grafana (two dashboards already provisioned: <span class="src">erp-overview.json</span>, <span class="src">erp-hardening.json</span>) + Loki (via a custom <code>@erp/logger</code> transport — no Promtail sidecar needed) + Jaeger tracing through OpenTelemetry, wired into every one of the 15 backend services.</p></div>
+      <div class="callout ok"><div class="callout-title">Backup &amp; DR is real and tested, not theoretical</div><p>A daily automated job (pg_dump + Redis SAVE + MinIO mirror), an optional encrypted offsite copy, Pushgateway metrics, and a written runbook with a validated <strong>RTO &lt; 30 min / RPO &lt; 15 min</strong> target and a quarterly drill cadence. See <a href="#infrastructure/services/components">Infrastructure Components</a>.</p></div>
+      <div class="callout ok"><div class="callout-title">CI security posture is strong</div><p>Semgrep SAST, Trivy image scanning, Snyk, a full-history TruffleHog secret scan, and a <code>pnpm audit</code> gate all run on every push, alongside lint/type-check/test/E2E. See <a href="#infrastructure/ops/cicd">CI/CD &amp; Deployment</a>.</p></div>
+      <div class="callout ok"><div class="callout-title">The three India-specific integrations that actually matter for a GST-compliant retail ERP are real</div><p>MSG91 SMS, SendGrid email (with a genuine Mailhog dev fallback), and the NIC e-Invoice/e-Way Bill government APIs — complete with sandbox/production auto-switching and IRN retry logic. Not stubs. See <a href="#infrastructure/services/external">External Services</a>.</p></div>
+
+      <h2 id="whats-not">What needs attention before a production cutover</h2>
+      <div class="callout bug"><div class="callout-title">Vault secrets are wired two incompatible ways, and neither reaches a running pod</div><p>Kubernetes injects secrets via a Vault Agent sidecar that writes to <span class="src">/vault/secrets/db</span>, but no container entrypoint sources that file. Separately, the app's own <code>loadConfigWithSecrets()</code> expects <code>VAULT_ADDR</code>/<code>VAULT_TOKEN</code> to talk to Vault directly over HTTP — neither is set in any k8s manifest or the Helm chart. On a real cluster today, <code>DATABASE_URL</code> and <code>JWT_PRIVATE_KEY</code> would not resolve at all once <code>NODE_ENV=production</code> is set.</p></div>
+      <div class="callout bug"><div class="callout-title">NetworkPolicy only covers one of fourteen services</div><p>Only auth-service has explicit allow-rules against the default-deny-all policy in <span class="src">infrastructure/k8s/network-policy.yaml</span>. The other 13 backend services would be unable to reach Postgres, Redis, or Kafka if this policy were enforced as-is on a real cluster.</p></div>
+      <div class="callout bug"><div class="callout-title">No Ingress resource exists anywhere</div><p>cert-manager's three ClusterIssuers are fully scaffolded but bound to nothing — no domain, no TLS termination path, no reverse proxy in front of the cluster. <span class="src">erp-staging.nexoraatech.com</span> is referenced by the CI deploy job's environment URL, but nothing in the repo's IaC actually serves that hostname.</p></div>
+      <div class="callout bug"><div class="callout-title">web-frontend and pos-frontend have no Dockerfile at all</div><p>Every one of the 15 backend services has a production multi-stage Dockerfile. The two user-facing apps have none — no containerized build, no static hosting config, no CDN setup.</p></div>
+      <div class="callout review"><div class="callout-title">Istio policies are scaffolded, not installed</div><p>The authorization and mTLS policies in <span class="src">infrastructure/istio/</span> assume a control plane that doesn't exist anywhere in this repo's IaC. Treat mesh-level mTLS as unenforced until that changes.</p></div>
+
+      <p>None of this is disqualifying — it's the normal shape of a system that built its application layer, observability, and security tooling before its cluster networking and edge layer. The <a href="#infrastructure/audit/known-issues">Known Issues &amp; Punch List</a> page turns this into an ordered action list.</p>
+
+      <div class="pager">
+        <span></span>
+        <a class="next" href="#infrastructure/services/external"><div class="pg-label">Next</div><div class="pg-title">External Services →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ SERVICES: EXTERNAL ============ -->
+    <article class="page" id="page-infra-external-services" data-track="dev" data-title="External Services">
+      <span class="track-pill dev">Infrastructure documentation</span>
+      <h1>External Services</h1>
+      <p>Every genuine third-party SaaS or API touching this codebase, confirmed by reading the actual client implementation — not just the env var list. Self-hosted infrastructure (Postgres, Redis, Kafka, MinIO, Elasticsearch, Vault) is covered separately on the <a href="#infrastructure/services/components">Infrastructure Components</a> page since none of it is a paid external service.</p>
+
+      <h2 id="wired">Wired and confirmed live</h2>
+      <div class="tablewrap"><table>
+        <tr><th>Service</th><th>Purpose</th><th>Used by</th><th>Status</th><th>Mandatory?</th><th class="num">Est. monthly cost</th></tr>
+        <tr><td>MSG91</td><td>Transactional SMS</td><td>notification-service</td><td><span class="badge confirmed">wired, live, no dev fallback</span></td><td>Optional channel</td><td class="num">$25–120</td></tr>
+        <tr><td>SendGrid</td><td>Transactional email</td><td>notification-service</td><td><span class="badge confirmed">wired, falls back to Mailhog in dev</span></td><td>Mandatory for prod email</td><td class="num">$0–90</td></tr>
+        <tr><td>WhatsApp Cloud API (Meta)</td><td>CRM/marketing messages</td><td>notification-service</td><td><span class="badge confirmed">wired, live, no dev fallback</span></td><td>Optional</td><td class="num">$50–350</td></tr>
+        <tr><td>NIC e-Invoice (IRP)</td><td>GST IRN generation</td><td>gst-service</td><td><span class="badge confirmed">wired, sandbox/prod auto-switch on NODE_ENV</span></td><td>Legally mandatory above turnover threshold</td><td class="num">$25–150 (via GSP)</td></tr>
+        <tr><td>NIC e-Way Bill</td><td>Goods-movement compliance</td><td>gst-service</td><td><span class="badge confirmed">wired, same pattern</span></td><td>Mandatory if shipment &gt; ₹50k</td><td class="num">bundled above</td></tr>
+        <tr><td>PagerDuty</td><td>On-call alert routing</td><td>Alertmanager (infra only)</td><td><span class="badge confirmed">configured, optional</span></td><td>Optional</td><td class="num">$0–110</td></tr>
+        <tr><td>Slack (2 webhooks)</td><td>Infra/engineering alerts</td><td>Alertmanager</td><td><span class="badge confirmed">configured</span></td><td>Optional</td><td class="num">$0</td></tr>
+        <tr><td>GHCR</td><td>Docker image registry</td><td>CI build/deploy, all 15 services</td><td><span class="badge confirmed">in active use</span></td><td>Mandatory for current CI/CD</td><td class="num">$0–15</td></tr>
+        <tr><td>Semgrep App</td><td>SAST dashboard</td><td>CI</td><td><span class="badge confirmed">wired</span></td><td>Optional (CLI is free/OSS)</td><td class="num">$0</td></tr>
+        <tr><td>Snyk</td><td>Dependency vuln scan</td><td>CI</td><td><span class="badge confirmed">wired</span></td><td>Optional — overlaps Trivy + pnpm audit</td><td class="num">$0–52</td></tr>
+        <tr><td>Codecov</td><td>Coverage reporting</td><td>CI</td><td><span class="badge confirmed">wired</span></td><td>Optional</td><td class="num">$0–10</td></tr>
+        <tr><td>GitLab.com</td><td>One-way <code>main</code> mirror</td><td><span class="src">gitlab-sync.yml</span></td><td><span class="badge confirmed">wired</span></td><td>Optional (backup/BCP)</td><td class="num">$0</td></tr>
+      </table></div>
+
+      <h2 id="notification-detail">notification-service's three channels, in detail</h2>
+      <p>All three live in <span class="src">apps/notification-service/src/domain/channels/</span> and are instantiated unconditionally at startup regardless of whether real credentials exist:</p>
+      <ul>
+        <li><strong>SmsChannelProvider.ts</strong> — POSTs to MSG91's real API. No dev fallback: a blank/placeholder <code>MSG91_AUTH_KEY</code> genuinely calls MSG91 and fails, it doesn't quietly no-op.</li>
+        <li><strong>EmailChannelProvider.ts</strong> — has a real dev fallback. If the API key doesn't start with <code>SG.</code>, it routes through an SMTP transport to Mailhog instead of calling SendGrid's real API.</li>
+        <li><strong>WhatsAppChannelProvider.ts</strong> — POSTs to Meta's Graph API. Same no-fallback behavior as SMS.</li>
+      </ul>
+      <div class="callout review"><div class="callout-title">4 webhook-verification secrets exist in code with zero documented setup</div><p><code>SENDGRID_WEBHOOK_PUBLIC_KEY</code>, <code>WHATSAPP_APP_SECRET</code>, <code>WHATSAPP_WEBHOOK_VERIFY_TOKEN</code>, and <code>MSG91_WEBHOOK_SECRET</code> are real, tested code (see <span class="src">webhookVerification.test.ts</span>) but aren't in <code>.env.example</code> — see <a href="#infrastructure/services/env-vars">Environment Variables</a>.</p></div>
+
+      <h2 id="gst-detail">gst-service's NIC integration, in detail</h2>
+      <p><span class="src">EInvoiceService.ts</span> and <span class="src">EwayBillService.ts</span> both branch purely on <code>NODE_ENV === 'production'</code> to pick sandbox vs. real NIC URLs — no manual environment flag to forget. Both throw a clear <code>NIC_NOT_CONFIGURED</code> business error if <code>NIC_API_KEY</code> is unset, and IRN generation has a real retry mechanism (<code>retryPendingIrns()</code>, run every 15 minutes by scheduler-service, up to 5 attempts) rather than failing silently on a transient NIC outage.</p>
+
+      <h2 id="absent">Confirmed absent — commonly expected, not present at any layer</h2>
+      <p>These were searched for explicitly across every <code>package.json</code> and every service's source tree. Their absence is a finding, not an oversight in this audit.</p>
+      <div class="tablewrap"><table>
+        <tr><th>Category</th><th>Examples checked</th><th>Finding</th></tr>
+        <tr><td>Payment gateway</td><td>Razorpay, Stripe, PayU</td><td>None integrated. POS only renders a client-side UPI deep-link QR code (<span class="src">UpiQr.tsx</span>) — no transaction API, no webhook, no automated reconciliation.</td></tr>
+        <tr><td>Error tracking / APM</td><td>Sentry, Datadog, New Relic</td><td>Zero references anywhere in the repo, app code or dependencies. See the recommendation on <a href="#infrastructure/ops/tooling">Dev, Ops &amp; Admin Tooling</a>.</td></tr>
+        <tr><td>Product analytics</td><td>GA, Mixpanel, PostHog, Segment</td><td>web-frontend ships an explicit no-op <code>AnalyticsProvider</code> abstraction — ready, but genuinely unconnected today.</td></tr>
+        <tr><td>Maps</td><td>Google Maps, Mapbox</td><td>Not found anywhere.</td></tr>
+        <tr><td>OCR</td><td>Tesseract, cloud OCR APIs</td><td>Not found anywhere.</td></tr>
+        <tr><td>CDN</td><td>Cloudflare, Fastly, CloudFront</td><td>Not found — consistent with there being no production frontend hosting path at all yet.</td></tr>
+      </table></div>
+
+      <div class="pager">
+        <a href="#infrastructure/overview/summary"><div class="pg-label">Back</div><div class="pg-title">← Summary</div></a>
+        <a class="next" href="#infrastructure/services/components"><div class="pg-label">Next</div><div class="pg-title">Infrastructure Components →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ SERVICES: COMPONENTS ============ -->
+    <article class="page" id="page-infra-components" data-track="dev" data-title="Infrastructure Components">
+      <span class="track-pill dev">Infrastructure documentation</span>
+      <h1>Infrastructure Components</h1>
+      <p>Everything defined in <span class="src">docker-compose.yml</span> (local dev, 19 containers) plus what the Kubernetes/Helm layer adds for a real cluster. Sizing figures below are the actual numbers in <span class="src">infrastructure/k8s/*.yaml</span> and <span class="src">infrastructure/helm/erp/values.yaml</span>, not estimates.</p>
+
+      <h2 id="data-infra">Data &amp; messaging infrastructure</h2>
+      <div class="tablewrap"><table>
+        <tr><th>Component</th><th>Why it's needed</th><th>Dev</th><th>Prod</th><th>Notes</th></tr>
+        <tr><td>PostgreSQL 16 (×2)</td><td>System of record for all 15 services</td><td><span class="badge confirmed">required</span></td><td><span class="badge confirmed">required</span></td><td>Primary + a second instance in dev — not streaming replication; a real HA replica is a prod-only addition</td></tr>
+        <tr><td>PgBouncer</td><td>Transaction-mode connection pooling under load</td><td>present</td><td><span class="badge confirmed">required</span></td><td>Bitnami legacy image, pool size 25, max 1,000 client connections</td></tr>
+        <tr><td>Redis 7</td><td>Sessions, rate limiting, BullMQ job queue, distributed locks</td><td><span class="badge confirmed">required</span></td><td><span class="badge confirmed">required</span></td><td>Single-node only — <code>REDIS_CLUSTER_NODES</code> is documented but dead, no cluster client exists in code</td></tr>
+        <tr><td>Kafka 3.6 + Zookeeper</td><td>Event bus / outbox relay across accounting, sales, inventory, gst, event, hr, scheduler, search</td><td><span class="badge confirmed">required</span></td><td><span class="badge confirmed">required</span></td><td>Single broker, replication factor 1 in dev — prod needs ≥3 brokers for real durability</td></tr>
+        <tr><td>MinIO</td><td>S3-compatible object storage — attachments, exports, backups</td><td><span class="badge confirmed">required</span></td><td>or real AWS S3</td><td>Real <code>@aws-sdk/client-s3</code> client works against either MinIO or S3 unchanged</td></tr>
+        <tr><td>Elasticsearch 8.17</td><td>Global search, full-text catalog/customer search</td><td><span class="badge confirmed">required</span></td><td><span class="badge confirmed">required</span></td><td>search-service calls the REST API directly — no client SDK dependency at all</td></tr>
+        <tr><td>HashiCorp Vault</td><td>Production secrets — DB creds, JWT keys, MinIO keys</td><td>dev mode only</td><td><span class="badge gap">required, not fully wired</span></td><td>See the Vault double-wiring gap on the <a href="#infrastructure/overview/summary">Summary</a> page</td></tr>
+      </table></div>
+
+      <h2 id="observability-infra">Observability &amp; backup infrastructure</h2>
+      <div class="tablewrap"><table>
+        <tr><th>Component</th><th>Why it's needed</th><th>Notes</th></tr>
+        <tr><td>Jaeger + OpenTelemetry</td><td>Distributed request tracing</td><td>In-memory span storage in dev — swap for a real backend (Elasticsearch/Cassandra) in production</td></tr>
+        <tr><td>Loki + Grafana + Prometheus + Alertmanager</td><td>Logs, dashboards, metrics, alert routing</td><td>Logs push directly from <code>@erp/logger</code>'s LokiTransport — no Promtail sidecar needed</td></tr>
+        <tr><td>postgres-exporter / redis-exporter / Pushgateway</td><td>Metrics scraping for DB/cache + batch-job (backup) metrics</td><td>Standard Prometheus community exporters</td></tr>
+        <tr><td>Mailhog</td><td>Local SMTP capture for dev email testing</td><td>Not used in production — real email goes through SendGrid</td></tr>
+        <tr><td>Custom backup container</td><td>Daily pg_dump + Redis SAVE + MinIO mirror, optional encrypted offsite copy</td><td>RTO &lt; 30 min / RPO &lt; 15 min, quarterly drill cadence — see <span class="src">infrastructure/runbooks/dr-runbook.md</span></td></tr>
+      </table></div>
+
+      <h2 id="orchestration">Orchestration &amp; edge</h2>
+      <div class="tablewrap"><table>
+        <tr><th>Component</th><th>Status</th><th>Notes</th></tr>
+        <tr><td>Kubernetes (kustomize, <span class="src">infrastructure/k8s/</span>)</td><td><span class="badge confirmed">canonical prod path</span></td><td>2 replicas/service, 100m–500m CPU, 128Mi–512Mi memory, HPA 2–10 @ 70% CPU / 80% memory, PDB minAvailable 1. report-service gets more (250m–1000m CPU, 512Mi–1536Mi) for Puppeteer PDF rendering.</td></tr>
+        <tr><td>Helm chart (<span class="src">infrastructure/helm/erp/</span>)</td><td><span class="badge gap">not wired to CI yet</span></td><td>Verified byte-identical output to the kustomize manifests via <code>helm template</code>; migrating CI to use it is explicitly deferred in the chart's own README</td></tr>
+        <tr><td>Istio (authz policy + mTLS)</td><td><span class="badge gap">scaffolded only, not installed</span></td><td>No control-plane install anywhere in this repo's IaC — treat mTLS as unenforced today</td></tr>
+        <tr><td>cert-manager</td><td><span class="badge gap">scaffolded, unbound</span></td><td>3 ClusterIssuers defined (Let's Encrypt prod/staging + an internal CA); zero Ingress resources reference any of them</td></tr>
+        <tr><td>Ingress controller / reverse proxy</td><td><span class="badge gap">missing entirely</span></td><td>Nothing in the repo installs nginx-ingress, Traefik, or an equivalent</td></tr>
+      </table></div>
+
+      <div class="pager">
+        <a href="#infrastructure/services/external"><div class="pg-label">Back</div><div class="pg-title">← External Services</div></a>
+        <a class="next" href="#infrastructure/services/env-vars"><div class="pg-label">Next</div><div class="pg-title">Environment Variables →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ SERVICES: ENV VARS ============ -->
+    <article class="page" id="page-infra-envvars" data-track="dev" data-title="Environment Variables">
+      <span class="track-pill dev">Infrastructure documentation</span>
+      <h1>Environment Variables</h1>
+      <p>~135 distinct variables are read across the codebase; 78 are documented in the root <code>.env.example</code>. Grouped by concern below, with every real gap called out explicitly rather than buried in a giant table. For app bootstrap steps (migrations, first tenant, first operator) see <a href="/platform/index.html#platform/dev/environment-setup">Developer Platform → Environment Setup &amp; Bootstrapping</a> — this page covers infra-level configuration only.</p>
+
+      <div class="tablewrap"><table>
+        <tr><th>Group</th><th>Representative vars</th><th>Required?</th><th>Notes</th></tr>
+        <tr><td>Database</td><td><code>DATABASE_URL</code>, <code>DATABASE_REPLICA_URL</code></td><td><span class="badge gap">required in prod</span></td><td>Sourced from Vault in production via <code>loadConfigWithSecrets()</code>; plain env var in dev/test</td></tr>
+        <tr><td>Redis</td><td><code>REDIS_URL</code></td><td>optional, defaulted</td><td><code>REDIS_CLUSTER_NODES</code> documented but dead — no cluster client exists in code</td></tr>
+        <tr><td>Kafka</td><td><code>KAFKA_BROKERS</code>, <code>KAFKA_CLIENT_ID</code></td><td>optional, defaulted</td><td>—</td></tr>
+        <tr><td>Object storage</td><td><code>MINIO_ENDPOINT</code>, <code>MINIO_ACCESS_KEY</code>, <code>MINIO_SECRET_KEY</code>, <code>MINIO_BUCKET</code></td><td><span class="badge gap">required in prod</span></td><td>Access/secret key sourced from Vault in production</td></tr>
+        <tr><td>Search</td><td><code>ELASTICSEARCH_URL</code>, <code>ELASTICSEARCH_API_KEY</code></td><td>optional, defaulted</td><td><code>ELASTICSEARCH_API_KEY</code> undocumented in <code>.env.example</code>, silently <code>undefined</code> if unset</td></tr>
+        <tr><td>Vault</td><td><code>VAULT_ADDR</code>, <code>VAULT_TOKEN</code></td><td><span class="badge gap">required in prod</span></td><td>Fails fast if unset when <code>NODE_ENV=production</code> — but never actually set in any k8s manifest, see below</td></tr>
+        <tr><td>Auth / JWT</td><td><code>JWT_PUBLIC_KEY</code>, <code>JWT_PRIVATE_KEY</code>, <code>JWT_ISSUER</code>, <code>JWT_ACCESS_TOKEN_TTL_SECONDS</code>, <code>JWT_REFRESH_TOKEN_TTL_DAYS</code></td><td><span class="badge gap">required</span></td><td>See the TTL-var mismatch below</td></tr>
+        <tr><td>Rate limiting / lockout</td><td><code>LOGIN_RATE_LIMIT_MAX</code>, <code>ACCOUNT_LOCKOUT_ATTEMPTS</code>, <code>SIGNUP_RATE_LIMIT_MAX</code>, <code>LOOKUP_TENANTS_RATE_LIMIT_MAX</code></td><td>optional, defaulted</td><td>Last two undocumented in <code>.env.example</code></td></tr>
+        <tr><td>Notification channels</td><td><code>MSG91_AUTH_KEY</code>, <code>SENDGRID_API_KEY</code>, <code>WHATSAPP_ACCESS_TOKEN</code>, <code>SMTP_HOST</code>/<code>PORT</code></td><td>required per-channel</td><td>Plus 4 undocumented CP-6 webhook-verification secrets — see External Services</td></tr>
+        <tr><td>GST / NIC</td><td><code>NIC_IRP_URL</code>, <code>NIC_EWB_URL</code>, <code>NIC_API_KEY</code>, <code>NIC_USERNAME</code>, <code>NIC_PASSWORD</code></td><td><span class="badge gap">required in prod</span></td><td>Fully documented, no gaps</td></tr>
+        <tr><td>Service URLs / ports</td><td><code>INVENTORY_SERVICE_URL</code> … 13× <code>*_SERVICE_PORT</code></td><td>optional, defaulted</td><td>5 URLs (<code>AUTH</code>, <code>TENANT</code>, <code>PURCHASE</code>, <code>PRODUCTION</code>, <code>EVENT_SERVICE_URL</code>) + 13 ports undocumented</td></tr>
+        <tr><td>Gateway / CORS</td><td><code>API_GATEWAY_PORT</code>, <code>ALLOWED_ORIGINS</code></td><td><span class="badge gap">must be set explicitly in prod</span></td><td><code>.env.example</code> itself warns this falls back to <code>localhost:3000</code> and silently breaks every real frontend origin if left unset</td></tr>
+        <tr><td>Alerting / backup / DR</td><td><code>PAGERDUTY_SERVICE_KEY</code>, <code>OFFSITE_MINIO_*</code>, <code>BACKUP_ENCRYPTION_PUBLIC_KEY</code>, <code>PUSHGATEWAY_URL</code></td><td>optional</td><td>Fully documented</td></tr>
+        <tr><td>Frontend (Vite)</td><td><code>VITE_GATEWAY_URL</code>, <code>VITE_HR_URL</code>, <code>VITE_INVENTORY_API_URL</code>, <code>VITE_REPORT_URL</code>, <code>VITE_DOCS_SITE_URL</code></td><td>build-time</td><td>Last two undocumented</td></tr>
+      </table></div>
+
+      <h2 id="specific-gaps">Specific bugs and doc gaps worth fixing directly</h2>
+      <div class="callout bug"><div class="callout-title">JWT TTL variables silently do nothing</div><p><code>.env.example</code> documents <code>JWT_ACCESS_TOKEN_TTL</code>/<code>JWT_REFRESH_TOKEN_TTL</code>, but auth-service — the only service that issues tokens — actually reads <code>JWT_ACCESS_TOKEN_TTL_SECONDS</code>/<code>JWT_REFRESH_TOKEN_TTL_DAYS</code>. Setting the documented vars has zero effect on real session length.</p></div>
+      <div class="callout review"><div class="callout-title">Two unrelated "from" address vars exist under near-identical names</div><p><code>SMTP_FROM_ADDRESS</code> (auth/notification/tenant-service) is separate from the documented <code>SMTP_FROM</code> (report-service's scheduled-report emailer only) — easy to set one and assume it covers both.</p></div>
+      <div class="callout bug"><div class="callout-title">Local dev port mismatch</div><p><code>docker-compose.yml</code> maps Postgres primary/replica to host ports <strong>5435/5436</strong> (PgBouncer on 5434); <code>.env.example</code>'s <code>DATABASE_URL</code>/<code>DATABASE_REPLICA_URL</code> reference <strong>5432/5433</strong>. A fresh clone following the example file literally will not connect.</p></div>
+      <div class="callout bug"><div class="callout-title">Vault env vars are required by app code but never set in any k8s manifest or the Helm chart</div><p>Reinforces the double-wiring gap on the Summary page — this isn't just a config doc gap, it's the exact env var that will crash-loop every service in production the moment <code>NODE_ENV=production</code> is set without also fixing the Kubernetes side.</p></div>
+
+      <h2 id="dead-vars">Dead variables — documented, never read anywhere in code</h2>
+      <ul>
+        <li><code>REDIS_CLUSTER_NODES</code> — no Redis Cluster client exists anywhere; the app only ever uses single-node <code>REDIS_URL</code>.</li>
+        <li><code>OTEL_SERVICE_NAME</code>, <code>OTEL_TRACES_EXPORTER</code> — the OTLP exporter and service name are hardcoded per-service in <span class="src">packages/platform-sdk/src/telemetry.ts</span>, not read from env.</li>
+      </ul>
+
+      <div class="pager">
+        <a href="#infrastructure/services/components"><div class="pg-label">Back</div><div class="pg-title">← Infrastructure Components</div></a>
+        <a class="next" href="#infrastructure/ops/tooling"><div class="pg-label">Next</div><div class="pg-title">Dev, Ops &amp; Admin Tooling →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ OPS: TOOLING ============ -->
+    <article class="page" id="page-infra-tooling" data-track="dev" data-title="Dev, Ops & Admin Tooling">
+      <span class="track-pill dev">Infrastructure documentation</span>
+      <h1>Dev, Ops &amp; Admin Tooling</h1>
+
+      <h2 id="dev-tools">Development tools</h2>
+      <div class="tablewrap"><table>
+        <tr><th>Tool</th><th>Version</th><th>Why it's required</th></tr>
+        <tr><td>Node.js</td><td class="num">20.x</td><td>Runtime for all 15 services + both frontends — <code>.nvmrc</code>, root <code>engines</code>, CI, and all 15 Dockerfiles agree exactly, zero drift found</td></tr>
+        <tr><td>pnpm</td><td class="num">9.15.0</td><td>Workspace package manager for the whole monorepo (18 apps + 8 packages)</td></tr>
+        <tr><td>Docker Desktop</td><td>—</td><td>Runs the 19-container local infra stack</td></tr>
+        <tr><td>Turborepo</td><td class="num">^2.3.3</td><td>Task orchestration/caching across the workspace</td></tr>
+        <tr><td>TypeScript</td><td class="num">^5.7.3</td><td>Strict mode + <code>noUncheckedIndexedAccess</code>/<code>exactOptionalPropertyTypes</code> enforced identically across all 17 tsconfigs</td></tr>
+        <tr><td>ESLint 9 / Prettier 3</td><td>^9.17 / ^3.4.2</td><td>Lint + format, auto-fixed on staged files at commit time via lint-staged</td></tr>
+        <tr><td>Husky + lint-staged + commitlint</td><td>^9.1.7 / ^15.3.0 / ^19.6.1</td><td>Pre-commit lint/format + conventional-commit enforcement with a fixed scope enum. No pre-push hook exists — type-check/test remain CI-only gates.</td></tr>
+        <tr><td>Vitest</td><td class="num">^3.2.6</td><td>Unit/integration tests, uniform across every backend service and both frontends</td></tr>
+        <tr><td>Playwright</td><td>—</td><td>E2E smoke suite for web-frontend + pos-frontend (mocked HTTP boundary, not full-stack)</td></tr>
+      </table></div>
+      <div class="callout review"><div class="callout-title">No Swagger/OpenAPI, no Postman/Bruno/Insomnia collection</div><p>Every one of the 15 services' APIs is discoverable only by reading route source or <span class="src">ERP-PLANNING/API_VERSIONING.md</span>. Adding <code>@fastify/swagger</code> per service is a cheap, high-value fix for onboarding and future integrations.</p></div>
+
+      <h2 id="ops-monitoring">Operations &amp; monitoring — implemented vs. missing</h2>
+      <div class="tablewrap"><table>
+        <tr><th>Tool</th><th>Monitors</th><th>Status</th></tr>
+        <tr><td>Prometheus + Alertmanager</td><td>Service/infra metrics, alert routing to PagerDuty + Slack</td><td><span class="badge confirmed">implemented</span></td></tr>
+        <tr><td>Grafana</td><td>Dashboards — two provisioned already</td><td><span class="badge confirmed">implemented</span></td></tr>
+        <tr><td>Loki</td><td>Centralized structured logs from all 15 services</td><td><span class="badge confirmed">implemented</span></td></tr>
+        <tr><td>Jaeger + OpenTelemetry</td><td>Distributed request tracing</td><td><span class="badge confirmed">implemented</span></td></tr>
+        <tr><td><strong>Error tracking / APM</strong></td><td>Exception stack traces, user/session context, release tracking</td><td><span class="badge gap">not implemented</span></td></tr>
+      </table></div>
+      <p>The absence of error tracking is the single highest-leverage gap in this whole audit relative to its cost. Prometheus/Grafana tell you a service is unhealthy; nothing today captures the actual exception, stack trace, and request context when a specific business error occurs in production. Sentry's free tier (5k events/month) or a self-hosted GlitchTip instance closes this for effectively $0.</p>
+
+      <h2 id="admin-tools">Admin &amp; management tools</h2>
+      <p>This is the thinnest layer in the stack today — only the MinIO console (port 9001) and Grafana ship as hands-on admin UIs in <span class="src">docker-compose.yml</span>.</p>
+      <div class="tablewrap"><table>
+        <tr><th>Tool</th><th>Present?</th><th>What it would give you</th></tr>
+        <tr><td>pgAdmin / Adminer</td><td><span class="badge gap">absent</span></td><td>Direct Postgres inspection without shelling into a container</td></tr>
+        <tr><td>RedisInsight</td><td><span class="badge gap">absent</span></td><td>Visual key/queue inspection — useful given BullMQ (scheduler) and rate-limit state both live in Redis</td></tr>
+        <tr><td>Kafka UI (Provectus/Kafbat)</td><td><span class="badge gap">absent</span></td><td>Topic/consumer-group/lag visibility, currently only inspectable via the <code>kafka-topics</code> CLI</td></tr>
+        <tr><td>Portainer</td><td><span class="badge gap">absent</span></td><td>Container/compose-stack management UI — a convenience, not a functional gap</td></tr>
+      </table></div>
+      <p>All three "absent" rows are free, single-container OSS additions to <span class="src">docker-compose.yml</span> and would meaningfully cut down on <code>docker exec</code>-to-debug sessions.</p>
+
+      <div class="pager">
+        <a href="#infrastructure/services/env-vars"><div class="pg-label">Back</div><div class="pg-title">← Environment Variables</div></a>
+        <a class="next" href="#infrastructure/ops/cicd"><div class="pg-label">Next</div><div class="pg-title">CI/CD &amp; Deployment →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ OPS: CI/CD ============ -->
+    <article class="page" id="page-infra-cicd" data-track="dev" data-title="CI/CD & Deployment">
+      <span class="track-pill dev">Infrastructure documentation</span>
+      <h1>CI/CD &amp; Deployment</h1>
+      <p>The GitHub Actions pipeline (<span class="src">.github/workflows/ci.yml</span>) is genuinely mature. What's missing sits at the edge — registry, secrets, and networking are solid; the ingress/TLS layer between the cluster and the internet doesn't exist yet.</p>
+
+      <h2 id="pipeline">Pipeline stages — all real, all currently running</h2>
+      <ol class="steps">
+        <li><h4>Lint / format / type-check</h4><p>Plus a dedicated guard that fails the build if compiled artifacts are ever committed under <span class="src">packages/*/src</span>.</p></li>
+        <li><h4>Test with coverage gate (≥80%)</h4><p>Real Postgres + Redis service containers, plus a separate Playwright E2E smoke job for both frontends.</p></li>
+        <li><h4>Security gates</h4><p>Semgrep SAST (OWASP + Node + TS rulesets), Trivy container scan (fails on critical/high), Snyk, TruffleHog full-history secret scan, <code>pnpm audit --audit-level=high</code>.</p></li>
+        <li><h4>Build &amp; push</h4><p>15-service Docker build matrix to GHCR, tagged by branch/PR/semver/SHA.</p></li>
+        <li><h4>Manual load testing</h4><p>k6, dispatched on demand against a live target, with an automatic P95-regression gate — fails if any endpoint exceeds its target by more than 20%.</p></li>
+        <li><h4>Staging deploy</h4><p>Triggered by a <code>v*</code> git tag: applies <span class="src">infrastructure/k8s/</span> via kustomize, waits on all rollouts in parallel, runs a post-deploy smoke test, and auto-rolls-back every service on any failure.</p></li>
+        <li><h4>GitLab mirror</h4><p>A separate workflow force-pushes <code>main</code> to GitLab.com on every push — a pure backup/BCP mirror, not a second CI system.</p></li>
+      </ol>
+
+      <div class="callout note"><div class="callout-title">Adding a new backend service to CI is entirely manual, in four separate places</div><p>There's no automatic discovery of services in the pipeline — a new service must be added by hand to the Docker build matrix, the container-scan matrix, and two separate hardcoded service-name lists inside the staging-deploy job's rollout and rollback steps. Miss one and that service silently doesn't get its intended coverage.</p></div>
+
+      <h2 id="whats-missing">What production deployment is actually missing</h2>
+      <div class="callout bug"><div class="callout-title">No Ingress controller and no Ingress resource</div><p><code>https://erp-staging.nexoraatech.com</code> is referenced by the CI environment URL, but nothing in the repo's IaC actually serves that hostname.</p></div>
+      <div class="callout bug"><div class="callout-title">NetworkPolicy locks down 13 of 14 services with no allow-rules</div><p>Would need extending before enforcement is safe to turn on for real — see <a href="#infrastructure/services/components">Infrastructure Components</a>.</p></div>
+      <div class="callout bug"><div class="callout-title">Vault secret injection doesn't reach a running pod today</div><p>Needs a real delivery path chosen: a Vault Agent init-container that's actually sourced, the Vault CSI provider, or falling back to Kubernetes Secrets synced from Vault via External Secrets Operator.</p></div>
+      <div class="callout bug"><div class="callout-title">No production build/hosting path for either frontend</div><p>Needs a Dockerfile + nginx, or static hosting via S3/CloudFront/Cloudflare Pages, added before a real cutover.</p></div>
+
+      <div class="pager">
+        <a href="#infrastructure/ops/tooling"><div class="pg-label">Back</div><div class="pg-title">← Dev, Ops &amp; Admin Tooling</div></a>
+        <a class="next" href="#infrastructure/ops/cost"><div class="pg-label">Next</div><div class="pg-title">Cost Plans &amp; OSS Alternatives →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ OPS: COST ============ -->
+    <article class="page" id="page-infra-cost" data-track="dev" data-title="Cost Plans & OSS Alternatives">
+      <span class="track-pill dev">Infrastructure documentation</span>
+      <h1>Cost Plans &amp; OSS Alternatives</h1>
+      <p>Ranges, not quotes — actual pricing depends on region, negotiated cloud discounts, and real transaction/message volume. All three plans below assume the CI/CD, observability, and backup layers already built in this repo are reused as-is; the delta between plans is almost entirely managed-vs-self-hosted data infrastructure and redundancy, not new integrations.</p>
+
+      <h2 id="starter">Starter — self-hosted, single region</h2>
+      <p><strong>$120–260/mo.</strong> Development, pilot, or a single small retail chain. One or two beefy VPS instances running the whole docker-compose stack.</p>
+      <ul>
+        <li>1–2× 8vCPU/16GB VPS (Hetzner/DigitalOcean) — $80–160</li>
+        <li>MSG91 pay-as-you-go, low volume — $10–20</li>
+        <li>SendGrid free tier (100/day) — $0</li>
+        <li>NIC e-invoice via a low-tier GSP — $20–50</li>
+        <li>Domain + Let's Encrypt TLS — ~$1/mo amortized</li>
+        <li>Offsite backup bucket — $5</li>
+      </ul>
+
+      <h2 id="professional">Professional — managed cloud, single region, HA</h2>
+      <p><strong>$800–1,600/mo.</strong> A medium retail business running real transaction volume across several branches. Managed data services, real HPA autoscaling.</p>
+      <ul>
+        <li>Managed Kubernetes, 3 nodes — $150–300</li>
+        <li>Managed Postgres, HA — $60–200</li>
+        <li>Managed Redis — $30–60</li>
+        <li>Kafka, self-hosted on cluster or managed — $0–300</li>
+        <li>Elasticsearch, self-hosted OpenSearch or Elastic Cloud — $0–200</li>
+        <li>Sentry Team + Grafana Cloud — $26–75</li>
+        <li>MSG91 + SendGrid Essentials + WhatsApp BSP — $150–300</li>
+        <li>GSP production contract — $50–150</li>
+      </ul>
+
+      <h2 id="enterprise">Enterprise — multi-AZ, DR, security hardened</h2>
+      <p><strong>$5,000–14,000/mo.</strong> Multi-branch/multi-tenant at scale, contractual uptime SLAs, compliance obligations.</p>
+      <ul>
+        <li>Multi-AZ managed Kubernetes, autoscaled — $500–1,500</li>
+        <li>Multi-AZ Postgres w/ read replicas — $400–1,000</li>
+        <li>Managed Kafka (Confluent/MSK, dedicated) — $500–2,000</li>
+        <li>Elastic Cloud, production tier — $500–1,500</li>
+        <li>HCP Vault Dedicated (or hardened self-hosted HA Vault) — $1,500+</li>
+        <li>Datadog or Grafana Cloud Pro + PagerDuty paid — $500–1,500</li>
+        <li>WAF/CDN (Cloudflare Enterprise) — $200–2,000</li>
+        <li>Cross-region DR + compliance tooling — $200–500</li>
+      </ul>
+
+      <h2 id="oss-alternatives">Free / open-source alternatives to every paid line item</h2>
+      <div class="tablewrap"><table>
+        <tr><th>Paid option</th><th>OSS / self-hosted alt</th><th>Setup effort</th><th>Ongoing maintenance</th></tr>
+        <tr><td>SendGrid</td><td>Self-hosted Postfix/Mailu, or Amazon SES (cheaper, not free)</td><td>Low–Medium</td><td>Deliverability/reputation management is real ongoing work — SES or SendGrid still usually wins here</td></tr>
+        <tr><td>PagerDuty</td><td>Grafana OnCall (OSS)</td><td>Low — already running Grafana</td><td>Low</td></tr>
+        <tr><td>Elastic Cloud</td><td>Self-hosted Elasticsearch/OpenSearch (already what dev runs)</td><td>Already done</td><td>Medium — cluster ops, backups, upgrades become your responsibility</td></tr>
+        <tr><td>Sentry (paid tiers)</td><td>GlitchTip (OSS, Sentry-API-compatible) or self-hosted Sentry</td><td>Low</td><td>Low–Medium</td></tr>
+        <tr><td>Snyk</td><td>Already covered by Trivy + Semgrep + <code>pnpm audit</code>, all already in CI</td><td>None — just drop Snyk</td><td>None</td></tr>
+        <tr><td>Confluent Cloud Kafka</td><td>Self-hosted Kafka/Redpanda (already what dev runs)</td><td>Medium</td><td>Medium–High at real scale</td></tr>
+        <tr><td>Managed Postgres</td><td>Self-hosted Postgres + Patroni for HA</td><td>Medium–High</td><td>High — failover testing, backups, patching all become in-house</td></tr>
+        <tr><td>Datadog</td><td>Already-built Prometheus + Grafana + Loki + Jaeger stack</td><td>Already done</td><td>Low–Medium</td></tr>
+        <tr><td>HCP Vault Dedicated</td><td>Self-hosted Vault in HA mode (Raft storage)</td><td>Medium</td><td>Medium — unseal/rotation process must be owned in-house</td></tr>
+      </table></div>
+      <p>The pattern across almost every row: this system's OSS-first choices (Kafka over a managed queue, self-hosted Postgres/Redis/Elasticsearch/Vault, Prometheus/Grafana/Loki over Datadog) are already the cost-optimized path. The paid-vendor decisions that remain — SendGrid, MSG91, WhatsApp, the GST GSP — are either compliance-mandated or genuinely hard to fully self-host.</p>
+
+      <div class="pager">
+        <a href="#infrastructure/ops/cicd"><div class="pg-label">Back</div><div class="pg-title">← CI/CD &amp; Deployment</div></a>
+        <a class="next" href="#infrastructure/audit/dependencies"><div class="pg-label">Next</div><div class="pg-title">Dependency Audit →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ AUDIT: DEPENDENCIES ============ -->
+    <article class="page" id="page-infra-depaudit" data-track="dev" data-title="Dependency Audit">
+      <span class="track-pill dev">Infrastructure documentation</span>
+      <h1>Dependency Audit</h1>
+      <p>Full workspace scan: root + 18 <span class="src">apps/*</span> + 8 <span class="src">packages/*</span> manifests, the resolved lockfile, and a live <code>pnpm audit</code> run.</p>
+
+      <h2 id="security">Security</h2>
+      <div class="callout ok"><div class="callout-title">1 moderate finding, 0 high/critical</div><p><code>esbuild ≤0.24.2</code> dev-server request forgery, reached only through <code>drizzle-kit</code>'s dev-only migration CLI — never shipped in any of the 15 production Docker images. Already below CI's <code>--audit-level=high</code> gate.</p></div>
+
+      <h2 id="versions">Version consistency</h2>
+      <p>No real cross-service conflicts. fastify, kafkajs, drizzle-orm, vitest, vite, and React each resolve to a single version workspace-wide; apparent ioredis/jose/zod range differences collapse to one lockfile version each (partly thanks to a root <code>pnpm.overrides</code> pin on ioredis).</p>
+
+      <h2 id="unused">Confirmed unused (6 found)</h2>
+      <ul>
+        <li><code>ulid</code> declared in 10 services, actually imported in only 6 — dead in auth, hr, scheduler, tenant-service</li>
+        <li><code>zod</code> in api-gateway (pure proxy, no validation layer)</li>
+        <li><code>@erp/utils</code> in inventory-service (every sibling service uses it; this one doesn't)</li>
+      </ul>
+
+      <h2 id="supply-chain">Supply-chain note</h2>
+      <div class="callout review"><div class="callout-title"><code>xlsx</code> is sourced from a CDN tarball, not npm</div><p>Used in gst-service, report-service, scheduler-service, and <span class="src">tools/migration</span> — SheetJS's own distribution choice after deprecating npm releases. Consequence: <code>pnpm audit</code>/Snyk/Dependabot cannot scan it at all, and an outage at <code>cdn.sheetjs.com</code> would break <code>pnpm install</code> for those 4 packages with no fallback mirror.</p></div>
+
+      <h2 id="clean">Everything else checked and found clean</h2>
+      <p>No deprecated/abandoned packages (no <code>request</code>, <code>moment</code>, <code>node-sass</code>, <code>tslint</code>). TypeScript strictness is uniform across all 17 tsconfigs. Node 20 is consistent across <code>.nvmrc</code>, root <code>engines</code>, CI, and all 15 Dockerfiles with zero drift. The CI guard against committed compiled artifacts under <span class="src">packages/*/src</span> is present and active. The only manifest hygiene issue found outside the workspace itself: <span class="src">tools/migration</span> and <span class="src">tools/uat-seed</span> (outside the pnpm workspace glob) declare <code>@types/node ^22</code> against a Node 20 runtime target.</p>
+
+      <div class="pager">
+        <a href="#infrastructure/ops/cost"><div class="pg-label">Back</div><div class="pg-title">← Cost Plans &amp; OSS Alternatives</div></a>
+        <a class="next" href="#infrastructure/audit/known-issues"><div class="pg-label">Next</div><div class="pg-title">Known Issues &amp; Punch List →</div></a>
+      </div>
+    </article>
+
+    <!-- ============ AUDIT: KNOWN ISSUES ============ -->
+    <article class="page" id="page-infra-issues" data-track="dev" data-title="Known Issues & Punch List">
+      <span class="track-pill dev">Infrastructure documentation</span>
+      <h1>Known Issues &amp; Punch List</h1>
+      <p>The final page of this module — ordered by what actually blocks a production cutover versus what's a cost or hygiene optimization.</p>
+
+      <h2 id="must-fix">Must fix before production</h2>
+      <ol class="steps">
+        <li><h4>Wire Vault end-to-end</h4><p>Pick one delivery mechanism — a Vault Agent sidecar actually sourced by the entrypoint, the Vault CSI driver, or External Secrets Operator — and confirm it end-to-end. Today neither existing half-wired path reaches a running pod.</p></li>
+        <li><h4>Extend NetworkPolicy to the other 13 services</h4><p>Before enforcing default-deny in a real cluster, every service needs the same treatment auth-service already has in <span class="src">infrastructure/k8s/network-policy.yaml</span>.</p></li>
+        <li><h4>Stand up an Ingress controller</h4><p>Bind it to the existing cert-manager ClusterIssuers and a real domain — currently nothing serves the hostname the CI deploy job already references.</p></li>
+        <li><h4>Build a production path for both frontends</h4><p>Dockerfile + nginx, or static hosting via a CDN — currently the only two apps in the monorepo with neither.</p></li>
+        <li><h4>Fix the env var documentation mismatches</h4><p>The JWT TTL var names and the <code>SMTP_FROM</code>/<code>SMTP_FROM_ADDRESS</code> split, before anyone configures a production environment from <code>.env.example</code> alone.</p></li>
+      </ol>
+
+      <h2 id="should-add">Should add — cheap, high value</h2>
+      <div class="callout review"><div class="callout-title">Sentry or GlitchTip for error tracking</div><p>The single biggest observability gap relative to effort — see <a href="#infrastructure/ops/tooling">Dev, Ops &amp; Admin Tooling</a>.</p></div>
+      <div class="callout review"><div class="callout-title">pgAdmin/Adminer, RedisInsight, and a Kafka UI</div><p>All free, all currently missing from <span class="src">docker-compose.yml</span>.</p></div>
+      <div class="callout review"><div class="callout-title">An OpenAPI spec per service</div><p><code>@fastify/swagger</code> closes the "no Postman/Swagger anywhere" gap cheaply.</p></div>
+
+      <h2 id="cost-opt">Cost optimization opportunities</h2>
+      <ul>
+        <li>Drop Snyk — Trivy + Semgrep + <code>pnpm audit</code> already cover the same ground in CI today.</li>
+        <li>Stay on self-hosted Elasticsearch/OpenSearch and Kafka rather than migrating to Elastic Cloud/Confluent Cloud unless operational load genuinely exceeds in-house capacity — the Professional-tier estimate already assumes this.</li>
+        <li>Migrate the 4 <code>xlsx</code>-consuming packages off the CDN tarball dependency once SheetJS ships a scannable npm release, to close the one real supply-chain blind spot found.</li>
+      </ul>
+
+      <h2 id="safe-remove">Safe to remove</h2>
+      <ul>
+        <li>6 confirmed-unused dependency declarations (4× <code>ulid</code>, 1× <code>zod</code> in api-gateway, 1× <code>@erp/utils</code> in inventory-service).</li>
+        <li>2 dead env vars (<code>REDIS_CLUSTER_NODES</code>, plus <code>OTEL_SERVICE_NAME</code>/<code>OTEL_TRACES_EXPORTER</code>) from <code>.env.example</code> — or wire them up if cluster-mode Redis is genuinely planned.</li>
+      </ul>
+
+      <div class="callout ok"><div class="callout-title">What's genuinely solid, worth reusing as a model elsewhere</div><p>The CI security pipeline (Semgrep, Trivy, Snyk, TruffleHog, coverage gate) is thorough and not decorative. The backup/DR process is real, tested, and has a written, measured RTO/RPO. TypeScript strictness and Node version consistency are exemplary — zero drift across 17 tsconfigs and 15 Dockerfiles. None of this needs to be rebuilt; it needs to be extended to cover the edge-layer gaps above.</p></div>
+
+      <div class="pager">
+        <a href="#infrastructure/audit/dependencies"><div class="pg-label">Back</div><div class="pg-title">← Dependency Audit</div></a>
+        <span></span>
+      </div>
+    </article>
+
+  </main>
+
+  <aside class="toc">
+    <div class="toc-title">On this page</div>
+    <nav id="tocNav"></nav>
+  </aside>
+</div>
+
+<script src="/shared/docs-shell.js"></script>
+</body>
+</html>

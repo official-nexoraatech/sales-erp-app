@@ -1,5 +1,6 @@
 import type { Redis } from 'ioredis';
 import { and, eq, gt } from 'drizzle-orm';
+import { erpAuthBruteForceTotal } from '@erp/logger';
 import { blockedIps, securityAuditLog } from '@erp/db';
 import type { ErpDatabase } from '@erp/db';
 import type { AuthConfig } from '../config.js';
@@ -58,6 +59,7 @@ export async function recordFailedLoginAndMaybeBlock(
     ipAddress: inetParam(ip),
     details: { failedAttempts: count, windowSeconds: config.ipLoginFailWindowSeconds },
   });
+  erpAuthBruteForceTotal.inc({ tenant_id: String(tenantId) });
 
   await redis.del(key);
 }

@@ -16,6 +16,7 @@ import Input from '../../components/ui/Input.js';
 import Select from '../../components/ui/Select.js';
 import Button from '../../components/ui/Button.js';
 import { itemFormSchema, GST_RATES, type ItemFormData } from '../../schemas/item.schema.js';
+import VariantManager from './VariantManager.js';
 
 export default function ItemFormPage() {
   const { id } = useParams<{ id?: string }>();
@@ -212,6 +213,7 @@ export default function ItemFormPage() {
           <Select
             label="GST Rate %"
             required
+            hint="Auto-fills onto every invoice, quotation, and purchase-order line for this item — get it right here rather than correcting it on each document."
             {...register('gstRate', { valueAsNumber: true })}
             error={errors.gstRate?.message}
           >
@@ -275,6 +277,12 @@ export default function ItemFormPage() {
               checked={!!watch('isFabricItem')}
               onChange={(v) => setValue('isFabricItem', v)}
             />
+            <ERPSwitch
+              label="Has Variants"
+              description="Track size/color/etc. as separate SKUs"
+              checked={!!watch('hasVariants')}
+              onChange={(v) => setValue('hasVariants', v)}
+            />
           </div>
           {isFabric && (
             <Input
@@ -287,6 +295,7 @@ export default function ItemFormPage() {
           <Input
             label="Reorder Level"
             type="number"
+            hint="Drives the Low Stock flag on the Stock page and the Dashboard's low-stock widget — leave it blank and this item never triggers either."
             {...register('reorderLevel')}
             error={errors.reorderLevel?.message}
           />
@@ -298,6 +307,10 @@ export default function ItemFormPage() {
             <option value="CUSTOM">Custom</option>
           </Select>
         </ERPFormSection>
+
+        {isEdit && watch('hasVariants') && (
+          <VariantManager itemId={Number(id)} variants={(item?.variants ?? []) as never} />
+        )}
 
         <ERPStickyFooter>
           <Button variant="secondary" type="button" onClick={() => navigate('/inventory/items')}>

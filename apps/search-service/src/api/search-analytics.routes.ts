@@ -74,19 +74,24 @@ export async function searchAnalyticsRoutes(
   // Smart Search "did you mean": trigram-compares a query against this tenant's own
   // historical, result-bearing queries (search_analytics.query) — no LLM, just usage data
   // already being collected on every search. Returns null when nothing is similar enough.
-  fastify.get('/search/suggest', { preHandler: [authenticate] }, async (request, reply) => {
-    if (!hasPermission(request, PERMISSIONS.SEARCH_GLOBAL)) {
-      return reply.code(403).send({
-        error: { code: 'PERMISSION_DENIED', message: 'Missing permission: SEARCH_GLOBAL' },
-      });
-    }
-    const { tenantId } = (request as unknown as AuthedRequest).auth;
-    const parsed = SuggestQuerySchema.safeParse(request.query);
-    if (!parsed.success)
-      throw new ValidationError(parsed.error.errors.map((e) => e.message).join('; '));
-    const { q } = parsed.data;
+  // Same route-level rate-limit override rationale as GET /search (search.routes.ts) — this
+  // fires alongside every empty-result search, not just on demand.
+  fastify.get(
+    '/search/suggest',
+    { preHandler: [authenticate], config: { rateLimit: { max: 600, timeWindow: '1 minute' } } },
+    async (request, reply) => {
+      if (!hasPermission(request, PERMISSIONS.SEARCH_GLOBAL)) {
+        return reply.code(403).send({
+          error: { code: 'PERMISSION_DENIED', message: 'Missing permission: SEARCH_GLOBAL' },
+        });
+      }
+      const { tenantId } = (request as unknown as AuthedRequest).auth;
+      const parsed = SuggestQuerySchema.safeParse(request.query);
+      if (!parsed.success)
+        throw new ValidationError(parsed.error.errors.map((e) => e.message).join('; '));
+      const { q } = parsed.data;
 
-    const rows = await db.execute(sql`
+      const rows = await db.execute(sql`
       SELECT query, similarity(query, ${q}) AS sim, count(*)::int AS freq
       FROM search_analytics
       WHERE tenant_id = ${tenantId}
@@ -97,9 +102,10 @@ export async function searchAnalyticsRoutes(
       ORDER BY sim DESC, freq DESC
       LIMIT 1
     `);
-    const suggestion = (rows as unknown as Array<{ query: string }>)[0]?.query ?? null;
-    return reply.code(200).send({ data: { suggestion } });
-  });
+      const suggestion = (rows as unknown as Array<{ query: string }>)[0]?.query ?? null;
+      return reply.code(200).send({ data: { suggestion } });
+    }
+  );
 
   fastify.get(
     '/admin/search/analytics/summary',

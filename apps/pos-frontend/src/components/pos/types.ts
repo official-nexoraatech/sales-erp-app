@@ -4,6 +4,7 @@ export interface CartItem {
   quantity: number;
   unitPrice: number;
   gstRate: number;
+  cessRate: number;
   discountPct: number;
   lineTotal: number;
 }
@@ -13,6 +14,7 @@ export interface POSItem {
   name: string;
   salePrice?: string;
   gstRate?: number;
+  cessRate?: number;
   barcode?: string;
 }
 
@@ -27,7 +29,11 @@ export interface POSSearchResult {
   customCode: string | null;
   price: number;
   gstRate: number;
-  stock: { qty: number };
+  cessRate: number;
+  // null when this result came from the offline catalog fallback (useItemSearch.ts) — no
+  // stock quantity is synced to the client (no /sync/stock endpoint exists), so a live count
+  // is only ever available when the search actually reached the server.
+  stock: { qty: number | null };
   matchedOn: 'code' | 'supplierCode' | 'customCode' | 'alias' | 'name';
 }
 

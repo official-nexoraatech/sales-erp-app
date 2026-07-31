@@ -1,4 +1,5 @@
-import { CheckCircle2 } from 'lucide-react';
+import { CheckCircle2, Boxes, Calculator, FileCheck2 } from 'lucide-react';
+import ModuleGlyph from '../../../components/marketing/ModuleGlyph.js';
 import MarketingSection from '../../../components/marketing/MarketingSection.js';
 import { useScrollReveal } from '../../../hooks/useScrollReveal.js';
 
@@ -95,6 +96,7 @@ function GstTimelineMock() {
 
 const SHOWCASES = [
   {
+    icon: Boxes,
     eyebrow: 'Inventory',
     title: 'Know your stock, everywhere, in real time',
     description:
@@ -102,6 +104,7 @@ const SHOWCASES = [
     Mock: InventoryMock,
   },
   {
+    icon: Calculator,
     eyebrow: 'Accounting',
     title: 'Books that close themselves',
     description:
@@ -109,6 +112,7 @@ const SHOWCASES = [
     Mock: LedgerMock,
   },
   {
+    icon: FileCheck2,
     eyebrow: 'Compliance',
     title: 'GST filing without the spreadsheet gymnastics',
     description:
@@ -118,6 +122,7 @@ const SHOWCASES = [
 ];
 
 function ShowcaseRow({
+  icon,
   eyebrow,
   title,
   description,
@@ -128,16 +133,19 @@ function ShowcaseRow({
   return (
     <div
       ref={ref}
-      className={`grid lg:grid-cols-2 gap-10 items-center transition-all duration-slow ${
-        isVisible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'
-      } ${index % 2 === 1 ? 'lg:[direction:rtl]' : ''}`}
+      className={`flex flex-col lg:flex-row gap-10 items-center transition-all duration-slow ${
+        index % 2 === 1 ? 'lg:flex-row-reverse' : ''
+      } ${isVisible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'}`}
     >
-      <div className="lg:[direction:ltr]">
-        <span className="text-xs font-semibold uppercase tracking-wide text-brand">{eyebrow}</span>
-        <h3 className="mt-2 font-display font-semibold text-2xl text-primary">{title}</h3>
+      <div className="lg:w-1/2">
+        <ModuleGlyph icon={icon} size="sm" variant="accent" />
+        <span className="mt-3 block text-xs font-semibold uppercase tracking-wide text-brand">
+          {eyebrow}
+        </span>
+        <h3 className="mt-2 font-display font-semibold text-display-sm text-primary">{title}</h3>
         <p className="mt-3 text-secondary max-w-lg">{description}</p>
       </div>
-      <div className="lg:[direction:ltr] rounded-2xl border border-default bg-surface-card shadow-token-sm p-6 min-h-[220px] flex flex-col justify-center">
+      <div className="lg:w-1/2 w-full rounded-2xl border border-default bg-surface-card shadow-token-sm p-6 min-h-[220px] flex flex-col justify-center">
         <Mock />
       </div>
     </div>

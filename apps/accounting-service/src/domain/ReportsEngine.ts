@@ -48,6 +48,8 @@ export interface ProfitLossReport {
   operatingProfit: number;
   otherIncome: PLLine[];
   totalOtherIncome: number;
+  otherExpenses: PLLine[];
+  totalOtherExpenses: number;
   financialCharges: PLLine[];
   totalFinancialCharges: number;
   netProfit: number;
@@ -132,7 +134,25 @@ export class ReportsEngine {
       : new Date();
     const asOfISO = asOfDate.toISOString();
 
-    // Get all accounts with their period debits and credits
+    // "periodDebits/periodCredits" previously meant "everything since account inception" (no
+    // lower bound at all) — effectively duplicating what "opening balance" should represent, and
+    // giving a different "period" meaning than report-service's trial-balance-report (real
+    // from→to with a computed opening balance), which produced reconciling closing totals but a
+    // different, confusing "period" column between the two live Trial Balance endpoints. Default
+    // the period start to the current open financial year (same lookup pattern already used by
+    // getBalanceSheet's Current Year Earnings plug below) — pre-FY activity folds into opening
+    // balance, same as a standard Trial Balance. Falls back to "since inception" only when no
+    // financial year has been created yet, preserving prior behavior for that edge case.
+    const [openFy] = (await db.raw.execute(sql`
+      SELECT start_date FROM financial_years
+      WHERE tenant_id = ${tenantId} AND status != 'CLOSED' AND start_date <= ${asOfISO.substring(0, 10)}
+      ORDER BY start_date DESC LIMIT 1
+    `)) as Array<{ start_date: string }>;
+    const periodStartISO = openFy
+      ? new Date(`${openFy.start_date}T00:00:00.000Z`).toISOString()
+      : null;
+
+    // Get all accounts with their pre-period (folded into opening) and in-period debits/credits
     const rows = (await db.raw.execute(sql`
       SELECT
         a.id             AS account_id,
@@ -142,8 +162,10 @@ export class ReportsEngine {
         a.normal_balance,
         COALESCE(a.opening_balance, 0)::NUMERIC           AS opening_balance,
         a.opening_balance_type,
-        COALESCE(SUM(fe.debit_amount), 0)::NUMERIC        AS period_debits,
-        COALESCE(SUM(fe.credit_amount), 0)::NUMERIC       AS period_credits
+        COALESCE(SUM(CASE WHEN ${periodStartISO}::timestamptz IS NOT NULL AND fe.created_at < ${periodStartISO}::timestamptz THEN fe.debit_amount ELSE 0 END), 0)::NUMERIC  AS pre_period_debits,
+        COALESCE(SUM(CASE WHEN ${periodStartISO}::timestamptz IS NOT NULL AND fe.created_at < ${periodStartISO}::timestamptz THEN fe.credit_amount ELSE 0 END), 0)::NUMERIC AS pre_period_credits,
+        COALESCE(SUM(CASE WHEN ${periodStartISO}::timestamptz IS NULL OR fe.created_at >= ${periodStartISO}::timestamptz THEN fe.debit_amount ELSE 0 END), 0)::NUMERIC     AS period_debits,
+        COALESCE(SUM(CASE WHEN ${periodStartISO}::timestamptz IS NULL OR fe.created_at >= ${periodStartISO}::timestamptz THEN fe.credit_amount ELSE 0 END), 0)::NUMERIC    AS period_credits
       FROM accounts a
       LEFT JOIN financial_entries fe
         ON fe.account_id = a.id
@@ -163,15 +185,19 @@ export class ReportsEngine {
       normal_balance: string;
       opening_balance: string;
       opening_balance_type: string;
+      pre_period_debits: string;
+      pre_period_credits: string;
       period_debits: string;
       period_credits: string;
     }>;
 
     const lines: TrialBalanceLine[] = rows.map((row) => {
-      const openingBalance = Number(row.opening_balance);
+      const staticOpening = Number(row.opening_balance);
       const openingType = (row.opening_balance_type ?? 'DEBIT') as 'DEBIT' | 'CREDIT';
-      const openingDr = openingType === 'DEBIT' ? openingBalance : 0;
-      const openingCr = openingType === 'CREDIT' ? openingBalance : 0;
+      const openingDr =
+        (openingType === 'DEBIT' ? staticOpening : 0) + Number(row.pre_period_debits);
+      const openingCr =
+        (openingType === 'CREDIT' ? staticOpening : 0) + Number(row.pre_period_credits);
       const periodDr = Number(row.period_debits);
       const periodCr = Number(row.period_credits);
       const totalDr = openingDr + periodDr;
@@ -190,8 +216,8 @@ export class ReportsEngine {
         accountCode: row.account_code,
         accountName: row.account_name,
         accountType: row.account_type,
-        openingBalance,
-        openingBalanceType: openingType,
+        openingBalance: openingDr >= openingCr ? openingDr - openingCr : openingCr - openingDr,
+        openingBalanceType: openingDr >= openingCr ? 'DEBIT' : ('CREDIT' as 'DEBIT' | 'CREDIT'),
         periodDebits: periodDr,
         periodCredits: periodCr,
         closingDebit,
@@ -279,6 +305,23 @@ export class ReportsEngine {
     const financialCharges = rows
       .filter((r) => r.account_type === 'EXPENSE' && r.account_sub_type === 'TAX_EXPENSE')
       .map(buildLine);
+    // Bug fix (2026-07-31 RBAC/financial audit): any EXPENSE-type account whose sub-type is
+    // OTHER_EXPENSE, or left unset (the CoA create form's accountSubType is optional — see
+    // apps/accounting-service/src/api/accounts.routes.ts), fell through every bucket above and
+    // was silently excluded from netProfit — undercounting real expenses on the P&L statement
+    // itself, not just the Balance Sheet's derived "Current Year Earnings" plug. This also made
+    // report-service's independent balance-sheet-report query (which sums ALL EXPENSE+CONTRA
+    // rows regardless of sub-type) disagree with this engine. Fixed by capturing every
+    // remaining EXPENSE-type row here as its own labeled line, rather than silently dropping it.
+    const otherExpenses = rows
+      .filter(
+        (r) =>
+          r.account_type === 'EXPENSE' &&
+          r.account_sub_type !== 'COST_OF_GOODS' &&
+          r.account_sub_type !== 'OPERATING_EXPENSE' &&
+          r.account_sub_type !== 'TAX_EXPENSE'
+      )
+      .map(buildLine);
     const contraRevenue = rows.filter((r) => r.account_type === 'CONTRA').map(buildLine);
 
     const totalRevenue = revenue.reduce((s, l) => s + l.amount, 0);
@@ -288,8 +331,10 @@ export class ReportsEngine {
     const grossProfit = totalRevenue - totalCogs;
     const totalOperatingExpenses = operatingExpenses.reduce((s, l) => s + l.amount, 0);
     const operatingProfit = grossProfit - totalOperatingExpenses;
+    const totalOtherExpenses = otherExpenses.reduce((s, l) => s + l.amount, 0);
     const totalFinancialCharges = financialCharges.reduce((s, l) => s + l.amount, 0);
-    const netProfit = operatingProfit + totalOtherIncome - totalFinancialCharges;
+    const netProfit =
+      operatingProfit + totalOtherIncome - totalOtherExpenses - totalFinancialCharges;
 
     return {
       from,
@@ -306,6 +351,8 @@ export class ReportsEngine {
       operatingProfit,
       otherIncome,
       totalOtherIncome,
+      otherExpenses,
+      totalOtherExpenses,
       financialCharges,
       totalFinancialCharges,
       netProfit,

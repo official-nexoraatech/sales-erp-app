@@ -1,4 +1,4 @@
-﻿import { useState } from 'react';
+﻿import { useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
@@ -11,6 +11,8 @@ import ERPStickyFooter from '../../components/erp/ERPStickyFooter.js';
 import Button from '../../components/ui/Button.js';
 import Input from '../../components/ui/Input.js';
 import Select from '../../components/ui/Select.js';
+import { toFieldErrors } from '../../lib/zodFieldErrors.js';
+import { stockAdjustmentFormSchema } from '../../schemas/inventory-transactions.schema.js';
 
 interface AdjLine {
   itemId: number;
@@ -49,6 +51,7 @@ export default function StockAdjustmentFormPage() {
   const [notes, setNotes] = useState('');
   const [lines, setLines] = useState<AdjLine[]>([]);
   const [itemSearch, setItemSearch] = useState('');
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   const { data: whData } = useQuery({
     queryKey: ['warehouses'],
@@ -96,15 +99,23 @@ export default function StockAdjustmentFormPage() {
     setLines((prev) => prev.map((l, i) => (i === idx ? { ...l, [field]: val } : l)));
   }
 
-  function handleSubmit(): void {
-    if (!warehouseId) {
-      toast.error('Select a warehouse');
+  function handleSubmit(e: FormEvent): void {
+    e.preventDefault();
+    const result = stockAdjustmentFormSchema.safeParse({
+      warehouseId: warehouseId ? Number(warehouseId) : undefined,
+      adjustmentType,
+      lines: lines.map((l) => ({
+        itemId: l.itemId,
+        direction: l.direction,
+        quantity: l.quantity,
+      })),
+    });
+    if (!result.success) {
+      setFieldErrors(toFieldErrors(result.error));
+      toast.error('Fix the highlighted fields before saving');
       return;
     }
-    if (lines.length === 0) {
-      toast.error('Add at least one item');
-      return;
-    }
+    setFieldErrors({});
     createMutation.mutate({
       warehouseId: Number(warehouseId),
       adjustmentType,
@@ -120,7 +131,7 @@ export default function StockAdjustmentFormPage() {
   }
 
   return (
-    <div>
+    <form onSubmit={handleSubmit} noValidate>
       <ERPPageHeader
         variant="detail"
         title="New Stock Adjustment"
@@ -134,6 +145,7 @@ export default function StockAdjustmentFormPage() {
             required
             value={warehouseId}
             onChange={(e) => setWarehouseId(e.target.value)}
+            error={fieldErrors.warehouseId}
             options={[
               { value: '', label: 'Select warehouse...' },
               ...warehouses.map((w) => ({ value: String(w.id), label: w.name })),
@@ -142,6 +154,7 @@ export default function StockAdjustmentFormPage() {
           <Select
             label="Adjustment Type"
             required
+            hint="This is the only record of why stock changed — pick the specific reason, not a default, since there's no detail page to add context later."
             value={adjustmentType}
             onChange={(e) => setAdjustmentType(e.target.value)}
             options={ADJ_TYPES.map((t) => ({ value: t, label: t.replace('_', ' ') }))}
@@ -161,13 +174,22 @@ export default function StockAdjustmentFormPage() {
             label="Search item"
             value={itemSearch}
             onChange={(e) => setItemSearch(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') e.preventDefault();
+            }}
             placeholder="Type item name…"
           />
+          {fieldErrors.lines && (
+            <p className="text-xs text-danger mt-2" role="alert">
+              {fieldErrors.lines}
+            </p>
+          )}
           {itemResults.length > 0 && (
             <div className="mt-1 border border-default rounded-lg divide-y bg-surface-card max-h-40 overflow-y-auto">
               {itemResults.map((item) => (
                 <button
                   key={item.id}
+                  type="button"
                   className="w-full text-left px-3 py-2 text-sm hover:bg-surface-raised"
                   onClick={() => addLine(item)}
                 >
@@ -210,7 +232,7 @@ export default function StockAdjustmentFormPage() {
                       step="0.001"
                       value={line.quantity}
                       onChange={(e) => updateLine(idx, 'quantity', parseFloat(e.target.value) || 0)}
-                      className="w-24 rounded border-default bg-surface-card text-sm px-2 py-1"
+                      className={`w-24 rounded border bg-surface-card text-sm px-2 py-1 ${fieldErrors[`lines.${idx}.quantity`] ? 'border-danger' : 'border-default'}`}
                     />
                   </td>
                   <td className="py-2">
@@ -226,6 +248,7 @@ export default function StockAdjustmentFormPage() {
                   </td>
                   <td className="py-2">
                     <button
+                      type="button"
                       onClick={() => setLines((p) => p.filter((_, i) => i !== idx))}
                       className="text-danger hover:text-danger"
                     >
@@ -240,13 +263,17 @@ export default function StockAdjustmentFormPage() {
       </div>
 
       <ERPStickyFooter>
-        <Button variant="secondary" onClick={() => navigate('/inventory/adjustments')}>
+        <Button
+          type="button"
+          variant="secondary"
+          onClick={() => navigate('/inventory/adjustments')}
+        >
           Cancel
         </Button>
-        <Button onClick={handleSubmit} isLoading={createMutation.isPending}>
+        <Button type="submit" isLoading={createMutation.isPending}>
           Create Adjustment
         </Button>
       </ERPStickyFooter>
-    </div>
+    </form>
   );
 }

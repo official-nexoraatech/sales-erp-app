@@ -5,14 +5,19 @@ import {
   debitNotes,
   grns,
   grnLines,
+  purchaseOrders,
+  suppliers,
   items,
   projectionSupplierBalance,
+  projectionStockLevel,
   outboxEvents,
   inventoryLedger,
 } from '@erp/db';
 import type { ErpDatabase } from '@erp/db';
 import { BusinessError, NotFoundError } from '@erp/types';
 import { ulid } from 'ulid';
+import { GSTCalculator } from '@erp/utils';
+import { ValuationService } from './ValuationService.js';
 
 export interface ReturnLineInput {
   grnLineId: number;
@@ -49,6 +54,21 @@ export class PurchaseReturnService {
       if (grn.status !== 'APPROVED')
         throw new BusinessError('INVALID_GRN_STATUS', 'Can only return against APPROVED GRNs');
 
+      // Needed for correct CGST/SGST vs IGST split below — same source PO the GRN was
+      // received against carries the seller state / place of supply used at receipt time.
+      const [po] = await trx
+        .select({
+          placeOfSupply: purchaseOrders.placeOfSupply,
+          sellerStateCode: purchaseOrders.sellerStateCode,
+        })
+        .from(purchaseOrders)
+        .where(
+          and(
+            eq(purchaseOrders.id, grn.purchaseOrderId),
+            eq(purchaseOrders.tenantId, params.tenantId)
+          )
+        );
+
       // ES-23 [H8]: previously there was no quantity validation at all — a return
       // could be created for any returnQty regardless of what the GRN line actually
       // received. Validate against receivedQty minus prior APPROVED returns on the
@@ -62,7 +82,9 @@ export class PurchaseReturnService {
         const receivedQty = parseFloat(String(grnLine.receivedQty));
 
         const [priorReturns] = await trx
-          .select({ alreadyReturned: sql<string>`COALESCE(SUM(${purchaseReturnLines.returnQty}), 0)` })
+          .select({
+            alreadyReturned: sql<string>`COALESCE(SUM(${purchaseReturnLines.returnQty}), 0)`,
+          })
           .from(purchaseReturnLines)
           .innerJoin(purchaseReturns, eq(purchaseReturnLines.purchaseReturnId, purchaseReturns.id))
           .where(
@@ -83,16 +105,27 @@ export class PurchaseReturnService {
       }
 
       const computedLines = params.lines.map((l, i) => {
-        const taxableAmount = Math.round(l.unitPrice * l.returnQty * 100) / 100;
-        const isIntra = true; // simplified — same state logic
-        const cgstRate = isIntra ? l.gstRate / 2 : 0;
-        const sgstRate = isIntra ? l.gstRate / 2 : 0;
-        const igstRate = isIntra ? 0 : l.gstRate;
-        const cgstAmount = Math.round((taxableAmount * cgstRate / 100) * 100) / 100;
-        const sgstAmount = Math.round((taxableAmount * sgstRate / 100) * 100) / 100;
-        const igstAmount = Math.round((taxableAmount * igstRate / 100) * 100) / 100;
-        const lineTotal = Math.round((taxableAmount + cgstAmount + sgstAmount + igstAmount) * 100) / 100;
-        return { ...l, lineNumber: i + 1, taxableAmount, cgstAmount, sgstAmount, igstAmount, lineTotal };
+        // Was hardcoded to always-intrastate (CGST+SGST) regardless of the PO's actual
+        // seller state vs place of supply — genuinely interstate returns were taxed wrong.
+        // Reuse the same GSTCalculator the GRN itself was received with.
+        const gst = GSTCalculator.computeLine({
+          unitPrice: l.unitPrice,
+          quantity: l.returnQty,
+          discountPct: 0,
+          discountAmount: 0,
+          gstRate: l.gstRate,
+          sellerStateCode: po?.sellerStateCode ?? po?.placeOfSupply ?? '',
+          placeOfSupply: po?.placeOfSupply ?? '',
+        });
+        return {
+          ...l,
+          lineNumber: i + 1,
+          taxableAmount: gst.taxableAmount,
+          cgstAmount: gst.cgstAmount,
+          sgstAmount: gst.sgstAmount,
+          igstAmount: gst.igstAmount,
+          lineTotal: gst.lineTotal,
+        };
       });
 
       const grandTotal = computedLines.reduce((s, l) => s + l.lineTotal, 0);
@@ -178,11 +211,29 @@ export class PurchaseReturnService {
           .returning({ id: items.id, availableQty: items.availableQty });
 
         if (result.length === 0) {
-          throw new BusinessError('INSUFFICIENT_STOCK', `Insufficient stock for item ${line.itemId} to process return`);
+          throw new BusinessError(
+            'INSUFFICIENT_STOCK',
+            `Insufficient stock for item ${line.itemId} to process return`
+          );
         }
 
         const afterQty = parseFloat(String(result[0]!.availableQty ?? '0'));
         const beforeQty = afterQty + qty;
+
+        // Previously purchase-service had no STOCK_OUT valuation path at all — a purchase
+        // return decremented availableQty and wrote a ledger row but never touched
+        // waccCost/currentStockValue/FIFO layers, so book stock value stayed overstated
+        // forever after any return to a supplier (and a FIFO item's phantom layer stayed
+        // available to be wrongly consumed by a later sale).
+        const totalCogs = await ValuationService.consumeForStockOut(trx, {
+          tenantId,
+          itemId: line.itemId,
+          variantId: line.variantId ?? undefined,
+          warehouseId: ret.warehouseId,
+          quantity: qty,
+        });
+        const cogsPerUnit = qty > 0 ? Math.round((totalCogs / qty) * 100) / 100 : 0;
+
         await trx.insert(inventoryLedger).values({
           tenantId,
           itemId: line.itemId,
@@ -196,8 +247,37 @@ export class PurchaseReturnService {
           referenceId: id,
           referenceLineId: line.id,
           unitCost: String(line.unitPrice ?? '0'),
+          cogsPerUnit: String(cogsPerUnit),
           createdBy: userId,
         });
+
+        // Same per-warehouse projection_stock_level gap GRN receipts had (fixed
+        // 2026-07-17) — a purchase return never decremented it, leaving the Stock Levels
+        // page and Physical Verification's snapshot phantom-high for the returning warehouse.
+        await trx
+          .insert(projectionStockLevel)
+          .values({
+            tenantId,
+            itemId: line.itemId,
+            variantId: line.variantId ?? undefined,
+            warehouseId: ret.warehouseId,
+            availableQty: '0',
+            reservedQty: '0',
+            lastMovementAt: new Date(),
+          })
+          .onConflictDoUpdate({
+            target: [
+              projectionStockLevel.tenantId,
+              projectionStockLevel.itemId,
+              projectionStockLevel.warehouseId,
+              projectionStockLevel.variantId,
+            ],
+            set: {
+              availableQty: sql`GREATEST(0, projection_stock_level.available_qty - ${qty})`,
+              lastMovementAt: new Date(),
+              updatedAt: new Date(),
+            },
+          });
       }
 
       // Auto-generate debit note
@@ -220,7 +300,8 @@ export class PurchaseReturnService {
         })
         .returning({ id: debitNotes.id });
 
-      if (!dnRow) throw new BusinessError('DEBIT_NOTE_CREATE_FAILED', 'Failed to create debit note');
+      if (!dnRow)
+        throw new BusinessError('DEBIT_NOTE_CREATE_FAILED', 'Failed to create debit note');
 
       // Update purchase return
       await trx
@@ -250,6 +331,47 @@ export class PurchaseReturnService {
           )
         );
 
+      // gst-service's handlePurchaseReturnApproved and (once wired) accounting-service's
+      // consumer both need the same full breakdown GRN_APPROVED already carries — this
+      // payload previously only had {returnId, debitNoteId, debitNoteNumber, supplierId,
+      // grandTotal}, so every field the consumers read (incl. a field-name mismatch:
+      // consumer expected `returnNumber`, producer never sent one) came back undefined,
+      // silently recording every purchase-return GST ledger entry as ₹0.
+      const taxTotals = lines.reduce(
+        (acc, l) => ({
+          taxableAmount: acc.taxableAmount + parseFloat(String(l.taxableAmount)),
+          cgstAmount: acc.cgstAmount + parseFloat(String(l.cgstAmount)),
+          sgstAmount: acc.sgstAmount + parseFloat(String(l.sgstAmount)),
+          igstAmount: acc.igstAmount + parseFloat(String(l.igstAmount)),
+        }),
+        { taxableAmount: 0, cgstAmount: 0, sgstAmount: 0, igstAmount: 0 }
+      );
+
+      const [supplier] = await trx
+        .select({ displayName: suppliers.displayName, gstin: suppliers.gstin })
+        .from(suppliers)
+        .where(and(eq(suppliers.id, ret.supplierId), eq(suppliers.tenantId, tenantId)));
+
+      const [grnForPo] = await trx
+        .select({ purchaseOrderId: grns.purchaseOrderId })
+        .from(grns)
+        .where(and(eq(grns.id, ret.grnId), eq(grns.tenantId, tenantId)));
+
+      const [po] = grnForPo
+        ? await trx
+            .select({
+              placeOfSupply: purchaseOrders.placeOfSupply,
+              sellerStateCode: purchaseOrders.sellerStateCode,
+            })
+            .from(purchaseOrders)
+            .where(
+              and(
+                eq(purchaseOrders.id, grnForPo.purchaseOrderId),
+                eq(purchaseOrders.tenantId, tenantId)
+              )
+            )
+        : [];
+
       await trx.insert(outboxEvents).values({
         eventId: ulid(),
         eventType: 'PURCHASE_RETURN_APPROVED',
@@ -258,9 +380,21 @@ export class PurchaseReturnService {
         tenantId,
         payload: {
           returnId: id,
+          returnNumber: ret.returnNumber,
+          returnDate: ret.returnDate,
           debitNoteId: dnRow.id,
           debitNoteNumber,
           supplierId: ret.supplierId,
+          supplierName: supplier?.displayName ?? null,
+          supplierGstin: supplier?.gstin ?? null,
+          placeOfSupply: po?.placeOfSupply ?? null,
+          sellerStateCode: po?.sellerStateCode ?? po?.placeOfSupply ?? null,
+          taxableAmount: String(taxTotals.taxableAmount),
+          cgstAmount: String(taxTotals.cgstAmount),
+          sgstAmount: String(taxTotals.sgstAmount),
+          igstAmount: String(taxTotals.igstAmount),
+          cessAmount: '0',
+          isInterstate: taxTotals.igstAmount > 0,
           grandTotal: ret.grandTotal,
         },
         published: false,

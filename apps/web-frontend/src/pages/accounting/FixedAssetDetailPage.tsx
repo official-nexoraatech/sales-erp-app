@@ -148,7 +148,11 @@ export default function FixedAssetDetailPage() {
               </Button>
             )}
             {canDisposeAsset && asset.status === 'ACTIVE' && (
-              <Button variant="danger" onClick={() => setDisposeModalOpen(true)}>
+              <Button
+                data-tour-id="accounting-fixed-asset-dispose-button"
+                variant="danger"
+                onClick={() => setDisposeModalOpen(true)}
+              >
                 Dispose Asset
               </Button>
             )}

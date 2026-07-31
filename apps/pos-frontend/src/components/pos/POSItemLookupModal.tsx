@@ -92,6 +92,7 @@ export function POSItemLookupModal({ open, onClose, onSelectItem }: Props) {
       name: item.name,
       salePrice: String(item.price),
       gstRate: item.gstRate,
+      cessRate: item.cessRate,
       ...(item.barcode ? { barcode: item.barcode } : {}),
     });
     onClose();

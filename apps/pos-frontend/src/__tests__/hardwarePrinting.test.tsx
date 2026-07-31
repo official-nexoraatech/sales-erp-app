@@ -23,6 +23,7 @@ const sale: CompletedSale = {
       quantity: 2,
       unitPrice: 50,
       gstRate: 18,
+      cessRate: 0,
       discountPct: 0,
       lineTotal: 118,
     },

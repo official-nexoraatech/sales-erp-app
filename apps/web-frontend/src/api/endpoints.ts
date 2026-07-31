@@ -83,8 +83,19 @@ export const adminSecurityApi = {
 export const organizationApi = {
   get: () => apiClient.get('tenant', '/organization'),
   update: (data: Record<string, unknown>) => apiClient.put('tenant', '/organization', data),
-  uploadLogoUrl: (data: { fileName: string; contentType: string }) =>
-    apiClient.post('tenant', '/organization/logo/upload', data),
+  // Multipart direct upload — matches tenant-service's real implementation (F14, 2026-07-23
+  // tenant-service audit), not the fake presigned-URL JSON body this replaced, which the
+  // backend never actually supported.
+  uploadLogo: (file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return apiClient.upload<{ logoObjectKey: string }>(
+      'tenant',
+      '/organization/logo/upload',
+      formData
+    );
+  },
+  logoBlob: () => apiClient.getBlob('tenant', '/organization/logo'),
 };
 
 // ── SSO Configuration (PG-020, Session A — config CRUD only, no login flow yet) ────────
@@ -108,6 +119,43 @@ export const tenantApi = {
       'tenant',
       '/public/signup',
       data
+    ),
+};
+
+// ── Demo requests: public submission (no auth) + platform admin listing ────────
+export interface DemoRequest {
+  id: number;
+  fullName: string;
+  email: string;
+  countryCode: string | null;
+  phone: string | null;
+  company: string | null;
+  city: string | null;
+  designation: string | null;
+  productType: string | null;
+  message: string | null;
+  source: 'HERO_FORM' | 'CONTACT_PAGE';
+  createdAt: string;
+}
+export const demoRequestApi = {
+  submit: (data: {
+    fullName: string;
+    email: string;
+    countryCode?: string;
+    phone?: string;
+    company?: string;
+    city?: string;
+    designation?: string;
+    productType?: string;
+    message?: string;
+    source: 'HERO_FORM' | 'CONTACT_PAGE';
+  }) => apiClient.post<{ id: number }>('tenant', '/public/demo-requests', data),
+};
+export const adminDemoRequestApi = {
+  list: () =>
+    apiClient.get<{ content: DemoRequest[]; totalElements: number }>(
+      'tenant',
+      '/admin/demo-requests'
     ),
 };
 
@@ -297,6 +345,8 @@ export const userApi = {
   unlock: (id: number) => apiClient.post('auth', `/users/${id}/unlock`),
   assignBranches: (id: number, data: { branchIds: number[]; primaryBranchId?: number }) =>
     apiClient.put('auth', `/users/${id}/branches`, data),
+  updateRoles: (id: number, data: { roleIds: number[] }) =>
+    apiClient.put('auth', `/users/${id}/roles`, data),
 };
 
 // ── Customers ─────────────────────────────────────────────────────────────────
@@ -323,6 +373,18 @@ export const customerApi = {
   statement: (id: number) => apiClient.get('sales', `/customers/${id}/statement`),
   outstanding: (id: number) => apiClient.get('sales', `/customers/${id}/outstanding`),
   activity: (id: number) => apiClient.get('sales', `/customers/${id}/activity`),
+  // CRM-ROADMAP Phase 1, Feature 3 — Customer 360 Command Center: single composed read
+  // (health score, activity timeline, AR/credit snapshot, linked account).
+  get360: (id: number) => apiClient.get('sales', `/customers/${id}/360`),
+  // CRM-ROADMAP Phase 3, Feature 1 — dismiss/accept a cached churn/next-best-action/product
+  // recommendation shown on Customer 360.
+  recommendationFeedback: (
+    id: number,
+    data: {
+      recommendationType: 'NEXT_BEST_ACTION' | 'PRODUCT_RECOMMENDATION';
+      action: 'DISMISS' | 'ACCEPT';
+    }
+  ) => apiClient.post('sales', `/recommendations/${id}/feedback`, data),
   create: (data: Record<string, unknown>) => apiClient.post('sales', '/customers', data),
   update: (id: number, data: Record<string, unknown>) =>
     apiClient.put('sales', `/customers/${id}`, data),
@@ -346,6 +408,186 @@ export const customerApi = {
   ) => apiClient.put('sales', `/customers/${id}/preferences`, { preferences }),
 };
 
+// ── CRM Accounts (CRM-ROADMAP Phase 1, Feature 1 — Contact & Account Hierarchy) ────────
+// Named crmAccountApi, not accountApi — that name is already taken below by the Chart of
+// Accounts (accounting-service /accounts), an unrelated resource.
+export const crmAccountApi = {
+  list: (params?: { page?: number; size?: number; search?: string | undefined }) => {
+    const qs = new URLSearchParams();
+    if (params?.page !== undefined) qs.set('page', String(params.page));
+    if (params?.size !== undefined) qs.set('size', String(params.size));
+    if (params?.search) qs.set('search', params.search);
+    return apiClient.get<{ content: unknown[]; totalElements: number; page: number; size: number }>(
+      'sales',
+      `/accounts?${qs}`
+    );
+  },
+  getById: (id: number) => apiClient.get('sales', `/accounts/${id}`),
+  create: (data: Record<string, unknown>) => apiClient.post('sales', '/accounts', data),
+  update: (id: number, data: Record<string, unknown>) =>
+    apiClient.put('sales', `/accounts/${id}`, data),
+  merge: (data: { sourceId: number; targetId: number }) =>
+    apiClient.post('sales', '/accounts/merge', data),
+  getOrCreateForCustomer: (customerId: number) =>
+    apiClient.post('sales', `/accounts/for-customer/${customerId}`, {}),
+  dedupeCheck: (params: {
+    name?: string | undefined;
+    gstin?: string | undefined;
+    phone?: string | undefined;
+    email?: string | undefined;
+  }) => {
+    const qs = new URLSearchParams();
+    if (params.name) qs.set('name', params.name);
+    if (params.gstin) qs.set('gstin', params.gstin);
+    if (params.phone) qs.set('phone', params.phone);
+    if (params.email) qs.set('email', params.email);
+    return apiClient.get<{ content: unknown[] }>('sales', `/accounts/dedupe-check?${qs}`);
+  },
+  listContacts: (accountId: number) => apiClient.get('sales', `/accounts/${accountId}/contacts`),
+  addContact: (accountId: number, data: Record<string, unknown>) =>
+    apiClient.post('sales', `/accounts/${accountId}/contacts`, data),
+  updateContact: (accountId: number, contactId: number, data: Record<string, unknown>) =>
+    apiClient.put('sales', `/accounts/${accountId}/contacts/${contactId}`, data),
+  deleteContact: (accountId: number, contactId: number) =>
+    apiClient.delete('sales', `/accounts/${accountId}/contacts/${contactId}`),
+};
+
+// ── CRM Leads (CRM-ROADMAP Phase 1, Feature 2 — Lead Management & Capture) ────────────
+export const leadApi = {
+  // Public, unauthenticated — apiClient still attaches an Authorization header if one exists
+  // in the store, but the gateway/route both allow this path through without one (see
+  // apps/api-gateway/src/middleware/gateway-auth.ts's EXEMPT_PATHS and lead.routes.ts).
+  capture: (data: Record<string, unknown>) => apiClient.post('sales', '/leads/capture', data),
+  list: (params?: { stage?: string; mine?: boolean }) => {
+    const qs = new URLSearchParams();
+    if (params?.stage) qs.set('stage', params.stage);
+    if (params?.mine) qs.set('mine', 'true');
+    return apiClient.get<{ content: unknown[]; totalElements: number }>('sales', `/leads?${qs}`);
+  },
+  getById: (id: number) => apiClient.get('sales', `/leads/${id}`),
+  create: (data: Record<string, unknown>) => apiClient.post('sales', '/leads', data),
+  update: (id: number, data: Record<string, unknown>) =>
+    apiClient.put('sales', `/leads/${id}`, data),
+  assign: (id: number, userId?: number) =>
+    apiClient.post('sales', `/leads/${id}/assign`, { userId }),
+  convert: (id: number, branchId: number) =>
+    apiClient.post('sales', `/leads/${id}/convert`, { branchId }),
+  listActivities: (id: number) => apiClient.get('sales', `/leads/${id}/activities`),
+  addActivity: (id: number, data: { activityType: string; description: string }) =>
+    apiClient.post('sales', `/leads/${id}/activities`, data),
+  listAssignmentRules: () => apiClient.get('sales', '/lead-assignment-rules'),
+  createAssignmentRule: (data: Record<string, unknown>) =>
+    apiClient.post('sales', '/lead-assignment-rules', data),
+};
+
+// ── CRM Tickets (CRM-ROADMAP Phase 1, Feature 4 — Support & Ticketing) ────────────────
+export const ticketApi = {
+  list: (params?: {
+    status?: string | undefined;
+    mine?: boolean | undefined;
+    customerId?: number | undefined;
+  }) => {
+    const qs = new URLSearchParams();
+    if (params?.status) qs.set('status', params.status);
+    if (params?.mine) qs.set('mine', 'true');
+    if (params?.customerId) qs.set('customerId', String(params.customerId));
+    return apiClient.get<{ content: unknown[]; totalElements: number }>('sales', `/tickets?${qs}`);
+  },
+  getById: (id: number) => apiClient.get('sales', `/tickets/${id}`),
+  create: (data: Record<string, unknown>) => apiClient.post('sales', '/tickets', data),
+  update: (id: number, data: Record<string, unknown>) =>
+    apiClient.put('sales', `/tickets/${id}`, data),
+  assign: (id: number, userId: number) =>
+    apiClient.post('sales', `/tickets/${id}/assign`, { userId }),
+  reopen: (id: number) => apiClient.post('sales', `/tickets/${id}/reopen`, {}),
+  listMessages: (id: number) => apiClient.get('sales', `/tickets/${id}/messages`),
+  addMessage: (id: number, data: { visibility: 'INTERNAL' | 'CUSTOMER_VISIBLE'; body: string }) =>
+    apiClient.post('sales', `/tickets/${id}/messages`, data),
+  recordCsat: (id: number, data: { rating: number; comment?: string }) =>
+    apiClient.post('sales', `/tickets/${id}/csat`, data),
+};
+
+// ── CRM DLT Templates (CRM-ROADMAP Phase 1, Feature 6 — DLT/TRAI SMS Compliance) ──────
+export const dltTemplateApi = {
+  list: () =>
+    apiClient.get<{ content: unknown[]; totalElements: number }>('sales', '/dlt-templates'),
+  create: (data: Record<string, unknown>) => apiClient.post('sales', '/dlt-templates', data),
+  update: (id: number, data: Record<string, unknown>) =>
+    apiClient.put('sales', `/dlt-templates/${id}`, data),
+  delete: (id: number) => apiClient.delete('sales', `/dlt-templates/${id}`),
+};
+
+// CRM-ROADMAP Phase 2, Feature 1 — Sales Pipeline & Opportunity Management.
+export const opportunityApi = {
+  list: (params?: { stage?: string; dealType?: string; customerId?: number }) => {
+    const qs = new URLSearchParams();
+    if (params?.stage) qs.set('stage', params.stage);
+    if (params?.dealType) qs.set('dealType', params.dealType);
+    if (params?.customerId) qs.set('customerId', String(params.customerId));
+    const suffix = qs.toString() ? `?${qs.toString()}` : '';
+    return apiClient.get<{ content: unknown[]; totalElements: number }>(
+      'sales',
+      `/opportunities${suffix}`
+    );
+  },
+  get: (id: number) => apiClient.get<Record<string, unknown>>('sales', `/opportunities/${id}`),
+  create: (data: Record<string, unknown>) =>
+    apiClient.post<Record<string, unknown>>('sales', '/opportunities', data),
+  update: (id: number, data: Record<string, unknown>) =>
+    apiClient.put('sales', `/opportunities/${id}`, data),
+  delete: (id: number) => apiClient.delete('sales', `/opportunities/${id}`),
+  addLineItem: (id: number, data: Record<string, unknown>) =>
+    apiClient.post('sales', `/opportunities/${id}/line-items`, data),
+  removeLineItem: (id: number, lineItemId: number) =>
+    apiClient.delete('sales', `/opportunities/${id}/line-items/${lineItemId}`),
+  changeStage: (id: number, data: { toStageCode: string; version: number }) =>
+    apiClient.post('sales', `/opportunities/${id}/stage`, data),
+  markWon: (
+    id: number,
+    data: {
+      version: number;
+      branchId: number;
+      placeOfSupply: string;
+      sellerStateCode: string;
+      validUntil: string;
+    }
+  ) => apiClient.post('sales', `/opportunities/${id}/won`, data),
+  markLost: (id: number, data: { version: number; lostReason: string }) =>
+    apiClient.post('sales', `/opportunities/${id}/lost`, data),
+  // CRM-ROADMAP Phase 3, Feature 6: these 3 fields are omitted (not present at all) for a
+  // caller lacking OPPORTUNITY_VALUE_VIEW — hence all-optional here, not required numbers.
+  forecast: () =>
+    apiClient.get<{ pipelineValue?: number; weightedValue?: number; commitValue?: number }>(
+      'sales',
+      '/opportunities/forecast'
+    ),
+  pipelineStages: (dealType?: string) =>
+    apiClient.get<
+      Array<{
+        code: string;
+        name: string;
+        sequence: number;
+        probability: number;
+        isWon: boolean;
+        isLost: boolean;
+      }>
+    >(
+      'sales',
+      dealType ? `/pipeline-stages?dealType=${encodeURIComponent(dealType)}` : '/pipeline-stages'
+    ),
+};
+
+// CRM-ROADMAP Phase 1, Feature 8 — CRM Dashboards & KPI Tracking.
+export const crmDashboardApi = {
+  get: (params?: { from?: string | undefined; to?: string | undefined }) => {
+    const qs = new URLSearchParams();
+    if (params?.from) qs.set('from', params.from);
+    if (params?.to) qs.set('to', params.to);
+    const suffix = qs.toString() ? `?${qs.toString()}` : '';
+    return apiClient.get<unknown>('sales', `/crm/dashboard${suffix}`);
+  },
+};
+
 // ── Suppliers ─────────────────────────────────────────────────────────────────
 export const supplierApi = {
   list: (params?: {
@@ -365,11 +607,23 @@ export const supplierApi = {
     );
   },
   getById: (id: number) => apiClient.get('sales', `/suppliers/${id}`),
-  statement: (id: number) => apiClient.get('sales', `/suppliers/${id}/statement`),
+  // Real ledger-based statement/outstanding live in purchase-service
+  // (SupplierPaymentService.getStatement/getOutstanding) — sales-service has its own
+  // route at the same path but it's a stub that always returns an empty transaction list
+  // (apps/sales-service/src/api/supplier.routes.ts), so this must go to purchase-service.
+  statement: (id: number) => apiClient.get('purchase', `/suppliers/${id}/statement`),
+  outstanding: (id: number) => apiClient.get('purchase', `/suppliers/${id}/outstanding`),
   create: (data: Record<string, unknown>) => apiClient.post('sales', '/suppliers', data),
   update: (id: number, data: Record<string, unknown>) =>
     apiClient.put('sales', `/suppliers/${id}`, data),
   delete: (id: number) => apiClient.delete('sales', `/suppliers/${id}`),
+  contacts: (id: number) => apiClient.get('sales', `/suppliers/${id}/contacts`),
+  addContact: (id: number, data: Record<string, unknown>) =>
+    apiClient.post('sales', `/suppliers/${id}/contacts`, data),
+  updateContact: (id: number, contactId: number, data: Record<string, unknown>) =>
+    apiClient.put('sales', `/suppliers/${id}/contacts/${contactId}`, data),
+  deleteContact: (id: number, contactId: number) =>
+    apiClient.delete('sales', `/suppliers/${id}/contacts/${contactId}`),
 };
 
 // ── Categories ────────────────────────────────────────────────────────────────
@@ -407,6 +661,7 @@ export const itemApi = {
     categoryId?: number | undefined;
     brandId?: number | undefined;
     status?: string | undefined;
+    priceListId?: number | undefined;
   }) => {
     const qs = new URLSearchParams();
     if (params?.page !== undefined) qs.set('page', String(params.page));
@@ -415,6 +670,7 @@ export const itemApi = {
     if (params?.categoryId) qs.set('categoryId', String(params.categoryId));
     if (params?.brandId) qs.set('brandId', String(params.brandId));
     if (params?.status) qs.set('status', params.status);
+    if (params?.priceListId) qs.set('priceListId', String(params.priceListId));
     return apiClient.get<{ content: unknown[]; totalElements: number }>(
       'inventory',
       `/items?${qs}`
@@ -429,6 +685,8 @@ export const itemApi = {
   delete: (id: number) => apiClient.delete('inventory', `/items/${id}`),
   addVariants: (id: number, variants: unknown[]) =>
     apiClient.post('inventory', `/items/${id}/variants`, variants),
+  updateVariant: (id: number, variantId: number, data: Record<string, unknown>) =>
+    apiClient.put('inventory', `/items/${id}/variants/${variantId}`, data),
   generateBarcode: (id: number, type?: string) =>
     apiClient.post('inventory', `/items/${id}/barcode/generate`, { type }),
 };
@@ -759,8 +1017,9 @@ export const invoiceApi = {
   },
   getById: (id: number) => apiClient.get('sales', `/invoices/${id}`),
   create: (data: Record<string, unknown>) => apiClient.post('sales', '/invoices', data),
-  confirm: (id: number, data: { invoiceNumber: string }) =>
-    apiClient.post('sales', `/invoices/${id}/confirm`, data),
+  // C-7 fix: invoiceNumber is now generated server-side (gap-free, FY-scoped sequence) —
+  // no request body needed.
+  confirm: (id: number) => apiClient.post('sales', `/invoices/${id}/confirm`, {}),
   cancel: (id: number, data: { reason: string }) =>
     apiClient.post('sales', `/invoices/${id}/cancel`, data),
   duplicate: (id: number) => apiClient.post('sales', `/invoices/${id}/duplicate`, {}),
@@ -853,6 +1112,54 @@ export const deliveryChallanApi = {
 export const loyaltyApi = {
   balance: (customerId: number) => apiClient.get('sales', `/customers/${customerId}/loyalty`),
   redeem: (data: Record<string, unknown>) => apiClient.post('sales', '/pos/loyalty/redeem', data),
+  redeemCatalogItem: (data: Record<string, unknown>) =>
+    apiClient.post('sales', '/pos/loyalty/redeem-catalog', data),
+
+  // CRM-ROADMAP Phase 2, Feature 3 — tier + redemption-catalog configuration
+  listTiers: () => apiClient.get('sales', '/loyalty/tiers'),
+  createTier: (data: Record<string, unknown>) => apiClient.post('sales', '/loyalty/tiers', data),
+  updateTier: (id: number, data: Record<string, unknown>) =>
+    apiClient.put('sales', `/loyalty/tiers/${id}`, data),
+  listCatalog: () => apiClient.get('sales', '/loyalty/redemption-catalog'),
+  createCatalogItem: (data: Record<string, unknown>) =>
+    apiClient.post('sales', '/loyalty/redemption-catalog', data),
+  updateCatalogItem: (id: number, data: Record<string, unknown>) =>
+    apiClient.put('sales', `/loyalty/redemption-catalog/${id}`, data),
+};
+
+// CRM-ROADMAP Phase 2, Feature 4 — Referral Program Engine
+export const referralApi = {
+  getOrCreateCode: (customerId: number) => apiClient.get('sales', `/referral-codes/${customerId}`),
+  getFunnel: () => apiClient.get('sales', '/referral/funnel'),
+  listRewards: (status?: 'PENDING' | 'FLAGGED' | 'PAID' | 'REJECTED') => {
+    const qs = new URLSearchParams();
+    if (status) qs.set('status', status);
+    return apiClient.get('sales', `/referral/rewards?${qs}`);
+  },
+  approveReward: (id: number) => apiClient.post('sales', `/referral/rewards/${id}/approve`, {}),
+  rejectReward: (id: number, reason: string) =>
+    apiClient.post('sales', `/referral/rewards/${id}/reject`, { reason }),
+  // Public, unauthenticated — same shape as leadApi.capture above.
+  redeem: (data: Record<string, unknown>) => apiClient.post('sales', '/referral/redeem', data),
+};
+
+// CRM-ROADMAP Phase 2, Feature 5 — Omnichannel Communication Hub
+export const conversationApi = {
+  list: (params?: { status?: string; mine?: boolean }) => {
+    const qs = new URLSearchParams();
+    if (params?.status) qs.set('status', params.status);
+    if (params?.mine) qs.set('mine', 'true');
+    return apiClient.get('sales', `/conversations?${qs}`);
+  },
+  getById: (id: number) => apiClient.get('sales', `/conversations/${id}`),
+  reply: (id: number, body: string) =>
+    apiClient.post('sales', `/conversations/${id}/messages`, { body }),
+  assign: (id: number, userId: number) =>
+    apiClient.post('sales', `/conversations/${id}/assign`, { userId }),
+  close: (id: number) => apiClient.post('sales', `/conversations/${id}/close`, {}),
+  listCannedResponses: () => apiClient.get('sales', '/canned-responses'),
+  createCannedResponse: (data: Record<string, unknown>) =>
+    apiClient.post('sales', '/canned-responses', data),
 };
 
 // ── Phase 5 — Purchase ────────────────────────────────────────────────────────
@@ -887,6 +1194,79 @@ export const purchaseOrderApi = {
     apiClient.post('purchase', `/purchase-orders/${id}/cancel`, data),
   duplicate: (id: number) => apiClient.post('purchase', `/purchase-orders/${id}/duplicate`, {}),
   activity: (id: number) => apiClient.get('purchase', `/purchase-orders/${id}/activity`),
+  pdf: (id: number) => apiClient.getBlob('purchase', `/purchase-orders/${id}/pdf`),
+};
+
+// ── Purchase audit 2026-07-21 gap-fix — Purchase Requisition ─────────────────
+export const requisitionApi = {
+  list: (params?: { status?: string | undefined }) => {
+    const qs = new URLSearchParams();
+    if (params?.status) qs.set('status', params.status);
+    return apiClient.get<{ content: unknown[]; totalElements: number }>(
+      'purchase',
+      `/requisitions?${qs}`
+    );
+  },
+  getById: (id: number) => apiClient.get('purchase', `/requisitions/${id}`),
+  create: (data: Record<string, unknown>) => apiClient.post('purchase', '/requisitions', data),
+  submit: (id: number) => apiClient.post('purchase', `/requisitions/${id}/submit`, {}),
+  approve: (id: number) => apiClient.post('purchase', `/requisitions/${id}/approve`, {}),
+  reject: (id: number, data: { reason: string }) =>
+    apiClient.post('purchase', `/requisitions/${id}/reject`, data),
+  convertToPO: (id: number, data: Record<string, unknown>) =>
+    apiClient.post('purchase', `/requisitions/${id}/convert-to-po`, data),
+};
+
+// ── Purchase audit 2026-07-21 gap-fix — RFQ / Supplier Quotations ────────────
+export const rfqApi = {
+  list: (params?: { status?: string | undefined }) => {
+    const qs = new URLSearchParams();
+    if (params?.status) qs.set('status', params.status);
+    return apiClient.get<{ content: unknown[]; totalElements: number }>('purchase', `/rfqs?${qs}`);
+  },
+  create: (data: Record<string, unknown>) => apiClient.post('purchase', '/rfqs', data),
+  compare: (id: number) => apiClient.get('purchase', `/rfqs/${id}/compare`),
+  recordQuotation: (id: number, data: Record<string, unknown>) =>
+    apiClient.post('purchase', `/rfqs/${id}/quotations`, data),
+  selectQuotation: (quotationId: number, data: Record<string, unknown>) =>
+    apiClient.post('purchase', `/quotations/${quotationId}/select`, data),
+};
+
+// ── Purchase audit 2026-07-21 gap-fix — Purchase Invoice (PO/GRN variance match) ──
+export const purchaseInvoiceApi = {
+  list: (params?: { status?: string | undefined }) => {
+    const qs = new URLSearchParams();
+    if (params?.status) qs.set('status', params.status);
+    return apiClient.get<{ content: unknown[]; totalElements: number }>(
+      'purchase',
+      `/purchase-invoices?${qs}`
+    );
+  },
+  getById: (id: number) => apiClient.get('purchase', `/purchase-invoices/${id}`),
+  create: (data: Record<string, unknown>) => apiClient.post('purchase', '/purchase-invoices', data),
+  approve: (id: number) => apiClient.post('purchase', `/purchase-invoices/${id}/approve`, {}),
+};
+
+// ── Purchase audit 2026-07-21 gap-fix — Purchase KPI Dashboard ───────────────
+export const purchaseDashboardApi = {
+  summary: () => apiClient.get('purchase', '/purchase-orders-dashboard-summary'),
+};
+
+// ── Purchase audit 2026-07-21 gap-fix — generic Import Wizard (scheduler-service's
+// ImportEngine already supported supplier/customer/item/employee/opening-stock/attendance
+// end-to-end — upload/map/validate/execute/rollback — but had zero frontend UI anywhere) ──
+export const importApi = {
+  template: (entityType: string) =>
+    apiClient.getBlob('scheduler', `/imports/templates/${entityType}`),
+  upload: (data: { entityType: string; csvData: string; fileName: string }) =>
+    apiClient.post<{ jobId: string }>('scheduler', '/imports/upload', data),
+  mapColumns: (
+    jobId: string,
+    data: { mappings: Array<{ sourceColumn: string; targetField: string }> }
+  ) => apiClient.post('scheduler', `/imports/${jobId}/map`, data),
+  validate: (jobId: string) => apiClient.post('scheduler', `/imports/${jobId}/validate`, {}),
+  execute: (jobId: string) => apiClient.post('scheduler', `/imports/${jobId}/execute`, {}),
+  status: (jobId: string) => apiClient.get('scheduler', `/imports/${jobId}/status`),
 };
 
 export const grnApi = {
@@ -918,6 +1298,7 @@ export const grnApi = {
   addLandedCost: (id: number, data: Record<string, unknown>) =>
     apiClient.post('purchase', `/grns/${id}/landed-costs`, data),
   allocateLandedCost: (id: number) => apiClient.post('purchase', `/grns/${id}/allocate`, {}),
+  activity: (id: number) => apiClient.get('purchase', `/grns/${id}/activity`),
 };
 
 export const supplierPaymentApi = {
@@ -940,6 +1321,7 @@ export const supplierPaymentApi = {
     }>('purchase', `/supplier-payments?${qs}`);
   },
   getById: (id: number) => apiClient.get('purchase', `/supplier-payments/${id}`),
+  voucher: (id: number) => apiClient.getBlob('purchase', `/supplier-payments/${id}/voucher`),
   create: (data: Record<string, unknown>) => apiClient.post('purchase', '/supplier-payments', data),
   allocate: (id: number, data: Record<string, unknown>) =>
     apiClient.post('purchase', `/supplier-payments/${id}/allocate`, data),
@@ -991,6 +1373,8 @@ export const purchaseReturnApi = {
       pageSize: number;
     }>('purchase', `/debit-notes?${qs}`);
   },
+  applyDebitNote: (id: number, data: { amount: number; notes?: string }) =>
+    apiClient.post('purchase', `/debit-notes/${id}/apply`, data),
 };
 
 export const expenseApi = {
@@ -1179,6 +1563,65 @@ export const employeeApi = {
     apiClient.post('hr', `/employees/${id}/exit`, data),
 };
 
+// ── Employee Self-Service: "my own" attendance/leave/payslips (2026-07-20 HR audit) ─
+// Any authenticated user whose account is linked to an employee record (EmployeeFormPage's
+// "Linked User Account" field) can hit these — no manager-level VIEW permission required,
+// unlike every other HR read route which grants access to ALL employees' data.
+export const meApi = {
+  attendance: (month?: string) =>
+    apiClient.get<{ content: Record<string, unknown>[] }>(
+      'hr',
+      `/me/attendance${month ? `?month=${month}` : ''}`
+    ),
+  leaveBalance: () =>
+    apiClient.get<{ content: Record<string, unknown>[] }>('hr', '/me/leave-balance'),
+  payrollSlips: () =>
+    apiClient.get<{ content: Record<string, unknown>[] }>('hr', '/me/payroll-slips'),
+};
+
+// ── Employee Nominees (2026-07-20 HR audit) ─────────────────────────────────
+export const employeeNomineeApi = {
+  list: (employeeId: number) =>
+    apiClient.get<{ content: Record<string, unknown>[]; totalElements: number }>(
+      'hr',
+      `/employees/${employeeId}/nominees`
+    ),
+  create: (employeeId: number, data: Record<string, unknown>) =>
+    apiClient.post('hr', `/employees/${employeeId}/nominees`, data),
+  update: (employeeId: number, nomineeId: number, data: Record<string, unknown>) =>
+    apiClient.put('hr', `/employees/${employeeId}/nominees/${nomineeId}`, data),
+  remove: (employeeId: number, nomineeId: number) =>
+    apiClient.delete('hr', `/employees/${employeeId}/nominees/${nomineeId}`),
+};
+
+// ── Employee History: increments/promotions/transfers (2026-07-20 HR audit) ─
+export const employeeHistoryApi = {
+  list: (employeeId: number) =>
+    apiClient.get<{ content: Record<string, unknown>[]; totalElements: number }>(
+      'hr',
+      `/employees/${employeeId}/history`
+    ),
+};
+
+// ── Exit Workflow: notice period + clearance + Full & Final settlement ──────
+export const exitWorkflowApi = {
+  get: (employeeId: number) => apiClient.get('hr', `/employees/${employeeId}/exit-workflow`),
+  start: (employeeId: number, data: Record<string, unknown>) =>
+    apiClient.post('hr', `/employees/${employeeId}/exit-workflow`, data),
+  clear: (employeeId: number) =>
+    apiClient.post('hr', `/employees/${employeeId}/exit-workflow/clear`, {}),
+  computeFnf: (employeeId: number) =>
+    apiClient.get<{
+      proRatedSalaryAmount: number;
+      leaveEncashmentAmount: number;
+      loanRecoveryAmount: number;
+      unusedPaidLeaveDays: number;
+      fnfTotalAmount: number;
+    }>('hr', `/employees/${employeeId}/exit-workflow/compute-fnf`),
+  settle: (employeeId: number, data: Record<string, unknown>) =>
+    apiClient.post('hr', `/employees/${employeeId}/exit-workflow/settle`, data),
+};
+
 // ── PG-042 — Employee Photo/Document Upload ─────────────────────────────────────
 export interface EmployeeDocument {
   id: number;
@@ -1304,6 +1747,12 @@ export const statutoryApi = {
     apiClient.post('hr', '/esi-challans/mark-filed', { month, year }),
   form16: (employeeId: number, year: string) =>
     apiClient.get<Record<string, unknown>>('hr', `/employees/${employeeId}/form16?year=${year}`),
+  ptReport: (month: number, year: number) =>
+    apiClient.get<Record<string, unknown>>('hr', `/pt-report?month=${month}&year=${year}`),
+  ptReportExport: (month: number, year: number) =>
+    apiClient.getBlob('hr', `/pt-report/export?month=${month}&year=${year}`),
+  markPtFiled: (month: number, year: number) =>
+    apiClient.post('hr', '/pt-report/mark-filed', { month, year }),
 };
 
 export const holidayApi = {
@@ -1464,6 +1913,20 @@ export const crmApi = {
   campaignStats: (id: number) => apiClient.get('sales', `/crm/campaigns/${id}/stats`),
   campaignRecipients: (id: number) => apiClient.get('sales', `/crm/campaigns/${id}/recipients`),
   birthdayStats: () => apiClient.get('sales', '/crm/campaigns/birthday-stats'),
+  // CRM-ROADMAP Phase 3, Feature 3 — cross-campaign ROI report
+  campaignRoiReport: () => apiClient.get('sales', '/crm/campaigns/roi-report'),
+
+  // CRM-ROADMAP Phase 3, Feature 5 — per-language variants for one campaign. Replaces the whole
+  // set per call, not a per-language granular API.
+  campaignTranslations: (id: number) =>
+    apiClient.get<{
+      content: Array<{ language: string; messageTemplate: string }>;
+      totalElements: number;
+    }>('sales', `/crm/campaigns/${id}/translations`),
+  updateCampaignTranslations: (
+    id: number,
+    translations: Array<{ language: string; messageTemplate: string }>
+  ) => apiClient.put('sales', `/crm/campaigns/${id}/translations`, { translations }),
 
   // CP-7: approval workflow
   submitCampaignForApproval: (id: number) =>
@@ -1481,8 +1944,13 @@ export const crmApi = {
   getCommunicationSettings: () => apiClient.get('sales', '/crm/communication-settings'),
   updateCommunicationSettings: (data: {
     approvalRequired?: boolean;
+    // Product audit 2026-07-31, Phase 1 Step 10: opt-in gate for the daily overdue-invoice
+    // payment-reminder ladder.
+    paymentReminderEnabled?: boolean;
     maxPerDayFrequencyCap?: number | null;
     notificationRateLimitPerMinute?: number | null;
+    // CRM-ROADMAP Phase 3, Feature 3 — per-message cost rate per channel
+    costPerMessage?: Partial<Record<'SMS' | 'WHATSAPP' | 'EMAIL' | 'IN_APP', number>>;
   }) => apiClient.put('sales', '/crm/communication-settings', data),
 
   // CP-8: per-tenant/per-channel sender identity
@@ -1529,6 +1997,108 @@ export const crmApi = {
     if (params?.size !== undefined) qs.set('size', String(params.size));
     return apiClient.get('sales', `/customers/${customerId}/activity?${qs}`);
   },
+
+  // CRM-ROADMAP Phase 2, Feature 2 — Visual Customer Journey Builder
+  listJourneys: () => apiClient.get('sales', '/journeys'),
+  getJourney: (id: number) => apiClient.get('sales', `/journeys/${id}`),
+  createJourney: (data: Record<string, unknown>) => apiClient.post('sales', '/journeys', data),
+  publishJourney: (id: number) => apiClient.post('sales', `/journeys/${id}/publish`, {}),
+  deleteJourney: (id: number) => apiClient.delete('sales', `/journeys/${id}`),
+  journeyAffectedCount: (id: number) => apiClient.get('sales', `/journeys/${id}/affected-count`),
+  listJourneyEnrollments: (id: number) => apiClient.get('sales', `/journeys/${id}/enrollments`),
+  enrollJourneyCustomer: (id: number, customerId: number) =>
+    apiClient.post('sales', `/journeys/${id}/enrollments`, { customerId }),
+
+  // CRM-ROADMAP Phase 4, Feature 4 — Territory Management
+  listTerritories: () => apiClient.get('sales', '/territories'),
+  createTerritory: (data: { name: string; description?: string }) =>
+    apiClient.post('sales', '/territories', data),
+  updateTerritory: (id: number, data: Record<string, unknown>) =>
+    apiClient.put('sales', `/territories/${id}`, data),
+  setTerritoryBranches: (id: number, branchIds: number[]) =>
+    apiClient.put('sales', `/territories/${id}/branches`, { branchIds }),
+  setTerritoryUsers: (id: number, userIds: number[]) =>
+    apiClient.put('sales', `/territories/${id}/users`, { userIds }),
+  territoryCoverage: (id: number) => apiClient.get('sales', `/territories/${id}/coverage`),
+
+  // CRM-ROADMAP Phase 4, Feature 5 — Sales Forecasting & Quota Management
+  listQuotas: (params?: { periodYear?: number; periodMonth?: number }) => {
+    const qs = new URLSearchParams();
+    if (params?.periodYear !== undefined) qs.set('periodYear', String(params.periodYear));
+    if (params?.periodMonth !== undefined) qs.set('periodMonth', String(params.periodMonth));
+    const query = qs.toString();
+    return apiClient.get('sales', `/quotas${query ? `?${query}` : ''}`);
+  },
+  createQuota: (data: Record<string, unknown>) => apiClient.post('sales', '/quotas', data),
+  updateQuota: (id: number, data: { quotaAmount: number; version: number }) =>
+    apiClient.put('sales', `/quotas/${id}`, data),
+  quotaAttainment: (params?: { periodYear?: number; periodMonth?: number }) => {
+    const qs = new URLSearchParams();
+    if (params?.periodYear !== undefined) qs.set('periodYear', String(params.periodYear));
+    if (params?.periodMonth !== undefined) qs.set('periodMonth', String(params.periodMonth));
+    const query = qs.toString();
+    return apiClient.get('sales', `/quotas/attainment${query ? `?${query}` : ''}`);
+  },
+
+  // CRM-ROADMAP Phase 4, Feature 3 — Festival Intelligence AI
+  listFestivalSuggestions: (status?: string) =>
+    apiClient.get('sales', `/crm/festival-suggestions${status ? `?status=${status}` : ''}`),
+  approveFestivalSuggestion: (id: number, data: Record<string, unknown>) =>
+    apiClient.post('sales', `/crm/festival-suggestions/${id}/approve`, data),
+  rejectFestivalSuggestion: (id: number) =>
+    apiClient.post('sales', `/crm/festival-suggestions/${id}/reject`, {}),
+};
+
+// CRM-ROADMAP Phase 4, Feature 1 — Field Sales / Distributor CRM
+export const fieldVisitApi = {
+  listRoutes: () => apiClient.get('sales', '/visit-routes'),
+  createRoute: (data: {
+    name: string;
+    assignedTo: number;
+    territoryId?: number;
+    scheduledDate: string;
+  }) => apiClient.post('sales', '/visit-routes', data),
+  updateRoute: (id: number, data: { version: number; status?: string }) =>
+    apiClient.put('sales', `/visit-routes/${id}`, data),
+  setRouteStops: (id: number, stops: Array<{ customerId: number; sequenceNumber: number }>) =>
+    apiClient.put('sales', `/visit-routes/${id}/stops`, { stops }),
+  routeProgress: (id: number) => apiClient.get('sales', `/visit-routes/${id}/progress`),
+  listVisits: (params?: { repUserId?: number; dateFrom?: string; dateTo?: string }) => {
+    const qs = new URLSearchParams();
+    if (params?.repUserId !== undefined) qs.set('repUserId', String(params.repUserId));
+    if (params?.dateFrom) qs.set('dateFrom', params.dateFrom);
+    if (params?.dateTo) qs.set('dateTo', params.dateTo);
+    const query = qs.toString();
+    return apiClient.get('sales', `/field-visits${query ? `?${query}` : ''}`);
+  },
+  checkOut: (id: number, data: { checkOutLat?: number; checkOutLng?: number }) =>
+    apiClient.put('sales', `/field-visits/${id}/checkout`, data),
+};
+
+// CRM-ROADMAP Phase 4, Feature 2 — WhatsApp Commerce
+export const whatsappCommerceApi = {
+  listOrders: () => apiClient.get('sales', '/crm/whatsapp-orders'),
+};
+
+// CRM-ROADMAP Phase 4, Feature 7 — CTI / Call Center Integration
+export const callApi = {
+  initiate: (data: { customerId?: number; toNumber: string }) =>
+    apiClient.post('sales', '/calls/initiate', data),
+  list: (params?: { customerId?: number }) => {
+    const qs = new URLSearchParams();
+    if (params?.customerId !== undefined) qs.set('customerId', String(params.customerId));
+    const query = qs.toString();
+    return apiClient.get('sales', `/calls${query ? `?${query}` : ''}`);
+  },
+  addNotes: (id: number, notes: string) => apiClient.put('sales', `/calls/${id}/notes`, { notes }),
+};
+
+// CRM-ROADMAP Phase 4, Feature 8 — Public CRM API & BI/Data-Warehouse Export
+export const apiKeyApi = {
+  list: () => apiClient.get('sales', '/api-keys'),
+  create: (data: { name: string; scopes: string[]; expiresAt?: string }) =>
+    apiClient.post('sales', '/api-keys', data),
+  revoke: (id: number) => apiClient.delete('sales', `/api-keys/${id}`),
 };
 
 // ── Global Search (search-service) ────────────────────────────────────────────
@@ -1545,6 +2115,9 @@ export interface SearchResult {
   total: number;
   took: number;
   query: string;
+  // True per-entity match counts across every result, not just the returned page — only
+  // present for an untyped (multi-entity) search. See SearchEngine.search's entityCounts.
+  entityCounts?: Record<string, number>;
 }
 
 export interface SearchAdvancedFilters {
@@ -1680,6 +2253,8 @@ export const reportsEngineApi = {
     format: 'JSON' | 'CSV' | 'EXCEL' = 'JSON',
     async = false
   ) => apiClient.post<unknown>('report', `/api/v2/reports/${slug}/run`, { params, format, async }),
+  runBlob: (slug: string, params: Record<string, string | number>, format: 'CSV' | 'EXCEL') =>
+    apiClient.postBlob('report', `/api/v2/reports/${slug}/run`, { params, format }),
   runHistory: () => apiClient.get<unknown[]>('report', '/api/v2/reports/run-history'),
   runStatus: (runId: number) =>
     apiClient.get<ReportRunRecord>('report', `/api/v2/reports/run-history/${runId}`),
@@ -1781,6 +2356,83 @@ export const dlqApi = {
   discard: (id: number) => apiClient.post<unknown>('event', `/api/v2/admin/dlq/${id}/discard`),
 };
 
+// ── Scheduler Job Monitoring — apps/scheduler-service's JobRegistry API had no frontend
+// consumer at all before this; every one of its 44 registered jobs was invisible outside logs.
+export interface SchedulerJobStatus {
+  name: string;
+  cron: string;
+  description: string;
+  tenantScoped: boolean;
+  isPaused: boolean;
+  waiting: number;
+  active: number;
+  lastRun: {
+    status: 'RUNNING' | 'COMPLETED' | 'FAILED' | 'SKIPPED';
+    startedAt: string;
+    durationMs: number | null;
+    triggeredBy: 'CRON' | 'MANUAL';
+  } | null;
+}
+
+export interface SchedulerJobHistoryRow {
+  id: number;
+  jobName: string;
+  cronExpression: string | null;
+  status: 'RUNNING' | 'COMPLETED' | 'FAILED' | 'SKIPPED';
+  triggeredBy: 'CRON' | 'MANUAL';
+  triggeredByUserId: number | null;
+  startedAt: string;
+  completedAt: string | null;
+  durationMs: number | null;
+  errorMessage: string | null;
+}
+
+// scheduler is an apiV2:true gateway upstream (see apps/api-gateway/src/config.ts) — the
+// gateway strips '/api/scheduler' and prepends '/api/v2' itself, so paths here must NOT
+// include '/api/v2' (unlike 'event', which is apiV2:false and needs it spelled out — see
+// dlqApi above). Matches importsApi's existing '/imports/...' paths for this same service.
+export const schedulerJobsApi = {
+  list: () =>
+    apiClient.get<{ content: SchedulerJobStatus[]; totalElements: number }>('scheduler', '/jobs'),
+  history: (jobName: string) =>
+    apiClient.get<{ content: SchedulerJobHistoryRow[]; jobName: string }>(
+      'scheduler',
+      `/jobs/${encodeURIComponent(jobName)}/history`
+    ),
+  trigger: (jobName: string) =>
+    apiClient.post<{ message: string; jobName: string; jobId: string }>(
+      'scheduler',
+      `/jobs/${encodeURIComponent(jobName)}/trigger`
+    ),
+  pause: (jobName: string) =>
+    apiClient.patch<{ message: string; jobName: string }>(
+      'scheduler',
+      `/jobs/${encodeURIComponent(jobName)}/pause`
+    ),
+  resume: (jobName: string) =>
+    apiClient.patch<{ message: string; jobName: string }>(
+      'scheduler',
+      `/jobs/${encodeURIComponent(jobName)}/resume`
+    ),
+};
+
+// CRM-ROADMAP Phase 4, Feature 8 — Public CRM API & BI/Data-Warehouse Export
+export const exportScheduleApi = {
+  list: () => apiClient.get('scheduler', '/export-schedules'),
+  create: (data: {
+    entityType: string;
+    format?: string;
+    cronExpression: string;
+    recipients?: string[];
+  }) => apiClient.post('scheduler', '/export-schedules', data),
+  update: (
+    id: number,
+    data: { cronExpression?: string; recipients?: string[]; active?: boolean }
+  ) => apiClient.put('scheduler', `/export-schedules/${id}`, data),
+  remove: (id: number) => apiClient.delete('scheduler', `/export-schedules/${id}`),
+  history: (id: number) => apiClient.get('scheduler', `/export-schedules/${id}/history`),
+};
+
 // ── Phase 12 — Saga Monitoring ────────────────────────────────────────────────
 export const sagaAdminApi = {
   summary: () => apiClient.get<unknown>('event', '/api/v2/admin/sagas/summary'),
@@ -1840,6 +2492,54 @@ export const projectionAdminApi = {
 export const performanceAdminApi = {
   baselines: () => apiClient.get<unknown[]>('event', '/api/v2/admin/performance/baselines'),
   targets: () => apiClient.get<unknown[]>('event', '/api/v2/admin/performance/targets'),
+};
+
+// ── DAP-1 — Digital Adoption Platform (tour progress + analytics) ──────────────
+// See ERP-PLANNING/DAP-Planning/01_ARCHITECTURE.md §5. No admin-only permission gate —
+// every call scopes to the caller's own tenantId/userId server-side.
+export interface TourProgressRecord {
+  id: number;
+  tenantId: number;
+  userId: number;
+  tourId: string;
+  tourVersion: number;
+  status: 'in_progress' | 'completed' | 'skipped';
+  currentStepId: string | null;
+  completedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type TourEventType =
+  | 'tour_started'
+  | 'step_viewed'
+  | 'step_completed'
+  | 'tour_completed'
+  | 'tour_skipped'
+  | 'tour_abandoned';
+
+export const dapApi = {
+  getProgress: () => apiClient.get<TourProgressRecord[]>('event', '/api/v2/dap/progress'),
+  upsertProgress: (
+    tourId: string,
+    body: {
+      tourVersion: number;
+      status: 'in_progress' | 'completed' | 'skipped';
+      currentStepId?: string;
+    }
+  ) =>
+    apiClient.put<{ tourId: string; status: string }>(
+      'event',
+      `/api/v2/dap/progress/${encodeURIComponent(tourId)}`,
+      body
+    ),
+  recordEvent: (body: {
+    tourId: string;
+    tourVersion: number;
+    stepId?: string;
+    eventType: TourEventType;
+    metadata?: Record<string, unknown>;
+  }) => apiClient.post<{ recorded: boolean }>('event', '/api/v2/dap/events', body),
 };
 
 // ── ES-20 — Document Attachments ────────────────────────────────────────────────
@@ -1921,6 +2621,15 @@ export interface InAppNotification {
   readAt: string | null;
 }
 
+export interface NotificationPreference {
+  eventType: string;
+  smsEnabled: boolean;
+  emailEnabled: boolean;
+  whatsappEnabled: boolean;
+  inAppEnabled: boolean;
+  quietHoursEnabled: boolean;
+}
+
 export const notificationsApi = {
   list: (params?: { page?: number; size?: number }) =>
     apiClient.get<{
@@ -1932,4 +2641,66 @@ export const notificationsApi = {
   unreadCount: () =>
     apiClient.get<{ count: number }>('notification', '/notifications/unread-count'),
   markRead: (id: number) => apiClient.post('notification', `/notifications/${id}/read`),
+  getPreferences: () =>
+    apiClient.get<{ content: NotificationPreference[] }>(
+      'notification',
+      '/notifications/preferences'
+    ),
+  savePreference: (data: {
+    eventType: string;
+    smsEnabled?: boolean;
+    emailEnabled?: boolean;
+    whatsappEnabled?: boolean;
+    inAppEnabled?: boolean;
+    quietHoursEnabled?: boolean;
+  }) => apiClient.post('notification', '/notifications/preferences', data),
+  retry: (id: number) => apiClient.post('notification', `/notifications/${id}/retry`),
+};
+
+// ── Notification-service audit 2026-07-23 — Template management ─────────────────
+export interface NotificationTemplate {
+  id: number;
+  name: string;
+  eventType: string;
+  channel: 'SMS' | 'EMAIL' | 'WHATSAPP' | 'IN_APP';
+  subject: string | null;
+  bodyTemplate: string;
+  isActive: boolean;
+  isSystem: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface NotificationTemplateInput {
+  name: string;
+  eventType: string;
+  channel: 'SMS' | 'EMAIL' | 'WHATSAPP' | 'IN_APP';
+  subject?: string;
+  bodyTemplate: string;
+}
+
+export const notificationTemplatesApi = {
+  list: () =>
+    apiClient.get<{ content: NotificationTemplate[] }>('notification', '/notifications/templates'),
+  get: (id: number) =>
+    apiClient.get<NotificationTemplate>('notification', `/notifications/templates/${id}`),
+  create: (data: NotificationTemplateInput) =>
+    apiClient.post<NotificationTemplate>('notification', '/notifications/templates', data),
+  update: (
+    id: number,
+    data: Partial<Pick<NotificationTemplateInput, 'name' | 'subject' | 'bodyTemplate'>> & {
+      isActive?: boolean;
+    }
+  ) => apiClient.put('notification', `/notifications/templates/${id}`, data),
+  remove: (id: number) => apiClient.delete('notification', `/notifications/templates/${id}`),
+  preview: (data: {
+    bodyTemplate: string;
+    subject?: string;
+    sampleData?: Record<string, unknown>;
+  }) =>
+    apiClient.post<{ renderedBody: string; renderedSubject?: string }>(
+      'notification',
+      '/notifications/templates/preview',
+      data
+    ),
 };

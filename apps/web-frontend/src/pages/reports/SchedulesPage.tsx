@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Trash2, Clock, Mail } from 'lucide-react';
 import { reportSchedulesApi, reportsEngineApi } from '../../api/endpoints.js';
 import { useAuthStore } from '../../store/auth.store.js';
+import { useConfirm } from '../../context/ConfirmContext.js';
 import { PERMISSIONS } from '../../constants/permissions.js';
 import { ERPCardSkeleton } from '../../components/erp/ERPSkeleton.js';
 import ERPEmptyState from '../../components/erp/ERPEmptyState.js';
@@ -33,10 +34,13 @@ const CRON_PRESETS = [
 
 export default function SchedulesPage() {
   const qc = useQueryClient();
+  const confirm = useConfirm();
   const hasPermission = useAuthStore((s) => s.hasPermission);
   const [showForm, setShowForm] = useState(false);
   const [reportSlug, setReportSlug] = useState('');
-  const [format, setFormat] = useState<'PDF' | 'EXCEL' | 'CSV'>('EXCEL');
+  // PDF was removed as an option — the delivery worker only builds an attachment for
+  // EXCEL/CSV; a PDF-format schedule silently emails with no attachment at all.
+  const [format, setFormat] = useState<'EXCEL' | 'CSV'>('EXCEL');
   const [cronExpression, setCronExpression] = useState('0 7 * * *');
   const [recipients, setRecipients] = useState<string[]>([]);
 
@@ -92,7 +96,11 @@ export default function SchedulesPage() {
           </h1>
           <p className="text-sm text-secondary mt-0.5">Automate report delivery via email</p>
         </div>
-        <Button variant="primary" onClick={() => setShowForm((v) => !v)}>
+        <Button
+          data-tour-id="reports-schedules-create-button"
+          variant="primary"
+          onClick={() => setShowForm((v) => !v)}
+        >
           <Plus size={16} /> New Schedule
         </Button>
       </div>
@@ -127,12 +135,11 @@ export default function SchedulesPage() {
               <label className="block text-xs font-medium text-secondary mb-1">Format</label>
               <select
                 value={format}
-                onChange={(e) => setFormat(e.target.value as 'PDF' | 'EXCEL' | 'CSV')}
+                onChange={(e) => setFormat(e.target.value as 'EXCEL' | 'CSV')}
                 className="w-full text-sm border border-default rounded-lg px-3 py-2 bg-surface-card text-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
               >
                 <option value="EXCEL">Excel (.xlsx)</option>
                 <option value="CSV">CSV</option>
-                <option value="PDF">PDF</option>
               </select>
             </div>
             <div>
@@ -234,7 +241,15 @@ export default function SchedulesPage() {
                 </div>
               </div>
               <button
-                onClick={() => deleteMutation.mutate(schedule.id)}
+                onClick={async () => {
+                  const ok = await confirm({
+                    title: 'Delete this schedule?',
+                    message: `Stops "${def?.name ?? schedule.reportSlug}" from being emailed to ${recipientsArr.join(', ')}. There's no undo, and no pause/edit option — you'd need to recreate it from scratch.`,
+                    confirmLabel: 'Delete',
+                    variant: 'danger',
+                  });
+                  if (ok) deleteMutation.mutate(schedule.id);
+                }}
                 disabled={deleteMutation.isPending}
                 className="p-1.5 rounded-lg text-error hover:bg-error-bg transition-colors disabled:opacity-40 shrink-0"
                 title="Delete schedule"

@@ -1,0 +1,12 @@
+/* Import order matters here — see web-frontend/src/index.css's own comment: Tailwind's
+   @theme block must load before the shared design tokens, or same-specificity :root
+   declarations resolve by source order and Tailwind's own defaults silently win. */
+@import "tailwindcss";
+@import "@erp/design-tokens/tokens.css";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+body {
+  background-color: var(--surface-page);
+  color: var(--text-primary);
+}

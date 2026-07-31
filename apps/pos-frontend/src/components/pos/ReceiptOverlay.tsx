@@ -1,11 +1,13 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
 import { MessageCircle, Mail, Printer, Usb, X } from 'lucide-react';
 import { authFetch } from '../../auth.js';
 import { buildReceipt } from '../../escpos.js';
 import { supportsAnyPrinting, writeToPairedPrinter } from '../../webPrinter.js';
+import { useFocusTrap } from '../../hooks/useFocusTrap.js';
 import type { CompletedSale } from './types.js';
 import POSButton from './POSButton.js';
+import { ReferralQr } from './ReferralQr.js';
 
 // Routed through api-gateway rather than calling sales-service directly by port — see
 // apps/web-frontend/src/api/client.ts's header comment for why.
@@ -26,10 +28,49 @@ export function ReceiptOverlay({ sale, onClose }: { sale: CompletedSale; onClose
   );
   const [sending, setSending] = useState(false);
   const [hwPrinting, setHwPrinting] = useState(false);
+  const [referralLink, setReferralLink] = useState<string | null>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     localStorage.setItem('pos_paper_size', paperSize);
   }, [paperSize]);
+
+  // CRM-ROADMAP Phase 2, Feature 4 — get-or-create the paying customer's own referral code for
+  // the receipt QR. Best-effort: a failure here must never block the receipt from rendering.
+  useEffect(() => {
+    if (!sale.customer) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await authFetch(`${SALES_API}/referral-codes/${sale.customer!.id}`);
+        if (!res.ok) return;
+        const json = (await res.json()) as { data?: { code?: string } };
+        if (!cancelled && json.data?.code) {
+          setReferralLink(`${SALES_API}/r/${json.data.code}`);
+        }
+      } catch {
+        // best-effort — no referral QR is not a receipt-blocking failure
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [sale.customer]);
+
+  // This is the one modal-like surface in the app not built on POSDialog (it needs its own
+  // always-black-on-white print styling, not POSDialog's themed shell) — matching POSDialog's
+  // Escape-to-close/focus-trap/aria-modal behavior directly rather than leaving it as the only
+  // screen a cashier sees on every single completed sale with no keyboard/screen-reader
+  // semantics at all. Always "open" while mounted — POSScreen only renders this when there's a
+  // completed sale to show.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose();
+    }
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+  useFocusTrap(panelRef, true);
 
   // WebUSB/Web Serial raw ESC/POS printing — feature-detected, additional to
   // (never a replacement for) the window.print() button below. Absent on
@@ -78,6 +119,10 @@ export function ReceiptOverlay({ sale, onClose }: { sale: CompletedSale; onClose
       {/* Receipt content is always rendered black-on-white, independent of app theme —
           it represents physical thermal/A4 paper output, not an on-screen surface. */}
       <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="receipt-overlay-title"
         className="relative bg-white text-black rounded-2xl shadow-token-modal p-4 max-h-[90vh] overflow-y-auto print:rounded-none print:max-h-none print:overflow-visible print:mx-auto print:shadow-none"
         style={{ width: `${size.widthMm}mm`, maxWidth: '100%' }}
       >
@@ -90,7 +135,9 @@ export function ReceiptOverlay({ sale, onClose }: { sale: CompletedSale; onClose
         </button>
 
         <div className="text-center mb-3">
-          <div className="font-bold text-lg">Receipt</div>
+          <div id="receipt-overlay-title" className="font-bold text-lg">
+            Receipt
+          </div>
           <div className="text-xs text-gray-600">{sale.invoiceNumber}</div>
           {!sale.synced && (
             <div className="text-xs text-amber-700 font-medium mt-1 print:hidden">
@@ -127,6 +174,13 @@ export function ReceiptOverlay({ sale, onClose }: { sale: CompletedSale; onClose
             </div>
           )}
         </div>
+
+        {referralLink && (
+          <div className="mt-3 border-t border-dashed border-gray-400 pt-2 text-center">
+            <p className="text-xs font-semibold mb-1">Refer a friend, you both earn rewards!</p>
+            <ReferralQr referralLink={referralLink} />
+          </div>
+        )}
 
         <div className="mt-4 flex flex-col gap-2 print:hidden">
           <div className="flex gap-1">

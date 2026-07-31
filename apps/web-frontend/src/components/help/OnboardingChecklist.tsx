@@ -42,7 +42,7 @@ const STEPS: ChecklistStep[] = [
     id: 'items',
     label: 'Add items',
     description: 'Add your cloth items with HSN codes and prices, or import from Excel.',
-    path: '/items',
+    path: '/inventory/items',
     cta: 'Add Items',
   },
   {

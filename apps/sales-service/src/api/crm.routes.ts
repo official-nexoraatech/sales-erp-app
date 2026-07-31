@@ -7,12 +7,16 @@ import {
   customerSegments,
   campaigns,
   campaignTemplates,
+  crmCampaignTemplateTranslations,
+  crmCampaignMessageTranslations,
   campaignAutomationRules,
   campaignComments,
+  crmCampaignVariants,
   businessSeasons,
   notificationLog,
   tenantSenderIdentity,
   tenantCommunicationSettings,
+  crmWhatsappCatalogOrders,
 } from '@erp/db';
 import type { ErpDatabase } from '@erp/db';
 import { and, eq, gte, inArray, isNull, lte, or, sql } from 'drizzle-orm';
@@ -32,8 +36,14 @@ import {
   type SegmentFilterDefinition,
   type SegmentFilterRule,
 } from '../domain/SegmentService.js';
-import { CampaignService, checkChannelLimits } from '../domain/CampaignService.js';
+import {
+  CampaignService,
+  checkChannelLimits,
+  checkDltCompliance,
+  renderCampaignMessage,
+} from '../domain/CampaignService.js';
 import { HealthScoringService } from '../domain/HealthScoringService.js';
+import { FestivalIntelligenceService } from '../domain/FestivalIntelligenceService.js';
 
 type AuthedRequest = {
   auth: { tenantId: number; userId: number; permissions: string[]; branchIds: number[] };
@@ -58,7 +68,20 @@ const InteractionSchema = z.object({
 
 const SegmentFilterRuleSchema = z.object({
   field: z.string().min(1),
-  operator: z.enum(['eq', 'neq', 'gt', 'gte', 'lt', 'lte', 'contains']),
+  // CRM-ROADMAP Phase 2, Feature 7 — behavioral/RFM operators added alongside the original 7;
+  // see SegmentService.ts's buildCondition for how each is evaluated.
+  operator: z.enum([
+    'eq',
+    'neq',
+    'gt',
+    'gte',
+    'lt',
+    'lte',
+    'contains',
+    'between_dates',
+    'purchased_category',
+    'rfm_score',
+  ]),
 
   value: z.any(),
 });
@@ -87,6 +110,14 @@ const CampaignPreviewSchema = z.object({
   channel: z.enum(['SMS', 'WHATSAPP', 'EMAIL', 'IN_APP']),
 });
 
+// CRM-ROADMAP Phase 2, Feature 6 — up to 2 variants (the roadmap's own Playwright scenario is
+// literally "A/B test two message variants"), each independently DLT-checked at send time.
+const CampaignVariantSchema = z.object({
+  label: z.string().min(1).max(10),
+  messageTemplate: z.string().min(1).max(2000),
+  weight: z.number().int().positive().max(100).default(50),
+});
+
 const CampaignCreateSchema = z.object({
   name: z.string().min(2).max(200),
   segmentId: z.number().int().positive().optional(),
@@ -99,6 +130,10 @@ const CampaignCreateSchema = z.object({
   templateId: z.number().int().positive().optional(),
   // CP-8: store/branch scoping — omitted or absent means tenant-wide (today's behavior).
   branchId: z.number().int().positive().optional(),
+  // CRM-ROADMAP Phase 2, Feature 6 — the real destination a {{link}} token resolves to; omitted
+  // means the template has no tracked link (today's default for every existing campaign).
+  linkUrl: z.string().url().max(2000).optional(),
+  variants: z.array(CampaignVariantSchema).max(2).optional(),
 });
 
 // CP-4: every field optional except `version` (required for the optimistic-lock check) — a
@@ -113,6 +148,10 @@ const CampaignUpdateSchema = z.object({
   messageTemplate: z.string().min(1).max(2000).optional(),
   campaignType: z.string().max(50).nullable().optional(),
   templateId: z.number().int().positive().nullable().optional(),
+  // CRM-ROADMAP Phase 2, Feature 6 — variants are deliberately not editable via this route
+  // (only settable at creation, per CampaignCreateSchema); linkUrl can still be adjusted or
+  // cleared (null) before the campaign is sent.
+  linkUrl: z.string().url().max(2000).nullable().optional(),
 });
 
 // CP-5: recurrenceRule is optional — a plain one-time scheduled send omits it entirely, matching
@@ -152,10 +191,25 @@ const SenderIdentitySchema = z.object({
 // caller can flip just one without re-sending the whole settings object.
 const CommunicationSettingsSchema = z.object({
   approvalRequired: z.boolean().optional(),
+  // Product audit 2026-07-31, Phase 1 Step 10: opt-in gate for the daily invoice
+  // payment-reminder ladder (scheduler-service's sales.payment-reminder-ladder job) — off
+  // (false) preserves today's behavior exactly, same convention as approvalRequired above.
+  paymentReminderEnabled: z.boolean().optional(),
   maxPerDayFrequencyCap: z.number().int().positive().nullable().optional(),
   // CP-9 follow-up (R14): overrides notification-service's default 200/min internal send rate
   // limit for this tenant specifically — null/omitted uses the platform default.
   notificationRateLimitPerMinute: z.number().int().positive().nullable().optional(),
+  // CRM-ROADMAP Phase 3, Feature 3 — per-message cost rate per channel, feeding
+  // CampaignService.getStats()/getRoiReport()'s spend calculation. Missing channel keys default
+  // to 0 spend, so an unconfigured tenant sees no behavior change.
+  costPerMessage: z
+    .object({
+      SMS: z.number().nonnegative().optional(),
+      WHATSAPP: z.number().nonnegative().optional(),
+      EMAIL: z.number().nonnegative().optional(),
+      IN_APP: z.number().nonnegative().optional(),
+    })
+    .optional(),
 });
 
 const CampaignTemplateSchema = z.object({
@@ -164,6 +218,20 @@ const CampaignTemplateSchema = z.object({
   campaignType: z.string().max(50).optional(),
   channel: z.enum(['SMS', 'WHATSAPP', 'EMAIL', 'IN_APP']),
   messageTemplate: z.string().min(1).max(2000),
+});
+
+// CRM-ROADMAP Phase 3, Feature 5 — replaces the entire translation set for one template/campaign
+// per call (delete + bulk insert), rather than per-language granular routes — simpler for both
+// this API and the template editor's "one save button" UX.
+const TranslationsSchema = z.object({
+  translations: z
+    .array(
+      z.object({
+        language: z.string().min(2).max(10),
+        messageTemplate: z.string().min(1).max(2000),
+      })
+    )
+    .max(20),
 });
 
 // CP-5: trigger-based automation rules
@@ -482,6 +550,14 @@ export async function crmRoutes(
         .returning();
       if (!created) throw new Error('Segment creation failed unexpectedly');
 
+      // CRM-ROADMAP Phase 2, Feature 7 — a behavioral-operator segment would otherwise sit
+      // empty in crm_segment_membership_cache until the next nightly refresh; seed it once now
+      // so a consumer reading the cache immediately after creation doesn't see a false zero.
+      if (SegmentService.needsMembershipCache(filterDefinition)) {
+        const where = SegmentService.customWhere(tenantId, filterDefinition);
+        await SegmentService.refreshMembershipCache(ctx.db.raw, tenantId, created.id, where);
+      }
+
       await ctx.audit.log({
         action: 'CREATE',
         entityType: 'customer_segment',
@@ -685,6 +761,27 @@ export async function crmRoutes(
 
       const warnings = checkChannelLimits(body.data.channel, body.data.messageTemplate);
 
+      // CRM-ROADMAP Phase 1, Feature 6 — blocked at creation time, before any row is
+      // inserted, with a clear specific error (not a generic failure). A synthetic render
+      // stands in for a real recipient here — no recipient needs to be resolved just to
+      // validate the template shape, and this must reject an empty-segment campaign's SMS
+      // content just as readily as one with real recipients.
+      if (body.data.channel === 'SMS') {
+        const syntheticMessage = renderCampaignMessage(body.data.messageTemplate, {
+          customerName: 'Customer',
+          balance: 0,
+          loyaltyPoints: 0,
+          shopName: 'Our Store',
+        });
+        const dltResult = await checkDltCompliance(ctx, 'SMS', syntheticMessage);
+        if (!dltResult.compliant) {
+          throw new BusinessError(
+            'DLT_TEMPLATE_MISMATCH',
+            dltResult.reason ?? 'DLT template mismatch'
+          );
+        }
+      }
+
       const [created] = await ctx.db.raw
         .insert(campaigns)
         .values({
@@ -697,10 +794,48 @@ export async function crmRoutes(
           campaignType: body.data.campaignType,
           templateId: body.data.templateId,
           branchId: body.data.branchId,
+          linkUrl: body.data.linkUrl,
           createdBy: userId,
         })
         .returning();
       if (!created) throw new Error('Campaign creation failed unexpectedly');
+
+      if (body.data.variants && body.data.variants.length > 0) {
+        await ctx.db.raw.insert(crmCampaignVariants).values(
+          body.data.variants.map((v) => ({
+            tenantId,
+            campaignId: created.id,
+            label: v.label,
+            messageTemplate: v.messageTemplate,
+            weight: v.weight,
+          }))
+        );
+      }
+
+      // CRM-ROADMAP Phase 3, Feature 5 — snapshot the source template's language variants onto
+      // this campaign, same "copy at creation time, not a live link" convention
+      // campaigns.messageTemplate itself already uses for the base template.
+      if (body.data.templateId) {
+        const templateTranslations = await ctx.db.raw
+          .select()
+          .from(crmCampaignTemplateTranslations)
+          .where(
+            and(
+              eq(crmCampaignTemplateTranslations.templateId, body.data.templateId),
+              eq(crmCampaignTemplateTranslations.tenantId, tenantId)
+            )
+          );
+        if (templateTranslations.length > 0) {
+          await ctx.db.raw.insert(crmCampaignMessageTranslations).values(
+            templateTranslations.map((t) => ({
+              tenantId,
+              campaignId: created.id,
+              language: t.language,
+              messageTemplate: t.messageTemplate,
+            }))
+          );
+        }
+      }
 
       const preview = await CampaignService.previewSample(
         ctx,
@@ -793,6 +928,112 @@ export async function crmRoutes(
     }
   );
 
+  // CRM-ROADMAP Phase 3, Feature 5 — per-language variants for this specific campaign (either
+  // snapshotted from a source template at creation, or authored directly here). A campaign with
+  // zero rows sends its plain messageTemplate to every recipient, unchanged from today.
+  fastify.get<{ Params: { id: string } }>(
+    '/crm/campaigns/:id/translations',
+    { preHandler: [authenticate, requirePermission(PERMISSIONS.CRM_VIEW)] },
+    async (request, reply) => {
+      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
+      const ctx = ctxFactory.create({
+        tenantId,
+        userId,
+        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
+      });
+      const id = parseInt(request.params.id, 10);
+
+      const [campaign] = await ctx.db.raw
+        .select({ id: campaigns.id })
+        .from(campaigns)
+        .where(and(eq(campaigns.id, id), eq(campaigns.tenantId, tenantId)));
+      if (!campaign) throw new NotFoundError('Campaign', id);
+
+      const rows = await ctx.db.raw
+        .select()
+        .from(crmCampaignMessageTranslations)
+        .where(
+          and(
+            eq(crmCampaignMessageTranslations.campaignId, id),
+            eq(crmCampaignMessageTranslations.tenantId, tenantId)
+          )
+        )
+        .orderBy(sql`language ASC`);
+      return reply.code(200).send({ data: { content: rows, totalElements: rows.length } });
+    }
+  );
+
+  // Replaces the entire translation set for this campaign in one call. Blocked once the campaign
+  // has left DRAFT/SCHEDULED — same "can't rewrite content mid/post-send" reasoning as variants
+  // already being create-only, applied here since this route allows edits after creation too.
+  fastify.put<{ Params: { id: string } }>(
+    '/crm/campaigns/:id/translations',
+    { preHandler: [authenticate, requirePermission(PERMISSIONS.CRM_CAMPAIGN_CREATE)] },
+    async (request, reply) => {
+      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
+      const ctx = ctxFactory.create({
+        tenantId,
+        userId,
+        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
+      });
+      const id = parseInt(request.params.id, 10);
+
+      const body = TranslationsSchema.safeParse(request.body);
+      if (!body.success)
+        throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
+
+      const [campaign] = await ctx.db.raw
+        .select({ id: campaigns.id, status: campaigns.status })
+        .from(campaigns)
+        .where(and(eq(campaigns.id, id), eq(campaigns.tenantId, tenantId)));
+      if (!campaign) throw new NotFoundError('Campaign', id);
+      if (!['DRAFT', 'SCHEDULED'].includes(campaign.status)) {
+        throw new BusinessError(
+          'INVALID_CAMPAIGN_STATE',
+          `Cannot edit translations on a campaign in status ${campaign.status}`
+        );
+      }
+
+      const languages = body.data.translations.map((t) => t.language);
+      if (new Set(languages).size !== languages.length) {
+        throw new ValidationError('Each language may appear at most once');
+      }
+
+      let rows: (typeof crmCampaignMessageTranslations.$inferSelect)[] = [];
+      await ctx.db.transaction(async (trx) => {
+        await trx.raw
+          .delete(crmCampaignMessageTranslations)
+          .where(
+            and(
+              eq(crmCampaignMessageTranslations.campaignId, id),
+              eq(crmCampaignMessageTranslations.tenantId, tenantId)
+            )
+          );
+        if (body.data.translations.length > 0) {
+          rows = await trx.raw
+            .insert(crmCampaignMessageTranslations)
+            .values(
+              body.data.translations.map((t) => ({
+                tenantId,
+                campaignId: id,
+                language: t.language,
+                messageTemplate: t.messageTemplate,
+              }))
+            )
+            .returning();
+        }
+      });
+
+      await ctx.audit.log({
+        action: 'UPDATE',
+        entityType: 'campaign_message_translations',
+        entityId: id,
+        after: { languages } as unknown as Record<string, unknown>,
+      });
+      return reply.code(200).send({ data: { content: rows, totalElements: rows.length } });
+    }
+  );
+
   // CP-4: edit a DRAFT/SCHEDULED campaign, optimistic-locked via `version`. Editing a SCHEDULED
   // campaign resets it to DRAFT (CampaignService.update handles this) — the client must
   // re-confirm scheduling via a fresh POST .../schedule call.
@@ -822,6 +1063,7 @@ export async function crmRoutes(
         messageTemplate,
         campaignType,
         templateId,
+        linkUrl,
       } = body.data;
       if (branchId !== undefined && branchId !== null && !branchInScope(auth, branchId)) {
         throw new BusinessError(
@@ -838,6 +1080,7 @@ export async function crmRoutes(
         ...(messageTemplate !== undefined ? { messageTemplate } : {}),
         ...(campaignType !== undefined ? { campaignType } : {}),
         ...(templateId !== undefined ? { templateId } : {}),
+        ...(linkUrl !== undefined ? { linkUrl } : {}),
       };
       if (Object.keys(patch).length === 0)
         throw new ValidationError('At least one field besides version must be provided');
@@ -1095,6 +1338,103 @@ export async function crmRoutes(
     }
   );
 
+  // CRM-ROADMAP Phase 3, Feature 5 — per-language variants of a saved template. A template with
+  // zero rows here is unaffected (send() uses its plain messageTemplate for every recipient).
+  fastify.get<{ Params: { id: string } }>(
+    '/crm/campaign-templates/:id/translations',
+    { preHandler: [authenticate, requirePermission(PERMISSIONS.CRM_VIEW)] },
+    async (request, reply) => {
+      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
+      const ctx = ctxFactory.create({
+        tenantId,
+        userId,
+        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
+      });
+      const id = parseInt(request.params.id, 10);
+
+      const [template] = await ctx.db.raw
+        .select({ id: campaignTemplates.id })
+        .from(campaignTemplates)
+        .where(and(eq(campaignTemplates.id, id), eq(campaignTemplates.tenantId, tenantId)));
+      if (!template) throw new NotFoundError('Campaign template', id);
+
+      const rows = await ctx.db.raw
+        .select()
+        .from(crmCampaignTemplateTranslations)
+        .where(
+          and(
+            eq(crmCampaignTemplateTranslations.templateId, id),
+            eq(crmCampaignTemplateTranslations.tenantId, tenantId)
+          )
+        )
+        .orderBy(sql`language ASC`);
+      return reply.code(200).send({ data: { content: rows, totalElements: rows.length } });
+    }
+  );
+
+  // Replaces the entire translation set for this template in one call (delete + bulk insert).
+  fastify.put<{ Params: { id: string } }>(
+    '/crm/campaign-templates/:id/translations',
+    { preHandler: [authenticate, requirePermission(PERMISSIONS.CRM_CAMPAIGN_CREATE)] },
+    async (request, reply) => {
+      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
+      const ctx = ctxFactory.create({
+        tenantId,
+        userId,
+        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
+      });
+      const id = parseInt(request.params.id, 10);
+
+      const body = TranslationsSchema.safeParse(request.body);
+      if (!body.success)
+        throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
+
+      const [template] = await ctx.db.raw
+        .select({ id: campaignTemplates.id })
+        .from(campaignTemplates)
+        .where(and(eq(campaignTemplates.id, id), eq(campaignTemplates.tenantId, tenantId)));
+      if (!template) throw new NotFoundError('Campaign template', id);
+
+      const languages = body.data.translations.map((t) => t.language);
+      if (new Set(languages).size !== languages.length) {
+        throw new ValidationError('Each language may appear at most once');
+      }
+
+      let rows: (typeof crmCampaignTemplateTranslations.$inferSelect)[] = [];
+      await ctx.db.transaction(async (trx) => {
+        await trx.raw
+          .delete(crmCampaignTemplateTranslations)
+          .where(
+            and(
+              eq(crmCampaignTemplateTranslations.templateId, id),
+              eq(crmCampaignTemplateTranslations.tenantId, tenantId)
+            )
+          );
+        if (body.data.translations.length > 0) {
+          rows = await trx.raw
+            .insert(crmCampaignTemplateTranslations)
+            .values(
+              body.data.translations.map((t) => ({
+                tenantId,
+                templateId: id,
+                language: t.language,
+                messageTemplate: t.messageTemplate,
+              }))
+            )
+            .returning();
+        }
+      });
+
+      await ctx.audit.log({
+        action: 'UPDATE',
+        entityType: 'campaign_template_translations',
+        entityId: id,
+        after: { languages } as unknown as Record<string, unknown>,
+      });
+      return reply.code(200).send({ data: { content: rows, totalElements: rows.length } });
+    }
+  );
+
   // ════════════════════════════════════════════════════════════════════════
   // CP-5 — Campaign Automation Rules
   // ════════════════════════════════════════════════════════════════════════
@@ -1302,6 +1642,24 @@ export async function crmRoutes(
 
       const stats = await CampaignService.getStats(ctx, id);
       return reply.code(200).send({ data: stats });
+    }
+  );
+
+  // CRM-ROADMAP Phase 3, Feature 3 — cross-campaign ROI report. Same permission as per-campaign
+  // stats above: "no new attack surface — read-only aggregate reporting, same permission model
+  // as existing campaign viewing" per this feature's own security note.
+  fastify.get(
+    '/crm/campaigns/roi-report',
+    { preHandler: [authenticate, requirePermission(PERMISSIONS.CRM_CAMPAIGN_ANALYTICS_VIEW)] },
+    async (request, reply) => {
+      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
+      const ctx = ctxFactory.create({
+        tenantId,
+        userId,
+        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
+      });
+      const report = await CampaignService.getRoiReport(ctx);
+      return reply.code(200).send({ data: { content: report, totalElements: report.length } });
     }
   );
 
@@ -1540,6 +1898,99 @@ export async function crmRoutes(
   );
 
   // ════════════════════════════════════════════════════════════════════════
+  // CRM-ROADMAP Phase 4, Feature 3 — Festival Intelligence AI (suggestion review)
+  // ════════════════════════════════════════════════════════════════════════
+
+  fastify.get(
+    '/crm/festival-suggestions',
+    { preHandler: [authenticate, requirePermission(PERMISSIONS.CRM_SEASON_VIEW)] },
+    async (request, reply) => {
+      const { tenantId } = (request as unknown as AuthedRequest).auth;
+      const ctx = ctxFactory.create({
+        tenantId,
+        userId: 0,
+        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
+      });
+      const query = request.query as {
+        status?: 'PENDING' | 'APPROVED' | 'REJECTED' | 'INSUFFICIENT_DATA';
+      };
+      const rows = await FestivalIntelligenceService.list(ctx.db.raw, tenantId, {
+        status: query.status,
+      });
+      return reply.code(200).send({ data: { content: rows, totalElements: rows.length } });
+    }
+  );
+
+  const ApproveSuggestionSchema = z.object({
+    name: z.string().min(2).max(200),
+    startDate: z.string().optional(),
+    endDate: z.string().optional(),
+    stockMultiplier: z.number().positive().optional(),
+    loyaltyMultiplier: z.number().positive().optional(),
+  });
+
+  fastify.post<{ Params: { id: string } }>(
+    '/crm/festival-suggestions/:id/approve',
+    { preHandler: [authenticate, requirePermission(PERMISSIONS.CRM_SEASON_MANAGE)] },
+    async (request, reply) => {
+      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
+      const ctx = ctxFactory.create({
+        tenantId,
+        userId,
+        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
+      });
+      const id = parseInt(request.params.id, 10);
+
+      const body = ApproveSuggestionSchema.safeParse(request.body);
+      if (!body.success)
+        throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
+
+      const result = await FestivalIntelligenceService.approve(ctx.db.raw, tenantId, userId, id, {
+        name: body.data.name,
+        startDate: body.data.startDate ? new Date(body.data.startDate) : undefined,
+        endDate: body.data.endDate ? new Date(body.data.endDate) : undefined,
+        stockMultiplier: body.data.stockMultiplier,
+        loyaltyMultiplier: body.data.loyaltyMultiplier,
+      });
+
+      await ctx.audit.log({
+        action: 'UPDATE',
+        entityType: 'crm_festival_suggestion',
+        entityId: id,
+        after: { status: 'APPROVED', createdSeasonId: result.seasonId } as unknown as Record<
+          string,
+          unknown
+        >,
+      });
+      return reply.code(200).send({ data: result });
+    }
+  );
+
+  fastify.post<{ Params: { id: string } }>(
+    '/crm/festival-suggestions/:id/reject',
+    { preHandler: [authenticate, requirePermission(PERMISSIONS.CRM_SEASON_MANAGE)] },
+    async (request, reply) => {
+      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
+      const ctx = ctxFactory.create({
+        tenantId,
+        userId,
+        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
+      });
+      const id = parseInt(request.params.id, 10);
+
+      const updated = await FestivalIntelligenceService.reject(ctx.db.raw, tenantId, userId, id);
+
+      await ctx.audit.log({
+        action: 'UPDATE',
+        entityType: 'crm_festival_suggestion',
+        entityId: id,
+        after: { status: 'REJECTED' } as unknown as Record<string, unknown>,
+      });
+      return reply.code(200).send({ data: updated });
+    }
+  );
+
+  // ════════════════════════════════════════════════════════════════════════
   // CP-5/CP-7 follow-up — Tenant Communication Settings (approval + frequency cap)
   // ════════════════════════════════════════════════════════════════════════
   // Gated on CRM_AUTOMATION_MANAGE — the closest existing "manage tenant-wide campaign
@@ -1565,8 +2016,10 @@ export async function crmRoutes(
       return reply.code(200).send({
         data: {
           approvalRequired: settings?.approvalRequired ?? false,
+          paymentReminderEnabled: settings?.paymentReminderEnabled ?? false,
           maxPerDayFrequencyCap: settings?.frequencyCap?.maxPerDay ?? null,
           notificationRateLimitPerMinute: settings?.notificationRateLimitPerMinute ?? null,
+          costPerMessage: settings?.costPerMessage ?? null,
         },
       });
     }
@@ -1606,8 +2059,14 @@ export async function crmRoutes(
               ...(body.data.approvalRequired !== undefined
                 ? { approvalRequired: body.data.approvalRequired }
                 : {}),
+              ...(body.data.paymentReminderEnabled !== undefined
+                ? { paymentReminderEnabled: body.data.paymentReminderEnabled }
+                : {}),
               ...(body.data.notificationRateLimitPerMinute !== undefined
                 ? { notificationRateLimitPerMinute: body.data.notificationRateLimitPerMinute }
+                : {}),
+              ...(body.data.costPerMessage !== undefined
+                ? { costPerMessage: body.data.costPerMessage }
                 : {}),
               frequencyCap: nextFrequencyCap,
               updatedAt: new Date(),
@@ -1619,7 +2078,9 @@ export async function crmRoutes(
             .values({
               tenantId,
               approvalRequired: body.data.approvalRequired ?? false,
+              paymentReminderEnabled: body.data.paymentReminderEnabled ?? false,
               notificationRateLimitPerMinute: body.data.notificationRateLimitPerMinute ?? null,
+              costPerMessage: body.data.costPerMessage ?? null,
               frequencyCap: nextFrequencyCap,
             })
             .returning();
@@ -1634,8 +2095,10 @@ export async function crmRoutes(
       return reply.code(200).send({
         data: {
           approvalRequired: saved.approvalRequired,
+          paymentReminderEnabled: saved.paymentReminderEnabled,
           maxPerDayFrequencyCap: saved.frequencyCap?.maxPerDay ?? null,
           notificationRateLimitPerMinute: saved.notificationRateLimitPerMinute ?? null,
+          costPerMessage: saved.costPerMessage ?? null,
         },
       });
     }
@@ -1720,6 +2183,31 @@ export async function crmRoutes(
       });
 
       return reply.code(200).send({ data: saved });
+    }
+  );
+
+  // CRM-ROADMAP Phase 4, Feature 2 (WhatsApp Commerce). Reuses QUOTATION_VIEW rather than a new
+  // permission — this is just "which quotations came from WhatsApp," the same underlying
+  // resource a caller already needs QUOTATION_VIEW to see at all. Minimal ERP-side surface per
+  // the roadmap's own spec: an order-source indicator on the existing Quotations list, not a new
+  // page.
+  fastify.get(
+    '/crm/whatsapp-orders',
+    { preHandler: [authenticate, requirePermission(PERMISSIONS.QUOTATION_VIEW)] },
+    async (request, reply) => {
+      const { tenantId } = (request as unknown as AuthedRequest).auth;
+      const rows = await ctxFactory.rawDb
+        .select({
+          id: crmWhatsappCatalogOrders.id,
+          customerId: crmWhatsappCatalogOrders.customerId,
+          quotationId: crmWhatsappCatalogOrders.quotationId,
+          status: crmWhatsappCatalogOrders.status,
+          rejectionReason: crmWhatsappCatalogOrders.rejectionReason,
+          createdAt: crmWhatsappCatalogOrders.createdAt,
+        })
+        .from(crmWhatsappCatalogOrders)
+        .where(eq(crmWhatsappCatalogOrders.tenantId, tenantId));
+      return reply.code(200).send({ data: { content: rows, totalElements: rows.length } });
     }
   );
 }

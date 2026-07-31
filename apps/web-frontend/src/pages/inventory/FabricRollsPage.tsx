@@ -10,6 +10,7 @@ import ERPDataGrid, {
   type ERPColumnDef,
   type ERPRowAction,
 } from '../../components/erp/ERPDataGrid.js';
+import ERPEmptyState from '../../components/erp/ERPEmptyState.js';
 import Button from '../../components/ui/Button.js';
 import Badge from '../../components/ui/Badge.js';
 import Modal from '../../components/ui/Modal.js';
@@ -45,13 +46,24 @@ const STATUS_COLORS: Record<string, 'default' | 'success' | 'warning' | 'danger'
   DAMAGED: 'danger',
 };
 
+const STATUS_DESCRIPTIONS: Record<string, string> = {
+  AVAILABLE: 'Full roll, nothing cut yet.',
+  PARTIALLY_CUT: 'Some length has been cut — remaining meters shown in the table.',
+  FULLY_CUT: 'No length remains on this roll.',
+  DAMAGED: 'Marked damaged — not cuttable from this page.',
+};
+
 export default function FabricRollsPage() {
   const qc = useQueryClient();
   const hasPermission = useAuthStore((s) => s.hasPermission);
   const canEditFabricRoll = hasPermission(PERMISSIONS.ITEM_EDIT);
   const [filterItemId, setFilterItemId] = useState('');
   const [showReceive, setShowReceive] = useState(false);
-  const [showCut, setShowCut] = useState<{ rollId: number; rollNumber: string } | null>(null);
+  const [showCut, setShowCut] = useState<{
+    rollId: number;
+    rollNumber: string;
+    remainingMeters: number;
+  } | null>(null);
 
   // Receive form state
   const [rollNumber, setRollNumber] = useState('');
@@ -77,7 +89,10 @@ export default function FabricRollsPage() {
   });
 
   const rolls: FabricRoll[] = (data as FabricRoll[]) ?? [];
-  const items: Item[] = (itemData as { content?: Item[] })?.content ?? [];
+  const allItems: Item[] = (itemData as { content?: Item[] })?.content ?? [];
+  // Only items flagged "Fabric Item" on the item master should ever be pickable here — a roll
+  // against a non-fabric item would silently desync from what that item's own stock page shows.
+  const items = allItems.filter((i) => i.isFabricItem);
   const warehouses: Warehouse[] = (whData as { content?: Warehouse[] })?.content ?? [];
 
   const receiveMutation = useMutation({
@@ -134,7 +149,11 @@ export default function FabricRollsPage() {
       key: 'status',
       header: 'Status',
       sortable: true,
-      render: (r) => <Badge variant={STATUS_COLORS[r.status] ?? 'default'}>{r.status}</Badge>,
+      render: (r) => (
+        <Badge variant={STATUS_COLORS[r.status] ?? 'default'} title={STATUS_DESCRIPTIONS[r.status]}>
+          {r.status}
+        </Badge>
+      ),
     },
     {
       key: 'receivedAt',
@@ -150,7 +169,13 @@ export default function FabricRollsPage() {
           {
             label: 'Cut',
             icon: Scissors,
-            onClick: (r: FabricRoll) => setShowCut({ rollId: r.id, rollNumber: r.rollNumber }),
+            tourId: 'inventory-fabric-rolls-cut-button',
+            onClick: (r: FabricRoll) =>
+              setShowCut({
+                rollId: r.id,
+                rollNumber: r.rollNumber,
+                remainingMeters: parseFloat(r.remainingMeters),
+              }),
             hidden: (r: FabricRoll) => !(r.status === 'AVAILABLE' || r.status === 'PARTIALLY_CUT'),
           },
         ]
@@ -164,7 +189,14 @@ export default function FabricRollsPage() {
         title="Fabric Rolls"
         subtitle="FIFO fabric roll inventory — receive, cut, and track"
       >
-        {canEditFabricRoll && <Button onClick={() => setShowReceive(true)}>+ Receive Roll</Button>}
+        {canEditFabricRoll && (
+          <Button
+            data-tour-id="inventory-fabric-rolls-create-button"
+            onClick={() => setShowReceive(true)}
+          >
+            + Receive Roll
+          </Button>
+        )}
       </ERPPageHeader>
 
       <div className="mb-4 w-64">
@@ -184,6 +216,20 @@ export default function FabricRollsPage() {
         data={rolls}
         isLoading={isLoading}
         rowKey="id"
+        emptyState={
+          filterItemId ? (
+            <ERPEmptyState type="no-results" />
+          ) : (
+            <ERPEmptyState
+              type="no-data"
+              title="No fabric rolls yet"
+              description="Receive a roll to start tracking its length as it gets cut for sales."
+              {...(canEditFabricRoll
+                ? { action: { label: '+ Receive Roll', onClick: () => setShowReceive(true) } }
+                : {})}
+            />
+          )
+        }
         actions={rowActions}
       />
 
@@ -248,9 +294,23 @@ export default function FabricRollsPage() {
         title={`Cut Roll ${showCut?.rollNumber}`}
       >
         <div className="space-y-4">
+          <p className="text-sm text-secondary">
+            {showCut?.remainingMeters.toFixed(2)}m remaining on this roll.
+          </p>
           <Input
             label="Meters to Cut"
             type="number"
+            max={showCut?.remainingMeters}
+            hint={
+              showCut && parseFloat(cutMeters || '0') > showCut.remainingMeters
+                ? undefined
+                : `Up to ${showCut?.remainingMeters.toFixed(2)}m available.`
+            }
+            error={
+              showCut && parseFloat(cutMeters || '0') > showCut.remainingMeters
+                ? `Only ${showCut.remainingMeters.toFixed(2)}m remain on this roll.`
+                : undefined
+            }
             value={cutMeters}
             onChange={(e) => setCutMeters(e.target.value)}
           />
@@ -273,7 +333,11 @@ export default function FabricRollsPage() {
                   d: { meters: parseFloat(cutMeters), purpose: cutPurpose || undefined },
                 })
               }
-              disabled={!cutMeters}
+              disabled={
+                !cutMeters ||
+                !(parseFloat(cutMeters) > 0) ||
+                Boolean(showCut && parseFloat(cutMeters) > showCut.remainingMeters)
+              }
             >
               Record Cut
             </Button>

@@ -32,6 +32,7 @@ vi.mock('@erp/db', () => ({
   tenants: { __name: 'tenants' },
   branches: { __name: 'branches' },
   refreshTokens: { __name: 'refreshTokens', userId: '__refreshTokens.userId__' },
+  securityAuditLog: { __name: 'securityAuditLog' },
 }));
 
 vi.mock('drizzle-orm', () => ({
@@ -60,7 +61,7 @@ vi.mock('@erp/types', async (importOriginal) => {
   };
 });
 
-import { users, roles, rolePermissions } from '@erp/db';
+import { users, roles, rolePermissions, securityAuditLog } from '@erp/db';
 import { userRoutes } from '../routes/users.js';
 import { initializeJwt, signAccessToken } from '../jwt.js';
 
@@ -97,12 +98,14 @@ function makeFakeDb() {
     users: [] as Record<string, unknown>[],
     roles: [] as Record<string, unknown>[],
     rolePermissions: [] as Record<string, unknown>[],
+    securityAuditLog: [] as Record<string, unknown>[],
   };
 
   function rowsFor(table: unknown): Record<string, unknown>[] {
     if (table === users) return store.users;
     if (table === roles) return store.roles;
     if (table === rolePermissions) return store.rolePermissions;
+    if (table === securityAuditLog) return store.securityAuditLog;
     return [];
   }
 
@@ -133,6 +136,9 @@ function makeFakeDb() {
         },
       }),
     }),
+    // acquireTenantLimitLock() (F9 fix) issues a raw advisory-lock statement — irrelevant to
+    // what these authz tests exercise, so it's a no-op here.
+    execute: async () => [],
   };
 
   return { db, store };
@@ -143,7 +149,13 @@ function makeFakeDb() {
 function makeFakeCtxFactory(db: ReturnType<typeof makeFakeDb>['db']): { create: () => unknown } {
   return {
     create: () => ({
-      db: { raw: db },
+      db: {
+        raw: db,
+        // F9 fix: POST /users now runs the limit-check + insert inside ctx.db.transaction().
+        // No real isolation needed for this unit-level test — just invoke the callback with
+        // the same fake raw db, matching the pattern used by other services' route tests.
+        transaction: vi.fn(async (cb: (trx: { raw: typeof db }) => unknown) => cb({ raw: db })),
+      },
       events: { publish: vi.fn().mockResolvedValue(undefined) },
     }),
   };

@@ -93,6 +93,64 @@ describe('Section 192 TDS slabs (calculateIncomeTax)', () => {
   });
 });
 
+describe('computeMonthlyTDS zero/partial-gross guard (2026-07-20 audit fix)', () => {
+  it('withholds ₹0 TDS when annualized gross is ₹0 (e.g. a fully-LOP period)', async () => {
+    const { computeMonthlyTDS } = await import('../domain/PayrollEngine.js');
+    expect(computeMonthlyTDS(0)).toBe(0);
+  });
+
+  it('divides annual tax by monthsInPeriod instead of a flat 12 when given a shorter period', async () => {
+    const { computeMonthlyTDS, calculateIncomeTax } = await import('../domain/PayrollEngine.js');
+    const annualGross = 900000; // taxable after 75,000 standard deduction = 825,000
+    const annualTax = calculateIncomeTax(annualGross - 75000);
+    expect(computeMonthlyTDS(annualGross, 3)).toBe(Math.round(annualTax / 3));
+    expect(computeMonthlyTDS(annualGross)).toBe(Math.round(annualTax / 12));
+  });
+});
+
+describe('employeeMonthsInFinancialYear (mid-year joiner TDS projection)', () => {
+  it('returns 12 for an employee with no joining date on file', async () => {
+    const { employeeMonthsInFinancialYear } = await import('../domain/PayrollEngine.js');
+    expect(employeeMonthsInFinancialYear(7, 2026, null)).toBe(12);
+  });
+
+  it('returns 12 for an employee who joined in an earlier financial year', async () => {
+    const { employeeMonthsInFinancialYear } = await import('../domain/PayrollEngine.js');
+    // FY starting April 2025; payroll period is July 2026 (FY starting April 2026)
+    expect(employeeMonthsInFinancialYear(7, 2026, '2025-06-01')).toBe(12);
+  });
+
+  it('returns 8 months (Aug-Mar) for an employee who joined in August of the FY being processed', async () => {
+    const { employeeMonthsInFinancialYear } = await import('../domain/PayrollEngine.js');
+    // FY 2026-27 starts April 2026; joined August 2026 → Aug,Sep,Oct,Nov,Dec,Jan,Feb,Mar = 8
+    expect(employeeMonthsInFinancialYear(10, 2026, '2026-08-15')).toBe(8);
+  });
+
+  it('returns 1 for an employee who joined in March, the last month of the FY', async () => {
+    const { employeeMonthsInFinancialYear } = await import('../domain/PayrollEngine.js');
+    expect(employeeMonthsInFinancialYear(3, 2027, '2027-03-10')).toBe(1);
+  });
+});
+
+describe('countPresentDays (HALF_DAY payroll weighting, 2026-07-20 audit fix)', () => {
+  it('weighs HALF_DAY as 0.5, matching the attendance team-summary report', async () => {
+    const { countPresentDays } = await import('../domain/PayrollEngine.js');
+    const rows = [
+      { status: 'PRESENT' },
+      { status: 'LATE' },
+      { status: 'HALF_DAY' },
+      { status: 'HALF_DAY' },
+      { status: 'ABSENT' },
+    ];
+    expect(countPresentDays(rows)).toBe(3); // 1 + 1 + 0.5 + 0.5 + 0
+  });
+
+  it('no longer counts HALF_DAY as a full present day (regression guard)', async () => {
+    const { countPresentDays } = await import('../domain/PayrollEngine.js');
+    expect(countPresentDays([{ status: 'HALF_DAY' }])).toBe(0.5);
+  });
+});
+
 describe('Multi-state Professional Tax (PG-044)', () => {
   // Same 3-slab shape as the pre-PG-044 hardcoded PT_SLABS constant — regression safety:
   // a Maharashtra employee's PT must not shift after switching to the seeded pt_slabs table.
@@ -171,10 +229,10 @@ describe('PFChallanService.generateChallan', () => {
       employeeId: idx + 1,
       displayName: `Employee ${idx + 1}`,
       uan: `UAN00${idx + 1}`,
-      basicSalary: '15000.00',
-      pfEmployee: '1800.00',
-      pfEmployer: '550.50',
-      epsAmount: '1249.50',
+      basicSalary: encryptField('15000.00', MOCK_ENC_KEY),
+      pfEmployee: encryptField('1800.00', MOCK_ENC_KEY),
+      pfEmployer: encryptField('550.50', MOCK_ENC_KEY),
+      epsAmount: encryptField('1249.50', MOCK_ENC_KEY),
     }));
 
     const db = makeDb([
@@ -192,6 +250,49 @@ describe('PFChallanService.generateChallan', () => {
   });
 });
 
+describe('ESIChallanService.generateChallan', () => {
+  it('produces correct totals for a 5-employee payroll run, skipping non-ESI-applicable slips', async () => {
+    const { ESIChallanService } = await import('../domain/ESIChallanService.js');
+
+    const applicable = Array.from({ length: 4 }, (_, idx) => ({
+      employeeId: idx + 1,
+      displayName: `Employee ${idx + 1}`,
+      esiNumber: `ESI00${idx + 1}`,
+      basicSalary: encryptField('12000.00', MOCK_ENC_KEY),
+      hraAmount: encryptField('4000.00', MOCK_ENC_KEY),
+      daAmount: encryptField('0', MOCK_ENC_KEY),
+      otherAllowances: encryptField('0', MOCK_ENC_KEY),
+      pieceRateAmount: encryptField('0', MOCK_ENC_KEY),
+      esiEmployee: encryptField('120.00', MOCK_ENC_KEY),
+      esiEmployer: encryptField('520.00', MOCK_ENC_KEY),
+    }));
+    const notApplicable = {
+      employeeId: 99,
+      displayName: 'Employee 99',
+      esiNumber: null,
+      basicSalary: encryptField('30000.00', MOCK_ENC_KEY),
+      hraAmount: encryptField('0', MOCK_ENC_KEY),
+      daAmount: encryptField('0', MOCK_ENC_KEY),
+      otherAllowances: encryptField('0', MOCK_ENC_KEY),
+      pieceRateAmount: encryptField('0', MOCK_ENC_KEY),
+      esiEmployee: encryptField('0', MOCK_ENC_KEY),
+      esiEmployer: encryptField('0', MOCK_ENC_KEY),
+    };
+
+    const db = makeDb([
+      [{ id: 501 }], // payrollRuns lookup
+      [...applicable, notApplicable], // payrollSlips joined with employees
+    ]);
+
+    const result = await ESIChallanService.generateChallan(db, 1, 7, 2026);
+
+    expect(result.rows).toHaveLength(4); // the ₹0-ESI employee is excluded
+    expect(result.totals.grossSalary).toBeCloseTo(16000 * 4, 2);
+    expect(result.totals.esiEmployee).toBeCloseTo(480, 2);
+    expect(result.totals.esiEmployer).toBeCloseTo(2080, 2);
+  });
+});
+
 describe('Form16Service.generateForm16Data', () => {
   it('sums decrypted gross salary across all monthly payslips for the financial year', async () => {
     const { Form16Service } = await import('../domain/Form16Service.js');
@@ -204,9 +305,9 @@ describe('Form16Service.generateForm16Data', () => {
         periodMonth: month,
         periodYear: year,
         grossSalary: encryptField(String(monthlyGross), MOCK_ENC_KEY),
-        tdsDeduction: '0',
-        pfEmployee: '1800',
-        esiEmployee: '0',
+        tdsDeduction: encryptField('0', MOCK_ENC_KEY),
+        pfEmployee: encryptField('1800', MOCK_ENC_KEY),
+        esiEmployee: encryptField('0', MOCK_ENC_KEY),
       };
     });
 

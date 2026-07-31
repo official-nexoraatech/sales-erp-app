@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { PlatformContextFactory } from '@erp/sdk';
+import { DuplicateOperationError } from '@erp/sdk';
 import { payments, customers } from '@erp/db';
 import { and, desc, eq, sql, getTableColumns } from 'drizzle-orm';
 import { z } from 'zod';
@@ -7,6 +8,7 @@ import { PERMISSIONS } from '@erp/types';
 import { authenticate } from '../middleware/authenticate.js';
 import { requirePermission, requireAnyPermission } from '../middleware/authorize.js';
 import { PaymentService } from '../domain/PaymentService.js';
+import { PaymentNotificationService } from '../domain/PaymentNotificationService.js';
 import { sendError } from './http-errors.js';
 
 const CreatePaymentSchema = z.object({
@@ -20,6 +22,8 @@ const CreatePaymentSchema = z.object({
   chequeDate: z.string().datetime().optional(),
   transactionReference: z.string().max(100).optional(),
   notes: z.string().max(1000).optional(),
+  // M-8: client-generated idempotency key, same convention as CreateInvoiceSchema.operationId.
+  operationId: z.string().max(100).optional(),
 });
 
 const AllocateSchema = z.object({
@@ -98,21 +102,71 @@ export async function paymentRoutes(
       const svc = new PaymentService(ctx.db.raw);
       const paymentNumber = `PAY-${req.auth.tenantId}-${Date.now()}`;
 
-      const id = await svc.create({
-        tenantId: req.auth.tenantId,
-        branchId: body.branchId,
-        customerId: body.customerId,
-        paymentNumber,
-        paymentDate: new Date(body.paymentDate),
-        paymentMode: body.paymentMode,
-        amount: body.amount,
-        chequeNumber: body.chequeNumber,
-        chequeBankName: body.chequeBankName,
-        chequeDate: body.chequeDate ? new Date(body.chequeDate) : undefined,
-        transactionReference: body.transactionReference,
-        notes: body.notes,
-        createdBy: req.auth.userId,
-      } as Parameters<typeof svc.create>[0]);
+      let id: number;
+      try {
+        id = await svc.create({
+          tenantId: req.auth.tenantId,
+          branchId: body.branchId,
+          customerId: body.customerId,
+          paymentNumber,
+          paymentDate: new Date(body.paymentDate),
+          paymentMode: body.paymentMode,
+          amount: body.amount,
+          chequeNumber: body.chequeNumber,
+          chequeBankName: body.chequeBankName,
+          chequeDate: body.chequeDate ? new Date(body.chequeDate) : undefined,
+          transactionReference: body.transactionReference,
+          notes: body.notes,
+          createdBy: req.auth.userId,
+          clientOperationId: body.operationId,
+        } as Parameters<typeof svc.create>[0]);
+      } catch (err) {
+        // M-8: a network-timeout retry with the same operationId lands here instead of
+        // creating a duplicate Payment row — return the one that already exists.
+        if (err instanceof DuplicateOperationError && body.operationId) {
+          const [existing] = await ctx.db.raw
+            .select({ id: payments.id })
+            .from(payments)
+            .where(
+              and(
+                eq(payments.tenantId, req.auth.tenantId),
+                eq(payments.clientOperationId, body.operationId)
+              )
+            );
+          if (existing) {
+            return reply
+              .code(200)
+              .send({ data: { id: existing.id, paymentNumber: paymentNumber } });
+          }
+          return sendError(
+            reply,
+            409,
+            'DUPLICATE_OPERATION_PROCESSING',
+            'This payment is still being recorded — please retry shortly'
+          );
+        }
+        throw err;
+      }
+
+      // H-9 fix: payment creation previously only enqueued a tenant-configured outbound
+      // webhook — no customer-facing acknowledgment at all.
+      await PaymentNotificationService.notifyPaymentReceived(ctx, id);
+
+      // M-16 fix: no route in this file wrote to the audit log at all despite mutating
+      // financial state.
+      await ctx.audit.log({
+        action: 'CREATE',
+        entityType: 'payment',
+        entityId: id,
+        after: {
+          paymentNumber,
+          customerId: body.customerId,
+          amount: body.amount,
+          paymentMode: body.paymentMode,
+        },
+        actorEmail: req.auth.email,
+        ipAddress: req.ip,
+      });
 
       return reply.code(201).send({ data: { id, paymentNumber } });
     },
@@ -150,6 +204,14 @@ export async function paymentRoutes(
       });
       const svc = new PaymentService(ctx.db.raw);
       await svc.allocate(parseInt(id, 10), req.auth.tenantId, body.allocations, req.auth.userId);
+      await ctx.audit.log({
+        action: 'UPDATE',
+        entityType: 'payment',
+        entityId: parseInt(id, 10),
+        after: { allocations: body.allocations },
+        actorEmail: req.auth.email,
+        ipAddress: req.ip,
+      });
       return reply.send({ success: true });
     },
   });
@@ -167,6 +229,14 @@ export async function paymentRoutes(
       });
       const svc = new PaymentService(ctx.db.raw);
       await svc.bounceCheque(parseInt(id, 10), req.auth.tenantId, body.reason);
+      await ctx.audit.log({
+        action: 'STATUS_CHANGE',
+        entityType: 'payment',
+        entityId: parseInt(id, 10),
+        after: { status: 'BOUNCED', reason: body.reason },
+        actorEmail: req.auth.email,
+        ipAddress: req.ip,
+      });
       return reply.send({ success: true });
     },
   });

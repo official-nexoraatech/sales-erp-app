@@ -112,6 +112,16 @@ export async function ssoConfigRoutes(
             provider: created.provider,
             enabled: created.enabled,
           });
+          // toResponse() strips the encrypted client secret — audit trail records the same
+          // fields the API itself ever exposes, never the ciphertext.
+          await ctx.audit.log({
+            action: 'CREATE',
+            entityType: 'sso_config',
+            entityId: created.id,
+            after: toResponse(created),
+            actorEmail: request.auth.email,
+            ipAddress: request.ip,
+          });
         }
         return reply.code(200).send({ data: toResponse(created!) });
       }
@@ -146,6 +156,15 @@ export async function ssoConfigRoutes(
           provider: updated.provider,
           enabled: updated.enabled,
         });
+        await ctx.audit.log({
+          action: 'UPDATE',
+          entityType: 'sso_config',
+          entityId: updated.id,
+          before: toResponse(existing),
+          after: toResponse(updated),
+          actorEmail: request.auth.email,
+          ipAddress: request.ip,
+        });
       }
 
       return reply.code(200).send({ data: toResponse(updated!) });
@@ -169,6 +188,14 @@ export async function ssoConfigRoutes(
       if (!deleted) throw new NotFoundError('SSO configuration');
 
       await ctx.events.publish('sso-config', tenantId, 'SSO_CONFIG_DELETED', { tenantId });
+      await ctx.audit.log({
+        action: 'DELETE',
+        entityType: 'sso_config',
+        entityId: deleted.id,
+        before: toResponse(deleted),
+        actorEmail: request.auth.email,
+        ipAddress: request.ip,
+      });
 
       return reply.code(204).send();
     }

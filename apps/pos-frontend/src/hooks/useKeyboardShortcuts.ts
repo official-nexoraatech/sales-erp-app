@@ -69,8 +69,11 @@ export function useKeyboardShortcuts({
         e.preventDefault();
         if (cartLength > 0 && !isHolding) onHold();
       } else if (e.key === 'F5' || e.key === 'F6' || e.key === 'F7') {
-        if (cartLength === 0) return;
+        // preventDefault() unconditionally — these are claimed shortcut keys in this app
+        // regardless of cart state; without this, an empty-cart F5 fell through to the
+        // browser's native page-refresh instead of being a no-op.
         e.preventDefault();
+        if (cartLength === 0) return;
         onSetPaymentMode(e.key === 'F5' ? 'CASH' : e.key === 'F6' ? 'CARD' : 'UPI');
         onShowPayment(true);
       } else if (e.key === 'F8') {
@@ -79,7 +82,15 @@ export function useKeyboardShortcuts({
       } else if (e.key === 'F9') {
         e.preventDefault();
         if (lastAddedItem) onRepeatLast(lastAddedItem);
-      } else if (e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === 'z') {
+      } else if (
+        e.ctrlKey &&
+        !e.shiftKey &&
+        e.key.toLowerCase() === 'z' &&
+        !isEditableTarget(e.target)
+      ) {
+        // Guarded the same way ArrowUp/Down already are below — without this, Ctrl+Z typed
+        // while focused in a qty/discount input undid the last *cart line* instead of the
+        // character just typed, since this listener is bound to window, not the input.
         if (cartLength === 0) return;
         e.preventDefault();
         onUndoLastLine();
@@ -87,8 +98,10 @@ export function useKeyboardShortcuts({
         e.preventDefault();
         barcodeRef.current?.focus();
       } else if (e.ctrlKey && e.key.toLowerCase() === 'd') {
-        if (highlightedLineItemId === null) return;
+        // preventDefault() unconditionally — without this, an empty-highlight Ctrl+D leaked
+        // through to the browser's native bookmark dialog instead of being a no-op.
         e.preventDefault();
+        if (highlightedLineItemId === null) return;
         document.getElementById(`pos-cart-discount-${highlightedLineItemId}`)?.focus();
       } else if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && !isEditableTarget(e.target)) {
         if (cartLength === 0) return;

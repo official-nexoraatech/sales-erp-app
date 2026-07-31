@@ -6,7 +6,7 @@
  * already unit-tested individually, to verify they compose correctly end-to-end.
  */
 import 'fake-indexeddb/auto';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -16,7 +16,15 @@ import { queueSale, getPendingSales, resolveConflict, markStockConflict } from '
 import { runBackgroundSync } from '../swSync.js';
 import { setActiveSessionId } from '../session.js';
 import { setSelectedBranch } from '../branchStore.js';
+import { setTokens } from '../auth.js';
+import { PERMISSIONS } from '@erp/types';
 import POSScreen, { StockConflictModal, supportsBackgroundSync } from '../POSScreen.js';
+
+function fakeJwt(payload: Record<string, unknown>): string {
+  const header = btoa(JSON.stringify({ alg: 'RS256' }));
+  const body = btoa(JSON.stringify(payload));
+  return `${header}.${body}.fake-signature`;
+}
 
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -239,5 +247,102 @@ describe('Cross-cutting: PG-051 — POSScreen reads branchId from the persisted 
     const [held] = await db.heldSales.toArray();
     // Not the old hardcoded branchId: 1 — the value persisted via setSelectedBranch above.
     expect(held!.branchId).toBe(5);
+  });
+});
+
+describe('Cross-cutting: Open Drawer button is gated on POS_MANAGE/POS_CASH_DRAWER, not shown to every till user', () => {
+  const fetchMock = vi.fn((url: string) => {
+    const u = String(url);
+    if (u.includes('/pos/quick-items')) {
+      return Promise.resolve(
+        jsonResponse(200, { data: [{ id: 1, name: 'Test Item', salePrice: '50', gstRate: 18 }] })
+      );
+    }
+    if (u.includes('/sync/')) {
+      return Promise.resolve(
+        jsonResponse(200, { data: { content: [], totalElements: 0, hasMore: false } })
+      );
+    }
+    return Promise.resolve(jsonResponse(200, { data: [] }));
+  });
+
+  function renderPOSScreen() {
+    vi.stubGlobal('fetch', fetchMock);
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    return render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <POSScreen />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+  }
+
+  beforeEach(() => {
+    (navigator as unknown as Record<string, unknown>)['usb'] = {};
+  });
+
+  afterEach(() => {
+    delete (navigator as unknown as Record<string, unknown>)['usb'];
+  });
+
+  it('hides the standalone Open Drawer button from a CASHIER (POS_ACCESS only, no POS_MANAGE/POS_CASH_DRAWER)', async () => {
+    setTokens(fakeJwt({ tenantId: 1, permissions: [PERMISSIONS.POS_ACCESS] }), 'refresh-1');
+
+    renderPOSScreen();
+
+    await screen.findByText('Test Item');
+    expect(screen.queryByLabelText('Open cash drawer')).not.toBeInTheDocument();
+  });
+
+  it('shows the Open Drawer button to a SALES_MANAGER (POS_MANAGE)', async () => {
+    setTokens(fakeJwt({ tenantId: 1, permissions: [PERMISSIONS.POS_MANAGE] }), 'refresh-1');
+
+    renderPOSScreen();
+
+    await screen.findByText('Test Item');
+    expect(await screen.findByLabelText('Open cash drawer')).toBeInTheDocument();
+  });
+});
+
+describe('Cross-cutting: opening one POS overlay closes any other already open (no double-Escape, no overlapping backdrops)', () => {
+  it('opening Browse Catalog while Held Sales is open closes Held Sales', async () => {
+    const fetchMock = vi.fn((url: string) => {
+      const u = String(url);
+      if (u.includes('/pos/quick-items')) {
+        return Promise.resolve(
+          jsonResponse(200, { data: [{ id: 1, name: 'Test Item', salePrice: '50', gstRate: 18 }] })
+        );
+      }
+      if (
+        u.includes('/sync/') ||
+        u.includes('/pos/held-sales') ||
+        u.includes('/pos/lookup-filters')
+      ) {
+        return Promise.resolve(
+          jsonResponse(200, { data: { content: [], totalElements: 0, hasMore: false } })
+        );
+      }
+      return Promise.resolve(jsonResponse(200, { data: [] }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <POSScreen />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+
+    await screen.findByText('Test Item');
+    fireEvent.click(screen.getByText('Held Sales'));
+    expect(await screen.findByRole('heading', { name: 'Held Sales' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText('Browse Catalog (F3)'));
+
+    expect(await screen.findByRole('heading', { name: 'Item Lookup' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Held Sales' })).not.toBeInTheDocument();
   });
 });

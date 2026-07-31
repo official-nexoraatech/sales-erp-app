@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { eq, and, sql, desc } from 'drizzle-orm';
+import { eq, and, sql, desc, inArray } from 'drizzle-orm';
 import { items, warehouses, inventoryLedger, projectionStockLevel } from '@erp/db';
 import { PERMISSIONS } from '@erp/types';
 import type { PlatformContextFactory } from '@erp/sdk';
@@ -9,6 +9,7 @@ import { authenticate } from '../middleware/authenticate.js';
 import { requirePermission } from '../middleware/authorize.js';
 import { createDatabaseClient } from '@erp/db';
 import { runReconciliation } from '../jobs/reconciliation.job.js';
+import { assertWarehouseInScope, getWarehouseScope } from '../domain/WarehouseBranchScope.js';
 
 const StockListQuery = z.object({
   warehouseId: z.coerce.number().int().positive().optional(),
@@ -83,9 +84,24 @@ export async function stockRoutes(
         .where(eq(projectionStockLevel.tenantId, request.auth.tenantId))
         .$dynamic();
 
+      const warehouseScope = await getWarehouseScope(ctx.db.raw, request.auth.tenantId, {
+        permissions: request.auth.permissions,
+        branchIds: request.auth.branchIds,
+      });
       if (query.warehouseId) {
+        await assertWarehouseInScope(ctx.db.raw, request.auth.tenantId, query.warehouseId, {
+          permissions: request.auth.permissions,
+          branchIds: request.auth.branchIds,
+        });
         baseQuery = baseQuery.where(
           eq(projectionStockLevel.warehouseId, query.warehouseId)
+        ) as typeof baseQuery;
+      } else if (warehouseScope !== 'all') {
+        if (warehouseScope.length === 0) {
+          return reply.code(200).send({ data: { content: [], totalElements: 0, page, limit } });
+        }
+        baseQuery = baseQuery.where(
+          inArray(projectionStockLevel.warehouseId, warehouseScope)
         ) as typeof baseQuery;
       }
 
@@ -114,6 +130,10 @@ export async function stockRoutes(
       if (query.warehouseId) {
         countQuery = countQuery.where(
           eq(projectionStockLevel.warehouseId, query.warehouseId)
+        ) as typeof countQuery;
+      } else if (warehouseScope !== 'all' && warehouseScope.length > 0) {
+        countQuery = countQuery.where(
+          inArray(projectionStockLevel.warehouseId, warehouseScope)
         ) as typeof countQuery;
       }
       if (query.belowReorder) {
@@ -144,6 +164,22 @@ export async function stockRoutes(
       const { itemId } = request.params as { itemId: string };
       const id = parseInt(itemId, 10);
 
+      const warehouseScope = await getWarehouseScope(ctx.db.raw, request.auth.tenantId, {
+        permissions: request.auth.permissions,
+        branchIds: request.auth.branchIds,
+      });
+      if (warehouseScope !== 'all' && warehouseScope.length === 0) {
+        return reply.code(200).send({ data: [] });
+      }
+
+      let whereClause = and(
+        eq(projectionStockLevel.itemId, id),
+        eq(projectionStockLevel.tenantId, request.auth.tenantId)
+      );
+      if (warehouseScope !== 'all') {
+        whereClause = and(whereClause, inArray(projectionStockLevel.warehouseId, warehouseScope));
+      }
+
       const stock = await ctx.db.raw
         .select({
           warehouseId: projectionStockLevel.warehouseId,
@@ -154,12 +190,7 @@ export async function stockRoutes(
         })
         .from(projectionStockLevel)
         .innerJoin(warehouses, eq(warehouses.id, projectionStockLevel.warehouseId))
-        .where(
-          and(
-            eq(projectionStockLevel.itemId, id),
-            eq(projectionStockLevel.tenantId, request.auth.tenantId)
-          )
-        );
+        .where(whereClause);
 
       return reply.code(200).send({ data: stock });
     }

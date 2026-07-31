@@ -1,0 +1,138 @@
+import type { TourDefinition } from '../../schema.js';
+import { PERMISSIONS } from '../../../../constants/permissions.js';
+
+// Deep-dive companion to `crm-campaigns-overview`. Grounded against CampaignService.ts /
+// CampaignsPage.tsx / CampaignDetailPage.tsx / CampaignFormPage.tsx. Covers the full lifecycle
+// including the approval workflow (previously undocumented in any tour), real channel providers,
+// consent enforcement, and the honest limits (no open/click tracking, no A/B testing, rate-limit
+// overflow fails permanently rather than queueing).
+const tour: TourDefinition = {
+  id: 'crm-campaigns-complete-guide',
+  version: 1,
+  type: 'complete',
+  title: 'Campaigns — complete guide',
+  description:
+    'The full Draft→Approval→Send lifecycle, what actually happens on send, and the real limits of delivery tracking.',
+  module: 'crm',
+  estimatedMinutes: 7,
+  requiredPermissions: [PERMISSIONS.CRM_VIEW],
+  steps: [
+    {
+      id: 'purpose',
+      route: 'crm/campaigns',
+      title: 'Why this page exists',
+      body: 'Send a message — SMS, WhatsApp, Email, or In-App — to everyone currently matching a segment, through real provider integrations.',
+      placement: 'center',
+      mode: 'informational',
+      requiredPermission: PERMISSIONS.CRM_VIEW,
+    },
+    {
+      id: 'create',
+      route: 'crm/campaigns/new',
+      target: '[data-tour-id="crm-campaign-preview-recipients-button"]',
+      title: 'Creating a campaign',
+      body: 'Pick a segment, channel, and write your message. Preview Recipients shows a live count before you commit to anything — use it. Image/video/PDF attachments only work on Email and WhatsApp; SMS and In-App are text-only.',
+      placement: 'bottom',
+      mode: 'informational',
+      requiredPermission: PERMISSIONS.CRM_CAMPAIGN_CREATE,
+    },
+    {
+      id: 'statuses',
+      route: 'crm/campaigns',
+      title: 'Status vs. Approval Status — two separate fields',
+      body: "Lifecycle status is Draft → Scheduled → Sending → Sent (or Cancelled/Failed). A separate Approval Status (Pending Approval → Approved/Rejected) only appears if your tenant requires it — otherwise it stays blank and doesn't block anything.",
+      placement: 'center',
+      mode: 'informational',
+      requiredPermission: PERMISSIONS.CRM_VIEW,
+    },
+    {
+      id: 'approval-flow',
+      route: 'crm/campaigns',
+      target: '[data-tour-id="crm-campaign-submit-approval-button"]',
+      title: 'Submit for Approval → Approve/Reject',
+      body: "When required, a Draft can't be sent or scheduled until Submit for Approval, then a separately-permissioned reviewer clicks Approve — or Reject with a required reason, shown back on the campaign afterward.",
+      placement: 'bottom',
+      mode: 'informational',
+      requiredPermission: PERMISSIONS.CRM_CAMPAIGN_CREATE,
+    },
+    {
+      id: 'send',
+      route: 'crm/campaigns',
+      target: '[data-tour-id="crm-campaign-send-now-button"]',
+      title: 'Send Now',
+      body: 'A real, irreversible dispatch — batches of 25, through actual SendGrid (email), MSG91 (SMS), or Meta WhatsApp Cloud API. The confirmation dialog now states the exact channel and recipient count before you commit.',
+      placement: 'bottom',
+      mode: 'informational',
+      requiredPermission: PERMISSIONS.CRM_CAMPAIGN_SEND,
+    },
+    {
+      id: 'consent-enforcement',
+      route: 'crm/campaigns',
+      title: 'Opt-outs are enforced automatically, at send time',
+      body: 'Two layers: a simple per-channel opt-out flag, and a more granular consent-category table — both checked fresh when you click Send, not when the segment was built. You never need to manually filter out opted-out customers.',
+      placement: 'center',
+      mode: 'informational',
+      requiredPermission: PERMISSIONS.CRM_VIEW,
+    },
+    {
+      id: 'rate-limit',
+      route: 'crm/campaigns',
+      title: "Rate-limit overflow fails, it doesn't queue",
+      body: 'If a send exceeds your configured messages-per-minute cap (set in Campaign Settings), the overflow recipients are marked Failed permanently — they are not automatically retried later. Check the recipient breakdown after a large send.',
+      placement: 'center',
+      mode: 'informational',
+      requiredPermission: PERMISSIONS.CRM_VIEW,
+      calloutTitle: 'Common mistake',
+      calloutVariant: 'warning',
+    },
+    {
+      id: 'business-impact',
+      route: 'crm/campaigns',
+      title: 'What sending actually tracks',
+      body: 'Real delivery status — but not engagement.',
+      placement: 'center',
+      mode: 'informational',
+      requiredPermission: PERMISSIONS.CRM_VIEW,
+      calloutTitle: 'Business impact',
+      calloutVariant: 'info',
+      businessImpact: [
+        'Sent/Delivered/Failed counts come from real provider delivery webhooks — genuinely accurate, not simulated.',
+        "Open rate, click rate, conversion tracking, and A/B testing are not built yet — the detail page won't show them because there's nothing to show.",
+        'Webhook events fire on Campaign Sent / Cancelled, manageable under Settings → Integrations — useful if you want an external system notified.',
+      ],
+    },
+    {
+      id: 'common-mistakes',
+      route: 'crm/campaigns',
+      title: 'Common mistakes',
+      body: 'Two things catch people off guard.',
+      placement: 'center',
+      mode: 'informational',
+      requiredPermission: PERMISSIONS.CRM_VIEW,
+      calloutTitle: 'Common mistakes',
+      calloutVariant: 'warning',
+      businessImpact: [
+        "Editing a Scheduled campaign's message without noticing the schedule date field isn't shown in edit mode — reschedule separately via the Schedule button if the timing also needs to change.",
+        'Assuming a rejected campaign silently vanishes — it stays visible with the rejection reason attached; resubmit after fixing whatever was flagged.',
+      ],
+    },
+    {
+      id: 'best-practices',
+      route: 'crm/campaigns',
+      title: 'Best practices',
+      body: 'Preview, then send with confidence.',
+      placement: 'center',
+      mode: 'informational',
+      requiredPermission: PERMISSIONS.CRM_VIEW,
+      calloutTitle: 'Best practices',
+      calloutVariant: 'success',
+      businessImpact: [
+        'Always Preview Recipients before creating a campaign — catching a wrong segment here is much cheaper than after a real send.',
+        "Turn on approval requirement (Campaign Settings) for any tenant where more than one person can create campaigns — it's the only safety net between a draft and a real customer-facing send.",
+        "Keep your rate limit realistic for your provider's actual tier, since overflow fails permanently rather than queueing.",
+      ],
+    },
+  ],
+};
+
+export default tour;

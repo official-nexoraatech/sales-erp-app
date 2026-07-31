@@ -1,9 +1,10 @@
 import type { FastifyInstance } from 'fastify';
 import type { PlatformContextFactory } from '@erp/sdk';
-import { expenses } from '@erp/db';
-import { and, desc, eq, sql } from 'drizzle-orm';
+import { getBranchScope } from '@erp/sdk';
+import { expenses, type ErpDatabase } from '@erp/db';
+import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { z } from 'zod';
-import { PERMISSIONS } from '@erp/types';
+import { PERMISSIONS, ERPError } from '@erp/types';
 import { authenticate } from '../middleware/authenticate.js';
 import { requirePermission } from '../middleware/authorize.js';
 import { ExpenseService } from '../domain/ExpenseService.js';
@@ -47,6 +48,25 @@ const PayExpenseSchema = z.object({
   paymentReference: z.string().max(100).optional(),
 });
 
+// Purchase audit 2026-07-21 gap-fix (systemic pass, part 3): same lightweight-lookup pattern as
+// purchase-order.routes.ts's assertPoBranchInScope.
+async function assertExpenseBranchInScope(
+  ctx: { db: { raw: ErpDatabase } },
+  id: number,
+  tenantId: number,
+  auth: { permissions: string[]; branchIds: number[] }
+): Promise<void> {
+  const branchScope = getBranchScope(auth);
+  if (branchScope === 'all') return;
+  const [expense] = await ctx.db.raw
+    .select({ branchId: expenses.branchId })
+    .from(expenses)
+    .where(and(eq(expenses.id, id), eq(expenses.tenantId, tenantId)));
+  if (expense && !branchScope.includes(expense.branchId)) {
+    throw new ERPError('EXPENSE_OUT_OF_SCOPE', 'Expense is outside your assigned branch(es)', 403);
+  }
+}
+
 export async function expenseRoutes(
   fastify: FastifyInstance,
   ctxFactory: PlatformContextFactory
@@ -76,6 +96,15 @@ export async function expenseRoutes(
       if (q.status) conditions.push(eq(expenses.status, q.status as never));
       if (q.expenseType) conditions.push(eq(expenses.expenseType, q.expenseType as never));
 
+      // Purchase audit 2026-07-21 gap-fix (systemic pass) — see purchase-order.routes.ts.
+      const branchScope = getBranchScope(req.auth);
+      if (branchScope !== 'all') {
+        if (branchScope.length === 0) {
+          return reply.send({ data: { content: [], totalElements: 0, page, pageSize } });
+        }
+        conditions.push(inArray(expenses.branchId, branchScope));
+      }
+
       const rows = await ctx.db.raw
         .select()
         .from(expenses)
@@ -99,6 +128,16 @@ export async function expenseRoutes(
     preHandler: requirePermission(PERMISSIONS.EXPENSE_CREATE),
     handler: async (req, reply) => {
       const body = CreateExpenseSchema.parse(req.body);
+
+      const createScope = getBranchScope(req.auth);
+      if (createScope !== 'all' && !createScope.includes(body.branchId)) {
+        throw new ERPError(
+          'EXPENSE_OUT_OF_SCOPE',
+          'Cannot create an expense outside your assigned branch(es)',
+          403
+        );
+      }
+
       const ctx = ctxFactory.create({
         tenantId: req.auth.tenantId,
         userId: req.auth.userId,
@@ -135,6 +174,16 @@ export async function expenseRoutes(
       });
       const svc = new ExpenseService(ctx.db.raw);
       const data = await svc.getWithLines(parseInt(id, 10), req.auth.tenantId);
+
+      const branchScope = getBranchScope(req.auth);
+      if (branchScope !== 'all' && !branchScope.includes(data.branchId)) {
+        throw new ERPError(
+          'EXPENSE_OUT_OF_SCOPE',
+          'Expense is outside your assigned branch(es)',
+          403
+        );
+      }
+
       return reply.send({ data });
     },
   });
@@ -150,6 +199,7 @@ export async function expenseRoutes(
         correlationId:
           (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
       });
+      await assertExpenseBranchInScope(ctx, parseInt(id, 10), req.auth.tenantId, req.auth);
       const svc = new ExpenseService(ctx.db.raw);
       await svc.update(parseInt(id, 10), req.auth.tenantId, req.auth.userId, {
         description: body.description,
@@ -170,6 +220,7 @@ export async function expenseRoutes(
         correlationId:
           (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
       });
+      await assertExpenseBranchInScope(ctx, parseInt(id, 10), req.auth.tenantId, req.auth);
       const svc = new ExpenseService(ctx.db.raw);
       await svc.submit(parseInt(id, 10), req.auth.tenantId, req.auth.userId);
       return reply.send({ success: true });
@@ -186,6 +237,7 @@ export async function expenseRoutes(
         correlationId:
           (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
       });
+      await assertExpenseBranchInScope(ctx, parseInt(id, 10), req.auth.tenantId, req.auth);
       const svc = new ExpenseService(ctx.db.raw);
       await svc.approve(parseInt(id, 10), req.auth.tenantId, req.auth.userId);
       return reply.send({ success: true });
@@ -203,6 +255,7 @@ export async function expenseRoutes(
         correlationId:
           (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
       });
+      await assertExpenseBranchInScope(ctx, parseInt(id, 10), req.auth.tenantId, req.auth);
       const svc = new ExpenseService(ctx.db.raw);
       await svc.pay(parseInt(id, 10), req.auth.tenantId, req.auth.userId, {
         paymentMode: body.paymentMode,

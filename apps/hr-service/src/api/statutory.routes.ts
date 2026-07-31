@@ -9,6 +9,7 @@ import { authenticate } from '../middleware/authenticate.js';
 import { requirePermission } from '../middleware/authorize.js';
 import { PFChallanService } from '../domain/PFChallanService.js';
 import { ESIChallanService } from '../domain/ESIChallanService.js';
+import { PTReportService } from '../domain/PTReportService.js';
 import { Form16Service } from '../domain/Form16Service.js';
 
 type AuthedRequest = { auth: { tenantId: number; userId: number } };
@@ -38,7 +39,7 @@ function toCSV(header: string[], rows: (string | number)[][]): string {
 async function getFiling(
   db: TenantScopedDatabase,
   tenantId: number,
-  challanType: 'PF' | 'ESI',
+  challanType: 'PF' | 'ESI' | 'PT',
   periodMonth: number,
   periodYear: number
 ) {
@@ -287,6 +288,106 @@ export async function statutoryRoutes(
       return reply
         .code(200)
         .send({ data: { message: 'ESI challan marked as filed', ...body.data } });
+    }
+  );
+
+  // ── Professional Tax Report (2026-07-20 HR audit) ────────────────────────
+  fastify.get<{ Querystring: { month?: string; year?: string } }>(
+    '/pt-report',
+    { preHandler: [authenticate, requirePermission(PERMISSIONS.HR_STATUTORY)] },
+    async (request, reply) => {
+      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
+      const ctx = ctxFactory.create({
+        tenantId,
+        userId,
+        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
+      });
+      const query = PeriodQuerySchema.safeParse(request.query);
+      if (!query.success)
+        throw new ValidationError(query.error.errors.map((e) => e.message).join('; '));
+
+      const report = await PTReportService.generateReport(
+        ctx.db,
+        tenantId,
+        query.data.month,
+        query.data.year
+      );
+      const filing = await getFiling(ctx.db, tenantId, 'PT', query.data.month, query.data.year);
+
+      return reply.code(200).send({ data: { ...report, filedAt: filing?.filedAt ?? null } });
+    }
+  );
+
+  fastify.get<{ Querystring: { month?: string; year?: string; format?: string } }>(
+    '/pt-report/export',
+    { preHandler: [authenticate, requirePermission(PERMISSIONS.HR_STATUTORY)] },
+    async (request, reply) => {
+      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
+      const ctx = ctxFactory.create({
+        tenantId,
+        userId,
+        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
+      });
+      const query = PeriodQuerySchema.safeParse(request.query);
+      if (!query.success)
+        throw new ValidationError(query.error.errors.map((e) => e.message).join('; '));
+
+      const report = await PTReportService.generateReport(
+        ctx.db,
+        tenantId,
+        query.data.month,
+        query.data.year
+      );
+      const header = ['Employee Name', 'Gross Salary', 'Professional Tax'];
+      const rows = report.rows.map((r) => [r.employeeName, r.grossSalary, r.professionalTax]);
+      const csv = toCSV(header, rows);
+
+      reply.header('Content-Type', 'text/csv; charset=utf-8');
+      reply.header(
+        'Content-Disposition',
+        `attachment; filename="pt-report-${query.data.year}-${String(query.data.month).padStart(2, '0')}.csv"`
+      );
+      return reply.code(200).send(csv);
+    }
+  );
+
+  fastify.post(
+    '/pt-report/mark-filed',
+    { preHandler: [authenticate, requirePermission(PERMISSIONS.HR_STATUTORY)] },
+    async (request, reply) => {
+      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
+      const ctx = ctxFactory.create({
+        tenantId,
+        userId,
+        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
+      });
+      const body = MarkFiledSchema.safeParse(request.body);
+      if (!body.success)
+        throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
+
+      const existing = await getFiling(ctx.db, tenantId, 'PT', body.data.month, body.data.year);
+      if (existing) {
+        await ctx.db.raw
+          .update(statutoryChallanFilings)
+          .set({ filedAt: new Date(), filedBy: userId })
+          .where(eq(statutoryChallanFilings.id, existing.id));
+      } else {
+        await ctx.db.raw.insert(statutoryChallanFilings).values({
+          tenantId,
+          challanType: 'PT',
+          periodMonth: body.data.month,
+          periodYear: body.data.year,
+          filedAt: new Date(),
+          filedBy: userId,
+        } as typeof statutoryChallanFilings.$inferInsert);
+      }
+
+      await ctx.audit.log({
+        action: 'UPDATE',
+        entityType: 'pt_report',
+        metadata: { action: 'MARK_FILED', ...body.data },
+      });
+      return reply.code(200).send({ data: { message: 'PT report marked as filed', ...body.data } });
     }
   );
 

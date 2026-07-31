@@ -1,9 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import Fastify from 'fastify';
 import { holidayRoutes } from '../api/holiday.routes.js';
+import type * as ErpTypes from '@erp/types';
 
 vi.mock('@erp/types', async (importActual) => {
-  const actual = await importActual<typeof import('@erp/types')>();
+  const actual = await importActual<typeof ErpTypes>();
   return {
     ...actual,
     PERMISSIONS: {
@@ -26,7 +27,14 @@ vi.mock('../middleware/authorize.js', () => ({
 const holidayStore: Record<string, unknown>[] = [];
 
 vi.mock('@erp/db', () => ({
-  holidayCalendars: { id: {}, tenantId: {}, name: {}, holidayDate: {}, holidayType: {}, branchId: {} },
+  holidayCalendars: {
+    id: {},
+    tenantId: {},
+    name: {},
+    holidayDate: {},
+    holidayType: {},
+    branchId: {},
+  },
 }));
 
 function makeCtxFactory() {
@@ -36,7 +44,16 @@ function makeCtxFactory() {
         raw: {
           select: () => ({
             from: () => ({
-              where: () => ({ orderBy: () => Promise.resolve(holidayStore) }),
+              // The route code sometimes awaits `.where(...)` directly (a duplicate-existence
+              // check before insert) and sometimes chains `.orderBy(...)` after it (the list
+              // route) — this mock needs to satisfy both shapes, so `where()` returns a
+              // thenable/array-like that's also awaitable on its own.
+              where: () => {
+                const result = Object.assign([...holidayStore], {
+                  orderBy: () => Promise.resolve(holidayStore),
+                });
+                return result;
+              },
             }),
           }),
           insert: () => ({
@@ -45,6 +62,11 @@ function makeCtxFactory() {
                 const row = { id: crypto.randomUUID(), ...vals };
                 holidayStore.push(row);
                 return Promise.resolve([row]);
+              },
+              then: (resolve: (v: unknown) => void) => {
+                const row = { id: crypto.randomUUID(), ...vals };
+                holidayStore.push(row);
+                resolve(undefined);
               },
             }),
           }),
@@ -63,9 +85,12 @@ describe('holidayRoutes', () => {
   beforeEach(async () => {
     holidayStore.length = 0;
     app = Fastify();
-    await app.register(async (sub) => {
-      await holidayRoutes(sub, makeCtxFactory() as never);
-    }, { prefix: '/api/v2' });
+    await app.register(
+      async (sub) => {
+        await holidayRoutes(sub, makeCtxFactory() as never);
+      },
+      { prefix: '/api/v2' }
+    );
     await app.ready();
   });
 
@@ -77,15 +102,6 @@ describe('holidayRoutes', () => {
     });
     expect(createRes.statusCode).toBe(201);
 
-    const listMockDb = {
-      raw: {
-        select: () => ({
-          from: () => ({
-            where: () => ({ orderBy: () => Promise.resolve(holidayStore) }),
-          }),
-        }),
-      },
-    };
     expect(holidayStore).toHaveLength(1);
     expect((holidayStore[0] as Record<string, unknown>)['name']).toBe('Diwali');
   });

@@ -11,6 +11,7 @@ import {
   quotations,
   deliveryChallans,
   inventoryLedger,
+  projectionStockLevel,
 } from '@erp/db';
 import type { ErpDatabase } from '@erp/db';
 import { BusinessError, NotFoundError, ERPError } from '@erp/types';
@@ -22,7 +23,8 @@ import {
   EventStoreService,
   TenantScopedDatabase,
 } from '@erp/sdk';
-import { GSTCalculator } from './GSTCalculator.js';
+import { GSTCalculator } from '@erp/utils';
+import { NumberSeriesEngine } from './NumberSeriesEngine.js';
 import { ValuationService } from './ValuationService.js';
 import { enqueueWebhookDeliveries } from './WebhookService.js';
 import { ulid } from 'ulid';
@@ -148,13 +150,10 @@ export class InvoiceService {
         });
         return { ...l, ...gst, lineNumber: i + 1 };
       });
-      const totals = GSTCalculator.sumTotals(
-        computedLines.map((l) => ({
-          discountPct: l.discountPct ?? 0,
-          discountAmount: l.discountAmount ?? 0,
-          ...l,
-        }))
-      );
+      // computedLines already carries every GSTLineResult field (subtotal/discountAmount/
+      // taxableAmount/etc.) via the ...gst spread above — no need to reconstruct a
+      // discount-input-plus-result shape the way the old per-service sumTotals required.
+      const totals = GSTCalculator.sumTotals(computedLines);
 
       // Step 1 — Validate credit limit. Skipped for walk-in sales: customerId 0 is a
       // deliberate "no customer selected" sentinel stored in the NOT NULL column (see
@@ -165,10 +164,27 @@ export class InvoiceService {
           .select({
             creditLimit: customers.creditLimit,
             creditLimitEnabled: customers.creditLimitEnabled,
+            status: customers.status,
           })
           .from(customers)
           .where(and(eq(customers.id, params.customerId), eq(customers.tenantId, params.tenantId)));
         if (!customer) throw new NotFoundError('Customer not found');
+
+        // H-3 fix: customers.status='BLOCKED'/'INACTIVE' were schema-valid but nothing ever
+        // checked them at the point a real transaction gets created — a blocked or inactive
+        // customer could still be invoiced.
+        if (customer.status === 'BLOCKED') {
+          throw new BusinessError(
+            'CUSTOMER_BLOCKED',
+            `Customer ${params.customerId} is blocked and cannot be invoiced`
+          );
+        }
+        if (customer.status === 'INACTIVE') {
+          throw new BusinessError(
+            'CUSTOMER_INACTIVE',
+            `Customer ${params.customerId} is inactive and cannot be invoiced`
+          );
+        }
 
         // Load current balance from projection table
         const [balanceRow] = await trx
@@ -337,13 +353,31 @@ export class InvoiceService {
       );
 
       // Mark quotation as converted if linked
+      // C-5 fix: this used to unconditionally force-set the quotation to CONVERTED with no
+      // status check at all — bypassing QuotationService.convert()'s own guard (status must
+      // be ACCEPTED) entirely. An invoice could be created from a DRAFT, SENT, REJECTED, or
+      // EXPIRED quotation and silently stamp it CONVERTED. The WHERE clause now requires
+      // ACCEPTED atomically (no separate read-then-write race), matching the guarded-update
+      // pattern already used elsewhere in this method (stock deduction, credit checks).
       if (params.quotationId) {
-        await trx
+        const [updatedQuotation] = await trx
           .update(quotations)
           .set({ status: 'CONVERTED', convertedInvoiceId: invoiceId, convertedAt: new Date() })
           .where(
-            and(eq(quotations.id, params.quotationId), eq(quotations.tenantId, params.tenantId))
+            and(
+              eq(quotations.id, params.quotationId),
+              eq(quotations.tenantId, params.tenantId),
+              eq(quotations.status, 'ACCEPTED')
+            )
+          )
+          .returning({ id: quotations.id });
+
+        if (!updatedQuotation) {
+          throw new BusinessError(
+            'INVALID_QUOTATION_STATUS',
+            `Quotation ${params.quotationId} must be ACCEPTED to convert to an invoice`
           );
+        }
       }
 
       // Mark delivery challan as converted if linked
@@ -376,41 +410,40 @@ export class InvoiceService {
   // The orchestrator's actual multi-step compensation mechanism (a later, genuinely
   // independent step failing and triggering rollback of an earlier COMPENSATABLE step) is
   // exercised directly in packages/platform-sdk/src/__tests__/saga.test.ts.
-  async confirm(
-    id: number,
-    tenantId: number,
-    invoiceNumber: string,
-    userId: number
-  ): Promise<void> {
+  async confirm(id: number, tenantId: number, userId: number): Promise<string> {
     const orchestrator = new SagaOrchestrator(this.db);
+    // SagaOrchestrator's step `execute` returns void (packages/platform-sdk/src/saga.ts) — it
+    // doesn't plumb a step's return value back out, so the generated number is captured via
+    // closure instead. A RETRYABLE step's earlier failed attempt(s), if any, ran (and rolled
+    // back) inside their own transaction, so only the attempt that actually commits keeps its
+    // number — retries can't leak a gap into the sequence.
+    let invoiceNumber = '';
     try {
       await orchestrator.run({
         sagaType: 'INVOICE_CREATION',
         tenantId,
         correlationId: ulid(),
-        payload: { invoiceId: id, invoiceNumber, userId },
-        context: { id, tenantId, invoiceNumber, userId },
+        payload: { invoiceId: id, userId },
+        context: { id, tenantId, userId },
         steps: [
           {
             name: 'confirmInvoiceTransaction',
             type: 'RETRYABLE',
-            execute: async (ctx: {
-              id: number;
-              tenantId: number;
-              invoiceNumber: string;
-              userId: number;
-            }) => {
-              await this.confirmInTransaction(ctx.id, ctx.tenantId, ctx.invoiceNumber, ctx.userId);
+            execute: async (ctx: { id: number; tenantId: number; userId: number }) => {
+              invoiceNumber = await this.confirmInTransaction(ctx.id, ctx.tenantId, ctx.userId);
             },
           },
         ],
       });
+      return invoiceNumber;
     } catch (err) {
       const cause = err instanceof SagaExecutionError ? err.cause : err;
+      // Defensive backstop only — the server-generated number is unique by construction, but
+      // the DB unique index (invoices_tenant_number) is kept as the last line of defense.
       if (isUniqueConstraintViolation(cause, 'invoices_tenant_number')) {
         throw new BusinessError(
           'INVOICE_NUMBER_DUPLICATE',
-          `Invoice number ${invoiceNumber} already exists`
+          'Generated invoice number collided with an existing invoice — please retry'
         );
       }
       throw cause;
@@ -420,10 +453,9 @@ export class InvoiceService {
   private async confirmInTransaction(
     id: number,
     tenantId: number,
-    invoiceNumber: string,
     userId: number
-  ): Promise<void> {
-    await this.db.transaction(async (trx) => {
+  ): Promise<string> {
+    return this.db.transaction(async (trx) => {
       const [invoice] = await trx
         .select()
         .from(invoices)
@@ -435,20 +467,10 @@ export class InvoiceService {
           `Cannot confirm invoice in status ${invoice.status}`
         );
 
-      // ES-14: duplicate invoice number guard — the DB unique index
-      // (invoices_tenant_number) is the ultimate backstop, but a raw
-      // constraint-violation surfaces as an opaque 500. Check proactively so a
-      // clash returns a clear 422 instead.
-      const [duplicate] = await trx
-        .select({ id: invoices.id })
-        .from(invoices)
-        .where(and(eq(invoices.tenantId, tenantId), eq(invoices.invoiceNumber, invoiceNumber)));
-      if (duplicate && duplicate.id !== id) {
-        throw new BusinessError(
-          'INVOICE_NUMBER_DUPLICATE',
-          `Invoice number ${invoiceNumber} already exists`
-        );
-      }
+      // C-7 fix: server-generated, gap-free, FY-scoped sequential number — replaces the old
+      // client-supplied invoiceNumber + proactive duplicate check. Called with this same
+      // `trx`, so a rolled-back confirm (e.g. insufficient stock below) never burns a number.
+      const invoiceNumber = await new NumberSeriesEngine(trx).next(tenantId, 'INVOICE');
 
       // ES-14: period closure guard — cannot confirm (post) an invoice dated
       // inside an accounting period the tenant has already closed. Queries the
@@ -519,11 +541,41 @@ export class InvoiceService {
         const lineCogs = await ValuationService.consumeForStockOut(trx, {
           tenantId,
           itemId: line.itemId,
+          variantId: line.variantId ?? undefined,
           warehouseId: lineWarehouseId,
           quantity: lineQty,
         });
         invoiceCogsTotal += lineCogs;
         const cogsPerUnit = lineQty > 0 ? Math.round((lineCogs / lineQty) * 100) / 100 : 0;
+
+        // Sales/POS checkout only ever updated the item's global availableQty above, never
+        // the per-warehouse projection_stock_level row — the same class of bug found for GRN
+        // receipts (2026-07-17 QA), just on the stock-out side. Left the Stock Levels page and
+        // Physical Verification's snapshot wrong for any warehouse with real sales activity.
+        await trx
+          .insert(projectionStockLevel)
+          .values({
+            tenantId,
+            itemId: line.itemId,
+            variantId: line.variantId ?? undefined,
+            warehouseId: lineWarehouseId,
+            availableQty: '0',
+            reservedQty: '0',
+            lastMovementAt: new Date(),
+          })
+          .onConflictDoUpdate({
+            target: [
+              projectionStockLevel.tenantId,
+              projectionStockLevel.itemId,
+              projectionStockLevel.warehouseId,
+              projectionStockLevel.variantId,
+            ],
+            set: {
+              availableQty: sql`GREATEST(0, projection_stock_level.available_qty - ${lineQty})`,
+              lastMovementAt: new Date(),
+              updatedAt: new Date(),
+            },
+          });
 
         await trx.insert(inventoryLedger).values({
           tenantId,
@@ -689,6 +741,8 @@ export class InvoiceService {
         toStatus: 'CONFIRMED',
         performedBy: userId,
       });
+
+      return invoiceNumber;
     });
   }
 
@@ -711,6 +765,7 @@ export class InvoiceService {
 
         for (const line of lines) {
           const lineQty = parseFloat(String(line.quantity));
+          const lineWarehouseId = line.warehouseId ?? invoice.warehouseId;
           const result = await trx
             .update(items)
             .set({
@@ -722,22 +777,83 @@ export class InvoiceService {
 
           const afterQty = parseFloat(String(result[0]?.availableQty ?? '0'));
           const beforeQty = afterQty - lineQty;
-          await trx.insert(inventoryLedger).values({
-            tenantId,
-            itemId: line.itemId,
-            variantId: line.variantId ?? undefined,
-            warehouseId: line.warehouseId ?? invoice.warehouseId,
-            movementType: 'STOCK_IN',
-            quantity: String(lineQty),
-            quantityBefore: String(beforeQty),
-            quantityAfter: String(afterQty),
-            referenceType: 'INVOICE',
-            referenceId: id,
-            referenceLineId: line.id,
-            unitCost: '0',
-            notes: reason,
-            createdBy: userId,
-          });
+
+          // Restore the exact value that confirm()'s STOCK_OUT removed (not a fresh/unknown
+          // cost) — otherwise waccCost silently dilutes on every cancelled invoice, since
+          // quantity goes back up but currentStockValue previously didn't. Look up the
+          // original STOCK_OUT's own recorded cogsPerUnit as this reversal's unit cost.
+          const [originalOut] = await trx
+            .select({ cogsPerUnit: inventoryLedger.cogsPerUnit })
+            .from(inventoryLedger)
+            .where(
+              and(
+                eq(inventoryLedger.tenantId, tenantId),
+                eq(inventoryLedger.referenceType, 'INVOICE'),
+                eq(inventoryLedger.referenceId, id),
+                eq(inventoryLedger.referenceLineId, line.id),
+                eq(inventoryLedger.movementType, 'STOCK_OUT')
+              )
+            );
+          const reversalUnitCost = parseFloat(String(originalOut?.cogsPerUnit ?? '0'));
+
+          const [reversalLedgerRow] = await trx
+            .insert(inventoryLedger)
+            .values({
+              tenantId,
+              itemId: line.itemId,
+              variantId: line.variantId ?? undefined,
+              warehouseId: lineWarehouseId,
+              movementType: 'STOCK_IN',
+              quantity: String(lineQty),
+              quantityBefore: String(beforeQty),
+              quantityAfter: String(afterQty),
+              referenceType: 'INVOICE',
+              referenceId: id,
+              referenceLineId: line.id,
+              unitCost: '0',
+              notes: reason,
+              createdBy: userId,
+            })
+            .returning({ id: inventoryLedger.id });
+
+          if (reversalUnitCost > 0) {
+            await ValuationService.applyStockIn(trx, {
+              tenantId,
+              itemId: line.itemId,
+              variantId: line.variantId ?? undefined,
+              warehouseId: lineWarehouseId,
+              quantity: lineQty,
+              unitCost: reversalUnitCost,
+              qtyBeforeStockIn: beforeQty,
+              sourceLedgerId: reversalLedgerRow!.id,
+            });
+          }
+
+          // Reverse the same per-warehouse projection_stock_level deduction confirm() made.
+          await trx
+            .insert(projectionStockLevel)
+            .values({
+              tenantId,
+              itemId: line.itemId,
+              variantId: line.variantId ?? undefined,
+              warehouseId: lineWarehouseId,
+              availableQty: String(Math.max(0, lineQty)),
+              reservedQty: '0',
+              lastMovementAt: new Date(),
+            })
+            .onConflictDoUpdate({
+              target: [
+                projectionStockLevel.tenantId,
+                projectionStockLevel.itemId,
+                projectionStockLevel.warehouseId,
+                projectionStockLevel.variantId,
+              ],
+              set: {
+                availableQty: sql`projection_stock_level.available_qty + ${lineQty}`,
+                lastMovementAt: new Date(),
+                updatedAt: new Date(),
+              },
+            });
         }
 
         // Update projections
@@ -767,6 +883,10 @@ export class InvoiceService {
             customerId: invoice.customerId,
             grandTotal: invoice.grandTotal,
             reason,
+            // M-7 fix: this payload omitted status — search-service's partial-update/upsert
+            // consumer only merges in fields that are actually present, so a cancelled
+            // invoice's search document kept showing status: 'CONFIRMED' forever.
+            status: 'CANCELLED',
           },
           published: false,
         });

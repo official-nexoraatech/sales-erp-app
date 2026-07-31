@@ -30,6 +30,10 @@ import { expenseRoutes } from './api/expense.routes.js';
 import { internalRoutes } from './api/internal.routes.js';
 import { attachmentRoutes } from './api/attachment.routes.js';
 import { searchSyncInternalRoutes } from './api/search-sync.internal.routes.js';
+import { requisitionRoutes } from './api/requisition.routes.js';
+import { rfqRoutes } from './api/rfq.routes.js';
+import { purchaseInvoiceRoutes } from './api/purchase-invoice.routes.js';
+import { dashboardRoutes } from './api/dashboard.routes.js';
 
 initializeTelemetry({ serviceName: 'purchase-service' });
 
@@ -132,6 +136,10 @@ async function bootstrap(): Promise<void> {
       await purchaseReturnRoutes(sub, ctxFactory);
       await expenseRoutes(sub, ctxFactory);
       await attachmentRoutes(sub, ctxFactory);
+      await requisitionRoutes(sub, ctxFactory);
+      await rfqRoutes(sub, ctxFactory);
+      await purchaseInvoiceRoutes(sub, ctxFactory);
+      await dashboardRoutes(sub, ctxFactory);
     },
     { prefix: '/api/v2' }
   );

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { Send, CheckCircle2, IndianRupee } from 'lucide-react';
+import { Eye, Send, CheckCircle2, IndianRupee } from 'lucide-react';
 import { expenseApi } from '../../api/endpoints.js';
 import { useAuthStore } from '../../store/auth.store.js';
 import { PERMISSIONS } from '../../constants/permissions.js';
@@ -16,6 +16,7 @@ import Badge from '../../components/ui/Badge.js';
 import Modal from '../../components/ui/Modal.js';
 import Input from '../../components/ui/Input.js';
 import Select from '../../components/ui/Select.js';
+import ERPEmptyState from '../../components/erp/ERPEmptyState.js';
 import { formatDate, formatCurrency } from '../../lib/format.js';
 
 interface Expense {
@@ -117,11 +118,17 @@ export default function ExpensesPage() {
   ];
 
   const rowActions: ERPRowAction<Expense>[] = [
+    {
+      label: 'View',
+      icon: Eye,
+      onClick: (r: Expense) => navigate(`/purchase/expenses/${r.id}`),
+    },
     ...(canCreateExpense
       ? [
           {
             label: 'Submit',
             icon: Send,
+            tourId: 'expense-submit-row-action',
             onClick: (r: Expense) => submitMutation.mutate(r.id),
             hidden: (r: Expense) => r.status !== 'DRAFT',
           },
@@ -132,6 +139,7 @@ export default function ExpensesPage() {
           {
             label: 'Approve',
             icon: CheckCircle2,
+            tourId: 'expense-approve-row-action',
             onClick: (r: Expense) => approveMutation.mutate(r.id),
             hidden: (r: Expense) => r.status !== 'SUBMITTED',
           },
@@ -156,7 +164,12 @@ export default function ExpensesPage() {
     <div>
       <ERPPageHeader variant="list" title="Expenses" subtitle="Track and approve business expenses">
         {canCreateExpense && (
-          <Button onClick={() => navigate('/purchase/expenses/new')}>+ New Expense</Button>
+          <Button
+            data-tour-id="purchase-expenses-create-button"
+            onClick={() => navigate('/purchase/expenses/new')}
+          >
+            + New Expense
+          </Button>
         )}
       </ERPPageHeader>
 
@@ -176,6 +189,8 @@ export default function ExpensesPage() {
         data={rows}
         isLoading={isLoading}
         rowKey="id"
+        enableExport
+        exportFilename="expenses"
         pagination={{ page, pageSize, total: totalElements }}
         onPageChange={setPage}
         onPageSizeChange={(size) => {
@@ -183,6 +198,25 @@ export default function ExpensesPage() {
           setPage(1);
         }}
         actions={rowActions}
+        emptyState={
+          status ? (
+            <ERPEmptyState type="no-results" />
+          ) : (
+            <ERPEmptyState
+              type="no-data"
+              title="No expenses yet"
+              description="Record a business expense — one Expense record covers a single cost line, so log freight, loading, and other costs separately."
+              {...(canCreateExpense
+                ? {
+                    action: {
+                      label: '+ New Expense',
+                      onClick: () => navigate('/purchase/expenses/new'),
+                    },
+                  }
+                : {})}
+            />
+          )
+        }
       />
 
       <Modal isOpen={payId !== null} onClose={() => setPayId(null)} title="Mark Expense as Paid">

@@ -11,6 +11,7 @@ import ERPDataGrid, {
   type ERPColumnDef,
   type ERPRowAction,
 } from '../../components/erp/ERPDataGrid.js';
+import ERPEmptyState from '../../components/erp/ERPEmptyState.js';
 import Button from '../../components/ui/Button.js';
 import Badge from '../../components/ui/Badge.js';
 import Modal from '../../components/ui/Modal.js';
@@ -36,6 +37,15 @@ const STATUS_COLORS: Record<string, 'default' | 'success' | 'warning' | 'danger'
   REVIEW: 'warning',
   APPROVED: 'success',
   CANCELLED: 'danger',
+};
+
+const STATUS_DESCRIPTIONS: Record<string, string> = {
+  DRAFT: "Created, but the count snapshot hasn't been taken yet.",
+  COUNTING: 'Snapshot taken — enter physical counts, then Approve to apply any variances.',
+  REVIEW: 'Under review.',
+  APPROVED:
+    'Approved — any line with a variance automatically became a stock adjustment, already applied.',
+  CANCELLED: 'Cancelled — no adjustments were created.',
 };
 
 export default function PhysicalVerificationPage() {
@@ -85,7 +95,11 @@ export default function PhysicalVerificationPage() {
       key: 'status',
       header: 'Status',
       sortable: true,
-      render: (r) => <Badge variant={STATUS_COLORS[r.status] ?? 'default'}>{r.status}</Badge>,
+      render: (r) => (
+        <Badge variant={STATUS_COLORS[r.status] ?? 'default'} title={STATUS_DESCRIPTIONS[r.status]}>
+          {r.status}
+        </Badge>
+      ),
     },
     { key: 'createdAt', header: 'Date', sortable: true, render: (r) => formatDate(r.createdAt) },
   ];
@@ -113,7 +127,12 @@ export default function PhysicalVerificationPage() {
         title="Physical Verifications"
         subtitle="Count and verify physical stock"
       >
-        <Button onClick={() => setShowCreate(true)}>+ Start Verification</Button>
+        <Button
+          data-tour-id="inventory-physical-verifications-create-button"
+          onClick={() => setShowCreate(true)}
+        >
+          + Start Verification
+        </Button>
       </ERPPageHeader>
 
       <ERPDataGrid
@@ -121,6 +140,14 @@ export default function PhysicalVerificationPage() {
         data={verifs}
         isLoading={isLoading}
         rowKey="id"
+        emptyState={
+          <ERPEmptyState
+            type="no-data"
+            title="No verifications yet"
+            description="Start a physical verification to count actual stock against what the system expects."
+            action={{ label: '+ Start Verification', onClick: () => setShowCreate(true) }}
+          />
+        }
         pagination={{ page, pageSize, total: totalElements }}
         onPageChange={setPage}
         onPageSizeChange={(size) => {

@@ -124,7 +124,7 @@ export default function StockTransferDetailPage() {
   function handleReceive() {
     const lines = (transfer as TransferDetail).lines.map((l) => ({
       lineId: l.id,
-      receivedQty: parseFloat(receiveQty[l.id] ?? l.requestedQty),
+      receivedQty: parseFloat(receiveQty[l.id] ?? l.dispatchedQty),
     }));
     receiveMutation.mutate(lines);
   }
@@ -147,17 +147,26 @@ export default function StockTransferDetailPage() {
         <div className="flex flex-wrap items-center gap-3">
           <Badge variant={STATUS_COLORS[transfer.status] ?? 'default'}>{transfer.status}</Badge>
           {canManage && transfer.status === 'DRAFT' && (
-            <Button onClick={() => submitMutation.mutate()} isLoading={submitMutation.isPending}>
+            <Button
+              data-tour-id="inventory-transfer-detail-submit-button"
+              onClick={() => submitMutation.mutate()}
+              isLoading={submitMutation.isPending}
+            >
               Submit
             </Button>
           )}
           {canManage && transfer.status === 'SUBMITTED' && (
-            <Button onClick={() => approveMutation.mutate()} isLoading={approveMutation.isPending}>
+            <Button
+              data-tour-id="inventory-transfer-detail-approve-button"
+              onClick={() => approveMutation.mutate()}
+              isLoading={approveMutation.isPending}
+            >
               Approve
             </Button>
           )}
           {canManage && transfer.status === 'APPROVED' && (
             <Button
+              data-tour-id="inventory-transfer-detail-dispatch-button"
               onClick={() => dispatchMutation.mutate()}
               isLoading={dispatchMutation.isPending}
             >
@@ -165,12 +174,21 @@ export default function StockTransferDetailPage() {
             </Button>
           )}
           {canManage && canReceive && (
-            <Button onClick={handleReceive} isLoading={receiveMutation.isPending}>
+            <Button
+              data-tour-id="inventory-transfer-detail-receive-button"
+              onClick={handleReceive}
+              isLoading={receiveMutation.isPending}
+            >
               Receive
             </Button>
           )}
           {canManage && canCancel && (
-            <Button variant="danger" onClick={handleCancel} isLoading={cancelMutation.isPending}>
+            <Button
+              data-tour-id="inventory-transfer-detail-cancel-button"
+              variant="danger"
+              onClick={handleCancel}
+              isLoading={cancelMutation.isPending}
+            >
               Cancel
             </Button>
           )}
@@ -235,8 +253,10 @@ export default function StockTransferDetailPage() {
                       <Input
                         type="number"
                         step="0.001"
+                        min={0}
+                        max={l.dispatchedQty}
                         className="w-28 text-right ml-auto"
-                        value={receiveQty[l.id] ?? l.requestedQty}
+                        value={receiveQty[l.id] ?? l.dispatchedQty}
                         onChange={(e) =>
                           setReceiveQty((prev) => ({ ...prev, [l.id]: e.target.value }))
                         }

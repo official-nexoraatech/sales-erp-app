@@ -20,6 +20,14 @@ export async function loadAuthConfig() {
       process.env['FORGOT_PASSWORD_RATE_LIMIT_WINDOW_MS'] ?? '900000',
       10
     ),
+    // /auth/mfa/verify is pre-auth and OTP-guessable — previously relied solely on the
+    // global 200/min limiter, unlike every other public auth route in this file. Default
+    // matches login's own default (10 per 5min) since both gate a credential-verification step.
+    mfaVerifyRateLimitMax: parseInt(process.env['MFA_VERIFY_RATE_LIMIT_MAX'] ?? '10', 10),
+    mfaVerifyRateLimitWindowMs: parseInt(
+      process.env['MFA_VERIFY_RATE_LIMIT_WINDOW_MS'] ?? '300000',
+      10
+    ),
     lookupTenantsRateLimitMax: parseInt(process.env['LOOKUP_TENANTS_RATE_LIMIT_MAX'] ?? '20', 10),
     lookupTenantsRateLimitWindowMs: parseInt(
       process.env['LOOKUP_TENANTS_RATE_LIMIT_WINDOW_MS'] ?? '300000',

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useCallback } from 'react';
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
 import {
   PanelLeftClose,
@@ -6,10 +6,12 @@ import {
   LogOut,
   Bell,
   HelpCircle,
+  Compass,
   Search,
   Menu,
   X,
 } from 'lucide-react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useAuthStore } from '../store/auth.store.js';
 import { authApi } from '../api/endpoints.js';
 import { useUIStore } from '../store/ui.store.js';
@@ -26,11 +28,15 @@ import BranchSwitcher from './erp/BranchSwitcher.js';
 import QuickCreateMenu from './erp/QuickCreateMenu.js';
 import AppearanceMenu from './erp/AppearanceMenu.js';
 import TenantThemeSync from './erp/TenantThemeSync.js';
+import TenantLogo from './erp/TenantLogo.js';
 import ImpersonationBanner from './erp/ImpersonationBanner.js';
+import OfflineBanner from './erp/OfflineBanner.js';
 import { Kbd } from '@erp/ui';
 import { HelpPanel } from './help/HelpPanel.js';
+import { TourGuidePanel } from './help/TourGuidePanel.js';
 import { OnboardingChecklist } from './help/OnboardingChecklist.js';
 import { NotificationsPanel } from './notifications/NotificationsPanel.js';
+import { TourProvider, TourOverlay, useTour, useHasUnseenPageTour } from '../dap/index.js';
 
 /** Matches NavLink's own default (non-`end`) active semantics, so a parent can tell whether
  * one of its children is the current section without duplicating react-router's matcher. */
@@ -70,6 +76,8 @@ function NavItemLeaf({ item, collapsed }: { item: NavItem; collapsed: boolean })
 function NavGroupItem({ item, collapsed }: { item: NavItem; collapsed: boolean }) {
   const location = useLocation();
   const navigate = useNavigate();
+  const { activeStep } = useTour();
+  const containerRef = useRef<HTMLDivElement>(null);
   const isChildActive = useMemo(
     () => item.children?.some((child) => isPathActive(location.pathname, child.path)) ?? false,
     [item.children, location.pathname]
@@ -82,6 +90,19 @@ function NavGroupItem({ item, collapsed }: { item: NavItem; collapsed: boolean }
   useEffect(() => {
     if (isChildActive) setOpen(true);
   }, [isChildActive]);
+
+  // Tour-awareness: a tour step must never explain a sidebar item hidden inside a collapsed
+  // accordion. The accordion's children are always in the DOM (collapsed via grid-rows, not
+  // conditional rendering — see the `open` div below), so this works purely via DOM
+  // membership — no naming convention needed between nav config and tour content.
+  useEffect(() => {
+    if (!activeStep?.target) return;
+    const targetEl = document.querySelector(activeStep.target);
+    if (targetEl && containerRef.current?.contains(targetEl)) {
+      setOpen(true);
+      targetEl.scrollIntoView({ block: 'nearest' });
+    }
+  }, [activeStep]);
 
   if (!item.children) {
     return <NavItemLeaf item={item} collapsed={collapsed} />;
@@ -123,7 +144,7 @@ function NavGroupItem({ item, collapsed }: { item: NavItem; collapsed: boolean }
   }
 
   return (
-    <div>
+    <div ref={containerRef}>
       <button
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
@@ -175,11 +196,27 @@ function NavGroupItem({ item, collapsed }: { item: NavItem; collapsed: boolean }
 
 const ONBOARDING_DISMISSED_KEY = 'erp_onboarding_dismissed';
 
+// `TourProvider` must wrap this component (not live inside it) so LayoutContent itself — not
+// just its NavGroupItem descendants — can read `useTour()` to force the desktop rail out of
+// its collapsed icon-only mode while a tour is running (see `tourForcesExpanded` below). A
+// tour must never explain a sidebar item hidden inside a collapsed rail's click-triggered
+// flyout menu, and that flyout only exists in collapsed mode in the first place.
 export default function Layout() {
+  return (
+    <TourProvider>
+      <LayoutContent />
+    </TourProvider>
+  );
+}
+
+function LayoutContent() {
   const { sidebarCollapsed, toggleSidebar, setSidebarCollapsed, pushRecentPage, density } =
     useUIStore();
   const navigate = useNavigate();
   const location = useLocation();
+  const queryClient = useQueryClient();
+  const { activeTour } = useTour();
+  const hasUnseenPageTour = useHasUnseenPageTour();
   const { user, logout, hasPermission } = useAuthStore();
   const navGroups = useMemo(
     () => filterNavGroups(NAV_GROUPS, hasPermission),
@@ -195,7 +232,12 @@ export default function Layout() {
   // desktop's collapsed rail has no equivalent peek; reaching a sub-item there opens a small
   // flyout menu (see NavGroupItem) rather than expanding the whole sidebar.
   const [tabletExpanded, setTabletExpanded] = useState(false);
-  const effectiveCollapsed = isTablet ? true : sidebarCollapsed;
+  // A tour must never explain a sidebar item hidden behind the collapsed rail's
+  // click-triggered flyout menu — force the full accordion rail for the tour's duration
+  // instead. Derived (not a stored toggle), so the user's actual collapsed/expanded
+  // preference is restored automatically the moment the tour ends, no bookkeeping needed.
+  const tourForcesExpanded = Boolean(activeTour) && !isMobile && !isTablet;
+  const effectiveCollapsed = isTablet ? true : tourForcesExpanded ? false : sidebarCollapsed;
   const overlayExpanded = !isMobile && effectiveCollapsed && isTablet && tabletExpanded;
   const showLabels = isMobile || !effectiveCollapsed || overlayExpanded;
 
@@ -235,6 +277,7 @@ export default function Layout() {
   }
 
   const [helpOpen, setHelpOpen] = useState(false);
+  const [tourGuideOpen, setTourGuideOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [commandPaletteInitialQuery, setCommandPaletteInitialQuery] = useState('');
@@ -261,7 +304,10 @@ export default function Layout() {
   useKeyboardShortcut(']', () => {
     if (!isMobile && !isTablet) setSidebarCollapsed(false);
   });
-  useKeyboardShortcut('?', () => setHelpOpen((v) => !v));
+  useKeyboardShortcut('?', () => {
+    setTourGuideOpen(false);
+    setHelpOpen((v) => !v);
+  });
   const streamedUnreadCount = useNotificationStream();
   const [unreadCount, setUnreadCount] = useState(0);
   useEffect(() => setUnreadCount(streamedUnreadCount), [streamedUnreadCount]);
@@ -277,6 +323,10 @@ export default function Layout() {
     // never traps the user on a "logged out" screen that's still actually logged in.
     void authApi.logout().catch(() => {});
     logout();
+    // Otherwise a second user logging in on this browser without a hard refresh can see
+    // this user's cached lists/dashboard render until each query's next background
+    // refetch (see WEB-FRONTEND-AUDIT-2026-07-24.md, Critical #1).
+    queryClient.clear();
     navigate('/login');
   }
 
@@ -296,9 +346,14 @@ export default function Layout() {
           renders a single centered button that both shows the brand mark and expands the sidebar. */}
       {showLabels ? (
         <div className="flex items-center gap-2 px-4 py-4 border-b border-sidebar-border">
-          <div className="w-7 h-7 rounded-md bg-primary flex items-center justify-center text-white font-bold text-sm shrink-0">
-            N
-          </div>
+          <TenantLogo
+            className="w-7 h-7 rounded-md object-cover shrink-0"
+            fallback={
+              <div className="w-7 h-7 rounded-md bg-primary flex items-center justify-center text-white font-bold text-sm shrink-0">
+                N
+              </div>
+            }
+          />
           <span className="font-bold text-sidebar text-sm truncate">NEXORAA ERP</span>
           <button
             onClick={handleSidebarToggleClick}
@@ -314,9 +369,16 @@ export default function Layout() {
             onClick={handleSidebarToggleClick}
             aria-label="Expand sidebar"
             title="Expand sidebar"
-            className="w-8 h-8 rounded-md bg-primary flex items-center justify-center text-white font-bold text-sm shrink-0 hover:opacity-90 transition-opacity"
+            className="w-8 h-8 rounded-md hover:opacity-90 transition-opacity"
           >
-            N
+            <TenantLogo
+              className="w-8 h-8 rounded-md object-cover"
+              fallback={
+                <div className="w-8 h-8 rounded-md bg-primary flex items-center justify-center text-white font-bold text-sm">
+                  N
+                </div>
+              }
+            />
           </button>
         </div>
       )}
@@ -371,6 +433,7 @@ export default function Layout() {
 
   return (
     <div className="flex flex-col h-screen bg-surface-page overflow-hidden">
+      <OfflineBanner />
       <ImpersonationBanner />
       <div className="flex flex-1 min-h-0 overflow-hidden">
         {/* Mobile drawer scrim */}
@@ -439,6 +502,7 @@ export default function Layout() {
               )}
               <div className="relative">
                 <button
+                  data-tour-id="dashboard-approvals-button"
                   onClick={() => setNotificationsOpen((v) => !v)}
                   aria-label="Notifications"
                   className={`p-2 rounded-lg transition-colors relative ${notificationsOpen ? 'bg-primary text-primary-fg' : 'text-secondary hover:bg-surface-raised'}`}
@@ -458,8 +522,42 @@ export default function Layout() {
                 )}
               </div>
               <AppearanceMenu />
+              <div className="relative">
+                <button
+                  onClick={() => {
+                    setHelpOpen(false);
+                    setTourGuideOpen((v) => !v);
+                  }}
+                  aria-label={
+                    hasUnseenPageTour
+                      ? 'Open guided tours — a tour is available for this page'
+                      : 'Open guided tours'
+                  }
+                  aria-haspopup="dialog"
+                  aria-expanded={tourGuideOpen}
+                  title="Guided tours"
+                  className={`relative p-2 rounded-lg transition-colors ${tourGuideOpen ? 'bg-primary text-primary-fg' : 'text-secondary hover:bg-surface-raised'}`}
+                >
+                  <Compass size={18} />
+                  {hasUnseenPageTour && !tourGuideOpen && (
+                    <span
+                      aria-hidden="true"
+                      className="absolute top-1 right-1 w-2 h-2 rounded-full bg-brand animate-[tourSpotlightPulse_2s_ease-in-out_infinite]"
+                    />
+                  )}
+                </button>
+                {tourGuideOpen && (
+                  <TourGuidePanel
+                    onClose={() => setTourGuideOpen(false)}
+                    onOpenHelp={() => setHelpOpen(true)}
+                  />
+                )}
+              </div>
               <button
-                onClick={() => setHelpOpen((v) => !v)}
+                onClick={() => {
+                  setTourGuideOpen(false);
+                  setHelpOpen((v) => !v);
+                }}
                 aria-label="Open help panel"
                 aria-haspopup="dialog"
                 aria-expanded={helpOpen}
@@ -510,6 +608,7 @@ export default function Layout() {
         )}
 
         <TenantThemeSync />
+        <TourOverlay />
       </div>
     </div>
   );

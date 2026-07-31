@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { PlatformContextFactory, PlatformContext, PlatformAttachments } from '@erp/sdk';
-import { employees, departments, designations } from '@erp/db';
+import { PlatformEventBus } from '@erp/sdk';
+import { employees, departments, designations, employeeHistory } from '@erp/db';
 import { and, desc, eq, ilike, isNull, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { BusinessError, NotFoundError, ValidationError } from '@erp/types';
@@ -47,6 +48,7 @@ const CreateEmployeeSchema = z.object({
   branchId: z.number().int().positive().optional(),
   managerId: z.number().int().positive().optional(),
   shiftId: z.number().int().positive().optional(),
+  userId: z.number().int().positive().optional(),
   joiningDate: z.string().max(10),
 });
 
@@ -489,40 +491,49 @@ export async function employeeRoutes(
 
       const displayName = `${rest.firstName} ${rest.lastName}`;
 
-      const [created] = await ctx.db.raw
-        .insert(employees)
-        .values({
+      // Insert, code-generation update, and the EMPLOYEE_JOINED event now happen in one
+      // transaction — previously each ran as its own separate statement, so the event (and
+      // even the employeeCode update) could be lost if the process crashed between steps.
+      const final = await ctx.db.transaction(async (trx) => {
+        const [created] = await trx.raw
+          .insert(employees)
+          .values({
+            tenantId,
+            createdBy: userId,
+            displayName,
+            employeeCode: 'EMP-TEMP',
+            ...(aadhaarLast4 ? { aadhaarLast4 } : {}),
+            ...(panEncrypted ? { panEncrypted, panHash } : {}),
+            ...(bankAccountNoEncrypted ? { bankAccountNoEncrypted, bankAccountNoHash } : {}),
+            ...rest,
+          } as typeof employees.$inferInsert)
+          .returning();
+
+        if (!created) throw new Error('Employee insert failed');
+
+        const empCode = generateEmployeeCode(created.id);
+        const [updated] = await trx.raw
+          .update(employees)
+          .set({ employeeCode: empCode })
+          .where(eq(employees.id, created.id))
+          .returning();
+
+        const eventBus = new PlatformEventBus(trx, tenantId, userId, ctx.tenant.correlationId);
+        await eventBus.publishInTransaction('employee', created.id, 'EMPLOYEE_JOINED', {
+          employeeId: created.id,
           tenantId,
-          createdBy: userId,
           displayName,
-          employeeCode: 'EMP-TEMP',
-          ...(aadhaarLast4 ? { aadhaarLast4 } : {}),
-          ...(panEncrypted ? { panEncrypted, panHash } : {}),
-          ...(bankAccountNoEncrypted ? { bankAccountNoEncrypted, bankAccountNoHash } : {}),
-          ...rest,
-        } as typeof employees.$inferInsert)
-        .returning();
+        });
 
-      if (!created) throw new Error('Employee insert failed');
-
-      // Update with generated code
-      const empCode = generateEmployeeCode(created.id);
-      const [final] = await ctx.db.raw
-        .update(employees)
-        .set({ employeeCode: empCode })
-        .where(eq(employees.id, created.id))
-        .returning();
-
-      await ctx.events.publish('employee', created.id, 'EMPLOYEE_JOINED', {
-        employeeId: created.id,
-        tenantId,
-        displayName,
+        return updated;
       });
+      if (!final) throw new Error('Employee update failed');
+
       await ctx.audit.log({
         action: 'CREATE',
         entityType: 'employee',
-        entityId: created.id,
-        after: { employeeId: created.id, displayName },
+        entityId: final.id,
+        after: { employeeId: final.id, displayName },
       });
 
       return reply
@@ -594,6 +605,32 @@ export async function employeeRoutes(
           'Employee was modified concurrently. Please refresh and retry.'
         );
 
+      // Employees only ever stored current-state department/designation/branch/manager — log
+      // a history row for each field that actually changed, so past changes aren't lost.
+      const trackedFields: Array<{
+        field: keyof typeof employees.$inferSelect;
+        type: typeof employeeHistory.$inferInsert.changeType;
+      }> = [
+        { field: 'departmentId', type: 'DEPARTMENT_CHANGE' },
+        { field: 'designationId', type: 'DESIGNATION_CHANGE' },
+        { field: 'branchId', type: 'TRANSFER' },
+        { field: 'managerId', type: 'MANAGER_CHANGE' },
+      ];
+      const today = new Date().toISOString().slice(0, 10);
+      for (const { field, type } of trackedFields) {
+        if (existing[field] !== result[0][field]) {
+          await ctx.db.raw.insert(employeeHistory).values({
+            tenantId,
+            employeeId: id,
+            createdBy: userId,
+            changeType: type,
+            effectiveDate: today,
+            previousValue: { [field]: existing[field] },
+            newValue: { [field]: result[0][field] },
+          } as typeof employeeHistory.$inferInsert);
+        }
+      }
+
       await ctx.audit.log({ action: 'UPDATE', entityType: 'employee', entityId: id });
       return reply.code(200).send({
         data: { ...result[0], panEncrypted: undefined, bankAccountNoEncrypted: undefined },
@@ -624,21 +661,24 @@ export async function employeeRoutes(
         );
       if (!existing) throw new NotFoundError('Employee', id);
 
-      await ctx.db.raw
-        .update(employees)
-        .set({
-          exitDate: body.data.exitDate,
-          exitReason: body.data.exitReason,
-          status: 'EXITED',
-          isActive: false,
-          updatedAt: new Date(),
-        })
-        .where(eq(employees.id, id));
+      await ctx.db.transaction(async (trx) => {
+        await trx.raw
+          .update(employees)
+          .set({
+            exitDate: body.data.exitDate,
+            exitReason: body.data.exitReason,
+            status: 'EXITED',
+            isActive: false,
+            updatedAt: new Date(),
+          })
+          .where(eq(employees.id, id));
 
-      await ctx.events.publish('employee', id, 'EMPLOYEE_EXITED', {
-        employeeId: id,
-        tenantId,
-        ...body.data,
+        const eventBus = new PlatformEventBus(trx, tenantId, userId, ctx.tenant.correlationId);
+        await eventBus.publishInTransaction('employee', id, 'EMPLOYEE_EXITED', {
+          employeeId: id,
+          tenantId,
+          ...body.data,
+        });
       });
       await ctx.audit.log({
         action: 'UPDATE',

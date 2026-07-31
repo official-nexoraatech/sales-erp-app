@@ -46,26 +46,99 @@ describe('handleEmployeeLoanDisbursed', () => {
   });
 
   it('posts a DR Employee Loans Receivable / CR Cash journal for the disbursed amount', async () => {
-    const { handleEmployeeLoanDisbursed } = await import('../consumers/EmployeeLoanAccountingConsumer.js');
+    const { handleEmployeeLoanDisbursed } =
+      await import('../consumers/EmployeeLoanAccountingConsumer.js');
 
     await handleEmployeeLoanDisbursed(
-      { ...baseEvent, payload: { employeeLoanId: 1, employeeId: 10, principalAmount: '10000', disbursedAmount: '10000' } } as never,
+      {
+        ...baseEvent,
+        payload: {
+          employeeLoanId: 1,
+          employeeId: 10,
+          principalAmount: '10000',
+          disbursedAmount: '10000',
+        },
+      } as never,
       {} as never
     );
 
     expect(buildJournalEntry).toHaveBeenCalledWith(
       {},
       1,
-      expect.objectContaining({ eventType: 'EMPLOYEE_LOAN_DISBURSED', amount: 10000, referenceType: 'EMPLOYEE_LOAN', referenceId: 1 })
+      expect.objectContaining({
+        eventType: 'EMPLOYEE_LOAN_DISBURSED',
+        amount: 10000,
+        referenceType: 'EMPLOYEE_LOAN',
+        referenceId: 1,
+      })
     );
     expect(postJournal).toHaveBeenCalledTimes(1);
   });
 
   it('skips posting when the disbursed amount is zero', async () => {
-    const { handleEmployeeLoanDisbursed } = await import('../consumers/EmployeeLoanAccountingConsumer.js');
+    const { handleEmployeeLoanDisbursed } =
+      await import('../consumers/EmployeeLoanAccountingConsumer.js');
 
     await handleEmployeeLoanDisbursed(
-      { ...baseEvent, payload: { employeeLoanId: 2, employeeId: 11, principalAmount: '0', disbursedAmount: '0' } } as never,
+      {
+        ...baseEvent,
+        payload: { employeeLoanId: 2, employeeId: 11, principalAmount: '0', disbursedAmount: '0' },
+      } as never,
+      {} as never
+    );
+
+    expect(buildJournalEntry).not.toHaveBeenCalled();
+    expect(postJournal).not.toHaveBeenCalled();
+  });
+});
+
+// Audit finding 2026-07-23: Employee Loans Receivable was debited once at disbursement and
+// never credited down as EMIs were collected via payroll — hr-service's
+// EmployeeLoanService.applyMonthlyDeduction had no accounting event at all. This new handler
+// (EMPLOYEE_LOAN_REPAID) closes that gap with an additive journal.
+describe('handleEmployeeLoanRepaid', () => {
+  beforeEach(() => {
+    checkPeriodOpen.mockClear();
+    postJournal.mockClear();
+    buildJournalEntry.mockClear();
+  });
+
+  it('posts a DR Salaries Expense / CR Employee Loans Receivable journal for the total EMI collected this payroll run', async () => {
+    const { handleEmployeeLoanRepaid } =
+      await import('../consumers/EmployeeLoanAccountingConsumer.js');
+
+    await handleEmployeeLoanRepaid(
+      {
+        ...baseEvent,
+        eventType: 'EMPLOYEE_LOAN_REPAID',
+        payload: { payrollRunId: 55, totalAmount: '3200.00' },
+      } as never,
+      {} as never
+    );
+
+    expect(buildJournalEntry).toHaveBeenCalledWith(
+      {},
+      1,
+      expect.objectContaining({
+        eventType: 'EMPLOYEE_LOAN_REPAID',
+        amount: 3200,
+        referenceType: 'PAYROLL_RUN',
+        referenceId: 55,
+      })
+    );
+    expect(postJournal).toHaveBeenCalledTimes(1);
+  });
+
+  it('skips posting when totalAmount is zero (no loan EMI collected this run)', async () => {
+    const { handleEmployeeLoanRepaid } =
+      await import('../consumers/EmployeeLoanAccountingConsumer.js');
+
+    await handleEmployeeLoanRepaid(
+      {
+        ...baseEvent,
+        eventType: 'EMPLOYEE_LOAN_REPAID',
+        payload: { payrollRunId: 56, totalAmount: '0' },
+      } as never,
       {} as never
     );
 

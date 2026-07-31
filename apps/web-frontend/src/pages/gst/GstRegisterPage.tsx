@@ -24,11 +24,15 @@ function formatCurrency(val: unknown): string {
 
 export function GstRegisterPage() {
   const [period, setPeriod] = useState(getCurrentPeriod());
-  const [type, setType] = useState<'SALES' | 'PURCHASE' | 'ALL'>('ALL');
+  const [type, setType] = useState<'SALES' | 'PURCHASE' | 'RCM' | 'ALL'>('ALL');
 
+  // RCM is a distinct query (gst_ledger.rcmApplicable=true across any entry type), not one
+  // of getRegister()'s SALES/PURCHASE/ALL entryType buckets — GET /gst/rcm-register already
+  // existed and returned the same row shape (full gst_ledger columns) but had no UI caller
+  // anywhere in the app until now.
   const { data: registerData, isLoading: regLoading } = useQuery({
     queryKey: ['gst-register', period, type],
-    queryFn: () => gstApi.register(period, type),
+    queryFn: () => (type === 'RCM' ? gstApi.rcmRegister(period) : gstApi.register(period, type)),
   });
 
   const { data: summaryData, isLoading: sumLoading } = useQuery({
@@ -89,7 +93,11 @@ export function GstRegisterPage() {
             <p className="text-sm text-secondary">Append-only GST entry log</p>
           </div>
         </div>
-        <Button variant="outline" onClick={handleDownloadCsv}>
+        <Button
+          data-tour-id="gst-register-export-button"
+          variant="outline"
+          onClick={handleDownloadCsv}
+        >
           <Download size={16} />
           Export CSV
         </Button>
@@ -110,14 +118,15 @@ export function GstRegisterPage() {
             <option value="ALL">All Entries</option>
             <option value="SALES">Sales Only</option>
             <option value="PURCHASE">Purchase Only</option>
+            <option value="RCM">RCM (Reverse Charge)</option>
           </select>
         </div>
       </div>
 
       {/* Summary cards */}
       {!sumLoading && summary && (
-        <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-          {(['sales', 'purchases', 'creditNotes', 'purchaseReturns'] as const).map((key) => {
+        <div className="grid grid-cols-2 gap-4 md:grid-cols-5">
+          {(['sales', 'purchases', 'creditNotes', 'purchaseReturns', 'rcm'] as const).map((key) => {
             const s = summary[key] as Record<string, unknown> | undefined;
             const isSales = key === 'sales' || key === 'purchases';
             const Icon = isSales ? TrendingUp : TrendingDown;
@@ -127,6 +136,7 @@ export function GstRegisterPage() {
               purchases: 'Purchases',
               creditNotes: 'Credit Notes',
               purchaseReturns: 'Purchase Returns',
+              rcm: 'RCM Liability',
             };
             // GstLedgerService.getSummary() only puts a `total` field on `sales` (and an
             // unrelated `itcEligible` on `purchases`) — `creditNotes`/`purchaseReturns` have

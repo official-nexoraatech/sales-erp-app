@@ -10,6 +10,10 @@ export interface AccessTokenPayload {
   branchIds: number[];
   impersonatedBy?: number;
   isImpersonation?: boolean;
+  // Set only for a CRM-ROADMAP Phase 3, Feature 2 (Self-Service Customer Portal) session —
+  // `roles: ['CUSTOMER']` tokens carry this instead of a `users.id`-based `sub`. See
+  // portal-auth.routes.ts.
+  customerId?: number;
 }
 
 export interface JwtConfig {
@@ -29,7 +33,10 @@ export async function initializeJwt(config: JwtConfig): Promise<void> {
   _config = config;
 }
 
-export async function signAccessToken(payload: AccessTokenPayload, ttlSecondsOverride?: number): Promise<string> {
+export async function signAccessToken(
+  payload: AccessTokenPayload,
+  ttlSecondsOverride?: number
+): Promise<string> {
   if (!_privateKey || !_config) throw new Error('JWT not initialized');
 
   return new SignJWT({
@@ -40,6 +47,7 @@ export async function signAccessToken(payload: AccessTokenPayload, ttlSecondsOve
     branchIds: payload.branchIds,
     ...(payload.impersonatedBy !== undefined ? { impersonatedBy: payload.impersonatedBy } : {}),
     ...(payload.isImpersonation !== undefined ? { isImpersonation: payload.isImpersonation } : {}),
+    ...(payload.customerId !== undefined ? { customerId: payload.customerId } : {}),
   })
     .setProtectedHeader({ alg: 'RS256' })
     .setSubject(payload.sub)
@@ -49,7 +57,9 @@ export async function signAccessToken(payload: AccessTokenPayload, ttlSecondsOve
     .sign(_privateKey);
 }
 
-export async function verifyAccessToken(token: string): Promise<AccessTokenPayload & { iat: number; exp: number }> {
+export async function verifyAccessToken(
+  token: string
+): Promise<AccessTokenPayload & { iat: number; exp: number }> {
   if (!_publicKey || !_config) throw new Error('JWT not initialized');
 
   const { payload } = await jwtVerify(token, _publicKey, {
@@ -64,8 +74,13 @@ export async function verifyAccessToken(token: string): Promise<AccessTokenPaylo
     roles: payload['roles'] as string[],
     permissions: payload['permissions'] as string[],
     branchIds: (payload['branchIds'] as number[]) ?? [],
-    ...(payload['impersonatedBy'] !== undefined ? { impersonatedBy: payload['impersonatedBy'] as number } : {}),
-    ...(payload['isImpersonation'] !== undefined ? { isImpersonation: payload['isImpersonation'] as boolean } : {}),
+    ...(payload['impersonatedBy'] !== undefined
+      ? { impersonatedBy: payload['impersonatedBy'] as number }
+      : {}),
+    ...(payload['isImpersonation'] !== undefined
+      ? { isImpersonation: payload['isImpersonation'] as boolean }
+      : {}),
+    ...(payload['customerId'] !== undefined ? { customerId: payload['customerId'] as number } : {}),
     iat: payload.iat as number,
     exp: payload.exp as number,
   };

@@ -37,6 +37,17 @@ export const purchaseOrders = pgTable(
       >(),
     poDate: timestamp('po_date', { withTimezone: true }).notNull(),
     expectedDeliveryDate: timestamp('expected_delivery_date', { withTimezone: true }),
+    // Purchase audit 2026-07-21 gap-fix: BLANKET/RATE_CONTRACT POs are long-validity
+    // agreements that GRNs are progressively drawn against (call-offs) rather than a
+    // one-off order — reuses the existing multi-GRN-per-PO mechanism, just gated by
+    // contractValidTill instead of a fixed orderedQty being the only limit.
+    poType: varchar('po_type', { length: 20 })
+      .notNull()
+      .default('STANDARD')
+      .$type<'STANDARD' | 'BLANKET' | 'RATE_CONTRACT'>(),
+    contractValidFrom: timestamp('contract_valid_from', { withTimezone: true }),
+    contractValidTill: timestamp('contract_valid_till', { withTimezone: true }),
+    requisitionId: integer('requisition_id'),
     placeOfSupply: varchar('place_of_supply', { length: 2 }).notNull(),
     sellerStateCode: varchar('seller_state_code', { length: 2 }),
     subtotal: decimal('subtotal', { precision: 15, scale: 2 }).notNull().default('0'),
@@ -232,11 +243,24 @@ export const grnLines = pgTable(
       .default('0'),
     hsnCode: varchar('hsn_code', { length: 20 }),
     warehouseId: integer('warehouse_id'),
+    // ES-purchase-audit: batch/serial/expiry/QC capture at receipt time — see migration
+    // 0088 for why these are receipt-only fields, not a full batch-wise stock ledger.
+    batchNumber: varchar('batch_number', { length: 100 }),
+    serialNumbers: jsonb('serial_numbers').$type<string[]>(),
+    expiryDate: timestamp('expiry_date', { withTimezone: true }),
+    acceptedQty: decimal('accepted_qty', { precision: 15, scale: 3 }),
+    rejectedQty: decimal('rejected_qty', { precision: 15, scale: 3 }).notNull().default('0'),
+    damagedQty: decimal('damaged_qty', { precision: 15, scale: 3 }).notNull().default('0'),
+    qcStatus: varchar('qc_status', { length: 20 })
+      .notNull()
+      .default('NA')
+      .$type<'PENDING' | 'PASSED' | 'FAILED' | 'NA'>(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => [
     index('idx_grn_lines_grn').on(t.grnId),
     index('idx_grn_lines_item').on(t.itemId, t.tenantId),
+    index('idx_grn_lines_batch').on(t.batchNumber, t.tenantId),
   ]
 );
 
@@ -519,6 +543,223 @@ export const projectionSupplierBalance = pgTable(
   ]
 );
 
+// ─── Purchase Requisitions ────────────────────────────────────────────────────
+// Purchase audit 2026-07-21 gap-fix: department request -> approval, upstream of RFQ/PO.
+// No budget/cost-center-budget subsystem exists anywhere in this codebase (confirmed via
+// gap-analysis search) — estimatedTotal is captured for the approver's judgment call, not
+// enforced against a budget ceiling. Genuine, documented scope decision, not an oversight.
+export const purchaseRequisitions = pgTable(
+  'purchase_requisitions',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    tenantId: integer('tenant_id').notNull(),
+    branchId: integer('branch_id').notNull(),
+    requisitionNumber: varchar('requisition_number', { length: 50 }),
+    department: varchar('department', { length: 100 }),
+    priority: varchar('priority', { length: 10 })
+      .notNull()
+      .default('MEDIUM')
+      .$type<'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT'>(),
+    status: varchar('status', { length: 20 })
+      .notNull()
+      .default('DRAFT')
+      .$type<'DRAFT' | 'SUBMITTED' | 'APPROVED' | 'REJECTED' | 'CONVERTED' | 'CANCELLED'>(),
+    requiredByDate: timestamp('required_by_date', { withTimezone: true }),
+    estimatedTotal: decimal('estimated_total', { precision: 15, scale: 2 }).notNull().default('0'),
+    notes: text('notes'),
+    rejectionReason: text('rejection_reason'),
+    convertedToPoId: integer('converted_to_po_id'),
+    requestedBy: integer('requested_by').notNull(),
+    approvedBy: integer('approved_by'),
+    approvedAt: timestamp('approved_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    version: integer('version').notNull().default(0),
+  },
+  (t) => [
+    unique('purchase_requisitions_tenant_number').on(t.tenantId, t.requisitionNumber),
+    index('idx_requisition_tenant_status').on(t.tenantId, t.status, t.createdAt),
+  ]
+);
+
+export const purchaseRequisitionLines = pgTable(
+  'purchase_requisition_lines',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    requisitionId: integer('requisition_id').notNull(),
+    tenantId: integer('tenant_id').notNull(),
+    lineNumber: integer('line_number').notNull(),
+    itemId: integer('item_id').notNull(),
+    description: text('description'),
+    requestedQty: decimal('requested_qty', { precision: 15, scale: 3 }).notNull(),
+    unitId: integer('unit_id'),
+    estimatedUnitPrice: decimal('estimated_unit_price', { precision: 15, scale: 2 })
+      .notNull()
+      .default('0'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index('idx_requisition_lines_requisition').on(t.requisitionId)]
+);
+
+// ─── RFQ / Supplier Quotations ────────────────────────────────────────────────
+export const rfqs = pgTable(
+  'rfqs',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    tenantId: integer('tenant_id').notNull(),
+    branchId: integer('branch_id').notNull(),
+    rfqNumber: varchar('rfq_number', { length: 50 }),
+    requisitionId: integer('requisition_id'),
+    status: varchar('status', { length: 20 })
+      .notNull()
+      .default('DRAFT')
+      .$type<'DRAFT' | 'SENT' | 'CLOSED' | 'CANCELLED'>(),
+    dueDate: timestamp('due_date', { withTimezone: true }),
+    notes: text('notes'),
+    createdBy: integer('created_by').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    unique('rfqs_tenant_number').on(t.tenantId, t.rfqNumber),
+    index('idx_rfq_tenant_status').on(t.tenantId, t.status, t.createdAt),
+  ]
+);
+
+export const rfqLines = pgTable(
+  'rfq_lines',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    rfqId: integer('rfq_id').notNull(),
+    tenantId: integer('tenant_id').notNull(),
+    lineNumber: integer('line_number').notNull(),
+    itemId: integer('item_id').notNull(),
+    description: text('description'),
+    qty: decimal('qty', { precision: 15, scale: 3 }).notNull(),
+    unitId: integer('unit_id'),
+  },
+  (t) => [index('idx_rfq_lines_rfq').on(t.rfqId)]
+);
+
+export const rfqSuppliers = pgTable(
+  'rfq_suppliers',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    rfqId: integer('rfq_id').notNull(),
+    tenantId: integer('tenant_id').notNull(),
+    supplierId: integer('supplier_id').notNull(),
+    status: varchar('status', { length: 20 })
+      .notNull()
+      .default('INVITED')
+      .$type<'INVITED' | 'RESPONDED' | 'DECLINED'>(),
+    invitedAt: timestamp('invited_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    unique('rfq_suppliers_unique').on(t.rfqId, t.supplierId),
+    index('idx_rfq_suppliers_rfq').on(t.rfqId, t.tenantId),
+  ]
+);
+
+export const supplierQuotations = pgTable(
+  'supplier_quotations',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    tenantId: integer('tenant_id').notNull(),
+    rfqId: integer('rfq_id').notNull(),
+    supplierId: integer('supplier_id').notNull(),
+    quotationNumber: varchar('quotation_number', { length: 100 }),
+    status: varchar('status', { length: 20 })
+      .notNull()
+      .default('SUBMITTED')
+      .$type<'SUBMITTED' | 'SELECTED' | 'REJECTED'>(),
+    validTill: timestamp('valid_till', { withTimezone: true }),
+    grandTotal: decimal('grand_total', { precision: 15, scale: 2 }).notNull().default('0'),
+    notes: text('notes'),
+    convertedToPoId: integer('converted_to_po_id'),
+    createdBy: integer('created_by').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    index('idx_quotation_rfq').on(t.rfqId, t.tenantId),
+    index('idx_quotation_supplier').on(t.supplierId, t.tenantId),
+  ]
+);
+
+export const supplierQuotationLines = pgTable(
+  'supplier_quotation_lines',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    quotationId: integer('quotation_id').notNull(),
+    tenantId: integer('tenant_id').notNull(),
+    rfqLineId: integer('rfq_line_id').notNull(),
+    itemId: integer('item_id').notNull(),
+    qty: decimal('qty', { precision: 15, scale: 3 }).notNull(),
+    unitPrice: decimal('unit_price', { precision: 15, scale: 2 }).notNull(),
+    gstRate: decimal('gst_rate', { precision: 5, scale: 2 }).notNull().default('0'),
+    deliveryDays: integer('delivery_days'),
+    lineTotal: decimal('line_total', { precision: 15, scale: 2 }).notNull(),
+  },
+  (t) => [index('idx_quotation_lines_quotation').on(t.quotationId)]
+);
+
+// ─── Purchase Invoices (supplier-invoice capture + PO/GRN variance check) ────
+// Purchase audit 2026-07-21 gap-fix: this system posts AP/GST at GRN approval (2-way
+// PO<->GRN match) — deliberately NOT changed by this table (see PurchaseInvoiceService
+// module comment). This is a reconciliation/audit record only: captures what the supplier
+// actually billed against what was received, and flags qty/rate variance for review. Not
+// wired into SupplierPaymentService, which continues to allocate against GRNs exactly as
+// before this feature.
+export const purchaseInvoices = pgTable(
+  'purchase_invoices',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    tenantId: integer('tenant_id').notNull(),
+    branchId: integer('branch_id').notNull(),
+    invoiceNumber: varchar('invoice_number', { length: 50 }),
+    supplierInvoiceNumber: varchar('supplier_invoice_number', { length: 100 }).notNull(),
+    supplierId: integer('supplier_id').notNull(),
+    purchaseOrderId: integer('purchase_order_id').notNull(),
+    grnId: integer('grn_id').notNull(),
+    invoiceDate: timestamp('invoice_date', { withTimezone: true }).notNull(),
+    status: varchar('status', { length: 20 })
+      .notNull()
+      .default('MATCHED')
+      .$type<'MATCHED' | 'VARIANCE' | 'APPROVED'>(),
+    subtotal: decimal('subtotal', { precision: 15, scale: 2 }).notNull().default('0'),
+    taxAmount: decimal('tax_amount', { precision: 15, scale: 2 }).notNull().default('0'),
+    grandTotal: decimal('grand_total', { precision: 15, scale: 2 }).notNull().default('0'),
+    varianceAmount: decimal('variance_amount', { precision: 15, scale: 2 }).notNull().default('0'),
+    notes: text('notes'),
+    approvedBy: integer('approved_by'),
+    approvedAt: timestamp('approved_at', { withTimezone: true }),
+    createdBy: integer('created_by').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    unique('purchase_invoices_tenant_number').on(t.tenantId, t.invoiceNumber),
+    index('idx_purchase_invoice_grn').on(t.grnId, t.tenantId),
+    index('idx_purchase_invoice_po').on(t.purchaseOrderId, t.tenantId),
+    index('idx_purchase_invoice_supplier').on(t.supplierId, t.tenantId),
+  ]
+);
+
+export const purchaseInvoiceLines = pgTable(
+  'purchase_invoice_lines',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    invoiceId: integer('invoice_id').notNull(),
+    tenantId: integer('tenant_id').notNull(),
+    grnLineId: integer('grn_line_id').notNull(),
+    itemId: integer('item_id').notNull(),
+    invoicedQty: decimal('invoiced_qty', { precision: 15, scale: 3 }).notNull(),
+    invoicedRate: decimal('invoiced_rate', { precision: 15, scale: 2 }).notNull(),
+    qtyVariance: decimal('qty_variance', { precision: 15, scale: 3 }).notNull().default('0'),
+    rateVariance: decimal('rate_variance', { precision: 15, scale: 2 }).notNull().default('0'),
+    lineTotal: decimal('line_total', { precision: 15, scale: 2 }).notNull(),
+  },
+  (t) => [index('idx_purchase_invoice_lines_invoice').on(t.invoiceId)]
+);
+
 // ─── Type exports ─────────────────────────────────────────────────────────────
 export type PurchaseOrder = typeof purchaseOrders.$inferSelect;
 export type PurchaseOrderLine = typeof purchaseOrderLines.$inferSelect;
@@ -533,3 +774,12 @@ export type PurchaseReturnLine = typeof purchaseReturnLines.$inferSelect;
 export type DebitNote = typeof debitNotes.$inferSelect;
 export type Expense = typeof expenses.$inferSelect;
 export type ExpenseLine = typeof expenseLines.$inferSelect;
+export type PurchaseRequisition = typeof purchaseRequisitions.$inferSelect;
+export type PurchaseRequisitionLine = typeof purchaseRequisitionLines.$inferSelect;
+export type Rfq = typeof rfqs.$inferSelect;
+export type RfqLine = typeof rfqLines.$inferSelect;
+export type RfqSupplier = typeof rfqSuppliers.$inferSelect;
+export type SupplierQuotation = typeof supplierQuotations.$inferSelect;
+export type SupplierQuotationLine = typeof supplierQuotationLines.$inferSelect;
+export type PurchaseInvoice = typeof purchaseInvoices.$inferSelect;
+export type PurchaseInvoiceLine = typeof purchaseInvoiceLines.$inferSelect;

@@ -30,6 +30,7 @@ export const outboxEvents = pgTable(
     retryCount: integer('retry_count').notNull().default(0),
     failed: boolean('failed').notNull().default(false),
     failedReason: text('failed_reason'),
+    nextRetryAt: timestamp('next_retry_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => [
@@ -197,6 +198,32 @@ export const faqItems = pgTable(
 export type FaqItem = typeof faqItems.$inferSelect;
 export type NewFaqItem = typeof faqItems.$inferInsert;
 
+// ─── Demo Requests ──────────────────────────────────────────────────────────
+// Lead capture from the public marketing site — global (no tenant_id), fed by two entry
+// points (the landing-page Hero form and the /contact page), distinguished by `source`.
+// Most fields are nullable because the two forms collect different subsets.
+export const demoRequests = pgTable(
+  'demo_requests',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    fullName: varchar('full_name', { length: 200 }).notNull(),
+    email: varchar('email', { length: 255 }).notNull(),
+    countryCode: varchar('country_code', { length: 5 }),
+    phone: varchar('phone', { length: 20 }),
+    company: varchar('company', { length: 200 }),
+    city: varchar('city', { length: 100 }),
+    designation: varchar('designation', { length: 100 }),
+    productType: varchar('product_type', { length: 20 }),
+    message: text('message'),
+    source: varchar('source', { length: 20 }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index('idx_demo_requests_created_at').on(t.createdAt)]
+);
+
+export type DemoRequest = typeof demoRequests.$inferSelect;
+export type NewDemoRequest = typeof demoRequests.$inferInsert;
+
 export type OutboxEvent = typeof outboxEvents.$inferInsert;
 export type InboxEvent = typeof inboxEvents.$inferInsert;
 export type AuditLogEntry = typeof auditLog.$inferInsert;
@@ -227,3 +254,4 @@ export * from './production.js';
 export * from './distributed.js';
 export * from './document-attachments.js';
 export * from './search.js';
+export * from './dap.js';

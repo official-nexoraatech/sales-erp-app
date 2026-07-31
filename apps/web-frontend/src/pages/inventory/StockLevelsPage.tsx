@@ -114,7 +114,7 @@ export default function StockLevelsPage() {
       />
 
       <div className="mb-4 flex flex-wrap gap-4 items-center">
-        <div className="w-64">
+        <div className="w-64" data-tour-id="inventory-stock-warehouse-filter">
           <Select
             label="Filter by Warehouse"
             value={warehouseId}

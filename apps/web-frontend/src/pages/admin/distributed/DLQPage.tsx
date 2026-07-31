@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { dlqApi } from '../../../api/endpoints.js';
 import { useAuthStore } from '../../../store/auth.store.js';
+import { useConfirm } from '../../../context/ConfirmContext.js';
 import { PERMISSIONS } from '../../../constants/permissions.js';
 import ERPPageHeader from '../../../components/erp/ERPPageHeader.js';
 import { ERPCardSkeleton } from '../../../components/erp/ERPSkeleton.js';
@@ -40,6 +41,7 @@ const STATUS_VARIANT: Record<string, 'default' | 'warning' | 'success' | 'danger
 
 export default function DLQPage() {
   const qc = useQueryClient();
+  const confirm = useConfirm();
   const hasPermission = useAuthStore((s) => s.hasPermission);
   const [selectedTopic, setSelectedTopic] = useState<string | null>(null);
   const [selectedItem, setSelectedItem] = useState<DLQItem | null>(null);
@@ -156,10 +158,19 @@ export default function DLQPage() {
                 <h3 className="text-sm font-semibold text-primary">{selectedTopic}</h3>
                 {hasPermission(PERMISSIONS.DLQ_MANAGE) && topicPending > 0 && (
                   <Button
+                    data-tour-id="admin-dlq-replay-button"
                     size="sm"
                     variant="primary"
                     loading={replayMutation.isPending}
-                    onClick={() => replayMutation.mutate(selectedTopic)}
+                    onClick={async () => {
+                      const ok = await confirm({
+                        title: 'Replay all pending items?',
+                        message: `This re-publishes ${topicPending} pending message(s) on "${selectedTopic}" back to Kafka for reprocessing — it will re-trigger whatever side effects the original message caused.`,
+                        confirmLabel: 'Replay All Pending',
+                        variant: 'primary',
+                      });
+                      if (ok) replayMutation.mutate(selectedTopic);
+                    }}
                   >
                     Replay All Pending
                   </Button>
@@ -255,7 +266,16 @@ export default function DLQPage() {
                   variant="danger"
                   size="sm"
                   loading={discardMutation.isPending}
-                  onClick={() => discardMutation.mutate(selectedItem.id)}
+                  onClick={async () => {
+                    const ok = await confirm({
+                      title: 'Discard this item?',
+                      message:
+                        'Permanently gives up on this message — it will never be reprocessed. This cannot be undone.',
+                      confirmLabel: 'Discard',
+                      variant: 'danger',
+                    });
+                    if (ok) discardMutation.mutate(selectedItem.id);
+                  }}
                 >
                   Discard
                 </Button>

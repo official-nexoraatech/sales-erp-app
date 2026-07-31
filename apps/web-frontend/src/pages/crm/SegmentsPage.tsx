@@ -19,6 +19,45 @@ interface Segment {
   _count?: number;
 }
 
+interface SegmentCustomer {
+  id: number;
+  displayName?: string;
+  name?: string;
+  phone?: string;
+}
+
+function SegmentCustomersPanel({ segmentId }: { segmentId: number }) {
+  const { data, isLoading } = useQuery({
+    queryKey: ['crm-segment-customers', segmentId],
+    queryFn: () => crmApi.segmentCustomers(segmentId, { page: 0, size: 20 }),
+  });
+  const result = data as { content?: SegmentCustomer[]; totalElements?: number } | undefined;
+  const rows = result?.content ?? [];
+
+  if (isLoading)
+    return <p className="text-xs text-secondary px-5 py-2">Loading matching customers…</p>;
+  if (rows.length === 0)
+    return (
+      <p className="text-xs text-secondary px-5 py-2">No customers currently match this segment.</p>
+    );
+
+  return (
+    <div className="px-5 py-3 bg-surface-subtle">
+      <p className="text-xs text-secondary mb-2">
+        {result?.totalElements ?? rows.length} matching customer(s) — showing first {rows.length}
+      </p>
+      <ul className="text-xs text-primary divide-y divide-default">
+        {rows.map((c) => (
+          <li key={c.id} className="py-1.5 flex justify-between">
+            <span>{c.displayName ?? c.name ?? `Customer #${c.id}`}</span>
+            {c.phone && <span className="text-secondary">{c.phone}</span>}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 interface HealthCounts {
   champion: number;
   loyal: number;
@@ -43,6 +82,7 @@ export default function SegmentsPage() {
 
   const [previewCode, setPreviewCode] = useState<string | null>(null);
   const [previewCount, setPreviewCount] = useState<number | null>(null);
+  const [expandedSegmentId, setExpandedSegmentId] = useState<number | null>(null);
 
   const { data: segData, isLoading: segmentsLoading } = useQuery({
     queryKey: ['crm-segments'],
@@ -84,7 +124,12 @@ export default function SegmentsPage() {
         subtitle="Pre-built and custom segments for targeted campaigns"
         actions={
           canCreate ? (
-            <Button onClick={() => navigate('/crm/segments/new')}>+ New Segment</Button>
+            <Button
+              data-tour-id="crm-segments-create-button"
+              onClick={() => navigate('/crm/segments/new')}
+            >
+              + New Segment
+            </Button>
           ) : undefined
         }
       />
@@ -147,7 +192,12 @@ export default function SegmentsPage() {
                 {previewCode === p.code && previewCount !== null && (
                   <span className="text-xs text-secondary">{previewCount} customers</span>
                 )}
-                <Button variant="ghost" size="sm" onClick={() => previewMut.mutate(p.code)}>
+                <Button
+                  data-tour-id="crm-segment-preview-button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => previewMut.mutate(p.code)}
+                >
                   Preview
                 </Button>
                 <Button variant="secondary" size="sm" onClick={() => exportSegment(p.code)}>
@@ -182,20 +232,32 @@ export default function SegmentsPage() {
             {segments
               .filter((s) => !s.isSystem)
               .map((seg) => (
-                <div
-                  key={seg.id}
-                  className="flex items-center justify-between px-5 py-3 flex-wrap gap-2"
-                >
-                  <div>
-                    <p className="text-sm font-medium text-primary">{seg.name}</p>
-                    {seg.description && <p className="text-xs text-secondary">{seg.description}</p>}
-                    <span className="text-xs font-mono text-secondary">{seg.code}</span>
+                <div key={seg.id}>
+                  <div className="flex items-center justify-between px-5 py-3 flex-wrap gap-2">
+                    <div>
+                      <p className="text-sm font-medium text-primary">{seg.name}</p>
+                      {seg.description && (
+                        <p className="text-xs text-secondary">{seg.description}</p>
+                      )}
+                      <span className="text-xs font-mono text-secondary">{seg.code}</span>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button
+                        data-tour-id="crm-segment-view-customers-button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() =>
+                          setExpandedSegmentId((cur) => (cur === seg.id ? null : seg.id))
+                        }
+                      >
+                        {expandedSegmentId === seg.id ? 'Hide Customers' : 'View Customers'}
+                      </Button>
+                      <Button variant="secondary" size="sm" onClick={() => exportSegment(seg.id)}>
+                        Export CSV
+                      </Button>
+                    </div>
                   </div>
-                  <div className="flex gap-2">
-                    <Button variant="secondary" size="sm" onClick={() => exportSegment(seg.id)}>
-                      Export CSV
-                    </Button>
-                  </div>
+                  {expandedSegmentId === seg.id && <SegmentCustomersPanel segmentId={seg.id} />}
                 </div>
               ))}
           </div>

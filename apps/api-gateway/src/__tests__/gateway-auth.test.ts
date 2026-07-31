@@ -2,9 +2,9 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { generateKeyPair, exportSPKI, exportPKCS8, SignJWT, importPKCS8 } from 'jose';
-import { gatewayAuthPreHandler } from '../middleware/gateway-auth.js';
+import { gatewayAuthDecorate, gatewayAuthReject } from '../middleware/gateway-auth.js';
 
-describe('gatewayAuthPreHandler', () => {
+describe('gateway auth (decorate + reject)', () => {
   let app: FastifyInstance;
   let publicKeyPem: string;
   let privateKeyPem: string;
@@ -16,8 +16,13 @@ describe('gatewayAuthPreHandler', () => {
     process.env['JWT_PUBLIC_KEY'] = publicKeyPem;
 
     app = Fastify({ logger: false });
-    app.addHook('preHandler', gatewayAuthPreHandler);
+    // Mirrors app.ts's real registration order (decorate, then — where app.ts also has the
+    // rate limiter in between — reject); this file doesn't exercise rate-limiting itself
+    // (see gateway-rate-limit.test.ts for that), only the auth decide/reject outcome.
+    app.addHook('preHandler', gatewayAuthDecorate);
+    app.addHook('preHandler', gatewayAuthReject);
     app.get('/health', async () => ({ ok: true }));
+    app.get('/metrics', async () => ({ ok: true }));
     app.get('/api/sales/api/v2/invoices', async (request) => ({
       tenantHeader: request.headers['x-tenant-id'],
     }));
@@ -35,17 +40,29 @@ describe('gatewayAuthPreHandler', () => {
     await app.close();
   });
 
+  // F17 fix: verifyAccessToken() now checks the `iss` claim (matching auth-service's own
+  // 'erp-auth-service' default) — mirror that here so this helper keeps producing realistic
+  // tokens.
   async function signToken(claims: Record<string, unknown>, expiresIn = '1h'): Promise<string> {
     const privateKey = await importPKCS8(privateKeyPem, 'RS256');
     return new SignJWT(claims)
       .setProtectedHeader({ alg: 'RS256' })
       .setSubject(String(claims['sub'] ?? '1'))
+      .setIssuer('erp-auth-service')
       .setExpirationTime(expiresIn)
       .sign(privateKey);
   }
 
   it('allows /health through without an Authorization header', async () => {
     const response = await app.inject({ method: 'GET', url: '/health' });
+    expect(response.statusCode).toBe(200);
+  });
+
+  // Regression test for a gap found in the 2026-07-23 API Gateway audit: /metrics was not
+  // in EXEMPT_PATHS, so every unauthenticated Prometheus scrape 401'd (unlike every other
+  // one of the 14 backend services, which leave /metrics unauthenticated by scope).
+  it('allows /metrics through without an Authorization header', async () => {
+    const response = await app.inject({ method: 'GET', url: '/metrics' });
     expect(response.statusCode).toBe(200);
   });
 

@@ -1,6 +1,7 @@
-import { ShieldCheck, KeyRound, FileClock, Lock } from 'lucide-react';
+import { ShieldCheck, KeyRound, FileClock, Lock, Clock } from 'lucide-react';
 import ModuleGlyph from '../../../components/marketing/ModuleGlyph.js';
 import MarketingSection from '../../../components/marketing/MarketingSection.js';
+import { useScrollReveal } from '../../../hooks/useScrollReveal.js';
 
 const REAL_CAPABILITIES = [
   {
@@ -29,6 +30,30 @@ const REAL_CAPABILITIES = [
 
 const ROADMAP_BADGES = ['ISO 27001', 'SOC 2', 'GDPR', 'HIPAA'];
 
+function CapabilityCard({
+  icon,
+  title,
+  description,
+  index,
+}: (typeof REAL_CAPABILITIES)[number] & { index: number }) {
+  const { ref, isVisible } = useScrollReveal<HTMLDivElement>();
+  return (
+    <div
+      ref={ref}
+      style={{ transitionDelay: isVisible ? `${Math.min(index, 6) * 60}ms` : '0ms' }}
+      className={`flex gap-3 rounded-2xl border border-default bg-surface-page p-5 shadow-token-sm transition-all duration-slow hover:-translate-y-1 hover:border-brand hover:shadow-token-lg ${
+        isVisible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-3'
+      }`}
+    >
+      <ModuleGlyph icon={icon} size="sm" />
+      <div>
+        <h3 className="text-sm font-semibold text-primary">{title}</h3>
+        <p className="text-sm text-secondary mt-0.5">{description}</p>
+      </div>
+    </div>
+  );
+}
+
 export default function SecuritySection() {
   return (
     <MarketingSection surface="card" className="py-24" id="security">
@@ -43,17 +68,8 @@ export default function SecuritySection() {
       </div>
 
       <div className="mt-14 grid sm:grid-cols-2 gap-6 max-w-3xl mx-auto">
-        {REAL_CAPABILITIES.map(({ icon, title, description }) => (
-          <div
-            key={title}
-            className="flex gap-3 rounded-2xl border border-default bg-surface-page p-5"
-          >
-            <ModuleGlyph icon={icon} size="sm" />
-            <div>
-              <h3 className="text-sm font-semibold text-primary">{title}</h3>
-              <p className="text-sm text-secondary mt-0.5">{description}</p>
-            </div>
-          </div>
+        {REAL_CAPABILITIES.map((capability, index) => (
+          <CapabilityCard key={capability.title} {...capability} index={index} />
         ))}
       </div>
 
@@ -68,7 +84,9 @@ export default function SecuritySection() {
               className="inline-flex items-center gap-1.5 rounded-full border border-default bg-surface-page px-3 py-1.5 text-xs font-medium text-secondary"
             >
               {badge}
-              <span className="text-warning">&middot; In Progress</span>
+              <span className="inline-flex items-center gap-1 text-warning">
+                <Clock className="h-3 w-3" /> In Progress
+              </span>
             </span>
           ))}
         </div>

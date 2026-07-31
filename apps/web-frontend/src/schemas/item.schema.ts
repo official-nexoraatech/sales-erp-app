@@ -12,7 +12,10 @@ const optionalNonNegative = (message = 'Cannot be negative') =>
   z.preprocess(blankToUndefined, z.coerce.number().min(0, message).optional());
 
 export const itemFormSchema = z.object({
-  name: z.string().min(2, 'Must be at least 2 characters').max(300, 'Must be 300 characters or fewer'),
+  name: z
+    .string()
+    .min(2, 'Must be at least 2 characters')
+    .max(300, 'Must be 300 characters or fewer'),
   itemCode: z.string().max(50, 'Must be 50 characters or fewer').optional(),
   hsnCode: z.string().regex(HSN_REGEX, 'HSN code must be 4, 6, or 8 digits'),
   gstRate: z.coerce.number().refine((v) => (GST_RATES as readonly number[]).includes(v), {
@@ -21,7 +24,10 @@ export const itemFormSchema = z.object({
   cessRate: optionalNonNegative().refine((v) => v === undefined || v <= 100, 'Cannot exceed 100'),
   categoryId: z.preprocess(blankToUndefined, z.coerce.number().int().positive().optional()),
   brandId: z.preprocess(blankToUndefined, z.coerce.number().int().positive().optional()),
-  unitId: z.preprocess(blankToUndefined, z.coerce.number({ invalid_type_error: 'Required' }).int().positive('Required')),
+  unitId: z.preprocess(
+    blankToUndefined,
+    z.coerce.number({ invalid_type_error: 'Required' }).int().positive('Required')
+  ),
   mrp: optionalNonNegative(),
   salePrice: optionalNonNegative(),
   minSalePrice: optionalNonNegative(),
@@ -30,6 +36,7 @@ export const itemFormSchema = z.object({
   barcode: z.string().max(100, 'Must be 100 characters or fewer').optional(),
   barcodeType: z.string().optional(),
   trackInventory: z.boolean().optional(),
+  hasVariants: z.boolean().optional(),
   isFabricItem: z.boolean().optional(),
   fabricWidth: optionalNonNegative(),
   description: z.string().max(5000, 'Must be 5000 characters or fewer').optional(),

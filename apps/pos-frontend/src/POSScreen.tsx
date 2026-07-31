@@ -35,10 +35,11 @@ import {
   markStockConflict,
   resolveConflict,
 } from './offlineDb.js';
-import { authFetch, ensureFreshToken, getAuthClaims } from './auth.js';
+import { authFetch, ensureFreshToken, getAuthClaims, hasPermission } from './auth.js';
+import { PERMISSIONS } from '@erp/types';
 import { getActiveSessionId } from './session.js';
 import { getSelectedBranch } from './branchStore.js';
-import { getCachedSellerStateCode, setCachedSellerStateCode } from './orgStore.js';
+import { getCachedSellerStateCode, refreshCachedSellerStateCode } from './orgStore.js';
 import { syncAllReferenceData } from './referenceSync.js';
 import { buildDrawerKickOnly } from './escpos.js';
 import { supportsAnyPrinting, writeToPairedPrinter, reconnectPairedPrinter } from './webPrinter.js';
@@ -53,6 +54,7 @@ import {
   upsertCustomers,
   getSyncMeta,
   setSyncMeta,
+  getCatalogItemByBarcode,
 } from './localStore.js';
 import { PENDING_SYNC_META_STORE } from './swSync.js';
 import type { CachedCustomer, PendingSale } from './db.js';
@@ -63,12 +65,13 @@ import { POSOmnibox } from './components/pos/POSOmnibox.js';
 import { POSItemLookupModal } from './components/pos/POSItemLookupModal.js';
 import { useCart } from './hooks/useCart.js';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts.js';
+import { isValidBarcodeChecksum } from './hooks/useBarcodeScanDetector.js';
 import { POSProductCard } from './components/pos/POSProductCard.js';
 import POSInput from './components/pos/POSInput.js';
 import POSButton from './components/pos/POSButton.js';
 import { POSCart } from './components/pos/POSCart.js';
 import { POSSummary } from './components/pos/POSSummary.js';
-import { POSPaymentPanel } from './components/pos/POSPaymentPanel.js';
+import { POSPaymentPanel, LOYALTY_POINT_VALUE } from './components/pos/POSPaymentPanel.js';
 import POSDialog from './components/pos/POSDialog.js';
 import { useTheme } from './context/ThemeContext.js';
 import { Kbd } from '@erp/ui';
@@ -83,7 +86,6 @@ export { StockConflictModal } from './components/pos/StockConflictModal.js';
 const SALES_API = import.meta.env['VITE_SALES_API_URL'] ?? 'http://localhost:3000/api/sales';
 const PRODUCTION_API =
   import.meta.env['VITE_PRODUCTION_API_URL'] ?? 'http://localhost:3000/api/production';
-const TENANT_API = import.meta.env['VITE_TENANT_API_URL'] ?? 'http://localhost:3000/api/tenant';
 // Returns/exchange reuse the full sales-return workflow (approvals, credit notes) already
 // built in the main back-office app rather than duplicating that domain logic in POS.
 const WEB_FRONTEND_URL = import.meta.env['VITE_WEB_FRONTEND_URL'] ?? 'http://localhost:5173';
@@ -144,6 +146,11 @@ export default function POSScreen() {
     lastAddedItem,
     highlightedLineItemId,
     grandTotal,
+    totalItems,
+    totalQuantity,
+    subtotal,
+    discountAmount,
+    taxAmount,
     addItem,
     updateQty,
     updateDiscount,
@@ -180,6 +187,9 @@ export default function POSScreen() {
     { mode: 'CARD', amount: '' },
   ]);
   const [redeemPoints, setRedeemPoints] = useState('');
+  // CRM-ROADMAP Phase 2, Feature 3 — a specific catalog reward, mutually exclusive with the
+  // raw-points redemption above (a sale applies at most one loyalty redemption).
+  const [selectedRewardId, setSelectedRewardId] = useState('');
   const [showHeldSales, setShowHeldSales] = useState(false);
   const [showNewCustomer, setShowNewCustomer] = useState(false);
   const [showLookup, setShowLookup] = useState(false);
@@ -196,21 +206,38 @@ export default function POSScreen() {
     staleTime: 5 * 60_000,
   });
 
+  // CRM-ROADMAP Phase 2, Feature 3 — specific rewards (e.g. "10% Off Voucher") a customer can
+  // redeem points for, as an alternative to the raw points->currency input above.
+  const { data: catalogData } = useQuery({
+    queryKey: ['pos-redemption-catalog'],
+    queryFn: async () => {
+      const res = await authFetch(`${SALES_API}/loyalty/redemption-catalog`);
+      if (!res.ok) return { data: { content: [] } };
+      return res.json() as Promise<{
+        data: {
+          content: Array<{
+            id: number;
+            name: string;
+            pointsCost: number;
+            rewardType: 'DISCOUNT_AMOUNT' | 'DISCOUNT_PERCENT';
+            rewardValue: string;
+          }>;
+        };
+      }>;
+    },
+    enabled: showPayment && !!customer,
+    staleTime: 5 * 60_000,
+  });
+  const rewardCatalog = catalogData?.data?.content ?? [];
+
   // Compliance audit: salePayload() used to hardcode placeOfSupply/sellerStateCode to '27'
   // (Maharashtra) for every sale — any non-Maharashtra tenant got wrong CGST/SGST-vs-IGST
-  // splitting. Fetches the tenant's GSTIN once online and caches the derived state code in
-  // localStorage (see orgStore.ts) so it's still available for offline sales after the
-  // first successful sync — an in-memory-only query cache wouldn't survive an offline reload.
+  // splitting. Periodically refreshes the cached state code (see orgStore.ts) so it stays
+  // current; ShiftOpenScreen.tsx also calls this once right after a shift opens, so a
+  // brand-new device has it cached before it can ever reach this screen for the first time.
   useQuery({
     queryKey: ['pos-org-gstin'],
-    queryFn: async () => {
-      const res = await authFetch(`${TENANT_API}/organization`);
-      if (!res.ok) return null;
-      const body = (await res.json()) as { data?: { gstin?: string | null } };
-      const gstin = body.data?.gstin;
-      if (gstin && gstin.length >= 2) setCachedSellerStateCode(gstin.substring(0, 2));
-      return gstin ?? null;
-    },
+    queryFn: refreshCachedSellerStateCode,
     staleTime: 60 * 60_000,
   });
   const upiVpa = (upiData as { data?: { upiVpa: string | null } } | undefined)?.data?.upiVpa;
@@ -498,7 +525,21 @@ export default function POSScreen() {
     barcodeRef.current?.focus();
   }, []);
 
-  const change = Math.max(0, round2((parseFloat(amountTendered) || 0) - grandTotal));
+  // Redeemed loyalty points reduce the amount actually owed — matches pos.routes.ts's
+  // server-authoritative `amountDue = grandTotal - redemptionValue`. Change/UPI/split
+  // validation must all be computed against amountDue, not the pre-redemption grandTotal,
+  // or a customer paying cash after redeeming points would see the wrong Change amount.
+  // A selected catalog reward takes precedence over the raw-points input (mutually exclusive,
+  // matching pos.routes.ts's own validation) — this is only a client-side preview of the
+  // discount; the server computes and debits the authoritative amount atomically.
+  const selectedReward = rewardCatalog.find((r) => String(r.id) === selectedRewardId);
+  const redemptionValue = selectedReward
+    ? selectedReward.rewardType === 'DISCOUNT_PERCENT'
+      ? round2((grandTotal * parseFloat(selectedReward.rewardValue)) / 100)
+      : parseFloat(selectedReward.rewardValue)
+    : round2((parseInt(redeemPoints, 10) || 0) * LOYALTY_POINT_VALUE);
+  const amountDue = round2(Math.max(0, grandTotal - redemptionValue));
+  const change = Math.max(0, round2((parseFloat(amountTendered) || 0) - amountDue));
 
   // Sends just the drawer-kick ESC/POS command to the currently paired printer,
   // pairing on demand if nothing is paired yet — independent of printing a receipt.
@@ -521,8 +562,11 @@ export default function POSScreen() {
   };
 
   // Resolves a scanned/typed value to an item: instant local match against the quick-items
-  // grid first, then a fallback to production-service's cached full-catalog barcode lookup —
-  // without this fallback, scanning anything outside the ~20 quick items silently did nothing.
+  // grid first, then production-service's live full-catalog barcode lookup, then (if offline
+  // or the live lookup couldn't reach the server) the same locally-synced catalog Dexie
+  // already keeps for LookupScreen — without this last fallback, a cashier offline could
+  // only ever sell the ~20 quick items even though the full catalog is sitting in Dexie for
+  // exactly this purpose.
   const resolveAndAddItem = useCallback(
     async (value: string) => {
       const localMatch = quickItems.find(
@@ -534,24 +578,48 @@ export default function POSScreen() {
         return;
       }
 
-      try {
-        const res = await authFetch(
-          `${PRODUCTION_API}/items/by-barcode/${encodeURIComponent(value)}`
-        );
-        if (res.ok) {
-          const json = (await res.json()) as { data?: { item?: POSItem } };
-          if (json.data?.item) {
-            addItem(json.data.item);
-            flashFeedback('success');
-            return;
+      if (navigator.onLine) {
+        try {
+          const res = await authFetch(
+            `${PRODUCTION_API}/items/by-barcode/${encodeURIComponent(value)}`
+          );
+          if (res.ok) {
+            const json = (await res.json()) as { data?: { item?: POSItem } };
+            if (json.data?.item) {
+              addItem(json.data.item);
+              flashFeedback('success');
+              return;
+            }
           }
+        } catch {
+          // network error — fall through to the offline catalog fallback below
         }
-      } catch {
-        // network error — fall through to the not-found toast below
+      }
+
+      const cached = await getCatalogItemByBarcode(value);
+      if (cached) {
+        addItem({
+          id: cached.id,
+          name: cached.name,
+          salePrice: String(cached.salePrice),
+          gstRate: cached.gstRate,
+          cessRate: cached.cessRate,
+          ...(cached.barcode ? { barcode: cached.barcode } : {}),
+        });
+        flashFeedback('success');
+        return;
       }
 
       flashFeedback('error');
-      toast.error(`No item found for "${value}"`);
+      // A checksum-invalid, digit-only value of a real barcode length (EAN-8/12/13/14) is a
+      // stronger signal of a garbled/partial scan than "not in our catalog" — a clearer
+      // message than the generic not-found toast. Doesn't change whether the lookup was
+      // attempted, only which message is shown once it's already failed.
+      toast.error(
+        isValidBarcodeChecksum(value)
+          ? `No item found for "${value}"`
+          : `"${value}" doesn't look like a valid barcode — try rescanning`
+      );
     },
     [quickItems]
   );
@@ -599,11 +667,13 @@ export default function POSScreen() {
       quantity: l.quantity,
       unitPrice: l.unitPrice,
       gstRate: l.gstRate,
+      cessRate: l.cessRate,
       discountPct: l.discountPct,
     })),
     paymentMode,
-    amountTendered: parseFloat(amountTendered) || grandTotal,
-    loyaltyPointsRedeem: parseInt(redeemPoints, 10) || 0,
+    amountTendered: parseFloat(amountTendered) || amountDue,
+    loyaltyPointsRedeem: selectedReward ? 0 : parseInt(redeemPoints, 10) || 0,
+    ...(selectedReward ? { redeemCatalogItemId: selectedReward.id } : {}),
     ...(splitEnabled
       ? {
           payments: splitRows
@@ -660,7 +730,7 @@ export default function POSScreen() {
           lines: cart,
           customer,
           paymentMode,
-          amountTendered: parseFloat(amountTendered) || grandTotal,
+          amountTendered: parseFloat(amountTendered) || amountDue,
           change,
           synced: false,
         });
@@ -674,7 +744,7 @@ export default function POSScreen() {
             lines: cart,
             customer,
             paymentMode,
-            amountTendered: parseFloat(amountTendered) || grandTotal,
+            amountTendered: parseFloat(amountTendered) || amountDue,
             change,
             synced: true,
           });
@@ -692,6 +762,7 @@ export default function POSScreen() {
         { mode: 'CARD', amount: '' },
       ]);
       setRedeemPoints('');
+      setSelectedRewardId('');
       barcodeRef.current?.focus();
     },
     onError: (e: Error) => toast.error(e.message),
@@ -822,6 +893,22 @@ export default function POSScreen() {
     onError: (e: Error) => toast.error(e.message),
   });
 
+  // Held Sales / New Customer / Payment / Browse Catalog are all independent POSDialog-family
+  // overlays with no shared stack manager — opening a second one while another is already up
+  // used to leave both mounted (overlapping backdrops, and a single Escape closing both at
+  // once, since each installs its own document-level listener). Simplest fix proportionate to
+  // this app's size: enforce mutual exclusion at the point something opens, rather than
+  // building a generalized modal-stack manager for four overlays.
+  const showOnly = useCallback(
+    (which: 'payment' | 'heldSales' | 'newCustomer' | 'lookup' | null) => {
+      setShowPayment(which === 'payment');
+      setShowHeldSales(which === 'heldSales');
+      setShowNewCustomer(which === 'newCustomer');
+      setShowLookup(which === 'lookup');
+    },
+    []
+  );
+
   useKeyboardShortcuts({
     barcodeRef,
     cartLength: cart.length,
@@ -837,12 +924,12 @@ export default function POSScreen() {
       setShowPayment(false);
       barcodeRef.current?.focus();
     },
-    onOpenLookup: () => setShowLookup(true),
+    onOpenLookup: () => showOnly('lookup'),
     onHold: () => holdSaleMutation.mutate(),
     onSetPaymentMode: setPaymentMode,
-    onShowPayment: setShowPayment,
-    onShowHeldSales: setShowHeldSales,
-    onShowNewCustomer: setShowNewCustomer,
+    onShowPayment: (show) => (show ? showOnly('payment') : setShowPayment(false)),
+    onShowHeldSales: (show) => (show ? showOnly('heldSales') : setShowHeldSales(false)),
+    onShowNewCustomer: (show) => (show ? showOnly('newCustomer') : setShowNewCustomer(false)),
     onRepeatLast: addItem,
     onUndoLastLine: undoLastLine,
     onMoveLineSelection: moveLineSelection,
@@ -850,54 +937,54 @@ export default function POSScreen() {
 
   return (
     <>
-      <div className="flex h-screen bg-surface-page font-sans print:hidden">
-        {/* Left — item grid */}
-        <div className="flex flex-col w-2/3 p-4 gap-4">
-          {/* Top bar with connectivity indicator */}
-          <div className="flex items-center justify-between">
-            <span className="flex items-center gap-2 font-bold text-lg text-primary">
-              <ShoppingBag size={20} className="text-brand" />
-              POS
-            </span>
-            <div className="flex items-center gap-4">
-              <button
-                onClick={() => setShowHeldSales(true)}
-                className="flex items-center gap-1 text-xs font-medium text-link hover:text-[var(--text-link-hover)]"
-              >
-                <History size={14} />
-                Held Sales
-              </button>
-              <a
-                href={WEB_FRONTEND_URL + '/sales/returns/new'}
-                target="_blank"
-                rel="noreferrer"
-                className="flex items-center gap-1 text-xs font-medium text-link hover:text-[var(--text-link-hover)]"
-              >
-                <ArrowLeftRight size={14} />
-                Returns / Exchange
-              </a>
-              <button
-                onClick={() => setShowLookup(true)}
-                className="flex items-center gap-1 text-xs font-medium text-link hover:text-[var(--text-link-hover)]"
-              >
-                <LayoutGrid size={14} />
-                Browse Catalog (F3)
-              </button>
-              <Link
-                to="/lookup"
-                className="flex items-center gap-1 text-xs font-medium text-link hover:text-[var(--text-link-hover)]"
-              >
-                <SearchIcon size={14} />
-                Lookup
-              </Link>
-              <Link
-                to="/shift/close"
-                className="flex items-center gap-1 text-xs font-medium text-link hover:text-[var(--text-link-hover)]"
-              >
-                <LogOut size={14} />
-                End Shift
-              </Link>
-              {supportsAnyPrinting() && (
+      <div className="flex flex-col h-screen bg-surface-page font-sans print:hidden overflow-hidden">
+        {/* Top bar with connectivity indicator */}
+        <div className="flex items-center justify-between px-4 pt-4 pb-2 shrink-0">
+          <span className="flex items-center gap-2 font-bold text-lg text-primary">
+            <ShoppingBag size={20} className="text-brand" />
+            POS
+          </span>
+          <div className="flex items-center gap-4">
+            <button
+              onClick={() => showOnly('heldSales')}
+              className="flex items-center gap-1 text-xs font-medium text-link hover:text-[var(--text-link-hover)]"
+            >
+              <History size={14} />
+              Held Sales
+            </button>
+            <a
+              href={WEB_FRONTEND_URL + '/sales/returns/new'}
+              target="_blank"
+              rel="noreferrer"
+              className="flex items-center gap-1 text-xs font-medium text-link hover:text-[var(--text-link-hover)]"
+            >
+              <ArrowLeftRight size={14} />
+              Returns / Exchange
+            </a>
+            <button
+              onClick={() => showOnly('lookup')}
+              className="flex items-center gap-1 text-xs font-medium text-link hover:text-[var(--text-link-hover)]"
+            >
+              <LayoutGrid size={14} />
+              Browse Catalog (F3)
+            </button>
+            <Link
+              to="/lookup"
+              className="flex items-center gap-1 text-xs font-medium text-link hover:text-[var(--text-link-hover)]"
+            >
+              <SearchIcon size={14} />
+              Lookup
+            </Link>
+            <Link
+              to="/shift/close"
+              className="flex items-center gap-1 text-xs font-medium text-link hover:text-[var(--text-link-hover)]"
+            >
+              <LogOut size={14} />
+              End Shift
+            </Link>
+            {supportsAnyPrinting() &&
+              (hasPermission(PERMISSIONS.POS_MANAGE) ||
+                hasPermission(PERMISSIONS.POS_CASH_DRAWER)) && (
                 <button
                   onClick={() => void openDrawer()}
                   disabled={drawerOpening}
@@ -908,26 +995,28 @@ export default function POSScreen() {
                   <DoorOpen size={16} />
                 </button>
               )}
-              <button
-                onClick={toggleTheme}
-                aria-label={isDark ? 'Switch to light theme' : 'Switch to dark theme'}
-                className="flex items-center justify-center w-8 h-8 rounded-lg text-secondary hover:text-primary hover:bg-surface-raised transition-colors"
-              >
-                {isDark ? <Sun size={16} /> : <Moon size={16} />}
-              </button>
-              <SyncStatusPanel
-                online={isOnline}
-                pendingCount={pendingCount}
-                stuckCount={stuckCount}
-                conflictCount={conflictSales.length}
-                lastSyncedAt={lastSyncedAt}
-                onSyncNow={() => void syncPendingCustomers().then(() => syncPending())}
-                onRetryStuck={() => void retryStuckItems()}
-                onShowConflicts={() => setShowConflicts(true)}
-              />
-            </div>
+            <button
+              onClick={toggleTheme}
+              aria-label={isDark ? 'Switch to light theme' : 'Switch to dark theme'}
+              className="flex items-center justify-center w-8 h-8 rounded-lg text-secondary hover:text-primary hover:bg-surface-raised transition-colors"
+            >
+              {isDark ? <Sun size={16} /> : <Moon size={16} />}
+            </button>
+            <SyncStatusPanel
+              online={isOnline}
+              pendingCount={pendingCount}
+              stuckCount={stuckCount}
+              conflictCount={conflictSales.length}
+              lastSyncedAt={lastSyncedAt}
+              onSyncNow={() => void syncPendingCustomers().then(() => syncPending())}
+              onRetryStuck={() => void retryStuckItems()}
+              onShowConflicts={() => setShowConflicts(true)}
+            />
           </div>
+        </div>
 
+        {/* Full-width sticky search bar */}
+        <div className="sticky top-0 z-10 bg-surface-page px-4 pb-3 shrink-0">
           <POSOmnibox
             barcodeRef={barcodeRef}
             videoRef={videoRef}
@@ -942,7 +1031,7 @@ export default function POSScreen() {
           />
 
           {/* Keyboard shortcut hints — the handlers for these live in the useEffect above */}
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-secondary">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-secondary mt-2">
             <span className="flex items-center gap-1">
               <Kbd>F2</Kbd> New bill
             </span>
@@ -971,85 +1060,86 @@ export default function POSScreen() {
               <Kbd>↑</Kbd>/<Kbd>↓</Kbd>+<Kbd>Ctrl</Kbd>+<Kbd>D</Kbd> Line discount
             </span>
           </div>
-
-          {/* Quick item grid */}
-          <div className="grid grid-cols-4 gap-3 overflow-y-auto flex-1 content-start">
-            {quickItems.map((item) => (
-              <POSProductCard key={item.id} item={item} onSelect={addItem} />
-            ))}
-          </div>
-
-          {/* Customer search */}
-          <div className="relative">
-            <div className="flex gap-2">
-              <POSInput
-                type="text"
-                placeholder="Customer search (name or phone)…"
-                value={customerSearch}
-                onChange={(e) => setCustomerSearch(e.target.value)}
-                wrapperClassName="flex-1"
-              />
-              <POSButton variant="outline" onClick={() => setShowNewCustomer(true)}>
-                <UserPlus size={16} />
-                New
-              </POSButton>
-            </div>
-            {customerResults.length > 0 && (
-              <div
-                className="absolute bottom-full left-0 right-0 bg-surface-overlay border border-default rounded-xl shadow-token-lg max-h-40 overflow-y-auto mb-1"
-                style={{ zIndex: 'var(--z-dropdown)' }}
-              >
-                {customerResults.map((c) => (
-                  <button
-                    key={c.id}
-                    onClick={() => {
-                      setCustomer(c);
-                      setCustomerSearch('');
-                    }}
-                    className="w-full text-left px-4 py-2.5 text-sm hover:bg-surface-raised transition-colors"
-                  >
-                    <span className="font-medium text-primary">{c.displayName}</span>
-                    <span className="text-secondary ml-2">{c.phone}</span>
-                    {c.loyaltyPoints && (
-                      <span className="text-warning ml-2">{c.loyaltyPoints} pts</span>
-                    )}
-                  </button>
-                ))}
-              </div>
-            )}
-            {customer && (
-              <div className="mt-1 text-sm text-success flex items-center gap-2">
-                <span className="flex items-center gap-1">
-                  <Check size={14} /> {customer.displayName}
-                </span>
-                <button
-                  onClick={() => setCustomer(null)}
-                  aria-label="Clear customer"
-                  className="text-secondary hover:text-primary"
-                >
-                  <XIcon size={14} />
-                </button>
-              </div>
-            )}
-          </div>
         </div>
 
-        {/* Right — cart */}
-        <div className="flex flex-col w-1/3 bg-surface-card border-l border-default">
-          <div className="p-4 border-b border-default">
-            <h2 className="text-lg font-bold text-primary">Current Sale</h2>
-            {customer && <p className="text-sm text-secondary">{customer.displayName}</p>}
+        {/* Current Sale — full width, directly below the search bar */}
+        <div className="flex flex-col md:flex-row border-y border-default bg-surface-card shrink-0">
+          <div className="flex-1 min-w-0 flex flex-col">
+            <div className="flex flex-wrap items-center justify-between gap-3 px-4 pt-3">
+              <h2 className="text-lg font-bold text-primary">Current Sale</h2>
+
+              {/* Customer search */}
+              <div className="relative w-full sm:w-72">
+                <div className="flex gap-2">
+                  <POSInput
+                    type="text"
+                    placeholder="Customer search (name or phone)…"
+                    value={customerSearch}
+                    onChange={(e) => setCustomerSearch(e.target.value)}
+                    wrapperClassName="flex-1"
+                  />
+                  <POSButton variant="outline" onClick={() => showOnly('newCustomer')}>
+                    <UserPlus size={16} />
+                    New
+                  </POSButton>
+                </div>
+                {customerResults.length > 0 && (
+                  <div
+                    className="absolute top-full left-0 right-0 bg-surface-overlay border border-default rounded-xl shadow-token-lg max-h-40 overflow-y-auto mt-1"
+                    style={{ zIndex: 'var(--z-dropdown)' }}
+                  >
+                    {customerResults.map((c) => (
+                      <button
+                        key={c.id}
+                        onClick={() => {
+                          setCustomer(c);
+                          setCustomerSearch('');
+                        }}
+                        className="w-full text-left px-4 py-2.5 text-sm hover:bg-surface-raised transition-colors"
+                      >
+                        <span className="font-medium text-primary">{c.displayName}</span>
+                        <span className="text-secondary ml-2">{c.phone}</span>
+                        {c.loyaltyPoints && (
+                          <span className="text-warning ml-2">{c.loyaltyPoints} pts</span>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {customer && (
+                  <div className="mt-1 text-sm text-success flex items-center gap-2">
+                    <span className="flex items-center gap-1">
+                      <Check size={14} /> {customer.displayName}
+                    </span>
+                    <button
+                      onClick={() => setCustomer(null)}
+                      aria-label="Clear customer"
+                      className="text-secondary hover:text-primary"
+                    >
+                      <XIcon size={14} />
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="max-h-72 overflow-y-auto">
+              <POSCart
+                items={cart}
+                onUpdateQty={updateQty}
+                onUpdateDiscount={updateDiscount}
+                highlightedItemId={highlightedLineItemId}
+              />
+            </div>
           </div>
 
-          <POSCart
-            items={cart}
-            onUpdateQty={updateQty}
-            onUpdateDiscount={updateDiscount}
-            highlightedItemId={highlightedLineItemId}
-          />
-
-          <div className="p-4 border-t border-default space-y-3">
+          <div className="w-full md:w-80 shrink-0 border-t md:border-t-0 md:border-l border-default p-4 space-y-3">
             <POSSummary
+              totalItems={totalItems}
+              totalQuantity={totalQuantity}
+              subtotal={subtotal}
+              discountAmount={discountAmount}
+              taxAmount={taxAmount}
               grandTotal={grandTotal}
               orderDiscountPct={orderDiscountPct}
               onOrderDiscountChange={(value) => {
@@ -1074,7 +1164,7 @@ export default function POSScreen() {
                   variant="primary"
                   size="lg"
                   disabled={cart.length === 0}
-                  onClick={() => setShowPayment(true)}
+                  onClick={() => showOnly('payment')}
                   className="flex-[3] text-lg"
                 >
                   Charge (F8)
@@ -1085,6 +1175,9 @@ export default function POSScreen() {
                 customer={customer}
                 redeemPoints={redeemPoints}
                 onRedeemPointsChange={setRedeemPoints}
+                rewardCatalog={rewardCatalog}
+                selectedRewardId={selectedRewardId}
+                onSelectedRewardIdChange={setSelectedRewardId}
                 splitEnabled={splitEnabled}
                 onSplitEnabledChange={setSplitEnabled}
                 splitRows={splitRows}
@@ -1093,7 +1186,7 @@ export default function POSScreen() {
                 onPaymentModeChange={setPaymentMode}
                 amountTendered={amountTendered}
                 onAmountTenderedChange={setAmountTendered}
-                grandTotal={grandTotal}
+                amountDue={amountDue}
                 change={change}
                 upiVpa={upiVpa}
                 upiPayeeName={upiPayeeName}
@@ -1102,6 +1195,22 @@ export default function POSScreen() {
                 isProcessing={saleMutation.isPending}
               />
             )}
+          </div>
+        </div>
+
+        {/* Product grid (catalog) — occupies the remaining page space */}
+        <div className="flex-1 overflow-y-auto p-4">
+          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-3">
+            {quickItems.map((item) => (
+              <POSProductCard
+                key={item.id}
+                item={item}
+                onSelect={(i) => {
+                  addItem(i);
+                  barcodeRef.current?.focus();
+                }}
+              />
+            ))}
           </div>
         </div>
       </div>

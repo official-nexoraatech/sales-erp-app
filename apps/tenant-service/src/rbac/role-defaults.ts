@@ -25,6 +25,9 @@ export const ROLE_DEFAULTS: Record<string, Permission[]> = {
           PERMISSIONS.FINANCIAL_YEAR_CLOSE,
           PERMISSIONS.PAYROLL_PROCESS,
           PERMISSIONS.IMPERSONATE_USER,
+          // Logging in as a customer is sensitive enough to reserve for OWNER/SUPER_ADMIN only,
+          // same reasoning as IMPERSONATE_USER above (CRM-ROADMAP Phase 3, Feature 2).
+          PERMISSIONS.IMPERSONATE_PORTAL_CUSTOMER,
         ] as Permission[]
       ).includes(p)
   ),
@@ -48,8 +51,13 @@ export const ROLE_DEFAULTS: Record<string, Permission[]> = {
     PERMISSIONS.CREDIT_NOTE_VIEW,
     PERMISSIONS.CREDIT_NOTE_CREATE,
     PERMISSIONS.CUSTOMER_VIEW,
+    PERMISSIONS.CRM_360_VIEW,
     PERMISSIONS.CUSTOMER_CREATE,
     PERMISSIONS.CUSTOMER_EDIT,
+    // H-3 fix: CUSTOMER_BLOCK was defined but never checked by any route (dead constant) —
+    // now gates POST /customers/:id/block|unblock. See migration 0097 for the existing-tenant
+    // backfill this role-defaults.ts change doesn't retroactively apply.
+    PERMISSIONS.CUSTOMER_BLOCK,
     PERMISSIONS.ITEM_VIEW,
     PERMISSIONS.STOCK_VIEW,
     PERMISSIONS.REPORT_VIEW,
@@ -80,6 +88,129 @@ export const ROLE_DEFAULTS: Record<string, Permission[]> = {
     // operations but never see the report on them.
     PERMISSIONS.CRM_LOYALTY_VIEW,
     PERMISSIONS.SEARCH_GLOBAL,
+    // CRM-ROADMAP Phase 1, Feature 1: SALES_MANAGER owns the Account/Contact hierarchy
+    // (mirrors this role already owning CUSTOMER_CREATE/EDIT above). CRM_ACCOUNT_MERGE is
+    // deliberately included here, not held back for a separate tier — this codebase's roles
+    // don't have a SALES_MANAGER/SALES_REP split, and merge is exactly the kind of
+    // credit-risk-adjacent decision this role already makes via CUSTOMER_BLOCK.
+    PERMISSIONS.CRM_ACCOUNT_VIEW,
+    PERMISSIONS.CRM_ACCOUNT_CREATE,
+    PERMISSIONS.CRM_ACCOUNT_UPDATE,
+    PERMISSIONS.CRM_ACCOUNT_MERGE,
+    // CRM-ROADMAP Phase 1, Feature 2: SALES_MANAGER owns lead capture-through-conversion,
+    // same reasoning as Feature 1's CRM_ACCOUNT_* grant above.
+    PERMISSIONS.LEAD_VIEW,
+    PERMISSIONS.LEAD_CREATE,
+    PERMISSIONS.LEAD_UPDATE,
+    PERMISSIONS.LEAD_ASSIGN,
+    PERMISSIONS.LEAD_CONVERT,
+    PERMISSIONS.LEAD_DELETE,
+    // CRM-ROADMAP Phase 1, Feature 7: this role already holds the generic IMPORT_EXECUTE
+    // above plus CRM_ACCOUNT_*/LEAD_* CRUD — without these two entity-specific gates,
+    // ImportEngine.execute() would reject its account/lead CSV imports the same way
+    // EMPLOYEE_IMPORT already gates employee rows.
+    PERMISSIONS.CRM_ACCOUNT_IMPORT,
+    PERMISSIONS.LEAD_IMPORT,
+    // CRM-ROADMAP Phase 4, Feature 4: SALES_MANAGER owns Sales Ops admin configuration —
+    // same reasoning as this role already owning the assignment-rule-adjacent LEAD_ASSIGN above.
+    PERMISSIONS.TERRITORY_MANAGE,
+    // CRM-ROADMAP Phase 4, Feature 5: SALES_MANAGER sets and reviews quotas, same Sales Ops
+    // admin reasoning as TERRITORY_MANAGE immediately above.
+    PERMISSIONS.QUOTA_MANAGE,
+    PERMISSIONS.QUOTA_VALUE_VIEW,
+    // CRM-ROADMAP Phase 4, Feature 3 — fixes a pre-existing gap found while implementing this
+    // feature: CRM_SEASON_VIEW/MANAGE were never granted to any named role (only reachable via
+    // OWNER/ADMIN/SUPER_ADMIN's TENANT_SCOPED_PERMISSIONS wildcard) — this system has no
+    // dedicated "merchandiser" role, and SALES_MANAGER is the closest fit to review/approve a
+    // festival suggestion, the same way it already owns every other CRM Sales Ops action above.
+    PERMISSIONS.CRM_SEASON_VIEW,
+    PERMISSIONS.CRM_SEASON_MANAGE,
+    // CRM-ROADMAP Phase 4, Feature 1: SALES_MANAGER plans/assigns field-sales routes and has
+    // tenant-wide visibility into every rep's field visits — same Sales Ops admin reasoning as
+    // TERRITORY_MANAGE/QUOTA_MANAGE above. FIELD_VISIT_MANAGE also lets a SALES_MANAGER who is
+    // themselves a field rep log their own visits (identity-scoped at the query layer).
+    PERMISSIONS.FIELD_VISIT_MANAGE,
+    PERMISSIONS.ROUTE_MANAGE,
+    // CRM-ROADMAP Phase 4, Feature 7: SALES_MANAGER can click-to-call and view call history/
+    // recordings — same Sales Ops admin reasoning as every other CRM_* grant above.
+    PERMISSIONS.CALL_INITIATE,
+    PERMISSIONS.CALL_LOG_VIEW,
+    // CRM-ROADMAP Phase 1, Feature 4: SALES_MANAGER owns ticket handling end-to-end, same
+    // reasoning as Features 1/2's CRM_ACCOUNT_*/LEAD_* grants above.
+    PERMISSIONS.TICKET_VIEW,
+    PERMISSIONS.TICKET_CREATE,
+    PERMISSIONS.TICKET_UPDATE,
+    PERMISSIONS.TICKET_ASSIGN,
+    PERMISSIONS.TICKET_RESOLVE,
+    PERMISSIONS.TICKET_DELETE,
+    // CRM-ROADMAP Phase 1, Feature 8: the manager-facing rollup of the Lead/Ticket/Campaign
+    // data this role already owns end-to-end above.
+    PERMISSIONS.CRM_DASHBOARD_VIEW,
+    // CRM-ROADMAP Phase 2, Feature 1: SALES_MANAGER owns the pipeline end-to-end, same
+    // reasoning as every prior CRM feature grant above — this role already creates
+    // quotations/invoices directly, so opportunity-to-quotation handoff is a natural extension.
+    PERMISSIONS.OPPORTUNITY_VIEW,
+    PERMISSIONS.OPPORTUNITY_CREATE,
+    PERMISSIONS.OPPORTUNITY_UPDATE,
+    PERMISSIONS.OPPORTUNITY_STAGE_CHANGE,
+    PERMISSIONS.OPPORTUNITY_DELETE,
+    // CRM-ROADMAP Phase 3, Feature 6: this role already sees comparable pricing data via
+    // INVOICE_VIEW/QUOTATION_VIEW/PRICE_OVERRIDE above — preserves today's behavior exactly.
+    PERMISSIONS.OPPORTUNITY_VALUE_VIEW,
+    // CRM-ROADMAP Phase 2, Feature 2: this role already owns the CRM domain end-to-end
+    // (accounts/leads/tickets/opportunities/dashboard above) — same reasoning extends to
+    // journeys, including publishing one.
+    PERMISSIONS.JOURNEY_VIEW,
+    PERMISSIONS.JOURNEY_CREATE,
+    PERMISSIONS.JOURNEY_PUBLISH,
+    PERMISSIONS.JOURNEY_DELETE,
+    // CRM-ROADMAP Phase 2, Feature 3: this role already effectively runs loyalty operations via
+    // its POS_MANAGE grant above — LOYALTY_REDEEM/TIER_MANAGE make that explicit and specific
+    // now that /pos/loyalty/redeem checks the granular constant instead of POS_MANAGE (see the
+    // CASHIER grant below for the gap this closes: POS_MANAGE alone left every cashier unable to
+    // redeem loyalty points at checkout despite running the till).
+    PERMISSIONS.LOYALTY_TIER_MANAGE,
+    PERMISSIONS.LOYALTY_REDEEM,
+    // CRM-ROADMAP Phase 2, Feature 4: same "already owns the CRM domain end-to-end" reasoning
+    // as every prior CRM feature grant above.
+    PERMISSIONS.REFERRAL_VIEW,
+    PERMISSIONS.REFERRAL_CONFIGURE,
+    // CRM-ROADMAP Phase 2, Feature 5: same "already owns the CRM domain end-to-end" reasoning
+    // as every prior CRM feature grant above.
+    PERMISSIONS.CONVERSATION_VIEW,
+    PERMISSIONS.CONVERSATION_REPLY,
+    PERMISSIONS.CONVERSATION_ASSIGN,
+    // RBAC audit 2026-07-31: a role-defaults-vs-route-guard cross-check found this role could
+    // not reach the CRM Campaign/Segment surface at all (crm.routes.ts's CRM_VIEW gate covers
+    // the campaign list, segment health, and automation-rule list endpoints) despite already
+    // owning every other CRM sub-domain above (accounts/leads/tickets/opportunities/journeys/
+    // loyalty/referrals/conversations/seasons). Same role-defaults.ts-omission pattern as every
+    // other fix in this file — the Campaign Planning migrations (0053-0060) were never followed
+    // up with a role-defaults.ts grant. Granted here: view, segment authoring, campaign
+    // authoring/scheduling (create/edit/draft/submit-for-approval — NOT send), interaction
+    // logging, automation-rule config, sender-identity, and DLT template management.
+    // Deliberately NOT granted: CRM_CAMPAIGN_APPROVE / CRM_CAMPAIGN_SEND — crm.routes.ts
+    // already has a distinct submit-for-approval -> approve -> send workflow, and bulk
+    // customer-facing WhatsApp/SMS sends are DLT/TRAI-compliance-sensitive (see
+    // NotificationEngine.sendRaw's hard gate) — segregation of duties (creator != approver)
+    // for that specific step is being treated as intentional design, not a bug, pending
+    // explicit product confirmation.
+    PERMISSIONS.CRM_VIEW,
+    PERMISSIONS.CRM_SEGMENT_VIEW,
+    PERMISSIONS.CRM_SEGMENT_CREATE,
+    PERMISSIONS.CRM_CAMPAIGN_CREATE,
+    PERMISSIONS.CRM_CAMPAIGN_ANALYTICS_VIEW,
+    PERMISSIONS.CRM_INTERACTION_VIEW,
+    PERMISSIONS.CRM_INTERACTION_CREATE,
+    PERMISSIONS.CRM_AUTOMATION_MANAGE,
+    PERMISSIONS.CRM_SENDER_IDENTITY_MANAGE,
+    PERMISSIONS.CRM_DLT_TEMPLATE_MANAGE,
+    // RBAC audit 2026-07-31: sale-return.routes.ts's POST /credit-notes/:id/apply and
+    // /credit-notes/:id/refund require CREDIT_NOTE_ADJUST specifically (not
+    // CREDIT_NOTE_VIEW/CREATE, both already held above) — same "can create but never execute
+    // the next lifecycle step" gap pattern documented throughout this file (e.g. PO_APPROVE,
+    // GRN_APPROVE).
+    PERMISSIONS.CREDIT_NOTE_ADJUST,
   ],
 
   CASHIER: [
@@ -92,6 +223,7 @@ export const ROLE_DEFAULTS: Record<string, Permission[]> = {
     PERMISSIONS.SALE_RETURN_VIEW,
     PERMISSIONS.SALE_RETURN_CREATE,
     PERMISSIONS.CUSTOMER_VIEW,
+    PERMISSIONS.CRM_360_VIEW,
     PERMISSIONS.CUSTOMER_CREATE,
     PERMISSIONS.ITEM_VIEW,
     PERMISSIONS.STOCK_VIEW,
@@ -105,9 +237,34 @@ export const ROLE_DEFAULTS: Record<string, Permission[]> = {
     PERMISSIONS.POS_OPEN_SHIFT,
     PERMISSIONS.POS_CLOSE_SHIFT,
     PERMISSIONS.SEARCH_GLOBAL,
+    // CRM-ROADMAP Phase 2, Feature 3: real gap found — /pos/loyalty/redeem was gated on
+    // POS_MANAGE only, which CASHIER deliberately does NOT hold (see the comment above on
+    // POS_CASH_DRAWER). That made loyalty-point redemption at checkout a supervisor-only action
+    // despite the roadmap's own explicit requirement that redemption be "cashier-permitted but
+    // not cashier-configurable." LOYALTY_REDEEM (POS-facing) is granted here; LOYALTY_TIER_MANAGE
+    // (config-facing) deliberately is not.
+    PERMISSIONS.LOYALTY_REDEEM,
+    // CRM-ROADMAP Phase 2, Feature 4: a cashier printing a receipt needs to fetch (get-or-create)
+    // the paying customer's own referral code for the receipt QR — the same "cashier-permitted,
+    // not cashier-configurable" split as LOYALTY_REDEEM/TIER_MANAGE above. REFERRAL_CONFIGURE
+    // (code deactivation, fraud-review) is deliberately not granted here.
+    PERMISSIONS.REFERRAL_VIEW,
   ],
 
   PURCHASE_MANAGER: [
+    // Purchase audit 2026-07-21 gap-fix: Requisition -> RFQ/Quotation -> PO -> Invoice-match
+    // are new upstream/downstream stages of this role's existing PO/GRN ownership.
+    PERMISSIONS.REQUISITION_VIEW,
+    PERMISSIONS.REQUISITION_CREATE,
+    PERMISSIONS.REQUISITION_APPROVE,
+    PERMISSIONS.REQUISITION_CONVERT,
+    PERMISSIONS.RFQ_VIEW,
+    PERMISSIONS.RFQ_CREATE,
+    PERMISSIONS.SUPPLIER_QUOTATION_CREATE,
+    PERMISSIONS.SUPPLIER_QUOTATION_COMPARE,
+    PERMISSIONS.PURCHASE_INVOICE_VIEW,
+    PERMISSIONS.PURCHASE_INVOICE_CREATE,
+    PERMISSIONS.PURCHASE_INVOICE_APPROVE,
     PERMISSIONS.PO_VIEW,
     PERMISSIONS.PO_CREATE,
     PERMISSIONS.PO_UPDATE,
@@ -126,6 +283,23 @@ export const ROLE_DEFAULTS: Record<string, Permission[]> = {
     PERMISSIONS.SUPPLIER_VIEW,
     PERMISSIONS.SUPPLIER_CREATE,
     PERMISSIONS.SUPPLIER_EDIT,
+    // Purchase audit 2026-07-21: this role owns supplier CRUD but couldn't view a supplier's
+    // running-balance statement (supplier-payment.routes.ts's GET /suppliers/:id/statement
+    // checks this separate constant) — same role-defaults.ts-omission pattern documented
+    // throughout this file.
+    PERMISSIONS.SUPPLIER_STATEMENT_VIEW,
+    // Purchase audit 2026-07-21: PurchaseOrderService.approve() lets an approver override a
+    // blocked vendor-credit-limit check, but only if they also hold this constant
+    // (purchase-order.routes.ts's inline check) — it was granted only to SALES_MANAGER (for
+    // the unrelated invoice-credit-limit use case) and OWNER/ADMIN/SUPER_ADMIN, so a
+    // PURCHASE_MANAGER could never override their own module's credit-limit block.
+    PERMISSIONS.CREDIT_LIMIT_OVERRIDE,
+    // Purchase audit 2026-07-21: expense.routes.ts's whole Expense module (freight/other
+    // purchase-related charges) was unreachable for this role — it owns the rest of
+    // purchasing but had zero EXPENSE_* permissions.
+    PERMISSIONS.EXPENSE_VIEW,
+    PERMISSIONS.EXPENSE_CREATE,
+    PERMISSIONS.EXPENSE_APPROVE,
     PERMISSIONS.ITEM_VIEW,
     PERMISSIONS.STOCK_VIEW,
     // See SALES_MANAGER's bulk-import comment above — same omission (this role owns
@@ -174,6 +348,18 @@ export const ROLE_DEFAULTS: Record<string, Permission[]> = {
     PERMISSIONS.PAYMENT_VIEW,
     PERMISSIONS.EXPENSE_VIEW,
     PERMISSIONS.EXPENSE_CREATE,
+    // Purchase audit 2026-07-21: expense.routes.ts's approve step checks EXPENSE_APPROVE
+    // separately from EXPENSE_VIEW/CREATE — this role (and PURCHASE_MANAGER) held the first
+    // two but not this one, so EXPENSE_APPROVE was granted to nobody but OWNER/ADMIN/
+    // SUPER_ADMIN and the expense-approval workflow was practically unreachable day-to-day.
+    PERMISSIONS.EXPENSE_APPROVE,
+    // Purchase audit 2026-07-21: same SUPPLIER_STATEMENT_VIEW omission as PURCHASE_MANAGER
+    // above — this role holds PAYMENT_OUT_VIEW but couldn't view the statement it summarizes.
+    PERMISSIONS.SUPPLIER_STATEMENT_VIEW,
+    // Purchase audit 2026-07-21: the new PO/GRN-vs-supplier-invoice variance record is
+    // exactly the kind of AP reconciliation document this role needs to see before a
+    // payment goes out, even though it doesn't create/approve the match itself.
+    PERMISSIONS.PURCHASE_INVOICE_VIEW,
     PERMISSIONS.GST_VIEW,
     PERMISSIONS.GST_FILE,
     PERMISSIONS.GSTR9_VIEW,
@@ -222,6 +408,18 @@ export const ROLE_DEFAULTS: Record<string, Permission[]> = {
     PERMISSIONS.EXPORT_GENERATE,
     PERMISSIONS.EXPORT_VIEW,
     PERMISSIONS.SEARCH_GLOBAL,
+    // Inventory module audit 2026-07-21: this role held none of the granular inventory
+    // *_VIEW constants report-service's inventory reports gate on (Stock Ledger, Warehouse-
+    // wise Stock, Dead Stock, Physical Verification, Stock Transfer, Stock Adjustment,
+    // Fabric Roll) — despite inventory value feeding straight into the Balance Sheet this
+    // role is explicitly permissioned to view/prepare. View-only; no adjust/transfer/manage.
+    PERMISSIONS.ITEM_VIEW,
+    PERMISSIONS.STOCK_VIEW,
+    PERMISSIONS.WAREHOUSE_VIEW,
+    PERMISSIONS.STOCK_ADJUSTMENT_VIEW,
+    PERMISSIONS.STOCK_TRANSFER_VIEW,
+    PERMISSIONS.PHYSICAL_VERIFICATION_VIEW,
+    PERMISSIONS.FABRIC_ROLL_VIEW,
   ],
 
   INVENTORY_MANAGER: [
@@ -274,18 +472,38 @@ export const ROLE_DEFAULTS: Record<string, Permission[]> = {
     PERMISSIONS.EMPLOYEE_VIEW,
     PERMISSIONS.EMPLOYEE_CREATE,
     PERMISSIONS.EMPLOYEE_UPDATE,
+    // 2026-07-20 HR audit: department/designation DELETE routes check this separate
+    // constant, not EMPLOYEE_UPDATE — this role could create/edit but never delete one.
+    PERMISSIONS.EMPLOYEE_DELETE,
     PERMISSIONS.ATTENDANCE_VIEW,
     PERMISSIONS.ATTENDANCE_MARK,
     // Security audit: hr-service's /attendance/report and /attendance/team-summary check
     // this separate constant, not ATTENDANCE_VIEW — this role could mark/view individual
     // attendance but never see the report or team summary.
     PERMISSIONS.ATTENDANCE_REPORT,
+    // 2026-07-20 HR audit: PUT /attendance/:id/correct checks this separate constant —
+    // without it this role could mark attendance but never correct a mistaken entry.
+    PERMISSIONS.ATTENDANCE_CORRECT,
     PERMISSIONS.LEAVE_VIEW,
+    // 2026-07-20 HR audit: this role runs day-to-day HR, including applying for its own
+    // leave — LEAVE_APPLY was previously granted to nobody but OWNER/ADMIN/SUPER_ADMIN.
+    PERMISSIONS.LEAVE_APPLY,
     PERMISSIONS.LEAVE_APPROVE,
+    // 2026-07-20 HR audit: POST /leave-applications/:id/reject checks this separate
+    // constant — this role held LEAVE_APPROVE but could only ever approve, never reject.
+    PERMISSIONS.LEAVE_REJECT,
     PERMISSIONS.PAYROLL_VIEW,
     PERMISSIONS.PAYROLL_PROCESS,
-    PERMISSIONS.SALARY_VIEW,
+    // 2026-07-20 HR audit: SALARY_VIEW is a dead constant no route ever checks (superseded
+    // by VIEW_SALARY_DETAILS below) — dropped rather than carried forward.
     PERMISSIONS.VIEW_SALARY_DETAILS,
+    // 2026-07-20 HR audit: POST /payroll-runs/:id/approve, /disburse, and /bulk-send all
+    // check this separate constant — this role could create and calculate a payroll run
+    // (PAYROLL_PROCESS) but never approve, disburse, or send the slips it just calculated.
+    PERMISSIONS.PAYROLL_APPROVE,
+    // 2026-07-20 HR audit: GET /payroll-slips/:id/pdf checks this separate constant — this
+    // role could view salary details but never print/download the payslip PDF.
+    PERMISSIONS.SALARY_SLIP_PRINT,
     PERMISSIONS.HR_STATUTORY,
     PERMISSIONS.EMPLOYEE_LOAN_MANAGE,
     // Security audit: the whole Alterations module (hr-service's alteration.routes.ts, 10
@@ -301,6 +519,10 @@ export const ROLE_DEFAULTS: Record<string, Permission[]> = {
     PERMISSIONS.IMPORT_EXECUTE,
     PERMISSIONS.IMPORT_ROLLBACK,
     PERMISSIONS.EMPLOYEE_IMPORT,
+    // 2026-07-20 HR audit: this role's routes gate on this constant (holiday.routes.ts's
+    // entire file) — despite the "HR Manager" name, it could not view/create/delete/seed
+    // the Holiday Calendar at all.
+    PERMISSIONS.HR_MANAGE,
     PERMISSIONS.REPORT_VIEW,
     PERMISSIONS.SEARCH_GLOBAL,
   ],
@@ -309,10 +531,15 @@ export const ROLE_DEFAULTS: Record<string, Permission[]> = {
     PERMISSIONS.INVOICE_VIEW,
     PERMISSIONS.QUOTATION_VIEW,
     PERMISSIONS.CUSTOMER_VIEW,
+    PERMISSIONS.CRM_360_VIEW,
     PERMISSIONS.ITEM_VIEW,
     PERMISSIONS.STOCK_VIEW,
     PERMISSIONS.ATTENDANCE_VIEW,
     PERMISSIONS.LEAVE_VIEW,
+    // 2026-07-20 HR audit: STAFF is the general non-manager employee role — without
+    // LEAVE_APPLY (previously granted to nobody but OWNER/ADMIN/SUPER_ADMIN) an ordinary
+    // employee could view their leave balance but never actually apply for or cancel leave.
+    PERMISSIONS.LEAVE_APPLY,
     PERMISSIONS.SEARCH_GLOBAL,
   ],
 
@@ -382,6 +609,14 @@ export const ROLE_DEFAULTS: Record<string, Permission[]> = {
     PERMISSIONS.EXPORT_GENERATE,
     PERMISSIONS.EXPORT_VIEW,
     PERMISSIONS.SEARCH_GLOBAL,
+    // See ACCOUNTANT's inventory-view comment above — same omission, one tier up.
+    PERMISSIONS.ITEM_VIEW,
+    PERMISSIONS.STOCK_VIEW,
+    PERMISSIONS.WAREHOUSE_VIEW,
+    PERMISSIONS.STOCK_ADJUSTMENT_VIEW,
+    PERMISSIONS.STOCK_TRANSFER_VIEW,
+    PERMISSIONS.PHYSICAL_VERIFICATION_VIEW,
+    PERMISSIONS.FABRIC_ROLL_VIEW,
   ],
 
   AUDITOR: [
@@ -389,6 +624,21 @@ export const ROLE_DEFAULTS: Record<string, Permission[]> = {
     // See ACCOUNTANT's Payment Collection Report comment above — same omission; auditors
     // need to review collections as part of financial oversight.
     PERMISSIONS.PAYMENT_VIEW,
+    // Purchase audit 2026-07-21: this role — whose entire purpose is financial oversight —
+    // had zero visibility into any purchase-side document (PO/GRN/return/supplier payment/
+    // supplier record). It could review sales invoices and journals but not the purchase
+    // half of the books at all. View-only, matching this role's read-only posture elsewhere.
+    PERMISSIONS.PO_VIEW,
+    PERMISSIONS.GRN_VIEW,
+    PERMISSIONS.PURCHASE_RETURN_VIEW,
+    PERMISSIONS.PAYMENT_OUT_VIEW,
+    PERMISSIONS.SUPPLIER_VIEW,
+    PERMISSIONS.SUPPLIER_STATEMENT_VIEW,
+    // Purchase audit 2026-07-21: requisition/RFQ/invoice-match are new stages of the same
+    // purchase-side paper trail this role already reviews above — view-only, same posture.
+    PERMISSIONS.REQUISITION_VIEW,
+    PERMISSIONS.RFQ_VIEW,
+    PERMISSIONS.PURCHASE_INVOICE_VIEW,
     PERMISSIONS.JOURNAL_VIEW,
     PERMISSIONS.LEDGER_VIEW,
     PERMISSIONS.LEDGER_EXPORT,
@@ -412,6 +662,17 @@ export const ROLE_DEFAULTS: Record<string, Permission[]> = {
     PERMISSIONS.EXPORT_GENERATE,
     PERMISSIONS.EXPORT_VIEW,
     PERMISSIONS.SEARCH_GLOBAL,
+    // Inventory module audit 2026-07-21: this role — whose entire purpose is financial
+    // oversight — had zero visibility into inventory stock/valuation reports despite them
+    // feeding directly into the Balance Sheet it's explicitly permissioned to review. Same
+    // omission pattern as the purchase-side PO/GRN/supplier fix above.
+    PERMISSIONS.ITEM_VIEW,
+    PERMISSIONS.STOCK_VIEW,
+    PERMISSIONS.WAREHOUSE_VIEW,
+    PERMISSIONS.STOCK_ADJUSTMENT_VIEW,
+    PERMISSIONS.STOCK_TRANSFER_VIEW,
+    PERMISSIONS.PHYSICAL_VERIFICATION_VIEW,
+    PERMISSIONS.FABRIC_ROLL_VIEW,
   ],
 
   DATA_OFFICER: [

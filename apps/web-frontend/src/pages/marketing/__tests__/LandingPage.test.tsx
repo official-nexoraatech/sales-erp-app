@@ -13,6 +13,9 @@ vi.mock('../../../api/endpoints.js', () => ({
       ],
     }),
   },
+  demoRequestApi: {
+    submit: vi.fn().mockResolvedValue({ id: 1 }),
+  },
 }));
 
 function renderPage() {
@@ -27,12 +30,12 @@ function renderPage() {
 }
 
 describe('LandingPage', () => {
-  it('renders the hero headline and primary CTAs', () => {
+  it('renders the demo-request hero form', () => {
     renderPage();
     expect(
-      screen.getByRole('heading', { level: 1, name: /run your whole business/i })
+      screen.getByRole('heading', { level: 2, name: /request for demo/i })
     ).toBeInTheDocument();
-    expect(screen.getAllByRole('button', { name: /start free trial/i }).length).toBeGreaterThan(0);
+    expect(screen.getByRole('button', { name: /book a demo/i })).toBeInTheDocument();
   });
 
   it('renders every product module as a link to the Features page', () => {

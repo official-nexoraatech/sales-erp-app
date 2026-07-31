@@ -1,10 +1,9 @@
 import { useEffect, useRef } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { organizationApi } from '../../api/endpoints.js';
+import { useQueryClient } from '@tanstack/react-query';
 import { useAuthStore } from '../../store/auth.store.js';
-import { ApiError } from '../../api/client.js';
 import { shiftLightness, setLightness } from '../../lib/colorShade.js';
 import { useTheme } from '../../context/ThemeContext.js';
+import { useOrganization } from '../../hooks/useOrganization.js';
 
 interface ThemeConfig {
   brandPrimary?: string;
@@ -80,22 +79,10 @@ export default function TenantThemeSync(): null {
   const qc = useQueryClient();
   const channelRef = useRef<BroadcastChannel | null>(null);
 
-  const { data } = useQuery({
-    queryKey: ['organization'],
-    queryFn: async () => {
-      try {
-        return await organizationApi.get();
-      } catch (err) {
-        if (err instanceof ApiError && err.statusCode === 404) return null;
-        throw err;
-      }
-    },
-    enabled: isAuthenticated,
-    staleTime: 60_000,
-  });
+  const { data } = useOrganization();
 
   useEffect(() => {
-    const themeConfig = (data as { themeConfig?: ThemeConfig } | null)?.themeConfig;
+    const themeConfig = data?.themeConfig as ThemeConfig | undefined;
     applyThemeConfig(themeConfig, mode === 'hc');
   }, [data, mode]);
 

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { XCircle } from 'lucide-react';
+import { Eye, XCircle } from 'lucide-react';
 import { supplierPaymentApi } from '../../api/endpoints.js';
 import { useAuthStore } from '../../store/auth.store.js';
 import { PERMISSIONS } from '../../constants/permissions.js';
@@ -13,6 +13,9 @@ import ERPDataGrid, {
 } from '../../components/erp/ERPDataGrid.js';
 import Button from '../../components/ui/Button.js';
 import Badge from '../../components/ui/Badge.js';
+import ERPEmptyState from '../../components/erp/ERPEmptyState.js';
+import Modal from '../../components/ui/Modal.js';
+import Input from '../../components/ui/Input.js';
 import { formatDate, formatCurrency } from '../../lib/format.js';
 
 interface SupplierPayment {
@@ -42,6 +45,8 @@ export default function SupplierPaymentsPage() {
   const canManagePayment = useAuthStore((s) => s.hasPermission(PERMISSIONS.PAYMENT_OUT_CREATE));
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
+  const [bounceId, setBounceId] = useState<number | null>(null);
+  const [bounceReason, setBounceReason] = useState('');
 
   const { data, isLoading } = useQuery({
     queryKey: ['supplier-payments', page, pageSize],
@@ -58,6 +63,8 @@ export default function SupplierPaymentsPage() {
       supplierPaymentApi.bounce(id, { reason }),
     onSuccess: () => {
       toast.success('Cheque marked bounced');
+      setBounceId(null);
+      setBounceReason('');
       qc.invalidateQueries({ queryKey: ['supplier-payments'] });
     },
     onError: (e: Error) => toast.error(e.message),
@@ -122,14 +129,22 @@ export default function SupplierPaymentsPage() {
   ];
 
   const rowActions: ERPRowAction<SupplierPayment>[] = [
+    {
+      label: 'View',
+      icon: Eye,
+      onClick: (r: SupplierPayment) => navigate(`/purchase/payments/${r.id}`),
+    },
     ...(canManagePayment
       ? [
           {
             label: 'Mark Bounced',
             icon: XCircle,
             type: 'delete' as const,
-            onClick: (r: SupplierPayment) =>
-              bounceMutation.mutate({ id: r.id, reason: 'Cheque bounced' }),
+            tourId: 'supplier-payment-bounce-row-action',
+            onClick: (r: SupplierPayment) => {
+              setBounceId(r.id);
+              setBounceReason('');
+            },
             hidden: (r: SupplierPayment) =>
               !(r.paymentMode === 'CHEQUE' && ['PAID', 'PARTIALLY_ALLOCATED'].includes(r.status)),
           },
@@ -145,7 +160,12 @@ export default function SupplierPaymentsPage() {
         subtitle="Record and track payments to suppliers"
       >
         {canManagePayment && (
-          <Button onClick={() => navigate('/purchase/payments/new')}>+ Record Payment</Button>
+          <Button
+            data-tour-id="purchase-payments-create-button"
+            onClick={() => navigate('/purchase/payments/new')}
+          >
+            + Record Payment
+          </Button>
         )}
       </ERPPageHeader>
 
@@ -154,6 +174,8 @@ export default function SupplierPaymentsPage() {
         data={rows}
         isLoading={isLoading}
         rowKey="id"
+        enableExport
+        exportFilename="supplier-payments"
         pagination={{ page, pageSize, total: totalElements }}
         onPageChange={setPage}
         onPageSizeChange={(size) => {
@@ -161,7 +183,57 @@ export default function SupplierPaymentsPage() {
           setPage(1);
         }}
         actions={rowActions}
+        emptyState={
+          <ERPEmptyState
+            type="no-data"
+            title="No supplier payments yet"
+            description="Record a payment to reduce what you owe a supplier — this posts to your books immediately."
+            {...(canManagePayment
+              ? {
+                  action: {
+                    label: '+ Record Payment',
+                    onClick: () => navigate('/purchase/payments/new'),
+                  },
+                }
+              : {})}
+          />
+        }
       />
+
+      <Modal
+        isOpen={bounceId !== null}
+        onClose={() => setBounceId(null)}
+        title="Mark Cheque as Bounced"
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-secondary">
+            This reverses the accounting entry for this payment and re-adds the amount to the
+            supplier's outstanding balance. This cannot be undone.
+          </p>
+          <Input
+            label="Reason"
+            required
+            placeholder="e.g. Insufficient funds"
+            value={bounceReason}
+            onChange={(e) => setBounceReason(e.target.value)}
+          />
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" onClick={() => setBounceId(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="danger"
+              isLoading={bounceMutation.isPending}
+              disabled={!bounceReason.trim()}
+              onClick={() =>
+                bounceId !== null && bounceMutation.mutate({ id: bounceId, reason: bounceReason })
+              }
+            >
+              Mark Bounced
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

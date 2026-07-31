@@ -97,7 +97,10 @@ export default function ConsignmentSettlementsPage() {
         subtitle="Monthly settlement of consigned goods sold to customers."
         actions={
           hasPermission(PERMISSIONS.CONSIGNMENT_SETTLE) ? (
-            <Button onClick={() => setShowCreateForm(!showCreateForm)}>
+            <Button
+              data-tour-id="production-consignment-settlements-create-button"
+              onClick={() => setShowCreateForm(!showCreateForm)}
+            >
               {showCreateForm ? 'Cancel' : '+ Create Settlement'}
             </Button>
           ) : undefined
@@ -206,6 +209,7 @@ export default function ConsignmentSettlementsPage() {
                   <td className="px-4 py-3 text-right">
                     {hasPermission(PERMISSIONS.CONSIGNMENT_SETTLE) && s.status === 'PENDING' && (
                       <Button
+                        data-tour-id="production-consignment-settlements-mark-settled-button"
                         size="sm"
                         variant="outline"
                         onClick={() => {

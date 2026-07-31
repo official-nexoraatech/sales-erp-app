@@ -31,8 +31,10 @@ export async function handleGRNApproved(
   const sgstAmount = Number(p.sgstAmount ?? 0);
   const igstAmount = Number(p.igstAmount ?? 0);
 
+  const postingDate = new Date(event.occurredAt);
+
   try {
-    await JournalEngine.checkPeriodOpen(db, event.tenantId, new Date());
+    await JournalEngine.checkPeriodOpen(db, event.tenantId, postingDate);
 
     const journalEntry = await PostingMatrixService.buildJournalEntry(db, event.tenantId, {
       eventType: 'GRN_APPROVED',
@@ -45,6 +47,7 @@ export async function handleGRNApproved(
       sgstAmount,
       igstAmount,
       ...(p.isInterstate !== undefined ? { isInterstate: p.isInterstate } : {}),
+      postingDate,
     });
 
     const result = await JournalEngine.post(db, event.tenantId, event.userId, journalEntry);

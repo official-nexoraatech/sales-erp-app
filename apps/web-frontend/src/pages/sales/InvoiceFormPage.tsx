@@ -1,4 +1,4 @@
-﻿import { useState, useEffect } from 'react';
+﻿import { useState, useEffect, useMemo, type FormEvent } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
@@ -25,6 +25,8 @@ import Checkbox from '../../components/ui/Checkbox.js';
 import { INDIAN_STATES } from '../../lib/indianStates.js';
 import { createSearchLoadOptions } from '../../lib/searchSelectOptions.js';
 import { friendlyApiErrorMessage } from '../../lib/errorMessages.js';
+import { toFieldErrors } from '../../lib/zodFieldErrors.js';
+import { invoiceFormSchema } from '../../schemas/sales-transactions.schema.js';
 import type { ApiError } from '../../api/client.js';
 
 const loadCustomerOptions = createSearchLoadOptions('customer');
@@ -80,12 +82,42 @@ export default function InvoiceFormPage() {
   const [itemSearch, setItemSearch] = useState('');
   const [overrideCreditLimit, setOverrideCreditLimit] = useState(false);
   const [overridePriceFloor, setOverridePriceFloor] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const canOverrideCreditLimit = hasPermission(PERMISSIONS.CREDIT_LIMIT_OVERRIDE);
   const canOverridePriceFloor = hasPermission(PERMISSIONS.PRICE_FLOOR_OVERRIDE);
 
+  // H-4 fix: a customer's assigned price list was stored but never applied anywhere outside
+  // POS — item search always fell back to the flat salePrice. Fetching just for priceListId
+  // is cheap (cached by react-query) and reuses the same customer record other forms already
+  // fetch for this purpose (see quotationId/challanId prefill above).
+  const { data: selectedCustomerDetail } = useQuery({
+    queryKey: ['customer-pricing', customerId],
+    queryFn: () => customerApi.getById(Number(customerId)),
+    enabled: !!customerId && hasPermission(PERMISSIONS.CUSTOMER_VIEW),
+  });
+  const customerPriceListId = (selectedCustomerDetail as { priceListId?: number } | undefined)
+    ?.priceListId;
+
+  // M-3 fix: placeOfSupply defaulted to '27' (Maharashtra) and was only ever manually typed —
+  // dc9651d fixed the seller's state the same way this fixes the customer's; without this, an
+  // interstate sale to a customer from another state would still compute CGST/SGST instead of
+  // IGST unless the user remembered to change the default. Auto-fills on customer selection,
+  // still editable afterward (doesn't re-fire on unrelated re-renders since it's keyed on the
+  // fetched customer record, not on placeOfSupply itself).
+  useEffect(() => {
+    const stateCode = (
+      selectedCustomerDetail as { billingAddress?: { stateCode?: string } } | undefined
+    )?.billingAddress?.stateCode;
+    if (stateCode) setPlaceOfSupply(stateCode);
+  }, [selectedCustomerDetail]);
+
   const { data: itemData } = useQuery({
-    queryKey: ['item-search', itemSearch],
-    queryFn: () => itemApi.list({ search: itemSearch }),
+    queryKey: ['item-search', itemSearch, customerPriceListId],
+    queryFn: () =>
+      itemApi.list({
+        search: itemSearch,
+        ...(customerPriceListId ? { priceListId: customerPriceListId } : {}),
+      }),
     enabled: itemSearch.length > 1 && hasPermission(PERMISSIONS.ITEM_VIEW),
   });
   const { data: warehouseData } = useQuery({
@@ -238,22 +270,29 @@ export default function InvoiceFormPage() {
     (warehouseData as { content?: Array<{ id: number; name: string }> })?.content ?? [];
   const branches = (branchData as { content?: Array<{ id: number; name: string }> })?.content ?? [];
 
-  const computedLines = lines.map((l) => {
-    const g = computeLine(l, sellerState, placeOfSupply);
-    return { ...l, ...g };
-  });
+  // Memoized — this used to recompute GST for every line on every keystroke in any field on
+  // the page (see WEB-FRONTEND-AUDIT-2026-07-24.md, Medium #24), since it ran unconditionally
+  // on every render with no dependency gating.
+  const computedLines = useMemo(
+    () => lines.map((l) => ({ ...l, ...computeLine(l, sellerState, placeOfSupply) })),
+    [lines, sellerState, placeOfSupply]
+  );
 
-  const totals = computedLines.reduce(
-    (acc, l) => ({
-      subtotal: round2(acc.subtotal + l.unitPrice * l.quantity),
-      discount: round2(acc.discount + (l.unitPrice * l.quantity * l.discountPct) / 100),
-      taxable: round2(acc.taxable + l.taxable),
-      cgst: round2(acc.cgst + l.cgst),
-      sgst: round2(acc.sgst + l.sgst),
-      igst: round2(acc.igst + l.igst),
-      grand: round2(acc.grand + l.lineTotal),
-    }),
-    { subtotal: 0, discount: 0, taxable: 0, cgst: 0, sgst: 0, igst: 0, grand: 0 }
+  const totals = useMemo(
+    () =>
+      computedLines.reduce(
+        (acc, l) => ({
+          subtotal: round2(acc.subtotal + l.unitPrice * l.quantity),
+          discount: round2(acc.discount + (l.unitPrice * l.quantity * l.discountPct) / 100),
+          taxable: round2(acc.taxable + l.taxable),
+          cgst: round2(acc.cgst + l.cgst),
+          sgst: round2(acc.sgst + l.sgst),
+          igst: round2(acc.igst + l.igst),
+          grand: round2(acc.grand + l.lineTotal),
+        }),
+        { subtotal: 0, discount: 0, taxable: 0, cgst: 0, sgst: 0, igst: 0, grand: 0 }
+      ),
+    [computedLines]
   );
 
   const addItem = (item: {
@@ -304,15 +343,29 @@ export default function InvoiceFormPage() {
       ),
   });
 
-  const handleSubmit = (): void => {
-    if (!customerId || !branchId || !warehouseId || lines.length === 0) {
-      toast.error('Fill all required fields and add at least one item');
+  const handleSubmit = (e: FormEvent): void => {
+    e.preventDefault();
+    const result = invoiceFormSchema.safeParse({
+      customerId: customerId ? Number(customerId) : undefined,
+      branchId: branchId ? Number(branchId) : undefined,
+      warehouseId: warehouseId ? Number(warehouseId) : undefined,
+      placeOfSupply,
+      invoiceDate,
+      dueDate,
+      lines: lines.map((l) => ({
+        itemId: l.itemId,
+        quantity: l.quantity,
+        unitPrice: l.unitPrice,
+        discountPct: l.discountPct,
+        gstRate: l.gstRate,
+      })),
+    });
+    if (!result.success) {
+      setFieldErrors(toFieldErrors(result.error));
+      toast.error('Fix the highlighted fields before saving');
       return;
     }
-    if (lines.some((l) => !(l.quantity > 0))) {
-      toast.error('Every line item must have a quantity greater than zero');
-      return;
-    }
+    setFieldErrors({});
 
     createMutation.mutate({
       customerId: Number(customerId),
@@ -340,7 +393,7 @@ export default function InvoiceFormPage() {
   };
 
   return (
-    <div>
+    <form onSubmit={handleSubmit} noValidate>
       <ERPPageHeader
         variant="detail"
         title="New Invoice"
@@ -349,19 +402,23 @@ export default function InvoiceFormPage() {
       />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
-        <ERPAsyncSelect
-          label="Customer"
-          value={selectedCustomer}
-          onChange={setSelectedCustomer}
-          loadOptions={loadCustomerOptions}
-          placeholder="Type to search customers…"
-          required
-        />
+        <div data-tour-id="sales-invoice-new-customer-select">
+          <ERPAsyncSelect
+            label="Customer"
+            value={selectedCustomer}
+            onChange={setSelectedCustomer}
+            loadOptions={loadCustomerOptions}
+            placeholder="Type to search customers…"
+            required
+            error={fieldErrors.customerId}
+          />
+        </div>
         <Select
           label="Branch"
           required
           value={branchId}
           onChange={(e) => setBranchId(e.target.value)}
+          error={fieldErrors.branchId}
           options={[
             { value: '', label: 'Select branch...' },
             ...branches.map((b) => ({ value: String(b.id), label: b.name })),
@@ -372,6 +429,7 @@ export default function InvoiceFormPage() {
           required
           value={warehouseId}
           onChange={(e) => setWarehouseId(e.target.value)}
+          error={fieldErrors.warehouseId}
           options={[
             { value: '', label: 'Select warehouse...' },
             ...warehouses.map((w) => ({ value: String(w.id), label: w.name })),
@@ -383,6 +441,7 @@ export default function InvoiceFormPage() {
           type="date"
           value={invoiceDate}
           onChange={(e) => setInvoiceDate(e.target.value)}
+          error={fieldErrors.invoiceDate}
         />
         <Input
           label="Due Date"
@@ -390,12 +449,15 @@ export default function InvoiceFormPage() {
           type="date"
           value={dueDate}
           onChange={(e) => setDueDate(e.target.value)}
+          error={fieldErrors.dueDate}
         />
         <Select
           label="Place of Supply"
           required
+          hint="Decides GST split: same state as your business charges CGST+SGST, a different state charges IGST instead."
           value={placeOfSupply}
           onChange={(e) => setPlaceOfSupply(e.target.value)}
+          error={fieldErrors.placeOfSupply}
           options={[
             { value: '', label: 'Select state…' },
             ...INDIAN_STATES.map((s) => ({ value: s.gstCode, label: `${s.gstCode} – ${s.name}` })),
@@ -407,10 +469,14 @@ export default function InvoiceFormPage() {
       <div className="bg-surface-card rounded-xl border border-default p-4 mb-4">
         <div className="flex gap-2 mb-4">
           <input
+            data-tour-id="sales-invoice-new-item-search"
             type="text"
             placeholder="Search items to add..."
             value={itemSearch}
             onChange={(e) => setItemSearch(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') e.preventDefault();
+            }}
             className="flex-1 rounded-lg border border-default bg-surface-card px-3 py-2 text-sm"
           />
         </div>
@@ -419,6 +485,7 @@ export default function InvoiceFormPage() {
             {itemOptions.map((item) => (
               <button
                 key={item.id}
+                type="button"
                 onClick={() => addItem(item)}
                 className="w-full text-left px-3 py-2 text-sm hover:bg-surface-raised"
               >
@@ -428,6 +495,11 @@ export default function InvoiceFormPage() {
           </div>
         )}
 
+        {fieldErrors.lines && (
+          <p className="text-xs text-danger mb-2" role="alert">
+            {fieldErrors.lines}
+          </p>
+        )}
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
@@ -443,57 +515,70 @@ export default function InvoiceFormPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-default">
-              {computedLines.map((l, idx) => (
-                <tr key={idx}>
-                  <td className="py-2 pr-2">{l.itemName}</td>
-                  <td className="py-2 pr-2">
-                    <input
-                      type="number"
-                      min="0.001"
-                      step="0.001"
-                      value={l.quantity}
-                      onChange={(e) => updateLine(idx, 'quantity', parseFloat(e.target.value) || 0)}
-                      className="w-20 rounded border-default bg-surface-card px-2 py-1 text-sm"
-                    />
-                  </td>
-                  <td className="py-2 pr-2">
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      value={l.unitPrice}
-                      onChange={(e) =>
-                        updateLine(idx, 'unitPrice', parseFloat(e.target.value) || 0)
-                      }
-                      className="w-24 rounded border-default bg-surface-card px-2 py-1 text-sm"
-                    />
-                  </td>
-                  <td className="py-2 pr-2">
-                    <input
-                      type="number"
-                      min="0"
-                      max="100"
-                      step="0.01"
-                      value={l.discountPct}
-                      onChange={(e) =>
-                        updateLine(idx, 'discountPct', parseFloat(e.target.value) || 0)
-                      }
-                      className="w-16 rounded border-default bg-surface-card px-2 py-1 text-sm"
-                    />
-                  </td>
-                  <td className="py-2 pr-2 text-secondary">{l.gstRate}%</td>
-                  <td className="py-2 pr-2 text-right">₹{l.taxable.toFixed(2)}</td>
-                  <td className="py-2 pr-2 text-right font-semibold">₹{l.lineTotal.toFixed(2)}</td>
-                  <td className="py-2">
-                    <button
-                      onClick={() => removeLine(idx)}
-                      className="text-danger hover:text-danger text-xs"
-                    >
-                      ✕
-                    </button>
-                  </td>
-                </tr>
-              ))}
+              {computedLines.map((l, idx) => {
+                const qtyError = fieldErrors[`lines.${idx}.quantity`];
+                const priceError = fieldErrors[`lines.${idx}.unitPrice`];
+                return (
+                  <tr key={idx}>
+                    <td className="py-2 pr-2">{l.itemName}</td>
+                    <td className="py-2 pr-2">
+                      <input
+                        type="number"
+                        min="0.001"
+                        step="0.001"
+                        value={l.quantity}
+                        onChange={(e) =>
+                          updateLine(idx, 'quantity', parseFloat(e.target.value) || 0)
+                        }
+                        aria-invalid={Boolean(qtyError)}
+                        title={qtyError}
+                        className={`w-20 rounded border bg-surface-card px-2 py-1 text-sm ${qtyError ? 'border-danger' : 'border-default'}`}
+                      />
+                    </td>
+                    <td className="py-2 pr-2">
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={l.unitPrice}
+                        onChange={(e) =>
+                          updateLine(idx, 'unitPrice', parseFloat(e.target.value) || 0)
+                        }
+                        aria-invalid={Boolean(priceError)}
+                        title={priceError}
+                        className={`w-24 rounded border bg-surface-card px-2 py-1 text-sm ${priceError ? 'border-danger' : 'border-default'}`}
+                      />
+                    </td>
+                    <td className="py-2 pr-2">
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.01"
+                        value={l.discountPct}
+                        onChange={(e) =>
+                          updateLine(idx, 'discountPct', parseFloat(e.target.value) || 0)
+                        }
+                        className="w-16 rounded border-default bg-surface-card px-2 py-1 text-sm"
+                      />
+                    </td>
+                    <td className="py-2 pr-2 text-secondary">{l.gstRate}%</td>
+                    <td className="py-2 pr-2 text-right">₹{l.taxable.toFixed(2)}</td>
+                    <td className="py-2 pr-2 text-right font-semibold">
+                      ₹{l.lineTotal.toFixed(2)}
+                    </td>
+                    <td className="py-2">
+                      <button
+                        type="button"
+                        onClick={() => removeLine(idx)}
+                        className="text-danger hover:text-danger text-xs"
+                      >
+                        ✕
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
               {lines.length === 0 && (
                 <tr>
                   <td colSpan={8} className="py-6 text-center text-disabled text-sm">
@@ -565,6 +650,7 @@ export default function InvoiceFormPage() {
           {canOverrideCreditLimit && (
             <Checkbox
               label="Override customer credit limit if exceeded"
+              description="Without this, saving fails if this invoice would push the customer over their set credit limit. Only check this for an approved exception."
               checked={overrideCreditLimit}
               onChange={(e) => setOverrideCreditLimit(e.target.checked)}
             />
@@ -572,6 +658,7 @@ export default function InvoiceFormPage() {
           {canOverridePriceFloor && (
             <Checkbox
               label="Override minimum sale price if a line is below floor"
+              description="Without this, saving fails if any line's price is below that item's set minimum sale price. Use for a genuine discount exception, not a routine markdown."
               checked={overridePriceFloor}
               onChange={(e) => setOverridePriceFloor(e.target.checked)}
             />
@@ -580,13 +667,17 @@ export default function InvoiceFormPage() {
       )}
 
       <ERPStickyFooter>
-        <Button variant="secondary" onClick={() => navigate('/sales/invoices')}>
+        <Button type="button" variant="secondary" onClick={() => navigate('/sales/invoices')}>
           Cancel
         </Button>
-        <Button isLoading={createMutation.isPending} onClick={handleSubmit}>
+        <Button
+          type="submit"
+          data-tour-id="sales-invoice-new-save-button"
+          isLoading={createMutation.isPending}
+        >
           Save as Draft
         </Button>
       </ERPStickyFooter>
-    </div>
+    </form>
   );
 }

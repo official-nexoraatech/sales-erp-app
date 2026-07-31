@@ -10,6 +10,7 @@ import Button from '../../components/ui/Button.js';
 import Select from '../../components/ui/Select.js';
 import Input from '../../components/ui/Input.js';
 import Badge from '../../components/ui/Badge.js';
+import Modal from '../../components/ui/Modal.js';
 import { formatDate } from '../../lib/format.js';
 
 interface Employee {
@@ -47,6 +48,8 @@ export default function LeavesPage() {
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [reason, setReason] = useState('');
+  const [rejectId, setRejectId] = useState<number | null>(null);
+  const [rejectReason, setRejectReason] = useState('');
 
   const { data: empData } = useQuery({
     queryKey: ['employees-all'],
@@ -110,9 +113,12 @@ export default function LeavesPage() {
   });
 
   const rejectMutation = useMutation({
-    mutationFn: (id: number) => leaveApi.reject(id, { rejectionReason: 'Rejected by manager' }),
+    mutationFn: ({ id, reason: rejectionReason }: { id: number; reason: string }) =>
+      leaveApi.reject(id, { rejectionReason }),
     onSuccess: () => {
       toast.success('Leave rejected');
+      setRejectId(null);
+      setRejectReason('');
       qc.invalidateQueries({ queryKey: ['leave-pending'] });
     },
     onError: (e: Error) => toast.error(e.message),
@@ -183,6 +189,7 @@ export default function LeavesPage() {
           </div>
           <Input label="Reason" value={reason} onChange={(e) => setReason(e.target.value)} />
           <Button
+            data-tour-id="hr-leaves-apply-button"
             onClick={() => applyMutation.mutate()}
             loading={applyMutation.isPending}
             disabled={!employeeId || !leaveTypeId || !startDate || !endDate}
@@ -220,6 +227,7 @@ export default function LeavesPage() {
                     </div>
                     <div className="flex gap-2 mt-3">
                       <Button
+                        data-tour-id="hr-leaves-approve-button"
                         size="sm"
                         onClick={() => approveMutation.mutate(app.id)}
                         loading={approveMutation.isPending}
@@ -227,10 +235,13 @@ export default function LeavesPage() {
                         Approve
                       </Button>
                       <Button
+                        data-tour-id="hr-leaves-reject-button"
                         size="sm"
                         variant="danger-outline"
-                        onClick={() => rejectMutation.mutate(app.id)}
-                        loading={rejectMutation.isPending}
+                        onClick={() => {
+                          setRejectId(app.id);
+                          setRejectReason('');
+                        }}
                       >
                         Reject
                       </Button>
@@ -242,6 +253,37 @@ export default function LeavesPage() {
           </div>
         )}
       </div>
+
+      <Modal
+        isOpen={rejectId !== null}
+        onClose={() => setRejectId(null)}
+        title="Reject Leave Application"
+      >
+        <div className="space-y-4">
+          <Input
+            label="Reason"
+            required
+            placeholder="Reason for rejection"
+            value={rejectReason}
+            onChange={(e) => setRejectReason(e.target.value)}
+          />
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" onClick={() => setRejectId(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="danger"
+              isLoading={rejectMutation.isPending}
+              disabled={!rejectReason.trim()}
+              onClick={() =>
+                rejectId !== null && rejectMutation.mutate({ id: rejectId, reason: rejectReason })
+              }
+            >
+              Reject Leave
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

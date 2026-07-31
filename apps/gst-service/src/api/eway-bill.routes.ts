@@ -1,6 +1,9 @@
 import type { FastifyInstance } from 'fastify';
 import type { PlatformContextFactory } from '@erp/sdk';
 import { z } from 'zod';
+import { timingSafeEqual } from 'node:crypto';
+import { tenants } from '@erp/db';
+import { eq } from 'drizzle-orm';
 import { ValidationError } from '@erp/types';
 import { PERMISSIONS } from '@erp/types';
 import { authenticate } from '../middleware/authenticate.js';
@@ -9,6 +12,26 @@ import { EwayBillService } from '../domain/EwayBillService.js';
 import type { EwayBillPayload } from '../domain/EwayBillService.js';
 
 type AuthedRequest = { auth: { tenantId: number; userId: number } };
+
+// Same x-internal-key + timingSafeEqual convention as gstr3b.routes.ts's requireInternalKey.
+function requireInternalKey(
+  req: { headers: Record<string, string | string[] | undefined> },
+  reply: { code: (n: number) => { send: (b: unknown) => void } }
+): boolean {
+  const key = req.headers['x-internal-key'];
+  const expected = process.env['INTERNAL_API_KEY'];
+  const keyBuffer = Buffer.from(typeof key === 'string' ? key : '');
+  const expectedBuffer = Buffer.from(expected ?? '');
+  const matches =
+    !!expected &&
+    keyBuffer.length === expectedBuffer.length &&
+    timingSafeEqual(keyBuffer, expectedBuffer);
+  if (!matches) {
+    reply.code(401).send({ error: { code: 'UNAUTHORIZED', message: 'Unauthorized' } });
+    return false;
+  }
+  return true;
+}
 
 const ItemSchema = z.object({
   productName: z.string().min(1),
@@ -65,50 +88,117 @@ export async function ewayBillRoutes(
   ctxFactory: PlatformContextFactory
 ): Promise<void> {
   // POST /gst/eway-bill/generate
-  fastify.post('/gst/eway-bill/generate', {
-    preHandler: [authenticate, requirePermission(PERMISSIONS.EWAY_BILL_GENERATE)],
-  }, async (request, reply) => {
-    const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-    const ctx = ctxFactory.create({
-      tenantId, userId,
-      correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-    });
+  fastify.post(
+    '/gst/eway-bill/generate',
+    {
+      preHandler: [authenticate, requirePermission(PERMISSIONS.EWAY_BILL_GENERATE)],
+    },
+    async (request, reply) => {
+      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
+      const ctx = ctxFactory.create({
+        tenantId,
+        userId,
+        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
+      });
 
-    const body = GenerateEwbSchema.safeParse(request.body);
-    if (!body.success) throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
+      const body = GenerateEwbSchema.safeParse(request.body);
+      if (!body.success)
+        throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
 
-    const result = await EwayBillService.generate(
-      ctx.db,
-      tenantId,
-      userId,
-      body.data.invoiceId,
-      body.data.payload as EwayBillPayload,
-      ctx.tenant.correlationId
-    );
+      const result = await EwayBillService.generate(
+        ctx.db,
+        tenantId,
+        userId,
+        body.data.invoiceId,
+        body.data.payload as EwayBillPayload,
+        ctx.tenant.correlationId
+      );
 
-    // ES-28 [M16-b]: EWAY_BILL_GENERATED is now published inside the same
-    // transaction as the state-transition write (see EwayBillService.generate).
-    await ctx.audit.log({
-      action: 'EWAY_BILL_GENERATED',
-      entityType: 'INVOICE',
-      entityId: body.data.invoiceId,
-      after: result as unknown as Record<string, unknown>,
-    });
+      // ES-28 [M16-b]: EWAY_BILL_GENERATED is now published inside the same
+      // transaction as the state-transition write (see EwayBillService.generate).
+      await ctx.audit.log({
+        action: 'EWAY_BILL_GENERATED',
+        entityType: 'INVOICE',
+        entityId: body.data.invoiceId,
+        after: result as unknown as Record<string, unknown>,
+      });
 
-    return reply.code(200).send({ data: result });
-  });
+      return reply.code(200).send({ data: result });
+    }
+  );
 
   // GET /gst/eway-bill/expiring-soon
-  fastify.get('/gst/eway-bill/expiring-soon', {
-    preHandler: [authenticate, requirePermission(PERMISSIONS.GST_VIEW)],
-  }, async (request, reply) => {
-    const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-    const ctx = ctxFactory.create({
-      tenantId, userId,
-      correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-    });
+  fastify.get(
+    '/gst/eway-bill/expiring-soon',
+    {
+      preHandler: [authenticate, requirePermission(PERMISSIONS.GST_VIEW)],
+    },
+    async (request, reply) => {
+      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
+      const ctx = ctxFactory.create({
+        tenantId,
+        userId,
+        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
+      });
 
-    const expiring = await EwayBillService.getExpiringSoon(ctx.db, tenantId);
-    return reply.code(200).send({ data: { content: expiring, totalElements: expiring.length } });
+      const expiring = await EwayBillService.getExpiringSoon(ctx.db, tenantId);
+      return reply.code(200).send({ data: { content: expiring, totalElements: expiring.length } });
+    }
+  );
+
+  // POST /gst/eway-bill/expiry-alert — scheduler-triggered (x-internal-key), notification-service
+  // audit 2026-07-23, bug #5: scheduler-service's gst.eway-bill-expiry-alert job called the
+  // JWT-only GET route above with only an x-internal-key header, so it 401'd on every run — the
+  // job's try/catch swallowed that into a non-fatal warn log. Even with auth fixed, the handler
+  // never notified anyone (log-only). This is a dedicated internal route, same shape as
+  // gstr3b.routes.ts's /gst/gstr3b/reminder, that both authenticates correctly and actually
+  // dispatches a notification when e-Way Bills are expiring soon.
+  fastify.post('/gst/eway-bill/expiry-alert', {
+    handler: async (request, reply) => {
+      if (!requireInternalKey(request as never, reply as never)) return;
+      const tenantId = parseInt((request.query as { tenantId?: string }).tenantId ?? '', 10);
+      if (!tenantId) {
+        return reply
+          .code(400)
+          .send({ error: { code: 'MISSING_TENANT_ID', message: 'tenantId query param required' } });
+      }
+
+      const ctx = ctxFactory.create({ tenantId, userId: 0, correlationId: crypto.randomUUID() });
+      const expiring = await EwayBillService.getExpiringSoon(ctx.db, tenantId);
+
+      let sent = false;
+      if (expiring.length > 0) {
+        const [tenant] = await ctx.db.raw
+          .select({ contactEmail: tenants.contactEmail })
+          .from(tenants)
+          .where(eq(tenants.id, tenantId));
+        if (tenant?.contactEmail) {
+          const notificationUrl =
+            process.env['NOTIFICATION_SERVICE_URL'] ?? 'http://localhost:3014';
+          const apiKey = process.env['INTERNAL_API_KEY'] ?? '';
+          try {
+            await fetch(`${notificationUrl}/notifications/send-raw-internal`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'x-internal-key': apiKey },
+              body: JSON.stringify({
+                tenantId,
+                eventType: 'EWAY_BILL_EXPIRY_ALERT',
+                channel: 'EMAIL',
+                recipientEmail: tenant.contactEmail,
+                subject: `${expiring.length} e-Way Bill(s) expiring within 24 hours`,
+                body: `The following e-Way Bill(s) expire within 24 hours: ${expiring
+                  .map((e) => `${e.ewbNumber} (invoice ${e.invoiceNumber})`)
+                  .join(', ')}`,
+              }),
+            });
+            sent = true;
+          } catch {
+            // best-effort
+          }
+        }
+      }
+
+      return reply.code(200).send({ data: { totalElements: expiring.length, sent } });
+    },
   });
 }

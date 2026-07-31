@@ -9,7 +9,7 @@ import {
 } from '@erp/db';
 import type { ErpDatabase } from '@erp/db';
 import { BusinessError, NotFoundError } from '@erp/types';
-import { EventStoreService, TenantScopedDatabase } from '@erp/sdk';
+import { EventStoreService, TenantScopedDatabase, withIdempotentInsert } from '@erp/sdk';
 import { enqueueWebhookDeliveries } from './WebhookService.js';
 import { ulid } from 'ulid';
 
@@ -29,12 +29,24 @@ export interface CreatePaymentParams {
   notes?: string;
   posSessionId?: number;
   createdBy: number;
+  // M-8: client-generated idempotency key — a network-timeout retry of "Record Payment"
+  // used to create a duplicate Payment row, unlike invoices/POS sales which already had this.
+  clientOperationId?: string;
 }
 
 export class PaymentService {
   constructor(private db: ErpDatabase) {}
 
   async create(params: CreatePaymentParams): Promise<number> {
+    return withIdempotentInsert(
+      () => this.createInTransaction(params),
+      'payments_tenant_client_operation_id',
+      params.clientOperationId ?? '',
+      'Payment'
+    );
+  }
+
+  private async createInTransaction(params: CreatePaymentParams): Promise<number> {
     // Payment insert + outbox event + webhook enqueue used to be three separate,
     // independently-committing statements on this.db — if the outbox insert (or the
     // webhook enqueue) threw after the payment insert had already committed, a Payment
@@ -63,6 +75,7 @@ export class PaymentService {
           notes: params.notes,
           posSessionId: params.posSessionId,
           createdBy: params.createdBy,
+          clientOperationId: params.clientOperationId,
         })
         .returning({ id: payments.id });
 
@@ -252,10 +265,84 @@ export class PaymentService {
     await this.db.transaction(async (trx) => {
       const db = trx as unknown as ErpDatabase;
 
+      // C-4 fix: bounceCheque used to only flip payments.status — the accounting journal got
+      // reversed (PaymentAccountingConsumer.handleChequeBounced), but nothing here walked back
+      // what allocate() had already done: paymentAllocations rows stayed in place, invoices
+      // stayed PAID/PARTIALLY_PAID with a reduced balanceDue, and projectionCustomerBalance
+      // stayed reduced. The general ledger was right; the operational AR view Sales staff
+      // actually look at — "is this invoice paid, how much does this customer owe" — was wrong.
+      const existingAllocations = await db
+        .select({
+          id: paymentAllocations.id,
+          invoiceId: paymentAllocations.invoiceId,
+          amount: paymentAllocations.amount,
+        })
+        .from(paymentAllocations)
+        .where(
+          and(
+            eq(paymentAllocations.paymentId, paymentId),
+            eq(paymentAllocations.tenantId, tenantId)
+          )
+        );
+
+      for (const alloc of existingAllocations) {
+        const amount = parseFloat(String(alloc.amount));
+
+        const [invoice] = await db
+          .select({ customerId: invoices.customerId })
+          .from(invoices)
+          .where(and(eq(invoices.id, alloc.invoiceId), eq(invoices.tenantId, tenantId)));
+
+        // Only re-derive status from a PAID/PARTIALLY_PAID state — an invoice that was later
+        // cancelled or otherwise moved on shouldn't be silently pulled back to CONFIRMED here.
+        await db
+          .update(invoices)
+          .set({
+            paidAmount: sql`GREATEST(${invoices.paidAmount} - ${amount}, 0)`,
+            balanceDue: sql`${invoices.balanceDue} + ${amount}`,
+            status: sql`CASE
+              WHEN ${invoices.status} IN ('PAID', 'PARTIALLY_PAID')
+                THEN CASE WHEN ${invoices.balanceDue} + ${amount} >= ${invoices.grandTotal} - 0.01 THEN 'CONFIRMED' ELSE 'PARTIALLY_PAID' END
+              ELSE ${invoices.status}
+            END`,
+            updatedAt: new Date(),
+          })
+          .where(and(eq(invoices.id, alloc.invoiceId), eq(invoices.tenantId, tenantId)));
+
+        if (invoice) {
+          await db
+            .update(projectionCustomerBalance)
+            .set({
+              currentBalance: sql`${projectionCustomerBalance.currentBalance} + ${amount}`,
+              totalPaid: sql`GREATEST(${projectionCustomerBalance.totalPaid} - ${amount}, 0)`,
+              updatedAt: new Date(),
+            })
+            .where(
+              and(
+                eq(projectionCustomerBalance.tenantId, tenantId),
+                eq(projectionCustomerBalance.customerId, invoice.customerId)
+              )
+            );
+        }
+      }
+
+      if (existingAllocations.length > 0) {
+        await db
+          .delete(paymentAllocations)
+          .where(
+            and(
+              eq(paymentAllocations.paymentId, paymentId),
+              eq(paymentAllocations.tenantId, tenantId)
+            )
+          );
+      }
+
       await db
         .update(payments)
         .set({
           status: 'BOUNCED',
+          allocatedAmount: '0',
+          unallocatedAmount: '0',
           bouncedAt: new Date(),
           bounceReason: reason,
           updatedAt: new Date(),

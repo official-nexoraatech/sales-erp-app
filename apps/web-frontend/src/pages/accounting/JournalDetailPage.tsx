@@ -95,7 +95,11 @@ export default function JournalDetailPage() {
         <div className="flex flex-wrap items-center gap-3">
           <Badge variant={STATUS_VARIANT[j.status] ?? 'default'}>{j.status}</Badge>
           {canReverse && j.status === 'POSTED' && !j.isReversal && (
-            <Button variant="danger" onClick={() => setShowReverseConfirm(true)}>
+            <Button
+              data-tour-id="accounting-journal-detail-reverse-button"
+              variant="danger"
+              onClick={() => setShowReverseConfirm(true)}
+            >
               Reverse
             </Button>
           )}

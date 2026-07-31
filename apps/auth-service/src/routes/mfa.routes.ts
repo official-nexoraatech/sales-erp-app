@@ -4,6 +4,7 @@ import argon2 from 'argon2';
 import { eq } from 'drizzle-orm';
 import type { Redis } from 'ioredis';
 import { TenantScopedCache } from '@erp/sdk';
+import { erpAuthLoginTotal } from '@erp/logger';
 import { users, securityAuditLog } from '@erp/db';
 import type { ErpDatabase } from '@erp/db';
 import type { AuthConfig } from '../config.js';
@@ -73,6 +74,12 @@ export async function mfaVerifyRoute(
   redis: Redis
 ): Promise<void> {
   fastify.post('/auth/mfa/verify', {
+    config: {
+      rateLimit: {
+        max: config.mfaVerifyRateLimitMax,
+        timeWindow: config.mfaVerifyRateLimitWindowMs,
+      },
+    },
     handler: async (request, reply) => {
       const body = VerifyBody.safeParse(request.body);
       if (!body.success) {
@@ -117,6 +124,18 @@ export async function mfaVerifyRoute(
           await cache.del(key);
           await cache.del(attemptsKey);
         }
+        erpAuthLoginTotal.inc({ tenant_id: String(tenantId), outcome: 'failed' });
+        void db
+          .insert(securityAuditLog)
+          .values({
+            tenantId,
+            actorId: userId,
+            targetUserId: userId,
+            action: 'LOGIN_FAILURE',
+            ipAddress: inetParam(request.ip),
+            details: { reason: 'invalid_mfa_code' },
+          })
+          .catch(() => undefined);
         return reply.code(401).send({ error: 'Invalid TOTP or backup code' });
       }
 
@@ -128,6 +147,19 @@ export async function mfaVerifyRoute(
         ip: request.ip,
         userAgent: request.headers['user-agent'] ?? null,
       });
+
+      erpAuthLoginTotal.inc({ tenant_id: String(tenantId), outcome: 'success' });
+      void db
+        .insert(securityAuditLog)
+        .values({
+          tenantId,
+          actorId: userId,
+          targetUserId: userId,
+          action: 'LOGIN_SUCCESS',
+          ipAddress: inetParam(request.ip),
+          details: { mfaUsed: true },
+        })
+        .catch(() => undefined);
 
       setRefreshCookie(reply, tokens.refreshToken, config);
       return reply.code(200).send({ data: tokens });

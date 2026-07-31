@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { bankReconciliationApi } from '../../api/endpoints.js';
 import { useAuthStore } from '../../store/auth.store.js';
+import { useConfirm } from '../../context/ConfirmContext.js';
 import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
 import Button from '../../components/ui/Button.js';
@@ -42,6 +43,7 @@ const STAT_COLOR_CLASSES: Record<string, string> = {
 
 export default function BankReconciliationPage() {
   const qc = useQueryClient();
+  const confirm = useConfirm();
   const canReconcile = useAuthStore((s) => s.hasPermission(PERMISSIONS.BANK_RECONCILIATION_DO));
   const [selectedItem, setSelectedItem] = useState<number | null>(null);
 
@@ -120,8 +122,18 @@ export default function BankReconciliationPage() {
         <div className="bg-success-bg border border-success rounded-xl px-4 py-3 flex flex-wrap justify-between items-center gap-2">
           <span className="text-success font-medium">✓ All items matched — ready to finalize</span>
           <Button
+            data-tour-id="accounting-bank-reconciliation-finalize-button"
             variant="primary"
-            onClick={() => finalizeMutation.mutate(1)}
+            onClick={async () => {
+              const ok = await confirm({
+                title: 'Finalize this reconciliation?',
+                message:
+                  "This locks the statement period. You can't re-match items in it afterward.",
+                confirmLabel: 'Finalize',
+                variant: 'primary',
+              });
+              if (ok) finalizeMutation.mutate(1);
+            }}
             disabled={finalizeMutation.isPending}
           >
             Finalize Reconciliation

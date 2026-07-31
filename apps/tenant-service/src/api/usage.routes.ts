@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import type { ErpDatabase } from '@erp/db';
 import { tenants, usageSummary } from '@erp/db';
 import { eq, and, desc } from 'drizzle-orm';
-import { NotFoundError, PERMISSIONS } from '@erp/types';
+import { NotFoundError, ValidationError, PERMISSIONS } from '@erp/types';
 import { authenticate } from '../middleware/authenticate.js';
 import { requirePermission } from '../middleware/authorize.js';
 import { UsagePeriodQuerySchema } from './tenant.schemas.js';
@@ -28,7 +28,7 @@ export async function usageRoutes(fastify: FastifyInstance, db: ErpDatabase): Pr
       const id = parseInt(request.params.id, 10);
       const parsedQuery = UsagePeriodQuerySchema.safeParse(request.query);
       if (!parsedQuery.success) {
-        return reply.code(400).send({ error: { code: 'VALIDATION_ERROR', message: 'Invalid period — expected YYYY-MM' } });
+        throw new ValidationError('Invalid period — expected YYYY-MM');
       }
       const period = parsedQuery.data.period ?? currentPeriod();
 
@@ -66,7 +66,7 @@ export async function usageRoutes(fastify: FastifyInstance, db: ErpDatabase): Pr
     async (request, reply) => {
       const parsedQuery = UsagePeriodQuerySchema.safeParse(request.query);
       if (!parsedQuery.success) {
-        return reply.code(400).send({ error: { code: 'VALIDATION_ERROR', message: 'Invalid period — expected YYYY-MM' } });
+        throw new ValidationError('Invalid period — expected YYYY-MM');
       }
       const period = parsedQuery.data.period ?? currentPeriod();
       const periodStart = `${period}-01`;

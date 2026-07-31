@@ -128,7 +128,12 @@ export default function ChartOfAccountsPage() {
               >
                 Seed Default CoA
               </Button>
-              <Button onClick={() => navigate('/accounting/accounts/new')}>+ New Account</Button>
+              <Button
+                data-tour-id="accounting-coa-create-button"
+                onClick={() => navigate('/accounting/accounts/new')}
+              >
+                + New Account
+              </Button>
             </div>
           ) : undefined
         }

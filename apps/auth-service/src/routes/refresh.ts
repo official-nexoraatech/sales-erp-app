@@ -63,6 +63,15 @@ export async function refreshRoute(
         return reply.code(401).send({ error: 'User not found or inactive' });
       }
 
+      // A user locked (manually by an admin, or automatically after too many failed
+      // login attempts) after this refresh token was issued must not be able to keep
+      // minting fresh access tokens with it — locking only blocked new /auth/login
+      // attempts before this check existed, leaving an already-logged-in session fully
+      // functional for as long as the caller kept refreshing.
+      if (user.lockedUntil && user.lockedUntil > now) {
+        return reply.code(401).send({ error: 'Account is locked' });
+      }
+
       // Rotate refresh token — revoke old, issue new
       await db
         .update(refreshTokens)

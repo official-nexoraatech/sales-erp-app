@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useState, useMemo, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
@@ -19,6 +19,8 @@ import Input from '../../components/ui/Input.js';
 import Select from '../../components/ui/Select.js';
 import { INDIAN_STATES } from '../../lib/indianStates.js';
 import { createSearchLoadOptions } from '../../lib/searchSelectOptions.js';
+import { toFieldErrors } from '../../lib/zodFieldErrors.js';
+import { purchaseOrderFormSchema } from '../../schemas/purchase-transactions.schema.js';
 
 const loadSupplierOptions = createSearchLoadOptions('supplier');
 const ITEM_SEARCH_ID = 'po-item-search';
@@ -73,8 +75,12 @@ export default function PurchaseOrderFormPage() {
   );
   const [notes, setNotes] = useState('');
   const [termsAndConditions, setTermsAndConditions] = useState('');
+  const [poType, setPoType] = useState<'STANDARD' | 'BLANKET' | 'RATE_CONTRACT'>('STANDARD');
+  const [contractValidFrom, setContractValidFrom] = useState('');
+  const [contractValidTill, setContractValidTill] = useState('');
   const [lines, setLines] = useState<LineItem[]>([]);
   const [itemPick, setItemPick] = useState<ItemPickOption | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   const { data: warehouseData } = useQuery({
     queryKey: ['warehouses'],
@@ -126,19 +132,28 @@ export default function PurchaseOrderFormPage() {
     [canViewItems]
   );
 
-  const computedLines = lines.map((l) => ({ ...l, ...computeLine(l, sellerState, placeOfSupply) }));
+  // Memoized — same unmemoized-recompute-on-every-keystroke bug class as InvoiceFormPage (see
+  // WEB-FRONTEND-AUDIT-2026-07-24.md, Medium #24).
+  const computedLines = useMemo(
+    () => lines.map((l) => ({ ...l, ...computeLine(l, sellerState, placeOfSupply) })),
+    [lines, sellerState, placeOfSupply]
+  );
 
-  const totals = computedLines.reduce(
-    (acc, l) => ({
-      subtotal: round2(acc.subtotal + l.unitPrice * l.orderedQty),
-      discount: round2(acc.discount + (l.unitPrice * l.orderedQty * l.discountPct) / 100),
-      taxable: round2(acc.taxable + l.taxable),
-      cgst: round2(acc.cgst + l.cgst),
-      sgst: round2(acc.sgst + l.sgst),
-      igst: round2(acc.igst + l.igst),
-      grand: round2(acc.grand + l.lineTotal),
-    }),
-    { subtotal: 0, discount: 0, taxable: 0, cgst: 0, sgst: 0, igst: 0, grand: 0 }
+  const totals = useMemo(
+    () =>
+      computedLines.reduce(
+        (acc, l) => ({
+          subtotal: round2(acc.subtotal + l.unitPrice * l.orderedQty),
+          discount: round2(acc.discount + (l.unitPrice * l.orderedQty * l.discountPct) / 100),
+          taxable: round2(acc.taxable + l.taxable),
+          cgst: round2(acc.cgst + l.cgst),
+          sgst: round2(acc.sgst + l.sgst),
+          igst: round2(acc.igst + l.igst),
+          grand: round2(acc.grand + l.lineTotal),
+        }),
+        { subtotal: 0, discount: 0, taxable: 0, cgst: 0, sgst: 0, igst: 0, grand: 0 }
+      ),
+    [computedLines]
   );
 
   const addItem = (item: ItemPickOption) => {
@@ -181,11 +196,29 @@ export default function PurchaseOrderFormPage() {
     onError: (e: Error) => toast.error(e.message),
   });
 
-  const handleSubmit = () => {
-    if (!supplierId || !branchId || !warehouseId || lines.length === 0) {
-      toast.error('Fill all required fields and add at least one item');
+  const handleSubmit = (e?: FormEvent) => {
+    e?.preventDefault();
+    const result = purchaseOrderFormSchema.safeParse({
+      supplierId: supplierId ? Number(supplierId) : undefined,
+      branchId: branchId ? Number(branchId) : undefined,
+      warehouseId: warehouseId ? Number(warehouseId) : undefined,
+      poDate,
+      placeOfSupply,
+      sellerStateCode: sellerState,
+      lines: lines.map((l) => ({
+        itemId: l.itemId,
+        orderedQty: l.orderedQty,
+        unitPrice: l.unitPrice,
+        discountPct: l.discountPct,
+        gstRate: l.gstRate,
+      })),
+    });
+    if (!result.success) {
+      setFieldErrors(toFieldErrors(result.error));
+      toast.error('Fix the highlighted fields before saving');
       return;
     }
+    setFieldErrors({});
     createMutation.mutate({
       supplierId: Number(supplierId),
       branchId: Number(branchId),
@@ -196,12 +229,25 @@ export default function PurchaseOrderFormPage() {
       sellerStateCode: sellerState,
       notes: notes || undefined,
       termsAndConditions: termsAndConditions || undefined,
+      poType,
+      contractValidFrom:
+        poType !== 'STANDARD' && contractValidFrom
+          ? new Date(contractValidFrom).toISOString()
+          : undefined,
+      contractValidTill:
+        poType !== 'STANDARD' && contractValidTill
+          ? new Date(contractValidTill).toISOString()
+          : undefined,
       lines: lines.map((l) => ({
         itemId: l.itemId,
         orderedQty: l.orderedQty,
         unitPrice: l.unitPrice,
         discountPct: l.discountPct,
-        discountAmount: round2((l.unitPrice * l.orderedQty * l.discountPct) / 100),
+        // A line may only ever set ONE of discountPct/discountAmount (backend now rejects
+        // both non-zero simultaneously — 2026-07-31 GSTCalculator consolidation). This form
+        // only exposes a percentage field, so discountAmount is always sent as 0, matching
+        // InvoiceFormPage/QuotationFormPage's existing convention.
+        discountAmount: 0,
         gstRate: l.gstRate,
         hsnCode: l.hsnCode || undefined,
       })),
@@ -211,7 +257,7 @@ export default function PurchaseOrderFormPage() {
   useKeyboardShortcut('Enter', handleSubmit, { ctrlOrCmd: true });
 
   return (
-    <div>
+    <form onSubmit={handleSubmit} noValidate>
       <ERPPageHeader
         variant="detail"
         title="New Purchase Order"
@@ -227,12 +273,14 @@ export default function PurchaseOrderFormPage() {
           onChange={setSelectedSupplier}
           loadOptions={loadSupplierOptions}
           placeholder="Type to search suppliers…"
+          error={fieldErrors.supplierId}
         />
         <Select
           label="Branch"
           required
           value={branchId}
           onChange={(e) => setBranchId(e.target.value)}
+          error={fieldErrors.branchId}
           options={[
             { value: '', label: 'Select branch…' },
             ...branches.map((b) => ({ value: String(b.id), label: b.name })),
@@ -243,6 +291,7 @@ export default function PurchaseOrderFormPage() {
           required
           value={warehouseId}
           onChange={(e) => setWarehouseId(e.target.value)}
+          error={fieldErrors.warehouseId}
           options={[
             { value: '', label: 'Select warehouse…' },
             ...warehouses.map((w) => ({ value: String(w.id), label: w.name })),
@@ -254,6 +303,7 @@ export default function PurchaseOrderFormPage() {
           type="date"
           value={poDate}
           onChange={(e) => setPoDate(e.target.value)}
+          error={fieldErrors.poDate}
         />
         <Input
           label="Expected Delivery Date"
@@ -261,6 +311,33 @@ export default function PurchaseOrderFormPage() {
           value={expectedDeliveryDate}
           onChange={(e) => setExpectedDeliveryDate(e.target.value)}
         />
+        <Select
+          label="PO Type"
+          value={poType}
+          onChange={(e) => setPoType(e.target.value as typeof poType)}
+          options={[
+            { value: 'STANDARD', label: 'Standard (one-off)' },
+            { value: 'BLANKET', label: 'Blanket PO (multiple call-offs)' },
+            { value: 'RATE_CONTRACT', label: 'Rate Contract' },
+          ]}
+        />
+        {poType !== 'STANDARD' && (
+          <>
+            <Input
+              label="Contract Valid From"
+              type="date"
+              value={contractValidFrom}
+              onChange={(e) => setContractValidFrom(e.target.value)}
+            />
+            <Input
+              label="Contract Valid Till"
+              type="date"
+              required
+              value={contractValidTill}
+              onChange={(e) => setContractValidTill(e.target.value)}
+            />
+          </>
+        )}
       </ERPFormSection>
 
       <ERPFormSection
@@ -274,6 +351,7 @@ export default function PurchaseOrderFormPage() {
           required
           value={placeOfSupply}
           onChange={(e) => setPlaceOfSupply(e.target.value)}
+          error={fieldErrors.placeOfSupply}
           options={[
             { value: '', label: 'Select state…' },
             ...INDIAN_STATES.map((s) => ({ value: s.gstCode, label: `${s.gstCode} – ${s.name}` })),
@@ -284,6 +362,7 @@ export default function PurchaseOrderFormPage() {
           required
           value={sellerState}
           onChange={(e) => setSellerState(e.target.value)}
+          error={fieldErrors.sellerStateCode}
           options={[
             { value: '', label: 'Select state…' },
             ...INDIAN_STATES.map((s) => ({ value: s.gstCode, label: `${s.gstCode} – ${s.name}` })),
@@ -315,6 +394,11 @@ export default function PurchaseOrderFormPage() {
             </div>
           </div>
 
+          {fieldErrors.lines && (
+            <p className="text-xs text-danger mb-2" role="alert">
+              {fieldErrors.lines}
+            </p>
+          )}
           <div className="overflow-x-auto rounded-lg border border-default">
             <table className="w-full text-sm">
               <thead className="sticky top-0 bg-surface-subtle z-[1]">
@@ -346,72 +430,78 @@ export default function PurchaseOrderFormPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-default">
-                {computedLines.map((l, idx) => (
-                  <tr key={idx} className="hover:bg-surface-subtle transition-colors">
-                    <td className="px-3 py-2 text-primary">
-                      <div className="font-medium">{l.itemName}</div>
-                      {l.hsnCode && <div className="text-xs text-secondary">HSN {l.hsnCode}</div>}
-                    </td>
-                    <td className="px-3 py-2 text-right">
-                      <Input
-                        type="number"
-                        size="sm"
-                        min="0.001"
-                        step="1"
-                        value={l.orderedQty}
-                        onChange={(e) =>
-                          updateLine(idx, 'orderedQty', parseFloat(e.target.value) || 0)
-                        }
-                        aria-label={`Quantity for ${l.itemName}`}
-                        className="w-20 text-right ml-auto"
-                      />
-                    </td>
-                    <td className="px-3 py-2 text-right">
-                      <Input
-                        type="number"
-                        size="sm"
-                        min="0"
-                        step="0.01"
-                        value={l.unitPrice}
-                        onChange={(e) =>
-                          updateLine(idx, 'unitPrice', parseFloat(e.target.value) || 0)
-                        }
-                        aria-label={`Unit price for ${l.itemName}`}
-                        className="w-28 text-right ml-auto"
-                      />
-                    </td>
-                    <td className="px-3 py-2 text-right">
-                      <Input
-                        type="number"
-                        size="sm"
-                        min="0"
-                        max="100"
-                        step="0.01"
-                        value={l.discountPct}
-                        onChange={(e) =>
-                          updateLine(idx, 'discountPct', parseFloat(e.target.value) || 0)
-                        }
-                        aria-label={`Discount percent for ${l.itemName}`}
-                        className="w-16 text-right ml-auto"
-                      />
-                    </td>
-                    <td className="px-3 py-2 text-right text-secondary">{l.gstRate}%</td>
-                    <td className="px-3 py-2 text-right text-primary">₹{l.taxable.toFixed(2)}</td>
-                    <td className="px-3 py-2 text-right font-semibold text-primary">
-                      ₹{l.lineTotal.toFixed(2)}
-                    </td>
-                    <td className="px-3 py-2 text-right">
-                      <button
-                        type="button"
-                        onClick={() => removeLine(idx)}
-                        aria-label={`Remove ${l.itemName}`}
-                        className="p-1.5 rounded-md text-secondary hover:bg-danger-subtle hover:text-danger transition-colors"
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                {computedLines.map((l, idx) => {
+                  const qtyError = fieldErrors[`lines.${idx}.orderedQty`];
+                  const priceError = fieldErrors[`lines.${idx}.unitPrice`];
+                  return (
+                    <tr key={idx} className="hover:bg-surface-subtle transition-colors">
+                      <td className="px-3 py-2 text-primary">
+                        <div className="font-medium">{l.itemName}</div>
+                        {l.hsnCode && <div className="text-xs text-secondary">HSN {l.hsnCode}</div>}
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        <Input
+                          type="number"
+                          size="sm"
+                          min="0.001"
+                          step="1"
+                          value={l.orderedQty}
+                          onChange={(e) =>
+                            updateLine(idx, 'orderedQty', parseFloat(e.target.value) || 0)
+                          }
+                          aria-label={`Quantity for ${l.itemName}`}
+                          error={qtyError}
+                          className="w-20 text-right ml-auto"
+                        />
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        <Input
+                          type="number"
+                          size="sm"
+                          min="0"
+                          step="0.01"
+                          value={l.unitPrice}
+                          onChange={(e) =>
+                            updateLine(idx, 'unitPrice', parseFloat(e.target.value) || 0)
+                          }
+                          aria-label={`Unit price for ${l.itemName}`}
+                          error={priceError}
+                          className="w-28 text-right ml-auto"
+                        />
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        <Input
+                          type="number"
+                          size="sm"
+                          min="0"
+                          max="100"
+                          step="0.01"
+                          value={l.discountPct}
+                          onChange={(e) =>
+                            updateLine(idx, 'discountPct', parseFloat(e.target.value) || 0)
+                          }
+                          aria-label={`Discount percent for ${l.itemName}`}
+                          className="w-16 text-right ml-auto"
+                        />
+                      </td>
+                      <td className="px-3 py-2 text-right text-secondary">{l.gstRate}%</td>
+                      <td className="px-3 py-2 text-right text-primary">₹{l.taxable.toFixed(2)}</td>
+                      <td className="px-3 py-2 text-right font-semibold text-primary">
+                        ₹{l.lineTotal.toFixed(2)}
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        <button
+                          type="button"
+                          onClick={() => removeLine(idx)}
+                          aria-label={`Remove ${l.itemName}`}
+                          className="p-1.5 rounded-md text-secondary hover:bg-danger-subtle hover:text-danger transition-colors"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
             {lines.length === 0 && (
@@ -493,13 +583,13 @@ export default function PurchaseOrderFormPage() {
         <span className="hidden sm:flex items-center gap-1.5 text-xs text-secondary mr-auto">
           <Kbd>Ctrl</Kbd>+<Kbd>Enter</Kbd> to save
         </span>
-        <Button variant="secondary" onClick={() => navigate('/purchase/orders')}>
+        <Button type="button" variant="secondary" onClick={() => navigate('/purchase/orders')}>
           Cancel
         </Button>
-        <Button isLoading={createMutation.isPending} onClick={handleSubmit}>
+        <Button type="submit" isLoading={createMutation.isPending}>
           Save as Draft
         </Button>
       </ERPStickyFooter>
-    </div>
+    </form>
   );
 }

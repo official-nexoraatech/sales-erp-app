@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { PlatformContextFactory } from '@erp/sdk';
-import { saleReturns, creditNotes, customers, invoices } from '@erp/db';
+import { saleReturns, customers, invoices } from '@erp/db';
 import { and, desc, eq, sql, getTableColumns } from 'drizzle-orm';
 import { z } from 'zod';
 import { PERMISSIONS } from '@erp/types';
@@ -109,6 +109,15 @@ export async function saleReturnRoutes(
         createdBy: req.auth.userId,
       } as Parameters<typeof svc.create>[0]);
 
+      // Same cross-service item-cache gap GRN receipts had (fixed 2026-07-17) — a physical
+      // sale return writes availableQty/valuation directly to `items`, so inventory-service's
+      // Redis item-cache needs invalidating too.
+      await Promise.all(
+        [...new Set(body.lines.map((l) => l.itemId))].map((itemId) =>
+          ctx.cache.del(`item:${itemId}`)
+        )
+      );
+
       await ctx.audit.log({
         action: 'CREATE',
         entityType: 'sales_return',
@@ -161,6 +170,16 @@ export async function saleReturnRoutes(
         req.auth.tenantId,
         req.auth.userId
       );
+      // M-16 fix: apply/refund mutate financial state (creditNotes.status, usedAmount,
+      // remainingAmount) but neither route wrote to the audit log.
+      await ctx.audit.log({
+        action: 'UPDATE',
+        entityType: 'credit_note',
+        entityId: parseInt(id, 10),
+        after: { appliedToInvoiceId: body.invoiceId },
+        actorEmail: req.auth.email,
+        ipAddress: req.ip,
+      });
       return reply.send({ success: true });
     },
   });
@@ -175,17 +194,16 @@ export async function saleReturnRoutes(
         correlationId:
           (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
       });
-      await ctx.db.raw
-        .update(creditNotes)
-        .set({
-          status: 'REFUNDED',
-          usedAmount: creditNotes.amount,
-          remainingAmount: '0',
-          updatedAt: new Date(),
-        })
-        .where(
-          and(eq(creditNotes.id, parseInt(id, 10)), eq(creditNotes.tenantId, req.auth.tenantId))
-        );
+      const svc = new SaleReturnService(ctx.db.raw);
+      await svc.refundCreditNote(parseInt(id, 10), req.auth.tenantId, req.auth.userId);
+      await ctx.audit.log({
+        action: 'STATUS_CHANGE',
+        entityType: 'credit_note',
+        entityId: parseInt(id, 10),
+        after: { status: 'REFUNDED' },
+        actorEmail: req.auth.email,
+        ipAddress: req.ip,
+      });
       return reply.send({ success: true });
     },
   });

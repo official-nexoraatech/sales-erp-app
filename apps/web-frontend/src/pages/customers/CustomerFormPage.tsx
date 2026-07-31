@@ -166,6 +166,12 @@ export default function CustomerFormPage() {
           </Select>
           <Input label="Phone" required {...register('phone')} error={errors.phone?.message} />
           <Input label="Email" type="email" {...register('email')} error={errors.email?.message} />
+          <Input
+            label="Preferred Language"
+            placeholder="e.g. hi, ta, en"
+            {...register('preferredLanguage')}
+            error={errors.preferredLanguage?.message}
+          />
           <ERPGSTINInput
             label="GSTIN"
             value={gstinValue ?? ''}

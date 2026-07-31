@@ -174,6 +174,71 @@ describe('PRICE_FLOOR_OVERRIDE guard on POST /invoices', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
+// DISCOUNT_OVERRIDE (H-5 fix — previously enforced only in POS)
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe('DISCOUNT_OVERRIDE guard on POST /invoices', () => {
+  let app: FastifyInstance;
+
+  beforeAll(async () => {
+    app = Fastify({ logger: false });
+    await invoiceRoutes(app, mockCtxFactory);
+  });
+
+  afterAll(() => app.close());
+
+  it('returns 403 when a >10% line discount is submitted without DISCOUNT_OVERRIDE', async () => {
+    const token = await makeToken([PERMISSIONS.INVOICE_CREATE]);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/invoices',
+      headers: { Authorization: `Bearer ${token}` },
+      payload: {
+        ...VALID_INVOICE_BODY,
+        lines: [{ itemId: 1, quantity: 1, unitPrice: 100, gstRate: 18, discountPct: 50 }],
+      },
+    });
+
+    expect(res.statusCode).toBe(403);
+    const body = JSON.parse(res.body) as { error: { code: string; message: string } };
+    expect(body.error.code).toBe('DISCOUNT_LIMIT_EXCEEDED');
+  });
+
+  it('does not return 403 for a >10% line discount when the caller has DISCOUNT_OVERRIDE', async () => {
+    const token = await makeToken([PERMISSIONS.INVOICE_CREATE, PERMISSIONS.DISCOUNT_OVERRIDE]);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/invoices',
+      headers: { Authorization: `Bearer ${token}` },
+      payload: {
+        ...VALID_INVOICE_BODY,
+        lines: [{ itemId: 1, quantity: 1, unitPrice: 100, gstRate: 18, discountPct: 50 }],
+      },
+    });
+
+    expect(res.statusCode).not.toBe(403);
+  });
+
+  it('does not return 403 for a discount at or below the 10% ceiling, override or not', async () => {
+    const token = await makeToken([PERMISSIONS.INVOICE_CREATE]);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/invoices',
+      headers: { Authorization: `Bearer ${token}` },
+      payload: {
+        ...VALID_INVOICE_BODY,
+        lines: [{ itemId: 1, quantity: 1, unitPrice: 100, gstRate: 18, discountPct: 10 }],
+      },
+    });
+
+    expect(res.statusCode).not.toBe(403);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
 // EXPORT_CUSTOMER_DATA
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -251,10 +316,7 @@ describe('Admin role — access to all new guarded routes', () => {
   });
 
   it('admin can override price floor (not 403)', async () => {
-    const token = await makeToken([
-      PERMISSIONS.INVOICE_CREATE,
-      PERMISSIONS.PRICE_FLOOR_OVERRIDE,
-    ]);
+    const token = await makeToken([PERMISSIONS.INVOICE_CREATE, PERMISSIONS.PRICE_FLOOR_OVERRIDE]);
 
     const res = await invoiceApp.inject({
       method: 'POST',

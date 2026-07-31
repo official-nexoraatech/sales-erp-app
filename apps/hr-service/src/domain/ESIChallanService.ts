@@ -2,6 +2,8 @@ import type { TenantScopedDatabase } from '@erp/sdk';
 import { payrollRuns, payrollSlips, employees } from '@erp/db';
 import { and, eq } from 'drizzle-orm';
 import { NotFoundError } from '@erp/types';
+import { decryptField } from '@erp/utils/server';
+import { requireEnv } from '@erp/config';
 
 export interface ESIChallanRow {
   employeeId: number;
@@ -33,11 +35,13 @@ export class ESIChallanService {
     const [run] = await db.raw
       .select({ id: payrollRuns.id })
       .from(payrollRuns)
-      .where(and(
-        eq(payrollRuns.tenantId, tenantId),
-        eq(payrollRuns.periodMonth, periodMonth),
-        eq(payrollRuns.periodYear, periodYear),
-      ));
+      .where(
+        and(
+          eq(payrollRuns.tenantId, tenantId),
+          eq(payrollRuns.periodMonth, periodMonth),
+          eq(payrollRuns.periodYear, periodYear)
+        )
+      );
 
     if (!run) throw new NotFoundError('PayrollRun', `${periodMonth}/${periodYear}`);
 
@@ -55,23 +59,27 @@ export class ESIChallanService {
         esiEmployer: payrollSlips.esiEmployer,
       })
       .from(payrollSlips)
-      .innerJoin(employees, and(eq(employees.id, payrollSlips.employeeId), eq(employees.tenantId, tenantId)))
+      .innerJoin(
+        employees,
+        and(eq(employees.id, payrollSlips.employeeId), eq(employees.tenantId, tenantId))
+      )
       .where(and(eq(payrollSlips.tenantId, tenantId), eq(payrollSlips.payrollRunId, run.id)));
 
+    const encKey = requireEnv('FIELD_ENCRYPTION_KEY');
     const rows: ESIChallanRow[] = [];
     const totals = { grossSalary: 0, esiEmployee: 0, esiEmployer: 0 };
 
     for (const slip of slips) {
-      const esiEmployee = parseFloat(String(slip.esiEmployee));
+      const esiEmployee = parseFloat(decryptField(slip.esiEmployee, encKey));
       if (esiEmployee <= 0) continue; // not ESI-applicable this period
 
       const grossSalary =
-        parseFloat(String(slip.basicSalary)) +
-        parseFloat(String(slip.hraAmount)) +
-        parseFloat(String(slip.daAmount)) +
-        parseFloat(String(slip.otherAllowances)) +
-        parseFloat(String(slip.pieceRateAmount));
-      const esiEmployer = parseFloat(String(slip.esiEmployer));
+        parseFloat(decryptField(slip.basicSalary, encKey)) +
+        parseFloat(decryptField(slip.hraAmount, encKey)) +
+        parseFloat(decryptField(slip.daAmount, encKey)) +
+        parseFloat(decryptField(slip.otherAllowances, encKey)) +
+        parseFloat(decryptField(slip.pieceRateAmount, encKey));
+      const esiEmployer = parseFloat(decryptField(slip.esiEmployer, encKey));
 
       rows.push({
         employeeId: slip.employeeId,

@@ -15,7 +15,7 @@ import ShiftSummaryScreen from './ShiftSummaryScreen.js';
 import BranchSelectScreen from './BranchSelectScreen.js';
 import { getAccessToken, hasPermission } from './auth.js';
 import { PERMISSIONS } from '@erp/types';
-import { setActiveSessionId, fetchActiveSession } from './session.js';
+import { setActiveSessionId, getActiveSessionId, fetchActiveSession } from './session.js';
 import { getSelectedBranch } from './branchStore.js';
 import { ThemeProvider, useTheme } from './context/ThemeContext.js';
 import TenantThemeSync from './components/pos/TenantThemeSync.js';
@@ -52,21 +52,52 @@ function RequireBranch({ children }: { children: ReactElement }) {
 
 // PG-050 — redirects a cashier with no open shift to /shift/open before they can reach
 // the sale screen. Mirrors RequireAuth's thin-wrapper shape exactly.
+//
+// A reload while genuinely offline must not strand the cashier: if the server is
+// unreachable but this device already has a locally-persisted session id (from an earlier,
+// successful check), trust it and let the cashier keep selling through the outage — that's
+// the whole point of this app's offline architecture. Only a device with no persisted
+// session AND no connectivity has no way to proceed, since /shift/open itself needs the
+// network; that state gets a retry screen instead of an indefinite blank one.
 function RequireSession({ children }: { children: ReactElement }) {
-  const [status, setStatus] = useState<'checking' | 'ok' | 'none'>('checking');
+  const [status, setStatus] = useState<'checking' | 'ok' | 'none' | 'offline-unknown'>('checking');
 
-  useEffect(() => {
-    void fetchActiveSession().then((session) => {
-      if (session) {
-        setActiveSessionId(session.id);
+  const check = () => {
+    setStatus('checking');
+    void fetchActiveSession().then((result) => {
+      if (result.status === 'found') {
+        setActiveSessionId(result.session.id);
         setStatus('ok');
+      } else if (result.status === 'offline') {
+        setStatus(getActiveSessionId() !== null ? 'ok' : 'offline-unknown');
       } else {
         setStatus('none');
       }
     });
-  }, []);
+  };
+
+  useEffect(check, []);
 
   if (status === 'checking') return null;
+  if (status === 'offline-unknown') {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[var(--surface-app)] p-4 text-center">
+        <div className="max-w-sm space-y-3">
+          <p className="text-sm text-[var(--text-secondary)]">
+            Can&apos;t reach the server to confirm your shift status, and this device has no saved
+            shift yet. Reconnect and try again.
+          </p>
+          <button
+            type="button"
+            onClick={check}
+            className="min-h-[44px] rounded-md bg-[var(--color-primary)] px-4 py-2 text-sm font-medium text-white"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
   if (status === 'none') return <Navigate to="/shift/open" replace />;
   return children;
 }

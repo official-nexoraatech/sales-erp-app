@@ -13,6 +13,12 @@ export interface EventEntityMapping {
   // could collide (payment #5 from each side landing on the same ES doc id). Prefixing by
   // source keeps them distinct without needing a shared ID space across two services.
   idPrefix?: string;
+  // Composite-key entities can't use the default `${idPrefix}${aggregateId}` scheme — 'stock'
+  // is keyed by (item, warehouse, variant), not a single row id, since `aggregateId` here is
+  // the outbox event's integer aggregate id (the item), not a unique key for the stock level
+  // itself. Builds the ES doc id from the event payload instead; every other entity omits
+  // this and keeps the default aggregateId-based behavior.
+  idFromPayload?: (payload: Record<string, unknown>) => string;
 }
 
 // Maps every outbox event type this consumer subscribes to onto the search entity/index it
@@ -49,6 +55,16 @@ export const EVENT_ENTITY_MAP: Record<string, EventEntityMapping> = {
   TRANSFER_RECEIVED: { entity: 'stock_transfer', op: 'index' },
   STOCK_ADJUSTMENT_CREATED: { entity: 'stock_adjustment', op: 'index' },
   STOCK_ADJUSTMENT_UPDATED: { entity: 'stock_adjustment', op: 'index' },
+  // Per-warehouse stock level (item x warehouse x variant) — published by
+  // InventoryLedgerService.upsertProjection() on every stock movement (GRN receipt, sale,
+  // adjustment, transfer). Previously this entity had NO event mapping at all despite having
+  // a full ES mapping/permission/index — 'entity=stock' search always silently returned zero
+  // results, forever, indistinguishable from "no matches".
+  STOCK_LEVEL_CHANGED: {
+    entity: 'stock',
+    op: 'index',
+    idFromPayload: (p) => `${p['itemId']}-${p['warehouseId']}-${p['variantId'] ?? 0}`,
+  },
   // Sales
   INVOICE_CREATED: { entity: 'invoice', op: 'index' },
   INVOICE_CONFIRMED: { entity: 'invoice', op: 'index' },

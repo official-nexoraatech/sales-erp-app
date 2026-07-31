@@ -2,7 +2,14 @@ import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { customerApi, crmApi } from '../../api/endpoints.js';
+import {
+  customerApi,
+  crmApi,
+  crmAccountApi,
+  loyaltyApi,
+  referralApi,
+  callApi,
+} from '../../api/endpoints.js';
 import { useAuthStore } from '../../store/auth.store.js';
 import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
@@ -105,8 +112,14 @@ export default function CustomerViewPage() {
   const canLogInteraction = hasPermission(PERMISSIONS.CRM_INTERACTION_CREATE);
   const canViewInteractions = hasPermission(PERMISSIONS.CRM_INTERACTION_VIEW);
   const canEditCustomer = hasPermission(PERMISSIONS.CUSTOMER_EDIT);
+  const canCreateAccount = hasPermission(PERMISSIONS.CRM_ACCOUNT_CREATE);
+  const canViewAccount = hasPermission(PERMISSIONS.CRM_ACCOUNT_VIEW);
+  const canCreateTicket = hasPermission(PERMISSIONS.TICKET_CREATE);
+  const canViewReferral = hasPermission(PERMISSIONS.REFERRAL_VIEW);
+  const canInitiateCall = hasPermission(PERMISSIONS.CALL_INITIATE);
+  const canViewCalls = hasPermission(PERMISSIONS.CALL_LOG_VIEW);
 
-  const [tab, setTab] = useState<'details' | 'timeline' | 'interactions'>('details');
+  const [tab, setTab] = useState<'details' | 'timeline' | 'interactions' | 'calls'>('details');
   const [logOpen, setLogOpen] = useState(false);
   const [interactionForm, setInteractionForm] = useState({ ...BLANK_INTERACTION });
   const [timelinePage, setTimelinePage] = useState(0);
@@ -116,6 +129,115 @@ export default function CustomerViewPage() {
     queryFn: () => customerApi.getById(Number(id)),
   });
   const customer = data as Record<string, unknown> | undefined;
+  const accountId = customer?.accountId as number | undefined;
+
+  // CRM-ROADMAP Phase 1, Feature 1: linked B2B account, if this customer has one.
+  const { data: linkedAccountData } = useQuery({
+    queryKey: ['crm-accounts', accountId],
+    queryFn: () => crmAccountApi.getById(accountId!),
+    enabled: !!accountId && canViewAccount,
+  });
+  const linkedAccount = linkedAccountData as Record<string, unknown> | undefined;
+
+  const createAccountMut = useMutation({
+    mutationFn: () => crmAccountApi.getOrCreateForCustomer(Number(id)),
+    onSuccess: (created) => {
+      const account = created as Record<string, unknown>;
+      toast.success('Account created for this customer');
+      qc.invalidateQueries({ queryKey: ['customers', id] });
+      navigate(`/crm/accounts/${account.id}`);
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
+  // CRM-ROADMAP Phase 4, Feature 7 — CTI: click-to-call rings the rep's own phone first (from
+  // their profile), then bridges to the customer's number once answered — see CallService.
+  const callMut = useMutation({
+    mutationFn: () =>
+      callApi.initiate({ customerId: Number(id), toNumber: String(customer?.phone ?? '') }),
+    onSuccess: () =>
+      toast.success('Calling your phone now — it will connect to the customer once you answer'),
+    onError: (err: Error) => toast.error(err.message),
+  });
+
+  const { data: callsData } = useQuery({
+    queryKey: ['customer-calls', id],
+    queryFn: () => callApi.list({ customerId: Number(id) }),
+    enabled: tab === 'calls' && canViewCalls,
+  });
+  const calls = (callsData as { content?: Array<Record<string, unknown>> })?.content ?? [];
+
+  // CRM-ROADMAP Phase 1, Feature 3 — Customer 360 Command Center: one composed read for
+  // health score, AR/credit snapshot, and linked account — replaces the separate stored
+  // customer.healthScore/healthSegment (last computed by the weekly batch job) with a
+  // fresh, on-demand HealthScoringService.scoreCustomer result once loaded.
+  const { data: threeSixtyData } = useQuery({
+    queryKey: ['customer-360', id],
+    queryFn: () => customerApi.get360(Number(id)),
+  });
+  const threeSixty = threeSixtyData as
+    | {
+        health: { totalScore: number; segment: string } | null;
+        financial: {
+          currentBalance: number;
+          overdueAmount: number;
+          creditLimitEnabled: boolean;
+          creditHeadroom: number | null;
+          // CRM-ROADMAP Phase 1, Feature 5 — ERP-Native Integration Layer.
+          isOverLimit: boolean;
+        } | null;
+        recentItemsStock: Array<{
+          itemId: number;
+          itemName: string;
+          itemCode: string | null;
+          totalAvailableQty: number;
+          warehouseCount: number;
+        }>;
+        // CRM-ROADMAP Phase 3, Feature 1 — AI & Predictive Intelligence Suite.
+        churn: {
+          riskLevel: 'LOW' | 'MEDIUM' | 'HIGH' | 'INSUFFICIENT_DATA';
+          riskScore: number | null;
+          reason: string;
+        } | null;
+        nextBestAction: { id: number; actionText: string; reason: string } | null;
+        productRecommendations: Array<{
+          id: number;
+          itemId: number;
+          itemName: string;
+          reason: string;
+        }>;
+        degraded: string[];
+      }
+    | undefined;
+
+  // CRM-ROADMAP Phase 2, Feature 3: tier is derived server-side from lifetime points earned
+  // (never demoted automatically) — this page just displays it, never assigns it directly.
+  const { data: loyaltyData } = useQuery({
+    queryKey: ['customer-loyalty', id],
+    queryFn: () => loyaltyApi.balance(Number(id)),
+  });
+  const loyalty = loyaltyData as
+    | {
+        points: number;
+        tier: string | null;
+        nextTier: { name: string; pointsNeeded: number } | null;
+      }
+    | undefined;
+
+  // CRM-ROADMAP Phase 2, Feature 4 — "Refer a Friend" card; get-or-creates the code on first
+  // view rather than requiring a separate explicit "generate" action.
+  const { data: referralCodeData } = useQuery({
+    queryKey: ['customer-referral-code', id],
+    queryFn: () => referralApi.getOrCreateCode(Number(id)),
+    enabled: canViewReferral,
+  });
+  const referralCode = (referralCodeData as { code?: string } | undefined)?.code;
+  // Points at the tracked GET /r/:code redirect (records a CLICKED event before forwarding to
+  // the /refer/:code landing page), not straight at the landing page — a link shared without
+  // going through that route would never show up in the funnel stats.
+  const referralLink = referralCode
+    ? `${import.meta.env['VITE_GATEWAY_URL'] ?? 'http://localhost:3000'}/api/sales/r/${referralCode}`
+    : null;
 
   // CP-7 follow-up: granular consent model, additive to the binary opt-out flags above.
   const { data: prefsData } = useQuery({
@@ -177,12 +299,32 @@ export default function CustomerViewPage() {
     onError: () => toast.error('Failed to update preference'),
   });
 
+  // CRM-ROADMAP Phase 3, Feature 1 — dismissing a recommendation removes it from view
+  // immediately and doesn't re-surface the identical suggestion on the next nightly run
+  // (enforced server-side; see HealthScoringService.computeAndCachePredictions).
+  const feedbackMut = useMutation({
+    mutationFn: (vars: {
+      recommendationId: number;
+      recommendationType: 'NEXT_BEST_ACTION' | 'PRODUCT_RECOMMENDATION';
+      action: 'DISMISS' | 'ACCEPT';
+    }) =>
+      customerApi.recommendationFeedback(vars.recommendationId, {
+        recommendationType: vars.recommendationType,
+        action: vars.action,
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['customer-360', id] });
+    },
+    onError: () => toast.error('Failed to record feedback'),
+  });
+
   if (isLoading) return <ERPDetailSkeleton />;
   if (!customer) return <ERPEmptyState type="no-data" title="Customer not found" />;
 
   const billing = customer.billingAddress as Record<string, string> | undefined;
-  const healthSeg = customer.healthSegment as string | undefined;
-  const healthScore = customer.healthScore as number | undefined;
+  const healthSeg = threeSixty?.health?.segment ?? (customer.healthSegment as string | undefined);
+  const healthScore =
+    threeSixty?.health?.totalScore ?? (customer.healthScore as number | undefined);
 
   const healthColor: Record<string, 'green' | 'blue' | 'yellow' | 'red' | 'gray'> = {
     CHAMPION: 'green',
@@ -202,6 +344,14 @@ export default function CustomerViewPage() {
             {canLogInteraction && (
               <Button onClick={() => setLogOpen(true)}>+ Log Interaction</Button>
             )}
+            {canCreateTicket && (
+              <Button
+                variant="secondary"
+                onClick={() => navigate(`/crm/tickets/new?customerId=${id}`)}
+              >
+                + New Ticket
+              </Button>
+            )}
             <Button variant="secondary" onClick={() => navigate(`/customers/${id}/edit`)}>
               Edit
             </Button>
@@ -211,6 +361,15 @@ export default function CustomerViewPage() {
           </div>
         }
       />
+
+      {/* Customer 360: partial-degradation notice — the composed endpoint renders whatever
+          sections succeeded rather than 500ing the whole page if one sub-service is slow/down. */}
+      {threeSixty && threeSixty.degraded.length > 0 && (
+        <div className="mb-4 bg-warning-subtle border border-warning/30 rounded-xl px-4 py-2.5 text-xs text-secondary">
+          Some sections ({threeSixty.degraded.join(', ')}) couldn&apos;t load just now — the rest of
+          this page is unaffected.
+        </div>
+      )}
 
       {/* Health score strip */}
       {healthSeg && (
@@ -231,12 +390,127 @@ export default function CustomerViewPage() {
         </div>
       )}
 
+      {/* CRM-ROADMAP Phase 2, Feature 3 — Loyalty Tier strip. Only shown once at least one tier
+          is configured for the tenant (loyalty.tier is null otherwise). */}
+      {loyalty?.tier && (
+        <div className="mb-4 flex items-center gap-3 bg-surface-card rounded-xl border border-default px-5 py-3 flex-wrap">
+          <span className="text-xs text-secondary font-medium uppercase tracking-wide">
+            Loyalty Tier
+          </span>
+          <Badge label={loyalty.tier} color="blue" />
+          {loyalty.nextTier && (
+            <span className="text-xs text-secondary">
+              {loyalty.nextTier.pointsNeeded} points to {loyalty.nextTier.name}
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* CRM-ROADMAP Phase 3, Feature 1 — AI & Predictive Intelligence Suite. Every card ships
+          a non-empty, specific "why" — no bare scores without rationale (a stated DoD
+          requirement). Churn risk is informational only (no dismiss); next-best-action and
+          product recommendations can each be dismissed, which removes them here immediately
+          and stops the next nightly run from re-surfacing the identical suggestion. */}
+      {threeSixty?.churn && (
+        <div className="mb-4 bg-surface-card rounded-xl border border-default px-5 py-3">
+          {threeSixty.churn.riskLevel === 'INSUFFICIENT_DATA' ? (
+            <p className="text-xs text-secondary">
+              <span className="font-medium uppercase tracking-wide mr-2">Churn Risk</span>
+              Not enough purchase history yet to predict churn risk.
+            </p>
+          ) : (
+            <div className="flex items-center gap-3 flex-wrap">
+              <span className="text-xs text-secondary font-medium uppercase tracking-wide">
+                Churn Risk
+              </span>
+              <Badge
+                label={threeSixty.churn.riskLevel}
+                color={
+                  threeSixty.churn.riskLevel === 'HIGH'
+                    ? 'red'
+                    : threeSixty.churn.riskLevel === 'MEDIUM'
+                      ? 'yellow'
+                      : 'green'
+                }
+              />
+              <span className="text-xs text-secondary">{threeSixty.churn.reason}</span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {threeSixty?.nextBestAction && (
+        <div className="mb-4 bg-surface-card rounded-xl border border-default px-5 py-3">
+          <div className="flex items-start justify-between gap-3 flex-wrap">
+            <div>
+              <span className="text-xs text-secondary font-medium uppercase tracking-wide">
+                Next Best Action
+              </span>
+              <p className="text-sm font-medium text-primary mt-0.5">
+                {threeSixty.nextBestAction.actionText}
+              </p>
+              <p className="text-xs text-secondary mt-0.5">{threeSixty.nextBestAction.reason}</p>
+            </div>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() =>
+                feedbackMut.mutate({
+                  recommendationId: threeSixty.nextBestAction!.id,
+                  recommendationType: 'NEXT_BEST_ACTION',
+                  action: 'DISMISS',
+                })
+              }
+              disabled={feedbackMut.isPending}
+            >
+              Dismiss
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {threeSixty && threeSixty.productRecommendations.length > 0 && (
+        <div className="mb-4 bg-surface-card rounded-xl border border-default px-5 py-3">
+          <span className="text-xs text-secondary font-medium uppercase tracking-wide">
+            Recommended for This Customer
+          </span>
+          <div className="mt-2 space-y-2">
+            {threeSixty.productRecommendations.map((rec) => (
+              <div
+                key={rec.id}
+                className="flex items-start justify-between gap-3 border-b border-default last:border-0 pb-2 last:pb-0"
+              >
+                <div>
+                  <p className="text-sm font-medium text-primary">{rec.itemName}</p>
+                  <p className="text-xs text-secondary mt-0.5">{rec.reason}</p>
+                </div>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() =>
+                    feedbackMut.mutate({
+                      recommendationId: rec.id,
+                      recommendationType: 'PRODUCT_RECOMMENDATION',
+                      action: 'DISMISS',
+                    })
+                  }
+                  disabled={feedbackMut.isPending}
+                >
+                  Dismiss
+                </Button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <ERPTabs
         className="mb-5"
         tabs={[
           { key: 'details', label: 'Details' },
           { key: 'timeline', label: 'Activity Timeline' },
           { key: 'interactions', label: 'Interactions' },
+          { key: 'calls', label: 'Calls' },
         ]}
         active={tab}
         onChange={(key) => setTab(key as typeof tab)}
@@ -252,7 +526,24 @@ export default function CustomerViewPage() {
               </h2>
               <dl className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {[
-                  { label: 'Phone', value: customer.phone },
+                  {
+                    label: 'Phone',
+                    value: customer.phone ? (
+                      <span className="flex items-center gap-2">
+                        {String(customer.phone)}
+                        {canInitiateCall && (
+                          <Button
+                            size="xs"
+                            variant="secondary"
+                            disabled={callMut.isPending}
+                            onClick={() => callMut.mutate()}
+                          >
+                            {callMut.isPending ? 'Calling…' : 'Call'}
+                          </Button>
+                        )}
+                      </span>
+                    ) : undefined,
+                  },
                   { label: 'Email', value: customer.email },
                   { label: 'GSTIN', value: customer.gstin },
                   { label: 'PAN', value: customer.pan },
@@ -273,6 +564,25 @@ export default function CustomerViewPage() {
                       : undefined,
                   },
                   { label: 'Loyalty Card', value: customer.loyaltyCardNumber },
+                  {
+                    label: 'Account',
+                    value: linkedAccount ? (
+                      <button
+                        onClick={() => navigate(`/crm/accounts/${accountId}`)}
+                        className="text-link hover:underline"
+                      >
+                        {String(linkedAccount.name)}
+                      </button>
+                    ) : canCreateAccount ? (
+                      <button
+                        onClick={() => createAccountMut.mutate()}
+                        disabled={createAccountMut.isPending}
+                        className="text-link hover:underline text-xs"
+                      >
+                        {createAccountMut.isPending ? 'Creating…' : '+ Create B2B account'}
+                      </button>
+                    ) : undefined,
+                  },
                 ].map(({ label, value }) => (
                   <div key={label}>
                     <dt className="text-xs text-disabled">{label}</dt>
@@ -295,9 +605,88 @@ export default function CustomerViewPage() {
                 </p>
               </div>
             )}
+            {/* CRM-ROADMAP Phase 2, Feature 4 — Referral Program Engine. Code is get-or-created
+                lazily on first view, not a separate explicit "generate" step. */}
+            {canViewReferral && referralLink && (
+              <div className="bg-surface-card rounded-xl border border-default p-5">
+                <h2 className="text-sm font-semibold text-secondary mb-3 uppercase tracking-wide">
+                  Refer a Friend
+                </h2>
+                <p className="text-sm text-primary mb-2">
+                  Code: <span className="font-mono font-semibold">{referralCode}</span>
+                </p>
+                <div className="flex items-center gap-2">
+                  <input
+                    readOnly
+                    value={referralLink}
+                    className="flex-1 min-w-0 rounded-lg border border-default bg-surface-subtle px-3 py-1.5 text-xs text-secondary"
+                  />
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => {
+                      void navigator.clipboard.writeText(referralLink);
+                      toast.success('Referral link copied');
+                    }}
+                  >
+                    Copy
+                  </Button>
+                </div>
+              </div>
+            )}
+            {/* CRM-ROADMAP Phase 1, Feature 5 — ERP-Native Integration Layer: live stock
+                relevance for this customer's most recently purchased items, aggregated
+                across every warehouse (never just one) — the "12 in stock" context a rep
+                would otherwise have to switch to Inventory to see. */}
+            {threeSixty && threeSixty.recentItemsStock.length > 0 && (
+              <div className="bg-surface-card rounded-xl border border-default p-5">
+                <h2 className="text-sm font-semibold text-secondary mb-3 uppercase tracking-wide">
+                  Recently Purchased — Stock
+                </h2>
+                <div className="space-y-2">
+                  {threeSixty.recentItemsStock.map((s) => (
+                    <div key={s.itemId} className="flex items-center justify-between text-sm">
+                      <span className="text-primary">
+                        {s.itemName}
+                        {s.itemCode && <span className="text-secondary"> ({s.itemCode})</span>}
+                      </span>
+                      <Badge
+                        label={
+                          s.totalAvailableQty > 0
+                            ? `${s.totalAvailableQty} in stock${s.warehouseCount > 1 ? ` (${s.warehouseCount} warehouses)` : ''}`
+                            : 'Out of stock'
+                        }
+                        color={s.totalAvailableQty > 0 ? 'green' : 'red'}
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
           <div className="space-y-4">
             {[
+              // CRM-ROADMAP Phase 1, Feature 3/5: live AR snapshot from the 360 endpoint
+              // (CustomerFinancialSnapshotService), not the customer row's static fields.
+              {
+                label: 'Current Balance',
+                value: threeSixty?.financial ? (
+                  <span className={threeSixty.financial.isOverLimit ? 'text-danger' : undefined}>
+                    {formatCurrency(threeSixty.financial.currentBalance)}
+                    {threeSixty.financial.isOverLimit && <Badge label="OVER LIMIT" color="red" />}
+                  </span>
+                ) : (
+                  '—'
+                ),
+              },
+              {
+                label: 'Credit Headroom',
+                value: !threeSixty?.financial
+                  ? '—'
+                  : threeSixty.financial.creditHeadroom === null
+                    ? 'No limit set'
+                    : formatCurrency(threeSixty.financial.creditHeadroom),
+              },
               { label: 'Credit Limit', value: formatCurrency(Number(customer.creditLimit ?? 0)) },
               { label: 'Credit Days', value: `${customer.creditDays ?? 0} days` },
               {
@@ -490,6 +879,50 @@ export default function CustomerViewPage() {
                       </p>
                     )}
                     <p className="text-xs text-secondary mt-0.5">{formatDatetime(i.createdAt)}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {tab === 'calls' && (
+        <div className="bg-surface-card rounded-xl border border-default">
+          {!canViewCalls ? (
+            <ERPEmptyState type="no-access" title="No permission to view call history" />
+          ) : calls.length === 0 ? (
+            <ERPEmptyState
+              type="no-data"
+              title="No calls logged yet"
+              description="Calls made via the Call button above will appear here."
+            />
+          ) : (
+            <div className="divide-y divide-default">
+              {calls.map((c) => (
+                <div key={String(c.id)} className="flex items-start gap-4 px-5 py-3">
+                  <Badge
+                    label={String(c.status)}
+                    color={
+                      c.status === 'COMPLETED'
+                        ? 'green'
+                        : c.status === 'FAILED' || c.status === 'NO_ANSWER'
+                          ? 'red'
+                          : 'gray'
+                    }
+                  />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm text-primary">
+                      {String(c.direction) === 'OUTBOUND' ? 'Outbound' : 'Inbound'} call to{' '}
+                      {String(c.toNumber)}
+                      {c.durationSeconds ? ` · ${c.durationSeconds}s` : ''}
+                    </p>
+                    {typeof c.notes === 'string' && c.notes && (
+                      <p className="text-xs text-secondary mt-0.5">{c.notes}</p>
+                    )}
+                    <p className="text-xs text-secondary mt-0.5">
+                      {formatDatetime(String(c.startedAt))}
+                    </p>
                   </div>
                 </div>
               ))}

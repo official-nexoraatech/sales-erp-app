@@ -2,7 +2,14 @@ import { AlertTriangle } from 'lucide-react';
 import { ConnectivityDot, formatLastSync } from '../../ConnectivityStatus.js';
 
 export function SyncStatusPanel({
-  online, pendingCount, stuckCount, conflictCount, lastSyncedAt, onSyncNow, onRetryStuck, onShowConflicts,
+  online,
+  pendingCount,
+  stuckCount,
+  conflictCount,
+  lastSyncedAt,
+  onSyncNow,
+  onRetryStuck,
+  onShowConflicts,
 }: {
   online: boolean;
   pendingCount: number;
@@ -14,13 +21,19 @@ export function SyncStatusPanel({
   onShowConflicts: () => void;
 }) {
   return (
-    <div className="flex items-center gap-3">
+    // role="status" (implicit aria-live="polite" + aria-atomic="true") — connectivity/sync
+    // state changes (going offline, a sale getting stuck, a stock conflict appearing) were
+    // previously silent to a screen-reader user despite being conveyed visually in real time.
+    <div role="status" className="flex items-center gap-3">
       <ConnectivityDot online={online} pendingCount={pendingCount} />
       <span className="text-xs text-secondary" title="Last successful background/manual sync">
         Last sync: {formatLastSync(lastSyncedAt)}
       </span>
       {online && pendingCount > 0 && (
-        <button onClick={onSyncNow} className="text-xs font-medium text-link hover:text-[var(--text-link-hover)] underline">
+        <button
+          onClick={onSyncNow}
+          className="text-xs font-medium text-link hover:text-[var(--text-link-hover)] underline"
+        >
           Sync now
         </button>
       )}

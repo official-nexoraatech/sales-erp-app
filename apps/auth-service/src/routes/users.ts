@@ -1,15 +1,24 @@
 import type { FastifyInstance } from 'fastify';
 import type { User } from '@erp/db';
-import { users, roles, userRoles, userBranches, rolePermissions, refreshTokens } from '@erp/db';
+import {
+  users,
+  roles,
+  userRoles,
+  userBranches,
+  rolePermissions,
+  refreshTokens,
+  securityAuditLog,
+} from '@erp/db';
 import { and, eq, ne, inArray, isNull } from 'drizzle-orm';
 import { z } from 'zod';
 import * as argon2 from 'argon2';
 import { BusinessError, NotFoundError, PermissionError, ValidationError } from '@erp/types';
 import { PERMISSIONS } from '@erp/types';
 import type { PlatformContextFactory } from '@erp/sdk';
-import { assertUnderUserLimit } from '@erp/sdk';
+import { assertUnderUserLimit, acquireTenantLimitLock } from '@erp/sdk';
 import { authenticate } from '../middleware/authenticate.js';
 import { requirePermission } from '../middleware/authorize.js';
+import { inetParam } from '../db-helpers.js';
 
 // Strips fields that must never leave auth-service: password hash, encrypted
 // TOTP secret ciphertext, and hashed backup codes.
@@ -164,8 +173,6 @@ export async function userRoutes(
           'A user with this email already exists in this tenant'
         );
 
-      await assertUnderUserLimit(ctx.db.raw, tenantId);
-
       // Roles must belong to this tenant, and the caller cannot grant a permission
       // they don't themselves hold — prevents self-escalation via arbitrary roleIds.
       const targetRoles = await ctx.db.raw
@@ -185,18 +192,28 @@ export async function userRoutes(
 
       const passwordHash = await argon2.hash(body.data.password, { type: argon2.argon2id });
 
-      const [newUser] = await ctx.db.raw
-        .insert(users)
-        .values({
-          tenantId,
-          email: body.data.email,
-          passwordHash,
-          firstName: body.data.firstName,
-          lastName: body.data.lastName,
-          phone: body.data.phone,
-          isActive: body.data.isActive,
-        })
-        .returning();
+      // Regression guard (TOCTOU race): the limit check and the insert must happen inside
+      // the same transaction, serialized per-tenant by an advisory lock — otherwise two
+      // concurrent requests can both pass the count check right at the cap and jointly
+      // overshoot the plan's maxUsers limit before either insert commits.
+      const newUser = await ctx.db.transaction(async (trx) => {
+        await acquireTenantLimitLock(trx.raw, tenantId, 'maxUsers');
+        await assertUnderUserLimit(trx.raw, tenantId);
+
+        const [row] = await trx.raw
+          .insert(users)
+          .values({
+            tenantId,
+            email: body.data.email,
+            passwordHash,
+            firstName: body.data.firstName,
+            lastName: body.data.lastName,
+            phone: body.data.phone,
+            isActive: body.data.isActive,
+          })
+          .returning();
+        return row;
+      });
       if (!newUser) throw new Error('User insert failed unexpectedly');
 
       // Assign roles
@@ -373,6 +390,15 @@ export async function userRoutes(
         .set({ revokedAt: now })
         .where(and(eq(refreshTokens.userId, id), isNull(refreshTokens.revokedAt)));
 
+      await ctx.db.raw.insert(securityAuditLog).values({
+        tenantId,
+        actorId: callerId,
+        targetUserId: id,
+        action: 'ADMIN_PASSWORD_RESET',
+        ipAddress: inetParam(request.ip),
+        details: { sameTenant: true },
+      });
+
       return reply.code(200).send({ data: { message: 'Password reset successfully' } });
     }
   );
@@ -420,10 +446,30 @@ export async function userRoutes(
       }
 
       const lockUntil = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000); // 1 year = manual lock
+      const now = new Date();
       await ctx.db.raw
         .update(users)
-        .set({ lockedUntil: lockUntil, updatedAt: new Date() })
+        .set({ lockedUntil: lockUntil, updatedAt: now })
         .where(eq(users.id, id));
+
+      // Revoke all existing sessions — without this, a locked user's already-issued
+      // refresh token keeps minting fresh access tokens via /auth/refresh indefinitely
+      // (refresh.ts only checked isActive, never lockedUntil), making the lock a no-op
+      // for anyone already logged in. Same rationale as the password-reset/-change paths.
+      await ctx.db.raw
+        .update(refreshTokens)
+        .set({ revokedAt: now })
+        .where(and(eq(refreshTokens.userId, id), isNull(refreshTokens.revokedAt)));
+
+      await ctx.db.raw.insert(securityAuditLog).values({
+        tenantId,
+        actorId: callerId,
+        targetUserId: id,
+        action: 'ACCOUNT_LOCKED',
+        ipAddress: inetParam(request.ip),
+        details: {},
+      });
+
       return reply.code(200).send({ data: { message: 'User locked', id } });
     }
   );
@@ -433,7 +479,7 @@ export async function userRoutes(
     '/users/:id/unlock',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.USER_MANAGE)] },
     async (request, reply) => {
-      const { tenantId } = (request as unknown as AuthedRequest).auth;
+      const { tenantId, userId: callerId } = (request as unknown as AuthedRequest).auth;
       const ctx = ctxFor(request);
       const id = parseInt(request.params.id, 10);
       const [existing] = await ctx.db.raw
@@ -445,6 +491,16 @@ export async function userRoutes(
         .update(users)
         .set({ lockedUntil: null, failedLoginAttempts: 0, updatedAt: new Date() })
         .where(eq(users.id, id));
+
+      await ctx.db.raw.insert(securityAuditLog).values({
+        tenantId,
+        actorId: callerId,
+        targetUserId: id,
+        action: 'ACCOUNT_UNLOCKED',
+        ipAddress: inetParam(request.ip),
+        details: {},
+      });
+
       return reply.code(200).send({ data: { message: 'User unlocked', id } });
     }
   );
@@ -566,6 +622,14 @@ export async function userRoutes(
       .update(refreshTokens)
       .set({ revokedAt: now })
       .where(and(eq(refreshTokens.userId, userId), isNull(refreshTokens.revokedAt)));
+    await ctx.db.raw.insert(securityAuditLog).values({
+      tenantId,
+      actorId: userId,
+      targetUserId: userId,
+      action: 'PASSWORD_CHANGED',
+      ipAddress: inetParam(request.ip),
+      details: {},
+    });
     return reply.code(200).send({ data: { message: 'Password changed successfully' } });
   });
 

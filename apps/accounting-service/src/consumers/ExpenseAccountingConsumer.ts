@@ -9,7 +9,7 @@ const logger = createLogger({ serviceName: 'accounting-service' });
 interface ExpensePayload {
   expenseId: number;
   expenseNumber?: string;
-  grandTotal: string | number;
+  totalAmount: string | number;
   category?: string;
 }
 
@@ -18,10 +18,12 @@ export async function handleExpenseApproved(
   db: TenantScopedDatabase
 ): Promise<void> {
   const p = event.payload as unknown as ExpensePayload;
-  const amount = Number(p.grandTotal ?? 0);
+  const amount = Number(p.totalAmount ?? 0);
+
+  const postingDate = new Date(event.occurredAt);
 
   try {
-    await JournalEngine.checkPeriodOpen(db, event.tenantId, new Date());
+    await JournalEngine.checkPeriodOpen(db, event.tenantId, postingDate);
 
     const journalEntry = await PostingMatrixService.buildJournalEntry(db, event.tenantId, {
       eventType: 'EXPENSE_APPROVED',
@@ -29,10 +31,14 @@ export async function handleExpenseApproved(
       referenceType: 'EXPENSE',
       referenceId: p.expenseId,
       amount,
+      postingDate,
     });
 
     const result = await JournalEngine.post(db, event.tenantId, event.userId, journalEntry);
-    logger.info({ journalId: result.journalId, expenseId: p.expenseId }, 'Accounting: EXPENSE_APPROVED posted');
+    logger.info(
+      { journalId: result.journalId, expenseId: p.expenseId },
+      'Accounting: EXPENSE_APPROVED posted'
+    );
   } catch (err) {
     logger.error({ err, expenseId: p.expenseId }, 'Accounting: failed to post EXPENSE_APPROVED');
     throw err;
@@ -44,10 +50,12 @@ export async function handleExpensePaid(
   db: TenantScopedDatabase
 ): Promise<void> {
   const p = event.payload as unknown as ExpensePayload;
-  const amount = Number(p.grandTotal ?? 0);
+  const amount = Number(p.totalAmount ?? 0);
+
+  const postingDate = new Date(event.occurredAt);
 
   try {
-    await JournalEngine.checkPeriodOpen(db, event.tenantId, new Date());
+    await JournalEngine.checkPeriodOpen(db, event.tenantId, postingDate);
 
     const journalEntry = await PostingMatrixService.buildJournalEntry(db, event.tenantId, {
       eventType: 'EXPENSE_PAID',
@@ -55,10 +63,14 @@ export async function handleExpensePaid(
       referenceType: 'EXPENSE',
       referenceId: p.expenseId,
       amount,
+      postingDate,
     });
 
     const result = await JournalEngine.post(db, event.tenantId, event.userId, journalEntry);
-    logger.info({ journalId: result.journalId, expenseId: p.expenseId }, 'Accounting: EXPENSE_PAID posted');
+    logger.info(
+      { journalId: result.journalId, expenseId: p.expenseId },
+      'Accounting: EXPENSE_PAID posted'
+    );
   } catch (err) {
     logger.error({ err, expenseId: p.expenseId }, 'Accounting: failed to post EXPENSE_PAID');
     throw err;

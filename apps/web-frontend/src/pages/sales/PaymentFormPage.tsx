@@ -88,16 +88,18 @@ export default function PaymentFormPage() {
       />
 
       <ERPFormSection title="Payment Details" columns={2}>
-        <Select
-          label="Customer"
-          required
-          value={customerId}
-          onChange={(e) => setCustomerId(e.target.value)}
-          options={[
-            { value: '', label: 'Select customer...' },
-            ...customers.map((c) => ({ value: String(c.id), label: c.displayName })),
-          ]}
-        />
+        <div data-tour-id="sales-payment-new-customer-select">
+          <Select
+            label="Customer"
+            required
+            value={customerId}
+            onChange={(e) => setCustomerId(e.target.value)}
+            options={[
+              { value: '', label: 'Select customer...' },
+              ...customers.map((c) => ({ value: String(c.id), label: c.displayName })),
+            ]}
+          />
+        </div>
         <Input
           label="Payment Date"
           required
@@ -108,6 +110,7 @@ export default function PaymentFormPage() {
         <Select
           label="Payment Mode"
           required
+          hint="CHEQUE asks for a cheque number below (needed to mark it bounced later, if it bounces); UPI/NEFT/RTGS/CARD ask for a transaction reference instead."
           value={paymentMode}
           onChange={(e) => setPaymentMode(e.target.value)}
           options={['CASH', 'CARD', 'UPI', 'CHEQUE', 'NEFT', 'RTGS'].map((m) => ({
@@ -115,16 +118,20 @@ export default function PaymentFormPage() {
             label: m,
           }))}
         />
-        <Input
-          label="Amount"
-          required
-          type="number"
-          value={amount}
-          onChange={(e) => setAmount(e.target.value)}
-        />
+        <div data-tour-id="sales-payment-new-amount-input">
+          <Input
+            label="Amount"
+            required
+            type="number"
+            hint="Can be less than the invoice's balance due — that's a partial payment, and the invoice stays PARTIALLY_PAID until the rest is collected."
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+          />
+        </div>
         {paymentMode === 'CHEQUE' && (
           <Input
             label="Cheque Number"
+            required
             value={chequeNumber}
             onChange={(e) => setChequeNumber(e.target.value)}
           />
@@ -149,8 +156,11 @@ export default function PaymentFormPage() {
           Cancel
         </Button>
         <Button
+          data-tour-id="sales-payment-new-save-button"
           isLoading={createMutation.isPending}
-          disabled={!customerId || !amount}
+          disabled={
+            !customerId || !(parseFloat(amount) > 0) || (paymentMode === 'CHEQUE' && !chequeNumber)
+          }
           onClick={() =>
             createMutation.mutate({
               customerId: Number(customerId),

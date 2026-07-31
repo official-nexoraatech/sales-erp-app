@@ -10,6 +10,7 @@ import ERPEmptyState from '../../components/erp/ERPEmptyState.js';
 import ERPConfirmModal from '../../components/erp/ERPConfirmModal.js';
 import Button from '../../components/ui/Button.js';
 import Badge from '../../components/ui/Badge.js';
+import InfoTooltip from '../../components/ui/InfoTooltip.js';
 import { formatDate, formatCurrency } from '../../lib/format.js';
 import { useState } from 'react';
 
@@ -60,6 +61,18 @@ const STATUS_COLORS: Record<string, 'default' | 'success' | 'warning' | 'danger'
   REJECTED: 'danger',
 };
 
+const STATUS_DESCRIPTIONS: Record<string, string> = {
+  DRAFT: 'Not yet sent to the customer — still freely editable.',
+  SENT: 'Sent to the customer, awaiting their response.',
+  VIEWED: 'The customer has opened it.',
+  ACCEPTED:
+    'The customer agreed — ready to Convert to Invoice. No accounting, inventory, or GST effect yet.',
+  CONVERTED: 'Already converted — use Create Invoice below to start (another) invoice from it.',
+  EXPIRED:
+    'Past its "Valid Until" date — this is only a visual cue, it can still be accepted or rejected exactly as before.',
+  REJECTED: 'The customer declined.',
+};
+
 export default function QuotationDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -90,10 +103,11 @@ export default function QuotationDetailPage() {
   const convertMutation = useMutation({
     mutationFn: () => quotationApi.convert(Number(id)),
     onSuccess: () => {
-      toast.success('Quotation converted — proceed to create invoice');
+      toast.success('Quotation converted — creating invoice');
       void qc.invalidateQueries({ queryKey: ['quotation', id] });
       void qc.invalidateQueries({ queryKey: ['quotations'] });
       setShowConvertConfirm(false);
+      navigate(`/sales/invoices/new?quotationId=${id}`);
     },
     onError: (e: Error) => {
       toast.error(e.message);
@@ -140,8 +154,14 @@ export default function QuotationDetailPage() {
       >
         <div className="flex flex-wrap items-center gap-3">
           <Badge variant={STATUS_COLORS[q.status] ?? 'default'}>{q.status}</Badge>
+          {STATUS_DESCRIPTIONS[q.status] && (
+            <InfoTooltip label={`What does ${q.status} mean?`}>
+              {STATUS_DESCRIPTIONS[q.status]}
+            </InfoTooltip>
+          )}
           {canCreateQuotation && q.status === 'DRAFT' && (
             <Button
+              data-tour-id="sales-quotation-detail-send-button"
               variant="ghost"
               isLoading={sendMutation.isPending}
               onClick={() => sendMutation.mutate()}
@@ -151,19 +171,33 @@ export default function QuotationDetailPage() {
           )}
           {canConvertQuotation && ['SENT', 'VIEWED'].includes(q.status) && (
             <>
-              <Button onClick={() => acceptMutation.mutate()} isLoading={acceptMutation.isPending}>
+              <Button
+                data-tour-id="sales-quotation-detail-accept-button"
+                onClick={() => acceptMutation.mutate()}
+                isLoading={acceptMutation.isPending}
+              >
                 Accept
               </Button>
-              <Button variant="ghost" onClick={() => setShowRejectConfirm(true)}>
+              <Button
+                data-tour-id="sales-quotation-detail-reject-button"
+                variant="ghost"
+                onClick={() => setShowRejectConfirm(true)}
+              >
                 Reject
               </Button>
             </>
           )}
           {canConvertQuotation && q.status === 'ACCEPTED' && (
-            <Button onClick={() => setShowConvertConfirm(true)}>Convert to Order</Button>
+            <Button
+              data-tour-id="sales-quotation-detail-convert-button"
+              onClick={() => setShowConvertConfirm(true)}
+            >
+              Convert to Invoice
+            </Button>
           )}
           {canCreateQuotation && ['ACCEPTED', 'CONVERTED'].includes(q.status) && (
             <Button
+              data-tour-id="sales-quotation-detail-create-invoice-button"
               variant="ghost"
               onClick={() =>
                 navigate(`/sales/invoices/new?quotationId=${q.id}&customerId=${q.customerId}`)
@@ -290,9 +324,9 @@ export default function QuotationDetailPage() {
         open={showConvertConfirm}
         onClose={() => setShowConvertConfirm(false)}
         onConfirm={() => convertMutation.mutate()}
-        title="Convert Quotation to Order"
+        title="Convert Quotation to Invoice"
         description="This will mark the quotation as CONVERTED. You can then create an invoice linked to this quotation. This action cannot be undone."
-        confirmLabel="Convert to Order"
+        confirmLabel="Convert to Invoice"
         variant="warning"
         isLoading={convertMutation.isPending}
       />

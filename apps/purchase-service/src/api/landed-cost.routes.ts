@@ -1,7 +1,10 @@
 import type { FastifyInstance } from 'fastify';
 import type { PlatformContextFactory } from '@erp/sdk';
+import { getBranchScope } from '@erp/sdk';
+import { grns, type ErpDatabase } from '@erp/db';
+import { and, eq } from 'drizzle-orm';
 import { z } from 'zod';
-import { PERMISSIONS } from '@erp/types';
+import { PERMISSIONS, ERPError } from '@erp/types';
 import { authenticate } from '../middleware/authenticate.js';
 import { requirePermission } from '../middleware/authorize.js';
 import { LandedCostService } from '../domain/LandedCostService.js';
@@ -19,6 +22,25 @@ export async function landedCostRoutes(
 ): Promise<void> {
   fastify.addHook('preHandler', authenticate);
 
+  // Purchase audit 2026-07-21 gap-fix (systemic pass, part 3): landedCosts has no branchId of
+  // its own — every route here acts on a GRN by id, so resolve through grns.branch_id.
+  async function assertGrnBranchInScope(
+    ctx: { db: { raw: ErpDatabase } },
+    grnId: number,
+    tenantId: number,
+    auth: { permissions: string[]; branchIds: number[] }
+  ): Promise<void> {
+    const branchScope = getBranchScope(auth);
+    if (branchScope === 'all') return;
+    const [row] = await ctx.db.raw
+      .select({ branchId: grns.branchId })
+      .from(grns)
+      .where(and(eq(grns.id, grnId), eq(grns.tenantId, tenantId)));
+    if (row && !branchScope.includes(row.branchId)) {
+      throw new ERPError('GRN_OUT_OF_SCOPE', 'GRN is outside your assigned branch(es)', 403);
+    }
+  }
+
   fastify.post('/grns/:id/landed-costs', {
     preHandler: requirePermission(PERMISSIONS.GRN_APPROVE),
     handler: async (req, reply) => {
@@ -27,8 +49,10 @@ export async function landedCostRoutes(
       const ctx = ctxFactory.create({
         tenantId: req.auth.tenantId,
         userId: req.auth.userId,
-        correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
       });
+      await assertGrnBranchInScope(ctx, parseInt(id, 10), req.auth.tenantId, req.auth);
       const svc = new LandedCostService(ctx.db.raw);
       const costId = await svc.addCost({
         tenantId: req.auth.tenantId,
@@ -50,8 +74,10 @@ export async function landedCostRoutes(
       const ctx = ctxFactory.create({
         tenantId: req.auth.tenantId,
         userId: req.auth.userId,
-        correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
       });
+      await assertGrnBranchInScope(ctx, parseInt(id, 10), req.auth.tenantId, req.auth);
       const svc = new LandedCostService(ctx.db.raw);
       await svc.allocate(parseInt(id, 10), req.auth.tenantId);
       return reply.send({ success: true });
@@ -65,8 +91,10 @@ export async function landedCostRoutes(
       const ctx = ctxFactory.create({
         tenantId: req.auth.tenantId,
         userId: req.auth.userId,
-        correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
       });
+      await assertGrnBranchInScope(ctx, parseInt(id, 10), req.auth.tenantId, req.auth);
       const svc = new LandedCostService(ctx.db.raw);
       const data = await svc.getForGrn(parseInt(id, 10), req.auth.tenantId);
       return reply.send({ data });

@@ -43,7 +43,11 @@ beforeAll(async () => {
   process.env['JWT_PUBLIC_KEY'] = pub;
 });
 
-async function signToken(opts: { sub: string; tenantId: number; permissions: string[] }): Promise<string> {
+async function signToken(opts: {
+  sub: string;
+  tenantId: number;
+  permissions: string[];
+}): Promise<string> {
   const nowSec = Math.floor(Date.now() / 1000);
   return new SignJWT({
     tenantId: opts.tenantId,
@@ -54,6 +58,7 @@ async function signToken(opts: { sub: string; tenantId: number; permissions: str
     .setProtectedHeader({ alg: 'RS256' })
     .setSubject(opts.sub)
     .setIssuedAt(nowSec)
+    .setIssuer('erp-auth-service')
     .setExpirationTime(nowSec + 900)
     .sign(privateKey);
 }
@@ -95,7 +100,9 @@ async function buildApp(db: Record<string, unknown>): Promise<FastifyInstance> {
   await usageRoutes(app, db as never);
   app.setErrorHandler<FastifyError>((error, _request, reply) => {
     if (error instanceof ERPError) {
-      return reply.code(error.statusCode).send({ error: { code: error.code, message: error.message } });
+      return reply
+        .code(error.statusCode)
+        .send({ error: { code: error.code, message: error.message } });
     }
     return reply.code(500).send({ error: { code: 'INTERNAL_ERROR', message: 'Internal error' } });
   });
@@ -131,7 +138,11 @@ describe('PG-028 — GET /admin/tenants/:id/usage', () => {
   it('3. platform-operator, no usage_summary row yet → 200 with zeros + entitlements from tenant.settings', async () => {
     const db = makeFakeDb({ tenant: { id: 2, settings: { maxUsers: 25, maxBranches: 5 } } });
     const app = await buildApp(db);
-    const token = await signToken({ sub: '99', tenantId: 999, permissions: ['PLATFORM_TENANT_MANAGE'] });
+    const token = await signToken({
+      sub: '99',
+      tenantId: 999,
+      permissions: ['PLATFORM_TENANT_MANAGE'],
+    });
 
     const res = await app.inject({
       method: 'GET',
@@ -156,11 +167,21 @@ describe('PG-028 — GET /admin/tenants/:id/usage', () => {
     const db = makeFakeDb({
       tenant: { id: 2, settings: { maxUsers: 25, maxBranches: 5 } },
       usageSummaryRows: [
-        { tenantId: 2, invoiceCount: 7, activeUserCount: 3, storageBytes: 2048, apiCallCount: 1500 },
+        {
+          tenantId: 2,
+          invoiceCount: 7,
+          activeUserCount: 3,
+          storageBytes: 2048,
+          apiCallCount: 1500,
+        },
       ],
     });
     const app = await buildApp(db);
-    const token = await signToken({ sub: '99', tenantId: 999, permissions: ['PLATFORM_TENANT_MANAGE'] });
+    const token = await signToken({
+      sub: '99',
+      tenantId: 999,
+      permissions: ['PLATFORM_TENANT_MANAGE'],
+    });
 
     const res = await app.inject({
       method: 'GET',
@@ -170,14 +191,23 @@ describe('PG-028 — GET /admin/tenants/:id/usage', () => {
 
     expect(res.statusCode).toBe(200);
     const body = res.json() as { data: Record<string, unknown> };
-    expect(body.data).toMatchObject({ invoiceCount: 7, activeUserCount: 3, storageBytes: 2048, apiCallCount: 1500 });
+    expect(body.data).toMatchObject({
+      invoiceCount: 7,
+      activeUserCount: 3,
+      storageBytes: 2048,
+      apiCallCount: 1500,
+    });
     await app.close();
   });
 
-  it('5. malformed period → 400', async () => {
+  it('5. malformed period → 422 (F18: routed through the shared ValidationError, matching every other route in this service)', async () => {
     const db = makeFakeDb({ tenant: { id: 2, settings: {} } });
     const app = await buildApp(db);
-    const token = await signToken({ sub: '99', tenantId: 999, permissions: ['PLATFORM_TENANT_MANAGE'] });
+    const token = await signToken({
+      sub: '99',
+      tenantId: 999,
+      permissions: ['PLATFORM_TENANT_MANAGE'],
+    });
 
     const res = await app.inject({
       method: 'GET',
@@ -185,14 +215,18 @@ describe('PG-028 — GET /admin/tenants/:id/usage', () => {
       headers: { Authorization: `Bearer ${token}` },
     });
 
-    expect(res.statusCode).toBe(400);
+    expect(res.statusCode).toBe(422);
     await app.close();
   });
 
   it('6. tenant not found → 404', async () => {
     const db = makeFakeDb({});
     const app = await buildApp(db);
-    const token = await signToken({ sub: '99', tenantId: 999, permissions: ['PLATFORM_TENANT_MANAGE'] });
+    const token = await signToken({
+      sub: '99',
+      tenantId: 999,
+      permissions: ['PLATFORM_TENANT_MANAGE'],
+    });
 
     const res = await app.inject({
       method: 'GET',
@@ -237,10 +271,16 @@ describe('PG-028 — GET /admin/tenants/usage-overview', () => {
         { id: 1, name: 'Acme' },
         { id: 2, name: 'Globex' },
       ],
-      usageSummaryRows: [{ tenantId: 1, invoiceCount: 4, activeUserCount: 2, storageBytes: 512, apiCallCount: 99 }],
+      usageSummaryRows: [
+        { tenantId: 1, invoiceCount: 4, activeUserCount: 2, storageBytes: 512, apiCallCount: 99 },
+      ],
     });
     const app = await buildApp(db);
-    const token = await signToken({ sub: '99', tenantId: 999, permissions: ['PLATFORM_TENANT_MANAGE'] });
+    const token = await signToken({
+      sub: '99',
+      tenantId: 999,
+      permissions: ['PLATFORM_TENANT_MANAGE'],
+    });
 
     const res = await app.inject({
       method: 'GET',
@@ -251,8 +291,16 @@ describe('PG-028 — GET /admin/tenants/usage-overview', () => {
     expect(res.statusCode).toBe(200);
     const body = res.json() as { data: { content: Array<Record<string, unknown>> } };
     expect(body.data.content).toHaveLength(2);
-    expect(body.data.content[0]).toMatchObject({ tenantId: 1, tenantName: 'Acme', invoiceCount: 4 });
-    expect(body.data.content[1]).toMatchObject({ tenantId: 2, tenantName: 'Globex', invoiceCount: 0 });
+    expect(body.data.content[0]).toMatchObject({
+      tenantId: 1,
+      tenantName: 'Acme',
+      invoiceCount: 4,
+    });
+    expect(body.data.content[1]).toMatchObject({
+      tenantId: 2,
+      tenantName: 'Globex',
+      invoiceCount: 0,
+    });
     await app.close();
   });
 });

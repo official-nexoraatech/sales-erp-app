@@ -2,6 +2,7 @@ import { and, eq, sql } from 'drizzle-orm';
 import { landedCosts, grnLines, grns } from '@erp/db';
 import type { ErpDatabase } from '@erp/db';
 import { BusinessError, NotFoundError } from '@erp/types';
+import { ValuationService } from './ValuationService.js';
 
 export interface AddLandedCostParams {
   tenantId: number;
@@ -48,10 +49,21 @@ export class LandedCostService {
       .where(and(eq(grns.id, grnId), eq(grns.tenantId, tenantId)));
     if (!grn) throw new NotFoundError('GRN', grnId);
 
+    // Only pick up costs not yet allocated — previously this selected ALL costs for the
+    // GRN regardless of isAllocated, so calling allocate() again after adding a second
+    // freight/insurance charge would re-run the loop over the FIRST charge too, adding
+    // its allocation to grnLines.allocatedLandedCost a second time (and double-counting
+    // it into grns.landedCostTotal/effectiveCostTotal below).
     const costs = await this.db
       .select()
       .from(landedCosts)
-      .where(and(eq(landedCosts.grnId, grnId), eq(landedCosts.tenantId, tenantId)));
+      .where(
+        and(
+          eq(landedCosts.grnId, grnId),
+          eq(landedCosts.tenantId, tenantId),
+          eq(landedCosts.isAllocated, false)
+        )
+      );
 
     if (costs.length === 0) return;
 
@@ -84,15 +96,17 @@ export class LandedCostService {
             lineBase = parseFloat(String(line.receivedQty));
           }
 
-          const lineAllocation = Math.round((totalAmount * lineBase / totalBase) * 100) / 100;
+          const lineAllocation = Math.round(((totalAmount * lineBase) / totalBase) * 100) / 100;
           const receivedQty = parseFloat(String(line.receivedQty));
           const existingLanded = parseFloat(String(line.allocatedLandedCost ?? 0));
           const grnRate = parseFloat(String(line.grnRate));
 
           const newAllocatedLanded = existingLanded + lineAllocation;
-          const newEffectiveUnitCost = receivedQty > 0
-            ? Math.round(((grnRate * receivedQty + newAllocatedLanded) / receivedQty) * 10000) / 10000
-            : grnRate;
+          const newEffectiveUnitCost =
+            receivedQty > 0
+              ? Math.round(((grnRate * receivedQty + newAllocatedLanded) / receivedQty) * 10000) /
+                10000
+              : grnRate;
 
           await trx
             .update(grnLines)
@@ -101,22 +115,36 @@ export class LandedCostService {
               effectiveUnitCost: String(newEffectiveUnitCost),
             })
             .where(eq(grnLines.id, line.id));
+
+          // Previously grnLines.effectiveUnitCost was updated above but items.waccCost/
+          // currentStockValue and any FIFO layer stayed at the GRN-rate-only cost forever —
+          // landed costs never flowed into actual inventory costing/COGS. Only applies once
+          // the GRN is APPROVED (before that, no stock/ledger/FIFO layer exists yet for this
+          // line — see GRNService.approve()).
+          if (grn.status === 'APPROVED' && lineAllocation > 0) {
+            await ValuationService.applyLandedCostAdjustment(trx, {
+              tenantId,
+              itemId: line.itemId,
+              grnId,
+              grnLineId: line.id,
+              additionalValue: lineAllocation,
+            });
+          }
         }
 
-        await trx
-          .update(landedCosts)
-          .set({ isAllocated: true })
-          .where(eq(landedCosts.id, cost.id));
+        await trx.update(landedCosts).set({ isAllocated: true }).where(eq(landedCosts.id, cost.id));
       }
 
-      // Update GRN landed cost total and effective cost total
+      // Update GRN landed cost total and effective cost total — both additive against the
+      // current DB value (not an absolute overwrite), so a later call that only allocates
+      // a newly-added cost still keeps what earlier calls already accumulated.
       const totalLandedCost = costs.reduce((s, c) => s + parseFloat(String(c.amount)), 0);
       const grnTotal = parseFloat(String(grn.grandTotal));
       await trx
         .update(grns)
         .set({
           landedCostTotal: sql`${grns.landedCostTotal} + ${totalLandedCost}`,
-          effectiveCostTotal: String(grnTotal + totalLandedCost),
+          effectiveCostTotal: sql`${grnTotal} + ${grns.landedCostTotal} + ${totalLandedCost}`,
           updatedAt: new Date(),
         })
         .where(and(eq(grns.id, grnId), eq(grns.tenantId, tenantId)));

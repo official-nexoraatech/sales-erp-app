@@ -69,9 +69,39 @@ export default function UserFormPage() {
     }
   }, [user, reset]);
 
+  const canAssignRole = hasPermission(PERMISSIONS.ROLE_ASSIGN_USER);
+  const canManageBranches = hasPermission(PERMISSIONS.USER_MANAGE);
+
   const mutation = useMutation({
-    mutationFn: (d: Record<string, unknown>) =>
-      isEdit ? userApi.update(Number(id), d) : userApi.create(d),
+    mutationFn: async (d: UserFormData) => {
+      const payload: Record<string, unknown> = { ...d };
+      if (!isEdit) {
+        payload.roleIds = [d.roleId];
+        delete payload.roleId;
+        if (d.primaryBranchId) payload.branchIds = [d.primaryBranchId];
+        if (!d.password) delete payload.password;
+        return userApi.create(payload);
+      }
+
+      // Email/role/branch aren't accepted by PUT /users/:id at all — updating them requires
+      // the dedicated /roles and /branches endpoints, which this form previously showed as
+      // editable fields but silently discarded on submit (a real bug: users saw "User updated"
+      // even though their role/branch/email change never took effect).
+      delete payload.roleId;
+      delete payload.password;
+      delete payload.email;
+      const result = await userApi.update(Number(id), payload);
+      if (canAssignRole && d.roleId) {
+        await userApi.updateRoles(Number(id), { roleIds: [d.roleId] });
+      }
+      if (canManageBranches && d.primaryBranchId) {
+        await userApi.assignBranches(Number(id), {
+          branchIds: [d.primaryBranchId],
+          primaryBranchId: d.primaryBranchId,
+        });
+      }
+      return result;
+    },
     onSuccess: () => {
       toast.success(isEdit ? 'User updated' : 'User created');
       qc.invalidateQueries({ queryKey: ['users'] });
@@ -81,17 +111,7 @@ export default function UserFormPage() {
   });
 
   function onSubmit(d: UserFormData) {
-    const payload: Record<string, unknown> = { ...d };
-    if (!isEdit) {
-      payload.roleIds = [d.roleId];
-      delete payload.roleId;
-      if (d.primaryBranchId) payload.branchIds = [d.primaryBranchId];
-      if (!d.password) delete payload.password;
-    } else {
-      delete payload.roleId;
-      delete payload.password;
-    }
-    mutation.mutate(payload);
+    mutation.mutate(d);
   }
 
   return (
@@ -121,6 +141,8 @@ export default function UserFormPage() {
             label="Email"
             type="email"
             required
+            disabled={isEdit}
+            hint={isEdit ? "Email can't be changed after the account is created" : undefined}
             {...register('email')}
             error={errors.email?.message}
           />
@@ -138,7 +160,18 @@ export default function UserFormPage() {
         </ERPFormSection>
 
         <ERPFormSection title="Access" columns={2}>
-          <Select label="Role" required {...register('roleId')} error={errors.roleId?.message}>
+          <Select
+            label="Role"
+            required
+            disabled={isEdit && !canAssignRole}
+            hint={
+              isEdit && !canAssignRole
+                ? "You don't have permission to change a user's role"
+                : undefined
+            }
+            {...register('roleId')}
+            error={errors.roleId?.message}
+          >
             <option value="">Select role…</option>
             {roles.map((r) => (
               <option key={r.id} value={r.id}>
@@ -148,6 +181,14 @@ export default function UserFormPage() {
           </Select>
           <Select
             label="Primary Branch"
+            disabled={isEdit && !canManageBranches}
+            hint={
+              !isEdit
+                ? 'Leaving this blank lets the user see data for every branch, not just one'
+                : !canManageBranches
+                  ? "You don't have permission to change a user's branch"
+                  : 'Leaving this blank gives the user access to every branch, not just one'
+            }
             {...register('primaryBranchId')}
             error={errors.primaryBranchId?.message}
           >

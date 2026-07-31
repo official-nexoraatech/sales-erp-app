@@ -1,7 +1,9 @@
 import { useNavigate } from 'react-router-dom';
-import { Check } from 'lucide-react';
+import { Check, Sparkles, Rocket, Building2 } from 'lucide-react';
 import Button from '../../../components/ui/Button.js';
+import ModuleGlyph from '../../../components/marketing/ModuleGlyph.js';
 import MarketingSection from '../../../components/marketing/MarketingSection.js';
+import { useScrollReveal } from '../../../hooks/useScrollReveal.js';
 
 // Mirrors packages/db-client/migrations/0040_pg027_billing_entitlements.sql's real
 // plan_entitlements seed data exactly (max_users/max_branches/feature_flags) — no invented
@@ -12,6 +14,7 @@ import MarketingSection from '../../../components/marketing/MarketingSection.js'
 export const PLANS = [
   {
     id: 'STARTER',
+    icon: Sparkles,
     name: 'Starter',
     description: 'For small teams getting off spreadsheets.',
     limits: ['5 users', '1 branch'],
@@ -26,6 +29,7 @@ export const PLANS = [
   },
   {
     id: 'GROWTH',
+    icon: Rocket,
     name: 'Growth',
     description: 'For growing, multi-branch operations.',
     limits: ['25 users', '5 branches'],
@@ -41,6 +45,7 @@ export const PLANS = [
   },
   {
     id: 'ENTERPRISE',
+    icon: Building2,
     name: 'Enterprise',
     description: 'For large, complex organizations.',
     limits: ['Unlimited users', 'Unlimited branches'],
@@ -56,6 +61,63 @@ export const PLANS = [
   },
 ];
 
+function PlanCard({
+  plan,
+  index,
+  onSelect,
+}: {
+  plan: (typeof PLANS)[number];
+  index: number;
+  onSelect: () => void;
+}) {
+  const { ref, isVisible } = useScrollReveal<HTMLDivElement>();
+  return (
+    <div
+      ref={ref}
+      style={{ transitionDelay: isVisible ? `${Math.min(index, 6) * 60}ms` : '0ms' }}
+      className={`rounded-2xl border p-8 relative transition-all duration-slow hover:-translate-y-1 hover:shadow-token-lg ${
+        plan.highlighted
+          ? 'border-brand shadow-token-lg bg-surface-card'
+          : 'border-default bg-surface-card shadow-token-sm hover:border-brand'
+      } ${isVisible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-3'}`}
+    >
+      {plan.highlighted && (
+        <span className="absolute -top-3 left-8 rounded-full bg-[image:linear-gradient(135deg,var(--brand-accent),var(--brand-primary))] text-primary-fg text-xs font-semibold px-3 py-1 shadow-token-sm">
+          Most popular
+        </span>
+      )}
+      <ModuleGlyph icon={plan.icon} size="md" variant={plan.highlighted ? 'accent' : 'default'} />
+      <h3 className="mt-4 text-lg font-bold text-primary">{plan.name}</h3>
+      <p className="mt-1 text-sm text-secondary">{plan.description}</p>
+      <div className="mt-4 flex gap-2">
+        {plan.limits.map((l) => (
+          <span
+            key={l}
+            className="text-xs font-medium rounded-full bg-surface-subtle px-2.5 py-1 text-secondary"
+          >
+            {l}
+          </span>
+        ))}
+      </div>
+      <ul className="mt-6 space-y-2.5">
+        {plan.features.map((f) => (
+          <li key={f} className="flex items-start gap-2 text-sm text-primary">
+            <Check className="h-4 w-4 text-success shrink-0 mt-0.5" />
+            {f}
+          </li>
+        ))}
+      </ul>
+      <Button
+        className="w-full justify-center mt-8"
+        variant={plan.highlighted ? 'primary' : 'secondary'}
+        onClick={onSelect}
+      >
+        {plan.cta}
+      </Button>
+    </div>
+  );
+}
+
 export default function PricingPreview() {
   const navigate = useNavigate();
   return (
@@ -68,48 +130,13 @@ export default function PricingPreview() {
         <p className="mt-3 text-secondary">Start free on Starter. Talk to us when you need more.</p>
       </div>
       <div className="mt-14 grid md:grid-cols-3 gap-6 items-start">
-        {PLANS.map((plan) => (
-          <div
+        {PLANS.map((plan, index) => (
+          <PlanCard
             key={plan.id}
-            className={`rounded-2xl border p-8 ${
-              plan.highlighted
-                ? 'border-brand shadow-token-lg bg-surface-card relative'
-                : 'border-default bg-surface-card'
-            }`}
-          >
-            {plan.highlighted && (
-              <span className="absolute -top-3 left-8 rounded-full bg-brand text-primary-fg text-xs font-semibold px-3 py-1">
-                Most popular
-              </span>
-            )}
-            <h3 className="text-lg font-bold text-primary">{plan.name}</h3>
-            <p className="mt-1 text-sm text-secondary">{plan.description}</p>
-            <div className="mt-4 flex gap-2">
-              {plan.limits.map((l) => (
-                <span
-                  key={l}
-                  className="text-xs font-medium rounded-full bg-surface-subtle px-2.5 py-1 text-secondary"
-                >
-                  {l}
-                </span>
-              ))}
-            </div>
-            <ul className="mt-6 space-y-2.5">
-              {plan.features.map((f) => (
-                <li key={f} className="flex items-start gap-2 text-sm text-primary">
-                  <Check className="h-4 w-4 text-success shrink-0 mt-0.5" />
-                  {f}
-                </li>
-              ))}
-            </ul>
-            <Button
-              className="w-full justify-center mt-8"
-              variant={plan.highlighted ? 'primary' : 'secondary'}
-              onClick={() => navigate(plan.cta === 'Talk to Sales' ? '/contact' : '/signup')}
-            >
-              {plan.cta}
-            </Button>
-          </div>
+            plan={plan}
+            index={index}
+            onSelect={() => navigate(plan.cta === 'Talk to Sales' ? '/contact' : '/signup')}
+          />
         ))}
       </div>
     </MarketingSection>

@@ -254,6 +254,7 @@ describe('Phase 13 — Auth Security Hardening', () => {
           .mockReturnValueOnce(makeSelectLimit([])) // blocked_ips lookup — IP not blocked
           .mockReturnValue(makeSelectLimit([lockedUser])), // users lookup
         update: vi.fn(),
+        insert: vi.fn().mockReturnValue(makeInsert()), // LOGIN_FAILURE audit-log write
       };
 
       const app = await buildApp(db);
@@ -391,6 +392,64 @@ describe('Phase 13 — Auth Security Hardening', () => {
       expect(revokeSpy).toHaveBeenCalledWith(
         expect.objectContaining({ revokedAt: expect.any(Date) })
       );
+
+      await app.close();
+    });
+  });
+
+  // ─── 13.1.6g: Locked account cannot refresh its session ──────────────
+
+  describe('13.1.6g — Locked account → refresh rejected', () => {
+    it('rejects /auth/refresh for a user locked after the refresh token was issued', async () => {
+      const PLAIN_TOKEN = 'locked-user-refresh-token-32bytes!!';
+      const expectedHash = sha256Hex(PLAIN_TOKEN);
+
+      const tokenRow = {
+        id: 11,
+        tokenHash: expectedHash,
+        revokedAt: null,
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+        userId: 2,
+        tenantId: 1,
+        userAgent: null,
+        ipAddress: '127.0.0.1',
+      };
+
+      const lockedUserRow = {
+        id: 2,
+        email: 'locked-refresh@testco.com',
+        tenantId: 1,
+        isActive: true,
+        passwordHash: '$argon2id$fake',
+        failedLoginAttempts: 5,
+        lockedUntil: new Date(Date.now() + 900_000), // locked after the token was issued
+        lastLoginAt: null,
+        updatedAt: new Date(),
+      };
+
+      const db = {
+        select: vi
+          .fn()
+          .mockReturnValueOnce(makeSelectLimit([tokenRow])) // refreshTokens lookup
+          .mockReturnValue(makeSelectLimit([lockedUserRow])), // users lookup
+        update: vi.fn(),
+        insert: vi.fn(),
+      };
+
+      const app = await buildApp(db);
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/auth/refresh',
+        payload: { refreshToken: PLAIN_TOKEN },
+      });
+
+      expect(res.statusCode).toBe(401);
+      const body = JSON.parse(res.body) as { error: string };
+      expect(body.error).toMatch(/locked/i);
+
+      // Must reject before rotating — no new refresh token should be issued
+      expect(db.insert).not.toHaveBeenCalled();
 
       await app.close();
     });

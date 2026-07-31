@@ -1,9 +1,24 @@
-import { and, desc, eq, gte, inArray, notInArray, sql } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gt,
+  gte,
+  inArray,
+  isNotNull,
+  isNull,
+  notInArray,
+  sql,
+} from 'drizzle-orm';
 import {
   campaigns,
   campaignAutomationRules,
   campaignHistory,
   campaignRecipients,
+  crmCampaignVariants,
+  crmCampaignMessageTranslations,
+  crmLinkClicks,
   customers,
   customerSegments,
   invoices,
@@ -12,13 +27,17 @@ import {
   tenantCommunicationSettings,
   tenantSenderIdentity,
   customerCommunicationPreferences,
+  crmDltTemplates,
   type Campaign,
   type CampaignAutomationRule,
 } from '@erp/db';
+import type { ErpDatabase } from '@erp/db';
 import type { PlatformContext } from '@erp/sdk';
 import { createCircuitBreaker } from '@erp/sdk';
 import { BusinessError, NotFoundError, OptimisticLockError, ValidationError } from '@erp/types';
+import { matchesDltTemplate } from '@erp/utils';
 import { createLogger } from '@erp/logger';
+import { ulid } from 'ulid';
 import { SegmentService, type SegmentFilterDefinition } from './SegmentService.js';
 import { enqueueWebhookDeliveries } from './WebhookService.js';
 
@@ -58,11 +77,18 @@ interface RecipientRow {
   phone: string;
   email: string | null;
   loyaltyPoints: number;
+  // CRM-ROADMAP Phase 3, Feature 5 — null means no preference, send() falls back to the
+  // campaign's base messageTemplate for this recipient.
+  preferredLanguage: string | null;
 }
 
 function isUnicode(text: string): boolean {
   // eslint-disable-next-line no-control-regex
   return /[^\x00-\x7F]/.test(text);
+}
+
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
 }
 
 export function checkChannelLimits(channel: Campaign['channel'], message: string): string[] {
@@ -76,6 +102,60 @@ export function checkChannelLimits(channel: Campaign['channel'], message: string
     }
   }
   return warnings;
+}
+
+// CRM-ROADMAP Phase 1, Feature 6 — DLT/TRAI SMS Compliance. Every campaign is inherently a
+// promotional broadcast (as opposed to the individual event-driven transactional sends
+// NotificationEngine also handles), so every SMS campaign is checked — non-SMS channels are
+// always compliant (DLT only governs SMS). Reads crm_dlt_templates directly (same physical
+// Postgres instance — no cross-service call, same finding as Feature 5); this is a
+// best-effort, earlier-warning check using a representative rendered message, not the
+// authoritative gate — that's NotificationEngine.sendRaw's job at actual send time, checked
+// per-recipient against the real rendered body.
+export async function checkDltCompliance(
+  ctx: PlatformContext,
+  channel: Campaign['channel'],
+  sampleMessage: string
+): Promise<{ compliant: boolean; reason?: string }> {
+  if (channel !== 'SMS') return { compliant: true };
+
+  const templates = await ctx.db.raw
+    .select()
+    .from(crmDltTemplates)
+    .where(
+      and(eq(crmDltTemplates.tenantId, ctx.tenant.tenantId), eq(crmDltTemplates.isActive, true))
+    );
+
+  if (templates.length === 0) {
+    return {
+      compliant: false,
+      reason:
+        'No DLT templates are registered for this tenant — register one in CRM Settings before sending promotional SMS.',
+    };
+  }
+
+  const now = new Date();
+  const compliant = templates.some(
+    (t) =>
+      (!t.expiresAt || t.expiresAt > now) && matchesDltTemplate(sampleMessage, t.messagePattern)
+  );
+  return compliant
+    ? { compliant: true }
+    : {
+        compliant: false,
+        reason: 'This message does not match any registered DLT template for this tenant.',
+      };
+}
+
+async function assertDltCompliant(
+  ctx: PlatformContext,
+  channel: Campaign['channel'],
+  sampleMessage: string
+): Promise<void> {
+  const result = await checkDltCompliance(ctx, channel, sampleMessage);
+  if (!result.compliant) {
+    throw new BusinessError('DLT_TEMPLATE_MISMATCH', result.reason ?? 'DLT template mismatch');
+  }
 }
 
 // CP-2: channels that can carry a media attachment, and the size limit for each resolved media
@@ -126,6 +206,11 @@ export interface CampaignMessageVars {
   customField?: string;
   lastPurchaseDate?: string;
   lastPurchaseAmount?: number;
+  // CRM-ROADMAP Phase 2, Feature 6 — the per-recipient click-tracking redirect URL a `{{link}}`
+  // token resolves to. Unlike every other token, this one is never a static value shared across
+  // recipients — send() computes a fresh one per recipient (see buildTrackingUrl), which is why
+  // it's threaded through as a var rather than looked up inside renderCampaignMessage itself.
+  trackingUrl?: string;
 }
 
 const TOKEN_FALLBACKS = {
@@ -150,7 +235,72 @@ export function renderCampaignMessage(template: string, vars: CampaignMessageVar
       vars.lastPurchaseAmount !== undefined
         ? vars.lastPurchaseAmount.toFixed(2)
         : TOKEN_FALLBACKS.lastPurchaseAmount
-    );
+    )
+    .replace(/{{\s*link\s*}}/g, vars.trackingUrl ?? '');
+}
+
+// CRM-ROADMAP Phase 2, Feature 6 — mirrors report-service's existing public unsubscribe-link
+// convention (ScheduledReportJob.ts: `${REPORT_SERVICE_URL}/api/v2/unsubscribe/:token`), same
+// env var pattern, so this isn't a new URL-construction convention invented for this feature.
+export function buildTrackingUrl(trackingToken: string, kind: 'click' | 'open' = 'click'): string {
+  const salesUrl = process.env['SALES_SERVICE_URL'] ?? 'http://localhost:3013';
+  return `${salesUrl}/api/v2/${kind === 'click' ? 'c' : 'o'}/${trackingToken}`;
+}
+
+// Only EMAIL/IN_APP can render an <img> tag — SMS/WhatsApp bodies are plain text, so open
+// tracking for those channels is structurally impossible (matches the phase doc's own framing:
+// "an email/in-app open-tracking pixel").
+const OPEN_PIXEL_CHANNELS: ReadonlySet<Campaign['channel']> = new Set(['EMAIL', 'IN_APP']);
+
+function buildOpenPixelTag(trackingToken: string): string {
+  const url = buildTrackingUrl(trackingToken, 'open');
+  return `<img src="${url}" width="1" height="1" alt="" style="display:none" />`;
+}
+
+interface CampaignVariant {
+  id: number;
+  label: string;
+  messageTemplate: string;
+  weight: number;
+}
+
+/**
+ * Deterministic weighted assignment (not `Math.random()`) — reproducible/testable, and
+ * statistically converges to the configured weight ratio as recipient count grows. `seed` is
+ * the recipient's position in the send (0, 1, 2, ...), not a random draw.
+ */
+export function assignVariant(variants: CampaignVariant[], seed: number): CampaignVariant | null {
+  if (variants.length === 0) return null;
+  const totalWeight = variants.reduce((sum, v) => sum + v.weight, 0);
+  if (totalWeight <= 0) return variants[0]!;
+  const position = seed % totalWeight;
+  let cumulative = 0;
+  for (const variant of variants) {
+    cumulative += variant.weight;
+    if (position < cumulative) return variant;
+  }
+  return variants[variants.length - 1]!;
+}
+
+// CRM-ROADMAP Phase 3, Feature 5 — a matching-language translation wins outright for a
+// recipient; A/B variant assignment only runs when there isn't one, so the two features are
+// never combined for the same recipient. `variant: null` here means "no A/B variant was used"
+// (either because a translation was, or because none are configured) — campaignRecipients.
+// variantId is only ever set from a non-null variant, so a translated recipient's row correctly
+// has no variantId even when the campaign also has variants configured.
+export function resolveRecipientTemplate(
+  preferredLanguage: string | null,
+  translationByLanguage: Map<string, string>,
+  variants: CampaignVariant[],
+  baseTemplate: string,
+  seed: number
+): { template: string; variant: CampaignVariant | null } {
+  const languageTemplate = preferredLanguage
+    ? translationByLanguage.get(preferredLanguage)
+    : undefined;
+  if (languageTemplate) return { template: languageTemplate, variant: null };
+  const variant = assignVariant(variants, seed);
+  return { template: variant ? variant.messageTemplate : baseTemplate, variant };
 }
 
 /** FR-F2: which tokens present in the template would render a fallback value for this recipient. */
@@ -250,6 +400,7 @@ export class CampaignService {
           phone: customers.phone,
           email: customers.email,
           loyaltyPoints: customers.loyaltyPoints,
+          preferredLanguage: customers.preferredLanguage,
         })
         .from(customers)
         .where(
@@ -263,6 +414,7 @@ export class CampaignService {
           phone: customers.phone,
           email: customers.email,
           loyaltyPoints: customers.loyaltyPoints,
+          preferredLanguage: customers.preferredLanguage,
         })
         .from(customers)
         .where(
@@ -351,7 +503,11 @@ export class CampaignService {
             recipients.map((r) => r.id)
           ),
           gte(campaignRecipients.sentAt, todayStart),
-          inArray(campaignRecipients.status, ['SENT', 'DELIVERED'])
+          // Notification-service audit 2026-07-23 (architectural tier — async queue-based
+          // delivery): a recipient just queued for delivery sits at PENDING for a short window
+          // before NotificationDeliveryConsumer moves it to SENT — include PENDING here too so
+          // an in-flight send still counts toward today's frequency cap.
+          inArray(campaignRecipients.status, ['PENDING', 'SENT', 'DELIVERED'])
         )
       )
       .groupBy(campaignRecipients.customerId);
@@ -372,6 +528,8 @@ export class CampaignService {
     sampleMessage: string | null;
     warnings: string[];
     fallbackWarnings: string[];
+    dltCompliant: boolean;
+    dltError?: string;
   }> {
     const recipients = await CampaignService.resolveRecipients(ctx, {
       segmentId: segmentId ?? null,
@@ -385,6 +543,12 @@ export class CampaignService {
       .where(eq(organizationSettings.tenantId, ctx.tenant.tenantId));
     const shopName = org?.orgName ?? 'Our Store';
 
+    // CRM-ROADMAP Phase 2, Feature 6 — a placeholder, never-persisted token so the preview
+    // renders the same shape a real send would (no raw, broken "{{link}}" literal shown to the
+    // person authoring the campaign) without writing a crm_link_clicks row for a message that
+    // may never actually be sent.
+    const previewTrackingUrl = buildTrackingUrl('preview');
+
     let sampleMessage: string | null = null;
     let fallbackWarnings: string[] = [];
     if (recipients[0]) {
@@ -395,6 +559,7 @@ export class CampaignService {
         balance,
         loyaltyPoints: recipients[0].loyaltyPoints,
         shopName,
+        trackingUrl: previewTrackingUrl,
         ...(lastPurchase
           ? { lastPurchaseDate: lastPurchase.date, lastPurchaseAmount: lastPurchase.amount }
           : {}),
@@ -403,11 +568,26 @@ export class CampaignService {
       fallbackWarnings = detectFallbackTokens(messageTemplate, vars);
     }
 
+    // DLT compliance must be checkable even with zero resolved recipients (e.g. an empty
+    // segment) — a synthetic render stands in for a real one for this purpose only.
+    const dltCheckMessage =
+      sampleMessage ??
+      renderCampaignMessage(messageTemplate, {
+        customerName: 'Customer',
+        balance: 0,
+        loyaltyPoints: 0,
+        shopName,
+        trackingUrl: previewTrackingUrl,
+      });
+    const dltResult = await checkDltCompliance(ctx, channel, dltCheckMessage);
+
     return {
       recipientCount: recipients.length,
       sampleMessage,
       warnings: sampleMessage ? checkChannelLimits('SMS', sampleMessage) : [],
       fallbackWarnings,
+      dltCompliant: dltResult.compliant,
+      ...(dltResult.reason ? { dltError: dltResult.reason } : {}),
     };
   }
 
@@ -494,6 +674,68 @@ export class CampaignService {
       .from(organizationSettings)
       .where(eq(organizationSettings.tenantId, ctx.tenant.tenantId));
     const shopName = org?.orgName ?? 'Our Store';
+
+    // CRM-ROADMAP Phase 2, Feature 6 — A/B variants (empty for the vast majority of campaigns,
+    // which behave exactly as before). Fetched once per send, not per recipient.
+    const variants = await ctx.db.raw
+      .select()
+      .from(crmCampaignVariants)
+      .where(
+        and(
+          eq(crmCampaignVariants.campaignId, campaignId),
+          eq(crmCampaignVariants.tenantId, ctx.tenant.tenantId)
+        )
+      );
+
+    // CRM-ROADMAP Phase 3, Feature 5 — per-language variants (empty for every campaign that
+    // doesn't use this feature, which behave exactly as before). A recipient whose
+    // preferredLanguage matches a row here gets that translation instead of the base template
+    // or an A/B variant — language selection and A/B variant assignment are deliberately not
+    // combined in this pass (a recipient gets one or the other, never both).
+    const translations = await ctx.db.raw
+      .select()
+      .from(crmCampaignMessageTranslations)
+      .where(
+        and(
+          eq(crmCampaignMessageTranslations.campaignId, campaignId),
+          eq(crmCampaignMessageTranslations.tenantId, ctx.tenant.tenantId)
+        )
+      );
+    const translationByLanguage = new Map(translations.map((t) => [t.language, t.messageTemplate]));
+
+    const firstRecipientBalance = await CampaignService.getBalance(ctx, recipients[0]!.id);
+    const previewTrackingUrl = buildTrackingUrl('preview');
+    // CRM-ROADMAP Phase 1, Feature 6 — fail fast, before dispatching to any recipient, rather
+    // than letting NotificationEngine's own hard gate reject every single recipient one at a
+    // time (each still a real HTTP round-trip). Checked against the first real recipient's
+    // rendered message — NotificationEngine's per-recipient gate at actual send time remains
+    // the authoritative check regardless. CRM-ROADMAP Phase 2, Feature 6: when variants exist,
+    // EACH variant's template is checked independently — a variant could introduce
+    // non-compliant content the base template never had. CRM-ROADMAP Phase 3, Feature 5: a
+    // translation is only ever used INSTEAD OF a variant for a given recipient, never on top of
+    // one (see the per-recipient resolution below) — so the base template still needs checking
+    // whenever there are no variants (recipients without a matching translation fall through to
+    // it), with every translation template appended regardless.
+    const templatesToCheck = [
+      ...(variants.length > 0
+        ? variants.map((v) => v.messageTemplate)
+        : [campaign.messageTemplate]),
+      ...translations.map((t) => t.messageTemplate),
+    ];
+    for (const template of templatesToCheck) {
+      await assertDltCompliant(
+        ctx,
+        campaign.channel,
+        renderCampaignMessage(template, {
+          customerName: recipients[0]!.displayName,
+          balance: firstRecipientBalance,
+          loyaltyPoints: recipients[0]!.loyaltyPoints,
+          shopName,
+          trackingUrl: previewTrackingUrl,
+        })
+      );
+    }
+
     const media = await CampaignService.getPrimaryMedia(ctx, campaignId);
     // CP-8: per-tenant sender identity override — only EmailChannelProvider currently honors it
     // (see ChannelDeliveryParams.senderOverride for why SMS/WhatsApp don't).
@@ -523,8 +765,15 @@ export class CampaignService {
     const notificationUrl = process.env['NOTIFICATION_SERVICE_URL'] ?? 'http://localhost:3014';
     const internalKey = process.env['INTERNAL_API_KEY'] ?? '';
     // CP-3: only pay for the extra per-recipient invoice lookup when the template actually
-    // references one of the purchase-history tokens.
-    const needsLastPurchase = /{{\s*lastPurchase(Date|Amount)\s*}}/.test(campaign.messageTemplate);
+    // references one of the purchase-history tokens. CRM-ROADMAP Phase 2, Feature 6: checked
+    // across every variant template too, not just the base one.
+    const needsLastPurchase = templatesToCheck.some((t) =>
+      /{{\s*lastPurchase(Date|Amount)\s*}}/.test(t)
+    );
+    // Only create a crm_link_clicks row when it could ever be used — a plain SMS/WhatsApp
+    // campaign with no configured link needs neither a redirect token nor an open pixel, so
+    // existing link-less campaigns write exactly the same rows they always have.
+    const needsTracking = !!campaign.linkUrl || OPEN_PIXEL_CHANNELS.has(campaign.channel);
 
     let sentCount = 0;
     let failedCount = 0;
@@ -537,20 +786,19 @@ export class CampaignService {
     for (let i = 0; i < recipients.length; i += BATCH_SIZE) {
       const batch = recipients.slice(i, i + BATCH_SIZE);
       const results = await Promise.all(
-        batch.map(async (recipient) => {
+        batch.map(async (recipient, batchIndex) => {
+          const { template, variant } = resolveRecipientTemplate(
+            recipient.preferredLanguage,
+            translationByLanguage,
+            variants,
+            campaign.messageTemplate,
+            i + batchIndex
+          );
+
           const balance = await CampaignService.getBalance(ctx, recipient.id);
           const lastPurchase = needsLastPurchase
             ? await CampaignService.getLastPurchase(ctx, recipient.id)
             : null;
-          const body = renderCampaignMessage(campaign.messageTemplate, {
-            customerName: recipient.displayName,
-            balance,
-            loyaltyPoints: recipient.loyaltyPoints,
-            shopName,
-            ...(lastPurchase
-              ? { lastPurchaseDate: lastPurchase.date, lastPurchaseAmount: lastPurchase.amount }
-              : {}),
-          });
 
           const [recipientRow] = await ctx.db.raw
             .insert(campaignRecipients)
@@ -559,8 +807,37 @@ export class CampaignService {
               campaignId,
               customerId: recipient.id,
               status: 'PENDING',
+              ...(variant ? { variantId: variant.id } : {}),
             })
             .returning();
+
+          // CRM-ROADMAP Phase 2, Feature 6 — one tracking token per recipient, created before
+          // rendering so `{{link}}` resolves to this recipient's own redirect URL.
+          let trackingToken: string | undefined;
+          if (recipientRow && needsTracking) {
+            trackingToken = ulid();
+            await ctx.db.raw.insert(crmLinkClicks).values({
+              tenantId: ctx.tenant.tenantId,
+              campaignId,
+              campaignRecipientId: recipientRow.id,
+              trackingToken,
+              ...(campaign.linkUrl ? { destinationUrl: campaign.linkUrl } : {}),
+            });
+          }
+
+          let body = renderCampaignMessage(template, {
+            customerName: recipient.displayName,
+            balance,
+            loyaltyPoints: recipient.loyaltyPoints,
+            shopName,
+            ...(lastPurchase
+              ? { lastPurchaseDate: lastPurchase.date, lastPurchaseAmount: lastPurchase.amount }
+              : {}),
+            ...(trackingToken ? { trackingUrl: buildTrackingUrl(trackingToken) } : {}),
+          });
+          if (trackingToken && OPEN_PIXEL_CHANNELS.has(campaign.channel)) {
+            body += buildOpenPixelTag(trackingToken);
+          }
 
           try {
             const { httpOk, json } = await notificationBreaker.fire(
@@ -570,6 +847,9 @@ export class CampaignService {
                 tenantId: ctx.tenant.tenantId,
                 channel: campaign.channel,
                 eventType: 'CRM_CAMPAIGN',
+                // CRM-ROADMAP Phase 1, Feature 6: every campaign is a promotional broadcast
+                // by definition — subjects SMS sends to the DLT gate in NotificationEngine.
+                category: 'PROMOTIONAL',
                 ...(campaign.channel !== 'EMAIL' ? { recipientPhone: recipient.phone } : {}),
                 ...(recipient.email ? { recipientEmail: recipient.email } : {}),
                 ...(media ? { mediaUrl: media.mediaUrl, mediaType: media.mediaType } : {}),
@@ -584,7 +864,11 @@ export class CampaignService {
                 body,
               })
             );
-            const ok = httpOk && json.data?.status === 'SENT';
+            // Notification-service audit 2026-07-23 (architectural tier): delivery is now
+            // async — send-raw-internal enqueues the notification on a BullMQ worker and
+            // returns 'QUEUED' immediately, not 'SENT'. "ok" here means "notification-service
+            // accepted it for delivery," not "it was delivered."
+            const ok = httpOk && json.data?.status === 'QUEUED';
             const failureMessage =
               json.error?.code === 'TENANT_RATE_LIMIT_EXCEEDED'
                 ? "Rate limit exceeded — see Campaign Settings to raise this tenant's notification send limit"
@@ -594,10 +878,14 @@ export class CampaignService {
               await ctx.db.raw
                 .update(campaignRecipients)
                 .set({
-                  status: ok ? 'SENT' : 'FAILED',
+                  // Stays PENDING (its insert default, above) when accepted — the real outcome
+                  // (SENT, then DELIVERED or FAILED) arrives asynchronously via
+                  // NotificationDeliveryConsumer, driven by notification-service's
+                  // NOTIFICATION_DELIVERY_UPDATED outbox event (both the worker's own SENT/
+                  // FAILED and the provider's later DELIVERED confirmation use this same event).
+                  ...(ok ? {} : { status: 'FAILED' as const, errorMessage: failureMessage }),
                   notificationLogId: json.data?.logId ?? null,
                   sentAt: new Date(),
-                  errorMessage: ok ? null : failureMessage,
                 })
                 .where(eq(campaignRecipients.id, recipientRow.id));
             }
@@ -616,6 +904,13 @@ export class CampaignService {
           }
         })
       );
+      // campaigns.sentCount/failedCount are a synchronous snapshot taken at the end of dispatch —
+      // "sent" now means "successfully queued," "failed" means "rejected before queuing" (rate
+      // limit, validation, network error). Post-queue delivery outcomes (a worker retry that
+      // ultimately fails) don't retroactively update these two columns — the live, always-current
+      // truth is CampaignService.getStats(), which reflects campaignRecipients.status as
+      // NotificationDeliveryConsumer updates it (same eventual-consistency this feature already
+      // had for the DELIVERED count, now also covering the initial send outcome).
       sentCount += results.filter(Boolean).length;
       failedCount += results.filter((ok) => !ok).length;
     }
@@ -1200,7 +1495,42 @@ export class CampaignService {
   static async getStats(
     ctx: PlatformContext,
     campaignId: number
-  ): Promise<{ total: number; sent: number; delivered: number; failed: number; pending: number }> {
+  ): Promise<{
+    total: number;
+    sent: number;
+    delivered: number;
+    failed: number;
+    pending: number;
+    // CRM-ROADMAP Phase 2, Feature 6 — real numbers for the first time (previously permanently
+    // zero, since nothing ever wrote opened_at/clicked_at/converted_at). Rates are % of `total`
+    // (not `delivered`) so they're never artificially zero right after a send, before
+    // NotificationDeliveryConsumer has had a chance to mark anything DELIVERED yet.
+    opened: number;
+    clicked: number;
+    converted: number;
+    openRate: number;
+    clickRate: number;
+    conversionRate: number;
+    // CRM-ROADMAP Phase 3, Feature 3 — spend-vs-revenue for this one campaign, same cost/roi
+    // math as getRoiReport's cross-campaign version (see that method's own comment).
+    revenue: number;
+    cost: number;
+    roi: number | null;
+    variants: Array<{
+      id: number;
+      label: string;
+      sent: number;
+      opened: number;
+      clicked: number;
+      converted: number;
+    }>;
+  }> {
+    const [campaign] = await ctx.db.raw
+      .select({ channel: campaigns.channel, sentCount: campaigns.sentCount })
+      .from(campaigns)
+      .where(and(eq(campaigns.id, campaignId), eq(campaigns.tenantId, ctx.tenant.tenantId)));
+    if (!campaign) throw new NotFoundError('Campaign', campaignId);
+
     const rows = await ctx.db.raw
       .select({ status: campaignRecipients.status, count: sql<number>`count(*)::int` })
       .from(campaignRecipients)
@@ -1220,7 +1550,288 @@ export class CampaignService {
       if (row.status === 'FAILED') stats.failed = row.count;
       if (row.status === 'PENDING') stats.pending = row.count;
     }
-    return stats;
+
+    const [engagement] = await ctx.db.raw
+      .select({
+        opened: sql<number>`count(*) filter (where ${campaignRecipients.openedAt} is not null)::int`,
+        clicked: sql<number>`count(*) filter (where ${campaignRecipients.clickedAt} is not null)::int`,
+        converted: sql<number>`count(*) filter (where ${campaignRecipients.convertedAt} is not null)::int`,
+      })
+      .from(campaignRecipients)
+      .where(
+        and(
+          eq(campaignRecipients.campaignId, campaignId),
+          eq(campaignRecipients.tenantId, ctx.tenant.tenantId)
+        )
+      );
+    const opened = engagement?.opened ?? 0;
+    const clicked = engagement?.clicked ?? 0;
+    const converted = engagement?.converted ?? 0;
+    const denom = stats.total || 1;
+    const rate = (n: number) => Math.round((n / denom) * 1000) / 10;
+
+    const [revenueRow] = await ctx.db.raw
+      .select({ revenue: sql<string>`COALESCE(SUM(${campaignRecipients.convertedAmount}), 0)` })
+      .from(campaignRecipients)
+      .where(
+        and(
+          eq(campaignRecipients.campaignId, campaignId),
+          eq(campaignRecipients.tenantId, ctx.tenant.tenantId)
+        )
+      );
+    const [settings] = await ctx.db.raw
+      .select({ costPerMessage: tenantCommunicationSettings.costPerMessage })
+      .from(tenantCommunicationSettings)
+      .where(eq(tenantCommunicationSettings.tenantId, ctx.tenant.tenantId));
+    const revenue = round2(parseFloat(revenueRow?.revenue ?? '0'));
+    const rateForChannel = settings?.costPerMessage?.[campaign.channel] ?? 0;
+    const cost = round2(campaign.sentCount * rateForChannel);
+    const roi = cost > 0 ? round2((revenue - cost) / cost) : null;
+
+    const variantRows = await ctx.db.raw
+      .select({
+        id: crmCampaignVariants.id,
+        label: crmCampaignVariants.label,
+        sent: sql<number>`count(${campaignRecipients.id})::int`,
+        opened: sql<number>`count(*) filter (where ${campaignRecipients.openedAt} is not null)::int`,
+        clicked: sql<number>`count(*) filter (where ${campaignRecipients.clickedAt} is not null)::int`,
+        converted: sql<number>`count(*) filter (where ${campaignRecipients.convertedAt} is not null)::int`,
+      })
+      .from(crmCampaignVariants)
+      .leftJoin(campaignRecipients, eq(campaignRecipients.variantId, crmCampaignVariants.id))
+      .where(
+        and(
+          eq(crmCampaignVariants.campaignId, campaignId),
+          eq(crmCampaignVariants.tenantId, ctx.tenant.tenantId)
+        )
+      )
+      .groupBy(crmCampaignVariants.id, crmCampaignVariants.label);
+
+    return {
+      ...stats,
+      opened,
+      clicked,
+      converted,
+      openRate: stats.total > 0 ? rate(opened) : 0,
+      clickRate: stats.total > 0 ? rate(clicked) : 0,
+      conversionRate: stats.total > 0 ? rate(converted) : 0,
+      revenue,
+      cost,
+      roi,
+      variants: variantRows,
+    };
+  }
+
+  /**
+   * CRM-ROADMAP Phase 2, Feature 6 / Phase 3, Feature 3 — nightly attribution: any recipient
+   * sent within the window who wasn't already converted gets `convertedAt`/`convertedInvoiceId`/
+   * `convertedAmount` set to their first qualifying (non-draft/non-cancelled) purchase made
+   * AFTER their send, if one exists. Deliberately not tied to whether they clicked the tracked
+   * link for the *first-pass eligibility* check — a customer can be influenced by a campaign and
+   * still purchase without clicking through (e.g. they called the shop instead) — but clickedAt
+   * IS used as the tie-breaker below when a customer engaged with more than one eligible
+   * campaign before the same purchase (Phase 3's own explicit "last-click wins" requirement,
+   * since leaving this ambiguous risks double-crediting the same revenue to two campaigns' ROI).
+   *
+   * Runs a reversal pass first: a previously-attributed invoice that's since been CANCELLED
+   * loses its attribution entirely (convertedAt/convertedInvoiceId/convertedAmount all cleared
+   * together) — the roadmap's own explicit "must reverse, not leave stale revenue counted" edge
+   * case.
+   */
+  static async attributeConversions(
+    db: ErpDatabase,
+    tenantId: number,
+    windowDays = 30
+  ): Promise<number> {
+    const previouslyAttributed = await db
+      .select({
+        id: campaignRecipients.id,
+        convertedInvoiceId: campaignRecipients.convertedInvoiceId,
+      })
+      .from(campaignRecipients)
+      .where(
+        and(
+          eq(campaignRecipients.tenantId, tenantId),
+          isNotNull(campaignRecipients.convertedInvoiceId)
+        )
+      );
+
+    for (const row of previouslyAttributed) {
+      const [inv] = await db
+        .select({ status: invoices.status })
+        .from(invoices)
+        .where(eq(invoices.id, row.convertedInvoiceId!));
+      if (!inv || inv.status === 'CANCELLED') {
+        await db
+          .update(campaignRecipients)
+          .set({ convertedAt: null, convertedInvoiceId: null, convertedAmount: null })
+          .where(eq(campaignRecipients.id, row.id));
+      }
+    }
+
+    const cutoff = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000);
+    const pending = await db
+      .select({
+        id: campaignRecipients.id,
+        customerId: campaignRecipients.customerId,
+        sentAt: campaignRecipients.sentAt,
+        clickedAt: campaignRecipients.clickedAt,
+      })
+      .from(campaignRecipients)
+      .where(
+        and(
+          eq(campaignRecipients.tenantId, tenantId),
+          isNull(campaignRecipients.convertedAt),
+          isNotNull(campaignRecipients.sentAt),
+          gte(campaignRecipients.sentAt, cutoff)
+        )
+      );
+
+    const byCustomer = new Map<number, typeof pending>();
+    for (const r of pending) {
+      const list = byCustomer.get(r.customerId) ?? [];
+      list.push(r);
+      byCustomer.set(r.customerId, list);
+    }
+
+    let converted = 0;
+    for (const [customerId, recipients] of byCustomer) {
+      const attributedThisCustomer = new Set<number>();
+      const earliestSentAt = recipients.reduce(
+        (min, r) => (r.sentAt! < min ? r.sentAt! : min),
+        recipients[0]!.sentAt!
+      );
+
+      const candidateInvoices = await db
+        .select({
+          id: invoices.id,
+          invoiceDate: invoices.invoiceDate,
+          grandTotal: invoices.grandTotal,
+        })
+        .from(invoices)
+        .where(
+          and(
+            eq(invoices.tenantId, tenantId),
+            eq(invoices.customerId, customerId),
+            gt(invoices.invoiceDate, earliestSentAt),
+            notInArray(invoices.status, ['DRAFT', 'CANCELLED'])
+          )
+        )
+        .orderBy(asc(invoices.invoiceDate));
+
+      for (const inv of candidateInvoices) {
+        // An invoice converts at most ONE campaign send, ever, tenant-wide — skip if some other
+        // recipient (a prior run, or a different customer group processed earlier this run)
+        // already claimed it.
+        const [alreadyClaimed] = await db
+          .select({ id: campaignRecipients.id })
+          .from(campaignRecipients)
+          .where(eq(campaignRecipients.convertedInvoiceId, inv.id))
+          .limit(1);
+        if (alreadyClaimed) continue;
+
+        // A purchase must fall within `windowDays` of the SEND that (candidately) drove it — the
+        // boundary condition the roadmap calls out explicitly ("a purchase 40 days after a click
+        // should not attribute to a campaign with a 30-day window"). The `cutoff` pre-filter
+        // above only bounds how far back this job still bothers re-scanning "pending" recipients
+        // at all (a performance/housekeeping concern, safe as long as this job runs at least as
+        // often as `windowDays` — see this method's own scheduler cadence) — it is NOT itself the
+        // per-purchase attribution-window check, which has to be evaluated per candidate invoice
+        // here instead.
+        const windowMs = windowDays * 24 * 60 * 60 * 1000;
+        const eligible = recipients.filter(
+          (r) =>
+            !attributedThisCustomer.has(r.id) &&
+            r.sentAt! < inv.invoiceDate &&
+            inv.invoiceDate.getTime() - r.sentAt!.getTime() <= windowMs
+        );
+        if (eligible.length === 0) continue;
+
+        // Last-click-wins: the recipient with the latest engagement point (clickedAt if they
+        // clicked, else their sentAt) gets the credit.
+        const winner = eligible.reduce((best, r) => {
+          const rTime = (r.clickedAt ?? r.sentAt)!.getTime();
+          const bestTime = (best.clickedAt ?? best.sentAt)!.getTime();
+          return rTime > bestTime ? r : best;
+        });
+
+        await db
+          .update(campaignRecipients)
+          .set({
+            convertedAt: inv.invoiceDate,
+            convertedInvoiceId: inv.id,
+            convertedAmount: inv.grandTotal,
+          })
+          .where(eq(campaignRecipients.id, winner.id));
+
+        attributedThisCustomer.add(winner.id);
+        converted++;
+      }
+    }
+    return converted;
+  }
+
+  /**
+   * Cross-campaign ROI report — CRM-ROADMAP Phase 3, Feature 3. Revenue is the SUM of every
+   * recipient's convertedAmount, snapshotted at attribution time (a later unrelated edit to the
+   * invoice doesn't retroactively change past ROI numbers — only a full CANCELLED reversal does,
+   * via attributeConversions' own reversal pass above). Cost is sentCount × the tenant's
+   * configured per-channel rate (0 if unconfigured) — a live spend estimate, not a historical
+   * snapshot, so changing the rate does affect every campaign's reported cost retroactively;
+   * documented as a deliberate simplification given no per-send cost tracking exists anywhere in
+   * this codebase before this feature. `roi` is null (not Infinity, which doesn't survive
+   * JSON) when cost is 0 — the frontend shows "—" for those rather than a divide-by-zero result.
+   */
+  static async getRoiReport(ctx: PlatformContext): Promise<
+    Array<{
+      campaignId: number;
+      name: string;
+      channel: string;
+      sentCount: number;
+      conversions: number;
+      revenue: number;
+      cost: number;
+      roi: number | null;
+    }>
+  > {
+    const [settings] = await ctx.db.raw
+      .select({ costPerMessage: tenantCommunicationSettings.costPerMessage })
+      .from(tenantCommunicationSettings)
+      .where(eq(tenantCommunicationSettings.tenantId, ctx.tenant.tenantId));
+    const rates = settings?.costPerMessage ?? {};
+
+    const rows = await ctx.db.raw
+      .select({
+        campaignId: campaigns.id,
+        name: campaigns.name,
+        channel: campaigns.channel,
+        sentCount: campaigns.sentCount,
+        conversions: sql<number>`count(*) filter (where ${campaignRecipients.convertedAt} is not null)::int`,
+        revenue: sql<string>`COALESCE(SUM(${campaignRecipients.convertedAmount}), 0)`,
+      })
+      .from(campaigns)
+      .leftJoin(campaignRecipients, eq(campaignRecipients.campaignId, campaigns.id))
+      .where(and(eq(campaigns.tenantId, ctx.tenant.tenantId), eq(campaigns.status, 'SENT')))
+      .groupBy(campaigns.id, campaigns.name, campaigns.channel, campaigns.sentCount);
+
+    return rows
+      .map((r) => {
+        const revenue = round2(parseFloat(r.revenue));
+        const rate = rates[r.channel as keyof typeof rates] ?? 0;
+        const cost = round2(r.sentCount * rate);
+        const roi = cost > 0 ? round2((revenue - cost) / cost) : null;
+        return {
+          campaignId: r.campaignId,
+          name: r.name,
+          channel: r.channel,
+          sentCount: r.sentCount,
+          conversions: r.conversions,
+          revenue,
+          cost,
+          roi,
+        };
+      })
+      .sort((a, b) => b.revenue - a.revenue);
   }
 
   /** Per-recipient delivery drill-down — CampaignsPage previously only showed aggregate counts. */

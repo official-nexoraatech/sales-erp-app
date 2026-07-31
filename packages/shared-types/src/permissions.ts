@@ -125,11 +125,34 @@ export const PERMISSIONS = {
   POS_VOID_BILL: 'POS_VOID_BILL',
   POS_CASH_DRAWER: 'POS_CASH_DRAWER',
 
+  // ── Purchase Requisitions ─────────────────────────────────────────────────
+  REQUISITION_VIEW: 'REQUISITION_VIEW',
+  REQUISITION_CREATE: 'REQUISITION_CREATE',
+  REQUISITION_APPROVE: 'REQUISITION_APPROVE',
+  REQUISITION_CONVERT: 'REQUISITION_CONVERT',
+
+  // ── RFQ / Supplier Quotations (distinct from the sales-side QUOTATION_* above, which
+  // gate customer-facing sales quotations, not supplier-facing procurement ones) ────────
+  RFQ_VIEW: 'RFQ_VIEW',
+  RFQ_CREATE: 'RFQ_CREATE',
+  SUPPLIER_QUOTATION_CREATE: 'SUPPLIER_QUOTATION_CREATE',
+  SUPPLIER_QUOTATION_COMPARE: 'SUPPLIER_QUOTATION_COMPARE',
+
+  // ── Purchase Invoices (PO/GRN variance match) ────────────────────────────
+  PURCHASE_INVOICE_VIEW: 'PURCHASE_INVOICE_VIEW',
+  PURCHASE_INVOICE_CREATE: 'PURCHASE_INVOICE_CREATE',
+  PURCHASE_INVOICE_APPROVE: 'PURCHASE_INVOICE_APPROVE',
+
   // ── Purchase Orders ───────────────────────────────────────────────────────
   PO_VIEW: 'PO_VIEW',
   PO_CREATE: 'PO_CREATE',
   PO_UPDATE: 'PO_UPDATE',
   PO_APPROVE: 'PO_APPROVE',
+  // Tiered approval (purchase-module enhancement 2026-07-21): required, in addition to
+  // PO_APPROVE, to approve a PO above the tenant's configured purchaseApprovalThreshold
+  // (organization_settings.purchase_approval_threshold) — same escalation pattern as
+  // CREDIT_LIMIT_OVERRIDE below.
+  PO_APPROVE_HIGH_VALUE: 'PO_APPROVE_HIGH_VALUE',
   PO_AMEND: 'PO_AMEND',
   PO_CANCEL: 'PO_CANCEL',
   PO_PRINT: 'PO_PRINT',
@@ -228,7 +251,6 @@ export const PERMISSIONS = {
   PAYROLL_VIEW: 'PAYROLL_VIEW',
   PAYROLL_PROCESS: 'PAYROLL_PROCESS',
   PAYROLL_APPROVE: 'PAYROLL_APPROVE',
-  SALARY_VIEW: 'SALARY_VIEW',
   SALARY_SLIP_PRINT: 'SALARY_SLIP_PRINT',
   HR_STATUTORY: 'HR_STATUTORY',
   EMPLOYEE_LOAN_MANAGE: 'EMPLOYEE_LOAN_MANAGE',
@@ -273,6 +295,156 @@ export const PERMISSIONS = {
   CRM_SEGMENT_CREATE: 'CRM_SEGMENT_CREATE',
   CRM_SEASON_VIEW: 'CRM_SEASON_VIEW',
   CRM_SEASON_MANAGE: 'CRM_SEASON_MANAGE',
+  // CRM-ROADMAP Phase 1, Feature 1 (Contact & Account Hierarchy): named CRM_ACCOUNT_* rather
+  // than the roadmap doc's literal ACCOUNT_VIEW/CREATE/UPDATE — those three already exist
+  // above (§"Accounting") gating the Chart of Accounts, an unrelated resource. Reusing them
+  // would have silently overwritten that grant instead of adding a new one.
+  CRM_ACCOUNT_VIEW: 'CRM_ACCOUNT_VIEW',
+  CRM_ACCOUNT_CREATE: 'CRM_ACCOUNT_CREATE',
+  CRM_ACCOUNT_UPDATE: 'CRM_ACCOUNT_UPDATE',
+  // Merge is higher-risk than create/update (re-points every contact and customer under the
+  // source account) — restricted to SALES_MANAGER+ in role-defaults.ts, not granted alongside
+  // the other three CRM_ACCOUNT_* constants to every role that gets those.
+  CRM_ACCOUNT_MERGE: 'CRM_ACCOUNT_MERGE',
+  // CRM-ROADMAP Phase 1, Feature 7 (Data Import/Dedupe/Merge Tooling): entity-specific import
+  // gate, same layering precedent as CUSTOMER_IMPORT/EMPLOYEE_IMPORT — the generic
+  // IMPORT_EXECUTE gates the route, this gates the entity type within ImportEngine.execute().
+  CRM_ACCOUNT_IMPORT: 'CRM_ACCOUNT_IMPORT',
+  // CRM-ROADMAP Phase 1, Feature 2 (Lead Management & Capture). No naming collision found
+  // for the LEAD_* namespace (unlike Feature 1's ACCOUNT_* — see above).
+  LEAD_VIEW: 'LEAD_VIEW',
+  LEAD_CREATE: 'LEAD_CREATE',
+  LEAD_UPDATE: 'LEAD_UPDATE',
+  LEAD_ASSIGN: 'LEAD_ASSIGN',
+  LEAD_CONVERT: 'LEAD_CONVERT',
+  LEAD_DELETE: 'LEAD_DELETE',
+  // CRM-ROADMAP Phase 1, Feature 7: same reasoning as CRM_ACCOUNT_IMPORT above.
+  LEAD_IMPORT: 'LEAD_IMPORT',
+  // CRM-ROADMAP Phase 1, Feature 3 (Customer 360 Command Center). Gates the single composed
+  // GET /customers/:id/360 endpoint — granted to the same roles that already hold
+  // CUSTOMER_VIEW (it's a read-only, richer view of data those roles can already see
+  // piecemeal via /statement, /outstanding, /activity).
+  CRM_360_VIEW: 'CRM_360_VIEW',
+  // CRM-ROADMAP Phase 1, Feature 4 (Support & Ticketing). No naming collision found for the
+  // TICKET_* namespace.
+  TICKET_VIEW: 'TICKET_VIEW',
+  TICKET_CREATE: 'TICKET_CREATE',
+  TICKET_UPDATE: 'TICKET_UPDATE',
+  TICKET_ASSIGN: 'TICKET_ASSIGN',
+  TICKET_RESOLVE: 'TICKET_RESOLVE',
+  TICKET_DELETE: 'TICKET_DELETE',
+  // CRM-ROADMAP Phase 1, Feature 6 (DLT/TRAI SMS Compliance). A single coarse constant
+  // (view/create/update/delete of registered DLT templates) — admin-only config surface per
+  // the phase doc, same precedent as SSO_CONFIG_MANAGE/BRANCH_MANAGE rather than four
+  // granular CRUD constants.
+  CRM_DLT_TEMPLATE_MANAGE: 'CRM_DLT_TEMPLATE_MANAGE',
+  // CRM-ROADMAP Phase 1, Feature 8 (CRM Dashboards & KPI Tracking). Named CRM_DASHBOARD_VIEW
+  // rather than the roadmap doc's implied bare DASHBOARD_VIEW — that already exists above
+  // (§"Dashboard") gating report-service's unrelated org-wide KPI dashboard. Same
+  // disambiguation reasoning as CRM_ACCOUNT_VIEW vs. Chart-of-Accounts' ACCOUNT_VIEW.
+  CRM_DASHBOARD_VIEW: 'CRM_DASHBOARD_VIEW',
+  // CRM-ROADMAP Phase 2, Feature 1 (Sales Pipeline & Opportunity Management). No naming
+  // collision found for the OPPORTUNITY_* namespace (no HR/recruitment "job opening" feature
+  // uses it). Deal value is commercially sensitive but every role that gets OPPORTUNITY_VIEW
+  // already sees comparable pricing data via INVOICE_VIEW/QUOTATION_VIEW — no separate
+  // value-redaction permission introduced.
+  OPPORTUNITY_VIEW: 'OPPORTUNITY_VIEW',
+  OPPORTUNITY_CREATE: 'OPPORTUNITY_CREATE',
+  OPPORTUNITY_UPDATE: 'OPPORTUNITY_UPDATE',
+  // Stage changes into Won/Lost have real side effects (quotation auto-creation, permanent
+  // loss-reason record) — gated separately from a plain field-edit UPDATE, same reasoning as
+  // Feature 1's CRM_ACCOUNT_MERGE being split out from CRM_ACCOUNT_UPDATE.
+  OPPORTUNITY_STAGE_CHANGE: 'OPPORTUNITY_STAGE_CHANGE',
+  OPPORTUNITY_DELETE: 'OPPORTUNITY_DELETE',
+  // CRM-ROADMAP Phase 3, Feature 6 (Field-level RBAC for CRM Records) — the field-level
+  // permission this feature's objective calls out by name: today every role holding
+  // OPPORTUNITY_VIEW also holds INVOICE_VIEW/QUOTATION_VIEW/PRICE_OVERRIDE (verified against
+  // role-defaults.ts, not assumed), so nothing changes for the current 10 system roles. This
+  // exists so a future tenant-created custom role can be granted OPPORTUNITY_VIEW (see the
+  // deal's stage/pipeline position) without also seeing the commercially sensitive `value`
+  // field — response-serialization filter, not a route gate (see
+  // packages/platform-sdk/src/field-visibility.ts).
+  OPPORTUNITY_VALUE_VIEW: 'OPPORTUNITY_VALUE_VIEW',
+  // CRM-ROADMAP Phase 3, Feature 2 (Self-Service Customer Portal). PORTAL_ACCOUNT_MANAGE gates
+  // staff provisioning of a customer's portal login (POST /customers/:id/portal-account).
+  // IMPERSONATE_PORTAL_CUSTOMER is kept separate from the existing IMPERSONATE_USER — logging
+  // in as a customer is a distinct, still-sensitive action from impersonating another staff
+  // member, and conflating the two would let an IMPERSONATE_USER grant silently reach the new
+  // customer-facing surface too.
+  PORTAL_ACCOUNT_MANAGE: 'PORTAL_ACCOUNT_MANAGE',
+  IMPERSONATE_PORTAL_CUSTOMER: 'IMPERSONATE_PORTAL_CUSTOMER',
+  // CRM-ROADMAP Phase 4, Feature 4 (Territory Management). No naming collision found for the
+  // TERRITORY_* namespace (repo-wide grep). One constant gates CRUD on territories themselves
+  // plus branch/user assignment into them — a Sales Ops admin action, not something split into
+  // separate create/update/delete grants like customer-facing entities (CRM_ACCOUNT_* etc.).
+  TERRITORY_MANAGE: 'TERRITORY_MANAGE',
+  // CRM-ROADMAP Phase 4, Feature 5 (Sales Forecasting & Quota Management). No naming collision
+  // found for QUOTA_* (QUOTATION_*/SUPPLIER_QUOTATION_* are a distinct, unrelated document-type
+  // namespace, already noted as such where those are defined). QUOTA_MANAGE gates CRUD on quota
+  // records themselves, same "Sales Ops admin action" reasoning as TERRITORY_MANAGE above.
+  // QUOTA_VALUE_VIEW is the field-level gate on the quota/actual $ amounts and attainment %
+  // within the dashboard rollup — same precedent as OPPORTUNITY_VALUE_VIEW (a derived aggregate
+  // computed from a sensitive figure carries the same sensitivity as the raw figure itself).
+  QUOTA_MANAGE: 'QUOTA_MANAGE',
+  QUOTA_VALUE_VIEW: 'QUOTA_VALUE_VIEW',
+  // CRM-ROADMAP Phase 4, Feature 8 (Public CRM API & BI/Data-Warehouse Export). No naming
+  // collision found for API_KEY_*. Deliberately reserved for OWNER/ADMIN/SUPER_ADMIN only (via
+  // TENANT_SCOPED_PERMISSIONS, no explicit SALES_MANAGER grant) — issuing a credential that can
+  // pull CRM data out of the system entirely is a platform-governance action, same sensitivity
+  // tier as IMPERSONATE_USER/IMPERSONATE_PORTAL_CUSTOMER above, not a day-to-day Sales Ops
+  // action like TERRITORY_MANAGE/QUOTA_MANAGE. Export-schedule CRUD reuses the pre-existing
+  // EXPORT_GENERATE/EXPORT_VIEW permissions rather than inventing new ones — a recurring
+  // schedule is the same underlying action class as the existing one-shot export.
+  API_KEY_MANAGE: 'API_KEY_MANAGE',
+  // CRM-ROADMAP Phase 4, Feature 7 (CTI / Call Center Integration). No naming collision found
+  // for CALL_*. CALL_INITIATE gates click-to-call (a rep dialing out) separately from
+  // CALL_LOG_VIEW (viewing call history/recordings) — recordings are sensitive enough to
+  // warrant the same view/action split as, e.g., QUOTA_VALUE_VIEW vs QUOTA_MANAGE, rather than
+  // one combined permission.
+  CALL_INITIATE: 'CALL_INITIATE',
+  CALL_LOG_VIEW: 'CALL_LOG_VIEW',
+  // CRM-ROADMAP Phase 4, Feature 1 (Field Sales / Distributor CRM). No naming collision found
+  // for FIELD_VISIT_*/ROUTE_MANAGE. FIELD_VISIT_MANAGE gates a rep logging/checking-out their
+  // OWN visits (identity-scoped by repUserId at the query layer, not a separate role — this
+  // codebase has no distinct "field rep" role, reps are SALES_MANAGER-scoped users per
+  // role-defaults.ts). ROUTE_MANAGE gates route planning/assignment and tenant-wide visit/route
+  // visibility for distribution managers — deliberately no manager-hierarchy scoping (no such
+  // concept exists in this codebase); a ROUTE_MANAGE holder sees every rep's visits tenant-wide,
+  // same "no partial-tenant admin view" precedent as TERRITORY_MANAGE/QUOTA_MANAGE.
+  FIELD_VISIT_MANAGE: 'FIELD_VISIT_MANAGE',
+  ROUTE_MANAGE: 'ROUTE_MANAGE',
+  // CRM-ROADMAP Phase 2, Feature 2 (Visual Customer Journey Builder). No naming collision
+  // found for JOURNEY_*. Publish is gated separately from create/edit — same
+  // "state-transition action with real blast-radius, gated apart from authoring" reasoning as
+  // CRM_CAMPAIGN_APPROVE (a published journey can affect a large customer segment at scale,
+  // continuously, not a one-time send) — JOURNEY_CREATE covers both create and edit-while-DRAFT,
+  // matching CRM_CAMPAIGN_CREATE's existing precedent of gating a campaign's PUT route too.
+  JOURNEY_VIEW: 'JOURNEY_VIEW',
+  JOURNEY_CREATE: 'JOURNEY_CREATE',
+  JOURNEY_PUBLISH: 'JOURNEY_PUBLISH',
+  JOURNEY_DELETE: 'JOURNEY_DELETE',
+  // CRM-ROADMAP Phase 2, Feature 3 (Loyalty & Rewards Tiering). CRM_LOYALTY_VIEW/ADJUST already
+  // exist but are dead constants (see packages/shared-types/src/__tests__/dead-permission-
+  // constants.test.ts's own KNOWN exceptions list) — not reused here, since the roadmap names
+  // these two specifically and gives them a real intended split: redemption is cashier-permitted
+  // (low-privilege, POS-facing) while tier/catalog config is a separate, higher-privilege grant,
+  // exactly the CRM_CAMPAIGN_CREATE-vs-CRM_CAMPAIGN_APPROVE precedent.
+  LOYALTY_TIER_MANAGE: 'LOYALTY_TIER_MANAGE',
+  LOYALTY_REDEEM: 'LOYALTY_REDEEM',
+  // CRM-ROADMAP Phase 2, Feature 4 (Referral Program Engine). Names taken directly from the
+  // roadmap's own Security Considerations section. REFERRAL_CONFIGURE covers both generating/
+  // deactivating a customer's code and reviewing FLAGGED (fraud-suspected) rewards — one grant,
+  // same reasoning as CRM_AUTOMATION_MANAGE covering several related admin actions.
+  REFERRAL_VIEW: 'REFERRAL_VIEW',
+  REFERRAL_CONFIGURE: 'REFERRAL_CONFIGURE',
+  // CRM-ROADMAP Phase 2, Feature 5 (Omnichannel Communication Hub). Names taken directly from
+  // the roadmap's own Security Considerations section. ASSIGN is gated separately from REPLY —
+  // same "state-transition action gated apart from the day-to-day action" reasoning as
+  // JOURNEY_PUBLISH/CRM_CAMPAIGN_APPROVE — assigning a conversation changes whose queue it's in
+  // for everyone, not just this replier's own view of it.
+  CONVERSATION_VIEW: 'CONVERSATION_VIEW',
+  CONVERSATION_REPLY: 'CONVERSATION_REPLY',
+  CONVERSATION_ASSIGN: 'CONVERSATION_ASSIGN',
 
   // ── Reports ───────────────────────────────────────────────────────────────
   REPORT_VIEW: 'REPORT_VIEW',
@@ -292,7 +464,11 @@ export const PERMISSIONS = {
   // had zero implementation surface (no route manages workflow definitions today).
 
   // ── Notifications ─────────────────────────────────────────────────────────
-  NOTIFICATION_VIEW: 'NOTIFICATION_VIEW',
+  // NOTIFICATION_VIEW retired 2026-07-23 (notification-service audit, PG-014 pattern): a
+  // tenant user's own in-app notifications (GET /notifications) are identity-scoped by
+  // recipientUserId, not permission-gated — there was never a "view other users' notifications"
+  // feature for this constant to gate. NOTIFICATION_CONFIG is kept — see the notification
+  // template-management API this audit adds, which wires it up for real.
   NOTIFICATION_SEND: 'NOTIFICATION_SEND',
   NOTIFICATION_CONFIG: 'NOTIFICATION_CONFIG',
 

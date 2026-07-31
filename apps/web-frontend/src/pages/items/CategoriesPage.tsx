@@ -4,12 +4,14 @@ import toast from 'react-hot-toast';
 import { Pencil, Trash2 } from 'lucide-react';
 import { categoryApi } from '../../api/endpoints.js';
 import { useAuthStore } from '../../store/auth.store.js';
+import { useConfirm } from '../../context/ConfirmContext.js';
 import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
 import ERPDataGrid, {
   type ERPColumnDef,
   type ERPRowAction,
 } from '../../components/erp/ERPDataGrid.js';
+import ERPEmptyState from '../../components/erp/ERPEmptyState.js';
 import Button from '../../components/ui/Button.js';
 
 interface Category {
@@ -22,6 +24,7 @@ interface Category {
 export default function CategoriesPage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const confirm = useConfirm();
   const hasPermission = useAuthStore((s) => s.hasPermission);
   const canCreateCategory = hasPermission(PERMISSIONS.CATEGORY_CREATE);
   const canUpdateCategory = hasPermission(PERMISSIONS.CATEGORY_UPDATE);
@@ -64,7 +67,15 @@ export default function CategoriesPage() {
             label: 'Delete',
             icon: Trash2,
             type: 'delete' as const,
-            onClick: (r: Category) => deleteMutation.mutate(r.id),
+            onClick: async (r: Category) => {
+              const ok = await confirm({
+                title: 'Delete category?',
+                message: `"${r.name}" will be permanently removed. Items already assigned to it keep their data but lose the category link.`,
+                confirmLabel: 'Delete',
+                variant: 'danger',
+              });
+              if (ok) deleteMutation.mutate(r.id);
+            },
           },
         ]
       : []),
@@ -77,7 +88,12 @@ export default function CategoriesPage() {
         title="Item Categories"
         actions={
           canCreateCategory ? (
-            <Button onClick={() => navigate('/inventory/categories/new')}>+ New Category</Button>
+            <Button
+              data-tour-id="inventory-categories-create-button"
+              onClick={() => navigate('/inventory/categories/new')}
+            >
+              + New Category
+            </Button>
           ) : undefined
         }
       />
@@ -86,6 +102,21 @@ export default function CategoriesPage() {
         data={cats}
         isLoading={isLoading}
         rowKey="id"
+        emptyState={
+          <ERPEmptyState
+            type="no-data"
+            title="No categories yet"
+            description="Create categories to organize your item catalog and filter reports by product group."
+            {...(canCreateCategory
+              ? {
+                  action: {
+                    label: '+ New Category',
+                    onClick: () => navigate('/inventory/categories/new'),
+                  },
+                }
+              : {})}
+          />
+        }
         actions={rowActions}
       />
     </div>

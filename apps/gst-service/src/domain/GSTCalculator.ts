@@ -1,4 +1,14 @@
 // GSTCalculator — auto-switches IGST vs CGST+SGST based on interstate flag
+//
+// 2026-07-31 audit consolidation: the actual CGST/SGST/IGST/CESS split math (previously
+// reimplemented here independently, byte-for-byte the same computation as
+// sales/purchase/production-service's own copies) now delegates to the one shared primitive
+// in @erp/utils. This module keeps its own input/output shape (pre-computed taxableAmount +
+// isInterstate boolean, no discount handling) since it serves a genuinely different caller —
+// RCM self-assessment on an already-known taxable amount, not a line-item discount+tax
+// calculation — see @erp/utils's own header comment for the sales/purchase discount-formula
+// divergence this consolidation fixed.
+import { splitGstTax } from '@erp/utils';
 
 export interface GSTComputeInput {
   taxableAmount: number;
@@ -24,47 +34,31 @@ export interface GSTComputeResult {
 export class GSTCalculator {
   // RCM: buyer self-assesses GST on purchases from unregistered vendors and pays it
   // directly to the government instead of to the supplier (ES-10).
-  static calculateRCMTax(baseAmount: number, gstRate: number, isInterstate: boolean): GSTComputeResult {
+  static calculateRCMTax(
+    baseAmount: number,
+    gstRate: number,
+    isInterstate: boolean
+  ): GSTComputeResult {
     return GSTCalculator.compute({ taxableAmount: baseAmount, gstRate, isInterstate });
   }
 
   static compute(input: GSTComputeInput): GSTComputeResult {
-    const { taxableAmount, gstRate, cessRate = 0, isInterstate } = input;
-    const halfRate = gstRate / 2;
-
-    let cgstRate = 0;
-    let sgstRate = 0;
-    let igstRate = 0;
-    let cgstAmount = 0;
-    let sgstAmount = 0;
-    let igstAmount = 0;
-
-    if (isInterstate) {
-      igstRate = gstRate;
-      igstAmount = round2(taxableAmount * (gstRate / 100));
-    } else {
-      cgstRate = halfRate;
-      sgstRate = halfRate;
-      cgstAmount = round2(taxableAmount * (halfRate / 100));
-      sgstAmount = round2(taxableAmount * (halfRate / 100));
-    }
-
-    const cessAmount = round2(taxableAmount * (cessRate / 100));
-    const totalGst = cgstAmount + sgstAmount + igstAmount;
-    const grandTotal = taxableAmount + totalGst + cessAmount;
+    const { taxableAmount, gstRate, cessRate, isInterstate } = input;
+    const split = splitGstTax({ taxableAmount, gstRate, cessRate, isInterstate });
+    const grandTotal = round2(taxableAmount + split.totalGst + split.cessAmount);
 
     return {
       taxableAmount,
       gstRate,
-      cgstRate,
-      sgstRate,
-      igstRate,
-      cgstAmount,
-      sgstAmount,
-      igstAmount,
-      cessAmount,
-      totalGst,
-      grandTotal: round2(grandTotal),
+      cgstRate: split.cgstRate,
+      sgstRate: split.sgstRate,
+      igstRate: split.igstRate,
+      cgstAmount: split.cgstAmount,
+      sgstAmount: split.sgstAmount,
+      igstAmount: split.igstAmount,
+      cessAmount: split.cessAmount,
+      totalGst: split.totalGst,
+      grandTotal,
     };
   }
 }

@@ -314,6 +314,18 @@ export const DEFAULT_ACCOUNTS: DefaultAccount[] = [
     parentCode: '2300',
   },
   {
+    // Purchase audit 2026-07-21: TDSService.recordTDSEntry requires a real
+    // tdsPayableAccountId — without a seeded default, every tenant had to hand-create this
+    // account before TDS on supplier payments could ever be recorded, which combined with
+    // no UI ever calling POST /tds/deduct meant the whole TDS feature was unreachable.
+    accountCode: '2340',
+    name: 'TDS Payable',
+    accountType: 'LIABILITY',
+    accountSubType: 'OTHER_CURRENT_LIABILITY',
+    normalBalance: 'CREDIT',
+    parentCode: '2300',
+  },
+  {
     accountCode: '2500',
     name: 'Long-term Liabilities',
     accountType: 'LIABILITY',
@@ -570,6 +582,14 @@ export const DEFAULT_ACCOUNTS: DefaultAccount[] = [
   {
     accountCode: '6100',
     name: 'Discount Given',
+    accountType: 'EXPENSE',
+    accountSubType: 'OPERATING_EXPENSE',
+    normalBalance: 'DEBIT',
+    parentCode: '6000',
+  },
+  {
+    accountCode: '6110',
+    name: 'Stock Adjustment Loss',
     accountType: 'EXPENSE',
     accountSubType: 'OPERATING_EXPENSE',
     normalBalance: 'DEBIT',

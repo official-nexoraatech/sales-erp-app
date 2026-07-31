@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { sagaAdminApi } from '../../../api/endpoints.js';
 import { useAuthStore } from '../../../store/auth.store.js';
+import { useConfirm } from '../../../context/ConfirmContext.js';
 import { PERMISSIONS } from '../../../constants/permissions.js';
 import ERPPageHeader from '../../../components/erp/ERPPageHeader.js';
 import { ERPTableSkeleton } from '../../../components/erp/ERPSkeleton.js';
@@ -42,6 +43,7 @@ const STATUSES = ['', 'STARTED', 'COMPLETED', 'FAILED', 'COMPENSATING', 'COMPENS
 
 export default function SagaMonitorPage() {
   const qc = useQueryClient();
+  const confirm = useConfirm();
   const hasPermission = useAuthStore((s) => s.hasPermission);
   const [statusFilter, setStatusFilter] = useState('');
   const [selectedSaga, setSelectedSaga] = useState<SagaItem | null>(null);
@@ -271,7 +273,16 @@ export default function SagaMonitorPage() {
                     variant="danger"
                     size="sm"
                     loading={compensateMutation.isPending}
-                    onClick={() => compensateMutation.mutate(selectedSaga.id)}
+                    onClick={async () => {
+                      const ok = await confirm({
+                        title: 'Compensate this saga?',
+                        message:
+                          'Runs the rollback (compensation) logic for every step already completed in this saga. This cannot be undone.',
+                        confirmLabel: 'Compensate',
+                        variant: 'danger',
+                      });
+                      if (ok) compensateMutation.mutate(selectedSaga.id);
+                    }}
                   >
                     Compensate
                   </Button>

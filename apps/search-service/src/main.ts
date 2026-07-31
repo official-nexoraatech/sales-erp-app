@@ -10,6 +10,7 @@ import {
   createMetricsHandler,
   createHttpMetricsHook,
   createCorrelationIdHook,
+  erpSearchSyncFailureTotal,
 } from '@erp/logger';
 import { loadConfigWithSecrets } from '@erp/config';
 import type { ERPEventPayload } from '@erp/types';
@@ -87,6 +88,7 @@ async function bootstrap(): Promise<void> {
         { err: errMsg, eventType: event.eventType, aggregateId: event.aggregateId },
         'Failed to sync search index — writing to dead-letter queue'
       );
+      erpSearchSyncFailureTotal.inc({ event_type: event.eventType });
       await consumerDb.insert(dlqItems).values({
         topic: topicForEventType(event.eventType),
         partition: 0,

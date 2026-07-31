@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, type FormEvent } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
@@ -11,10 +11,13 @@ import Button from '../../components/ui/Button.js';
 import Input from '../../components/ui/Input.js';
 import Select from '../../components/ui/Select.js';
 import { formatCurrency } from '../../lib/format.js';
+import { toFieldErrors } from '../../lib/zodFieldErrors.js';
+import { grnFormSchema } from '../../schemas/purchase-transactions.schema.js';
 
 interface POLine {
   id: number;
   itemId: number;
+  itemName?: string;
   description: string;
   orderedQty: number;
   receivedQty: number;
@@ -27,6 +30,7 @@ interface PODetail {
   id: number;
   poNumber: string | null;
   supplierId: number;
+  supplierName?: string;
   branchId: number;
   warehouseId: number;
   lines: POLine[];
@@ -40,6 +44,11 @@ interface GRNLineInput {
   grnRate: number;
   gstRate: number;
   hsnCode?: string | undefined;
+  batchNumber?: string | undefined;
+  expiryDate?: string | undefined;
+  rejectedQty?: number | undefined;
+  damagedQty?: number | undefined;
+  qcStatus?: 'PENDING' | 'PASSED' | 'FAILED' | 'NA' | undefined;
 }
 
 export default function GRNCreatePage() {
@@ -56,8 +65,20 @@ export default function GRNCreatePage() {
   const [supplierInvoiceDate, setSupplierInvoiceDate] = useState('');
   const [notes, setNotes] = useState('');
   const [lineInputs, setLineInputs] = useState<
-    Record<number, { receivedQty: string; grnRate: string }>
+    Record<
+      number,
+      {
+        receivedQty: string;
+        grnRate: string;
+        batchNumber: string;
+        expiryDate: string;
+        rejectedQty: string;
+        damagedQty: string;
+        qcStatus: 'PENDING' | 'PASSED' | 'FAILED' | 'NA';
+      }
+    >
   >({});
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   const { data: poData, isLoading: poLoading } = useQuery({
     queryKey: ['po-detail', loadedPoId],
@@ -78,13 +99,39 @@ export default function GRNCreatePage() {
   useEffect(() => {
     if (!po) return;
     setWarehouseId(String(po.warehouseId));
-    const inputs: Record<number, { receivedQty: string; grnRate: string }> = {};
+    const inputs: typeof lineInputs = {};
     po.lines.forEach((l) => {
       const remaining = l.orderedQty - l.receivedQty;
-      inputs[l.id] = { receivedQty: String(remaining > 0 ? remaining : 0), grnRate: l.unitPrice };
+      inputs[l.id] = {
+        receivedQty: String(remaining > 0 ? remaining : 0),
+        grnRate: l.unitPrice,
+        batchNumber: '',
+        expiryDate: '',
+        rejectedQty: '0',
+        damagedQty: '0',
+        qcStatus: 'NA',
+      };
     });
     setLineInputs(inputs);
   }, [po]);
+
+  const updateLine = (id: number, patch: Partial<(typeof lineInputs)[number]>) => {
+    setLineInputs((prev) => ({
+      ...prev,
+      [id]: {
+        ...(prev[id] ?? {
+          receivedQty: '0',
+          grnRate: '0',
+          batchNumber: '',
+          expiryDate: '',
+          rejectedQty: '0',
+          damagedQty: '0',
+          qcStatus: 'NA',
+        }),
+        ...patch,
+      },
+    }));
+  };
 
   const createMutation = useMutation({
     mutationFn: (data: Record<string, unknown>) => grnApi.create(data),
@@ -104,36 +151,50 @@ export default function GRNCreatePage() {
     setLoadedPoId(id);
   };
 
-  const handleSubmit = () => {
-    if (!po) {
-      toast.error('No PO loaded');
-      return;
-    }
-    if (!warehouseId) {
-      toast.error('Select a warehouse');
-      return;
-    }
+  const handleSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    if (!po) return;
 
-    const lines: GRNLineInput[] = po.lines
-      .filter((l) => {
-        const qty = parseFloat(lineInputs[l.id]?.receivedQty ?? '0');
-        return qty > 0;
-      })
-      .map((l) => ({
+    const filteredLines = po.lines.filter((l) => {
+      const qty = parseFloat(lineInputs[l.id]?.receivedQty ?? '0');
+      return qty > 0;
+    });
+
+    const result = grnFormSchema.safeParse({
+      purchaseOrderId: po.id,
+      warehouseId: warehouseId ? Number(warehouseId) : undefined,
+      grnDate,
+      lines: filteredLines.map((l) => ({
+        purchaseOrderLineId: l.id,
+        itemId: l.itemId,
+        receivedQty: parseFloat(lineInputs[l.id]?.receivedQty ?? '0'),
+      })),
+    });
+    if (!result.success) {
+      setFieldErrors(toFieldErrors(result.error));
+      toast.error('Fix the highlighted fields before saving');
+      return;
+    }
+    setFieldErrors({});
+
+    const lines: GRNLineInput[] = filteredLines.map((l) => {
+      const inp = lineInputs[l.id]!;
+      return {
         purchaseOrderLineId: l.id,
         itemId: l.itemId,
         description: l.description ?? undefined,
-        receivedQty: parseFloat(lineInputs[l.id]!.receivedQty),
-        grnRate: parseFloat(lineInputs[l.id]!.grnRate),
+        receivedQty: parseFloat(inp.receivedQty),
+        grnRate: parseFloat(inp.grnRate),
         gstRate: parseFloat(l.gstRate),
         hsnCode: l.hsnCode ?? undefined,
         warehouseId: Number(warehouseId),
-      }));
-
-    if (lines.length === 0) {
-      toast.error('Enter received quantity for at least one line');
-      return;
-    }
+        batchNumber: inp.batchNumber || undefined,
+        expiryDate: inp.expiryDate ? new Date(inp.expiryDate).toISOString() : undefined,
+        rejectedQty: parseFloat(inp.rejectedQty || '0'),
+        damagedQty: parseFloat(inp.damagedQty || '0'),
+        qcStatus: inp.qcStatus,
+      };
+    });
 
     createMutation.mutate({
       purchaseOrderId: po.id,
@@ -153,7 +214,7 @@ export default function GRNCreatePage() {
   };
 
   return (
-    <div>
+    <form onSubmit={handleSubmit} noValidate>
       <ERPPageHeader
         variant="detail"
         title="Create Goods Receipt Note"
@@ -171,11 +232,18 @@ export default function GRNCreatePage() {
               type="number"
               value={poIdInput}
               onChange={(e) => setPoIdInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  handleLoad();
+                }
+              }}
               placeholder="Enter PO ID"
+              error={fieldErrors.purchaseOrderId}
             />
           </div>
           {!urlPoId && (
-            <Button variant="outline" onClick={handleLoad} isLoading={poLoading}>
+            <Button type="button" variant="outline" onClick={handleLoad} isLoading={poLoading}>
               Load PO
             </Button>
           )}
@@ -188,8 +256,8 @@ export default function GRNCreatePage() {
               {po.poNumber ?? `Draft-${po.id}`}
             </span>
             <span className="mx-3 text-disabled">·</span>
-            <span className="text-secondary">Supplier ID:</span>{' '}
-            <span className="text-primary">{po.supplierId}</span>
+            <span className="text-secondary">Supplier:</span>{' '}
+            <span className="text-primary">{po.supplierName ?? po.supplierId}</span>
             <span className="mx-3 text-disabled">·</span>
             <span className="text-secondary">Lines:</span>{' '}
             <span className="text-primary">{po.lines.length}</span>
@@ -205,6 +273,7 @@ export default function GRNCreatePage() {
               label="Warehouse *"
               value={warehouseId}
               onChange={(e) => setWarehouseId(e.target.value)}
+              error={fieldErrors.warehouseId}
               options={[
                 { value: '', label: 'Select warehouse…' },
                 ...warehouses.map((w) => ({ value: String(w.id), label: w.name })),
@@ -215,6 +284,7 @@ export default function GRNCreatePage() {
               type="date"
               value={grnDate}
               onChange={(e) => setGrnDate(e.target.value)}
+              error={fieldErrors.grnDate}
             />
             <Input
               label="Supplier Invoice #"
@@ -244,6 +314,11 @@ export default function GRNCreatePage() {
             <p className="text-xs text-secondary mb-3">
               If GRN rate differs from PO rate by more than 5%, the GRN will be sent for approval.
             </p>
+            {fieldErrors.lines && (
+              <p className="text-xs text-danger mb-3" role="alert">
+                {fieldErrors.lines}
+              </p>
+            )}
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-left text-secondary border-b border-default">
@@ -254,20 +329,33 @@ export default function GRNCreatePage() {
                   <th className="pb-2 pr-4">Receive Qty</th>
                   <th className="pb-2 pr-4">PO Rate</th>
                   <th className="pb-2 pr-4">GRN Rate</th>
-                  <th className="pb-2">GST %</th>
+                  <th className="pb-2 pr-4">GST %</th>
+                  <th className="pb-2 pr-4">Batch #</th>
+                  <th className="pb-2 pr-4">Expiry</th>
+                  <th className="pb-2 pr-4">Rejected</th>
+                  <th className="pb-2 pr-4">Damaged</th>
+                  <th className="pb-2">QC Status</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-default">
                 {po.lines.map((l) => {
                   const remaining = l.orderedQty - l.receivedQty;
-                  const inp = lineInputs[l.id] ?? { receivedQty: '0', grnRate: l.unitPrice };
+                  const inp = lineInputs[l.id] ?? {
+                    receivedQty: '0',
+                    grnRate: l.unitPrice,
+                    batchNumber: '',
+                    expiryDate: '',
+                    rejectedQty: '0',
+                    damagedQty: '0',
+                    qcStatus: 'NA' as const,
+                  };
                   const grnRate = parseFloat(inp.grnRate);
                   const poRate = parseFloat(l.unitPrice);
                   const hasVariance = poRate > 0 && Math.abs(grnRate - poRate) / poRate > 0.05;
 
                   return (
                     <tr key={l.id} className={remaining <= 0 ? 'opacity-50' : ''}>
-                      <td className="py-2 pr-4 text-primary">{l.description}</td>
+                      <td className="py-2 pr-4 text-primary">{l.itemName ?? l.description}</td>
                       <td className="py-2 pr-4 text-secondary">{l.orderedQty}</td>
                       <td className="py-2 pr-4 text-secondary">{l.receivedQty}</td>
                       <td className="py-2 pr-4 font-medium text-primary">{remaining}</td>
@@ -279,15 +367,7 @@ export default function GRNCreatePage() {
                           step="0.001"
                           value={inp.receivedQty}
                           disabled={remaining <= 0}
-                          onChange={(e) =>
-                            setLineInputs((prev) => ({
-                              ...prev,
-                              [l.id]: {
-                                receivedQty: e.target.value,
-                                grnRate: prev[l.id]?.grnRate ?? l.unitPrice,
-                              },
-                            }))
-                          }
+                          onChange={(e) => updateLine(l.id, { receivedQty: e.target.value })}
                           className="w-24 rounded border border-default bg-surface-card px-2 py-1 text-sm text-primary disabled:opacity-50"
                         />
                       </td>
@@ -301,15 +381,7 @@ export default function GRNCreatePage() {
                           step="0.01"
                           value={inp.grnRate}
                           disabled={remaining <= 0}
-                          onChange={(e) =>
-                            setLineInputs((prev) => ({
-                              ...prev,
-                              [l.id]: {
-                                receivedQty: prev[l.id]?.receivedQty ?? '0',
-                                grnRate: e.target.value,
-                              },
-                            }))
-                          }
+                          onChange={(e) => updateLine(l.id, { grnRate: e.target.value })}
                           className={`w-28 rounded border px-2 py-1 text-sm text-primary disabled:opacity-50 bg-surface-card ${
                             hasVariance ? 'border-warning' : 'border-default'
                           }`}
@@ -318,7 +390,65 @@ export default function GRNCreatePage() {
                           <p className="text-xs text-warning mt-0.5">&gt;5% variance</p>
                         )}
                       </td>
-                      <td className="py-2 text-secondary">{l.gstRate}%</td>
+                      <td className="py-2 pr-4 text-secondary">{l.gstRate}%</td>
+                      <td className="py-2 pr-4">
+                        <input
+                          type="text"
+                          value={inp.batchNumber}
+                          disabled={remaining <= 0}
+                          onChange={(e) => updateLine(l.id, { batchNumber: e.target.value })}
+                          placeholder="Optional"
+                          className="w-24 rounded border border-default bg-surface-card px-2 py-1 text-sm text-primary disabled:opacity-50"
+                        />
+                      </td>
+                      <td className="py-2 pr-4">
+                        <input
+                          type="date"
+                          value={inp.expiryDate}
+                          disabled={remaining <= 0}
+                          onChange={(e) => updateLine(l.id, { expiryDate: e.target.value })}
+                          className="w-32 rounded border border-default bg-surface-card px-2 py-1 text-sm text-primary disabled:opacity-50"
+                        />
+                      </td>
+                      <td className="py-2 pr-4">
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.001"
+                          value={inp.rejectedQty}
+                          disabled={remaining <= 0}
+                          onChange={(e) => updateLine(l.id, { rejectedQty: e.target.value })}
+                          className="w-20 rounded border border-default bg-surface-card px-2 py-1 text-sm text-primary disabled:opacity-50"
+                        />
+                      </td>
+                      <td className="py-2 pr-4">
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.001"
+                          value={inp.damagedQty}
+                          disabled={remaining <= 0}
+                          onChange={(e) => updateLine(l.id, { damagedQty: e.target.value })}
+                          className="w-20 rounded border border-default bg-surface-card px-2 py-1 text-sm text-primary disabled:opacity-50"
+                        />
+                      </td>
+                      <td className="py-2">
+                        <select
+                          value={inp.qcStatus}
+                          disabled={remaining <= 0}
+                          onChange={(e) =>
+                            updateLine(l.id, {
+                              qcStatus: e.target.value as 'PENDING' | 'PASSED' | 'FAILED' | 'NA',
+                            })
+                          }
+                          className="w-24 rounded border border-default bg-surface-card px-2 py-1 text-sm text-primary disabled:opacity-50"
+                        >
+                          <option value="NA">N/A</option>
+                          <option value="PENDING">Pending</option>
+                          <option value="PASSED">Passed</option>
+                          <option value="FAILED">Failed</option>
+                        </select>
+                      </td>
                     </tr>
                   );
                 })}
@@ -341,15 +471,15 @@ export default function GRNCreatePage() {
       )}
 
       <ERPStickyFooter>
-        <Button variant="secondary" onClick={() => navigate('/purchase/grns')}>
+        <Button type="button" variant="secondary" onClick={() => navigate('/purchase/grns')}>
           Cancel
         </Button>
         {po && (
-          <Button isLoading={createMutation.isPending} onClick={handleSubmit}>
+          <Button type="submit" isLoading={createMutation.isPending}>
             Create GRN
           </Button>
         )}
       </ERPStickyFooter>
-    </div>
+    </form>
   );
 }

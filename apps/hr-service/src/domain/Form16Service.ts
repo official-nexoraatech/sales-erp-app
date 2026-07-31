@@ -93,7 +93,7 @@ export class Form16Service {
 
     for (const slip of slips) {
       const gross = parseFloat(decryptField(slip.grossSalary, encKey));
-      const tds = parseFloat(String(slip.tdsDeduction));
+      const tds = parseFloat(decryptField(slip.tdsDeduction, encKey));
       grossSalary += gross;
       totalTDSDeducted += tds;
       monthlyBreakdown.push({
@@ -101,8 +101,8 @@ export class Form16Service {
         periodYear: slip.periodYear,
         gross: Math.round(gross * 100) / 100,
         tds: Math.round(tds * 100) / 100,
-        pf: parseFloat(String(slip.pfEmployee)),
-        esi: parseFloat(String(slip.esiEmployee)),
+        pf: parseFloat(decryptField(slip.pfEmployee, encKey)),
+        esi: parseFloat(decryptField(slip.esiEmployee, encKey)),
       });
     }
 

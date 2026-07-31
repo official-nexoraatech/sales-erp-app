@@ -38,7 +38,7 @@ const FAKE_ORG = {
   pan: 'AAAAA0000A',
   tan: 'AAAA00000A',
   cin: 'U12345MH2020PTC000000',
-  logoUrl: null,
+  logoObjectKey: null,
   address: null,
   timezone: 'Asia/Kolkata',
   currency: 'INR',
@@ -46,7 +46,12 @@ const FAKE_ORG = {
   dateFormat: 'DD/MM/YYYY',
   country: 'IN',
   language: 'en',
-  bankDetails: { bankName: 'Test Bank', accountNumber: '000111222333', ifscCode: 'TEST0001', upiVpa: 'acme@upi' },
+  bankDetails: {
+    bankName: 'Test Bank',
+    accountNumber: '000111222333',
+    ifscCode: 'TEST0001',
+    upiVpa: 'acme@upi',
+  },
   invoiceFooter: null,
   termsAndConditions: null,
   themeConfig: { brandPrimary: '#4f46e5' },
@@ -68,6 +73,16 @@ const mockCtxFactory = {
   }),
 } as never;
 
+// F14: organizationRoutes() now constructs a StorageClient from these fields at setup —
+// never actually contacted in this suite (no upload-route test here), just needs to exist.
+const FAKE_CONFIG = {
+  minioEndpoint: 'localhost:9000',
+  minioAccessKey: 'test',
+  minioSecretKey: 'test',
+  minioUseSSL: false,
+  minioBucket: 'erp-local',
+} as never;
+
 let privateKey: KeyLike;
 
 async function makeToken(permissions: string[]): Promise<string> {
@@ -76,6 +91,7 @@ async function makeToken(permissions: string[]): Promise<string> {
     .setProtectedHeader({ alg: 'RS256' })
     .setSubject('1')
     .setIssuedAt(nowSec)
+    .setIssuer('erp-auth-service')
     .setExpirationTime(nowSec + 900)
     .sign(privateKey);
 }
@@ -93,7 +109,7 @@ describe('PG-013 — GET /organization field-level authorization', () => {
     process.env['JWT_PUBLIC_KEY'] = pub;
 
     app = Fastify({ logger: false });
-    await organizationRoutes(app, mockCtxFactory);
+    await organizationRoutes(app, mockCtxFactory, FAKE_CONFIG);
   });
 
   it('a caller without ORGANIZATION_VIEW gets orgName/theme but not GSTIN/PAN/bank details', async () => {

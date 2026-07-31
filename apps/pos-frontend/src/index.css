@@ -91,7 +91,12 @@
 /* 5. Base styles */
 :root {
   font-family: var(--font-sans);
-  font-size: 14px;
+  /* 87.5% of the browser's default (usually 16px) renders identically to the old hardcoded
+     14px for anyone using browser defaults, but — unlike a fixed px value — still scales
+     when a low-vision cashier has raised their browser/OS "default font size" accessibility
+     setting. Pinch/Ctrl-zoom already worked fine either way; this only fixes the separate
+     "increase default text size" setting, which a literal px value ignores entirely. */
+  font-size: 87.5%;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -105,6 +110,16 @@
 
 html, body, #root {
   height: 100%;
+}
+
+/* Unlike `<a href>`, a native `<button>` does not get a pointer cursor from the browser's
+   own UA stylesheet — Tailwind's Preflight doesn't add one either. Every POS button
+   component (POSButton, POSProductCard, cart/checkout controls, etc.) renders a plain
+   `<button>`, so this was showing the default arrow cursor app-wide. Centralized here
+   instead of per-component; `:disabled` is excluded so disabled buttons correctly keep
+   their `cursor-not-allowed` styling. */
+button:not(:disabled) {
+  cursor: pointer;
 }
 
 /* Scrollbar */

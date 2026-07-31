@@ -225,6 +225,7 @@ export default function BarcodeLabelsPage() {
           </Select>
           <div className="col-span-2 flex items-end">
             <Button
+              data-tour-id="production-barcode-labels-generate-button"
               disabled={!selectedItem || generateMutation.isPending}
               onClick={() => generateMutation.mutate()}
             >
@@ -242,7 +243,9 @@ export default function BarcodeLabelsPage() {
               {printData.barcodes.length === 1 ? '' : 's'}
             </h3>
             {hasPermission(PERMISSIONS.BARCODE_PRINT) && (
-              <Button onClick={handlePrint}>Print Labels</Button>
+              <Button data-tour-id="production-barcode-labels-print-button" onClick={handlePrint}>
+                Print Labels
+              </Button>
             )}
           </div>
           <div ref={printRef} className="flex flex-wrap gap-2">

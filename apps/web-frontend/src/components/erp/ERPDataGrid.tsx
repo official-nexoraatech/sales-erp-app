@@ -70,6 +70,11 @@ export interface ERPRowAction<T> {
   onClick: (row: T) => void;
   type?: ERPRowActionType;
   hidden?: (row: T) => boolean;
+  /** Optional `data-tour-id` for guided-tour targeting — only meaningful when this action is
+   * guaranteed to render inline (see MAX_INLINE_ACTIONS below); an action that overflows into
+   * the "More actions" dropdown won't carry it through, so only set this on an action a page
+   * knows will stay inline. */
+  tourId?: string;
 }
 
 interface Props<T> {
@@ -318,6 +323,7 @@ export default function ERPDataGrid<T>({
               type="button"
               title={a.label}
               aria-label={a.label}
+              data-tour-id={a.tourId}
               onClick={(e) => {
                 e.stopPropagation();
                 a.onClick(row);

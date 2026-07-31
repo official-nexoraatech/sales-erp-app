@@ -8,6 +8,9 @@ import {
   leaveApi,
   employeeFilesApi,
   employeeLoanApi,
+  employeeNomineeApi,
+  employeeHistoryApi,
+  exitWorkflowApi,
   type EmployeeDocument,
 } from '../../api/endpoints.js';
 import { useAuthStore } from '../../store/auth.store.js';
@@ -22,7 +25,7 @@ import Button from '../../components/ui/Button.js';
 import Modal from '../../components/ui/Modal.js';
 import Input from '../../components/ui/Input.js';
 import Select from '../../components/ui/Select.js';
-import { formatDate } from '../../lib/format.js';
+import { formatDate, formatCurrency } from '../../lib/format.js';
 
 interface Employee {
   id: number;
@@ -95,6 +98,54 @@ const LOAN_TYPES = [
   { value: 'GENERAL', label: 'General Loan' },
 ];
 
+interface Nominee {
+  id: number;
+  name: string;
+  relationship: string;
+  sharePercentage: string;
+  contactNumber?: string;
+  isPrimary: boolean;
+}
+
+const RELATIONSHIP_TYPES = [
+  { value: 'SPOUSE', label: 'Spouse' },
+  { value: 'PARENT', label: 'Parent' },
+  { value: 'CHILD', label: 'Child' },
+  { value: 'SIBLING', label: 'Sibling' },
+  { value: 'OTHER', label: 'Other' },
+];
+
+interface HistoryRow {
+  id: number;
+  changeType: string;
+  effectiveDate: string;
+  previousValue: Record<string, unknown>;
+  newValue: Record<string, unknown>;
+  reason?: string;
+}
+
+const CHANGE_TYPE_LABELS: Record<string, string> = {
+  PROMOTION: 'Promotion',
+  TRANSFER: 'Branch Transfer',
+  INCREMENT: 'Salary Revision',
+  DEPARTMENT_CHANGE: 'Department Change',
+  DESIGNATION_CHANGE: 'Designation Change',
+  MANAGER_CHANGE: 'Manager Change',
+};
+
+interface ExitWorkflow {
+  id: number;
+  resignationDate: string;
+  lastWorkingDate: string;
+  noticePeriodDays: number;
+  clearanceStatus: 'PENDING' | 'CLEARED';
+  fnfStatus: 'PENDING' | 'SETTLED';
+  fnfTotalAmount?: string;
+  proRatedSalaryAmount?: string;
+  leaveEncashmentAmount?: string;
+  loanRecoveryAmount?: string;
+}
+
 export default function EmployeeViewPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -156,6 +207,7 @@ export default function EmployeeViewPage() {
     mutationFn: (loanId: number) => employeeLoanApi.updateStatus(loanId, 'CLOSED'),
     onSuccess: () => {
       toast.success('Loan closed');
+      setCloseLoanId(null);
       qc.invalidateQueries({ queryKey: ['employee-loans', id] });
     },
     onError: (e: Error) => toast.error(e.message),
@@ -167,6 +219,117 @@ export default function EmployeeViewPage() {
       toast.success('Employee exit recorded');
       qc.invalidateQueries({ queryKey: ['employees'] });
       setExitModalOpen(false);
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  // ── Nominees ──────────────────────────────────────────────────────────────
+  const [showNomineeForm, setShowNomineeForm] = useState(false);
+  const [nomineeName, setNomineeName] = useState('');
+  const [nomineeRelationship, setNomineeRelationship] = useState('SPOUSE');
+  const [nomineeShare, setNomineeShare] = useState('100');
+  const [nomineeContact, setNomineeContact] = useState('');
+  const [deleteNomineeId, setDeleteNomineeId] = useState<number | null>(null);
+
+  const { data: nomineesData, isLoading: nomineesLoading } = useQuery({
+    queryKey: ['employee-nominees', id],
+    queryFn: () => employeeNomineeApi.list(Number(id)),
+    enabled: hasPermission(PERMISSIONS.EMPLOYEE_VIEW),
+  });
+  const nominees: Nominee[] =
+    ((nomineesData as Record<string, unknown>)?.content as Nominee[]) ?? [];
+
+  const createNomineeMutation = useMutation({
+    mutationFn: () =>
+      employeeNomineeApi.create(Number(id), {
+        name: nomineeName,
+        relationship: nomineeRelationship,
+        sharePercentage: parseFloat(nomineeShare),
+        ...(nomineeContact ? { contactNumber: nomineeContact } : {}),
+      }),
+    onSuccess: () => {
+      toast.success('Nominee added');
+      setShowNomineeForm(false);
+      setNomineeName('');
+      setNomineeContact('');
+      setNomineeShare('100');
+      qc.invalidateQueries({ queryKey: ['employee-nominees', id] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const deleteNomineeMutation = useMutation({
+    mutationFn: (nomineeId: number) => employeeNomineeApi.remove(Number(id), nomineeId),
+    onSuccess: () => {
+      toast.success('Nominee removed');
+      setDeleteNomineeId(null);
+      qc.invalidateQueries({ queryKey: ['employee-nominees', id] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  // ── History (increments/promotions/transfers) ────────────────────────────
+  const { data: historyData } = useQuery({
+    queryKey: ['employee-history', id],
+    queryFn: () => employeeHistoryApi.list(Number(id)),
+    enabled: hasPermission(PERMISSIONS.EMPLOYEE_VIEW),
+  });
+  const history: HistoryRow[] =
+    ((historyData as Record<string, unknown>)?.content as HistoryRow[]) ?? [];
+
+  // ── Exit workflow: notice period, clearance, Full & Final settlement ────
+  const canManageExit = hasPermission(PERMISSIONS.EMPLOYEE_UPDATE);
+  const [showExitWorkflowForm, setShowExitWorkflowForm] = useState(false);
+  const [resignationDate, setResignationDate] = useState('');
+  const [lastWorkingDate, setLastWorkingDate] = useState('');
+  const [noticePeriodDays, setNoticePeriodDays] = useState('30');
+
+  const { data: exitWorkflowData } = useQuery({
+    queryKey: ['exit-workflow', id],
+    queryFn: () => exitWorkflowApi.get(Number(id)),
+    enabled: canManageExit && employee?.status !== 'ACTIVE',
+  });
+  const exitWorkflow = (exitWorkflowData as ExitWorkflow | null) ?? undefined;
+
+  const startExitWorkflowMutation = useMutation({
+    mutationFn: () =>
+      exitWorkflowApi.start(Number(id), {
+        resignationDate,
+        lastWorkingDate,
+        noticePeriodDays: parseInt(noticePeriodDays, 10),
+        exitReason,
+      }),
+    onSuccess: () => {
+      toast.success('Exit workflow started');
+      setShowExitWorkflowForm(false);
+      qc.invalidateQueries({ queryKey: ['exit-workflow', id] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const clearExitMutation = useMutation({
+    mutationFn: () => exitWorkflowApi.clear(Number(id)),
+    onSuccess: () => {
+      toast.success('Clearance marked complete');
+      qc.invalidateQueries({ queryKey: ['exit-workflow', id] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const { data: fnfPreview, refetch: refetchFnfPreview } = useQuery({
+    queryKey: ['exit-fnf-preview', id],
+    queryFn: () => exitWorkflowApi.computeFnf(Number(id)),
+    enabled: false,
+  });
+
+  const settleFnfMutation = useMutation({
+    mutationFn: () => {
+      if (!fnfPreview) throw new Error('Compute the F&F breakup first');
+      return exitWorkflowApi.settle(Number(id), fnfPreview);
+    },
+    onSuccess: () => {
+      toast.success('Full & Final settlement recorded');
+      qc.invalidateQueries({ queryKey: ['exit-workflow', id] });
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -203,6 +366,7 @@ export default function EmployeeViewPage() {
   const documentFileInputRef = useRef<HTMLInputElement>(null);
   const [documentType, setDocumentType] = useState('AADHAAR');
   const [deleteDocumentId, setDeleteDocumentId] = useState<number | null>(null);
+  const [closeLoanId, setCloseLoanId] = useState<number | null>(null);
   const documentsQueryKey = ['employee-documents', id];
 
   const { data: documents, isLoading: documentsLoading } = useQuery({
@@ -274,7 +438,11 @@ export default function EmployeeViewPage() {
               </Button>
             )}
             {hasPermission(PERMISSIONS.EMPLOYEE_UPDATE) && employee.status === 'ACTIVE' && (
-              <Button variant="danger-outline" onClick={() => setExitModalOpen(true)}>
+              <Button
+                data-tour-id="hr-employee-record-exit-button"
+                variant="danger-outline"
+                onClick={() => setExitModalOpen(true)}
+              >
                 Record Exit
               </Button>
             )}
@@ -541,6 +709,7 @@ export default function EmployeeViewPage() {
             <div className="flex flex-col gap-3">
               <div>
                 <Button
+                  data-tour-id="hr-employee-disburse-loan-button"
                   type="button"
                   variant="secondary"
                   size="sm"
@@ -614,10 +783,14 @@ export default function EmployeeViewPage() {
                       {loans.map((loan) => (
                         <tr key={loan.id}>
                           <td className="py-2">{loan.loanType.replace(/_/g, ' ')}</td>
-                          <td className="py-2 text-right">₹{loan.principalAmount}</td>
-                          <td className="py-2 text-right">₹{loan.monthlyDeduction}</td>
+                          <td className="py-2 text-right">
+                            {formatCurrency(Number(loan.principalAmount))}
+                          </td>
+                          <td className="py-2 text-right">
+                            {formatCurrency(Number(loan.monthlyDeduction))}
+                          </td>
                           <td className="py-2 text-right font-semibold">
-                            ₹{loan.outstandingBalance}
+                            {formatCurrency(Number(loan.outstandingBalance))}
                           </td>
                           <td className="py-2">
                             <Badge
@@ -638,7 +811,7 @@ export default function EmployeeViewPage() {
                                 type="button"
                                 variant="ghost"
                                 size="sm"
-                                onClick={() => closeLoanMutation.mutate(loan.id)}
+                                onClick={() => setCloseLoanId(loan.id)}
                               >
                                 Close
                               </Button>
@@ -655,6 +828,315 @@ export default function EmployeeViewPage() {
         </div>
       )}
 
+      <div className="mt-6">
+        <ERPFormSection
+          title="Nominees"
+          description="PF / gratuity nomination beneficiaries"
+          columns={1}
+        >
+          <div className="flex flex-col gap-3">
+            {hasPermission(PERMISSIONS.EMPLOYEE_UPDATE) && (
+              <div>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setShowNomineeForm((v) => !v)}
+                >
+                  {showNomineeForm ? 'Cancel' : '+ Add Nominee'}
+                </Button>
+              </div>
+            )}
+
+            {showNomineeForm && (
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 p-3 rounded-lg border border-default">
+                <Input
+                  label="Name"
+                  value={nomineeName}
+                  onChange={(e) => setNomineeName(e.target.value)}
+                />
+                <Select
+                  label="Relationship"
+                  value={nomineeRelationship}
+                  onChange={(e) => setNomineeRelationship(e.target.value)}
+                  options={RELATIONSHIP_TYPES}
+                />
+                <Input
+                  label="Share %"
+                  type="number"
+                  min="0"
+                  max="100"
+                  value={nomineeShare}
+                  onChange={(e) => setNomineeShare(e.target.value)}
+                />
+                <Input
+                  label="Contact Number"
+                  value={nomineeContact}
+                  onChange={(e) => setNomineeContact(e.target.value)}
+                />
+                <div className="sm:col-span-4">
+                  <Button
+                    type="button"
+                    size="sm"
+                    disabled={!nomineeName || createNomineeMutation.isPending}
+                    onClick={() => createNomineeMutation.mutate()}
+                  >
+                    {createNomineeMutation.isPending ? 'Saving…' : 'Add Nominee'}
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {nomineesLoading && <p className="text-xs text-secondary">Loading nominees…</p>}
+            {!nomineesLoading && nominees.length === 0 && (
+              <p className="text-xs text-secondary">No nominees on file for this employee.</p>
+            )}
+            {nominees.length > 0 && (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-secondary text-xs uppercase">
+                      <th className="py-2">Name</th>
+                      <th className="py-2">Relationship</th>
+                      <th className="py-2 text-right">Share</th>
+                      <th className="py-2">Contact</th>
+                      <th className="py-2"></th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-default">
+                    {nominees.map((n) => (
+                      <tr key={n.id}>
+                        <td className="py-2">
+                          {n.name} {n.isPrimary && <Badge variant="outline">Primary</Badge>}
+                        </td>
+                        <td className="py-2">{n.relationship}</td>
+                        <td className="py-2 text-right">{n.sharePercentage}%</td>
+                        <td className="py-2">{n.contactNumber ?? '–'}</td>
+                        <td className="py-2 text-right">
+                          {hasPermission(PERMISSIONS.EMPLOYEE_UPDATE) && (
+                            <button
+                              type="button"
+                              onClick={() => setDeleteNomineeId(n.id)}
+                              className="p-1.5 rounded hover:bg-surface-card text-secondary hover:text-danger"
+                              title="Remove"
+                            >
+                              <Trash2 size={15} />
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </ERPFormSection>
+      </div>
+
+      {history.length > 0 && (
+        <div className="mt-6">
+          <ERPFormSection
+            title="Increment / Promotion / Transfer History"
+            description="Past changes to department, designation, branch, manager, and salary"
+            columns={1}
+          >
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-secondary text-xs uppercase">
+                    <th className="py-2">Type</th>
+                    <th className="py-2">Effective Date</th>
+                    <th className="py-2">Change</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-default">
+                  {history.map((h) => (
+                    <tr key={h.id}>
+                      <td className="py-2">
+                        <Badge variant="outline">
+                          {CHANGE_TYPE_LABELS[h.changeType] ?? h.changeType}
+                        </Badge>
+                      </td>
+                      <td className="py-2">{formatDate(h.effectiveDate)}</td>
+                      <td className="py-2 text-xs text-secondary">
+                        {JSON.stringify(h.previousValue)} → {JSON.stringify(h.newValue)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </ERPFormSection>
+        </div>
+      )}
+
+      {canManageExit && employee.status !== 'ACTIVE' && (
+        <div className="mt-6">
+          <ERPFormSection
+            title="Exit & Full and Final Settlement"
+            description="Notice period, clearance, and F&F settlement breakup"
+            columns={1}
+          >
+            {!exitWorkflow ? (
+              <div className="flex flex-col gap-3">
+                {!showExitWorkflowForm ? (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => setShowExitWorkflowForm(true)}
+                  >
+                    Start Exit Workflow
+                  </Button>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-3 rounded-lg border border-default">
+                    <Input
+                      label="Resignation Date"
+                      type="date"
+                      value={resignationDate}
+                      onChange={(e) => setResignationDate(e.target.value)}
+                    />
+                    <Input
+                      label="Last Working Date"
+                      type="date"
+                      value={lastWorkingDate}
+                      onChange={(e) => setLastWorkingDate(e.target.value)}
+                    />
+                    <Input
+                      label="Notice Period (days)"
+                      type="number"
+                      value={noticePeriodDays}
+                      onChange={(e) => setNoticePeriodDays(e.target.value)}
+                    />
+                    <div className="sm:col-span-3">
+                      <Button
+                        type="button"
+                        size="sm"
+                        disabled={
+                          !resignationDate ||
+                          !lastWorkingDate ||
+                          startExitWorkflowMutation.isPending
+                        }
+                        onClick={() => startExitWorkflowMutation.mutate()}
+                      >
+                        {startExitWorkflowMutation.isPending ? 'Saving…' : 'Save'}
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-4 text-sm">
+                <dl className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                  <div>
+                    <dt className="text-secondary text-xs uppercase">Resignation Date</dt>
+                    <dd>{formatDate(exitWorkflow.resignationDate)}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-secondary text-xs uppercase">Last Working Date</dt>
+                    <dd>{formatDate(exitWorkflow.lastWorkingDate)}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-secondary text-xs uppercase">Notice Period</dt>
+                    <dd>{exitWorkflow.noticePeriodDays} days</dd>
+                  </div>
+                  <div>
+                    <dt className="text-secondary text-xs uppercase">Clearance</dt>
+                    <dd>
+                      <Badge
+                        variant={exitWorkflow.clearanceStatus === 'CLEARED' ? 'success' : 'warning'}
+                      >
+                        {exitWorkflow.clearanceStatus}
+                      </Badge>
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-secondary text-xs uppercase">F&F Status</dt>
+                    <dd>
+                      <Badge variant={exitWorkflow.fnfStatus === 'SETTLED' ? 'success' : 'warning'}>
+                        {exitWorkflow.fnfStatus}
+                      </Badge>
+                    </dd>
+                  </div>
+                </dl>
+
+                {exitWorkflow.clearanceStatus === 'PENDING' && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={() => clearExitMutation.mutate()}
+                    loading={clearExitMutation.isPending}
+                  >
+                    Mark Clearance Complete
+                  </Button>
+                )}
+
+                {exitWorkflow.clearanceStatus === 'CLEARED' &&
+                  exitWorkflow.fnfStatus === 'PENDING' && (
+                    <div className="flex flex-col gap-3">
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => void refetchFnfPreview()}
+                      >
+                        Compute F&amp;F Breakup
+                      </Button>
+                      {fnfPreview && (
+                        <div className="p-3 rounded-lg border border-default space-y-1">
+                          <div className="flex justify-between">
+                            <span className="text-secondary">Pro-rated Last Salary</span>
+                            <span>{formatCurrency(fnfPreview.proRatedSalaryAmount)}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-secondary">
+                              Leave Encashment ({fnfPreview.unusedPaidLeaveDays} days)
+                            </span>
+                            <span>{formatCurrency(fnfPreview.leaveEncashmentAmount)}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-secondary">Loan Recovery</span>
+                            <span>-{formatCurrency(fnfPreview.loanRecoveryAmount)}</span>
+                          </div>
+                          <div className="flex justify-between font-semibold pt-1 border-t border-default">
+                            <span>Net F&amp;F Amount</span>
+                            <span>{formatCurrency(fnfPreview.fnfTotalAmount)}</span>
+                          </div>
+                          <Button
+                            type="button"
+                            size="sm"
+                            className="mt-2"
+                            onClick={() => settleFnfMutation.mutate()}
+                            loading={settleFnfMutation.isPending}
+                          >
+                            Confirm & Settle
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                {exitWorkflow.fnfStatus === 'SETTLED' && (
+                  <p className="text-sm text-success">
+                    Settled: {formatCurrency(Number(exitWorkflow.fnfTotalAmount))}
+                  </p>
+                )}
+              </div>
+            )}
+          </ERPFormSection>
+        </div>
+      )}
+
+      <ERPConfirmModal
+        open={deleteNomineeId !== null}
+        onClose={() => setDeleteNomineeId(null)}
+        onConfirm={() => deleteNomineeId !== null && deleteNomineeMutation.mutate(deleteNomineeId)}
+        title="Remove Nominee"
+        description="This will permanently remove this nominee record. This action cannot be undone."
+        isLoading={deleteNomineeMutation.isPending}
+      />
+
       <ERPConfirmModal
         open={deleteDocumentId !== null}
         onClose={() => setDeleteDocumentId(null)}
@@ -664,6 +1146,15 @@ export default function EmployeeViewPage() {
         title="Delete Document"
         description="This will permanently delete the document. This action cannot be undone."
         isLoading={deleteDocumentMutation.isPending}
+      />
+
+      <ERPConfirmModal
+        open={closeLoanId !== null}
+        onClose={() => setCloseLoanId(null)}
+        onConfirm={() => closeLoanId !== null && closeLoanMutation.mutate(closeLoanId)}
+        title="Close this loan?"
+        description="Marks the loan as closed. Any remaining outstanding balance stays on record but stops being deducted from future payroll runs."
+        isLoading={closeLoanMutation.isPending}
       />
 
       <Modal

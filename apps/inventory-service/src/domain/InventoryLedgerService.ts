@@ -1,7 +1,8 @@
 import { eq, and, sql } from 'drizzle-orm';
-import { items, inventoryLedger, projectionStockLevel } from '@erp/db';
+import { items, inventoryLedger, projectionStockLevel, outboxEvents, warehouses } from '@erp/db';
 import { ERPError } from '@erp/types';
 import type { ErpDatabase } from '@erp/db';
+import { ulid } from 'ulid';
 import { ValuationService } from './ValuationService.js';
 
 export interface StockMovementParams {
@@ -112,10 +113,14 @@ export class InventoryLedgerService {
     await this.upsertProjection(db, params, -quantity, 0);
   }
 
+  // Returns costImpact: the monetary stock-value change this adjustment caused
+  // (positive for a valued excess/IN, negative magnitude = COGS for a shortage/OUT) —
+  // callers use this to post a net loss/gain to accounting; see StockAdjustmentService
+  // and PhysicalVerificationService.
   async adjustStock(
     params: StockMovementParams & { direction: 'IN' | 'OUT' },
     trx?: ErpDatabase
-  ): Promise<void> {
+  ): Promise<{ costImpact: number }> {
     const db = trx ?? this.db;
     const { tenantId, itemId, quantity, direction } = params;
     const delta = direction === 'IN' ? quantity : -quantity;
@@ -150,8 +155,47 @@ export class InventoryLedgerService {
     const after = parseFloat(result[0]!.availableQty ?? '0');
     const before = after - delta;
 
-    await this.writeLedger(db, 'ADJUSTMENT', before, after, params);
+    // Stock adjustments (damage/shortage/theft/excess) and Physical Verification write-offs
+    // both funnel through here — previously this only moved availableQty/the ledger/the
+    // projection and never touched waccCost/currentStockValue/FIFO layers, so a write-off
+    // silently left the book stock value unchanged (WACC-costed items even drifted upward,
+    // since the same currentStockValue then divides across a now-smaller quantity) and never
+    // decremented a FIFO layer, corrupting later COGS. Excess (IN) is valued like any other
+    // stock-in at the adjustment's own unitCost; shortage/damage/etc (OUT) is costed at the
+    // item's existing WACC/FIFO basis, exactly like a sale, not at the adjustment's unitCost.
+    let cogsPerUnit: number | undefined;
+    let costImpact = 0;
+    if (direction === 'OUT') {
+      const totalCogs = await ValuationService.consumeForStockOut(db, {
+        tenantId,
+        itemId,
+        variantId: params.variantId,
+        warehouseId: params.warehouseId,
+        quantity,
+      });
+      cogsPerUnit = quantity > 0 ? Math.round((totalCogs / quantity) * 100) / 100 : 0;
+      costImpact = -totalCogs;
+    }
+
+    const ledgerId = await this.writeLedger(db, 'ADJUSTMENT', before, after, params, cogsPerUnit);
+
+    if (direction === 'IN') {
+      const unitCost = params.unitCost ?? 0;
+      await ValuationService.applyStockIn(db, {
+        tenantId,
+        itemId,
+        variantId: params.variantId,
+        warehouseId: params.warehouseId,
+        quantity,
+        unitCost,
+        qtyBeforeStockIn: before,
+        sourceLedgerId: ledgerId,
+      });
+      costImpact = unitCost > 0 ? quantity * unitCost : 0;
+    }
+
     await this.upsertProjection(db, params, delta, 0);
+    return { costImpact };
   }
 
   async transferStock(
@@ -245,7 +289,7 @@ export class InventoryLedgerService {
     availableDelta: number,
     reservedDelta: number
   ): Promise<void> {
-    await db
+    const [row] = await db
       .insert(projectionStockLevel)
       .values({
         tenantId: params.tenantId,
@@ -269,6 +313,45 @@ export class InventoryLedgerService {
           lastMovementAt: new Date(),
           updatedAt: new Date(),
         },
-      });
+      })
+      .returning({ availableQty: projectionStockLevel.availableQty });
+
+    await this.publishStockLevelChanged(db, params, parseFloat(row!.availableQty));
+  }
+
+  // Feeds search-service's 'stock' entity (per-warehouse stock level). Every stock movement
+  // funnels through upsertProjection, so this is the one place that needs to publish an event
+  // rather than every GRN/invoice/adjustment/transfer route doing it individually — see
+  // eventEntityMap.ts's STOCK_LEVEL_CHANGED mapping for the consumer side.
+  private async publishStockLevelChanged(
+    db: ErpDatabase,
+    params: StockMovementParams,
+    quantity: number
+  ): Promise<void> {
+    const [item] = await db
+      .select({ name: items.name, itemCode: items.itemCode })
+      .from(items)
+      .where(and(eq(items.id, params.itemId), eq(items.tenantId, params.tenantId)));
+    const [warehouse] = await db
+      .select({ name: warehouses.name })
+      .from(warehouses)
+      .where(and(eq(warehouses.id, params.warehouseId), eq(warehouses.tenantId, params.tenantId)));
+
+    await db.insert(outboxEvents).values({
+      eventId: ulid(),
+      eventType: 'STOCK_LEVEL_CHANGED',
+      aggregateType: 'Stock',
+      aggregateId: params.itemId,
+      tenantId: params.tenantId,
+      payload: {
+        itemId: params.itemId,
+        warehouseId: params.warehouseId,
+        variantId: params.variantId,
+        itemName: item?.name,
+        sku: item?.itemCode,
+        warehouse: warehouse?.name,
+        quantity,
+      },
+    });
   }
 }

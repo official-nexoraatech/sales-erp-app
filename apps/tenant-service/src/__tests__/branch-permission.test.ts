@@ -21,7 +21,10 @@ vi.mock('drizzle-orm', () => ({
   isNull: vi.fn(() => '__isNull__'),
   or: vi.fn(() => '__or__'),
   ilike: vi.fn(() => '__ilike__'),
-  sql: Object.assign(vi.fn(() => '__sql__'), { raw: vi.fn() }),
+  sql: Object.assign(
+    vi.fn(() => '__sql__'),
+    { raw: vi.fn() }
+  ),
 }));
 
 // PG-012 (tenant-suspension enforcement) added an assertTenantActive() call inside
@@ -78,6 +81,7 @@ async function makeToken(permissions: string[]): Promise<string> {
     .setProtectedHeader({ alg: 'RS256' })
     .setSubject('1')
     .setIssuedAt(nowSec)
+    .setIssuer('erp-auth-service')
     .setExpirationTime(nowSec + 900)
     .sign(privateKey);
 }

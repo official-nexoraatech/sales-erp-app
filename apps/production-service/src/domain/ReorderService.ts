@@ -10,7 +10,7 @@ import {
 import type { ErpDatabase } from '@erp/db';
 import { BusinessError } from '@erp/types';
 import { ulid } from 'ulid';
-import { GSTCalculator } from './GSTCalculator.js';
+import { GSTCalculator } from '@erp/utils';
 
 export interface ReorderItem {
   itemId: number;

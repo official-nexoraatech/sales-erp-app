@@ -1,12 +1,13 @@
 import type { FastifyInstance } from 'fastify';
 import type { ErpDatabase } from '@erp/db';
-import { users, roles, userRoles, rolePermissions } from '@erp/db';
+import { users, roles, userRoles, rolePermissions, securityAuditLog } from '@erp/db';
 import { eq, and, inArray } from 'drizzle-orm';
 import { z } from 'zod';
 import { NotFoundError, ValidationError, BusinessError, PermissionError } from '@erp/types';
 import { PERMISSIONS } from '@erp/types';
 import { authenticate } from '../middleware/authenticate.js';
 import { requirePermission } from '../middleware/authorize.js';
+import { inetParam } from '../db-helpers.js';
 
 const AssignRolesSchema = z.object({
   roleIds: z.array(z.number().int().positive()).min(1),
@@ -49,7 +50,9 @@ export async function userRolesRoutes(fastify: FastifyInstance, db: ErpDatabase)
     '/users/:id/roles',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.ROLE_ASSIGN_USER)] },
     async (request, reply) => {
-      const auth = (request as { auth: { tenantId: number; permissions: string[] } }).auth;
+      const auth = (
+        request as { auth: { tenantId: number; userId: number; permissions: string[] } }
+      ).auth;
       const tenantId = auth.tenantId;
       const userId = parseInt(request.params.id, 10);
 
@@ -99,6 +102,15 @@ export async function userRolesRoutes(fastify: FastifyInstance, db: ErpDatabase)
       await db
         .insert(userRoles)
         .values(body.data.roleIds.map((roleId) => ({ userId, roleId, tenantId })));
+
+      await db.insert(securityAuditLog).values({
+        tenantId,
+        actorId: auth.userId,
+        targetUserId: userId,
+        action: 'ROLE_ASSIGNED',
+        ipAddress: inetParam(request.ip),
+        details: { roleIds: body.data.roleIds },
+      });
 
       return reply.code(200).send({ data: { userId, roleIds: body.data.roleIds } });
     }

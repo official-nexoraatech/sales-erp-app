@@ -89,19 +89,65 @@ describe.skipIf(!DB_URL)('Tenant provisioning integration', () => {
     expect(org!.createdBy).toBe(result.adminUserId);
   });
 
-  it('can suspend and activate a tenant', async () => {
+  it('can suspend and activate a tenant, clearing suspension metadata and bumping version each transition', async () => {
     if (!provisionedTenantId) return;
 
     const provisioner = new TenantProvisioner(db, 'http://localhost:9200', makeFakeStorageClient());
+
+    const [before] = await db.select().from(tenants).where(eq(tenants.id, provisionedTenantId));
+    const versionBeforeSuspend = before!.version;
 
     await provisioner.suspend(provisionedTenantId, 'Integration test suspension', 1);
     const [suspended] = await db.select().from(tenants).where(eq(tenants.id, provisionedTenantId));
     expect(suspended!.status).toBe('SUSPENDED');
     expect(suspended!.suspendedBy).toBe(1);
+    expect(suspended!.suspendedReason).toBe('Integration test suspension');
+    expect(suspended!.version).toBe(versionBeforeSuspend + 1);
 
     await provisioner.activate(provisionedTenantId);
     const [active] = await db.select().from(tenants).where(eq(tenants.id, provisionedTenantId));
     expect(active!.status).toBe('ACTIVE');
+    // Regression guard: activate() used to set these to `undefined`, which Drizzle silently
+    // drops from the UPDATE — the columns kept their stale suspended values forever.
+    expect(active!.suspendedAt).toBeNull();
+    expect(active!.suspendedBy).toBeNull();
+    expect(active!.suspendedReason).toBeNull();
+    expect(active!.version).toBe(versionBeforeSuspend + 2);
+  });
+
+  it('close() only transitions from a non-CLOSED status and cannot be applied twice', async () => {
+    const slug = `test-tenant-close-${Date.now()}`;
+    const provisioner = new TenantProvisioner(db, 'http://localhost:9200', makeFakeStorageClient());
+    const result = await provisioner.provision({
+      name: 'Close Test Co.',
+      slug,
+      contactEmail: `close-${Date.now()}@example.com`,
+      adminFirstName: 'Test',
+      adminLastName: 'Admin',
+      adminPassword: 'Password123!',
+      plan: 'STARTER',
+    });
+
+    await provisioner.close(result.tenantId, 'Integration test close', 1);
+    const [closed] = await db.select().from(tenants).where(eq(tenants.id, result.tenantId));
+    expect(closed!.status).toBe('CLOSED');
+    const versionAfterFirstClose = closed!.version;
+
+    // A second close() call must be a no-op (regression guard: close() previously had no
+    // status guard in its WHERE clause at all, unlike suspend()/activate()).
+    await provisioner.close(result.tenantId, 'Second close attempt', 1);
+    const [stillClosed] = await db.select().from(tenants).where(eq(tenants.id, result.tenantId));
+    expect(stillClosed!.version).toBe(versionAfterFirstClose);
+
+    // Clean up — this test provisions its own tenant, separate from provisionedTenantId.
+    await db.execute(`DELETE FROM user_roles WHERE tenant_id = ${result.tenantId}`);
+    await db.execute(`DELETE FROM user_branches WHERE tenant_id = ${result.tenantId}`);
+    await db.execute(`DELETE FROM role_permissions WHERE tenant_id = ${result.tenantId}`);
+    await db.delete(organizationSettings).where(eq(organizationSettings.tenantId, result.tenantId));
+    await db.delete(users).where(eq(users.tenantId, result.tenantId));
+    await db.delete(roles).where(eq(roles.tenantId, result.tenantId));
+    await db.delete(branches).where(eq(branches.tenantId, result.tenantId));
+    await db.delete(tenants).where(eq(tenants.id, result.tenantId));
   });
 
   it('marks provisioning FAILED and rejects if the S3 bucket is unreachable', async () => {

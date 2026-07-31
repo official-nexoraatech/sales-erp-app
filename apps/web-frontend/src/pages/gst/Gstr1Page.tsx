@@ -8,6 +8,7 @@ import {
   ChevronDown,
   ChevronRight,
 } from 'lucide-react';
+import { GSTIN_REGEX } from '@erp/types';
 import { gstApi } from '../../api/endpoints.js';
 import toast from 'react-hot-toast';
 import { useAuthStore } from '../../store/auth.store.js';
@@ -122,6 +123,7 @@ export function Gstr1Page() {
         <div className="flex gap-2">
           {canFileGstr1 && (
             <Button
+              data-tour-id="gst-gstr1-export-button"
               variant="primary"
               onClick={() => exportMutation.mutate('JSON')}
               disabled={!gstr1Data?.isExportReady || exportMutation.isPending}
@@ -149,6 +151,9 @@ export function Gstr1Page() {
             maxLength={15}
             className="px-3 py-2 text-sm bg-surface-card border border-default rounded-lg text-primary font-mono focus:outline-none focus:ring-2 focus:ring-focus w-48"
           />
+          {gstin.length > 0 && !GSTIN_REGEX.test(gstin) && (
+            <p className="text-xs text-danger mt-1">Doesn't look like a valid GSTIN.</p>
+          )}
         </div>
       </div>
 

@@ -1,13 +1,16 @@
-import { useState } from 'react';
+import { useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { journalApi, accountApi, costCenterApi } from '../../api/endpoints.js';
+import { useConfirm } from '../../context/ConfirmContext.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
 import ERPTextarea from '../../components/erp/ERPTextarea.js';
 import ERPStickyFooter from '../../components/erp/ERPStickyFooter.js';
 import Button from '../../components/ui/Button.js';
 import { formatCurrency } from '../../lib/format.js';
+import { toFieldErrors } from '../../lib/zodFieldErrors.js';
+import { journalFormSchema } from '../../schemas/accounting-transactions.schema.js';
 import type { ApiError } from '../../api/client.js';
 
 interface Account {
@@ -36,8 +39,10 @@ function emptyLine(): JournalLine {
 
 export default function JournalFormPage() {
   const navigate = useNavigate();
+  const confirm = useConfirm();
   const [description, setDescription] = useState('');
   const [lines, setLines] = useState<JournalLine[]>([emptyLine(), emptyLine()]);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   const { data: accountData } = useQuery({
     queryKey: ['accounts-list'],
@@ -74,24 +79,40 @@ export default function JournalFormPage() {
     onError: (e: ApiError) => toast.error(e.message || 'Failed to post journal'),
   });
 
-  const handleSubmit = (): void => {
-    if (!description.trim()) {
-      toast.error('Description is required');
-      return;
-    }
+  const handleSubmit = async (e: FormEvent): Promise<void> => {
+    e.preventDefault();
     const validLines = lines.filter(
       (l) => l.accountId && (parseFloat(l.debitAmount) > 0 || parseFloat(l.creditAmount) > 0)
     );
-    if (validLines.length < 2) {
-      toast.error('A journal requires at least 2 lines, each with an account and an amount');
+    const result = journalFormSchema.safeParse({
+      description,
+      lines: validLines.map((l) => ({
+        accountId: Number(l.accountId),
+        debitAmount: parseFloat(l.debitAmount) || 0,
+        creditAmount: parseFloat(l.creditAmount) || 0,
+      })),
+    });
+    if (!result.success) {
+      setFieldErrors(toFieldErrors(result.error));
+      toast.error('Fix the highlighted fields before saving');
       return;
     }
+    setFieldErrors({});
     if (!isBalanced) {
       toast.error(
         `Journal is unbalanced: debit ${formatCurrency(totalDebit)} vs credit ${formatCurrency(totalCredit)}`
       );
       return;
     }
+
+    const ok = await confirm({
+      title: 'Post this journal?',
+      message:
+        'This posts immediately to the ledger — there is no draft stage. You can reverse it afterward, but the original entry is never deleted or edited.',
+      confirmLabel: 'Post Journal',
+      variant: 'primary',
+    });
+    if (!ok) return;
 
     createMutation.mutate({
       description: description.trim(),
@@ -106,7 +127,7 @@ export default function JournalFormPage() {
   };
 
   return (
-    <div>
+    <form onSubmit={handleSubmit} noValidate>
       <ERPPageHeader
         variant="detail"
         title="New Manual Journal"
@@ -122,10 +143,16 @@ export default function JournalFormPage() {
           onChange={(e) => setDescription(e.target.value)}
           rows={2}
           placeholder="What is this journal entry for?"
+          error={fieldErrors.description}
         />
       </div>
 
       <div className="bg-surface-card rounded-xl border border-default p-4 mb-4">
+        {fieldErrors.lines && (
+          <p className="text-xs text-danger mb-3" role="alert">
+            {fieldErrors.lines}
+          </p>
+        )}
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
@@ -162,6 +189,9 @@ export default function JournalFormPage() {
                       step="0.01"
                       value={l.debitAmount}
                       onChange={(e) => updateLine(idx, 'debitAmount', e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') e.preventDefault();
+                      }}
                       className="w-28 rounded border-default bg-surface-card px-2 py-1 text-sm"
                     />
                   </td>
@@ -172,6 +202,9 @@ export default function JournalFormPage() {
                       step="0.01"
                       value={l.creditAmount}
                       onChange={(e) => updateLine(idx, 'creditAmount', e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') e.preventDefault();
+                      }}
                       className="w-28 rounded border-default bg-surface-card px-2 py-1 text-sm"
                     />
                   </td>
@@ -180,6 +213,9 @@ export default function JournalFormPage() {
                       type="text"
                       value={l.description}
                       onChange={(e) => updateLine(idx, 'description', e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') e.preventDefault();
+                      }}
                       className="w-40 rounded border-default bg-surface-card px-2 py-1 text-sm"
                     />
                   </td>
@@ -200,6 +236,7 @@ export default function JournalFormPage() {
                   <td className="py-2">
                     {lines.length > 2 && (
                       <button
+                        type="button"
                         onClick={() => removeLine(idx)}
                         className="text-danger hover:text-danger text-xs"
                       >
@@ -213,7 +250,7 @@ export default function JournalFormPage() {
           </table>
         </div>
 
-        <Button variant="ghost" className="mt-3" onClick={addLine}>
+        <Button type="button" variant="ghost" className="mt-3" onClick={addLine}>
           + Add Line
         </Button>
 
@@ -238,13 +275,18 @@ export default function JournalFormPage() {
       </div>
 
       <ERPStickyFooter>
-        <Button variant="secondary" onClick={() => navigate('/accounting/journals')}>
+        <Button type="button" variant="secondary" onClick={() => navigate('/accounting/journals')}>
           Cancel
         </Button>
-        <Button isLoading={createMutation.isPending} disabled={!isBalanced} onClick={handleSubmit}>
+        <Button
+          type="submit"
+          data-tour-id="accounting-journal-post-button"
+          isLoading={createMutation.isPending}
+          disabled={!isBalanced}
+        >
           Post Journal
         </Button>
       </ERPStickyFooter>
-    </div>
+    </form>
   );
 }

@@ -136,6 +136,7 @@ export default function SsoConfigPage() {
         {canManage && (
           <div className="flex items-center gap-3 pt-2">
             <Button
+              data-tour-id="settings-sso-save-button"
               type="submit"
               loading={isSubmitting || saveMutation.isPending}
               disabled={!isDirty}

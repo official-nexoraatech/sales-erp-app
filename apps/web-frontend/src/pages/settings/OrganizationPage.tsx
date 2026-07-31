@@ -1,11 +1,12 @@
-﻿import { useEffect } from 'react';
+﻿import { useEffect, useRef, type ChangeEvent } from 'react';
 import { useForm } from 'react-hook-form';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { GSTIN_REGEX } from '@erp/types';
 import { organizationApi } from '../../api/endpoints.js';
-import { ApiError } from '../../api/client.js';
 import { useAuthStore } from '../../store/auth.store.js';
+import { useOrganization } from '../../hooks/useOrganization.js';
+import { useObjectUrl } from '../../hooks/useObjectUrl.js';
 import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
 import Input from '../../components/ui/Input.js';
@@ -14,6 +15,9 @@ import Button from '../../components/ui/Button.js';
 import ColorPicker from '../../components/ui/ColorPicker.js';
 import { ERPFormSkeleton } from '../../components/erp/ERPSkeleton.js';
 import { broadcastTenantThemeChange } from '../../components/erp/TenantThemeSync.js';
+
+const LOGO_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/svg+xml']);
+const MAX_LOGO_SIZE = 2 * 1024 * 1024; // matches tenant-service's registered limit
 
 interface OrgForm {
   orgName: string;
@@ -33,27 +37,51 @@ interface OrgForm {
     fontSans?: string;
     radiusScale?: 'sharp' | 'default' | 'rounded';
   };
+  purchaseApprovalThreshold?: number | string;
 }
 
 export default function OrganizationPage() {
   const qc = useQueryClient();
   const canEditOrgSettings = useAuthStore((s) => s.hasPermission(PERMISSIONS.ORG_SETTINGS_EDIT));
-  const { data, isLoading } = useQuery({
-    queryKey: ['organization'],
-    // A tenant with no organization row yet is a valid "not set up" state, not an
-    // error — the PUT handler creates the row on first save. Swallow the 404 here
-    // so it doesn't trip the global QueryCache error toast in main.tsx.
-    queryFn: async () => {
-      try {
-        return await organizationApi.get();
-      } catch (err) {
-        if (err instanceof ApiError && err.statusCode === 404) return null;
-        throw err;
-      }
-    },
-  });
+  const { data, isLoading } = useOrganization();
 
   const org = data as Record<string, unknown> | undefined;
+
+  const logoInputRef = useRef<HTMLInputElement>(null);
+  const { data: logoBlob } = useQuery({
+    queryKey: ['organization-logo'],
+    queryFn: () => organizationApi.logoBlob(),
+    enabled: Boolean(data?.logoObjectKey),
+    staleTime: 60_000,
+    retry: false,
+  });
+  const logoUrl = useObjectUrl(logoBlob);
+
+  const uploadLogoMutation = useMutation({
+    mutationFn: (file: File) => organizationApi.uploadLogo(file),
+    onSuccess: () => {
+      toast.success('Logo uploaded');
+      qc.invalidateQueries({ queryKey: ['organization'] });
+      qc.invalidateQueries({ queryKey: ['organization-logo'] });
+      broadcastTenantThemeChange();
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
+  function handleLogoChange(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (!LOGO_MIME_TYPES.has(file.type)) {
+      toast.error('Logo must be a PNG, JPEG, WebP or SVG image');
+      return;
+    }
+    if (file.size > MAX_LOGO_SIZE) {
+      toast.error('Logo exceeds the 2MB size limit');
+      return;
+    }
+    uploadLogoMutation.mutate(file);
+  }
 
   const {
     register,
@@ -90,6 +118,15 @@ export default function OrganizationPage() {
       delete payload['address'];
     }
     if (payload['bankDetails'] === null) delete payload['bankDetails'];
+    // Blank/0 means "no threshold configured" (single-tier approval) — must be omitted
+    // entirely, not sent as 0, since PurchaseOrderService.approve() treats 0 as "every PO
+    // requires high-value approval", not "feature disabled".
+    if (
+      payload['purchaseApprovalThreshold'] === '' ||
+      payload['purchaseApprovalThreshold'] === null
+    ) {
+      delete payload['purchaseApprovalThreshold'];
+    }
     const themeConfig = payload['themeConfig'] as Record<string, unknown> | undefined;
     if (themeConfig) {
       for (const key of ['brandPrimary', 'brandSecondary', 'brandAccent', 'fontSans']) {
@@ -166,6 +203,39 @@ export default function OrganizationPage() {
           <p className="text-xs text-secondary mb-4">
             Applies instantly, app-wide, to every user of this tenant.
           </p>
+
+          <div className="flex items-center gap-4 mb-5">
+            <div className="w-14 h-14 rounded-lg border border-default bg-surface-subtle flex items-center justify-center overflow-hidden shrink-0">
+              {logoUrl ? (
+                <img src={logoUrl} alt="Organization logo" className="w-full h-full object-cover" />
+              ) : (
+                <span className="text-xs text-secondary">No logo</span>
+              )}
+            </div>
+            {canEditOrgSettings && (
+              <div>
+                <input
+                  ref={logoInputRef}
+                  type="file"
+                  aria-label="Upload organization logo"
+                  accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                  className="hidden"
+                  onChange={handleLogoChange}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  loading={uploadLogoMutation.isPending}
+                  onClick={() => logoInputRef.current?.click()}
+                >
+                  {org?.['logoObjectKey'] ? 'Replace logo' : 'Upload logo'}
+                </Button>
+                <p className="text-xs text-disabled mt-1">PNG, JPEG, WebP or SVG, up to 2MB.</p>
+              </div>
+            )}
+          </div>
+
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
             <ColorPicker label="Primary Color" {...register('themeConfig.brandPrimary')} />
             <ColorPicker label="Secondary Color" {...register('themeConfig.brandSecondary')} />
@@ -183,6 +253,23 @@ export default function OrganizationPage() {
               <option value="rounded">Rounded</option>
             </Select>
           </div>
+        </div>
+
+        <div className="border-t border-default pt-5">
+          <h2 className="text-sm font-semibold text-primary mb-1">Purchase Approvals</h2>
+          <p className="text-xs text-secondary mb-4">
+            Purchase Orders above this amount require an approver with the PO High-Value Approval
+            permission, in addition to regular PO approval. Leave blank to disable (single-tier
+            approval — the default).
+          </p>
+          <Input
+            label="Approval Threshold (₹)"
+            type="number"
+            step="0.01"
+            min="0"
+            placeholder="No threshold — single-tier approval"
+            {...register('purchaseApprovalThreshold')}
+          />
         </div>
 
         {canEditOrgSettings && (

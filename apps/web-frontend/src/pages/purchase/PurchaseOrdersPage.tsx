@@ -13,6 +13,7 @@ import ERPDataGrid, {
   type ERPRowAction,
 } from '../../components/erp/ERPDataGrid.js';
 import ERPDrawer from '../../components/erp/ERPDrawer.js';
+import ERPEmptyState from '../../components/erp/ERPEmptyState.js';
 import AttachmentSection from '../../components/erp/AttachmentSection.js';
 import Button from '../../components/ui/Button.js';
 import Badge from '../../components/ui/Badge.js';
@@ -182,7 +183,7 @@ export default function PurchaseOrdersPage() {
               setApproveId(r.id);
               setPoNumber('');
             },
-            hidden: (r: PurchaseOrder) => r.status !== 'SUBMITTED',
+            hidden: (r: PurchaseOrder) => !['SUBMITTED', 'PENDING_APPROVAL'].includes(r.status),
           },
         ]
       : []),
@@ -191,6 +192,7 @@ export default function PurchaseOrdersPage() {
           {
             label: 'Receive',
             icon: PackageCheck,
+            tourId: 'po-receive-row-action',
             onClick: (r: PurchaseOrder) => navigate(`/purchase/grns/new?poId=${r.id}`),
             hidden: (r: PurchaseOrder) => !['APPROVED', 'PARTIALLY_RECEIVED'].includes(r.status),
           },
@@ -221,7 +223,7 @@ export default function PurchaseOrdersPage() {
               setCancelId(r.id);
               setCancelReason('');
             },
-            hidden: (r: PurchaseOrder) => !['DRAFT', 'SUBMITTED'].includes(r.status),
+            hidden: (r: PurchaseOrder) => ['RECEIVED', 'CLOSED', 'CANCELLED'].includes(r.status),
           },
         ]
       : []),
@@ -234,7 +236,11 @@ export default function PurchaseOrdersPage() {
         title="Purchase Orders"
         subtitle="Manage supplier purchase orders"
       >
-        {canCreatePO && <Button onClick={() => navigate('/purchase/orders/new')}>+ New PO</Button>}
+        {canCreatePO && (
+          <Button data-tour-id="po-create-button" onClick={() => navigate('/purchase/orders/new')}>
+            + New PO
+          </Button>
+        )}
       </ERPPageHeader>
 
       <div className="flex flex-wrap gap-4 mb-4">
@@ -262,6 +268,22 @@ export default function PurchaseOrdersPage() {
         data={rows}
         isLoading={isLoading}
         rowKey="id"
+        enableExport
+        exportFilename="purchase-orders"
+        emptyState={
+          debouncedSearch || status ? (
+            <ERPEmptyState type="no-results" />
+          ) : (
+            <ERPEmptyState
+              type="no-data"
+              title="No purchase orders yet"
+              description="Create a Purchase Order to formally commit to buying goods from a supplier."
+              {...(canCreatePO
+                ? { action: { label: '+ New PO', onClick: () => navigate('/purchase/orders/new') } }
+                : {})}
+            />
+          )
+        }
         pagination={{ page, pageSize, total: totalElements }}
         onPageChange={setPage}
         onPageSizeChange={(size) => {

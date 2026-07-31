@@ -3,6 +3,7 @@ import {
   bigserial,
   boolean,
   date,
+  decimal,
   index,
   integer,
   jsonb,
@@ -24,7 +25,10 @@ export const tenants = pgTable(
       .notNull()
       .default('PROVISIONING')
       .$type<'PROVISIONING' | 'ACTIVE' | 'SUSPENDED' | 'CLOSED'>(),
-    plan: varchar('plan', { length: 50 }).notNull().default('STARTER').$type<'STARTER' | 'GROWTH' | 'ENTERPRISE'>(),
+    plan: varchar('plan', { length: 50 })
+      .notNull()
+      .default('STARTER')
+      .$type<'STARTER' | 'GROWTH' | 'ENTERPRISE'>(),
     contactEmail: varchar('contact_email', { length: 255 }).notNull(),
     contactPhone: varchar('contact_phone', { length: 20 }),
     gstin: varchar('gstin', { length: 20 }),
@@ -59,14 +63,15 @@ export const tenants = pgTable(
     provisioningSteps: jsonb('provisioning_steps')
       .$type<Record<string, { done: boolean; completedAt?: string; error?: string }>>()
       .default({}),
+    // F13 (2026-07-23 tenant-service audit): timezone/fiscalYearStart/currency/country/
+    // language/dateFormat used to live here too, written once at provisioning and never
+    // read back by anything — organizationSettings (seeded from the same signup input, see
+    // TenantProvisioner.provision()'s SEED_ORG_SETTINGS step) is the actual, live source of
+    // truth for those fields. Removed rather than kept in sync, since a synced-but-unread
+    // copy has no purpose. maxUsers/maxBranches are the only fields anything here reads
+    // (packages/platform-sdk/src/entitlements.ts).
     settings: jsonb('settings')
       .$type<{
-        timezone?: string;
-        fiscalYearStart?: string;
-        currency?: string;
-        country?: string;
-        language?: string;
-        dateFormat?: string;
         maxBranches?: number;
         maxUsers?: number;
       }>()
@@ -107,7 +112,10 @@ export const organizationSettings = pgTable(
     pan: varchar('pan', { length: 20 }),
     tan: varchar('tan', { length: 20 }),
     cin: varchar('cin', { length: 21 }),
-    logoUrl: text('logo_url'),
+    // F14 (2026-07-23 tenant-service audit): renamed from logoUrl — the bucket is private
+    // (no public-read policy), so a persisted value must be an S3 object key that a signed
+    // URL gets generated from on read, never a directly-renderable URL stored as-is.
+    logoObjectKey: text('logo_object_key'),
     address: jsonb('address').$type<{
       line1: string;
       line2?: string;
@@ -131,6 +139,11 @@ export const organizationSettings = pgTable(
     }>(),
     invoiceFooter: text('invoice_footer'),
     termsAndConditions: text('terms_and_conditions'),
+    // Purchase module enhancement 2026-07-21: tiered PO approval — a PO whose grandTotal
+    // exceeds this amount requires PO_APPROVE_HIGH_VALUE in addition to PO_APPROVE. NULL
+    // (the default) means no threshold is configured, so approval stays single-tier — same
+    // behavior as before this feature existed.
+    purchaseApprovalThreshold: decimal('purchase_approval_threshold', { precision: 15, scale: 2 }),
     // Tenant branding — ERP-PLANNING/05_ERP_THEME_SYSTEM.md §4. Deliberately small and
     // enumerated: color/font/radius only, never spacing/status colors (§4.2).
     themeConfig: jsonb('theme_config').$type<{
@@ -252,7 +265,10 @@ export const planEntitlements = pgTable(
     maxBranches: integer('max_branches'),
     featureFlags: jsonb('feature_flags').notNull().default([]).$type<string[]>(),
     monthlyPricePaise: integer('monthly_price_paise'),
-    billingPeriod: varchar('billing_period', { length: 20 }).notNull().default('MONTHLY').$type<'MONTHLY' | 'ANNUAL'>(),
+    billingPeriod: varchar('billing_period', { length: 20 })
+      .notNull()
+      .default('MONTHLY')
+      .$type<'MONTHLY' | 'ANNUAL'>(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },

@@ -99,10 +99,29 @@ export function calculateIncomeTax(taxableIncome: number): number {
 
 const STANDARD_DEDUCTION = 75000;
 
-export function computeMonthlyTDS(annualGrossSalary: number): number {
+export function computeMonthlyTDS(annualGrossSalary: number, monthsInPeriod = 12): number {
   const taxableIncome = Math.max(0, annualGrossSalary - STANDARD_DEDUCTION);
   const annualTax = calculateIncomeTax(taxableIncome);
-  return Math.round(annualTax / 12);
+  return Math.round(annualTax / monthsInPeriod);
+}
+
+// How many months of the financial year (Apr-Mar) starting `fyStartYear` this employee will
+// draw this salary — 12 for an employee who joined in an earlier FY, or the months from their
+// joining month to FY-end (inclusive) if they joined during the FY being processed. Used to
+// annualize TDS without assuming a full 12 months of income for a mid-year joiner.
+export function employeeMonthsInFinancialYear(
+  periodMonth: number,
+  periodYear: number,
+  joiningDate: string | Date | null
+): number {
+  if (!joiningDate) return 12;
+  const fyStartYear = periodMonth >= 4 ? periodYear : periodYear - 1;
+  const join = new Date(joiningDate);
+  const joinMonth = join.getMonth() + 1;
+  const joinFYStartYear = joinMonth >= 4 ? join.getFullYear() : join.getFullYear() - 1;
+  if (joinFYStartYear !== fyStartYear) return 12;
+  const joinMonthIndexInFY = ((joinMonth - 4 + 12) % 12) + 1; // April=1 ... March=12
+  return 13 - joinMonthIndexInFY;
 }
 
 // Resolves which state's PT slabs apply: the employee's branch state, falling back to the
@@ -151,6 +170,16 @@ export function computeLoanDeduction(
   return Math.round(total * 100) / 100;
 }
 
+// HALF_DAY counts as 0.5 present day — must match attendance.routes.ts's team-summary
+// weighting, otherwise payroll pays a full day for attendance the report shows as half.
+export function countPresentDays(attRows: Array<{ status: string }>): number {
+  return attRows.reduce((sum, r) => {
+    if (r.status === 'PRESENT' || r.status === 'LATE') return sum + 1;
+    if (r.status === 'HALF_DAY') return sum + 0.5;
+    return sum;
+  }, 0);
+}
+
 export class PayrollEngine {
   static async computeSlip(
     db: TenantScopedDatabase,
@@ -187,6 +216,7 @@ export class PayrollEngine {
         pfApplicable: employees.pfApplicable,
         esiApplicable: employees.esiApplicable,
         branchId: employees.branchId,
+        joiningDate: employees.joiningDate,
       })
       .from(employees)
       .where(and(eq(employees.tenantId, tenantId), eq(employees.id, employeeId)));
@@ -216,9 +246,7 @@ export class PayrollEngine {
         )
       );
 
-    const presentDays = attRows.filter(
-      (r) => r.status === 'PRESENT' || r.status === 'LATE' || r.status === 'HALF_DAY'
-    ).length;
+    const presentDays = countPresentDays(attRows);
 
     // Approved paid leaves in this period
     const leaveRows = await db.raw
@@ -285,8 +313,16 @@ export class PayrollEngine {
       employeeId
     );
     const loanDeduction = computeLoanDeduction(activeLoans);
-    // TDS (Section 192): projected on full (non-prorated) monthly gross × 12
-    const tdsDeduction = computeMonthlyTDS(grossFull * 12);
+    // TDS (Section 192): annualize this period's actual (LOP-adjusted) gross, not the assigned
+    // grossFull — a fully-LOP period must project ₹0 annual income, not the employee's full
+    // salary — and scope the projection to only the months this employee will draw pay in the
+    // current FY, so a mid-year joiner isn't taxed as if earning this salary for a full year.
+    const monthsInFY = employeeMonthsInFinancialYear(
+      periodMonth,
+      periodYear,
+      empRow?.joiningDate ?? null
+    );
+    const tdsDeduction = computeMonthlyTDS(grossSalary * monthsInFY, monthsInFY);
 
     const totalDeductions =
       pfEmployee + esiEmployee + professionalTax + loanDeduction + tdsDeduction;
@@ -344,21 +380,21 @@ export class PayrollEngine {
       paidLeaveDays: String(slip.paidLeaveDays),
       lopDays: String(slip.lopDays),
       workingDays: slip.workingDays,
-      basicSalary: String(slip.basicSalary),
-      hraAmount: String(slip.hraAmount),
-      daAmount: String(slip.daAmount),
-      otherAllowances: String(slip.otherAllowances),
-      pieceRateAmount: String(slip.pieceRateAmount),
+      basicSalary: encryptField(String(slip.basicSalary), encKey),
+      hraAmount: encryptField(String(slip.hraAmount), encKey),
+      daAmount: encryptField(String(slip.daAmount), encKey),
+      otherAllowances: encryptField(String(slip.otherAllowances), encKey),
+      pieceRateAmount: encryptField(String(slip.pieceRateAmount), encKey),
       grossSalary: encryptField(String(slip.grossSalary), encKey),
-      pfEmployee: String(slip.pfEmployee),
-      epsAmount: String(slip.epsAmount),
-      pfEmployer: String(slip.pfEmployer),
-      esiEmployee: String(slip.esiEmployee),
-      esiEmployer: String(slip.esiEmployer),
-      professionalTax: String(slip.professionalTax),
-      loanDeduction: String(slip.loanDeduction),
-      tdsDeduction: String(slip.tdsDeduction),
-      totalDeductions: String(slip.totalDeductions),
+      pfEmployee: encryptField(String(slip.pfEmployee), encKey),
+      epsAmount: encryptField(String(slip.epsAmount), encKey),
+      pfEmployer: encryptField(String(slip.pfEmployer), encKey),
+      esiEmployee: encryptField(String(slip.esiEmployee), encKey),
+      esiEmployer: encryptField(String(slip.esiEmployer), encKey),
+      professionalTax: encryptField(String(slip.professionalTax), encKey),
+      loanDeduction: encryptField(String(slip.loanDeduction), encKey),
+      tdsDeduction: encryptField(String(slip.tdsDeduction), encKey),
+      totalDeductions: encryptField(String(slip.totalDeductions), encKey),
       netSalary: encryptField(String(slip.netSalary), encKey),
       status: 'DRAFT' as const,
       updatedAt: new Date(),

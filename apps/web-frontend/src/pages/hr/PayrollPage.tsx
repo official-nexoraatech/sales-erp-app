@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { payrollApi, employeeApi } from '../../api/endpoints.js';
 import { useAuthStore } from '../../store/auth.store.js';
+import { useConfirm } from '../../context/ConfirmContext.js';
 import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
 import { ERPTableSkeleton } from '../../components/erp/ERPSkeleton.js';
@@ -46,6 +47,7 @@ const STATUS_VARIANT: Record<string, 'default' | 'warning' | 'success' | 'info'>
 export default function PayrollPage() {
   const qc = useQueryClient();
   const navigate = useNavigate();
+  const confirm = useConfirm();
   const hasPermission = useAuthStore((s) => s.hasPermission);
   const [createOpen, setCreateOpen] = useState(false);
   const [expandedRunId, setExpandedRunId] = useState<number | null>(null);
@@ -165,7 +167,9 @@ export default function PayrollPage() {
               </Button>
             )}
             {hasPermission(PERMISSIONS.PAYROLL_PROCESS) && (
-              <Button onClick={() => setCreateOpen(true)}>+ New Payroll Run</Button>
+              <Button data-tour-id="hr-payroll-create-button" onClick={() => setCreateOpen(true)}>
+                + New Payroll Run
+              </Button>
             )}
           </div>
         }
@@ -225,6 +229,7 @@ export default function PayrollPage() {
                             run.status === 'CALCULATED' ||
                             run.status === 'CALCULATING') && (
                             <Button
+                              data-tour-id="hr-payroll-calculate-button"
                               size="sm"
                               variant="secondary"
                               onClick={() => calculateMutation.mutate(run.id)}
@@ -236,6 +241,7 @@ export default function PayrollPage() {
                         {hasPermission(PERMISSIONS.PAYROLL_APPROVE) &&
                           run.status === 'CALCULATED' && (
                             <Button
+                              data-tour-id="hr-payroll-approve-button"
                               size="sm"
                               onClick={() => approveMutation.mutate(run.id)}
                               loading={approveMutation.isPending}
@@ -246,9 +252,18 @@ export default function PayrollPage() {
                         {hasPermission(PERMISSIONS.PAYROLL_APPROVE) &&
                           run.status === 'APPROVED' && (
                             <Button
+                              data-tour-id="hr-payroll-disburse-button"
                               size="sm"
                               variant="primary"
-                              onClick={() => disburseMutation.mutate(run.id)}
+                              onClick={async () => {
+                                const ok = await confirm({
+                                  title: 'Disburse payroll?',
+                                  message: `This posts ${formatCurrency(Number(run.totalNet))} net pay to ${run.totalEmployees} employee(s) and books it against Bank in your accounting. This can't be undone.`,
+                                  confirmLabel: 'Disburse',
+                                  variant: 'primary',
+                                });
+                                if (ok) disburseMutation.mutate(run.id);
+                              }}
                               loading={disburseMutation.isPending}
                             >
                               Disburse

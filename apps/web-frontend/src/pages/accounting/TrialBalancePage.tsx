@@ -137,21 +137,12 @@ export default function TrialBalancePage() {
             description="Try selecting a different date."
           />
         }
-        footer={
-          tb && (
-            <>
-              <td colSpan={7} className="px-4 py-3 text-primary">
-                TOTAL
-              </td>
-              <td className="px-4 py-3 text-right font-mono text-primary">
-                {formatCurrency(tb.totalDebits)}
-              </td>
-              <td className="px-4 py-3 text-right font-mono text-primary">
-                {formatCurrency(tb.totalCredits)}
-              </td>
-            </>
-          )
-        }
+        // This report has no server-side pagination — a large chart of accounts renders in
+        // one response, so the grid virtualizes rows instead of mounting all of them at once
+        // (see WEB-FRONTEND-AUDIT-2026-07-24.md, High #4). Virtualized mode doesn't support a
+        // table `footer`; the totals it would have shown are already in the banner above.
+        virtualized
+        virtualizedHeight={560}
       />
     </div>
   );

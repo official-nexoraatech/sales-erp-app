@@ -54,7 +54,16 @@ export const importJobs = pgTable(
     status: varchar('status', { length: 30 })
       .notNull()
       .default('UPLOADED')
-      .$type<'UPLOADED' | 'MAPPED' | 'VALIDATING' | 'VALIDATED' | 'EXECUTING' | 'COMPLETED' | 'FAILED' | 'ROLLED_BACK'>(),
+      .$type<
+        | 'UPLOADED'
+        | 'MAPPED'
+        | 'VALIDATING'
+        | 'VALIDATED'
+        | 'EXECUTING'
+        | 'COMPLETED'
+        | 'FAILED'
+        | 'ROLLED_BACK'
+      >(),
     s3Key: text('s3_key').notNull(),
     originalFileName: varchar('original_file_name', { length: 300 }).notNull(),
     totalRows: integer('total_rows').notNull().default(0),
@@ -86,7 +95,10 @@ export const exportJobs = pgTable(
     id: bigserial('id', { mode: 'number' }).primaryKey(),
     tenantId: integer('tenant_id').notNull(),
     entityType: varchar('entity_type', { length: 100 }).notNull(),
-    format: varchar('format', { length: 10 }).notNull().default('XLSX').$type<'XLSX' | 'CSV' | 'PDF'>(),
+    format: varchar('format', { length: 10 })
+      .notNull()
+      .default('XLSX')
+      .$type<'XLSX' | 'CSV' | 'PDF'>(),
     status: varchar('status', { length: 20 })
       .notNull()
       .default('PENDING')
@@ -109,6 +121,61 @@ export const exportJobs = pgTable(
     index('idx_export_jobs_requested_by').on(t.requestedBy, t.tenantId),
   ]
 );
+
+// ─── Export Schedules (CRM-ROADMAP Phase 4, Feature 8 — Public CRM API & BI Export) ───────
+// Recurring, user-configured export dispatch — mirrors report.ts's reportSchedules/
+// reportRunHistory pattern exactly (ExportScheduleJob drives this the same way
+// ScheduledReportJob drives reportSchedules), distinct from exportJobs above which is the
+// existing one-shot, on-demand "generate and download now" flow.
+export const exportSchedules = pgTable(
+  'export_schedules',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    tenantId: integer('tenant_id').notNull(),
+    entityType: varchar('entity_type', { length: 100 }).notNull(),
+    format: varchar('format', { length: 10 }).notNull().default('XLSX').$type<'XLSX' | 'CSV'>(),
+    filters: jsonb('filters').notNull().default({}),
+    cronExpression: varchar('cron_expression', { length: 100 }).notNull(),
+    recipients: jsonb('recipients').notNull().default([]),
+    active: integer('active').notNull().default(1),
+    createdBy: integer('created_by').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index('idx_export_schedules_tenant').on(t.tenantId, t.active)]
+);
+
+// ─── Export Run History ─────────────────────────────────────────────────────
+export const exportRunHistory = pgTable(
+  'export_run_history',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    tenantId: integer('tenant_id').notNull(),
+    scheduleId: integer('schedule_id'),
+    entityType: varchar('entity_type', { length: 100 }).notNull(),
+    format: varchar('format', { length: 10 }).notNull().$type<'XLSX' | 'CSV'>(),
+    status: varchar('status', { length: 20 })
+      .notNull()
+      .default('RUNNING')
+      .$type<'RUNNING' | 'COMPLETED' | 'FAILED'>(),
+    startedAt: timestamp('started_at', { withTimezone: true }),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+    fileUrl: text('file_url'),
+    errorMessage: text('error_message'),
+    rowCount: integer('row_count'),
+    durationMs: integer('duration_ms'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    index('idx_export_run_tenant').on(t.tenantId, t.status),
+    index('idx_export_run_schedule').on(t.scheduleId),
+  ]
+);
+
+export type ExportSchedule = typeof exportSchedules.$inferSelect;
+export type NewExportSchedule = typeof exportSchedules.$inferInsert;
+export type ExportRunHistory = typeof exportRunHistory.$inferSelect;
+export type NewExportRunHistory = typeof exportRunHistory.$inferInsert;
 
 // ─── Scheduled Job Configs (paused/active state) ──────────────────────────
 export const scheduledJobConfigs = pgTable(
@@ -138,6 +205,9 @@ export interface ValidationError {
   column: string;
   value: unknown;
   message: string;
+  // CRM-ROADMAP Phase 1, Feature 7 — absent/'ERROR' blocks VALIDATED status; 'WARNING' is a
+  // non-blocking dedupe suggestion (see ImportEngine.ts's own ValidationError interface).
+  severity?: 'ERROR' | 'WARNING';
 }
 
 export type JobHistoryEntry = typeof jobHistory.$inferSelect;

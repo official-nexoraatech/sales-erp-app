@@ -85,6 +85,7 @@ export default function GstConfigPage() {
         subtitle="Manage GST rates and HSN codes."
         actions={
           <Button
+            data-tour-id="gst-config-seed-rates-button"
             variant="secondary"
             onClick={() => seedMutation.mutate()}
             loading={seedMutation.isPending}
@@ -142,7 +143,11 @@ export default function GstConfigPage() {
               onChange={(e) => setHsnQuery(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && searchHsn()}
             />
-            <Button variant="secondary" onClick={searchHsn}>
+            <Button
+              data-tour-id="gst-config-hsn-search-button"
+              variant="secondary"
+              onClick={searchHsn}
+            >
               Search
             </Button>
           </div>
@@ -188,7 +193,9 @@ export default function GstConfigPage() {
               />
             </div>
           </div>
-          <Button onClick={computeGst}>Compute</Button>
+          <Button data-tour-id="gst-config-compute-button" onClick={computeGst}>
+            Compute
+          </Button>
           {computeResult && (
             <div className="mt-4 grid grid-cols-3 gap-4 text-center">
               {[

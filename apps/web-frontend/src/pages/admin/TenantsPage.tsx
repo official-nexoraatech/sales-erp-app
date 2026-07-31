@@ -6,6 +6,7 @@ import toast from 'react-hot-toast';
 import { Ban, CheckCircle, XCircle, Users } from 'lucide-react';
 import { adminTenantApi } from '../../api/endpoints.js';
 import { useAuthStore } from '../../store/auth.store.js';
+import { useConfirm } from '../../context/ConfirmContext.js';
 import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
 import ERPDataGrid, {
@@ -41,6 +42,7 @@ interface ReasonForm {
 export default function TenantsPage() {
   const qc = useQueryClient();
   const navigate = useNavigate();
+  const confirm = useConfirm();
   const canManage = useAuthStore((s) => s.hasPermission(PERMISSIONS.PLATFORM_TENANT_MANAGE));
   const { data, isLoading } = useQuery({
     queryKey: ['admin-tenants'],
@@ -120,7 +122,15 @@ export default function TenantsPage() {
         {
           label: 'Activate',
           icon: CheckCircle,
-          onClick: (r: Tenant) => activateMutation.mutate(r.id),
+          onClick: async (r: Tenant) => {
+            const ok = await confirm({
+              title: 'Activate this tenant?',
+              message: `Restores full access for "${r.name}" — every user of this tenant can immediately sign in and use the platform again.`,
+              confirmLabel: 'Activate',
+              variant: 'primary',
+            });
+            if (ok) activateMutation.mutate(r.id);
+          },
           hidden: (r: Tenant) => r.status !== 'SUSPENDED',
         },
         {
@@ -141,7 +151,12 @@ export default function TenantsPage() {
         subtitle="Manage every organization provisioned on this platform."
         actions={
           canManage ? (
-            <Button onClick={() => navigate('/admin/tenants/new')}>+ New Tenant</Button>
+            <Button
+              data-tour-id="admin-tenants-create-button"
+              onClick={() => navigate('/admin/tenants/new')}
+            >
+              + New Tenant
+            </Button>
           ) : undefined
         }
       />

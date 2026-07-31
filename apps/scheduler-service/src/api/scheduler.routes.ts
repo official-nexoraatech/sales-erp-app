@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import type { ErpDatabase } from '@erp/db';
 import { jobHistory } from '@erp/db';
 import { eq, and, desc } from 'drizzle-orm';
-import { NotFoundError, BusinessError } from '@erp/types';
+import { NotFoundError } from '@erp/types';
 import { PERMISSIONS } from '@erp/types';
 import type { JobRegistry } from '../JobRegistry.js';
 import { authenticate } from '../middleware/authenticate.js';
@@ -21,7 +21,9 @@ export async function schedulerRoutes(
   // ── GET /jobs — List all registered jobs with status ─────────────────────
   fastify.get('/jobs', { preHandler: authenticate }, async (request, reply) => {
     if (!hasPermission(request, PERMISSIONS.JOB_VIEW)) {
-      return reply.code(403).send({ error: { code: 'PERMISSION_DENIED', message: 'Missing permission: JOB_VIEW' } });
+      return reply
+        .code(403)
+        .send({ error: { code: 'PERMISSION_DENIED', message: 'Missing permission: JOB_VIEW' } });
     }
 
     const { tenantId } = (request as unknown as AuthedRequest).auth;
@@ -56,7 +58,13 @@ export async function schedulerRoutes(
             : null,
         };
       } catch {
-        return { name, cron: config.cron, description: config.description, isPaused: false, lastRun: null };
+        return {
+          name,
+          cron: config.cron,
+          description: config.description,
+          isPaused: false,
+          lastRun: null,
+        };
       }
     });
 
@@ -67,79 +75,96 @@ export async function schedulerRoutes(
   });
 
   // ── POST /jobs/:name/trigger — Manually trigger a job ────────────────────
-  fastify.post<{ Params: { name: string } }>('/jobs/:name/trigger', { preHandler: authenticate }, async (request, reply) => {
-    if (!hasPermission(request, PERMISSIONS.JOB_TRIGGER)) {
-      return reply.code(403).send({ error: { code: 'PERMISSION_DENIED', message: 'Missing permission: JOB_TRIGGER' } });
+  fastify.post<{ Params: { name: string } }>(
+    '/jobs/:name/trigger',
+    { preHandler: authenticate },
+    async (request, reply) => {
+      if (!hasPermission(request, PERMISSIONS.JOB_TRIGGER)) {
+        return reply.code(403).send({
+          error: { code: 'PERMISSION_DENIED', message: 'Missing permission: JOB_TRIGGER' },
+        });
+      }
+
+      const { tenantId, userId = 0 } = (request as unknown as AuthedRequest).auth;
+      const jobName = request.params.name;
+
+      const allJobs = registry.listAll();
+      const jobDef = allJobs.find((j) => j.name === jobName);
+      if (!jobDef) throw new NotFoundError('Job', jobName);
+
+      // job_history is now recorded by JobRegistry's worker itself (RUNNING → COMPLETED/FAILED/
+      // SKIPPED) once BullMQ actually picks this up, for both cron and manual runs — see
+      // JobRegistry.startHistory/completeHistory. Passing triggeredByUserId through job.data lets
+      // the worker attribute the row correctly instead of this route writing its own, since a
+      // route-side insert would race the worker's and leave an orphaned row stuck at RUNNING.
+      const jobId = await registry.triggerManual(jobName, tenantId, { triggeredByUserId: userId });
+
+      return reply.code(200).send({ data: { message: 'Job triggered', jobName, jobId } });
     }
-
-    const { tenantId, userId = 0 } = (request as unknown as AuthedRequest).auth;
-    const jobName = request.params.name;
-
-    const allJobs = registry.listAll();
-    const jobDef = allJobs.find((j) => j.name === jobName);
-    if (!jobDef) throw new NotFoundError('Job', jobName);
-
-    const jobId = await registry.triggerManual(jobName, tenantId);
-
-    // Record in job history
-    await db.insert(jobHistory).values({
-      tenantId,
-      jobName,
-      cronExpression: jobDef.config.cron,
-      status: 'RUNNING',
-      triggeredBy: 'MANUAL',
-      triggeredByUserId: userId,
-      startedAt: new Date(),
-      createdBy: userId,
-    });
-
-    return reply.code(200).send({ data: { message: 'Job triggered', jobName, jobId } });
-  });
+  );
 
   // ── PATCH /jobs/:name/pause ───────────────────────────────────────────────
-  fastify.patch<{ Params: { name: string } }>('/jobs/:name/pause', { preHandler: authenticate }, async (request, reply) => {
-    if (!hasPermission(request, PERMISSIONS.JOB_PAUSE)) {
-      return reply.code(403).send({ error: { code: 'PERMISSION_DENIED', message: 'Missing permission: JOB_PAUSE' } });
+  fastify.patch<{ Params: { name: string } }>(
+    '/jobs/:name/pause',
+    { preHandler: authenticate },
+    async (request, reply) => {
+      if (!hasPermission(request, PERMISSIONS.JOB_PAUSE)) {
+        return reply
+          .code(403)
+          .send({ error: { code: 'PERMISSION_DENIED', message: 'Missing permission: JOB_PAUSE' } });
+      }
+
+      const jobName = request.params.name;
+      const allJobs = registry.listAll();
+      if (!allJobs.find((j) => j.name === jobName)) throw new NotFoundError('Job', jobName);
+
+      await registry.pause(jobName);
+      return reply.code(200).send({ data: { message: 'Job paused', jobName } });
     }
-
-    const jobName = request.params.name;
-    const allJobs = registry.listAll();
-    if (!allJobs.find((j) => j.name === jobName)) throw new NotFoundError('Job', jobName);
-
-    await registry.pause(jobName);
-    return reply.code(200).send({ data: { message: 'Job paused', jobName } });
-  });
+  );
 
   // ── PATCH /jobs/:name/resume ──────────────────────────────────────────────
-  fastify.patch<{ Params: { name: string } }>('/jobs/:name/resume', { preHandler: authenticate }, async (request, reply) => {
-    if (!hasPermission(request, PERMISSIONS.JOB_PAUSE)) {
-      return reply.code(403).send({ error: { code: 'PERMISSION_DENIED', message: 'Missing permission: JOB_PAUSE' } });
+  fastify.patch<{ Params: { name: string } }>(
+    '/jobs/:name/resume',
+    { preHandler: authenticate },
+    async (request, reply) => {
+      if (!hasPermission(request, PERMISSIONS.JOB_PAUSE)) {
+        return reply
+          .code(403)
+          .send({ error: { code: 'PERMISSION_DENIED', message: 'Missing permission: JOB_PAUSE' } });
+      }
+
+      const jobName = request.params.name;
+      const allJobs = registry.listAll();
+      if (!allJobs.find((j) => j.name === jobName)) throw new NotFoundError('Job', jobName);
+
+      await registry.resume(jobName);
+      return reply.code(200).send({ data: { message: 'Job resumed', jobName } });
     }
-
-    const jobName = request.params.name;
-    const allJobs = registry.listAll();
-    if (!allJobs.find((j) => j.name === jobName)) throw new NotFoundError('Job', jobName);
-
-    await registry.resume(jobName);
-    return reply.code(200).send({ data: { message: 'Job resumed', jobName } });
-  });
+  );
 
   // ── GET /jobs/:name/history — Last 30 runs ───────────────────────────────
-  fastify.get<{ Params: { name: string } }>('/jobs/:name/history', { preHandler: authenticate }, async (request, reply) => {
-    if (!hasPermission(request, PERMISSIONS.JOB_VIEW)) {
-      return reply.code(403).send({ error: { code: 'PERMISSION_DENIED', message: 'Missing permission: JOB_VIEW' } });
+  fastify.get<{ Params: { name: string } }>(
+    '/jobs/:name/history',
+    { preHandler: authenticate },
+    async (request, reply) => {
+      if (!hasPermission(request, PERMISSIONS.JOB_VIEW)) {
+        return reply
+          .code(403)
+          .send({ error: { code: 'PERMISSION_DENIED', message: 'Missing permission: JOB_VIEW' } });
+      }
+
+      const { tenantId } = (request as unknown as AuthedRequest).auth;
+      const jobName = request.params.name;
+
+      const history = await db
+        .select()
+        .from(jobHistory)
+        .where(and(eq(jobHistory.jobName, jobName), eq(jobHistory.tenantId, tenantId)))
+        .orderBy(desc(jobHistory.startedAt))
+        .limit(30);
+
+      return reply.code(200).send({ data: { content: history, jobName } });
     }
-
-    const { tenantId } = (request as unknown as AuthedRequest).auth;
-    const jobName = request.params.name;
-
-    const history = await db
-      .select()
-      .from(jobHistory)
-      .where(and(eq(jobHistory.jobName, jobName), eq(jobHistory.tenantId, tenantId)))
-      .orderBy(desc(jobHistory.startedAt))
-      .limit(30);
-
-    return reply.code(200).send({ data: { content: history, jobName } });
-  });
+  );
 }

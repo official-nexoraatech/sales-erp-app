@@ -9,13 +9,23 @@
 import { describe, it, expect, vi } from 'vitest';
 
 vi.mock('@erp/db', () => ({
-  items: { id: 'id', tenantId: 'tenant_id', availableQty: 'available_qty', version: 'version' },
+  items: {
+    id: 'id',
+    tenantId: 'tenant_id',
+    availableQty: 'available_qty',
+    version: 'version',
+    name: 'name',
+    itemCode: 'item_code',
+  },
+  warehouses: { id: 'id', tenantId: 'tenant_id', name: 'name' },
+  outboxEvents: {},
   inventoryLedger: {},
   projectionStockLevel: {
     tenantId: 'tenant_id',
     itemId: 'item_id',
     warehouseId: 'warehouse_id',
     variantId: 'variant_id',
+    availableQty: 'available_qty',
   },
   inventoryFifoLayers: {
     id: 'id',
@@ -93,7 +103,10 @@ describe('InventoryLedgerService.deductStock — ES-03', () => {
       undefined, // ES-13: ValuationService update items.current_stock_value (WACC branch)
       [], // PG-032: select inventory_warehouse_valuation row — none yet, no-op
       [{ id: 1 }], // insert inventoryLedger ... returning
-      undefined, // insert projectionStockLevel ... onConflictDoUpdate
+      [{ availableQty: '90.000' }], // insert projectionStockLevel ... onConflictDoUpdate ... returning
+      [{ name: 'Test Item', itemCode: 'SKU-1' }], // publishStockLevelChanged: select items
+      [{ name: 'Main Warehouse' }], // publishStockLevelChanged: select warehouses
+      undefined, // insert outboxEvents (STOCK_LEVEL_CHANGED)
     ];
     const db = makeDb(script);
     const svc = new InventoryLedgerService(db as never);
@@ -149,10 +162,13 @@ describe('InventoryLedgerService.addStock — ES-23 atomic increment', () => {
   it('derives before/after from the atomic UPDATE...RETURNING, not a prior read', async () => {
     const script = [
       [{ availableQty: '110.000' }], // update items ... returning (atomic increment)
-      [{ costingMethod: 'WACC', waccCost: '0', currentStockValue: '0' }], // ValuationService item lookup
-      undefined, // ValuationService update items.current_stock_value (WACC branch)
       [{ id: 1 }], // insert inventoryLedger ... returning
-      undefined, // insert projectionStockLevel ... onConflictDoUpdate
+      // baseParams.unitCost is 0, so ValuationService.applyStockIn short-circuits with zero
+      // DB calls (`if (unitCost <= 0) return;`) — the next call is upsertProjection's.
+      [{ availableQty: '110.000' }], // insert projectionStockLevel ... onConflictDoUpdate ... returning
+      [{ name: 'Test Item', itemCode: 'SKU-1' }], // publishStockLevelChanged: select items
+      [{ name: 'Main Warehouse' }], // publishStockLevelChanged: select warehouses
+      undefined, // insert outboxEvents (STOCK_LEVEL_CHANGED)
     ];
     const db = makeDb(script);
     const svc = new InventoryLedgerService(db as never);

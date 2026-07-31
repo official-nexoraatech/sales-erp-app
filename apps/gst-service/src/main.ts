@@ -38,9 +38,13 @@ import { gstr2aRoutes } from './api/gstr2a.routes.js';
 import { gstReturnsRoutes } from './api/gst-returns.routes.js';
 import { internalRoutes } from './api/internal.routes.js';
 import { HSN_SEED_DATA } from './domain/hsn-seed.js';
-import { handleInvoiceConfirmed } from './consumers/InvoiceGstConsumer.js';
+import { handleInvoiceConfirmed, handleInvoiceCancelled } from './consumers/InvoiceGstConsumer.js';
 import { handleSaleReturnApproved } from './consumers/SaleReturnGstConsumer.js';
-import { handleGRNApproved, handlePurchaseReturnApproved } from './consumers/GRNGstConsumer.js';
+import {
+  handleGRNApproved,
+  handlePurchaseReturnApproved,
+  handleRcmLiabilityPosted,
+} from './consumers/GRNGstConsumer.js';
 import {
   handleInvoiceConfirmedForEinvoice,
   handleInvoiceCancelledForEinvoice,
@@ -94,6 +98,7 @@ async function bootstrap(): Promise<void> {
         await handleInvoiceConfirmedForEinvoice(event, db, gstComplianceSaga);
         break;
       case 'INVOICE_CANCELLED':
+        await handleInvoiceCancelled(event, db);
         await handleInvoiceCancelledForEinvoice(event, db);
         break;
       case 'SALE_RETURN_APPROVED':
@@ -104,6 +109,9 @@ async function bootstrap(): Promise<void> {
         break;
       case 'PURCHASE_RETURN_APPROVED':
         await handlePurchaseReturnApproved(event, db);
+        break;
+      case 'RCM_LIABILITY_POSTED':
+        await handleRcmLiabilityPosted(event, db);
         break;
       default:
         logger.warn({ eventType: event.eventType }, 'Unhandled event type in gst consumer');
@@ -116,6 +124,7 @@ async function bootstrap(): Promise<void> {
     'erp.sale.return.approved',
     'erp.grn.approved',
     'erp.purchase.return.approved',
+    'erp.rcm.liability.posted',
   ];
 
   const { PlatformEventConsumer } = await import('@erp/sdk');

@@ -103,6 +103,11 @@ export default function SeasonFormPage() {
   const f = <K extends keyof typeof form>(key: K, val: (typeof form)[K]) =>
     setForm((prev) => ({ ...prev, [key]: val }));
 
+  const dateRangeError =
+    form.startDate && form.endDate && form.endDate <= form.startDate
+      ? 'End date must be after start date'
+      : undefined;
+
   const today = new Date();
   const seasonStart = form.startDate ? new Date(form.startDate) : null;
   const seasonEnd = form.endDate ? new Date(form.endDate) : null;
@@ -164,6 +169,7 @@ export default function SeasonFormPage() {
           type="date"
           value={form.endDate}
           onChange={(e) => f('endDate', e.target.value)}
+          error={dateRangeError}
         />
         <Input
           label="Stock Multiplier"
@@ -211,7 +217,9 @@ export default function SeasonFormPage() {
         </Button>
         <Button
           onClick={() => mutation.mutate()}
-          disabled={mutation.isPending || !form.name || !form.startDate || !form.endDate}
+          disabled={
+            mutation.isPending || !form.name || !form.startDate || !form.endDate || !!dateRangeError
+          }
         >
           {mutation.isPending
             ? isEdit

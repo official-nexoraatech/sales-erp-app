@@ -10,6 +10,10 @@ export interface AuthPayload {
   permissions: string[];
   branchIds: number[];
   userId: number;
+  // Set only for a CRM-ROADMAP Phase 3, Feature 2 (Self-Service Customer Portal) session —
+  // see apps/auth-service/src/jwt.ts's AccessTokenPayload. Every non-sales-service service's
+  // authenticate.ts rejects any `roles: ['CUSTOMER']` token before this field would matter.
+  customerId?: number;
 }
 
 export class AuthTokenError extends Error {}
@@ -23,7 +27,13 @@ export async function verifyAccessToken(token: string): Promise<AuthPayload> {
   const publicKeyPem = process.env['JWT_PUBLIC_KEY'];
   if (!publicKeyPem) throw new AuthTokenError('JWT_PUBLIC_KEY not configured');
   const publicKey = await importSPKI(publicKeyPem.replace(/\\n/g, '\n'), 'RS256');
-  const { payload } = await jwtVerify(token, publicKey, { algorithms: ['RS256'] });
+  // auth-service signs with this same issuer (apps/auth-service/src/config.ts, `JWT_ISSUER`
+  // env var, same 'erp-auth-service' default) and already verifies it on its own side
+  // (apps/auth-service/src/jwt.ts) — this was the one relying-party service missing the
+  // check, an asymmetry worth closing as defense-in-depth even though signature validity
+  // alone already ties the token to the one private key.
+  const issuer = process.env['JWT_ISSUER'] ?? 'erp-auth-service';
+  const { payload } = await jwtVerify(token, publicKey, { algorithms: ['RS256'], issuer });
   return {
     sub: payload.sub as string,
     tenantId: payload['tenantId'] as number,
@@ -32,6 +42,7 @@ export async function verifyAccessToken(token: string): Promise<AuthPayload> {
     permissions: (payload['permissions'] as string[]) ?? [],
     branchIds: (payload['branchIds'] as number[]) ?? [],
     userId: parseInt(payload.sub as string, 10),
+    ...(payload['customerId'] !== undefined ? { customerId: payload['customerId'] as number } : {}),
   };
 }
 

@@ -25,6 +25,8 @@ import {
 import { loadNotificationConfig } from './config.js';
 import { notificationRoutes } from './api/notification.routes.js';
 import { webhookRoutes } from './api/webhook.routes.js';
+import { templateRoutes } from './api/template.routes.js';
+import { DeliveryQueue } from './domain/DeliveryQueue.js';
 
 initializeTelemetry({ serviceName: 'notification-service' });
 
@@ -50,6 +52,11 @@ async function bootstrap(): Promise<void> {
     logger.error({ err: err.message }, 'Redis connection error in notification-service');
   });
   subscribeToTenantStatusInvalidations(redis);
+
+  // Architectural tier (2026-07-23 audit): actual channel delivery + retry now happens on a
+  // BullMQ worker instead of blocking the HTTP request — see DeliveryQueue.ts. Shares this same
+  // Redis connection, same convention as scheduler-service's JobRegistry.
+  const deliveryQueue = new DeliveryQueue(redis, db, config);
 
   const fastify = Fastify({ logger: false, trustProxy: true });
 
@@ -89,10 +96,12 @@ async function bootstrap(): Promise<void> {
 
   // PG-010: dual-registered — unprefixed (legacy, deprecation window) and under /api/v2
   // (baseline convention) — until web-frontend/pos-frontend fully migrate to /api/v2.
-  await notificationRoutes(fastify, db, config, redis);
+  await notificationRoutes(fastify, db, deliveryQueue, redis);
+  await templateRoutes(fastify, db);
   await fastify.register(
     async (sub) => {
-      await notificationRoutes(sub, db, config, redis);
+      await notificationRoutes(sub, db, deliveryQueue, redis);
+      await templateRoutes(sub, db);
     },
     { prefix: '/api/v2' }
   );
@@ -101,6 +110,19 @@ async function bootstrap(): Promise<void> {
   // encapsulated sub-plugin so its raw-body content-type parser doesn't affect the routes above.
   await fastify.register(async (sub) => {
     await webhookRoutes(sub, db, config);
+  });
+
+  const gracefulShutdown = async (): Promise<void> => {
+    await deliveryQueue.close();
+    await redis.quit();
+    await fastify.close();
+    process.exit(0);
+  };
+  process.on('SIGTERM', () => {
+    void gracefulShutdown();
+  });
+  process.on('SIGINT', () => {
+    void gracefulShutdown();
   });
 
   const address = await fastify.listen({ port: config.port, host: '0.0.0.0' });

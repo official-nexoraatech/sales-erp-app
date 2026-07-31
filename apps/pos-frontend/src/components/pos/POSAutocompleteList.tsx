@@ -12,7 +12,8 @@ interface RowProps {
   onHover: (index: number) => void;
 }
 
-function stockBadge(qty: number) {
+function stockBadge(qty: number | null) {
+  if (qty === null) return <POSBadge variant="info">Stock unknown</POSBadge>;
   if (qty <= 0) return <POSBadge variant="danger">Out of stock</POSBadge>;
   if (qty <= 5) return <POSBadge variant="warning">{qty} left</POSBadge>;
   return <POSBadge variant="success">In stock</POSBadge>;

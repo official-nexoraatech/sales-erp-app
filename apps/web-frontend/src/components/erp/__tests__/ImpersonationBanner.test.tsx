@@ -1,5 +1,6 @@
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { runAxe, formatViolations } from '../../../testUtils/axe.js';
 import ImpersonationBanner from '../ImpersonationBanner.js';
@@ -13,14 +14,35 @@ vi.mock('../../../api/endpoints.js', () => ({
   },
 }));
 
-const REAL_USER = { id: 9, tenantId: 1, email: 'admin@test.com', firstName: 'A', lastName: 'D', roles: ['ADMIN'], branchIds: [], permissions: ['IMPERSONATE_USER'] };
-const TARGET_USER = { id: 1, tenantId: 1, email: 'priya@test.com', firstName: 'Priya', lastName: 'Shah', roles: ['SALES_MANAGER'], branchIds: [2], permissions: ['CUSTOMER_VIEW'] };
+const REAL_USER = {
+  id: 9,
+  tenantId: 1,
+  email: 'admin@test.com',
+  firstName: 'A',
+  lastName: 'D',
+  roles: ['ADMIN'],
+  branchIds: [],
+  permissions: ['IMPERSONATE_USER'],
+};
+const TARGET_USER = {
+  id: 1,
+  tenantId: 1,
+  email: 'priya@test.com',
+  firstName: 'Priya',
+  lastName: 'Shah',
+  roles: ['SALES_MANAGER'],
+  branchIds: [2],
+  permissions: ['CUSTOMER_VIEW'],
+};
 
 function renderBanner() {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
-    <MemoryRouter>
-      <ImpersonationBanner />
-    </MemoryRouter>
+    <QueryClientProvider client={qc}>
+      <MemoryRouter>
+        <ImpersonationBanner />
+      </MemoryRouter>
+    </QueryClientProvider>
   );
 }
 
@@ -28,7 +50,13 @@ describe('ImpersonationBanner', () => {
   beforeEach(() => {
     endImpersonationMock.mockReset();
     endImpersonationMock.mockResolvedValue(undefined);
-    useAuthStore.setState({ user: null, accessToken: null, refreshToken: null, realSession: null, impersonationExpiresAt: null });
+    useAuthStore.setState({
+      user: null,
+      accessToken: null,
+      refreshToken: null,
+      realSession: null,
+      impersonationExpiresAt: null,
+    });
   });
 
   afterEach(() => {
@@ -36,7 +64,11 @@ describe('ImpersonationBanner', () => {
   });
 
   it('renders nothing when not impersonating', () => {
-    useAuthStore.setState({ user: REAL_USER, accessToken: 'admin-token', refreshToken: 'admin-refresh' });
+    useAuthStore.setState({
+      user: REAL_USER,
+      accessToken: 'admin-token',
+      refreshToken: 'admin-refresh',
+    });
     const { container } = renderBanner();
     expect(container).toBeEmptyDOMElement();
   });

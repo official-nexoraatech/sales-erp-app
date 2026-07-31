@@ -30,6 +30,7 @@ import { sagaRoutes } from './api/saga.routes.js';
 import { schemaRegistryRoutes } from './api/schema-registry.routes.js';
 import { projectionRoutes } from './api/projections.routes.js';
 import { performanceRoutes } from './api/performance.routes.js';
+import { dapRoutes } from './api/dap.routes.js';
 import { healthOutboxRoutes } from './api/health.outbox.routes.js';
 import { OutboxRelayWorker } from './outbox/OutboxRelayWorker.js';
 import { createEventServiceGstComplianceOrchestrator } from './sagas/gstComplianceProxy.js';
@@ -78,6 +79,7 @@ async function bootstrap(): Promise<void> {
     pollIntervalMs: parseInt(process.env['OUTBOX_RELAY_POLL_INTERVAL_MS'] ?? '500', 10),
     batchSize: parseInt(process.env['OUTBOX_RELAY_BATCH_SIZE'] ?? '100', 10),
     maxRetryAttempts: parseInt(process.env['OUTBOX_MAX_RETRY_ATTEMPTS'] ?? '5', 10),
+    retryBaseDelayMs: parseInt(process.env['OUTBOX_RETRY_BASE_DELAY_MS'] ?? '2000', 10),
   });
 
   const metricsHandler = await createMetricsHandler('event-service');
@@ -133,6 +135,7 @@ async function bootstrap(): Promise<void> {
       await schemaRegistryRoutes(sub, ctxFactory);
       await projectionRoutes(sub, ctxFactory);
       await performanceRoutes(sub, ctxFactory);
+      await dapRoutes(sub, ctxFactory);
     },
     { prefix: '/api/v2' }
   );

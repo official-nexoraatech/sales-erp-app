@@ -25,6 +25,7 @@ export const ENTITY_SOURCES: Record<string, SearchSyncSource[]> = {
   warehouse: [{ envVar: 'INVENTORY_SERVICE_URL', defaultUrl: 'http://localhost:3012' }],
   stock_transfer: [{ envVar: 'INVENTORY_SERVICE_URL', defaultUrl: 'http://localhost:3012' }],
   stock_adjustment: [{ envVar: 'INVENTORY_SERVICE_URL', defaultUrl: 'http://localhost:3012' }],
+  stock: [{ envVar: 'INVENTORY_SERVICE_URL', defaultUrl: 'http://localhost:3012' }],
   purchase_order: [{ envVar: 'PURCHASE_SERVICE_URL', defaultUrl: 'http://localhost:3020' }],
   grn: [{ envVar: 'PURCHASE_SERVICE_URL', defaultUrl: 'http://localhost:3020' }],
   purchase_return: [{ envVar: 'PURCHASE_SERVICE_URL', defaultUrl: 'http://localhost:3020' }],
@@ -42,7 +43,6 @@ export const ENTITY_SOURCES: Record<string, SearchSyncSource[]> = {
   role: [{ envVar: 'AUTH_SERVICE_URL', defaultUrl: 'http://localhost:3010' }],
   branch: [{ envVar: 'TENANT_SERVICE_URL', defaultUrl: 'http://localhost:3011' }],
   organization: [{ envVar: 'TENANT_SERVICE_URL', defaultUrl: 'http://localhost:3011' }],
-  // 'stock' (live per-warehouse quantity) and 'attachment' (no owning-entity listing
-  // endpoint built in Phase 4) are intentionally absent — see search-sync.internal.routes.ts
-  // in inventory-service for why 'stock' doesn't fit this row-based backfill mechanism.
+  // 'attachment' has no owning-entity listing endpoint (no full-reindex safety net — see
+  // eventEntityMap.ts) — it's intentionally absent, backed only by real-time Kafka events.
 };

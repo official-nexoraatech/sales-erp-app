@@ -116,6 +116,7 @@ export default function BranchesPage() {
               });
               if (ok) deleteMutation.mutate(r.id);
             },
+            hidden: (r: Branch) => r.isHeadOffice,
           },
         ]
       : []),
@@ -129,7 +130,12 @@ export default function BranchesPage() {
         subtitle="Manage your store branches and locations."
         actions={
           canManageBranch ? (
-            <Button onClick={() => navigate('/settings/branches/new')}>+ New Branch</Button>
+            <Button
+              data-tour-id="settings-branches-create-button"
+              onClick={() => navigate('/settings/branches/new')}
+            >
+              + New Branch
+            </Button>
           ) : undefined
         }
       />

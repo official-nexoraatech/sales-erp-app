@@ -11,6 +11,7 @@ import ERPDataGrid, {
   type ERPColumnDef,
   type ERPRowAction,
 } from '../../components/erp/ERPDataGrid.js';
+import ERPEmptyState from '../../components/erp/ERPEmptyState.js';
 import Button from '../../components/ui/Button.js';
 import Badge from '../../components/ui/Badge.js';
 import { formatDate, formatCurrency } from '../../lib/format.js';
@@ -19,6 +20,7 @@ interface DeliveryChallan {
   id: number;
   challanNumber: string;
   customerId: number;
+  customerName?: string;
   challanDate: string;
   status: string;
   subtotal: string;
@@ -30,6 +32,13 @@ const STATUS_COLORS: Record<string, 'default' | 'success' | 'warning' | 'danger'
   DISPATCHED: 'warning',
   CONVERTED: 'success',
   CANCELLED: 'danger',
+};
+
+const STATUS_DESCRIPTIONS: Record<string, string> = {
+  DRAFT: 'Not yet dispatched — no stock or accounting effect.',
+  DISPATCHED: "Marked as dispatched — a status record only, it doesn't deduct stock.",
+  CONVERTED: 'Already converted to an invoice.',
+  CANCELLED: 'Cancelled.',
 };
 
 export default function DeliveryChallansPage() {
@@ -69,7 +78,7 @@ export default function DeliveryChallansPage() {
 
   const columns: ERPColumnDef<DeliveryChallan>[] = [
     { key: 'challanNumber', header: 'Challan #', mono: true, sortable: true },
-    { key: 'customerId', header: 'Customer' },
+    { key: 'customerName', header: 'Customer', render: (r) => r.customerName ?? r.customerId },
     {
       key: 'challanDate',
       header: 'Date',
@@ -87,7 +96,11 @@ export default function DeliveryChallansPage() {
       key: 'status',
       header: 'Status',
       sortable: true,
-      render: (r) => <Badge variant={STATUS_COLORS[r.status] ?? 'default'}>{r.status}</Badge>,
+      render: (r) => (
+        <Badge variant={STATUS_COLORS[r.status] ?? 'default'} title={STATUS_DESCRIPTIONS[r.status]}>
+          {r.status}
+        </Badge>
+      ),
     },
   ];
 
@@ -135,7 +148,12 @@ export default function DeliveryChallansPage() {
         subtitle="Manage goods dispatched before invoicing"
       >
         {canCreateChallan && (
-          <Button onClick={() => navigate('/sales/delivery-challans/new')}>+ New Challan</Button>
+          <Button
+            data-tour-id="sales-delivery-challans-create-button"
+            onClick={() => navigate('/sales/delivery-challans/new')}
+          >
+            + New Challan
+          </Button>
         )}
       </ERPPageHeader>
 
@@ -144,6 +162,21 @@ export default function DeliveryChallansPage() {
         data={rows}
         isLoading={isLoading}
         rowKey="id"
+        emptyState={
+          <ERPEmptyState
+            type="no-data"
+            title="No delivery challans yet"
+            description="Create a challan to record goods leaving the warehouse before you invoice the customer."
+            {...(canCreateChallan
+              ? {
+                  action: {
+                    label: '+ New Challan',
+                    onClick: () => navigate('/sales/delivery-challans/new'),
+                  },
+                }
+              : {})}
+          />
+        }
         pagination={{ page, pageSize, total: totalElements }}
         onPageChange={setPage}
         onPageSizeChange={(size) => {

@@ -19,6 +19,7 @@
     "@erp/sdk": "workspace:*",
     "@erp/types": "workspace:*",
     "@erp/utils": "workspace:*",
+    "argon2": "^0.41.1",
     "@fastify/cors": "^11.2.0",
     "@fastify/helmet": "^13.0.2",
     "@fastify/multipart": "^10.0.0",

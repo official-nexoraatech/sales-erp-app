@@ -132,12 +132,20 @@ export default function FixedAssetsPage() {
         actions={
           <div className="flex flex-wrap gap-2">
             {canRunDepreciation && (
-              <Button variant="secondary" onClick={() => setRunDepModalOpen(true)}>
+              <Button
+                data-tour-id="accounting-fixed-assets-run-depreciation-button"
+                variant="secondary"
+                onClick={() => setRunDepModalOpen(true)}
+              >
                 Run Depreciation
               </Button>
             )}
             {canCreateAsset && (
-              <Button variant="primary" onClick={() => navigate('/accounting/fixed-assets/new')}>
+              <Button
+                data-tour-id="accounting-fixed-assets-create-button"
+                variant="primary"
+                onClick={() => navigate('/accounting/fixed-assets/new')}
+              >
                 + Add Asset
               </Button>
             )}

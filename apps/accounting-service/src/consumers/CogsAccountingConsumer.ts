@@ -21,10 +21,18 @@ export async function handleCogsCalculated(
 ): Promise<void> {
   const p = event.payload as unknown as CogsCalculatedPayload;
   const cogsTotal = Number(p.cogsTotal ?? 0);
-  if (cogsTotal <= 0) return;
+  if (cogsTotal <= 0) {
+    logger.warn(
+      { invoiceId: p.invoiceId },
+      'Accounting: skipping COGS_CALCULATED journal — zero/missing cogsTotal'
+    );
+    return;
+  }
+
+  const postingDate = new Date(event.occurredAt);
 
   try {
-    await JournalEngine.checkPeriodOpen(db, event.tenantId, new Date());
+    await JournalEngine.checkPeriodOpen(db, event.tenantId, postingDate);
 
     const journalEntry = await PostingMatrixService.buildJournalEntry(db, event.tenantId, {
       eventType: 'COGS_CALCULATED',
@@ -32,10 +40,14 @@ export async function handleCogsCalculated(
       referenceType: 'INVOICE',
       referenceId: p.invoiceId,
       amount: cogsTotal,
+      postingDate,
     });
 
     const result = await JournalEngine.post(db, event.tenantId, event.userId, journalEntry);
-    logger.info({ journalId: result.journalId, invoiceId: p.invoiceId }, 'Accounting: COGS_CALCULATED posted');
+    logger.info(
+      { journalId: result.journalId, invoiceId: p.invoiceId },
+      'Accounting: COGS_CALCULATED posted'
+    );
   } catch (err) {
     logger.error({ err, invoiceId: p.invoiceId }, 'Accounting: failed to post COGS_CALCULATED');
     throw err;

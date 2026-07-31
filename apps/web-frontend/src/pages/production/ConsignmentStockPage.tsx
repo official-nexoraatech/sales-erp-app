@@ -11,7 +11,7 @@ import Button from '../../components/ui/Button.js';
 import Badge from '../../components/ui/Badge.js';
 import Input from '../../components/ui/Input.js';
 import Select from '../../components/ui/Select.js';
-import { formatDate } from '../../lib/format.js';
+import { formatDate, formatCurrency } from '../../lib/format.js';
 
 interface ConsignmentStock {
   id: number;
@@ -124,7 +124,10 @@ export default function ConsignmentStockPage() {
         subtitle="Track goods received on consignment — not on balance sheet until sold."
         actions={
           hasPermission(PERMISSIONS.CONSIGNMENT_RECEIVE) ? (
-            <Button onClick={() => setShowReceiveForm(!showReceiveForm)}>
+            <Button
+              data-tour-id="production-consignment-stock-receive-button"
+              onClick={() => setShowReceiveForm(!showReceiveForm)}
+            >
               {showReceiveForm ? 'Cancel' : '+ Receive Consignment'}
             </Button>
           ) : undefined
@@ -268,7 +271,9 @@ export default function ConsignmentStockPage() {
                   <td className="px-4 py-3 text-right font-mono">{s.receivedQty}</td>
                   <td className="px-4 py-3 text-right font-mono">{s.soldQty}</td>
                   <td className="px-4 py-3 text-right font-mono font-semibold">{s.availableQty}</td>
-                  <td className="px-4 py-3 text-right font-mono">₹{s.agreedRate}</td>
+                  <td className="px-4 py-3 text-right font-mono">
+                    {formatCurrency(parseFloat(String(s.agreedRate)))}
+                  </td>
                   <td className="px-4 py-3 text-xs">{formatDate(s.receivedDate)}</td>
                   <td className="px-4 py-3">
                     <Badge variant={STATUS_VARIANT[s.status] ?? 'default'}>{s.status}</Badge>
@@ -278,6 +283,7 @@ export default function ConsignmentStockPage() {
                       s.status === 'ACTIVE' &&
                       s.availableQty > 0 && (
                         <Button
+                          data-tour-id="production-consignment-stock-return-button"
                           size="sm"
                           variant="outline"
                           onClick={() => {

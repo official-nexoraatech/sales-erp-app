@@ -1,6 +1,7 @@
 /* global crypto, process, fetch, Buffer */
 import type { FastifyInstance } from 'fastify';
 import type { PlatformContextFactory } from '@erp/sdk';
+import { PlatformEventBus } from '@erp/sdk';
 import {
   payrollRuns,
   payrollSlips,
@@ -10,6 +11,7 @@ import {
   designations,
   departments,
   organizationSettings,
+  employeeHistory,
 } from '@erp/db';
 import { and, eq, isNull } from 'drizzle-orm';
 import { z } from 'zod';
@@ -188,6 +190,19 @@ export async function payrollRoutes(
 
       if (!created) throw new Error('Employee salary insert failed');
 
+      // Salary revision history — deliberately excludes the actual amounts (never log/store
+      // decrypted salary figures outside employee_salaries itself); records only that a
+      // revision happened and when, which is enough for an "Increment History" view.
+      await ctx.db.raw.insert(employeeHistory).values({
+        tenantId,
+        employeeId: body.data.employeeId,
+        createdBy: userId,
+        changeType: 'INCREMENT',
+        effectiveDate: body.data.effectiveFrom,
+        previousValue: {},
+        newValue: { salaryStructureId: body.data.salaryStructureId },
+      } as typeof employeeHistory.$inferInsert);
+
       await ctx.audit.log({
         action: 'CREATE',
         entityType: 'employee_salary',
@@ -287,6 +302,59 @@ export async function payrollRoutes(
         .from(payrollSlips)
         .where(and(eq(payrollSlips.payrollRunId, id), eq(payrollSlips.tenantId, tenantId)));
       return reply.code(200).send({ data: { ...run, slips } });
+    }
+  );
+
+  // Product audit 2026-07-31, Phase 1 Step 8 — the per-employee skip-and-report fix above
+  // (2026-07-12) already stops one bad employee record from blocking the whole company's
+  // payroll run, but there was still no way to know about a missing salary structure BEFORE
+  // starting a run — only after, by reading the `skipped` list. Mirrors the exact same
+  // check PayrollEngine.computeSlip() uses (an active employeeSalaries row with isActive=true),
+  // so this predicts precisely what Calculate would skip, not an approximation.
+  fastify.get(
+    '/payroll-runs/preflight',
+    { preHandler: [authenticate, requirePermission(PERMISSIONS.PAYROLL_VIEW)] },
+    async (request, reply) => {
+      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
+      const ctx = ctxFactory.create({
+        tenantId,
+        userId,
+        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
+      });
+
+      const activeEmployees = await ctx.db.raw
+        .select({
+          id: employees.id,
+          employeeCode: employees.employeeCode,
+          firstName: employees.firstName,
+          lastName: employees.lastName,
+        })
+        .from(employees)
+        .where(
+          and(
+            eq(employees.tenantId, tenantId),
+            eq(employees.status, 'ACTIVE'),
+            isNull(employees.deletedAt)
+          )
+        );
+
+      const activeSalaryRows = await ctx.db.raw
+        .select({ employeeId: employeeSalaries.employeeId })
+        .from(employeeSalaries)
+        .where(and(eq(employeeSalaries.tenantId, tenantId), eq(employeeSalaries.isActive, true)));
+      const employeeIdsWithSalary = new Set(activeSalaryRows.map((r) => r.employeeId));
+
+      const missingSalaryStructure = activeEmployees.filter(
+        (e) => !employeeIdsWithSalary.has(e.id)
+      );
+
+      return reply.code(200).send({
+        data: {
+          totalActiveEmployees: activeEmployees.length,
+          readyCount: activeEmployees.length - missingSalaryStructure.length,
+          missingSalaryStructure,
+        },
+      });
     }
   );
 
@@ -479,9 +547,11 @@ export async function payrollRoutes(
           })
           .from(payrollSlips)
           .where(and(eq(payrollSlips.payrollRunId, id), eq(payrollSlips.tenantId, tenantId)));
+        const encKey = requireEnv('FIELD_ENCRYPTION_KEY');
+        let totalLoanRepaid = 0;
         for (const slip of approvedSlips) {
-          if (parseFloat(slip.loanDeduction) > 0) {
-            await EmployeeLoanService.applyMonthlyDeduction(
+          if (parseFloat(decryptField(slip.loanDeduction, encKey)) > 0) {
+            const deducted = await EmployeeLoanService.applyMonthlyDeduction(
               trx,
               tenantId,
               slip.employeeId,
@@ -489,19 +559,33 @@ export async function payrollRoutes(
               run.periodMonth,
               run.periodYear
             );
+            totalLoanRepaid = Math.round((totalLoanRepaid + deducted) * 100) / 100;
           }
         }
-      });
 
-      // Publish event for accounting-service to post salary payable journal (DR Salary Expense / CR Salary Payable)
-      await ctx.events.publish('payroll_run', id, 'PAYROLL_RUN_APPROVED', {
-        payrollRunId: id,
-        tenantId,
-        periodMonth: run.periodMonth,
-        periodYear: run.periodYear,
-        totalGross: run.totalGross,
-        totalDeductions: run.totalDeductions,
-        totalNet: run.totalNet,
+        // Publish event for accounting-service to post salary payable journal (DR Salary Expense / CR Salary Payable)
+        const eventBus = new PlatformEventBus(trx, tenantId, userId, ctx.tenant.correlationId);
+        await eventBus.publishInTransaction('payroll_run', id, 'PAYROLL_RUN_APPROVED', {
+          payrollRunId: id,
+          tenantId,
+          periodMonth: run.periodMonth,
+          periodYear: run.periodYear,
+          totalGross: run.totalGross,
+          totalDeductions: run.totalDeductions,
+          totalNet: run.totalNet,
+        });
+
+        // Audit finding 2026-07-23: applyMonthlyDeduction above decrements each loan's
+        // outstandingBalance in hr-service's own DB but previously had no accounting trail at
+        // all — Employee Loans Receivable sat permanently overstated after disbursement. This
+        // additive event lets accounting-service credit it down (mirrors COGS_CALCULATED
+        // alongside INVOICE_CONFIRMED — a separate journal for a related-but-distinct GL effect).
+        if (totalLoanRepaid > 0) {
+          await eventBus.publishInTransaction('payroll_run', id, 'EMPLOYEE_LOAN_REPAID', {
+            payrollRunId: id,
+            totalAmount: totalLoanRepaid,
+          });
+        }
       });
       await ctx.audit.log({
         action: 'UPDATE',
@@ -564,13 +648,14 @@ export async function payrollRoutes(
           .update(payrollSlips)
           .set({ status: 'PAID', updatedAt: new Date() })
           .where(and(eq(payrollSlips.payrollRunId, id), eq(payrollSlips.tenantId, tenantId)));
-      });
 
-      // Publish event for accounting-service to post disbursal journal (DR Salary Payable / CR Bank)
-      await ctx.events.publish('payroll_run', id, 'PAYROLL_RUN_DISBURSED', {
-        payrollRunId: id,
-        tenantId,
-        totalNet: run.totalNet,
+        // Publish event for accounting-service to post disbursal journal (DR Salary Payable / CR Bank)
+        const eventBus = new PlatformEventBus(trx, tenantId, userId, ctx.tenant.correlationId);
+        await eventBus.publishInTransaction('payroll_run', id, 'PAYROLL_RUN_DISBURSED', {
+          payrollRunId: id,
+          tenantId,
+          totalNet: run.totalNet,
+        });
       });
       await ctx.audit.log({
         action: 'UPDATE',
@@ -621,6 +706,7 @@ export async function payrollRoutes(
       const encKey = requireEnv('FIELD_ENCRYPTION_KEY');
       const grossSalary = parseFloat(decryptField(slip.grossSalary, encKey));
       const netSalary = parseFloat(decryptField(slip.netSalary, encKey));
+      const decrypt = (v: string): number => parseFloat(decryptField(v, encKey));
 
       const [run] = await ctx.db.raw
         .select({ periodMonth: payrollRuns.periodMonth, periodYear: payrollRuns.periodYear })
@@ -639,24 +725,24 @@ export async function payrollRoutes(
           lopDays: parseFloat(String(slip.lopDays)),
           workingDays: slip.workingDays,
           earnings: {
-            basicSalary: parseFloat(String(slip.basicSalary)),
-            hraAmount: parseFloat(String(slip.hraAmount)),
-            daAmount: parseFloat(String(slip.daAmount)),
-            otherAllowances: parseFloat(String(slip.otherAllowances)),
-            pieceRateAmount: parseFloat(String(slip.pieceRateAmount)),
+            basicSalary: decrypt(slip.basicSalary),
+            hraAmount: decrypt(slip.hraAmount),
+            daAmount: decrypt(slip.daAmount),
+            otherAllowances: decrypt(slip.otherAllowances),
+            pieceRateAmount: decrypt(slip.pieceRateAmount),
           },
           grossSalary,
           deductions: {
-            pfEmployee: parseFloat(String(slip.pfEmployee)),
-            esiEmployee: parseFloat(String(slip.esiEmployee)),
-            professionalTax: parseFloat(String(slip.professionalTax)),
-            loanDeduction: parseFloat(String(slip.loanDeduction)),
-            tdsDeduction: parseFloat(String(slip.tdsDeduction)),
-            totalDeductions: parseFloat(String(slip.totalDeductions)),
+            pfEmployee: decrypt(slip.pfEmployee),
+            esiEmployee: decrypt(slip.esiEmployee),
+            professionalTax: decrypt(slip.professionalTax),
+            loanDeduction: decrypt(slip.loanDeduction),
+            tdsDeduction: decrypt(slip.tdsDeduction),
+            totalDeductions: decrypt(slip.totalDeductions),
           },
-          pfEmployer: parseFloat(String(slip.pfEmployer)),
-          epsAmount: parseFloat(String(slip.epsAmount)),
-          esiEmployer: parseFloat(String(slip.esiEmployer)),
+          pfEmployer: decrypt(slip.pfEmployer),
+          epsAmount: decrypt(slip.epsAmount),
+          esiEmployer: decrypt(slip.esiEmployer),
           netSalary,
           status: slip.status,
         },
@@ -718,6 +804,7 @@ export async function payrollRoutes(
       const bankAccount = emp?.bankAccountNoEncrypted
         ? decryptField(emp.bankAccountNoEncrypted, encKey)
         : null;
+      const decrypt = (v: string): number => parseFloat(decryptField(v, encKey));
       const monthNames = [
         'January',
         'February',
@@ -746,21 +833,21 @@ export async function payrollRoutes(
           bankAccount,
         },
         earnings: [
-          { component: 'Basic Salary', amount: slip.basicSalary },
-          { component: 'HRA', amount: slip.hraAmount },
-          { component: 'DA', amount: slip.daAmount },
-          { component: 'Other Allowances', amount: slip.otherAllowances },
-          { component: 'Piece Rate', amount: slip.pieceRateAmount },
+          { component: 'Basic Salary', amount: decrypt(slip.basicSalary) },
+          { component: 'HRA', amount: decrypt(slip.hraAmount) },
+          { component: 'DA', amount: decrypt(slip.daAmount) },
+          { component: 'Other Allowances', amount: decrypt(slip.otherAllowances) },
+          { component: 'Piece Rate', amount: decrypt(slip.pieceRateAmount) },
         ],
         grossSalary: decryptField(slip.grossSalary, encKey),
         deductions: [
-          { component: 'PF (Employee)', amount: slip.pfEmployee },
-          { component: 'ESI (Employee)', amount: slip.esiEmployee },
-          { component: 'Professional Tax', amount: slip.professionalTax },
-          { component: 'Loan Deduction', amount: slip.loanDeduction },
-          { component: 'TDS', amount: slip.tdsDeduction },
+          { component: 'PF (Employee)', amount: decrypt(slip.pfEmployee) },
+          { component: 'ESI (Employee)', amount: decrypt(slip.esiEmployee) },
+          { component: 'Professional Tax', amount: decrypt(slip.professionalTax) },
+          { component: 'Loan Deduction', amount: decrypt(slip.loanDeduction) },
+          { component: 'TDS', amount: decrypt(slip.tdsDeduction) },
         ],
-        totalDeductions: slip.totalDeductions,
+        totalDeductions: decrypt(slip.totalDeductions),
         netPay: decryptField(slip.netSalary, encKey),
         workingDays: slip.workingDays,
         totalDays: slip.workingDays,
@@ -807,17 +894,22 @@ export async function payrollRoutes(
         .select({ id: payrollSlips.id, employeeId: payrollSlips.employeeId })
         .from(payrollSlips)
         .where(and(eq(payrollSlips.payrollRunId, id), eq(payrollSlips.tenantId, tenantId)));
-      for (const slip of slips) {
-        await ctx.events.publish('payroll_slip', slip.id, 'SALARY_SLIP_READY', {
-          payrollSlipId: slip.id,
-          employeeId: slip.employeeId,
-          tenantId,
-        });
-      }
-      await ctx.db.raw
-        .update(payrollSlips)
-        .set({ slipSentAt: new Date() })
-        .where(and(eq(payrollSlips.payrollRunId, id), eq(payrollSlips.tenantId, tenantId)));
+
+      await ctx.db.transaction(async (trx) => {
+        await trx.raw
+          .update(payrollSlips)
+          .set({ slipSentAt: new Date() })
+          .where(and(eq(payrollSlips.payrollRunId, id), eq(payrollSlips.tenantId, tenantId)));
+
+        const eventBus = new PlatformEventBus(trx, tenantId, userId, ctx.tenant.correlationId);
+        for (const slip of slips) {
+          await eventBus.publishInTransaction('payroll_slip', slip.id, 'SALARY_SLIP_READY', {
+            payrollSlipId: slip.id,
+            employeeId: slip.employeeId,
+            tenantId,
+          });
+        }
+      });
 
       return reply
         .code(200)
@@ -1003,24 +1095,28 @@ export async function payrollRoutes(
         )
       );
 
-    for (const slip of slips) {
-      await ctx.events.publish('payroll_slip', slip.id, 'SALARY_SLIP_READY', {
-        payrollSlipId: slip.id,
-        employeeId: slip.employeeId,
-        tenantId,
-      });
-    }
     if (slips.length > 0) {
-      await ctx.db.raw
-        .update(payrollSlips)
-        .set({ slipSentAt: new Date() })
-        .where(
-          and(
-            eq(payrollSlips.payrollRunId, run.id),
-            eq(payrollSlips.tenantId, tenantId),
-            isNull(payrollSlips.slipSentAt)
-          )
-        );
+      await ctx.db.transaction(async (trx) => {
+        await trx.raw
+          .update(payrollSlips)
+          .set({ slipSentAt: new Date() })
+          .where(
+            and(
+              eq(payrollSlips.payrollRunId, run.id),
+              eq(payrollSlips.tenantId, tenantId),
+              isNull(payrollSlips.slipSentAt)
+            )
+          );
+
+        const eventBus = new PlatformEventBus(trx, tenantId, 0, ctx.tenant.correlationId);
+        for (const slip of slips) {
+          await eventBus.publishInTransaction('payroll_slip', slip.id, 'SALARY_SLIP_READY', {
+            payrollSlipId: slip.id,
+            employeeId: slip.employeeId,
+            tenantId,
+          });
+        }
+      });
     }
 
     return reply.code(200).send({ data: { payrollRunId: run.id, count: slips.length } });

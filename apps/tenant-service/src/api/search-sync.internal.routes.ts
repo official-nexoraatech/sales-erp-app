@@ -4,6 +4,7 @@ import type { ErpDatabase } from '@erp/db';
 import { branches, organizationSettings } from '@erp/db';
 import { and, eq, gte, isNull } from 'drizzle-orm';
 import { timingSafeEqual } from 'node:crypto';
+import { BusinessError } from '@erp/types';
 
 async function checkInternalKey(req: FastifyRequest, reply: FastifyReply): Promise<void> {
   const key = req.headers['x-internal-key'];
@@ -15,7 +16,9 @@ async function checkInternalKey(req: FastifyRequest, reply: FastifyReply): Promi
     keyBuffer.length === expectedBuffer.length &&
     timingSafeEqual(keyBuffer, expectedBuffer);
   if (!matches) {
-    await reply.code(401).send({ error: { code: 'UNAUTHENTICATED', message: 'Invalid internal API key' } });
+    await reply
+      .code(401)
+      .send({ error: { code: 'UNAUTHENTICATED', message: 'Invalid internal API key' } });
   }
 }
 
@@ -35,7 +38,10 @@ interface SearchSyncQuery {
 // scheduler-service's search.full-reindex/search.incremental-sync jobs (Phase 4) to backfill
 // and catch-up-sync Elasticsearch. NOT protected by JWT authenticate — internal-only, guarded
 // by x-internal-key, same convention as every other internal.routes.ts in this codebase.
-export async function searchSyncInternalRoutes(fastify: FastifyInstance, db: ErpDatabase): Promise<void> {
+export async function searchSyncInternalRoutes(
+  fastify: FastifyInstance,
+  db: ErpDatabase
+): Promise<void> {
   fastify.get<{ Params: { entity: string }; Querystring: SearchSyncQuery }>(
     '/internal/search-sync/:entity',
     { preHandler: checkInternalKey },
@@ -45,23 +51,42 @@ export async function searchSyncInternalRoutes(fastify: FastifyInstance, db: Erp
       const page = parseInt(request.query.page ?? '0', 10);
       const size = Math.min(parseInt(request.query.size ?? '500', 10), 500);
       const offset = page * size;
-      const modifiedSince = request.query.modifiedSince ? new Date(request.query.modifiedSince) : undefined;
+      const modifiedSince = request.query.modifiedSince
+        ? new Date(request.query.modifiedSince)
+        : undefined;
 
       let content: SearchSyncDoc[] = [];
 
       if (entity === 'branch') {
         const conditions = [eq(branches.tenantId, tenantId), isNull(branches.deletedAt)];
         if (modifiedSince) conditions.push(gte(branches.updatedAt, modifiedSince));
-        const rows = await db.select().from(branches).where(and(...conditions)).limit(size).offset(offset);
-        content = rows.map((r) => ({ id: String(r.id), doc: { name: r.name, code: r.code, branchId: r.id, tenantId } }));
+        const rows = await db
+          .select()
+          .from(branches)
+          .where(and(...conditions))
+          .limit(size)
+          .offset(offset);
+        content = rows.map((r) => ({
+          id: String(r.id),
+          doc: { name: r.name, code: r.code, branchId: r.id, tenantId },
+        }));
       } else if (entity === 'organization') {
-        const rows = await db.select().from(organizationSettings).where(eq(organizationSettings.tenantId, tenantId)).limit(size).offset(offset);
+        const rows = await db
+          .select()
+          .from(organizationSettings)
+          .where(eq(organizationSettings.tenantId, tenantId))
+          .limit(size)
+          .offset(offset);
         content = rows.map((r) => ({ id: String(tenantId), doc: { name: r.orgName, tenantId } }));
       } else {
-        return reply.code(422).send({ error: { code: 'INVALID_ENTITY', message: `tenant-service does not own entity: ${entity}` } });
+        // F18: routed through the shared error class, matching every other route in this
+        // service — the hand-rolled reply here bypassed registerErrorHandler's envelope.
+        throw new BusinessError('INVALID_ENTITY', `tenant-service does not own entity: ${entity}`);
       }
 
-      return reply.code(200).send({ data: { content, totalElements: content.length, hasMore: content.length === size } });
+      return reply.code(200).send({
+        data: { content, totalElements: content.length, hasMore: content.length === size },
+      });
     }
   );
 }

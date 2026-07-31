@@ -8,7 +8,7 @@ import rateLimit from '@fastify/rate-limit';
 import { tenantOrIpKeyGenerator } from '@erp/sdk';
 import type Redis from 'ioredis';
 import type { ErpDatabase } from '@erp/db';
-import type { NotificationServiceConfig } from '../config.js';
+import type { DeliveryEnqueuer } from '../domain/DeliveryQueue.js';
 
 vi.mock('@erp/db', () => ({
   notificationLog: new Proxy({}, { get: (_t, prop) => ({ columnName: String(prop) }) }),
@@ -23,10 +23,12 @@ vi.mock('drizzle-orm', () => ({
   desc: vi.fn((_a: unknown) => '__desc__'),
 }));
 
-const sendRawMock = vi.fn().mockResolvedValue({ status: 'SENT', logId: 1 });
+const sendRawMock = vi.fn().mockResolvedValue({ status: 'QUEUED', logId: 1 });
 vi.mock('../domain/NotificationEngine.js', () => ({
   NotificationEngine: vi.fn().mockImplementation(() => ({ sendRaw: sendRawMock })),
 }));
+
+const mockDeliveryQueue: DeliveryEnqueuer = { enqueue: vi.fn().mockResolvedValue(undefined) };
 
 import { notificationRoutes } from '../api/notification.routes.js';
 
@@ -51,7 +53,7 @@ function makeRedis(incrValue: number): Redis {
 
 async function buildApp(db: ErpDatabase, redis: Redis) {
   const app = Fastify({ logger: false });
-  await notificationRoutes(app, db, {} as NotificationServiceConfig, redis);
+  await notificationRoutes(app, db, mockDeliveryQueue, redis);
   return app;
 }
 
@@ -154,7 +156,7 @@ describe('POST /notifications/send-raw-internal — exempt from the global IP-ke
 
     const db = makeDb([]);
     const redis = makeRedis(1); // always well within the tenant-level limit
-    await notificationRoutes(app, db, {} as NotificationServiceConfig, redis);
+    await notificationRoutes(app, db, mockDeliveryQueue, redis);
 
     for (let i = 0; i < 3; i++) {
       const res = await app.inject({ method: 'GET', url: '/other-route' });

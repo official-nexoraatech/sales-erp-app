@@ -4,7 +4,13 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { employeeApi, departmentApi, designationApi } from '../../api/endpoints.js';
+import {
+  employeeApi,
+  departmentApi,
+  designationApi,
+  attendanceApi,
+  userApi,
+} from '../../api/endpoints.js';
 import { useAuthStore } from '../../store/auth.store.js';
 import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
@@ -30,6 +36,16 @@ interface Department {
 interface Designation {
   id: number;
   name: string;
+}
+interface Shift {
+  id: number;
+  name: string;
+}
+interface TenantUser {
+  id: number;
+  email: string;
+  firstName: string;
+  lastName: string;
 }
 
 const TABS = ['Basic', 'Employment', 'Bank & Tax'] as const;
@@ -75,6 +91,21 @@ export default function EmployeeFormPage() {
   });
   const designations: Designation[] =
     ((desigData as Record<string, unknown>)?.content as Designation[]) ?? [];
+
+  const { data: shiftData } = useQuery({
+    queryKey: ['shifts'],
+    queryFn: () => attendanceApi.shifts(),
+    enabled: hasPermission(PERMISSIONS.EMPLOYEE_VIEW),
+  });
+  const shifts: Shift[] = ((shiftData as Record<string, unknown>)?.content as Shift[]) ?? [];
+
+  const { data: usersData } = useQuery({
+    queryKey: ['users-for-employee-link'],
+    queryFn: () => userApi.list(),
+    enabled: hasPermission(PERMISSIONS.EMPLOYEE_UPDATE),
+  });
+  const users: TenantUser[] =
+    ((usersData as Record<string, unknown>)?.content as TenantUser[]) ?? [];
 
   const {
     register,
@@ -219,6 +250,27 @@ export default function EmployeeFormPage() {
               {designations.map((d) => (
                 <option key={d.id} value={d.id}>
                   {d.name}
+                </option>
+              ))}
+            </Select>
+            <Select label="Shift" {...register('shiftId')} error={errors.shiftId?.message}>
+              <option value="">Select…</option>
+              {shifts.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </Select>
+            <Select
+              label="Linked User Account"
+              {...register('userId')}
+              error={errors.userId?.message}
+              hint="Enables self-service — this login can then view their own attendance/leave/payslips"
+            >
+              <option value="">None</option>
+              {users.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.firstName} {u.lastName} ({u.email})
                 </option>
               ))}
             </Select>

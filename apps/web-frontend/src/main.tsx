@@ -1,8 +1,8 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
-import { QueryClient, QueryClientProvider, QueryCache } from '@tanstack/react-query';
-import { Toaster, toast } from 'react-hot-toast';
+import { QueryClientProvider } from '@tanstack/react-query';
+import { Toaster } from 'react-hot-toast';
 import '@fontsource/inter/400.css';
 import '@fontsource/inter/500.css';
 import '@fontsource/inter/600.css';
@@ -13,25 +13,10 @@ import '@fontsource/lexend/500.css';
 import '@fontsource/lexend/600.css';
 import '@fontsource/lexend/700.css';
 import App from './App.js';
-import { ApiError } from './api/client.js';
+import { queryClient } from './lib/queryClient.js';
 import { ThemeProvider } from './context/ThemeContext.js';
 import { ConfirmProvider } from './context/ConfirmContext.js';
 import './index.css';
-
-const queryClient = new QueryClient({
-  queryCache: new QueryCache({
-    onError: (error) => {
-      // 401s are handled by the client.ts refresh-on-401 interceptor (silent retry
-      // or redirect to /login) — toasting here would just be noise on top of that.
-      if (error instanceof ApiError && error.statusCode === 401) return;
-      toast.error(error instanceof Error ? error.message : 'Something went wrong loading data');
-    },
-  }),
-  defaultOptions: {
-    queries: { staleTime: 30_000, retry: 1 },
-    mutations: { retry: 0 },
-  },
-});
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
@@ -72,3 +57,13 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     </ThemeProvider>
   </React.StrictMode>
 );
+
+// CRM-ROADMAP Phase 3, Feature 4 (Mobile CRM) — registered after load so it never competes
+// with the initial page render for bandwidth/CPU. Not supported (older browsers, some
+// in-app webviews) just means no install prompt/offline shell — the app itself doesn't
+// depend on this succeeding.
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => undefined);
+  });
+}

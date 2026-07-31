@@ -1,0 +1,147 @@
+import type { TourDefinition } from '../../schema.js';
+import { PERMISSIONS } from '../../../../constants/permissions.js';
+
+// Deep-dive companion to `sales-payments-overview`. Grounded against PaymentService.ts
+// (apps/sales-service) and PaymentAccountingConsumer.ts (apps/accounting-service): recording
+// and allocating a payment are two separate backend steps with different effects, and the
+// accounting entry posts at the *first* one, not the second — a genuinely non-obvious fact
+// this tour exists to surface rather than hide.
+const tour: TourDefinition = {
+  id: 'sales-payments-complete-guide',
+  version: 1,
+  type: 'complete',
+  title: 'Payments — complete guide',
+  description:
+    "How recording a payment differs from allocating it to an invoice, what posts to accounting and when, and what a bounced cheque does and doesn't undo automatically.",
+  module: 'sales',
+  estimatedMinutes: 6,
+  requiredPermissions: [PERMISSIONS.PAYMENT_VIEW, PERMISSIONS.PAYMENT_IN_VIEW],
+  steps: [
+    {
+      id: 'purpose',
+      route: 'sales/payments',
+      title: 'Why this page exists',
+      body: "This is where money coming in from customers gets recorded — cash, card, UPI, cheque, or bank transfer, against one or more confirmed invoices. It's typically used by whoever handles collections: accounts staff, a cashier, or a sales rep collecting on delivery.",
+      placement: 'center',
+      mode: 'informational',
+      requiredPermission: PERMISSIONS.PAYMENT_VIEW,
+    },
+    {
+      id: 'when-to-use',
+      route: 'sales/payments',
+      title: 'When to record a payment',
+      body: 'Only confirmed invoices can be paid against — a DRAFT invoice has no real balance due yet. The fastest, most reliable path is starting from the invoice itself: open the invoice, click "Record Payment" there, and the customer and outstanding amount arrive pre-filled and correctly linked.',
+      placement: 'center',
+      mode: 'informational',
+      requiredPermission: PERMISSIONS.PAYMENT_VIEW,
+    },
+    {
+      id: 'prerequisites',
+      route: 'sales/payments',
+      title: 'Before you start',
+      body: 'Recording and applying a payment are two different things under the hood — know this before you record one from this page directly.',
+      placement: 'center',
+      mode: 'informational',
+      requiredPermission: PERMISSIONS.PAYMENT_VIEW,
+      calloutTitle: 'Before you start',
+      calloutVariant: 'warning',
+      businessImpact: [
+        "The invoice you're collecting against must already be CONFIRMED — not DRAFT.",
+        'Starting from "+ Record Payment" on this page (without arriving from a specific invoice) records the payment as unallocated — there is currently no way in this app to apply it to an invoice afterward, so prefer starting from the invoice\'s own "Record Payment" button whenever you know which invoice it\'s for.',
+        "For cheque payments, have the cheque number ready — it's required for that payment mode.",
+      ],
+    },
+    {
+      id: 'create-customer',
+      route: 'sales/payments/new',
+      target: '[data-tour-id="sales-payment-new-customer-select"]',
+      title: 'Selecting the customer',
+      body: 'Arriving from an invoice\'s "Record Payment" button pre-fills this automatically. Picking it manually here (instead of from an invoice) is how you end up with an unallocated payment — see the caution on the previous step.',
+      placement: 'bottom',
+      mode: 'informational',
+      requiredPermission: PERMISSIONS.PAYMENT_CREATE,
+    },
+    {
+      id: 'create-amount',
+      route: 'sales/payments/new',
+      target: '[data-tour-id="sales-payment-new-amount-input"]',
+      title: 'Amount',
+      body: "When you arrive from an invoice, this pre-fills with that invoice's exact remaining balance — so it's worth double-checking it hasn't been hand-edited to a different figure before saving, especially for a partial payment.",
+      placement: 'bottom',
+      mode: 'informational',
+      requiredPermission: PERMISSIONS.PAYMENT_CREATE,
+    },
+    {
+      id: 'create-save',
+      route: 'sales/payments/new',
+      target: '[data-tour-id="sales-payment-new-save-button"]',
+      title: 'Record Payment',
+      body: 'Saving books the accounting entry immediately — Dr Cash/Bank, Cr Accounts Receivable — even before the payment is linked to a specific invoice. If you arrived from an invoice\'s "Record Payment" button, that link and the invoice\'s balance update happen automatically in the same action.',
+      placement: 'top',
+      mode: 'informational',
+      requiredPermission: PERMISSIONS.PAYMENT_CREATE,
+    },
+    {
+      id: 'mark-bounced',
+      route: 'sales/payments',
+      title: 'Mark Bounced',
+      body: "Available only on RECEIVED cheque payments — the row action reverses the Cash/Bank vs. Accounts Receivable entry automatically. It does not automatically undo the invoice's paid status or the customer's reduced outstanding balance — if you mark a cheque bounced, go check the invoice it was applied to and correct its status by hand.",
+      placement: 'center',
+      mode: 'informational',
+      requiredPermission: PERMISSIONS.PAYMENT_CREATE,
+    },
+    {
+      id: 'business-impact',
+      route: 'sales/payments',
+      title: 'Two steps, two different moments',
+      body: 'Recording a payment and applying it to an invoice happen at different times, with different effects.',
+      placement: 'center',
+      mode: 'informational',
+      requiredPermission: PERMISSIONS.PAYMENT_VIEW,
+      calloutTitle: 'Business impact',
+      calloutVariant: 'info',
+      businessImpact: [
+        "Accounting: Cash/Bank vs. Accounts Receivable posts the moment you record the payment — not when it's applied to an invoice.",
+        'Inventory: no effect — payments never touch stock.',
+        'GST: no effect — GST was already recorded when the invoice was confirmed.',
+        'Reports: Trial Balance reflects it immediately; AR Aging updates only once the payment is applied to a specific invoice.',
+        "Dashboard: cash-collected widgets reflect it as soon as it's recorded.",
+        "Customer Outstanding: only decreases once the payment is applied to an invoice — recording it alone doesn't reduce what a customer owes in the system.",
+      ],
+    },
+    {
+      id: 'common-mistakes',
+      route: 'sales/payments',
+      title: 'Common mistakes',
+      body: 'Most of these come from treating "recorded" and "applied" as the same thing.',
+      placement: 'center',
+      mode: 'informational',
+      requiredPermission: PERMISSIONS.PAYMENT_VIEW,
+      calloutTitle: 'Common mistakes',
+      calloutVariant: 'warning',
+      businessImpact: [
+        "Recording a payment from this page directly instead of from the invoice — it books to accounting but never reduces that invoice's balance.",
+        "Assuming a bounced cheque automatically un-pays the invoice it was applied to — it doesn't; check the invoice yourself.",
+        "Not entering a cheque number for a cheque payment — it's needed to reconcile against the bank statement later.",
+      ],
+    },
+    {
+      id: 'best-practices',
+      route: 'sales/payments',
+      title: 'Best practices',
+      body: 'Collect against a specific invoice whenever you can.',
+      placement: 'center',
+      mode: 'informational',
+      requiredPermission: PERMISSIONS.PAYMENT_VIEW,
+      calloutTitle: 'Best practices',
+      calloutVariant: 'success',
+      businessImpact: [
+        'Always start from the invoice\'s "Record Payment" button when you know which invoice the money is for — it keeps recording and applying in one step.',
+        'Reconcile cheque payments against the bank statement promptly so a bounce is caught and marked within days, not weeks.',
+        "Review unallocated payments periodically — cash sitting unapplied means a customer's real balance looks worse than it is.",
+      ],
+    },
+  ],
+};
+
+export default tour;

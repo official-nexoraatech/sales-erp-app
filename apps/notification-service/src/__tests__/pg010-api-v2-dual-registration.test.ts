@@ -2,24 +2,24 @@
 // its routes — once unprefixed (legacy, deprecation window) and once under /api/v2 (the
 // new baseline convention) — so this asserts both paths are reachable, mirroring main.ts's
 // registration shape without needing its full DB bootstrap.
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import Fastify from 'fastify';
 import type Redis from 'ioredis';
 import type { ErpDatabase } from '@erp/db';
-import type { NotificationServiceConfig } from '../config.js';
+import type { DeliveryEnqueuer } from '../domain/DeliveryQueue.js';
 import { notificationRoutes } from '../api/notification.routes.js';
 
 describe('PG-010 — notification-service dual /api/v2 + legacy registration', () => {
   it('reaches the same route both unprefixed and under /api/v2', async () => {
     const app = Fastify({ logger: false });
     const db = {} as ErpDatabase;
-    const config = {} as NotificationServiceConfig;
+    const deliveryQueue: DeliveryEnqueuer = { enqueue: vi.fn().mockResolvedValue(undefined) };
     const redis = {} as Redis;
 
-    await notificationRoutes(app, db, config, redis);
+    await notificationRoutes(app, db, deliveryQueue, redis);
     await app.register(
       async (sub) => {
-        await notificationRoutes(sub, db, config, redis);
+        await notificationRoutes(sub, db, deliveryQueue, redis);
       },
       { prefix: '/api/v2' }
     );

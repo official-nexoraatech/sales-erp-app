@@ -3,7 +3,7 @@ import type { ErpDatabase } from '@erp/db';
 import { searchAnalytics } from '@erp/db';
 import { and, eq, isNotNull } from 'drizzle-orm';
 import { PERMISSIONS, type Permission } from '@erp/types';
-import { getBranchScope } from '@erp/sdk';
+import { getBranchScope, PlatformAuditLogger, TenantScopedDatabase } from '@erp/sdk';
 import { z } from 'zod';
 import type { SearchEngine, SearchEntity } from '../domain/SearchEngine.js';
 import { ALL_SEARCH_ENTITIES, BRANCH_SCOPED_ENTITIES } from '../domain/SearchEngine.js';
@@ -15,6 +15,27 @@ type AuthedRequest = {
 
 function hasPermission(request: unknown, perm: string): boolean {
   return ((request as AuthedRequest).auth?.permissions ?? []).includes(perm);
+}
+
+// Every other destructive/admin action in this codebase leaves an audit-log trail
+// (PlatformAuditLogger, append-only per ERP_MASTER_SPEC §13) — search-service's admin routes
+// previously didn't, despite DELETE /admin/search/indices wiping every index for a tenant and
+// the reindex/bulk-index routes doing tenant-wide bulk writes. Best-effort: a logging failure
+// must never block the actual admin action, matching this file's existing analytics pattern.
+async function logAdminAction(
+  db: ErpDatabase | undefined,
+  tenantId: number,
+  userId: number | undefined,
+  action: string,
+  metadata: Record<string, unknown>
+): Promise<void> {
+  if (!db) return;
+  try {
+    const audit = new PlatformAuditLogger(new TenantScopedDatabase(tenantId, db), userId ?? 0);
+    await audit.log({ action, entityType: 'search_index', metadata });
+  } catch {
+    // best-effort — see comment above
+  }
 }
 
 const VALID_ENTITIES: SearchEntity[] = ALL_SEARCH_ENTITIES;
@@ -85,7 +106,13 @@ const SearchQuerySchema = z.object({
   q: z.string().min(1).max(200),
   entity: z.enum(VALID_ENTITIES as [SearchEntity, ...SearchEntity[]]).optional(),
   size: z.coerce.number().int().min(1).max(100).optional(),
-  from: z.coerce.number().int().min(0).optional(),
+  // Capped at 9900 (+ size's max of 100 = 10000) to match Elasticsearch's default
+  // `index.max_result_window` — without this, a caller paging past result 10,000 (a real
+  // scenario at ERP scale: browsing an unfiltered list of millions of invoices) got ES's raw
+  // illegal_argument_exception bubbling up as an opaque 500 instead of a clean 400. Deep
+  // result sets need the scroll/search_after API, not from/size — out of scope here; this
+  // just turns an ugly server error into an honest "you've paged too deep, narrow your search".
+  from: z.coerce.number().int().min(0).max(9900).optional(),
   fuzziness: z.enum(['AUTO', '0', '1', '2']).optional(),
   // Advanced search (Phase 6) — a fixed, known set of filterable fields rather than an
   // arbitrary key/value map, so a caller can't probe unmapped ES fields.
@@ -109,149 +136,164 @@ export async function searchRoutes(
   db?: ErpDatabase
 ): Promise<void> {
   // ── GET /search — Global fuzzy search ────────────────────────────────────
-  fastify.get('/search', { preHandler: [authenticate] }, async (request, reply) => {
-    if (!hasPermission(request, PERMISSIONS.SEARCH_GLOBAL)) {
-      return reply.code(403).send({
-        error: { code: 'PERMISSION_DENIED', message: 'Missing permission: SEARCH_GLOBAL' },
-      });
-    }
+  // Route-level override: the platform-wide global rate limit (200/min, effectively IP-keyed
+  // — see packages/platform-sdk/src/rate-limit.ts's own doc comment on why a globally
+  // registered limiter can't be tenant-keyed) is tuned for occasional admin/CRUD calls, not a
+  // command palette that fires a request on every 300ms-debounced keystroke for every logged-in
+  // user. A handful of concurrent users behind one shared office IP could exhaust it inside a
+  // minute of normal typing. Raised well above the platform default for this one read-only,
+  // cheap, legitimately-high-frequency-by-design endpoint rather than building tenant-aware
+  // keying here (which would require re-verifying the JWT before `authenticate` runs, since
+  // @fastify/rate-limit's key generator executes at onRequest — before any preHandler).
+  fastify.get(
+    '/search',
+    { preHandler: [authenticate], config: { rateLimit: { max: 600, timeWindow: '1 minute' } } },
+    async (request, reply) => {
+      if (!hasPermission(request, PERMISSIONS.SEARCH_GLOBAL)) {
+        return reply.code(403).send({
+          error: { code: 'PERMISSION_DENIED', message: 'Missing permission: SEARCH_GLOBAL' },
+        });
+      }
 
-    const auth = (request as unknown as AuthedRequest).auth;
-    const { tenantId } = auth;
-    const params = SearchQuerySchema.parse(request.query);
+      const auth = (request as unknown as AuthedRequest).auth;
+      const { tenantId } = auth;
+      const params = SearchQuerySchema.parse(request.query);
 
-    if (params.entity === 'attachment') {
-      if (allowedAttachmentParentTypes(request).length === 0) {
+      if (params.entity === 'attachment') {
+        if (allowedAttachmentParentTypes(request).length === 0) {
+          return reply.code(403).send({
+            error: {
+              code: 'PERMISSION_DENIED',
+              message: 'Missing permission: INVOICE_VIEW, PO_VIEW, or GRN_VIEW',
+            },
+          });
+        }
+      } else if (
+        params.entity !== undefined &&
+        !hasPermission(request, ENTITY_PERMISSION[params.entity])
+      ) {
         return reply.code(403).send({
           error: {
             code: 'PERMISSION_DENIED',
-            message: 'Missing permission: INVOICE_VIEW, PO_VIEW, or GRN_VIEW',
+            message: `Missing permission: ${ENTITY_PERMISSION[params.entity]}`,
           },
         });
       }
-    } else if (
-      params.entity !== undefined &&
-      !hasPermission(request, ENTITY_PERMISSION[params.entity])
-    ) {
-      return reply.code(403).send({
-        error: {
-          code: 'PERMISSION_DENIED',
-          message: `Missing permission: ${ENTITY_PERMISSION[params.entity]}`,
+
+      const branchScope = getBranchScope(auth);
+      const branchIds = branchScope === 'all' ? undefined : branchScope;
+
+      // Untyped (no `entity`) search is restricted to entities the caller can view. Branch-
+      // scoped entities are additionally excluded here when the caller is branch-restricted —
+      // see BRANCH_SCOPED_ENTITIES / SearchOptions.branchIds for why a multi-index query can't
+      // cheaply apply a branch filter only to the indices that have one. Request a specific
+      // `entity` to search a branch-scoped entity directly, where the filter is applied exactly.
+      // `attachment` gets the same treatment for the same reason: a per-document `entityType`
+      // filter can't be safely mixed into a multi-index query, so it's only included here when
+      // the caller can see every parent type outright — a caller with partial attachment
+      // visibility must search `entity=attachment` directly to get the properly filtered subset.
+      const allowedEntities =
+        params.entity === undefined
+          ? VALID_ENTITIES.filter((e) => {
+              if (e === 'attachment')
+                return (
+                  allowedAttachmentParentTypes(request).length ===
+                  ALL_ATTACHMENT_PARENT_TYPES.length
+                );
+              if (!hasPermission(request, ENTITY_PERMISSION[e])) return false;
+              if (branchIds !== undefined && BRANCH_SCOPED_ENTITIES.has(e)) return false;
+              return true;
+            })
+          : undefined;
+
+      // Advanced-search filters (Phase 6) — exact-match fields folded into `filters`, plus a
+      // separate date-range clause since `filters` can only express equality.
+      const filters: Record<string, unknown> = {};
+      if (params.status !== undefined) filters['status'] = params.status;
+      if (params.branchId !== undefined) filters['branchId'] = String(params.branchId);
+      if (params.warehouseId !== undefined) filters['warehouseId'] = String(params.warehouseId);
+      if (params.customerId !== undefined) filters['customerId'] = params.customerId;
+      if (params.supplierId !== undefined) filters['supplierId'] = params.supplierId;
+
+      // Smart Search ranking boost: documents this tenant's users have previously clicked on
+      // for this exact query text, sourced from search_analytics (already populated by the
+      // click-tracking below and in search-analytics.routes.ts). Best-effort — a lookup
+      // failure never blocks the actual search.
+      let boostedIds: string[] | undefined;
+      if (db) {
+        try {
+          const clicked = await db
+            .selectDistinct({ id: searchAnalytics.clickedResultId })
+            .from(searchAnalytics)
+            .where(
+              and(
+                eq(searchAnalytics.tenantId, tenantId),
+                eq(searchAnalytics.query, params.q),
+                isNotNull(searchAnalytics.clickedResultId)
+              )
+            )
+            .limit(20);
+          const ids = clicked.map((c) => c.id).filter((id): id is string => id !== null);
+          if (ids.length > 0) boostedIds = ids;
+        } catch {
+          // best-effort — fall through with no boost
+        }
+      }
+
+      const result = await engine.search(tenantId, params.q, {
+        ...(params.entity !== undefined ? { entity: params.entity } : {}),
+        ...(allowedEntities !== undefined ? { entities: allowedEntities } : {}),
+        ...(params.entity !== undefined &&
+        branchIds !== undefined &&
+        BRANCH_SCOPED_ENTITIES.has(params.entity)
+          ? { branchIds }
+          : {}),
+        ...(params.entity === 'attachment'
+          ? { attachmentEntityTypes: allowedAttachmentParentTypes(request) }
+          : {}),
+        ...(Object.keys(filters).length > 0 ? { filters } : {}),
+        ...(params.dateField && (params.dateFrom || params.dateTo)
+          ? {
+              dateRange: {
+                field: params.dateField,
+                ...(params.dateFrom ? { from: params.dateFrom } : {}),
+                ...(params.dateTo ? { to: params.dateTo } : {}),
+              },
+            }
+          : {}),
+        ...(boostedIds ? { boostedIds } : {}),
+        size: params.size ?? 20,
+        from: params.from ?? 0,
+        fuzziness: params.fuzziness ?? 'AUTO',
+      });
+
+      // Fire-and-forget analytics logging (Phase 8) — never let a logging failure affect the
+      // actual search response, and don't make the caller wait on it either.
+      if (db) {
+        void db
+          .insert(searchAnalytics)
+          .values({
+            tenantId,
+            userId: auth.userId ?? 0,
+            query: params.q,
+            entity: params.entity,
+            resultCount: result.total,
+            latencyMs: result.took,
+          })
+          .catch(() => {});
+      }
+
+      return reply.code(200).send({
+        data: {
+          hits: result.hits,
+          total: result.total,
+          took: result.took,
+          query: params.q,
+          ...(result.entityCounts ? { entityCounts: result.entityCounts } : {}),
         },
       });
     }
-
-    const branchScope = getBranchScope(auth);
-    const branchIds = branchScope === 'all' ? undefined : branchScope;
-
-    // Untyped (no `entity`) search is restricted to entities the caller can view. Branch-
-    // scoped entities are additionally excluded here when the caller is branch-restricted —
-    // see BRANCH_SCOPED_ENTITIES / SearchOptions.branchIds for why a multi-index query can't
-    // cheaply apply a branch filter only to the indices that have one. Request a specific
-    // `entity` to search a branch-scoped entity directly, where the filter is applied exactly.
-    // `attachment` gets the same treatment for the same reason: a per-document `entityType`
-    // filter can't be safely mixed into a multi-index query, so it's only included here when
-    // the caller can see every parent type outright — a caller with partial attachment
-    // visibility must search `entity=attachment` directly to get the properly filtered subset.
-    const allowedEntities =
-      params.entity === undefined
-        ? VALID_ENTITIES.filter((e) => {
-            if (e === 'attachment')
-              return (
-                allowedAttachmentParentTypes(request).length === ALL_ATTACHMENT_PARENT_TYPES.length
-              );
-            if (!hasPermission(request, ENTITY_PERMISSION[e])) return false;
-            if (branchIds !== undefined && BRANCH_SCOPED_ENTITIES.has(e)) return false;
-            return true;
-          })
-        : undefined;
-
-    // Advanced-search filters (Phase 6) — exact-match fields folded into `filters`, plus a
-    // separate date-range clause since `filters` can only express equality.
-    const filters: Record<string, unknown> = {};
-    if (params.status !== undefined) filters['status'] = params.status;
-    if (params.branchId !== undefined) filters['branchId'] = String(params.branchId);
-    if (params.warehouseId !== undefined) filters['warehouseId'] = String(params.warehouseId);
-    if (params.customerId !== undefined) filters['customerId'] = params.customerId;
-    if (params.supplierId !== undefined) filters['supplierId'] = params.supplierId;
-
-    // Smart Search ranking boost: documents this tenant's users have previously clicked on
-    // for this exact query text, sourced from search_analytics (already populated by the
-    // click-tracking below and in search-analytics.routes.ts). Best-effort — a lookup
-    // failure never blocks the actual search.
-    let boostedIds: string[] | undefined;
-    if (db) {
-      try {
-        const clicked = await db
-          .selectDistinct({ id: searchAnalytics.clickedResultId })
-          .from(searchAnalytics)
-          .where(
-            and(
-              eq(searchAnalytics.tenantId, tenantId),
-              eq(searchAnalytics.query, params.q),
-              isNotNull(searchAnalytics.clickedResultId)
-            )
-          )
-          .limit(20);
-        const ids = clicked.map((c) => c.id).filter((id): id is string => id !== null);
-        if (ids.length > 0) boostedIds = ids;
-      } catch {
-        // best-effort — fall through with no boost
-      }
-    }
-
-    const result = await engine.search(tenantId, params.q, {
-      ...(params.entity !== undefined ? { entity: params.entity } : {}),
-      ...(allowedEntities !== undefined ? { entities: allowedEntities } : {}),
-      ...(params.entity !== undefined &&
-      branchIds !== undefined &&
-      BRANCH_SCOPED_ENTITIES.has(params.entity)
-        ? { branchIds }
-        : {}),
-      ...(params.entity === 'attachment'
-        ? { attachmentEntityTypes: allowedAttachmentParentTypes(request) }
-        : {}),
-      ...(Object.keys(filters).length > 0 ? { filters } : {}),
-      ...(params.dateField && (params.dateFrom || params.dateTo)
-        ? {
-            dateRange: {
-              field: params.dateField,
-              ...(params.dateFrom ? { from: params.dateFrom } : {}),
-              ...(params.dateTo ? { to: params.dateTo } : {}),
-            },
-          }
-        : {}),
-      ...(boostedIds ? { boostedIds } : {}),
-      size: params.size ?? 20,
-      from: params.from ?? 0,
-      fuzziness: params.fuzziness ?? 'AUTO',
-    });
-
-    // Fire-and-forget analytics logging (Phase 8) — never let a logging failure affect the
-    // actual search response, and don't make the caller wait on it either.
-    if (db) {
-      void db
-        .insert(searchAnalytics)
-        .values({
-          tenantId,
-          userId: auth.userId ?? 0,
-          query: params.q,
-          entity: params.entity,
-          resultCount: result.total,
-          latencyMs: result.took,
-        })
-        .catch(() => {});
-    }
-
-    return reply.code(200).send({
-      data: {
-        hits: result.hits,
-        total: result.total,
-        took: result.took,
-        query: params.q,
-      },
-    });
-  });
+  );
 
   // ── POST /admin/search/reindex/:entity — full delete-and-recreate reindex ──
   // Called by scheduler-service's `search.full-reindex` job (Phase 4), which has already
@@ -278,6 +320,16 @@ export async function searchRoutes(
 
     const documents = request.body?.documents ?? [];
     const result = await engine.fullReindex(tenantId, entity, async () => documents);
+    await logAdminAction(
+      db,
+      tenantId,
+      (request as unknown as AuthedRequest).auth.userId,
+      'REINDEX',
+      {
+        entity,
+        ...result,
+      }
+    );
 
     return reply.code(200).send({
       data: { message: 'Reindex complete', tenantId, entity, ...result },
@@ -307,6 +359,16 @@ export async function searchRoutes(
     }
 
     const result = await engine.bulkIndex(tenantId, entity, documents ?? []);
+    await logAdminAction(
+      db,
+      tenantId,
+      (request as unknown as AuthedRequest).auth.userId,
+      'BULK_INDEX',
+      {
+        entity,
+        ...result,
+      }
+    );
     return reply
       .code(200)
       .send({ data: { message: 'Bulk index complete', tenantId, entity, ...result } });
@@ -320,8 +382,9 @@ export async function searchRoutes(
       });
     }
 
-    const { tenantId } = (request as unknown as AuthedRequest).auth;
+    const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
     await engine.createTenantIndices(tenantId);
+    await logAdminAction(db, tenantId, userId, 'CREATE_INDICES', {});
     return reply.code(201).send({ data: { message: 'Indices created', tenantId } });
   });
 
@@ -336,8 +399,9 @@ export async function searchRoutes(
         });
       }
 
-      const { tenantId } = (request as unknown as AuthedRequest).auth;
+      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
       await engine.deleteTenantIndices(tenantId);
+      await logAdminAction(db, tenantId, userId, 'DELETE_INDICES', {});
       return reply.code(200).send({ data: { message: 'Tenant indices deleted', tenantId } });
     }
   );

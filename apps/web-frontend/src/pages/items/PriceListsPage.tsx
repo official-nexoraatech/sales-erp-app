@@ -5,8 +5,10 @@ import { useAuthStore } from '../../store/auth.store.js';
 import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
 import ERPDataGrid, { type ERPColumnDef } from '../../components/erp/ERPDataGrid.js';
+import ERPEmptyState from '../../components/erp/ERPEmptyState.js';
 import Button from '../../components/ui/Button.js';
 import Badge from '../../components/ui/Badge.js';
+import { formatDate } from '../../lib/format.js';
 
 interface PriceList {
   id: number;
@@ -31,8 +33,16 @@ export default function PriceListsPage() {
     { key: 'code', header: 'Code', mono: true, sortable: true },
     { key: 'name', header: 'Name', sortable: true },
     { key: 'currency', header: 'Currency' },
-    { key: 'validFrom', header: 'Valid From' },
-    { key: 'validTo', header: 'Valid To' },
+    {
+      key: 'validFrom',
+      header: 'Valid From',
+      render: (r) => (r.validFrom ? formatDate(r.validFrom) : '–'),
+    },
+    {
+      key: 'validTo',
+      header: 'Valid To',
+      render: (r) => (r.validTo ? formatDate(r.validTo) : '–'),
+    },
     {
       key: 'isDefault',
       header: 'Default',
@@ -47,11 +57,36 @@ export default function PriceListsPage() {
         title="Price Lists"
         actions={
           canManagePriceList ? (
-            <Button onClick={() => navigate('/inventory/price-lists/new')}>+ New Price List</Button>
+            <Button
+              data-tour-id="inventory-price-lists-create-button"
+              onClick={() => navigate('/inventory/price-lists/new')}
+            >
+              + New Price List
+            </Button>
           ) : undefined
         }
       />
-      <ERPDataGrid columns={columns} data={priceLists} isLoading={isLoading} rowKey="id" />
+      <ERPDataGrid
+        columns={columns}
+        data={priceLists}
+        isLoading={isLoading}
+        rowKey="id"
+        emptyState={
+          <ERPEmptyState
+            type="no-data"
+            title="No price lists yet"
+            description="Create a named price list record for a specific currency or validity window."
+            {...(canManagePriceList
+              ? {
+                  action: {
+                    label: '+ New Price List',
+                    onClick: () => navigate('/inventory/price-lists/new'),
+                  },
+                }
+              : {})}
+          />
+        }
+      />
     </div>
   );
 }

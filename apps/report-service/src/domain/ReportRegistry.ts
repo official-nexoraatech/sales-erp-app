@@ -38,7 +38,17 @@ export const REPORT_REGISTRY: ReportDefinition[] = [
       { key: 'fromDate', label: 'From Date', type: 'date', required: true },
       { key: 'toDate', label: 'To Date', type: 'date', required: true },
       { key: 'branchId', label: 'Branch', type: 'select', required: false },
-      { key: 'status', label: 'Status', type: 'select', required: false, options: [{ value: 'PAID', label: 'Paid' }, { value: 'UNPAID', label: 'Unpaid' }, { value: 'CANCELLED', label: 'Cancelled' }] },
+      {
+        key: 'status',
+        label: 'Status',
+        type: 'select',
+        required: false,
+        options: [
+          { value: 'PAID', label: 'Paid' },
+          { value: 'UNPAID', label: 'Unpaid' },
+          { value: 'CANCELLED', label: 'Cancelled' },
+        ],
+      },
     ],
     columns: [
       { key: 'invoiceNumber', label: 'Invoice No', type: 'string' },
@@ -190,7 +200,19 @@ export const REPORT_REGISTRY: ReportDefinition[] = [
     params: [
       { key: 'fromDate', label: 'From Date', type: 'date', required: true },
       { key: 'toDate', label: 'To Date', type: 'date', required: true },
-      { key: 'mode', label: 'Payment Mode', type: 'select', required: false, options: [{ value: 'CASH', label: 'Cash' }, { value: 'CARD', label: 'Card' }, { value: 'UPI', label: 'UPI' }, { value: 'CHEQUE', label: 'Cheque' }, { value: 'NEFT', label: 'NEFT' }] },
+      {
+        key: 'mode',
+        label: 'Payment Mode',
+        type: 'select',
+        required: false,
+        options: [
+          { value: 'CASH', label: 'Cash' },
+          { value: 'CARD', label: 'Card' },
+          { value: 'UPI', label: 'UPI' },
+          { value: 'CHEQUE', label: 'Cheque' },
+          { value: 'NEFT', label: 'NEFT' },
+        ],
+      },
     ],
     columns: [
       { key: 'paymentDate', label: 'Date', type: 'date' },
@@ -316,7 +338,16 @@ export const REPORT_REGISTRY: ReportDefinition[] = [
       { key: 'fromDate', label: 'From Date', type: 'date', required: true },
       { key: 'toDate', label: 'To Date', type: 'date', required: true },
       { key: 'limit', label: 'Top N', type: 'number', required: false, default: '20' },
-      { key: 'sortBy', label: 'Sort By', type: 'select', required: false, options: [{ value: 'revenue', label: 'Revenue' }, { value: 'quantity', label: 'Quantity' }] },
+      {
+        key: 'sortBy',
+        label: 'Sort By',
+        type: 'select',
+        required: false,
+        options: [
+          { value: 'revenue', label: 'Revenue' },
+          { value: 'quantity', label: 'Quantity' },
+        ],
+      },
     ],
     columns: [
       { key: 'rank', label: '#', type: 'number', align: 'right' },
@@ -336,7 +367,13 @@ export const REPORT_REGISTRY: ReportDefinition[] = [
     params: [
       { key: 'fromDate', label: 'From Date', type: 'date', required: true },
       { key: 'toDate', label: 'To Date', type: 'date', required: true },
-      { key: 'maxSalesQty', label: 'Max Qty Threshold', type: 'number', required: false, default: '5' },
+      {
+        key: 'maxSalesQty',
+        label: 'Max Qty Threshold',
+        type: 'number',
+        required: false,
+        default: '5',
+      },
     ],
     columns: [
       { key: 'itemCode', label: 'Item Code', type: 'string' },
@@ -545,7 +582,18 @@ export const REPORT_REGISTRY: ReportDefinition[] = [
     params: [
       { key: 'fromDate', label: 'From Date', type: 'date', required: true },
       { key: 'toDate', label: 'To Date', type: 'date', required: true },
-      { key: 'status', label: 'Status', type: 'select', required: false, options: [{ value: 'OPEN', label: 'Open' }, { value: 'PARTIAL', label: 'Partial' }, { value: 'FULFILLED', label: 'Fulfilled' }, { value: 'CANCELLED', label: 'Cancelled' }] },
+      {
+        key: 'status',
+        label: 'Status',
+        type: 'select',
+        required: false,
+        options: [
+          { value: 'OPEN', label: 'Open' },
+          { value: 'PARTIAL', label: 'Partial' },
+          { value: 'FULFILLED', label: 'Fulfilled' },
+          { value: 'CANCELLED', label: 'Cancelled' },
+        ],
+      },
     ],
     columns: [
       { key: 'poNumber', label: 'PO No', type: 'string' },
@@ -757,9 +805,7 @@ export const REPORT_REGISTRY: ReportDefinition[] = [
     description: 'Items below reorder level that need replenishment',
     permission: 'REORDER_VIEW',
     supportsAsync: false,
-    params: [
-      { key: 'warehouseId', label: 'Warehouse', type: 'select', required: false },
-    ],
+    params: [{ key: 'warehouseId', label: 'Warehouse', type: 'select', required: false }],
     columns: [
       { key: 'itemCode', label: 'Item Code', type: 'string' },
       { key: 'itemName', label: 'Item', type: 'string' },
@@ -767,7 +813,8 @@ export const REPORT_REGISTRY: ReportDefinition[] = [
       { key: 'currentStock', label: 'Current Stock', type: 'number', align: 'right' },
       { key: 'reorderLevel', label: 'Reorder Level', type: 'number', align: 'right' },
       { key: 'reorderQty', label: 'Reorder Qty', type: 'number', align: 'right' },
-      { key: 'preferredSupplier', label: 'Supplier', type: 'string' },
+      // preferredSupplier column removed — items has no preferred_supplier_id column/relation
+      // anywhere in the schema, so the query never had data to put there.
     ],
   },
   {
@@ -851,7 +898,7 @@ export const REPORT_REGISTRY: ReportDefinition[] = [
     columns: [
       { key: 'rollNumber', label: 'Roll No', type: 'string' },
       { key: 'itemName', label: 'Item', type: 'string' },
-      { key: 'colour', label: 'Colour', type: 'string' },
+      // colour column removed — fabric_rolls has no colour column anywhere in the schema.
       { key: 'totalMetres', label: 'Total Metres', type: 'number', align: 'right' },
       { key: 'usedMetres', label: 'Used Metres', type: 'number', align: 'right' },
       { key: 'remainingMetres', label: 'Remaining', type: 'number', align: 'right' },
@@ -910,7 +957,13 @@ export const REPORT_REGISTRY: ReportDefinition[] = [
     supportsAsync: false,
     params: [
       { key: 'asOfDate', label: 'As of Date', type: 'date', required: true },
-      { key: 'daysSinceMovement', label: 'Days Since Movement', type: 'number', required: false, default: '180' },
+      {
+        key: 'daysSinceMovement',
+        label: 'Days Since Movement',
+        type: 'number',
+        required: false,
+        default: '180',
+      },
     ],
     columns: [
       { key: 'itemCode', label: 'Item Code', type: 'string' },
@@ -973,9 +1026,7 @@ export const REPORT_REGISTRY: ReportDefinition[] = [
     description: 'All financial transactions for a day',
     permission: 'JOURNAL_VIEW',
     supportsAsync: false,
-    params: [
-      { key: 'date', label: 'Date', type: 'date', required: true },
-    ],
+    params: [{ key: 'date', label: 'Date', type: 'date', required: true }],
     columns: [
       { key: 'time', label: 'Time', type: 'string' },
       { key: 'type', label: 'Type', type: 'string' },
@@ -1053,9 +1104,7 @@ export const REPORT_REGISTRY: ReportDefinition[] = [
     description: 'Assets, liabilities and equity as of date',
     permission: 'BALANCE_SHEET_VIEW',
     supportsAsync: false,
-    params: [
-      { key: 'asOfDate', label: 'As of Date', type: 'date', required: true },
-    ],
+    params: [{ key: 'asOfDate', label: 'As of Date', type: 'date', required: true }],
     columns: [
       { key: 'section', label: 'Section', type: 'string' },
       { key: 'accountCode', label: 'Code', type: 'string' },
@@ -1146,9 +1195,7 @@ export const REPORT_REGISTRY: ReportDefinition[] = [
     description: 'Fixed asset depreciation schedule',
     permission: 'FIXED_ASSET_VIEW',
     supportsAsync: false,
-    params: [
-      { key: 'financialYear', label: 'Financial Year', type: 'text', required: true },
-    ],
+    params: [{ key: 'financialYear', label: 'Financial Year', type: 'text', required: true }],
     columns: [
       { key: 'assetName', label: 'Asset', type: 'string' },
       { key: 'assetCategory', label: 'Category', type: 'string' },
@@ -1226,9 +1273,7 @@ export const REPORT_REGISTRY: ReportDefinition[] = [
     description: 'Employee payroll details for the month',
     permission: 'PAYROLL_VIEW',
     supportsAsync: true,
-    params: [
-      { key: 'month', label: 'Month (YYYY-MM)', type: 'text', required: true },
-    ],
+    params: [{ key: 'month', label: 'Month (YYYY-MM)', type: 'text', required: true }],
     columns: [
       { key: 'employeeCode', label: 'Emp Code', type: 'string' },
       { key: 'employeeName', label: 'Employee', type: 'string' },
@@ -1291,7 +1336,16 @@ export const REPORT_REGISTRY: ReportDefinition[] = [
     permission: 'EMPLOYEE_VIEW',
     supportsAsync: false,
     params: [
-      { key: 'status', label: 'Status', type: 'select', required: false, options: [{ value: 'ACTIVE', label: 'Active' }, { value: 'INACTIVE', label: 'Inactive' }] },
+      {
+        key: 'status',
+        label: 'Status',
+        type: 'select',
+        required: false,
+        options: [
+          { value: 'ACTIVE', label: 'Active' },
+          { value: 'INACTIVE', label: 'Inactive' },
+        ],
+      },
     ],
     columns: [
       { key: 'employeeCode', label: 'Emp Code', type: 'string' },
@@ -1323,6 +1377,87 @@ export const REPORT_REGISTRY: ReportDefinition[] = [
       { key: 'deliveryDate', label: 'Delivery Date', type: 'date' },
       { key: 'status', label: 'Status', type: 'string' },
       { key: 'charges', label: 'Charges', type: 'currency', align: 'right' },
+    ],
+  },
+  {
+    slug: 'salary-register',
+    name: 'Salary Register',
+    category: 'HR',
+    description:
+      'Full statutory-inclusive payroll register for the month (PF/ESI/PT/TDS/loan breakup)',
+    permission: 'VIEW_SALARY_DETAILS',
+    supportsAsync: true,
+    params: [{ key: 'month', label: 'Month (YYYY-MM)', type: 'text', required: true }],
+    columns: [
+      { key: 'employeeCode', label: 'Emp Code', type: 'string' },
+      { key: 'employeeName', label: 'Employee', type: 'string' },
+      { key: 'department', label: 'Department', type: 'string' },
+      { key: 'uan', label: 'UAN', type: 'string' },
+      { key: 'basicSalary', label: 'Basic', type: 'currency', align: 'right' },
+      { key: 'grossSalary', label: 'Gross', type: 'currency', align: 'right' },
+      { key: 'pfEmployee', label: 'PF', type: 'currency', align: 'right' },
+      { key: 'esiEmployee', label: 'ESI', type: 'currency', align: 'right' },
+      { key: 'professionalTax', label: 'PT', type: 'currency', align: 'right' },
+      { key: 'tdsDeduction', label: 'TDS', type: 'currency', align: 'right' },
+      { key: 'loanDeduction', label: 'Loan', type: 'currency', align: 'right' },
+      { key: 'totalDeductions', label: 'Total Deductions', type: 'currency', align: 'right' },
+      { key: 'netSalary', label: 'Net Pay', type: 'currency', align: 'right' },
+    ],
+  },
+  {
+    slug: 'department-summary-report',
+    name: 'Department Summary',
+    category: 'HR',
+    description: 'Headcount and payroll cost by department',
+    permission: 'PAYROLL_VIEW',
+    supportsAsync: false,
+    params: [{ key: 'month', label: 'Month (YYYY-MM)', type: 'text', required: true }],
+    columns: [
+      { key: 'department', label: 'Department', type: 'string' },
+      { key: 'headcount', label: 'Headcount', type: 'number', align: 'right' },
+      { key: 'totalGrossSalary', label: 'Total Gross', type: 'currency', align: 'right' },
+      { key: 'totalNetSalary', label: 'Total Net', type: 'currency', align: 'right' },
+    ],
+  },
+  {
+    slug: 'joining-report',
+    name: 'Joining Report',
+    category: 'HR',
+    description: 'New hires within a date range',
+    permission: 'EMPLOYEE_VIEW',
+    supportsAsync: false,
+    params: [
+      { key: 'fromDate', label: 'From Date', type: 'date', required: true },
+      { key: 'toDate', label: 'To Date', type: 'date', required: true },
+    ],
+    columns: [
+      { key: 'employeeCode', label: 'Emp Code', type: 'string' },
+      { key: 'employeeName', label: 'Name', type: 'string' },
+      { key: 'department', label: 'Department', type: 'string' },
+      { key: 'designation', label: 'Designation', type: 'string' },
+      { key: 'joiningDate', label: 'Joining Date', type: 'date' },
+      { key: 'employmentType', label: 'Employment Type', type: 'string' },
+    ],
+  },
+  {
+    slug: 'exit-report',
+    name: 'Exit Report',
+    category: 'HR',
+    description: 'Employees who exited within a date range, with tenure',
+    permission: 'EMPLOYEE_VIEW',
+    supportsAsync: false,
+    params: [
+      { key: 'fromDate', label: 'From Date', type: 'date', required: true },
+      { key: 'toDate', label: 'To Date', type: 'date', required: true },
+    ],
+    columns: [
+      { key: 'employeeCode', label: 'Emp Code', type: 'string' },
+      { key: 'employeeName', label: 'Name', type: 'string' },
+      { key: 'department', label: 'Department', type: 'string' },
+      { key: 'joiningDate', label: 'Joining Date', type: 'date' },
+      { key: 'exitDate', label: 'Exit Date', type: 'date' },
+      { key: 'exitReason', label: 'Reason', type: 'string' },
+      { key: 'tenureDays', label: 'Tenure (days)', type: 'number', align: 'right' },
     ],
   },
   {
@@ -1398,7 +1533,16 @@ export const REPORT_REGISTRY: ReportDefinition[] = [
     params: [
       { key: 'fromDate', label: 'From Date', type: 'date', required: true },
       { key: 'toDate', label: 'To Date', type: 'date', required: true },
-      { key: 'type', label: 'Type', type: 'select', required: false, options: [{ value: 'SALES', label: 'Sales' }, { value: 'PURCHASE', label: 'Purchase' }] },
+      {
+        key: 'type',
+        label: 'Type',
+        type: 'select',
+        required: false,
+        options: [
+          { value: 'SALES', label: 'Sales' },
+          { value: 'PURCHASE', label: 'Purchase' },
+        ],
+      },
     ],
     columns: [
       { key: 'date', label: 'Date', type: 'date' },
@@ -1543,7 +1687,13 @@ export const REPORT_REGISTRY: ReportDefinition[] = [
     permission: 'REPORT_VIEW',
     supportsAsync: false,
     params: [
-      { key: 'fastMoverThreshold', label: 'Fast Mover Threshold (units/30d)', type: 'number', required: false, default: '10' },
+      {
+        key: 'fastMoverThreshold',
+        label: 'Fast Mover Threshold (units/30d)',
+        type: 'number',
+        required: false,
+        default: '10',
+      },
     ],
     columns: [
       { key: 'itemCode', label: 'Item Code', type: 'string' },
@@ -1553,6 +1703,45 @@ export const REPORT_REGISTRY: ReportDefinition[] = [
       { key: 'daysOfSupply', label: 'Days of Supply', type: 'number', align: 'right' },
       { key: 'lastSaleDate', label: 'Last Sale', type: 'date' },
       { key: 'status', label: 'Status', type: 'string' },
+    ],
+  },
+  {
+    slug: 'purchase-analytics',
+    name: 'Purchase Analytics',
+    category: 'ANALYTICS',
+    description: 'Monthly purchase spend, GRN count, and average price-variance rate',
+    permission: 'REPORT_VIEW',
+    supportsAsync: false,
+    params: [
+      { key: 'fromDate', label: 'From Date', type: 'date', required: false },
+      { key: 'toDate', label: 'To Date', type: 'date', required: false },
+    ],
+    columns: [
+      { key: 'month', label: 'Month', type: 'string' },
+      { key: 'grnCount', label: 'GRNs', type: 'number', align: 'right' },
+      { key: 'spend', label: 'Spend', type: 'currency', align: 'right' },
+      { key: 'priceVarianceCount', label: 'Price Variances', type: 'number', align: 'right' },
+    ],
+  },
+  {
+    slug: 'supplier-performance',
+    name: 'Supplier Performance',
+    category: 'ANALYTICS',
+    description:
+      'Per-supplier on-time delivery rate, price-variance rate, return rate, and total business volume',
+    permission: 'REPORT_VIEW',
+    supportsAsync: false,
+    params: [
+      { key: 'fromDate', label: 'From Date', type: 'date', required: false },
+      { key: 'toDate', label: 'To Date', type: 'date', required: false },
+    ],
+    columns: [
+      { key: 'supplierName', label: 'Supplier', type: 'string' },
+      { key: 'grnCount', label: 'GRNs', type: 'number', align: 'right' },
+      { key: 'totalPurchased', label: 'Total Purchased', type: 'currency', align: 'right' },
+      { key: 'onTimeDeliveryPct', label: 'On-Time Delivery %', type: 'number', align: 'right' },
+      { key: 'priceVariancePct', label: 'Price Variance %', type: 'number', align: 'right' },
+      { key: 'returnRatePct', label: 'Return Rate %', type: 'number', align: 'right' },
     ],
   },
   {

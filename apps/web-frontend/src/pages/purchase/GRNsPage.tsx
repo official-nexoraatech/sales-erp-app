@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { CheckCircle2, XCircle, Paperclip } from 'lucide-react';
+import { Eye, CheckCircle2, XCircle, Paperclip } from 'lucide-react';
 import { grnApi } from '../../api/endpoints.js';
 import { useAuthStore } from '../../store/auth.store.js';
 import { useDebounce } from '../../hooks/useDebounce.js';
@@ -13,6 +13,7 @@ import ERPDataGrid, {
   type ERPRowAction,
 } from '../../components/erp/ERPDataGrid.js';
 import ERPDrawer from '../../components/erp/ERPDrawer.js';
+import ERPEmptyState from '../../components/erp/ERPEmptyState.js';
 import AttachmentSection from '../../components/erp/AttachmentSection.js';
 import Button from '../../components/ui/Button.js';
 import Badge from '../../components/ui/Badge.js';
@@ -27,6 +28,7 @@ interface GRN {
   supplierId: number;
   supplierName?: string;
   purchaseOrderId: number;
+  poNumber?: string;
   status: string;
   grandTotal: string;
   hasPriceVariance: boolean;
@@ -111,7 +113,11 @@ export default function GRNsPage() {
           <span className="text-secondary italic text-sm">Pending</span>
         ),
     },
-    { key: 'purchaseOrderId', header: 'PO #', render: (r) => `PO-${r.purchaseOrderId}` },
+    {
+      key: 'purchaseOrderId',
+      header: 'PO #',
+      render: (r) => r.poNumber ?? `PO-${r.purchaseOrderId}`,
+    },
     { key: 'supplierName', header: 'Supplier', render: (r) => r.supplierName ?? r.supplierId },
     {
       key: 'grandTotal',
@@ -154,11 +160,17 @@ export default function GRNsPage() {
   // every GRN created in this session's testing sat in DRAFT with zero inventory_ledger
   // rows and waccCost stuck at 0.00, despite real receipts against real POs.
   const rowActions: ERPRowAction<GRN>[] = [
+    {
+      label: 'View',
+      icon: Eye,
+      onClick: (r: GRN) => navigate(`/purchase/grns/${r.id}`),
+    },
     ...(canApproveGRN
       ? [
           {
             label: 'Approve',
             icon: CheckCircle2,
+            tourId: 'grn-approve-row-action',
             onClick: (r: GRN) => {
               setApproveId(r.id);
               setGrnNumber('');
@@ -196,7 +208,9 @@ export default function GRNsPage() {
         subtitle="Track and approve incoming goods"
       >
         {canCreateGRN && (
-          <Button onClick={() => navigate('/purchase/grns/new')}>+ Create GRN</Button>
+          <Button data-tour-id="grn-create-button" onClick={() => navigate('/purchase/grns/new')}>
+            + Create GRN
+          </Button>
         )}
       </ERPPageHeader>
 
@@ -223,6 +237,27 @@ export default function GRNsPage() {
         data={rows}
         isLoading={isLoading}
         rowKey="id"
+        enableExport
+        exportFilename="grns"
+        emptyState={
+          debouncedSearch || status ? (
+            <ERPEmptyState type="no-results" />
+          ) : (
+            <ERPEmptyState
+              type="no-data"
+              title="No GRNs yet"
+              description="Receive goods against an approved Purchase Order to create a GRN — this is what actually adds stock."
+              {...(canCreateGRN
+                ? {
+                    action: {
+                      label: '+ Create GRN',
+                      onClick: () => navigate('/purchase/grns/new'),
+                    },
+                  }
+                : {})}
+            />
+          )
+        }
         pagination={{ page, pageSize, total: totalElements }}
         onPageChange={setPage}
         onPageSizeChange={(size) => {

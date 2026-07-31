@@ -150,3 +150,60 @@ describe('ReportEngine — tenant isolation audit (ES-05)', () => {
     expect(values).not.toContain(TENANT_B);
   });
 });
+
+// H-1 fix: an invoice carries a real computed grand_total the moment it's created, before
+// confirm() is ever called — but only sales-register and ar-aging excluded status='DRAFT'.
+// Every other Sales report below counted unconfirmed drafts as real sales. This is a
+// golden-SQL check (not a live DB assertion) so a future edit that silently drops the DRAFT
+// exclusion fails loudly here rather than only in production numbers.
+describe('ReportEngine — DRAFT invoices excluded from Sales reports (H-1 fix)', () => {
+  let db: ReturnType<typeof makeDb>;
+  let engine: ReportEngine;
+
+  beforeEach(() => {
+    db = makeDb([]);
+    engine = new ReportEngine(db as never);
+  });
+
+  const DRAFT_EXCLUDED_SLUGS = [
+    'sales-by-customer',
+    'sales-by-item',
+    'sales-by-category',
+    'sales-by-salesperson',
+    'outstanding-receivables',
+    'customer-ledger',
+    'customer-statement',
+    'discount-report',
+    'top-selling-items',
+    'gst-register',
+  ];
+
+  for (const slug of DRAFT_EXCLUDED_SLUGS) {
+    it(`${slug}: SQL excludes DRAFT invoices, not just CANCELLED ones`, async () => {
+      await engine.generate(slug, TENANT_A, BASE_PARAMS);
+
+      const sqlText = db.execute.mock.calls
+        .map(([sqlArg]) => (sqlArg as { strings: TemplateStringsArray }).strings.join(''))
+        .join(' ');
+      expect(sqlText).toContain('DRAFT');
+    });
+  }
+});
+
+// H-8 fix: loyalty-points-report returned openingPoints/earned/redeemed hardcoded to 0 despite
+// a real, populated loyalty_transactions table simply never being queried.
+describe('ReportEngine — loyalty-points-report queries real loyalty_transactions (H-8 fix)', () => {
+  it('joins loyalty_transactions instead of hardcoding earned/redeemed to 0', async () => {
+    const db = makeDb([]);
+    const engine = new ReportEngine(db as never);
+
+    await engine.generate('loyalty-points-report', TENANT_A, BASE_PARAMS);
+
+    const sqlText = db.execute.mock.calls
+      .map(([sqlArg]) => (sqlArg as { strings: TemplateStringsArray }).strings.join(''))
+      .join(' ');
+    expect(sqlText).toContain('loyalty_transactions');
+    expect(sqlText).not.toContain('0 AS earned');
+    expect(sqlText).not.toContain('0 AS redeemed');
+  });
+});

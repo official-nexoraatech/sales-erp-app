@@ -9,6 +9,7 @@ import ERPDataGrid, {
   type ERPColumnDef,
   type ERPRowAction,
 } from '../../components/erp/ERPDataGrid.js';
+import ERPEmptyState from '../../components/erp/ERPEmptyState.js';
 import Button from '../../components/ui/Button.js';
 
 interface Unit {
@@ -50,7 +51,12 @@ export default function UnitsPage() {
         title="Units of Measure"
         actions={
           canCreateUnit ? (
-            <Button onClick={() => navigate('/inventory/units/new')}>+ New Unit</Button>
+            <Button
+              data-tour-id="inventory-units-create-button"
+              onClick={() => navigate('/inventory/units/new')}
+            >
+              + New Unit
+            </Button>
           ) : undefined
         }
       />
@@ -59,6 +65,16 @@ export default function UnitsPage() {
         data={units}
         isLoading={isLoading}
         rowKey="id"
+        emptyState={
+          <ERPEmptyState
+            type="no-data"
+            title="No units yet"
+            description="Add units of measure (e.g. Metre, Piece, Kg) for your item catalog to use."
+            {...(canCreateUnit
+              ? { action: { label: '+ New Unit', onClick: () => navigate('/inventory/units/new') } }
+              : {})}
+          />
+        }
         actions={rowActions}
       />
     </div>

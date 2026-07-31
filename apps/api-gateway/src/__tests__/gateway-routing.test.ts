@@ -35,9 +35,12 @@ describe('API gateway — routing', () => {
     process.env['JWT_PUBLIC_KEY'] = await exportSPKI(publicKey);
     const privateKeyPem = await exportPKCS8(privateKey);
     const signingKey = await importPKCS8(privateKeyPem, 'RS256');
+    // F17 fix: verifyAccessToken() now checks the `iss` claim (matching auth-service's own
+    // 'erp-auth-service' default) — this token must carry it to keep passing gateway auth.
     validToken = await new SignJWT({ sub: '1', tenantId: 1 })
       .setProtectedHeader({ alg: 'RS256' })
       .setSubject('1')
+      .setIssuer('erp-auth-service')
       .setExpirationTime('1h')
       .sign(signingKey);
 

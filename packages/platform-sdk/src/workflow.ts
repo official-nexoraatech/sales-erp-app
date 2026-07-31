@@ -9,7 +9,7 @@ import {
   users,
 } from '@erp/db';
 import type { WorkflowNode } from '@erp/db';
-import { NotFoundError, BusinessError } from '@erp/types';
+import { NotFoundError, BusinessError, ERPError } from '@erp/types';
 
 export interface WorkflowTriggerInput {
   event: string;
@@ -615,8 +615,12 @@ export class WorkflowEngine {
       throw new BusinessError('WORKFLOW_ALREADY_DECIDED', `Instance is already ${instance.status}`);
     }
 
-    // Record the decision
-    await this.db
+    // Record the decision — the WHERE also pins approverId to the caller, so this only
+    // matches a row if the caller is actually an eligible, still-pending approver for this
+    // node. Without checking that the update affected a row, any authenticated user could
+    // force-approve/reject someone else's workflow (e.g. self-approve their own high-value
+    // invoice) since a zero-row update previously fell through silently.
+    const [decidedApproval] = await this.db
       .update(workflowApprovals)
       .set({
         action: input.action,
@@ -629,9 +633,19 @@ export class WorkflowEngine {
         and(
           eq(workflowApprovals.instanceId, input.instanceId),
           eq(workflowApprovals.nodeId, input.nodeId),
-          eq(workflowApprovals.approverId, input.userId)
+          eq(workflowApprovals.approverId, input.userId),
+          eq(workflowApprovals.action, 'PENDING')
         )
+      )
+      .returning({ id: workflowApprovals.id });
+
+    if (!decidedApproval) {
+      throw new ERPError(
+        'NOT_ELIGIBLE_APPROVER',
+        'You are not an eligible, pending approver for this workflow step',
+        403
       );
+    }
 
     if (input.action === 'REJECTED') {
       await this.finalizeInstance(instance.id, 'REJECTED');

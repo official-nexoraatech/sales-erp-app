@@ -4,7 +4,8 @@ import argon2 from 'argon2';
 import { eq, and } from 'drizzle-orm';
 import type { Redis } from 'ioredis';
 import { TenantScopedCache, assertTenantActive } from '@erp/sdk';
-import { users } from '@erp/db';
+import { erpAuthLoginTotal } from '@erp/logger';
+import { users, securityAuditLog } from '@erp/db';
 import type { ErpDatabase } from '@erp/db';
 import { generateSecureToken } from '../crypto.js';
 import type { AuthConfig } from '../config.js';
@@ -12,6 +13,33 @@ import { checkIpBlocked, recordFailedLoginAndMaybeBlock } from '../middleware/su
 import { issueTokensAndSession } from '../domain/session.js';
 import { loadUserRolesAndPermissions } from '../domain/roles.js';
 import { setRefreshCookie } from '../refresh-cookie.js';
+import { inetParam } from '../db-helpers.js';
+
+function logLoginFailure(
+  db: ErpDatabase,
+  tenantId: number,
+  ip: string,
+  reason: string,
+  targetUserId?: number,
+  metricOutcome: 'failed' | 'locked' = 'failed'
+): void {
+  erpAuthLoginTotal.inc({ tenant_id: String(tenantId), outcome: metricOutcome });
+
+  // Fire-and-forget, matching this route's existing pattern for non-essential side
+  // effects (see suspicious-login.ts's own securityAuditLog inserts) — a logging
+  // failure must never turn a login attempt's own success/failure response into a 500.
+  void db
+    .insert(securityAuditLog)
+    .values({
+      tenantId,
+      actorId: targetUserId ?? 0,
+      ...(targetUserId !== undefined ? { targetUserId } : {}),
+      action: 'LOGIN_FAILURE',
+      ipAddress: inetParam(ip),
+      details: { reason },
+    })
+    .catch(() => undefined);
+}
 
 const LoginBody = z.object({
   email: z.string().email(),
@@ -62,16 +90,19 @@ export async function loginRoute(
       if (!user) {
         await argon2.hash('dummy-prevent-timing-attack', { type: argon2.argon2id });
         await recordFailedLoginAndMaybeBlock(db, redis, request.ip, tenantId, config);
+        logLoginFailure(db, tenantId, request.ip, 'unknown_user');
         return reply.code(401).send({ error: 'Invalid credentials' });
       }
 
       if (!user.isActive) {
+        logLoginFailure(db, tenantId, request.ip, 'account_disabled', user.id);
         return reply.code(401).send({ error: 'Account is disabled' });
       }
 
       // Check account lockout
       if (user.lockedUntil && user.lockedUntil > new Date()) {
         const remainingMs = user.lockedUntil.getTime() - Date.now();
+        logLoginFailure(db, tenantId, request.ip, 'account_locked', user.id, 'locked');
         return reply.code(429).send({
           error: 'Account temporarily locked',
           retryAfterSeconds: Math.ceil(remainingMs / 1000),
@@ -93,6 +124,14 @@ export async function loginRoute(
           .where(eq(users.id, user.id));
 
         await recordFailedLoginAndMaybeBlock(db, redis, request.ip, tenantId, config);
+        logLoginFailure(
+          db,
+          tenantId,
+          request.ip,
+          shouldLock ? 'invalid_password_now_locked' : 'invalid_password',
+          user.id,
+          shouldLock ? 'locked' : 'failed'
+        );
 
         if (shouldLock) {
           return reply.code(429).send({
@@ -152,6 +191,19 @@ export async function loginRoute(
           updatedAt: new Date(),
         })
         .where(eq(users.id, user.id));
+
+      erpAuthLoginTotal.inc({ tenant_id: String(tenantId), outcome: 'success' });
+      void db
+        .insert(securityAuditLog)
+        .values({
+          tenantId,
+          actorId: user.id,
+          targetUserId: user.id,
+          action: 'LOGIN_SUCCESS',
+          ipAddress: inetParam(request.ip),
+          details: {},
+        })
+        .catch(() => undefined);
 
       setRefreshCookie(reply, tokens.refreshToken, config);
       return reply.code(200).send({ data: tokens });

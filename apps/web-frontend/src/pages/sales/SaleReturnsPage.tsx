@@ -6,6 +6,7 @@ import { useAuthStore } from '../../store/auth.store.js';
 import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
 import ERPDataGrid, { type ERPColumnDef } from '../../components/erp/ERPDataGrid.js';
+import ERPEmptyState from '../../components/erp/ERPEmptyState.js';
 import Button from '../../components/ui/Button.js';
 import Badge from '../../components/ui/Badge.js';
 import { formatDate, formatCurrency } from '../../lib/format.js';
@@ -61,6 +62,13 @@ export default function SaleReturnsPage() {
           variant={
             r.status === 'APPROVED' ? 'success' : r.status === 'CANCELLED' ? 'danger' : 'default'
           }
+          title={
+            r.status === 'APPROVED'
+              ? 'Approved — stock, accounting, GST, and the credit note were all applied immediately when this return was created.'
+              : r.status === 'CANCELLED'
+                ? 'Cancelled.'
+                : undefined
+          }
         >
           {r.status}
         </Badge>
@@ -71,7 +79,7 @@ export default function SaleReturnsPage() {
       header: 'Credit Note',
       render: (r) =>
         r.creditNoteId ? (
-          <span className="font-mono text-sm text-link">CN-{r.creditNoteId}</span>
+          <span className="font-mono text-sm text-secondary">CN-{r.creditNoteId}</span>
         ) : (
           '—'
         ),
@@ -86,7 +94,12 @@ export default function SaleReturnsPage() {
         subtitle="Process customer returns and credit notes"
       >
         {canCreateReturn && (
-          <Button onClick={() => navigate('/sales/returns/new')}>+ New Return</Button>
+          <Button
+            data-tour-id="sales-returns-create-button"
+            onClick={() => navigate('/sales/returns/new')}
+          >
+            + New Return
+          </Button>
         )}
       </ERPPageHeader>
 
@@ -95,6 +108,16 @@ export default function SaleReturnsPage() {
         data={rows}
         isLoading={isLoading}
         rowKey="id"
+        emptyState={
+          <ERPEmptyState
+            type="no-data"
+            title="No returns recorded yet"
+            description="Record a sale return against an invoice to restore stock and issue a credit note."
+            {...(canCreateReturn
+              ? { action: { label: '+ New Return', onClick: () => navigate('/sales/returns/new') } }
+              : {})}
+          />
+        }
         pagination={{ page, pageSize, total: totalElements }}
         onPageChange={setPage}
         onPageSizeChange={(size) => {

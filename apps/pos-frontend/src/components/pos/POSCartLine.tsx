@@ -16,13 +16,13 @@ interface Props {
 export function POSCartLine({ line, onUpdateQty, onUpdateDiscount, highlighted }: Props) {
   return (
     <div
-      className={`flex items-center gap-2 rounded-xl p-2.5 transition-colors ${
+      className={`flex items-center gap-4 rounded-xl p-4 transition-colors ${
         highlighted ? 'bg-primary-subtle ring-2 ring-focus' : 'bg-surface-subtle'
       }`}
     >
       <div className="flex-1 min-w-0">
-        <div className="text-sm font-medium text-primary truncate">{line.itemName}</div>
-        <div className="text-xs text-secondary flex items-center gap-1 mt-0.5">
+        <div className="text-sm font-medium text-primary break-words">{line.itemName}</div>
+        <div className="text-xs text-secondary flex items-center gap-1 mt-1">
           <span>
             ₹{line.unitPrice.toFixed(2)} × {line.quantity}
           </span>
@@ -35,18 +35,19 @@ export function POSCartLine({ line, onUpdateQty, onUpdateDiscount, highlighted }
             onChange={(e) => onUpdateDiscount(line.itemId, parseFloat(e.target.value) || 0)}
             placeholder="0"
             title="Discount %"
+            aria-label={`Discount percent for ${line.itemName}`}
             className="w-10 rounded-md border border-default bg-surface-card px-1 text-xs text-primary focus:outline-none focus:border-focus"
           />
           <span>% off</span>
         </div>
       </div>
-      <div className="flex items-center gap-1 shrink-0">
+      <div className="flex items-center gap-2 shrink-0">
         <button
           onClick={() => onUpdateQty(line.itemId, round2(line.quantity - 1))}
           aria-label="Decrease quantity"
-          className="flex items-center justify-center w-9 h-9 rounded-lg bg-surface-raised hover:bg-surface-sunken text-primary transition-colors"
+          className="flex items-center justify-center w-11 h-11 rounded-lg bg-surface-raised hover:bg-surface-sunken text-primary transition-colors"
         >
-          <Minus size={15} />
+          <Minus size={18} />
         </button>
         <input
           type="number"
@@ -55,17 +56,18 @@ export function POSCartLine({ line, onUpdateQty, onUpdateDiscount, highlighted }
           value={line.quantity}
           onChange={(e) => onUpdateQty(line.itemId, parseFloat(e.target.value) || 0)}
           title="Quantity (supports fractional, e.g. 2.5 metres — type it directly)"
-          className="w-14 h-9 text-center text-sm font-semibold rounded-lg border border-default bg-surface-card text-primary focus:outline-none focus:border-focus"
+          aria-label={`Quantity for ${line.itemName}`}
+          className="w-16 h-11 text-center text-base font-semibold rounded-lg border border-default bg-surface-card text-primary focus:outline-none focus:border-focus"
         />
         <button
           onClick={() => onUpdateQty(line.itemId, round2(line.quantity + 1))}
           aria-label="Increase quantity"
-          className="flex items-center justify-center w-9 h-9 rounded-lg bg-surface-raised hover:bg-surface-sunken text-primary transition-colors"
+          className="flex items-center justify-center w-11 h-11 rounded-lg bg-surface-raised hover:bg-surface-sunken text-primary transition-colors"
         >
-          <Plus size={15} />
+          <Plus size={18} />
         </button>
       </div>
-      <div className="text-sm font-semibold text-primary w-20 text-right shrink-0">
+      <div className="text-sm font-semibold text-primary w-24 text-right shrink-0">
         ₹{line.lineTotal.toFixed(2)}
       </div>
     </div>

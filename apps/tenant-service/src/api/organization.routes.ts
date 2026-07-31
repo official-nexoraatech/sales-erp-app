@@ -5,8 +5,13 @@ import { z } from 'zod';
 import { NotFoundError, ValidationError } from '@erp/types';
 import { PERMISSIONS, OptionalGSTINSchema, OptionalPANSchema } from '@erp/types';
 import type { PlatformContextFactory } from '@erp/sdk';
+import { StorageClient } from '@erp/sdk';
+import type { TenantServiceConfig } from '../config.js';
 import { authenticate } from '../middleware/authenticate.js';
 import { requirePermission } from '../middleware/authorize.js';
+
+const LOGO_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/svg+xml']);
+const MAX_LOGO_SIZE = 2 * 1024 * 1024; // 2MB — matches the multipart plugin's registered limit
 
 // ERP-PLANNING/05_ERP_THEME_SYSTEM.md §4.1 — the only tenant-brandable surface: color,
 // font (from an approved list), and radius scale. Never layout/spacing/status colors (§4.2).
@@ -19,21 +24,6 @@ const ThemeConfigSchema = z.object({
   brandAccent: z.string().regex(HEX_COLOR, 'Must be a hex color, e.g. #f59e0b').optional(),
   fontSans: z.enum(ALLOWED_FONTS).optional(),
   radiusScale: z.enum(['sharp', 'default', 'rounded']).optional(),
-});
-
-// PG-013/security-audit: fileName previously went unvalidated straight into the S3 key
-// (path-traversal risk via "../"), and contentType was unrestricted (could request a
-// non-image upload target). Allow-list both.
-const LogoUploadSchema = z.object({
-  fileName: z
-    .string()
-    .max(255)
-    .regex(
-      /^[A-Za-z0-9._-]+$/,
-      'fileName must contain only letters, numbers, dots, hyphens, and underscores'
-    )
-    .optional(),
-  contentType: z.enum(['image/png', 'image/jpeg', 'image/webp', 'image/svg+xml']).optional(),
 });
 
 const UpdateOrgSchema = z.object({
@@ -68,13 +58,27 @@ const UpdateOrgSchema = z.object({
   invoiceFooter: z.string().max(2000).optional(),
   termsAndConditions: z.string().max(5000).optional(),
   themeConfig: ThemeConfigSchema.optional(),
+  // Purchase module enhancement 2026-07-21: tiered PO approval threshold — see
+  // PurchaseOrderService.approve() and PERMISSIONS.PO_APPROVE_HIGH_VALUE. Omitted/undefined
+  // means no threshold configured (single-tier approval, unchanged from before).
+  purchaseApprovalThreshold: z.coerce.number().min(0).optional(),
   version: z.number().int().min(0).optional(),
 });
 
 export async function organizationRoutes(
   fastify: FastifyInstance,
-  ctxFactory: PlatformContextFactory
+  ctxFactory: PlatformContextFactory,
+  config: TenantServiceConfig
 ): Promise<void> {
+  // F14: real server-side upload (mirrors TenantProvisioner's own StorageClient construction).
+  const storageClient = new StorageClient({
+    endpoint: config.minioEndpoint,
+    accessKeyId: config.minioAccessKey,
+    secretAccessKey: config.minioSecretKey,
+    useSSL: config.minioUseSSL,
+    bucket: config.minioBucket,
+  });
+
   function ctxFor(request: {
     auth: { tenantId: number; userId: number };
     headers: Record<string, unknown>;
@@ -114,7 +118,7 @@ export async function organizationRoutes(
           tenantId: org.tenantId,
           orgName: org.orgName,
           legalName: org.legalName,
-          logoUrl: org.logoUrl,
+          logoObjectKey: org.logoObjectKey,
           address: org.address,
           timezone: org.timezone,
           currency: org.currency,
@@ -149,6 +153,14 @@ export async function organizationRoutes(
       if (!body.success) {
         throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
       }
+      // Decimal column — drizzle-orm/postgres-js expects a string, not a JS number, same
+      // convention used for every other decimal field in this codebase (e.g. openingBalance).
+      const data = {
+        ...body.data,
+        ...(body.data.purchaseApprovalThreshold !== undefined
+          ? { purchaseApprovalThreshold: String(body.data.purchaseApprovalThreshold) }
+          : {}),
+      };
 
       const [existing] = await ctx.db.raw
         .select()
@@ -161,7 +173,7 @@ export async function organizationRoutes(
           .values({
             tenantId,
             createdBy: userId,
-            ...body.data,
+            ...data,
           } as unknown as typeof organizationSettings.$inferInsert)
           .returning();
         if (created) {
@@ -171,6 +183,14 @@ export async function organizationRoutes(
             'ORGANIZATION_UPDATED',
             created as unknown as Record<string, unknown>
           );
+          await ctx.audit.log({
+            action: 'CREATE',
+            entityType: 'organization_settings',
+            entityId: created.id,
+            after: created as unknown as Record<string, unknown>,
+            actorEmail: request.auth.email,
+            ipAddress: request.ip,
+          });
         }
         return reply.code(200).send({ data: created });
       }
@@ -183,7 +203,7 @@ export async function organizationRoutes(
       const [updated] = await ctx.db.raw
         .update(organizationSettings)
         .set({
-          ...body.data,
+          ...data,
           updatedAt: new Date(),
           updatedBy: userId,
           version: existing.version + 1,
@@ -198,6 +218,15 @@ export async function organizationRoutes(
           'ORGANIZATION_UPDATED',
           updated as unknown as Record<string, unknown>
         );
+        await ctx.audit.log({
+          action: 'UPDATE',
+          entityType: 'organization_settings',
+          entityId: updated.id,
+          before: existing as unknown as Record<string, unknown>,
+          after: updated as unknown as Record<string, unknown>,
+          actorEmail: request.auth.email,
+          ipAddress: request.ip,
+        });
       }
 
       return reply.code(200).send({ data: updated });
@@ -205,27 +234,93 @@ export async function organizationRoutes(
   );
 
   // ── POST /organization/logo/upload ────────────────────────────────────────
+  // F14 (2026-07-23 tenant-service audit): this used to only construct a fake "presigned"
+  // URL string (no signature/token — MinIO would reject a client PUT to it) and had no way
+  // to ever persist the result back onto organizationSettings (UpdateOrgSchema never had a
+  // logo field). Rewritten as a real, direct, server-side upload — mirrors
+  // hr-service's employee photo upload (PG-042), the same already-proven pattern.
   fastify.post(
     '/organization/logo/upload',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.ORG_SETTINGS_EDIT)] },
     async (request, reply) => {
-      const { tenantId } = request.auth;
-      const body = LogoUploadSchema.safeParse(request.body);
-      if (!body.success) {
-        throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
-      }
-      const fileName = body.data.fileName ?? 'logo.png';
-      const contentType = body.data.contentType ?? 'image/png';
-      const s3Key = `tenants/${tenantId}/logo/${Date.now()}-${fileName}`;
+      const { tenantId, userId } = request.auth;
+      const ctx = ctxFor(request);
 
-      return reply.code(200).send({
-        data: {
-          uploadUrl: `${process.env['MINIO_ENDPOINT'] ?? 'http://localhost:9000'}/erp-storage/${s3Key}`,
-          s3Key,
-          contentType,
-          expiresIn: 900,
-        },
+      const [existing] = await ctx.db.raw
+        .select()
+        .from(organizationSettings)
+        .where(eq(organizationSettings.tenantId, tenantId));
+      if (!existing) throw new NotFoundError('Organization settings');
+
+      const file = await request.file();
+      if (!file) throw new ValidationError('No file uploaded');
+      if (!LOGO_MIME_TYPES.has(file.mimetype)) {
+        throw new ValidationError(`Unsupported file type: ${file.mimetype}`);
+      }
+      const buffer = await file.toBuffer();
+      if (buffer.length > MAX_LOGO_SIZE) {
+        throw new ValidationError('Logo exceeds the 2MB size limit');
+      }
+
+      // Best-effort cleanup of the previous logo object — a failure here shouldn't block
+      // the new upload from succeeding, it just leaves one orphaned object in storage.
+      if (existing.logoObjectKey) {
+        await storageClient.deleteFile(existing.logoObjectKey).catch(() => undefined);
+      }
+
+      const objectKey = await storageClient.uploadFile(
+        tenantId,
+        'logo',
+        file.filename,
+        buffer,
+        file.mimetype
+      );
+
+      const [updated] = await ctx.db.raw
+        .update(organizationSettings)
+        .set({
+          logoObjectKey: objectKey,
+          updatedAt: new Date(),
+          updatedBy: userId,
+          version: existing.version + 1,
+        })
+        .where(eq(organizationSettings.tenantId, tenantId))
+        .returning();
+
+      await ctx.events.publish(
+        'organization',
+        tenantId,
+        'ORGANIZATION_UPDATED',
+        updated as unknown as Record<string, unknown>
+      );
+      await ctx.audit.log({
+        action: 'UPDATE',
+        entityType: 'organization_settings',
+        entityId: existing.id,
+        metadata: { action: 'LOGO_UPLOAD', fileName: file.filename },
+        actorEmail: request.auth.email,
+        ipAddress: request.ip,
       });
+
+      return reply.code(200).send({ data: { logoObjectKey: objectKey } });
     }
   );
+
+  // ── GET /organization/logo — redirect to a freshly-signed, short-lived download URL ────
+  // authenticate-only (matching GET /organization's own reference-data policy) — every
+  // authenticated user in the tenant legitimately needs to render branding.
+  fastify.get('/organization/logo', { preHandler: [authenticate] }, async (request, reply) => {
+    const { tenantId } = request.auth;
+    const ctx = ctxFor(request);
+
+    const [org] = await ctx.db.raw
+      .select({ logoObjectKey: organizationSettings.logoObjectKey })
+      .from(organizationSettings)
+      .where(eq(organizationSettings.tenantId, tenantId));
+
+    if (!org?.logoObjectKey) throw new NotFoundError('Organization logo');
+
+    const url = await storageClient.getSignedUrl(org.logoObjectKey);
+    return reply.code(302).redirect(url);
+  });
 }

@@ -75,7 +75,13 @@ export const reportSchedules = pgTable(
     tenantId: integer('tenant_id').notNull(),
     reportSlug: varchar('report_slug', { length: 100 }).notNull(),
     params: jsonb('params').notNull().default({}),
-    format: varchar('format', { length: 10 }).notNull().default('PDF').$type<'PDF' | 'EXCEL' | 'CSV'>(),
+    // Default is EXCEL, not PDF — ScheduledReportJob only builds an attachment for EXCEL/CSV,
+    // so a PDF-format row (previously the default) silently emails recipients with nothing
+    // attached. See analytics-reports.routes.ts's ScheduleCreateSchema for the matching fix.
+    format: varchar('format', { length: 10 })
+      .notNull()
+      .default('EXCEL')
+      .$type<'PDF' | 'EXCEL' | 'CSV'>(),
     cronExpression: varchar('cron_expression', { length: 100 }).notNull(),
     recipients: jsonb('recipients').notNull().default([]),
     active: integer('active').notNull().default(1),
@@ -84,9 +90,7 @@ export const reportSchedules = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
-  (t) => [
-    index('idx_report_schedules_tenant').on(t.tenantId, t.active),
-  ]
+  (t) => [index('idx_report_schedules_tenant').on(t.tenantId, t.active)]
 );
 
 // ─── Report Run History ─────────────────────────────────────────────────────
@@ -98,13 +102,25 @@ export const reportRunHistory = pgTable(
     scheduleId: integer('schedule_id'),
     reportSlug: varchar('report_slug', { length: 100 }).notNull(),
     params: jsonb('params').notNull().default({}),
-    format: varchar('format', { length: 10 }).notNull().default('PDF').$type<'PDF' | 'EXCEL' | 'CSV'>(),
-    status: varchar('status', { length: 20 }).notNull().default('PENDING').$type<'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED'>(),
+    // Default is EXCEL, not PDF — ScheduledReportJob only builds an attachment for EXCEL/CSV,
+    // so a PDF-format row (previously the default) silently emails recipients with nothing
+    // attached. See analytics-reports.routes.ts's ScheduleCreateSchema for the matching fix.
+    format: varchar('format', { length: 10 })
+      .notNull()
+      .default('EXCEL')
+      .$type<'PDF' | 'EXCEL' | 'CSV'>(),
+    status: varchar('status', { length: 20 })
+      .notNull()
+      .default('PENDING')
+      .$type<'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED'>(),
     startedAt: timestamp('started_at', { withTimezone: true }),
     completedAt: timestamp('completed_at', { withTimezone: true }),
     fileUrl: text('file_url'),
     errorMessage: text('error_message'),
-    triggeredBy: varchar('triggered_by', { length: 20 }).notNull().default('MANUAL').$type<'MANUAL' | 'SCHEDULED'>(),
+    triggeredBy: varchar('triggered_by', { length: 20 })
+      .notNull()
+      .default('MANUAL')
+      .$type<'MANUAL' | 'SCHEDULED'>(),
     rowCount: integer('row_count'),
     durationMs: integer('duration_ms'),
     resultData: jsonb('result_data'),

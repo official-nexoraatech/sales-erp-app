@@ -12,7 +12,7 @@ import {
   organizationSettings,
 } from '@erp/db';
 import { createLogger } from '@erp/logger';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, ne, sql } from 'drizzle-orm';
 import argon2 from 'argon2';
 import { randomUUID } from 'node:crypto';
 import { WorkflowEngine, RuleEngine } from '@erp/sdk';
@@ -58,6 +58,7 @@ const ALL_PROVISION_STEPS = [
   'SET_FEATURE_FLAGS',
   'ASSIGN_PLAN_ENTITLEMENTS',
   'SEED_CHART_OF_ACCOUNTS',
+  'CREATE_FIRST_FINANCIAL_YEAR',
   'SEND_WELCOME_EMAIL',
 ] as const;
 
@@ -66,7 +67,7 @@ type ProvisionStep = (typeof ALL_PROVISION_STEPS)[number];
 export class TenantProvisioner {
   constructor(
     private readonly db: ErpDatabase,
-    private readonly esUrl: string,
+    private readonly searchServiceUrl: string,
     private readonly storageClient: StorageClient
   ) {}
 
@@ -91,11 +92,10 @@ export class TenantProvisioner {
         status: 'PROVISIONING',
         provisioningStatus: 'NOT_STARTED',
         provisioningSteps: {},
-        settings: {
-          timezone: input.orgSettings?.timezone ?? 'Asia/Kolkata',
-          currency: input.orgSettings?.currency ?? 'INR',
-          country: input.orgSettings?.country ?? 'IN',
-        },
+        // F13: locale preferences (timezone/currency/country) are seeded into
+        // organizationSettings below (SEED_ORG_SETTINGS) instead — that's the table
+        // everything actually reads. `settings` here now only ever holds maxUsers/
+        // maxBranches, added later by BillingService.assignPlanEntitlements().
         s3Prefix: '',
         esIndexPrefix: '',
         createdBy: 0,
@@ -211,7 +211,7 @@ export class TenantProvisioner {
     // ── STEP 7: Create Elasticsearch indices ────────────────────────────────
     const esIndexPrefix = `erp_${tenantId}`;
     logger.info({ tenantId, esIndexPrefix }, 'Creating Elasticsearch indices');
-    await this.createEsIndices(tenantId, esIndexPrefix);
+    await this.createEsIndices(tenantId);
     markStep('CREATE_ES_INDICES');
 
     await this.db
@@ -250,6 +250,22 @@ export class TenantProvisioner {
     logger.info({ tenantId }, 'Seeding default Chart of Accounts');
     await this.seedChartOfAccounts(tenantId);
     markStep('SEED_CHART_OF_ACCOUNTS');
+
+    await this.db
+      .update(tenants)
+      .set({ provisioningSteps: completedSteps })
+      .where(eq(tenants.id, tenantId));
+
+    // ── STEP 9c: Create the tenant's first Financial Year ───────────────────
+    // Product audit 2026-07-31 (Phase 1, Step 7): found and fixed the same shape of gap as
+    // 9b above (SEED_CHART_OF_ACCOUNTS) — no provisioning step ever created a Financial Year,
+    // documented since 2026-07-13 as a manual go-live blocker ("every real client tenant
+    // needs a Financial Year created via Settings before their Balance Sheet/Trial Balance
+    // show meaningful data"). Same fire-and-forget-but-error-logged pattern as CoA seeding
+    // immediately above.
+    logger.info({ tenantId }, "Creating tenant's first Financial Year");
+    await this.createFirstFinancialYear(tenantId);
+    markStep('CREATE_FIRST_FINANCIAL_YEAR');
 
     await this.db
       .update(tenants)
@@ -367,63 +383,33 @@ export class TenantProvisioner {
     return user.id;
   }
 
-  private async createEsIndices(tenantId: number, prefix: string): Promise<void> {
-    const indices = ['customers', 'items', 'invoices', 'suppliers', 'employees'];
-    for (const entity of indices) {
-      const indexName = `${prefix}_${entity}`;
-      try {
-        const res = await fetch(`${this.esUrl}/${indexName}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            settings: {
-              number_of_shards: 1,
-              number_of_replicas: 0,
-              analysis: {
-                analyzer: {
-                  erp_name_analyzer: {
-                    type: 'custom',
-                    tokenizer: 'standard',
-                    filter: ['lowercase', 'asciifolding', 'erp_synonyms'],
-                  },
-                },
-                filter: {
-                  erp_synonyms: {
-                    type: 'synonym',
-                    synonyms: [
-                      'pvt => private',
-                      'ltd => limited',
-                      'co => company',
-                      'dept => department',
-                      'mfg => manufacturing',
-                    ],
-                  },
-                },
-              },
-            },
-            mappings: {
-              properties: {
-                tenantId: { type: 'integer' },
-                name: { type: 'text', analyzer: 'erp_name_analyzer' },
-                phone: { type: 'keyword' },
-                email: { type: 'keyword' },
-                createdAt: { type: 'date' },
-              },
-            },
-          }),
-        });
-        if (!res.ok && res.status !== 400) {
-          logger.warn(
-            { tenantId, indexName, status: res.status },
-            'ES index creation returned non-OK'
-          );
-        }
-      } catch (err) {
-        logger.warn(
-          { tenantId, indexName, err },
-          'ES index creation failed (non-fatal during provisioning)'
+  // Delegates to search-service, the sole owner of ENTITY_MAPPINGS/analyzer settings
+  // (SearchEngine.createTenantIndices) — this used to hand-roll its own PUT against
+  // Elasticsearch directly, for only 5 of the 30 searchable entities, under plural index
+  // names ('customers', 'items', ...) that predate a rename to singular entity names
+  // elsewhere in the codebase. Those hand-rolled indices were never queried by anything:
+  // every real search document lands under search-service's singular-named indices instead,
+  // which — with no pre-creation step — fell through to Elasticsearch's auto-create-index
+  // default (no custom analyzers/synonyms/ngram, wrong field types, unwanted default
+  // replica). Fire-and-forget like the other cross-service provisioning calls in this file:
+  // a failure here degrades search relevance/consistency for this tenant, but shouldn't
+  // block account creation.
+  private async createEsIndices(tenantId: number): Promise<void> {
+    const internalKey = process.env['INTERNAL_API_KEY'] ?? '';
+    try {
+      const res = await fetch(`${this.searchServiceUrl}/internal/search/create-tenant-indices`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-internal-key': internalKey },
+        body: JSON.stringify({ tenantId }),
+      });
+      if (!res.ok) {
+        logger.error(
+          { tenantId, status: res.status },
+          'search-service tenant index creation failed'
         );
       }
+    } catch (err) {
+      logger.error({ tenantId, err }, 'search-service tenant index creation failed');
     }
   }
 
@@ -551,6 +537,36 @@ export class TenantProvisioner {
     }
   }
 
+  // Same "not blocking, but logged at error level" reasoning as seedChartOfAccounts above —
+  // a tenant with no Financial Year can still transact, but every Balance Sheet/Trial Balance
+  // view will show meaningless figures until someone notices and creates one manually via
+  // Settings, which is exactly the manual step this closes.
+  private async createFirstFinancialYear(tenantId: number): Promise<void> {
+    const accountingUrl = process.env['ACCOUNTING_SERVICE_URL'];
+    if (!accountingUrl) {
+      logger.error(
+        { tenantId },
+        'ACCOUNTING_SERVICE_URL not configured — first Financial Year NOT created'
+      );
+      return;
+    }
+    const internalKey = process.env['INTERNAL_API_KEY'] ?? '';
+    try {
+      const res = await fetch(
+        `${accountingUrl}/api/v2/internal/financial-years/seed?tenantId=${tenantId}`,
+        {
+          method: 'POST',
+          headers: { 'x-internal-key': internalKey },
+        }
+      );
+      if (!res.ok) {
+        logger.error({ tenantId, status: res.status }, 'First Financial Year creation failed');
+      }
+    } catch (err) {
+      logger.error({ tenantId, err }, 'First Financial Year creation failed');
+    }
+  }
+
   async suspend(tenantId: number, reason: string, suspendedBy: number): Promise<void> {
     await this.db
       .update(tenants)
@@ -560,7 +576,10 @@ export class TenantProvisioner {
         suspendedBy,
         suspendedReason: reason,
         updatedAt: new Date(),
-        version: tenants.version,
+        // Passing the column itself (`tenants.version`) makes Drizzle emit `version = version`,
+        // a no-op — the correct increment is `version = version + 1`, matching how
+        // organization.routes.ts/branch.routes.ts maintain the same optimistic-lock column.
+        version: sql`${tenants.version} + 1`,
       })
       .where(and(eq(tenants.id, tenantId), eq(tenants.status, 'ACTIVE')));
   }
@@ -570,10 +589,14 @@ export class TenantProvisioner {
       .update(tenants)
       .set({
         status: 'ACTIVE',
-        suspendedAt: undefined,
-        suspendedBy: undefined,
-        suspendedReason: undefined,
+        // `undefined` (not `null`) here is silently dropped by Drizzle's update-set builder,
+        // so these three columns never actually cleared on reactivation — a tenant showed a
+        // stale suspension reason forever after being reactivated. `null` is a real SQL value.
+        suspendedAt: null,
+        suspendedBy: null,
+        suspendedReason: null,
         updatedAt: new Date(),
+        version: sql`${tenants.version} + 1`,
       })
       .where(and(eq(tenants.id, tenantId), eq(tenants.status, 'SUSPENDED')));
   }
@@ -587,7 +610,11 @@ export class TenantProvisioner {
         closedBy,
         closedReason: reason,
         updatedAt: new Date(),
+        version: sql`${tenants.version} + 1`,
       })
-      .where(eq(tenants.id, tenantId));
+      // Unlike suspend/activate, this previously had no status guard at all — a status check
+      // here (matching their pattern) closes the same double-transition TOCTOU window between
+      // the route's own pre-check SELECT and this UPDATE.
+      .where(and(eq(tenants.id, tenantId), ne(tenants.status, 'CLOSED')));
   }
 }

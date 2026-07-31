@@ -1,12 +1,14 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { eq, desc, sql } from 'drizzle-orm';
+import { eq, and, desc, sql, inArray } from 'drizzle-orm';
 import { physicalVerifications } from '@erp/db';
-import { PERMISSIONS } from '@erp/types';
+import type { ErpDatabase } from '@erp/db';
+import { PERMISSIONS, NotFoundError } from '@erp/types';
 import type { PlatformContextFactory } from '@erp/sdk';
 import { authenticate } from '../middleware/authenticate.js';
 import { requirePermission } from '../middleware/authorize.js';
 import { PhysicalVerificationService } from '../domain/PhysicalVerificationService.js';
+import { assertWarehouseInScope, getWarehouseScope } from '../domain/WarehouseBranchScope.js';
 
 const CreateSchema = z.object({
   warehouseId: z.number().int().positive(),
@@ -24,6 +26,22 @@ const CountUpdateSchema = z.object({
     .min(1),
 });
 
+// GET/start-counting/counts/variances/approve act on an existing verification whose
+// warehouseId isn't in the request — look it up first.
+async function assertVerificationInScope(
+  ctxDb: ErpDatabase,
+  tenantId: number,
+  id: number,
+  auth: { permissions: string[]; branchIds: number[] }
+): Promise<void> {
+  const [verif] = await ctxDb
+    .select({ warehouseId: physicalVerifications.warehouseId })
+    .from(physicalVerifications)
+    .where(and(eq(physicalVerifications.id, id), eq(physicalVerifications.tenantId, tenantId)));
+  if (!verif) throw new NotFoundError('PhysicalVerification', id);
+  await assertWarehouseInScope(ctxDb, tenantId, verif.warehouseId, auth);
+}
+
 export async function physicalVerificationRoutes(
   fastify: FastifyInstance,
   ctxFactory: PlatformContextFactory
@@ -40,17 +58,32 @@ export async function physicalVerificationRoutes(
       });
       const { page = 1, limit = 50 } = request.query as { page?: number; limit?: number };
       const offset = ((page as number) - 1) * (limit as number);
+
+      let whereClause = eq(physicalVerifications.tenantId, request.auth.tenantId);
+      // Inventory module audit 2026-07-21: previously unfiltered — any user with
+      // WAREHOUSE_MANAGE saw every branch's physical verifications.
+      const warehouseScope = await getWarehouseScope(ctx.db.raw, request.auth.tenantId, {
+        permissions: request.auth.permissions,
+        branchIds: request.auth.branchIds,
+      });
+      if (warehouseScope !== 'all') {
+        if (warehouseScope.length === 0) {
+          return reply.code(200).send({ data: { content: [], totalElements: 0, page, limit } });
+        }
+        whereClause = and(whereClause, inArray(physicalVerifications.warehouseId, warehouseScope))!;
+      }
+
       const rows = await ctx.db.raw
         .select()
         .from(physicalVerifications)
-        .where(eq(physicalVerifications.tenantId, request.auth.tenantId))
+        .where(whereClause)
         .orderBy(desc(physicalVerifications.createdAt), desc(physicalVerifications.id))
         .limit(limit as number)
         .offset(offset);
       const [countRow] = await ctx.db.raw
         .select({ count: sql<number>`count(*)::int` })
         .from(physicalVerifications)
-        .where(eq(physicalVerifications.tenantId, request.auth.tenantId));
+        .where(whereClause);
       return reply
         .code(200)
         .send({ data: { content: rows, totalElements: countRow?.count ?? 0, page, limit } });
@@ -68,6 +101,10 @@ export async function physicalVerificationRoutes(
         correlationId: request.id,
       });
       const body = CreateSchema.parse((request.body as { data?: unknown })?.data ?? request.body);
+      await assertWarehouseInScope(ctx.db.raw, request.auth.tenantId, body.warehouseId, {
+        permissions: request.auth.permissions,
+        branchIds: request.auth.branchIds,
+      });
       const svc = new PhysicalVerificationService(ctx.db.raw);
       const verif = await svc.create({
         tenantId: request.auth.tenantId,
@@ -89,6 +126,10 @@ export async function physicalVerificationRoutes(
         correlationId: request.id,
       });
       const { id } = request.params as { id: string };
+      await assertVerificationInScope(ctx.db.raw, request.auth.tenantId, parseInt(id, 10), {
+        permissions: request.auth.permissions,
+        branchIds: request.auth.branchIds,
+      });
       const svc = new PhysicalVerificationService(ctx.db.raw);
       const verif = await svc.get(parseInt(id, 10), request.auth.tenantId);
       return reply.code(200).send({ data: verif });
@@ -106,6 +147,10 @@ export async function physicalVerificationRoutes(
         correlationId: request.id,
       });
       const { id } = request.params as { id: string };
+      await assertVerificationInScope(ctx.db.raw, request.auth.tenantId, parseInt(id, 10), {
+        permissions: request.auth.permissions,
+        branchIds: request.auth.branchIds,
+      });
       const svc = new PhysicalVerificationService(ctx.db.raw);
       const verif = await svc.startCounting(
         parseInt(id, 10),
@@ -130,6 +175,10 @@ export async function physicalVerificationRoutes(
       const { counts } = CountUpdateSchema.parse(
         (request.body as { data?: unknown })?.data ?? request.body
       );
+      await assertVerificationInScope(ctx.db.raw, request.auth.tenantId, parseInt(id, 10), {
+        permissions: request.auth.permissions,
+        branchIds: request.auth.branchIds,
+      });
       const svc = new PhysicalVerificationService(ctx.db.raw);
       await svc.updateCounts(parseInt(id, 10), request.auth.tenantId, counts);
       return reply.code(200).send({ data: { message: 'Counts updated' } });
@@ -147,6 +196,10 @@ export async function physicalVerificationRoutes(
         correlationId: request.id,
       });
       const { id } = request.params as { id: string };
+      await assertVerificationInScope(ctx.db.raw, request.auth.tenantId, parseInt(id, 10), {
+        permissions: request.auth.permissions,
+        branchIds: request.auth.branchIds,
+      });
       const svc = new PhysicalVerificationService(ctx.db.raw);
       const variances = await svc.getVariances(parseInt(id, 10), request.auth.tenantId);
       return reply.code(200).send({ data: variances });
@@ -164,6 +217,10 @@ export async function physicalVerificationRoutes(
         correlationId: request.id,
       });
       const { id } = request.params as { id: string };
+      await assertVerificationInScope(ctx.db.raw, request.auth.tenantId, parseInt(id, 10), {
+        permissions: request.auth.permissions,
+        branchIds: request.auth.branchIds,
+      });
       const svc = new PhysicalVerificationService(ctx.db.raw);
       const verif = await svc.approve(parseInt(id, 10), request.auth.tenantId, request.auth.userId);
       return reply.code(200).send({ data: verif });

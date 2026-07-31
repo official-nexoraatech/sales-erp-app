@@ -38,6 +38,8 @@ import { handleUsageEvent } from './jobs/usageEventConsumer.js';
 import { schedulerRoutes } from './api/scheduler.routes.js';
 import { importRoutes } from './api/import.routes.js';
 import { exportRoutes } from './api/export.routes.js';
+import { exportScheduleRoutes } from './api/export-schedule.routes.js';
+import { ExportScheduleJob } from './jobs/ExportScheduleJob.js';
 
 initializeTelemetry({ serviceName: 'scheduler-service' });
 
@@ -69,11 +71,14 @@ async function bootstrap(): Promise<void> {
     bucket: process.env['MINIO_BUCKET'] ?? 'erp-storage',
   });
 
-  const registry = new JobRegistry(redis);
+  const registry = new JobRegistry(redis, db);
   registerSystemJobs(registry, db, storage);
   registerProjectionRebuildJobs(registry, db);
   registerExportGenerateJob(registry, db, storage);
   registerUsageRollupJob(registry, db);
+
+  const exportScheduleJob = new ExportScheduleJob(db, redis, storage);
+  await exportScheduleJob.start();
 
   // PG-028: consumes USAGE_* events (published via the outbox pattern by sales-service etc.)
   // into the durable usage_events table the usage-rollup job above reads from. scheduler-
@@ -171,6 +176,7 @@ async function bootstrap(): Promise<void> {
     await schedulerRoutes(sub, db, registry);
     await importRoutes(sub, db);
     await exportRoutes(sub, db, registry);
+    await exportScheduleRoutes(sub, db);
   };
 
   await registerSchedulerRoutes(fastify);
@@ -178,6 +184,7 @@ async function bootstrap(): Promise<void> {
 
   const gracefulShutdown = async (): Promise<void> => {
     await usageConsumer.stop();
+    await exportScheduleJob.stop();
     await registry.closeAll();
     await redis.quit();
     await fastify.close();

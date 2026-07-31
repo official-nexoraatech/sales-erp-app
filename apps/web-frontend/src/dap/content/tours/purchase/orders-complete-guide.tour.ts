@@ -1,0 +1,151 @@
+import type { TourDefinition } from '../../schema.js';
+import { PERMISSIONS } from '../../../../constants/permissions.js';
+
+// Deep-dive companion to `purchase-orders-overview`. Grounded against PurchaseOrderService.ts
+// (apps/purchase-service) and PurchaseOrdersPage.tsx / PurchaseOrderDetailPage.tsx /
+// PurchaseOrderFormPage.tsx. Key finding: a PO's create() and approve() write nothing but their
+// own tables and emit PO_CREATED/PO_APPROVED events that no other service subscribes to — it is
+// a pure commitment document, exactly like a Sales Quotation, until a GRN is approved against it.
+// The one real side effect approve() has is a supplier credit-limit check.
+const tour: TourDefinition = {
+  id: 'purchase-orders-complete-guide',
+  version: 1,
+  type: 'complete',
+  title: 'Purchase Orders — complete guide',
+  description:
+    'The full Draft→Submit→Approve→Receive lifecycle, what does and does not touch your books, and the gaps to know about (no edit, free-text confirmations).',
+  module: 'purchase',
+  estimatedMinutes: 6,
+  requiredPermissions: [PERMISSIONS.PO_VIEW],
+  steps: [
+    {
+      id: 'purpose',
+      route: 'purchase/orders',
+      title: 'Why this page exists',
+      body: "A Purchase Order is a formal request to a supplier for goods at agreed rates. It's a commitment, not a transaction — creating or approving one never touches stock, GST, or accounting.",
+      placement: 'center',
+      mode: 'informational',
+      requiredPermission: PERMISSIONS.PO_VIEW,
+    },
+    {
+      id: 'statuses',
+      route: 'purchase/orders',
+      title: 'Status flow',
+      body: 'Draft → Submitted → Approved. From there, GRNs drive it forward to Partially Received or Received as goods arrive. Cancel is available any time before Received, Closed, or Cancelled.',
+      placement: 'center',
+      mode: 'informational',
+      requiredPermission: PERMISSIONS.PO_VIEW,
+    },
+    {
+      id: 'create',
+      route: 'purchase/orders/new',
+      title: 'Creating a PO',
+      body: "Pick a supplier, branch, and warehouse, then search for items to add as lines — rate, GST rate, and HSN code all auto-fill from the item master. Submit only requires at least one line; it does not check for duplicate items or catch a zero/negative quantity beyond the input's own min attribute.",
+      placement: 'center',
+      mode: 'informational',
+      requiredPermission: PERMISSIONS.PO_VIEW,
+    },
+    {
+      id: 'submit',
+      route: 'purchase/orders',
+      target: '[data-tour-id="po-detail-submit-button"]',
+      title: 'Submit',
+      body: "Moves Draft to Submitted — a sign that it's ready for approval. No stock or accounting effect.",
+      placement: 'bottom',
+      mode: 'informational',
+      requiredPermission: PERMISSIONS.PO_VIEW,
+    },
+    {
+      id: 'approve',
+      route: 'purchase/orders',
+      target: '[data-tour-id="po-detail-approve-button"]',
+      title: 'Approve',
+      body: "You'll be asked to type in the PO Number — this is a free-text field with no format check, so agree on a numbering convention with your team. Approving also runs a supplier credit-limit check and can be blocked if the supplier is over their limit.",
+      placement: 'bottom',
+      mode: 'informational',
+      requiredPermission: PERMISSIONS.PO_VIEW,
+    },
+    {
+      id: 'no-edit-use-duplicate',
+      route: 'purchase/orders',
+      target: '[data-tour-id="po-detail-duplicate-button"]',
+      title: 'No edit — Duplicate is your workaround',
+      body: 'There is no edit page for a PO at any status, including Draft. If you need to fix a typo or reorder the same items, Duplicate creates a brand-new Draft copy for you to adjust.',
+      placement: 'bottom',
+      mode: 'informational',
+      requiredPermission: PERMISSIONS.PO_VIEW,
+    },
+    {
+      id: 'cancel',
+      route: 'purchase/orders',
+      target: '[data-tour-id="po-detail-cancel-button"]',
+      title: 'Cancel',
+      body: 'Available at any status except Received, Closed, or Cancelled — even after partial approval. Requires a free-text reason, no format enforced.',
+      placement: 'bottom',
+      mode: 'informational',
+      requiredPermission: PERMISSIONS.PO_VIEW,
+    },
+    {
+      id: 'receive',
+      route: 'purchase/orders',
+      target: '[data-tour-id="po-receive-row-action"]',
+      title: 'Receiving goods',
+      body: 'On an Approved or Partially Received PO, "Receive" takes you straight to a pre-filled Goods Receipt Note — the only step in this whole flow that actually moves anything.',
+      placement: 'bottom',
+      mode: 'informational',
+      requiredPermission: PERMISSIONS.PO_VIEW,
+    },
+    {
+      id: 'business-impact',
+      route: 'purchase/orders',
+      title: 'What a PO touches',
+      body: 'Almost nothing — by design.',
+      placement: 'center',
+      mode: 'informational',
+      requiredPermission: PERMISSIONS.PO_VIEW,
+      calloutTitle: 'Business impact',
+      calloutVariant: 'info',
+      businessImpact: [
+        'Inventory: no effect at any status. Stock only changes when a GRN is approved against this PO.',
+        'Accounting: no journal entry, ever — a PO alone never posts anything.',
+        'GST: no effect — GST is only classified once a GRN records the actual receipt.',
+        "Supplier: approving runs a credit-limit check against the supplier's outstanding balance and can block the approval.",
+        'Reports: a PO shows up in Purchase Order Status and Purchase-by-Supplier-style views (verify report accuracy separately — several purchase reports have known data issues).',
+      ],
+    },
+    {
+      id: 'common-mistakes',
+      route: 'purchase/orders',
+      title: 'Common mistakes',
+      body: 'Two things trip people up here.',
+      placement: 'center',
+      mode: 'informational',
+      requiredPermission: PERMISSIONS.PO_VIEW,
+      calloutTitle: 'Common mistakes',
+      calloutVariant: 'warning',
+      businessImpact: [
+        "Assuming Approve posts anything financial — it doesn't. Nothing hits your books or GST until a GRN is approved.",
+        "Trying to fix a typo after saving and not finding an edit page — it doesn't exist. Cancel and recreate, or Duplicate.",
+        "Typing an inconsistent PO Number format at approval — since it's free text, a mixed convention makes searching and cross-referencing harder later.",
+      ],
+    },
+    {
+      id: 'best-practices',
+      route: 'purchase/orders',
+      title: 'Best practices',
+      body: 'Keep the paper trail clean.',
+      placement: 'center',
+      mode: 'informational',
+      requiredPermission: PERMISSIONS.PO_VIEW,
+      calloutTitle: 'Best practices',
+      calloutVariant: 'success',
+      businessImpact: [
+        'Double-check quantities, rates, and items before Submit — there is no edit step to fall back on.',
+        'Agree on one PO Number format across your team, since the field is free text with no validation.',
+        "Use the Receive row action instead of GRN → New whenever possible — it's the only path that avoids typing a raw PO ID.",
+      ],
+    },
+  ],
+};
+
+export default tour;

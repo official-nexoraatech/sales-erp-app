@@ -20,10 +20,18 @@ export async function handleRcmLiabilityPosted(
   const p = event.payload as unknown as RcmLiabilityPostedPayload;
   const rcmTaxAmount = Number(p.rcmTaxAmount ?? 0);
 
-  if (rcmTaxAmount <= 0) return;
+  if (rcmTaxAmount <= 0) {
+    logger.warn(
+      { grnId: p.grnId },
+      'Accounting: skipping RCM_LIABILITY_POSTED journal — zero/missing rcmTaxAmount'
+    );
+    return;
+  }
+
+  const postingDate = new Date(event.occurredAt);
 
   try {
-    await JournalEngine.checkPeriodOpen(db, event.tenantId, new Date());
+    await JournalEngine.checkPeriodOpen(db, event.tenantId, postingDate);
 
     const journalEntry = await PostingMatrixService.buildJournalEntry(db, event.tenantId, {
       eventType: 'RCM_LIABILITY_POSTED',
@@ -31,10 +39,14 @@ export async function handleRcmLiabilityPosted(
       referenceType: 'GRN',
       referenceId: p.grnId,
       amount: rcmTaxAmount,
+      postingDate,
     });
 
     const result = await JournalEngine.post(db, event.tenantId, event.userId, journalEntry);
-    logger.info({ journalId: result.journalId, grnId: p.grnId }, 'Accounting: RCM_LIABILITY_POSTED posted');
+    logger.info(
+      { journalId: result.journalId, grnId: p.grnId },
+      'Accounting: RCM_LIABILITY_POSTED posted'
+    );
   } catch (err) {
     logger.error({ err, grnId: p.grnId }, 'Accounting: failed to post RCM_LIABILITY_POSTED');
     throw err;

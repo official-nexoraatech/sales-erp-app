@@ -2,6 +2,8 @@ import {
   LayoutDashboard,
   Building2,
   Store,
+  Gift,
+  MessageCircle,
   Warehouse,
   Users,
   Handshake,
@@ -66,6 +68,15 @@ import {
   Settings,
   Webhook,
   HelpCircle,
+  Send,
+  FileCheck2,
+  Bell,
+  Map,
+  TrendingUp,
+  Key,
+  FileDown,
+  Navigation,
+  Route,
 } from 'lucide-react';
 import type { ComponentType } from 'react';
 import { PERMISSIONS, type Permission } from '../constants/permissions.js';
@@ -95,6 +106,11 @@ export const NAV_GROUPS: NavGroup[] = [
         path: '/dashboard',
         icon: LayoutDashboard,
         permission: PERMISSIONS.DASHBOARD_VIEW,
+      },
+      {
+        label: 'My Profile',
+        path: '/my-profile',
+        icon: UserCircle2,
       },
     ],
   },
@@ -150,6 +166,36 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: Megaphone,
         children: [
           {
+            label: 'Dashboard',
+            path: '/crm/dashboard',
+            icon: LayoutDashboard,
+            permission: PERMISSIONS.CRM_DASHBOARD_VIEW,
+          },
+          {
+            label: 'Pipeline',
+            path: '/crm/pipeline',
+            icon: GitBranch,
+            permission: PERMISSIONS.OPPORTUNITY_VIEW,
+          },
+          {
+            label: 'Accounts',
+            path: '/crm/accounts',
+            icon: Handshake,
+            permission: PERMISSIONS.CRM_ACCOUNT_VIEW,
+          },
+          {
+            label: 'Leads',
+            path: '/crm/leads',
+            icon: UserCircle2,
+            permission: PERMISSIONS.LEAD_VIEW,
+          },
+          {
+            label: 'Tickets',
+            path: '/crm/tickets',
+            icon: ClipboardList,
+            permission: PERMISSIONS.TICKET_VIEW,
+          },
+          {
             label: 'Segments',
             path: '/crm/segments',
             icon: UserCircle2,
@@ -162,16 +208,88 @@ export const NAV_GROUPS: NavGroup[] = [
             permission: PERMISSIONS.CRM_VIEW,
           },
           {
+            label: 'Journeys',
+            path: '/crm/journeys',
+            icon: GitBranch,
+            permission: PERMISSIONS.JOURNEY_VIEW,
+          },
+          {
+            label: 'Loyalty Program',
+            path: '/crm/loyalty',
+            icon: Settings,
+            permission: PERMISSIONS.LOYALTY_TIER_MANAGE,
+          },
+          {
+            label: 'Referrals',
+            path: '/crm/referrals',
+            icon: Gift,
+            permission: PERMISSIONS.REFERRAL_VIEW,
+          },
+          {
+            label: 'Inbox',
+            path: '/crm/inbox',
+            icon: MessageCircle,
+            permission: PERMISSIONS.CONVERSATION_VIEW,
+          },
+          {
+            label: 'Campaign ROI',
+            path: '/crm/campaigns/roi-report',
+            icon: PieChart,
+            permission: PERMISSIONS.CRM_CAMPAIGN_ANALYTICS_VIEW,
+          },
+          {
             label: 'Seasons',
             path: '/crm/seasons',
             icon: CalendarRange,
             permission: PERMISSIONS.CRM_SEASON_VIEW,
           },
           {
+            label: 'Territories',
+            path: '/crm/territories',
+            icon: Map,
+            permission: PERMISSIONS.TERRITORY_MANAGE,
+          },
+          {
+            label: 'Quotas',
+            path: '/crm/quotas',
+            icon: TrendingUp,
+            permission: PERMISSIONS.QUOTA_MANAGE,
+          },
+          {
+            label: 'API Keys',
+            path: '/crm/api-keys',
+            icon: Key,
+            permission: PERMISSIONS.API_KEY_MANAGE,
+          },
+          {
+            label: 'Export Schedules',
+            path: '/crm/export-schedules',
+            icon: FileDown,
+            permission: PERMISSIONS.EXPORT_GENERATE,
+          },
+          {
+            label: 'My Routes',
+            path: '/crm/field-visits',
+            icon: Navigation,
+            permission: PERMISSIONS.FIELD_VISIT_MANAGE,
+          },
+          {
+            label: 'Visit Routes',
+            path: '/crm/visit-routes',
+            icon: Route,
+            permission: PERMISSIONS.ROUTE_MANAGE,
+          },
+          {
             label: 'Campaign Settings',
             path: '/crm/campaign-settings',
             icon: Settings,
             permission: PERMISSIONS.CRM_AUTOMATION_MANAGE,
+          },
+          {
+            label: 'DLT Templates',
+            path: '/crm/dlt-templates',
+            icon: Settings,
+            permission: PERMISSIONS.CRM_DLT_TEMPLATE_MANAGE,
           },
         ],
       },
@@ -270,6 +388,24 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: ShoppingBag,
         children: [
           {
+            label: 'Dashboard',
+            path: '/purchase/dashboard',
+            icon: LayoutDashboard,
+            permission: PERMISSIONS.PO_VIEW,
+          },
+          {
+            label: 'Requisitions',
+            path: '/purchase/requisitions',
+            icon: FileText,
+            permission: PERMISSIONS.REQUISITION_VIEW,
+          },
+          {
+            label: 'RFQs',
+            path: '/purchase/rfqs',
+            icon: Send,
+            permission: PERMISSIONS.RFQ_VIEW,
+          },
+          {
             label: 'Purchase Orders',
             path: '/purchase/orders',
             icon: ClipboardList,
@@ -292,6 +428,12 @@ export const NAV_GROUPS: NavGroup[] = [
             path: '/purchase/returns',
             icon: RotateCcw,
             permission: PERMISSIONS.PURCHASE_RETURN_VIEW,
+          },
+          {
+            label: 'Purchase Invoices',
+            path: '/purchase/invoices',
+            icon: FileCheck2,
+            permission: PERMISSIONS.PURCHASE_INVOICE_VIEW,
           },
           {
             label: 'Expenses',
@@ -542,6 +684,12 @@ export const NAV_GROUPS: NavGroup[] = [
             permission: PERMISSIONS.ATTENDANCE_VIEW,
           },
           {
+            label: 'Shifts',
+            path: '/hr/shifts',
+            icon: Clock,
+            permission: PERMISSIONS.ATTENDANCE_VIEW,
+          },
+          {
             label: 'Leave',
             path: '/hr/leaves',
             icon: CalendarDays,
@@ -551,6 +699,12 @@ export const NAV_GROUPS: NavGroup[] = [
             label: 'Payroll',
             path: '/hr/payroll',
             icon: Wallet2,
+            permission: PERMISSIONS.PAYROLL_VIEW,
+          },
+          {
+            label: 'Salary Structures',
+            path: '/hr/salary-structures',
+            icon: Layers,
             permission: PERMISSIONS.PAYROLL_VIEW,
           },
           {
@@ -566,6 +720,12 @@ export const NAV_GROUPS: NavGroup[] = [
             permission: PERMISSIONS.HR_STATUTORY,
           },
           {
+            label: 'PT Report',
+            path: '/hr/pt-report',
+            icon: Landmark,
+            permission: PERMISSIONS.HR_STATUTORY,
+          },
+          {
             label: 'Form 16',
             path: '/hr/form16',
             icon: FileSpreadsheet,
@@ -574,6 +734,12 @@ export const NAV_GROUPS: NavGroup[] = [
           {
             label: 'Alterations',
             path: '/hr/alterations',
+            icon: Scissors,
+            permission: PERMISSIONS.ALTERATION_VIEW,
+          },
+          {
+            label: 'Tailor Work Log',
+            path: '/hr/tailor-work-log',
             icon: Scissors,
             permission: PERMISSIONS.ALTERATION_VIEW,
           },
@@ -639,7 +805,14 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: HelpCircle,
         permission: PERMISSIONS.PLATFORM_CONTENT_MANAGE,
       },
+      {
+        label: 'Notification Templates',
+        path: '/settings/notification-templates',
+        icon: Bell,
+        permission: PERMISSIONS.NOTIFICATION_CONFIG,
+      },
       { label: 'Security Settings', path: '/security', icon: KeyRound },
+      { label: 'Notification Preferences', path: '/notification-preferences', icon: Bell },
     ],
   },
   {
@@ -699,6 +872,12 @@ export const NAV_GROUPS: NavGroup[] = [
         permission: PERMISSIONS.PERFORMANCE_VIEW,
       },
       {
+        label: 'Scheduler Jobs',
+        path: '/admin/distributed/scheduler',
+        icon: Clock,
+        permission: PERMISSIONS.JOB_VIEW,
+      },
+      {
         label: 'Search Analytics',
         path: '/admin/search-analytics',
         icon: Search,
@@ -713,6 +892,12 @@ export const NAV_GROUPS: NavGroup[] = [
         label: 'Tenants',
         path: '/admin/tenants',
         icon: Globe,
+        permission: PERMISSIONS.PLATFORM_TENANT_MANAGE,
+      },
+      {
+        label: 'Demo Requests',
+        path: '/admin/demo-requests',
+        icon: Inbox,
         permission: PERMISSIONS.PLATFORM_TENANT_MANAGE,
       },
     ],

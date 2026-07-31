@@ -115,6 +115,7 @@ export function GSTR9Page() {
         </div>
         {canFileGstr9 && (
           <Button
+            data-tour-id="gst-gstr9-export-button"
             variant="primary"
             onClick={() => exportMutation.mutate()}
             disabled={exportMutation.isPending || !result}

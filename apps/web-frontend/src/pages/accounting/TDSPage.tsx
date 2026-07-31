@@ -132,6 +132,23 @@ export default function TDSPage() {
           </select>
         </div>
 
+        {q26 && q26.entries.length > 0 && (
+          <div className="flex flex-wrap items-center gap-4 px-4 py-2 rounded-lg bg-surface-subtle text-sm text-secondary">
+            <span>
+              Total Gross:{' '}
+              <span className="font-mono text-primary font-medium">
+                {formatCurrency(q26.entries.reduce((s, r) => s + r.grossAmount, 0))}
+              </span>
+            </span>
+            <span>
+              Total TDS:{' '}
+              <span className="font-mono text-danger font-medium">
+                {formatCurrency(q26.entries.reduce((s, r) => s + r.tdsAmount, 0))}
+              </span>
+            </span>
+          </div>
+        )}
+
         <ERPDataGrid
           columns={q26Columns}
           data={q26?.entries ?? []}
@@ -144,23 +161,12 @@ export default function TDSPage() {
               description="Try selecting a different year or quarter."
             />
           }
-          footer={
-            q26 &&
-            q26.entries.length > 0 && (
-              <>
-                <td colSpan={3} className="px-4 py-3 text-primary">
-                  Total
-                </td>
-                <td className="px-4 py-3 text-right font-mono text-primary">
-                  {formatCurrency(q26.entries.reduce((s, r) => s + r.grossAmount, 0))}
-                </td>
-                <td className="px-4 py-3 text-right font-mono text-danger">
-                  {formatCurrency(q26.entries.reduce((s, r) => s + r.tdsAmount, 0))}
-                </td>
-                <td />
-              </>
-            )
-          }
+          // This report has no server-side pagination — a large tenant's full quarterly 26Q
+          // return renders in one response, so the grid virtualizes rows instead of mounting
+          // all of them at once (see WEB-FRONTEND-AUDIT-2026-07-24.md, High #4). Virtualized
+          // mode doesn't support a table `footer`; totals now show in the strip above instead.
+          virtualized
+          virtualizedHeight={480}
         />
       </div>
     </div>

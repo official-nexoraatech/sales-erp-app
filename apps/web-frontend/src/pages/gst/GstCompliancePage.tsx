@@ -275,7 +275,11 @@ export function GstCompliancePage() {
                           </td>
                           <td className="px-4 py-3">
                             {canFileGst && (e.status === 'PENDING' || e.status === 'OVERDUE') && (
-                              <Button variant="link" onClick={() => setMarkingEntry(e)}>
+                              <Button
+                                data-tour-id="gst-compliance-mark-filed-button"
+                                variant="link"
+                                onClick={() => setMarkingEntry(e)}
+                              >
                                 Mark Filed
                               </Button>
                             )}

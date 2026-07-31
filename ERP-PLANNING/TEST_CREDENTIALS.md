@@ -62,9 +62,29 @@ historical record of what was originally seeded; do not attempt to log in with t
 
 #### Users in Tenant 2
 
-| Role      | Email                | Password          | Notes                         |
-| --------- | -------------------- | ----------------- | ----------------------------- |
-| **OWNER** | `owner@qa-e2e.local` | `QaE2eOwner@2026` | Full permissions, all modules |
+Verified live against auth-service on 2026-07-25 (all returned 200 with a correctly role-scoped JWT).
+
+| Role                      | Email                                | Password          | Notes                         |
+| ------------------------- | ------------------------------------ | ----------------- | ----------------------------- |
+| **OWNER**                 | `owner@qa-e2e.local`                 | `QaE2eOwner@2026` | Full permissions, all modules |
+| **ADMIN**                 | `admin@qa-e2e.local`                 | `QaE2eRole@2026`  |                               |
+| **SUPER_ADMIN**           | `super.admin@qa-e2e.local`           | `QaE2eRole@2026`  |                               |
+| **SALES_MANAGER**         | `sales.manager@qa-e2e.local`         | `QaE2eRole@2026`  |                               |
+| **CASHIER**               | `cashier@qa-e2e.local`               | `QaE2eRole@2026`  |                               |
+| **PURCHASE_MANAGER**      | `purchase.manager@qa-e2e.local`      | `QaE2eRole@2026`  |                               |
+| **INVENTORY_MANAGER**     | `inventory.manager@qa-e2e.local`     | `QaE2eRole@2026`  |                               |
+| **ACCOUNTANT**            | `accountant@qa-e2e.local`            | `QaE2eRole@2026`  |                               |
+| **ACCOUNTANT_SUPERVISOR** | `accountant.supervisor@qa-e2e.local` | `QaE2eRole@2026`  |                               |
+| **AUDITOR**               | `auditor@qa-e2e.local`               | `QaE2eRole@2026`  |                               |
+| **HR_MANAGER**            | `hr.manager@qa-e2e.local`            | `QaE2eRole@2026`  |                               |
+| **STAFF**                 | `staff@qa-e2e.local`                 | `QaE2eRole@2026`  |                               |
+| **DATA_OFFICER**          | `data.officer@qa-e2e.local`          | `QaE2eRole@2026`  |                               |
+
+#### Cross-tenant Platform Operator (Tenant ID 1)
+
+| Role                  | Email                     | Password               | Notes                                      |
+| --------------------- | ------------------------- | ---------------------- | ------------------------------------------ |
+| **PLATFORM_OPERATOR** | `operator@platform.local` | `QaE2ePlatformOp@2026` | Cross-tenant admin; log in with tenantId 1 |
 
 **Login payload (API, via gateway)**
 

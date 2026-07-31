@@ -21,6 +21,14 @@ interface USBDeviceRequestOptions {
   filters: { vendorId?: number; productId?: number; classCode?: number }[];
 }
 
+interface USBConnectionEvent extends Event {
+  readonly device: USBDevice;
+}
+
+interface SerialConnectionEvent extends Event {
+  readonly port: SerialPort;
+}
+
 interface USB extends EventTarget {
   requestDevice(options: USBDeviceRequestOptions): Promise<USBDevice>;
   getDevices(): Promise<USBDevice[]>;

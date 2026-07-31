@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { PlatformContextFactory } from '@erp/sdk';
-import { deliveryChallans } from '@erp/db';
-import { and, desc, eq, sql } from 'drizzle-orm';
+import { deliveryChallans, customers } from '@erp/db';
+import { and, desc, eq, sql, getTableColumns } from 'drizzle-orm';
 import { z } from 'zod';
 import { PERMISSIONS } from '@erp/types';
 import { authenticate } from '../middleware/authenticate.js';
@@ -17,6 +17,10 @@ const ChallanLineSchema = z.object({
   unitId: z.number().int().positive().optional(),
   unitPrice: z.number().nonnegative().optional(),
   hsnCode: z.string().max(20).optional(),
+});
+
+const CancelChallanSchema = z.object({
+  reason: z.string().min(1).max(500),
 });
 
 const CreateChallanSchema = z.object({
@@ -59,8 +63,9 @@ export async function deliveryChallanRoutes(
         conditions.push(eq(deliveryChallans.customerId, parseInt(q.customerId, 10)));
 
       const rows = await ctx.db.raw
-        .select()
+        .select({ ...getTableColumns(deliveryChallans), customerName: customers.displayName })
         .from(deliveryChallans)
+        .leftJoin(customers, eq(deliveryChallans.customerId, customers.id))
         .where(and(...conditions))
         .orderBy(desc(deliveryChallans.challanDate), desc(deliveryChallans.id))
         .limit(pageSize)
@@ -103,6 +108,16 @@ export async function deliveryChallanRoutes(
         createdBy: req.auth.userId,
       } as Parameters<typeof svc.create>[0]);
 
+      // M-16 fix: no route in this file wrote to the audit log at all.
+      await ctx.audit.log({
+        action: 'CREATE',
+        entityType: 'delivery_challan',
+        entityId: id,
+        after: { challanNumber, customerId: body.customerId, status: 'DRAFT' },
+        actorEmail: req.auth.email,
+        ipAddress: req.ip,
+      });
+
       return reply.code(201).send({ data: { id, challanNumber } });
     },
   });
@@ -135,6 +150,40 @@ export async function deliveryChallanRoutes(
       });
       const svc = new DeliveryChallanService(ctx.db.raw);
       await svc.dispatch(parseInt(id, 10), req.auth.tenantId, req.auth.userId);
+      await ctx.audit.log({
+        action: 'STATUS_CHANGE',
+        entityType: 'delivery_challan',
+        entityId: parseInt(id, 10),
+        after: { status: 'DISPATCHED' },
+        actorEmail: req.auth.email,
+        ipAddress: req.ip,
+      });
+      return reply.send({ success: true });
+    },
+  });
+
+  // M-6 fix: no cancel route existed at all despite CANCELLED being a valid status.
+  fastify.post('/delivery-challans/:id/cancel', {
+    preHandler: requirePermission(PERMISSIONS.INVOICE_CANCEL),
+    handler: async (req, reply) => {
+      const { id } = req.params as { id: string };
+      const body = CancelChallanSchema.parse(req.body);
+      const ctx = ctxFactory.create({
+        tenantId: req.auth.tenantId,
+        userId: req.auth.userId,
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+      });
+      const svc = new DeliveryChallanService(ctx.db.raw);
+      await svc.cancel(parseInt(id, 10), req.auth.tenantId, req.auth.userId, body.reason);
+      await ctx.audit.log({
+        action: 'STATUS_CHANGE',
+        entityType: 'delivery_challan',
+        entityId: parseInt(id, 10),
+        after: { status: 'CANCELLED', reason: body.reason },
+        actorEmail: req.auth.email,
+        ipAddress: req.ip,
+      });
       return reply.send({ success: true });
     },
   });

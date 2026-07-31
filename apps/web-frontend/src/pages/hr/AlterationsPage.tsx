@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { alterationApi } from '../../api/endpoints.js';
 import { useAuthStore } from '../../store/auth.store.js';
+import { useConfirm } from '../../context/ConfirmContext.js';
 import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
 import { ERPTableSkeleton } from '../../components/erp/ERPSkeleton.js';
@@ -47,6 +48,7 @@ const STATUSES = [
 export default function AlterationsPage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const confirm = useConfirm();
   const hasPermission = useAuthStore((s) => s.hasPermission);
   const [statusFilter, setStatusFilter] = useState('');
 
@@ -85,7 +87,12 @@ export default function AlterationsPage() {
         }
         actions={
           hasPermission(PERMISSIONS.ALTERATION_CREATE) ? (
-            <Button onClick={() => navigate('/hr/alterations/new')}>+ Receive Order</Button>
+            <Button
+              data-tour-id="hr-alterations-create-button"
+              onClick={() => navigate('/hr/alterations/new')}
+            >
+              + Receive Order
+            </Button>
           ) : undefined
         }
       />
@@ -166,7 +173,15 @@ export default function AlterationsPage() {
                         <Button
                           size="sm"
                           variant="danger-outline"
-                          onClick={() => cancelMutation.mutate(o.id)}
+                          onClick={async () => {
+                            const ok = await confirm({
+                              title: 'Cancel alteration order?',
+                              message: `Cancel order ${o.orderNumber} for ${o.customerName}? This can't be undone.`,
+                              confirmLabel: 'Cancel Order',
+                              variant: 'danger',
+                            });
+                            if (ok) cancelMutation.mutate(o.id);
+                          }}
                         >
                           Cancel
                         </Button>

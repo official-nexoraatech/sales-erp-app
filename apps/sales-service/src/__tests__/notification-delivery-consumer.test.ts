@@ -123,6 +123,73 @@ describe.skipIf(!DB_URL)('handleNotificationDeliveryUpdated — integration', ()
     expect(reloadedCampaign?.deliveredCount).toBe(1);
   });
 
+  // Notification-service audit 2026-07-23 (architectural tier): delivery-status events now
+  // arrive twice per notification — 'SENT' first from the async DeliveryQueue worker (once it
+  // actually attempts the channel provider call), then later 'DELIVERED'/'FAILED' from the
+  // provider's own webhook if that channel supports one.
+  it("moves a PENDING recipient to SENT on the worker's initial delivery outcome, without touching deliveredCount", async () => {
+    const [recipient] = await db
+      .insert(campaignRecipients)
+      .values({
+        tenantId: TEST_TENANT,
+        campaignId,
+        customerId,
+        status: 'PENDING',
+        notificationLogId: 5010,
+      })
+      .returning();
+    const [before] = await db.select().from(campaigns).where(eq(campaigns.id, campaignId));
+
+    const tsDb = new TenantScopedDatabase(TEST_TENANT, db);
+    await handleNotificationDeliveryUpdated(
+      makeEvent({ notificationLogId: 5010, status: 'SENT', errorMessage: null }),
+      tsDb
+    );
+
+    const [reloadedRecipient] = await db
+      .select()
+      .from(campaignRecipients)
+      .where(eq(campaignRecipients.id, recipient!.id));
+    expect(reloadedRecipient?.status).toBe('SENT');
+
+    const [after] = await db.select().from(campaigns).where(eq(campaigns.id, campaignId));
+    expect(after?.deliveredCount).toBe(before?.deliveredCount);
+  });
+
+  it('progresses SENT -> DELIVERED as two distinct events, incrementing deliveredCount only on the second', async () => {
+    const [recipient] = await db
+      .insert(campaignRecipients)
+      .values({
+        tenantId: TEST_TENANT,
+        campaignId,
+        customerId,
+        status: 'PENDING',
+        notificationLogId: 5011,
+      })
+      .returning();
+
+    const tsDb = new TenantScopedDatabase(TEST_TENANT, db);
+    await handleNotificationDeliveryUpdated(
+      makeEvent({ notificationLogId: 5011, status: 'SENT', errorMessage: null }),
+      tsDb
+    );
+    const [afterSent] = await db.select().from(campaigns).where(eq(campaigns.id, campaignId));
+
+    await handleNotificationDeliveryUpdated(
+      makeEvent({ notificationLogId: 5011, status: 'DELIVERED', errorMessage: null }),
+      tsDb
+    );
+    const [afterDelivered] = await db.select().from(campaigns).where(eq(campaigns.id, campaignId));
+
+    expect(afterDelivered?.deliveredCount).toBe((afterSent?.deliveredCount ?? 0) + 1);
+
+    const [reloadedRecipient] = await db
+      .select()
+      .from(campaignRecipients)
+      .where(eq(campaignRecipients.id, recipient!.id));
+    expect(reloadedRecipient?.status).toBe('DELIVERED');
+  });
+
   it('is idempotent — applying the same status twice only increments deliveredCount once', async () => {
     const [recipient] = await db
       .insert(campaignRecipients)
@@ -153,15 +220,13 @@ describe.skipIf(!DB_URL)('handleNotificationDeliveryUpdated — integration', ()
   });
 
   it('sets errorMessage on FAILED without touching deliveredCount', async () => {
-    await db
-      .insert(campaignRecipients)
-      .values({
-        tenantId: TEST_TENANT,
-        campaignId,
-        customerId,
-        status: 'SENT',
-        notificationLogId: 5003,
-      });
+    await db.insert(campaignRecipients).values({
+      tenantId: TEST_TENANT,
+      campaignId,
+      customerId,
+      status: 'SENT',
+      notificationLogId: 5003,
+    });
     const [before] = await db.select().from(campaigns).where(eq(campaigns.id, campaignId));
 
     const tsDb = new TenantScopedDatabase(TEST_TENANT, db);

@@ -83,7 +83,10 @@ export default function JobWorkOrdersPage() {
         subtitle="Manage outsourced stitching and processing orders."
         actions={
           hasPermission(PERMISSIONS.JOB_WORK_CREATE) ? (
-            <Button onClick={() => navigate('/production/job-work/new')}>
+            <Button
+              data-tour-id="production-job-work-create-button"
+              onClick={() => navigate('/production/job-work/new')}
+            >
               + New Job Work Order
             </Button>
           ) : undefined

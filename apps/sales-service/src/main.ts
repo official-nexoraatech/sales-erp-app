@@ -43,11 +43,31 @@ import { loyaltyRoutes } from './api/loyalty.routes.js';
 import { deliveryChallanRoutes } from './api/delivery-challan.routes.js';
 import { internalRoutes } from './api/internal.routes.js';
 import { crmRoutes } from './api/crm.routes.js';
+import { journeyRoutes } from './api/journey.routes.js';
+import { referralRoutes } from './api/referral.routes.js';
+import { referralPublicRoutes } from './api/referral-public.routes.js';
+import { conversationRoutes } from './api/conversation.routes.js';
+import { inboundWebhookRoutes } from './api/inbound-webhooks.routes.js';
+import { accountRoutes } from './api/account.routes.js';
+import { leadRoutes } from './api/lead.routes.js';
+import { customer360Routes } from './api/customer-360.routes.js';
+import { ticketRoutes } from './api/ticket.routes.js';
+import { dltTemplateRoutes } from './api/dlt-template.routes.js';
+import { crmDashboardRoutes } from './api/crm-dashboard.routes.js';
+import { opportunityRoutes } from './api/opportunity.routes.js';
+import { linkTrackingRoutes } from './api/link-tracking.routes.js';
 import { integrationsRoutes } from './api/integrations.routes.js';
 import { dashboardRoutes } from './api/dashboard.routes.js';
 import { attachmentRoutes } from './api/attachment.routes.js';
 import { searchSyncInternalRoutes } from './api/search-sync.internal.routes.js';
 import { syncRoutes } from './api/sync.routes.js';
+import { portalRoutes } from './api/portal.routes.js';
+import { territoryRoutes } from './api/territory.routes.js';
+import { quotaRoutes } from './api/quota.routes.js';
+import { apiKeyRoutes } from './api/api-key.routes.js';
+import { publicApiRoutes } from './api/public-api.routes.js';
+import { fieldVisitRoutes } from './api/field-visit.routes.js';
+import { callRoutes } from './api/call.routes.js';
 
 initializeTelemetry({ serviceName: 'sales-service' });
 
@@ -235,6 +255,72 @@ async function bootstrap(): Promise<void> {
     { prefix: '/api/v2' }
   );
 
+  // CRM-ROADMAP Phase 1, Feature 2: POST /leads/capture is public/unauthenticated — it must
+  // be a true sibling of the `sub` block below, not nested inside it, for the exact reason
+  // documented on the internalSub block above (quotationRoutes/invoiceRoutes/etc. call
+  // fastify.addHook('preHandler', authenticate) directly on that shared `sub` instance;
+  // nesting leadRoutes inside it would silently 401 the one route in this file that must
+  // never require a JWT). Its own per-route preHandler array still gates every other /leads
+  // route with authenticate + requirePermission as normal.
+  await fastify.register(
+    async (leadSub) => {
+      await leadRoutes(leadSub, ctxFactory);
+    },
+    { prefix: '/api/v2' }
+  );
+
+  // CRM-ROADMAP Phase 2, Feature 6: GET /c/:trackingToken and /o/:trackingToken are also
+  // public/unauthenticated (a campaign recipient clicking a link or loading an email image
+  // isn't logged in) — same sibling-registration requirement as leadRoutes above.
+  await fastify.register(
+    async (trackingSub) => {
+      await linkTrackingRoutes(trackingSub, ctxFactory);
+    },
+    { prefix: '/api/v2' }
+  );
+
+  // CRM-ROADMAP Phase 2, Feature 4: GET /r/:code and POST /referral/redeem are also
+  // public/unauthenticated (a referee clicking a shared link or redeeming a code isn't logged
+  // in) — same sibling-registration requirement as leadRoutes/linkTrackingRoutes above.
+  await fastify.register(
+    async (referralPublicSub) => {
+      await referralPublicRoutes(referralPublicSub, ctxFactory);
+    },
+    { prefix: '/api/v2' }
+  );
+
+  // CRM-ROADMAP Phase 2, Feature 5: the inbound WhatsApp/email/SMS webhooks are also
+  // public/unauthenticated (a provider posting a reply isn't a logged-in ERP user) — same
+  // sibling-registration requirement as every public route file above.
+  await fastify.register(
+    async (inboundWebhookSub) => {
+      await inboundWebhookRoutes(inboundWebhookSub, ctxFactory);
+    },
+    { prefix: '/api/v2' }
+  );
+
+  // CRM-ROADMAP Phase 3, Feature 2 (Self-Service Customer Portal): a CUSTOMER-role JWT, never
+  // a staff one — every /portal/* route gates itself with its own requirePortalAuth preHandler,
+  // never the staff `authenticate` hook. Same true-sibling-registration requirement as every
+  // other public/differently-authed route block above (see internalSub's own comment for why).
+  await fastify.register(
+    async (portalSub) => {
+      await portalRoutes(portalSub, ctxFactory.rawDb);
+    },
+    { prefix: '/api/v2' }
+  );
+
+  // CRM-ROADMAP Phase 4, Feature 8 (Public CRM API & BI Export): authenticated by a per-tenant
+  // API key via its own requirePublicApiScope preHandler, never the staff `authenticate` hook —
+  // same true-sibling-registration requirement as portalSub above (see internalSub's own
+  // comment for why nesting would silently break this).
+  await fastify.register(
+    async (publicApiSub) => {
+      await publicApiRoutes(publicApiSub, ctxFactory.rawDb);
+    },
+    { prefix: '/api/v2' }
+  );
+
   await fastify.register(
     async (sub) => {
       await customerRoutes(sub, ctxFactory);
@@ -247,10 +333,24 @@ async function bootstrap(): Promise<void> {
       await loyaltyRoutes(sub, ctxFactory);
       await deliveryChallanRoutes(sub, ctxFactory);
       await crmRoutes(sub, ctxFactory);
+      await journeyRoutes(sub, ctxFactory);
+      await referralRoutes(sub, ctxFactory);
+      await conversationRoutes(sub, ctxFactory);
+      await accountRoutes(sub, ctxFactory);
+      await customer360Routes(sub, ctxFactory);
+      await ticketRoutes(sub, ctxFactory);
+      await dltTemplateRoutes(sub, ctxFactory);
+      await crmDashboardRoutes(sub, ctxFactory);
+      await opportunityRoutes(sub, ctxFactory);
       await integrationsRoutes(sub, ctxFactory);
       await dashboardRoutes(sub, ctxFactory);
       await attachmentRoutes(sub, ctxFactory);
       await syncRoutes(sub, ctxFactory);
+      await territoryRoutes(sub, ctxFactory);
+      await quotaRoutes(sub, ctxFactory);
+      await apiKeyRoutes(sub, ctxFactory);
+      await fieldVisitRoutes(sub, ctxFactory);
+      await callRoutes(sub, ctxFactory);
     },
     { prefix: '/api/v2' }
   );

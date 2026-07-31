@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import toast from 'react-hot-toast';
+import { GSTIN_REGEX } from '@erp/types';
 import { branchApi } from '../../api/endpoints.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
 import ERPFormSection from '../../components/erp/ERPFormSection.js';
@@ -146,7 +147,14 @@ export default function BranchFormPage() {
             {...register('code', { required: 'Required' })}
             error={errors.code?.message}
           />
-          <Input label="GSTIN" placeholder="27AAPFU0939F1ZV" {...register('gstin')} />
+          <Input
+            label="GSTIN"
+            placeholder="27AAPFU0939F1ZV"
+            {...register('gstin', {
+              pattern: { value: GSTIN_REGEX, message: 'Invalid GSTIN format' },
+            })}
+            error={errors.gstin?.message}
+          />
           <div className="flex items-end">
             <Checkbox label="Head Office" {...register('isHeadOffice')} />
           </div>

@@ -14,6 +14,10 @@ vi.mock('@erp/db', () => {
     warehouses: mockTable,
     departments: mockTable,
     designations: mockTable,
+    crmLeads: mockTable,
+    crmOpportunities: mockTable,
+    crmAccounts: mockTable,
+    crmAccountContacts: mockTable,
   };
 });
 
@@ -23,6 +27,7 @@ vi.mock('drizzle-orm', () => ({
   gte: vi.fn((a: unknown, b: unknown) => ({ type: 'gte', a, b })),
   lte: vi.fn((a: unknown, b: unknown) => ({ type: 'lte', a, b })),
   isNull: vi.fn((a: unknown) => ({ type: 'isNull', a })),
+  desc: vi.fn((a: unknown) => ({ type: 'desc', a })),
 }));
 
 import { gte, lte, eq } from 'drizzle-orm';
@@ -33,11 +38,13 @@ function makeChain(rows: unknown[]) {
     from: ReturnType<typeof vi.fn>;
     leftJoin: ReturnType<typeof vi.fn>;
     where: ReturnType<typeof vi.fn>;
+    orderBy: ReturnType<typeof vi.fn>;
     limit: ReturnType<typeof vi.fn>;
   } = {
     from: vi.fn(() => chain),
     leftJoin: vi.fn(() => chain),
     where: vi.fn(() => chain),
+    orderBy: vi.fn(() => chain),
     limit: vi.fn(() => Promise.resolve(rows)),
   };
   return chain;
@@ -53,9 +60,22 @@ afterEach(() => {
 });
 
 describe('ENTITY_COLUMNS', () => {
-  const entities: ExportEntity[] = ['customer', 'supplier', 'item', 'invoice', 'payment', 'ledger', 'stock', 'employee'];
+  const entities: ExportEntity[] = [
+    'customer',
+    'supplier',
+    'item',
+    'invoice',
+    'payment',
+    'ledger',
+    'stock',
+    'employee',
+    'lead',
+    'opportunity',
+    'account',
+    'contact',
+  ];
 
-  it('defines a non-empty column set for all 8 entity types', () => {
+  it('defines a non-empty column set for all 12 entity types', () => {
     for (const entity of entities) {
       expect(ENTITY_COLUMNS[entity].length).toBeGreaterThan(0);
     }
@@ -100,7 +120,11 @@ describe('ExportEngine.query', () => {
   it('applies dateFrom/dateTo/status filters to invoice queries', async () => {
     const db = makeDb([]);
     const engine = new ExportEngine(db as never);
-    await engine.query(1, 'invoice', { dateFrom: '2026-01-01', dateTo: '2026-01-31', status: 'PAID' });
+    await engine.query(1, 'invoice', {
+      dateFrom: '2026-01-01',
+      dateTo: '2026-01-31',
+      status: 'PAID',
+    });
 
     expect(gte).toHaveBeenCalledWith(expect.anything(), new Date('2026-01-01'));
     expect(lte).toHaveBeenCalledWith(expect.anything(), new Date('2026-01-31'));
@@ -137,7 +161,48 @@ describe('ExportEngine.query', () => {
     const db = makeDb([]);
     const engine = new ExportEngine(db as never);
     await expect(
-      engine.query(1, 'payment', { dateFrom: 123, status: { nested: true } } as unknown as Record<string, unknown>)
+      engine.query(1, 'payment', { dateFrom: 123, status: { nested: true } } as unknown as Record<
+        string,
+        unknown
+      >)
     ).resolves.toMatchObject({ totalRows: 0 });
+  });
+
+  // CRM-ROADMAP Phase 4, Feature 8 — Public CRM API & BI/Data-Warehouse Export.
+  it('returns tenant-scoped lead rows shaped by ENTITY_COLUMNS.lead', async () => {
+    const db = makeDb([{ displayName: 'Priya Sharma' }]);
+    const engine = new ExportEngine(db as never);
+    const result = await engine.query(1, 'lead');
+
+    expect(result.columns).toBe(ENTITY_COLUMNS.lead);
+    expect(result.rows).toEqual([{ displayName: 'Priya Sharma' }]);
+    expect(db.chain.leftJoin).not.toHaveBeenCalled();
+  });
+
+  it('returns tenant-scoped opportunity rows shaped by ENTITY_COLUMNS.opportunity', async () => {
+    const db = makeDb([{ name: 'Big Deal' }]);
+    const engine = new ExportEngine(db as never);
+    const result = await engine.query(1, 'opportunity');
+
+    expect(result.columns).toBe(ENTITY_COLUMNS.opportunity);
+    expect(result.totalRows).toBe(1);
+  });
+
+  it('returns tenant-scoped account rows shaped by ENTITY_COLUMNS.account', async () => {
+    const db = makeDb([{ name: 'Acme Corp' }]);
+    const engine = new ExportEngine(db as never);
+    const result = await engine.query(1, 'account');
+
+    expect(result.columns).toBe(ENTITY_COLUMNS.account);
+    expect(result.totalRows).toBe(1);
+  });
+
+  it('joins accounts for contact export to resolve accountName', async () => {
+    const db = makeDb([]);
+    const engine = new ExportEngine(db as never);
+    const result = await engine.query(1, 'contact');
+
+    expect(result.columns).toBe(ENTITY_COLUMNS.contact);
+    expect(db.chain.leftJoin).toHaveBeenCalledTimes(1);
   });
 });

@@ -10,8 +10,10 @@ import {
   departments,
   designations,
   attendance,
+  crmAccounts,
+  crmLeads,
 } from '@erp/db';
-import { eq, and, sql } from 'drizzle-orm';
+import { eq, and, or, inArray, isNull, sql } from 'drizzle-orm';
 import { createLogger } from '@erp/logger';
 import {
   BusinessError,
@@ -23,10 +25,24 @@ import {
 } from '@erp/types';
 import { requireEnv } from '@erp/config';
 import { encryptField } from '@erp/utils/server';
-import { createHmac } from 'node:crypto';
+import {
+  normalizePhone,
+  normalizeEmail,
+  scoreDuplicateMatch,
+  DUPLICATE_MATCH_SUGGESTION_THRESHOLD,
+} from '@erp/utils';
+import { createHash, createHmac } from 'node:crypto';
 import { z } from 'zod';
 
 const logger = createLogger({ serviceName: 'scheduler-service' });
+
+// Mirrors sales-service's account.routes.ts / customer.routes.ts simpleHash (same duplicated-
+// per-file convention already used for this exact function) — needed here so a CSV row's GSTIN
+// can be compared against crm_accounts.gstin_hash using the same hash the interactive
+// create-account flow computes.
+function simpleHash(value: string): string {
+  return createHash('sha256').update(value.toUpperCase()).digest('hex').substring(0, 64);
+}
 
 export interface ColumnMapping {
   sourceColumn: string;
@@ -39,10 +55,21 @@ export interface ValidationError {
   field: string;
   message: string;
   value: unknown;
+  // CRM-ROADMAP Phase 1, Feature 7 — absent or 'ERROR' blocks VALIDATED status (unchanged
+  // behavior for every pre-existing entity type); 'WARNING' is a non-blocking dedupe
+  // suggestion surfaced before commit, never one that prevents the job reaching VALIDATED.
+  severity?: 'ERROR' | 'WARNING';
 }
 
 export type ImportEntity =
-  'customer' | 'supplier' | 'item' | 'employee' | 'opening-stock' | 'attendance';
+  | 'customer'
+  | 'supplier'
+  | 'item'
+  | 'employee'
+  | 'opening-stock'
+  | 'attendance'
+  | 'account'
+  | 'lead';
 
 // ── Per-entity column definitions ─────────────────────────────────────────────
 const ENTITY_SCHEMAS: Record<ImportEntity, z.ZodObject<z.ZodRawShape>> = {
@@ -103,6 +130,38 @@ const ENTITY_SCHEMAS: Record<ImportEntity, z.ZodObject<z.ZodRawShape>> = {
     checkInTime: z.string().optional(),
     checkOutTime: z.string().optional(),
     source: z.enum(['MANUAL', 'BIOMETRIC']).default('MANUAL'),
+  }),
+  // CRM-ROADMAP Phase 1, Feature 7 (Data Import/Dedupe/Merge Tooling).
+  account: z.object({
+    name: z.string().min(2).max(300),
+    accountType: z.enum(['B2B', 'WHOLESALE', 'DISTRIBUTOR', 'CORPORATE', 'INDIVIDUAL']).optional(),
+    gstin: z
+      .string()
+      .regex(/^\d{2}[A-Z]{5}\d{4}[A-Z]{1}[A-Z\d]{1}[Z]{1}[A-Z\d]{1}$/)
+      .optional(),
+    primaryPhone: z
+      .string()
+      .regex(/^\d{10}$/)
+      .optional(),
+    primaryEmail: z.string().email().optional(),
+  }),
+  lead: z.object({
+    displayName: z.string().max(200).optional(),
+    companyName: z.string().max(300).optional(),
+    phone: z.string().regex(/^\d{10}$/),
+    email: z.string().email().optional(),
+    source: z
+      .enum([
+        'WEBSITE',
+        'REFERRAL',
+        'WALK_IN',
+        'SOCIAL_MEDIA',
+        'ADVERTISEMENT',
+        'PHONE_INQUIRY',
+        'OTHER',
+      ])
+      .optional(),
+    isB2b: z.coerce.boolean().optional(),
   }),
 };
 
@@ -216,10 +275,14 @@ export class ImportEngine {
 
     const rawRows = (job.rollbackData ?? []) as Array<Record<string, string>>;
     const mappings = job.columnMapping as unknown as ColumnMapping[];
-    const schema = ENTITY_SCHEMAS[job.entityType as ImportEntity];
+    const entityType = job.entityType as ImportEntity;
+    const schema = ENTITY_SCHEMAS[entityType];
 
     const errors: ValidationError[] = [];
     let validRows = 0;
+    // Kept only so the dedupe check below (account/lead) doesn't have to re-run applyTransform
+    // per row a second time.
+    const validMappedRows: Array<{ row: number; mapped: Record<string, unknown> }> = [];
 
     for (let i = 0; i < rawRows.length; i++) {
       const raw = rawRows[i]!;
@@ -232,6 +295,7 @@ export class ImportEngine {
       const result = schema.safeParse(mapped);
       if (result.success) {
         validRows++;
+        validMappedRows.push({ row: i + 2, mapped });
       } else {
         for (const issue of result.error.issues) {
           errors.push({
@@ -239,12 +303,24 @@ export class ImportEngine {
             field: issue.path.join('.'),
             message: issue.message,
             value: mapped[issue.path[0] as string],
+            severity: 'ERROR',
           });
         }
       }
     }
 
-    const newStatus = errors.length === 0 ? 'VALIDATED' : 'MAPPED';
+    // CRM-ROADMAP Phase 1, Feature 7 — dedupe suggestions are WARNING-severity, surfaced at
+    // this preview step ("shown before commit, not after") but never block VALIDATED status;
+    // per Feature 1's own "suggested, not auto-merged" requirement, the same principle applies
+    // to bulk import.
+    if (entityType === 'account') {
+      errors.push(...(await this.findAccountDuplicateWarnings(tenantId, validMappedRows)));
+    } else if (entityType === 'lead') {
+      errors.push(...(await this.findLeadDuplicateWarnings(tenantId, validMappedRows)));
+    }
+
+    const blockingErrors = errors.filter((e) => e.severity !== 'WARNING');
+    const newStatus = blockingErrors.length === 0 ? 'VALIDATED' : 'MAPPED';
     await this.db
       .update(importJobs)
       .set({
@@ -254,11 +330,139 @@ export class ImportEngine {
           column: e.field,
           value: e.value,
           message: e.message,
+          ...(e.severity ? { severity: e.severity } : {}),
         })),
       })
       .where(eq(importJobs.id, Number(jobId)));
 
     return { errors, validRows };
+  }
+
+  /**
+   * Batched (not per-row) duplicate-account check: fetches every existing crm_accounts row
+   * whose gstinHash/phone/email could match ANY row in this CSV in one query, then scores each
+   * CSV row against those candidates in memory with the same algorithm AccountService uses for
+   * interactive create/merge — one shared implementation, per this feature's DoD.
+   */
+  private async findAccountDuplicateWarnings(
+    tenantId: number,
+    validRows: Array<{ row: number; mapped: Record<string, unknown> }>
+  ): Promise<ValidationError[]> {
+    if (validRows.length === 0) return [];
+
+    const gstinHashes = new Set<string>();
+    const phones = new Set<string>();
+    const emails = new Set<string>();
+    for (const { mapped } of validRows) {
+      const gstin = mapped['gstin'] as string | undefined;
+      const phone = mapped['primaryPhone'] as string | undefined;
+      const email = mapped['primaryEmail'] as string | undefined;
+      if (gstin) gstinHashes.add(simpleHash(gstin));
+      if (phone) phones.add(normalizePhone(phone));
+      if (email) emails.add(normalizeEmail(email));
+    }
+
+    const lookupConditions = [];
+    if (gstinHashes.size > 0)
+      lookupConditions.push(inArray(crmAccounts.gstinHash, [...gstinHashes]));
+    if (phones.size > 0) lookupConditions.push(inArray(crmAccounts.primaryPhone, [...phones]));
+    if (emails.size > 0) lookupConditions.push(inArray(crmAccounts.primaryEmail, [...emails]));
+    if (lookupConditions.length === 0) return [];
+
+    const candidates = await this.db
+      .select()
+      .from(crmAccounts)
+      .where(
+        and(
+          eq(crmAccounts.tenantId, tenantId),
+          isNull(crmAccounts.mergedIntoAccountId),
+          or(...lookupConditions)
+        )
+      );
+    if (candidates.length === 0) return [];
+
+    const warnings: ValidationError[] = [];
+    for (const { row, mapped } of validRows) {
+      const name = mapped['name'] as string | undefined;
+      const gstin = mapped['gstin'] as string | undefined;
+      const phone = mapped['primaryPhone'] as string | undefined;
+      const email = mapped['primaryEmail'] as string | undefined;
+      const input = {
+        name,
+        gstinHash: gstin ? simpleHash(gstin) : undefined,
+        phone: phone ? normalizePhone(phone) : undefined,
+        email: email ? normalizeEmail(email) : undefined,
+      };
+      let best: { score: number; reasons: string[] } | undefined;
+      for (const candidate of candidates) {
+        const scored = scoreDuplicateMatch(input, candidate);
+        if (!best || scored.score > best.score) best = scored;
+      }
+      if (best && best.score >= DUPLICATE_MATCH_SUGGESTION_THRESHOLD) {
+        warnings.push({
+          row,
+          field: 'name',
+          message: `Possible duplicate of an existing account (${best.reasons.join(', ')})`,
+          value: name,
+          severity: 'WARNING',
+        });
+      }
+    }
+    return warnings;
+  }
+
+  /**
+   * Batched duplicate-lead check: flags a CSV row whose phone matches either an existing lead
+   * or an existing customer — the two "already have this person" cases this feature's own
+   * scenario calls out ("duplicate existing customers").
+   */
+  private async findLeadDuplicateWarnings(
+    tenantId: number,
+    validRows: Array<{ row: number; mapped: Record<string, unknown> }>
+  ): Promise<ValidationError[]> {
+    if (validRows.length === 0) return [];
+
+    const phones = [
+      ...new Set(validRows.map(({ mapped }) => normalizePhone(mapped['phone'] as string))),
+    ];
+    if (phones.length === 0) return [];
+
+    const [existingLeads, existingCustomers] = await Promise.all([
+      this.db
+        .select({ phone: crmLeads.phone })
+        .from(crmLeads)
+        .where(and(eq(crmLeads.tenantId, tenantId), inArray(crmLeads.phone, phones))),
+      this.db
+        .select({ phone: customers.phone })
+        .from(customers)
+        .where(and(eq(customers.tenantId, tenantId), inArray(customers.phone, phones))),
+    ]);
+    const leadPhones = new Set(existingLeads.map((l) => normalizePhone(l.phone)));
+    const customerPhones = new Set(existingCustomers.map((c) => normalizePhone(c.phone)));
+    if (leadPhones.size === 0 && customerPhones.size === 0) return [];
+
+    const warnings: ValidationError[] = [];
+    for (const { row, mapped } of validRows) {
+      const normalizedPhone = normalizePhone(mapped['phone'] as string);
+      if (customerPhones.has(normalizedPhone)) {
+        warnings.push({
+          row,
+          field: 'phone',
+          message: 'Phone matches an existing customer',
+          value: mapped['phone'],
+          severity: 'WARNING',
+        });
+      } else if (leadPhones.has(normalizedPhone)) {
+        warnings.push({
+          row,
+          field: 'phone',
+          message: 'Phone matches an existing lead',
+          value: mapped['phone'],
+          severity: 'WARNING',
+        });
+      }
+    }
+    return warnings;
   }
 
   async execute(
@@ -280,6 +484,14 @@ export class ImportEngine {
     // every entity type is already gated on at the route layer.
     if (job.entityType === 'employee' && !permissions.includes(PERMISSIONS.EMPLOYEE_IMPORT)) {
       throw new PermissionError(PERMISSIONS.EMPLOYEE_IMPORT);
+    }
+    // CRM-ROADMAP Phase 1, Feature 7 — same entity-specific-gate-on-top-of-generic-IMPORT_EXECUTE
+    // precedent as the employee check above.
+    if (job.entityType === 'account' && !permissions.includes(PERMISSIONS.CRM_ACCOUNT_IMPORT)) {
+      throw new PermissionError(PERMISSIONS.CRM_ACCOUNT_IMPORT);
+    }
+    if (job.entityType === 'lead' && !permissions.includes(PERMISSIONS.LEAD_IMPORT)) {
+      throw new PermissionError(PERMISSIONS.LEAD_IMPORT);
     }
 
     // ES-26 (M9): atomic conditional UPDATE — if another call already claimed this job (or it's
@@ -588,6 +800,61 @@ export class ImportEngine {
           }
           imported += resolvedRows.length;
           failed += unresolvedCount;
+        } else if (entityType === 'account') {
+          await this.db.insert(crmAccounts).values(
+            parsedBatch.map((row) => {
+              const r = row as {
+                name: string;
+                accountType?: 'B2B' | 'WHOLESALE' | 'DISTRIBUTOR' | 'CORPORATE' | 'INDIVIDUAL';
+                gstin?: string;
+                primaryPhone?: string;
+                primaryEmail?: string;
+              };
+              return {
+                tenantId,
+                name: r.name,
+                ...(r.accountType ? { accountType: r.accountType } : {}),
+                ...(r.gstin ? { gstin: r.gstin, gstinHash: simpleHash(r.gstin) } : {}),
+                ...(r.primaryPhone ? { primaryPhone: normalizePhone(r.primaryPhone) } : {}),
+                ...(r.primaryEmail ? { primaryEmail: normalizeEmail(r.primaryEmail) } : {}),
+                importBatchId: job.id,
+                createdBy: job.createdBy,
+              };
+            })
+          );
+          imported += parsedBatch.length;
+        } else if (entityType === 'lead') {
+          await this.db.insert(crmLeads).values(
+            parsedBatch.map((row) => {
+              const r = row as {
+                displayName?: string;
+                companyName?: string;
+                phone: string;
+                email?: string;
+                source?:
+                  | 'WEBSITE'
+                  | 'REFERRAL'
+                  | 'WALK_IN'
+                  | 'SOCIAL_MEDIA'
+                  | 'ADVERTISEMENT'
+                  | 'PHONE_INQUIRY'
+                  | 'OTHER';
+                isB2b?: boolean;
+              };
+              return {
+                tenantId,
+                ...(r.displayName ? { displayName: r.displayName } : {}),
+                ...(r.companyName ? { companyName: r.companyName } : {}),
+                phone: normalizePhone(r.phone),
+                ...(r.email ? { email: r.email } : {}),
+                ...(r.source ? { source: r.source } : {}),
+                ...(r.isB2b !== undefined ? { isB2b: r.isB2b } : {}),
+                importBatchId: job.id,
+                createdBy: job.createdBy,
+              };
+            })
+          );
+          imported += parsedBatch.length;
         } else {
           // opening-stock: no insert branch exists yet (separate inventory-module concern,
           // not fixed by this pass) — rows are counted as "imported" without ever being
@@ -632,6 +899,22 @@ export class ImportEngine {
       throw new BusinessError('IMPORT_INVALID_STATE', 'Can only rollback COMPLETED imports');
     }
 
+    // CRM-ROADMAP Phase 1, Feature 7's DoD requires rollback to actually delete the rows this
+    // job created (tagged via import_batch_id at execute() time), not just flip status — unlike
+    // every other pre-existing entity type here, whose rollback has never done this (a
+    // pre-existing gap, out of scope to fix for entities this feature didn't touch).
+    if (job.entityType === 'account') {
+      await this.db
+        .delete(crmAccounts)
+        .where(
+          and(eq(crmAccounts.tenantId, tenantId), eq(crmAccounts.importBatchId, Number(jobId)))
+        );
+    } else if (job.entityType === 'lead') {
+      await this.db
+        .delete(crmLeads)
+        .where(and(eq(crmLeads.tenantId, tenantId), eq(crmLeads.importBatchId, Number(jobId))));
+    }
+
     await this.db
       .update(importJobs)
       .set({ status: 'ROLLED_BACK' })
@@ -660,6 +943,8 @@ export class ImportEngine {
         'name,phone,designation,basicSalary,joiningDate,employeeCode,gender,department,pan,bankAccountNo',
       'opening-stock': 'sku,warehouseCode,quantity,costPrice',
       attendance: 'employeeCode,attendanceDate,status,checkInTime,checkOutTime,source',
+      account: 'name,accountType,gstin,primaryPhone,primaryEmail',
+      lead: 'displayName,companyName,phone,email,source,isB2b',
     };
     return templates[entityType];
   }

@@ -2,13 +2,15 @@ import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { Send, CheckCircle2 } from 'lucide-react';
+import { Send, CheckCircle2, Eye, XCircle } from 'lucide-react';
 import { stockAdjustmentApi } from '../../api/endpoints.js';
+import { useConfirm } from '../../context/ConfirmContext.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
 import ERPDataGrid, {
   type ERPColumnDef,
   type ERPRowAction,
 } from '../../components/erp/ERPDataGrid.js';
+import ERPEmptyState from '../../components/erp/ERPEmptyState.js';
 import Button from '../../components/ui/Button.js';
 import Badge from '../../components/ui/Badge.js';
 import Select from '../../components/ui/Select.js';
@@ -32,9 +34,19 @@ const STATUS_COLORS: Record<string, 'default' | 'success' | 'warning' | 'danger'
   CANCELLED: 'danger',
 };
 
+const STATUS_DESCRIPTIONS: Record<string, string> = {
+  DRAFT: 'Saved but not submitted — stock is unaffected.',
+  SUBMITTED: 'Awaiting approval — stock is still unaffected until approved.',
+  PENDING_APPROVAL:
+    'Over ₹50,000 in value, so it needs approval before it applies (same as SUBMITTED otherwise).',
+  APPROVED: 'Applied — stock quantity has been updated. This does not recompute your average cost.',
+  CANCELLED: 'Cancelled before approval — never applied to stock.',
+};
+
 export default function StockAdjustmentsPage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const confirm = useConfirm();
   const [status, setStatus] = useState('');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
@@ -70,6 +82,16 @@ export default function StockAdjustmentsPage() {
     onError: (e: Error) => toast.error(e.message),
   });
 
+  const cancelMutation = useMutation({
+    mutationFn: ({ id, reason }: { id: number; reason: string }) =>
+      stockAdjustmentApi.cancel(id, reason),
+    onSuccess: () => {
+      toast.success('Adjustment cancelled');
+      qc.invalidateQueries({ queryKey: ['stock-adjustments'] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
   const columns: ERPColumnDef<Adjustment>[] = [
     { key: 'adjustmentNumber', header: 'Number', mono: true, sortable: true },
     {
@@ -81,7 +103,11 @@ export default function StockAdjustmentsPage() {
       key: 'status',
       header: 'Status',
       sortable: true,
-      render: (r) => <Badge variant={STATUS_COLORS[r.status] ?? 'default'}>{r.status}</Badge>,
+      render: (r) => (
+        <Badge variant={STATUS_COLORS[r.status] ?? 'default'} title={STATUS_DESCRIPTIONS[r.status]}>
+          {r.status}
+        </Badge>
+      ),
     },
     {
       key: 'totalValue',
@@ -95,16 +121,42 @@ export default function StockAdjustmentsPage() {
 
   const rowActions: ERPRowAction<Adjustment>[] = [
     {
+      label: 'View',
+      icon: Eye,
+      tourId: 'inventory-adjustments-view-button',
+      onClick: (r: Adjustment) => navigate(`/inventory/adjustments/${r.id}`),
+    },
+    {
       label: 'Submit',
       icon: Send,
+      tourId: 'inventory-adjustments-submit-button',
       onClick: (r: Adjustment) => submitMutation.mutate(r.id),
       hidden: (r: Adjustment) => r.status !== 'DRAFT',
     },
     {
       label: 'Approve',
       icon: CheckCircle2,
-      onClick: (r: Adjustment) => approveMutation.mutate(r.id),
+      tourId: 'inventory-adjustments-approve-button',
+      onClick: async (r: Adjustment) => {
+        const ok = await confirm({
+          title: 'Approve this adjustment?',
+          message: `This immediately updates stock quantity for every line on ${r.adjustmentNumber}. It does not recompute average cost, and there's no undo — cannot be cancelled once approved.`,
+          confirmLabel: 'Approve',
+          variant: 'primary',
+        });
+        if (ok) approveMutation.mutate(r.id);
+      },
       hidden: (r: Adjustment) => !(r.status === 'SUBMITTED' || r.status === 'PENDING_APPROVAL'),
+    },
+    {
+      label: 'Cancel',
+      icon: XCircle,
+      tourId: 'inventory-adjustments-cancel-button',
+      onClick: (r: Adjustment) => {
+        const reason = window.prompt('Reason for cancelling this adjustment:');
+        if (reason && reason.trim()) cancelMutation.mutate({ id: r.id, reason: reason.trim() });
+      },
+      hidden: (r: Adjustment) => ['APPROVED', 'CANCELLED'].includes(r.status),
     },
   ];
 
@@ -115,7 +167,12 @@ export default function StockAdjustmentsPage() {
         title="Stock Adjustments"
         subtitle="Record inventory discrepancies and corrections"
       >
-        <Button onClick={() => navigate('/inventory/adjustments/new')}>+ New Adjustment</Button>
+        <Button
+          data-tour-id="inventory-adjustments-create-button"
+          onClick={() => navigate('/inventory/adjustments/new')}
+        >
+          + New Adjustment
+        </Button>
       </ERPPageHeader>
 
       <div className="mb-4 w-48">
@@ -139,6 +196,21 @@ export default function StockAdjustmentsPage() {
         data={adjustments}
         isLoading={isLoading}
         rowKey="id"
+        emptyState={
+          status ? (
+            <ERPEmptyState type="no-results" />
+          ) : (
+            <ERPEmptyState
+              type="no-data"
+              title="No adjustments yet"
+              description="Record a stock adjustment to correct damage, wastage, theft, or a count discrepancy."
+              action={{
+                label: '+ New Adjustment',
+                onClick: () => navigate('/inventory/adjustments/new'),
+              }}
+            />
+          )
+        }
         pagination={{ page, pageSize, total: totalElements }}
         onPageChange={setPage}
         onPageSizeChange={(size) => {

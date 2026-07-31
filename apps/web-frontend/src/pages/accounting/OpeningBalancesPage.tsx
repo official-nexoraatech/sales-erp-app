@@ -12,6 +12,7 @@ import {
 } from '../../api/endpoints.js';
 import { ApiError } from '../../api/client.js';
 import { useAuthStore } from '../../store/auth.store.js';
+import { useConfirm } from '../../context/ConfirmContext.js';
 import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
 import { ERPFormSkeleton } from '../../components/erp/ERPSkeleton.js';
@@ -388,6 +389,7 @@ const CATEGORY_LABELS: Record<string, string> = {
 
 export default function OpeningBalancesPage() {
   const qc = useQueryClient();
+  const confirm = useConfirm();
   const [step, setStep] = useState(0);
   const [lockError, setLockError] = useState<ApiError | null>(null);
   const { data: statusData, isLoading } = useQuery({
@@ -532,8 +534,18 @@ export default function OpeningBalancesPage() {
             before locking.
           </p>
           <Button
+            data-tour-id="accounting-opening-balances-lock-button"
             variant="danger"
-            onClick={() => lockMutation.mutate()}
+            onClick={async () => {
+              const ok = await confirm({
+                title: 'Lock opening balances?',
+                message:
+                  'This locks the wizard permanently — none of its steps can be edited again afterward.',
+                confirmLabel: 'Lock Opening Balances',
+                variant: 'danger',
+              });
+              if (ok) lockMutation.mutate();
+            }}
             loading={lockMutation.isPending}
             disabled={!completionFlags.some(Boolean)}
           >

@@ -106,6 +106,11 @@ export default function InventoryAnalyticsPage() {
           isLoading={isLoading}
           rowKey={(r) => `${r.itemCode ?? ''}-${r.itemName}`}
           density="compact"
+          // This report has no server-side pagination — a large tenant's full item catalog
+          // renders in one response, so the grid virtualizes rows instead of mounting all of
+          // them at once (see WEB-FRONTEND-AUDIT-2026-07-24.md, High #4).
+          virtualized
+          virtualizedHeight={560}
         />
       </div>
     </ERPErrorBoundary>

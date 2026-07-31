@@ -4,7 +4,11 @@ import { LokiTransport } from './loki-transport.js';
 export { LokiTransport };
 export { createMetricsHandler, createHttpMetricsHook } from './metrics.js';
 export type { MetricsHookRequest, MetricsHookReply } from './metrics.js';
-export { createCorrelationIdHook, generateCorrelationId, CORRELATION_ID_HEADER } from './correlation.js';
+export {
+  createCorrelationIdHook,
+  generateCorrelationId,
+  CORRELATION_ID_HEADER,
+} from './correlation.js';
 export {
   initializeErpMetrics,
   erpInvoiceCreateTotal,
@@ -25,6 +29,11 @@ export {
   erpHttpRequestDuration,
   erpOutboxRelayTotal,
   erpReplicaFallbackTotal,
+  erpJobExecutionTotal,
+  erpJobDurationSeconds,
+  erpJobLastSuccessTimestamp,
+  erpSearchSyncFailureTotal,
+  erpSearchReindexTotal,
 } from './erp-metrics.js';
 
 export interface StructuredLogger {

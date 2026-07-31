@@ -22,6 +22,11 @@ export interface JournalEntry {
   referenceType?: string;
   referenceId?: number;
   lines: JournalLine[];
+  // The business event's occurredAt, when the caller has one (event-driven consumers do).
+  // Used only to tag periodMonth/periodYear so a journal lands in the period the underlying
+  // event actually happened in, not whichever period the Kafka consumer happens to process it
+  // in — Postgres/wall-clock postedAt/createdAt below remain the real insert time regardless.
+  postingDate?: Date;
 }
 
 export interface PostedJournal {
@@ -86,8 +91,9 @@ export class JournalEngine {
     }
 
     const now = new Date();
-    const periodMonth = now.getMonth() + 1;
-    const periodYear = now.getFullYear();
+    const effectiveDate = entry.postingDate ?? now;
+    const periodMonth = effectiveDate.getMonth() + 1;
+    const periodYear = effectiveDate.getFullYear();
 
     await db.transaction(async (trx) => {
       // Insert journal header

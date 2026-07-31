@@ -18,13 +18,15 @@
   "scripts": {
     "build": "tsc",
     "type-check": "tsc --noEmit",
-    "lint": "eslint src/"
+    "lint": "eslint src/",
+    "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
     "@erp/types": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^20.17.0",
-    "typescript": "^5.7.3"
+    "typescript": "^5.7.3",
+    "vitest": "^3.2.6"
   }
 }

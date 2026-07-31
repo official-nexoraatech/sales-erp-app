@@ -1,4 +1,4 @@
-import { loadConfigWithSecrets } from '@erp/config';
+import { loadConfigWithSecrets, requireEnv } from '@erp/config';
 
 export interface TenantServiceConfig {
   port: number;
@@ -10,13 +10,15 @@ export interface TenantServiceConfig {
   minioSecretKey: string;
   minioUseSSL: boolean;
   minioBucket: string;
-  elasticsearchUrl: string;
+  searchServiceUrl: string;
   smtpHost: string;
   smtpPort: number;
   smtpFromAddress: string;
   jwtPublicKey: string;
   signupRateLimitMax: number;
   signupRateLimitWindowMs: number;
+  demoRequestRateLimitMax: number;
+  demoRequestRateLimitWindowMs: number;
 }
 
 export async function loadTenantConfig(): Promise<TenantServiceConfig> {
@@ -31,12 +33,21 @@ export async function loadTenantConfig(): Promise<TenantServiceConfig> {
     minioSecretKey: base.minioSecretKey,
     minioUseSSL: process.env['MINIO_USE_SSL'] === 'true',
     minioBucket: process.env['MINIO_BUCKET'] ?? 'erp-storage',
-    elasticsearchUrl: process.env['ELASTICSEARCH_URL'] ?? 'http://localhost:9200',
+    searchServiceUrl: process.env['SEARCH_SERVICE_URL'] ?? 'http://localhost:3017',
     smtpHost: process.env['SMTP_HOST'] ?? 'localhost',
     smtpPort: parseInt(process.env['SMTP_PORT'] ?? '1025', 10),
     smtpFromAddress: process.env['SMTP_FROM_ADDRESS'] ?? 'noreply@erp.local',
-    jwtPublicKey: process.env['JWT_PUBLIC_KEY'] ?? '',
+    // F20: previously defaulted to '' — a missing key silently booted the service, only
+    // surfacing as an opaque auth failure on the first real request (platform-sdk's
+    // verifyAccessToken throwing deep inside request handling) rather than an immediate,
+    // obvious boot-time error. requireEnv() fails fast instead.
+    jwtPublicKey: requireEnv('JWT_PUBLIC_KEY'),
     signupRateLimitMax: parseInt(process.env['SIGNUP_RATE_LIMIT_MAX'] ?? '5', 10),
     signupRateLimitWindowMs: parseInt(process.env['SIGNUP_RATE_LIMIT_WINDOW_MS'] ?? '3600000', 10),
+    demoRequestRateLimitMax: parseInt(process.env['DEMO_REQUEST_RATE_LIMIT_MAX'] ?? '5', 10),
+    demoRequestRateLimitWindowMs: parseInt(
+      process.env['DEMO_REQUEST_RATE_LIMIT_WINDOW_MS'] ?? '3600000',
+      10
+    ),
   };
 }

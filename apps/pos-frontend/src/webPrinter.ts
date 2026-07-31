@@ -38,8 +38,37 @@ function setPreferredTransport(t: PrinterTransport): void {
 let pairedUsbDevice: USBDevice | null = null;
 let pairedSerialPort: SerialPort | null = null;
 
+// Without this, an unplugged printer left hasPairedPrinter() reporting "paired" until the
+// next write attempt failed — the disconnect event clears the stale reference immediately
+// instead of surfacing only as a later, harder-to-diagnose write failure. Registered lazily
+// (once per navigator.usb/serial instance, from wherever a device first gets paired/
+// reconnected) rather than at module-eval time, since the browser API object isn't guaranteed
+// to be the same instance at import time as when a device is actually paired.
+// Keyed by the actual navigator.usb/serial object (a stable singleton for the page's
+// lifetime in a real browser) rather than a plain module-level boolean, so re-registering
+// against a genuinely different object (as each test's mock does) still attaches correctly.
+const usbListenerAttached = new WeakSet<object>();
+const serialListenerAttached = new WeakSet<object>();
+
+function ensureUsbDisconnectListener(): void {
+  if (!navigator.usb || usbListenerAttached.has(navigator.usb)) return;
+  navigator.usb.addEventListener('disconnect', (e: Event) => {
+    if ((e as USBConnectionEvent).device === pairedUsbDevice) pairedUsbDevice = null;
+  });
+  usbListenerAttached.add(navigator.usb);
+}
+
+function ensureSerialDisconnectListener(): void {
+  if (!navigator.serial || serialListenerAttached.has(navigator.serial)) return;
+  navigator.serial.addEventListener('disconnect', (e: Event) => {
+    if ((e as SerialConnectionEvent).port === pairedSerialPort) pairedSerialPort = null;
+  });
+  serialListenerAttached.add(navigator.serial);
+}
+
 export async function pairUsbPrinter(): Promise<USBDevice> {
   if (!navigator.usb) throw new Error('WebUSB not supported in this browser');
+  ensureUsbDisconnectListener();
   // No vendor/product filter — thermal printers span many vendor IDs, and the
   // browser's own device picker is the real filtering UI here.
   const device = await navigator.usb.requestDevice({ filters: [] });
@@ -50,6 +79,7 @@ export async function pairUsbPrinter(): Promise<USBDevice> {
 
 export async function pairSerialPrinter(): Promise<SerialPort> {
   if (!navigator.serial) throw new Error('Web Serial not supported in this browser');
+  ensureSerialDisconnectListener();
   const port = await navigator.serial.requestPort();
   pairedSerialPort = port;
   setPreferredTransport('serial');
@@ -62,12 +92,14 @@ export async function pairSerialPrinter(): Promise<SerialPort> {
 export async function reconnectPairedPrinter(): Promise<boolean> {
   const preferred = getPreferredTransport();
   if (preferred === 'usb' && navigator.usb) {
+    ensureUsbDisconnectListener();
     const devices = await navigator.usb.getDevices();
     if (devices[0]) {
       pairedUsbDevice = devices[0];
       return true;
     }
   } else if (preferred === 'serial' && navigator.serial) {
+    ensureSerialDisconnectListener();
     const ports = await navigator.serial.getPorts();
     if (ports[0]) {
       pairedSerialPort = ports[0];
@@ -90,7 +122,11 @@ async function writeUsb(device: USBDevice, data: Uint8Array): Promise<void> {
 }
 
 async function writeSerial(port: SerialPort, data: Uint8Array): Promise<void> {
-  await port.open({ baudRate: SERIAL_BAUD_RATE });
+  // Per spec, `port.writable` is null until open() succeeds and becomes null again after
+  // close() — the same shape as USBDevice.opened, used as the equivalent guard in writeUsb
+  // above. Without this check, a second print/drawer-kick in the same paired session called
+  // open() on an already-open port, which throws InvalidStateError.
+  if (!port.writable) await port.open({ baudRate: SERIAL_BAUD_RATE });
   const writer = port.writable?.getWriter();
   if (!writer) throw new Error('Serial port has no writable stream');
   try {

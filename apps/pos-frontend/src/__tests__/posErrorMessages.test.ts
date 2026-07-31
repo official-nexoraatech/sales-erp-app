@@ -9,6 +9,7 @@ const cart: CartItem[] = [
     quantity: 1,
     unitPrice: 12,
     gstRate: 5,
+    cessRate: 0,
     discountPct: 0,
     lineTotal: 12.6,
   },

@@ -1,0 +1,128 @@
+import type { TourDefinition } from '../../schema.js';
+import { PERMISSIONS } from '../../../../constants/permissions.js';
+
+// Deep-dive companion to `users-overview`. Grounded against auth-service's users.ts,
+// user-roles.ts, and packages/platform-sdk/src/auth.ts (getBranchScope). Covers the real
+// account-creation flow, how role/branch enforcement actually works, the deactivation-timing
+// gap, and the fix shipped this session for the previously-broken role/branch edit.
+const tour: TourDefinition = {
+  id: 'users-complete-guide',
+  version: 1,
+  type: 'complete',
+  title: 'Users — complete guide',
+  description:
+    'How account creation, role permissions, and branch scoping really work — and the real timing gap in deactivation.',
+  module: 'users',
+  estimatedMinutes: 6,
+  requiredPermissions: [PERMISSIONS.USER_VIEW],
+  steps: [
+    {
+      id: 'purpose',
+      route: 'users',
+      title: 'Why this page exists',
+      body: 'Every teammate who needs to log into this ERP gets a real account here, with a role that determines exactly what they can see and do.',
+      placement: 'center',
+      mode: 'informational',
+      requiredPermission: PERMISSIONS.USER_VIEW,
+    },
+    {
+      id: 'create-no-invite',
+      route: 'users/new',
+      title: 'Creating a user — you set the password',
+      body: "There's no invite-email step. You type a password (12+ characters) directly into the New User form and share it with the new hire yourself, through whatever channel you normally use. They can change it later via the app's own Forgot Password flow — that part genuinely does use a real, token-based email link.",
+      placement: 'center',
+      mode: 'informational',
+      requiredPermission: PERMISSIONS.USER_CREATE,
+    },
+    {
+      id: 'role-is-real-rbac',
+      route: 'users/new',
+      title: 'Role assignment is genuine RBAC, not a label',
+      body: "The role you pick at creation grants a real set of permission constants, checked server-side on every request that role's user makes — not a cosmetic tag.",
+      placement: 'center',
+      mode: 'informational',
+      requiredPermission: PERMISSIONS.USER_CREATE,
+    },
+    {
+      id: 'edit-role-branch-fixed',
+      route: 'users',
+      title: "Editing an existing user's role/branch — now actually works",
+      body: 'Previously, changing a user\'s Role or Branch on the Edit form looked like it worked (the fields were editable, and you got a "User updated" success message) but the change was silently discarded before it ever reached the server. That\'s fixed — both now genuinely persist, calling the real role- and branch-assignment endpoints.',
+      placement: 'center',
+      mode: 'informational',
+      requiredPermission: PERMISSIONS.USER_UPDATE,
+    },
+    {
+      id: 'email-cant-change',
+      route: 'users',
+      title: "Email still can't be changed after creation",
+      body: "This one genuinely has no backend support — the Edit form now shows Email as disabled with an explanation, instead of pretending it's editable.",
+      placement: 'center',
+      mode: 'informational',
+      requiredPermission: PERMISSIONS.USER_UPDATE,
+    },
+    {
+      id: 'branch-scope-nuance',
+      route: 'users',
+      title: 'Branch scoping: assign at least one, or it means "all"',
+      body: 'A user with one or more branches assigned is genuinely restricted to that data — enforced on invoices, CRM, POS, and sync endpoints. But a user with zero branches assigned isn\'t restricted at all; they see every branch\'s data, the same as a user with an explicit "bypass" permission. Leaving this blank is not the safe default it might look like.',
+      placement: 'center',
+      mode: 'informational',
+      requiredPermission: PERMISSIONS.USER_VIEW,
+      calloutTitle: 'Common mistake',
+      calloutVariant: 'warning',
+    },
+    {
+      id: 'deactivate-timing',
+      route: 'users',
+      title: 'Deactivation has a real timing gap',
+      body: "Deactivating a user flips them inactive immediately, but doesn't revoke their current session — their existing access token keeps working until it naturally expires (typically under 15 minutes). Only their next login or token refresh gets blocked. Compare this to password resets, which do revoke sessions immediately.",
+      placement: 'center',
+      mode: 'informational',
+      requiredPermission: PERMISSIONS.USER_DELETE,
+    },
+    {
+      id: 'no-reset-button',
+      route: 'users',
+      title: 'No "Reset Password" action on this page',
+      body: "The backend fully supports a tenant Admin resetting another user's password (with a step-up check requiring your own password), but there's no button anywhere on this page to trigger it. If a teammate is locked out, use Lock/Unlock for cheque-related locks, or have them use Forgot Password.",
+      placement: 'center',
+      mode: 'informational',
+      requiredPermission: PERMISSIONS.USER_MANAGE,
+    },
+    {
+      id: 'business-impact',
+      route: 'users',
+      title: 'What each action actually touches',
+      body: 'Real, immediate, server-enforced — with the two timing caveats above.',
+      placement: 'center',
+      mode: 'informational',
+      requiredPermission: PERMISSIONS.USER_VIEW,
+      calloutTitle: 'Business impact',
+      calloutVariant: 'info',
+      businessImpact: [
+        "Role changes take effect on the user's very next request — no re-login required.",
+        'Branch assignment changes are enforced the same way, immediately.',
+        "Deactivating preserves all of a user's historical records and audit-log attribution — nothing is deleted, only the account is marked inactive.",
+      ],
+    },
+    {
+      id: 'best-practices',
+      route: 'users',
+      title: 'Best practices',
+      body: 'Be deliberate about branch scope and deactivation timing.',
+      placement: 'center',
+      mode: 'informational',
+      requiredPermission: PERMISSIONS.USER_VIEW,
+      calloutTitle: 'Best practices',
+      calloutVariant: 'success',
+      businessImpact: [
+        "Always assign a specific branch to staff who shouldn't see other locations' data — an unset branch is not a restriction.",
+        'If you need someone locked out immediately (not just within 15 minutes), consider also changing their password, since that step does revoke sessions right away.',
+        "Communicate the initial password to a new hire through a secure channel — there's no email safety net doing this for you.",
+      ],
+    },
+  ],
+};
+
+export default tour;

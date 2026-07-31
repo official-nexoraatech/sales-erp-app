@@ -122,7 +122,12 @@ export default function Form16Page() {
             })}
           </Select>
         </div>
-        <Button onClick={() => refetch()} disabled={!employeeId} loading={isFetching}>
+        <Button
+          data-tour-id="hr-form16-generate-button"
+          onClick={() => refetch()}
+          disabled={!employeeId}
+          loading={isFetching}
+        >
           Generate
         </Button>
       </div>

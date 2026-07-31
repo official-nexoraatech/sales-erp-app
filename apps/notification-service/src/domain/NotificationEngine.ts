@@ -1,17 +1,18 @@
 import Handlebars from 'handlebars';
 import { createHash } from 'crypto';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, lt, gte } from 'drizzle-orm';
 import type { ErpDatabase } from '@erp/db';
 import {
   notificationTemplates,
   notificationLog,
   notificationPreferences,
   featureFlags,
+  crmDltTemplates,
 } from '@erp/db';
 import { createLogger } from '@erp/logger';
-import type { NotificationServiceConfig } from '../config.js';
-import { ChannelRegistry } from './channels/ChannelRegistry.js';
-import type { ChannelDeliveryParams } from './channels/types.js';
+import { matchesDltTemplate } from '@erp/utils';
+import { BusinessError } from '@erp/types';
+import type { DeliveryEnqueuer } from './DeliveryQueue.js';
 
 const logger = createLogger({ serviceName: 'notification-service' });
 
@@ -28,7 +29,11 @@ export interface SendNotificationInput {
 
 export interface NotificationResult {
   channel: string;
-  status: 'SENT' | 'SKIPPED' | 'FAILED';
+  // 'SENT'/'FAILED' are no longer determinable synchronously — delivery happens on the
+  // DeliveryQueue worker (see DeliveryQueue.ts). 'QUEUED' means the row was inserted and handed
+  // to the queue; the real outcome lands asynchronously on notification_log.status and, from
+  // there, on the NOTIFICATION_DELIVERY_UPDATED outbox event.
+  status: 'QUEUED' | 'SKIPPED';
   logId: number;
 }
 
@@ -38,6 +43,8 @@ export interface SendRawInput {
   channel: 'SMS' | 'EMAIL' | 'WHATSAPP' | 'IN_APP';
   recipientPhone?: string;
   recipientEmail?: string;
+  /** Required for the notification to appear in the recipient's in-app list/unread count — see IN_APP in ChannelName. */
+  recipientUserId?: number;
   subject?: string;
   body: string;
   createdBy?: number;
@@ -47,6 +54,13 @@ export interface SendRawInput {
   mediaType?: 'image' | 'video' | 'document';
   /** CP-8: tenant_sender_identity override — see ChannelDeliveryParams for support notes. */
   senderOverride?: { name?: string | undefined; addressOrNumber?: string | undefined };
+  /**
+   * CRM-ROADMAP Phase 1, Feature 6 — DLT/TRAI SMS Compliance. Defaults to 'TRANSACTIONAL' when
+   * omitted, so every existing caller of sendRaw (workflow reminders, credit-limit alerts, ...)
+   * is unaffected — only a caller that explicitly marks a send 'PROMOTIONAL' (CampaignService,
+   * for every campaign it sends) is subject to the DLT gate below.
+   */
+  category?: 'PROMOTIONAL' | 'TRANSACTIONAL' | undefined;
 }
 
 // ES-26 (M8): dedup key for a caller retry landing on an already-recently-sent notification.
@@ -77,22 +91,11 @@ function renderTemplate(template: string, data: Record<string, unknown>): string
   return compiled(data);
 }
 
-async function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 export class NotificationEngine {
-  // CP-2: channel dispatch now goes through a pluggable adapter registry (see domain/channels/)
-  // instead of an inline switch — built from the same config this class already took, so the
-  // public constructor signature is unchanged and every existing caller/test is unaffected.
-  private readonly channels: ChannelRegistry;
-
   constructor(
     private readonly db: ErpDatabase,
-    private readonly config: NotificationServiceConfig
-  ) {
-    this.channels = new ChannelRegistry(config);
-  }
+    private readonly deliveryQueue: DeliveryEnqueuer
+  ) {}
 
   // PG-047: quiet hours are tenant-configurable via the existing feature_flags table
   // (config: { startHour, endHour }), falling back to the hardcoded default when absent/disabled.
@@ -247,23 +250,20 @@ export class NotificationEngine {
         continue;
       }
 
-      const sent = await this.deliverWithRetry(
+      await this.deliveryQueue.enqueue({
+        logId: logEntry.id,
+        tenantId: input.tenantId,
         channel,
-        {
+        params: {
           ...(input.recipientPhone !== undefined ? { phone: input.recipientPhone } : {}),
           ...(input.recipientEmail !== undefined ? { email: input.recipientEmail } : {}),
           ...(subject !== undefined ? { subject } : {}),
           body,
           tenantId: input.tenantId,
         },
-        logEntry.id
-      );
-
-      results.push({
-        channel,
-        status: sent ? 'SENT' : 'FAILED',
-        logId: logEntry.id,
       });
+
+      results.push({ channel, status: 'QUEUED', logId: logEntry.id });
     }
 
     return results;
@@ -274,6 +274,35 @@ export class NotificationEngine {
    * lookup — used by callers (e.g. CRM campaigns) that author their own message body per call.
    */
   async sendRaw(input: SendRawInput): Promise<NotificationResult> {
+    // CRM-ROADMAP Phase 1, Feature 6 — DLT/TRAI SMS Compliance: the hard, blocking gate.
+    // Checked here (not just at sales-service's earlier campaign-creation-time check) so a
+    // non-compliant promotional SMS is refused even if a caller ever bypasses that earlier
+    // check and calls this method directly — the phase doc's own DoD requires exactly this
+    // ("verify NotificationEngine itself refuses it even if called directly"). Reads
+    // crm_dlt_templates via direct DB access (same physical Postgres instance as
+    // sales-service — no cross-service call needed, same finding as Feature 5).
+    if (input.channel === 'SMS' && input.category === 'PROMOTIONAL') {
+      const templates = await this.db
+        .select()
+        .from(crmDltTemplates)
+        .where(
+          and(eq(crmDltTemplates.tenantId, input.tenantId), eq(crmDltTemplates.isActive, true))
+        );
+      const now = new Date();
+      const compliant = templates.some(
+        (t) =>
+          (!t.expiresAt || t.expiresAt > now) && matchesDltTemplate(input.body, t.messagePattern)
+      );
+      if (!compliant) {
+        throw new BusinessError(
+          'DLT_TEMPLATE_MISMATCH',
+          templates.length === 0
+            ? 'No DLT templates are registered for this tenant — register one before sending promotional SMS.'
+            : 'This message does not match any registered DLT template for this tenant.'
+        );
+      }
+    }
+
     if (input.channel === 'SMS' && (await this.isQuietHours(input.tenantId))) {
       logger.info(
         { tenantId: input.tenantId, eventType: input.eventType },
@@ -294,6 +323,7 @@ export class NotificationEngine {
         templateId: null,
         eventType: input.eventType,
         channel: input.channel,
+        recipientUserId: input.recipientUserId,
         recipientPhone: input.recipientPhone,
         recipientEmail: input.recipientEmail,
         subject: input.subject,
@@ -314,9 +344,11 @@ export class NotificationEngine {
       return { channel: input.channel, status: 'SKIPPED', logId: 0 };
     }
 
-    const sent = await this.deliverWithRetry(
-      input.channel,
-      {
+    await this.deliveryQueue.enqueue({
+      logId: logEntry.id,
+      tenantId: input.tenantId,
+      channel: input.channel,
+      params: {
         ...(input.recipientPhone !== undefined ? { phone: input.recipientPhone } : {}),
         ...(input.recipientEmail !== undefined ? { email: input.recipientEmail } : {}),
         ...(input.subject !== undefined ? { subject: input.subject } : {}),
@@ -326,58 +358,76 @@ export class NotificationEngine {
         body: input.body,
         tenantId: input.tenantId,
       },
-      logEntry.id
-    );
+    });
 
-    return { channel: input.channel, status: sent ? 'SENT' : 'FAILED', logId: logEntry.id };
+    return { channel: input.channel, status: 'QUEUED', logId: logEntry.id };
   }
 
-  private async deliverWithRetry(
-    channel: 'SMS' | 'EMAIL' | 'WHATSAPP' | 'IN_APP',
-    params: ChannelDeliveryParams,
-    logId: number
-  ): Promise<boolean> {
-    let sent = false;
-    let lastError = '';
+  // Notification-service audit 2026-07-23: a notification that failed all attempts was
+  // permanently terminal — nothing ever retried it, and there was no manual retry either.
+  // MAX_TOTAL_ATTEMPTS caps how many times retryFailed() will pick a row back up across
+  // successive sweeps (each re-queue gets its own fresh 3-attempt BullMQ job — see
+  // DeliveryQueue's ATTEMPTS): once cumulative attemptCount reaches it, the row simply stops
+  // being selected and stays FAILED — a dead-letter state distinguished by attemptCount rather
+  // than a separate status/table, so no schema migration is needed for this pass. retrySingle()
+  // (below) is exempt from the cap — an explicit admin retry always re-queues, since a human
+  // chose to retry it.
+  private static readonly MAX_TOTAL_ATTEMPTS = 9;
 
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      try {
-        const { externalId } = await this.channels.get(channel).send(params);
+  /** Scheduler-triggered sweep: re-queues every FAILED notification for a tenant that hasn't hit MAX_TOTAL_ATTEMPTS, within maxAgeHours. */
+  async retryFailed(tenantId: number, maxAgeHours = 24): Promise<{ requeued: number }> {
+    const cutoff = new Date(Date.now() - maxAgeHours * 60 * 60 * 1000);
+    const rows = await this.db
+      .select()
+      .from(notificationLog)
+      .where(
+        and(
+          eq(notificationLog.tenantId, tenantId),
+          eq(notificationLog.status, 'FAILED'),
+          lt(notificationLog.attemptCount, NotificationEngine.MAX_TOTAL_ATTEMPTS),
+          gte(notificationLog.createdAt, cutoff)
+        )
+      );
 
-        await this.db
-          .update(notificationLog)
-          .set({
-            status: 'SENT',
-            externalMessageId: externalId,
-            attemptCount: attempt,
-            lastAttemptAt: new Date(),
-            updatedAt: new Date(),
-          })
-          .where(eq(notificationLog.id, logId));
-
-        sent = true;
-        break;
-      } catch (err) {
-        lastError = err instanceof Error ? err.message : String(err);
-        logger.warn({ channel, attempt, err: lastError }, 'Notification delivery failed, retrying');
-
-        await this.db
-          .update(notificationLog)
-          .set({ attemptCount: attempt, lastAttemptAt: new Date(), updatedAt: new Date() })
-          .where(eq(notificationLog.id, logId));
-
-        if (attempt < 3) await sleep(Math.pow(2, attempt) * 1000);
-      }
+    for (const row of rows) {
+      await this.requeue(tenantId, row);
     }
+    return { requeued: rows.length };
+  }
 
-    if (!sent) {
-      await this.db
-        .update(notificationLog)
-        .set({ status: 'FAILED', errorMessage: lastError, updatedAt: new Date() })
-        .where(eq(notificationLog.id, logId));
-    }
+  /** Explicit admin/user-triggered retry of one notification — not subject to MAX_TOTAL_ATTEMPTS. */
+  async retrySingle(tenantId: number, logId: number): Promise<NotificationResult | null> {
+    const [row] = await this.db
+      .select()
+      .from(notificationLog)
+      .where(and(eq(notificationLog.id, logId), eq(notificationLog.tenantId, tenantId)));
+    if (!row || row.status !== 'FAILED') return null;
 
-    return sent;
+    await this.requeue(tenantId, row);
+    return { channel: row.channel, status: 'QUEUED', logId: row.id };
+  }
+
+  private async requeue(tenantId: number, row: typeof notificationLog.$inferSelect): Promise<void> {
+    // Back to PENDING while the re-queued job is in flight, so the row doesn't misleadingly
+    // still read FAILED — the worker moves it to SENT or (if this fresh attempt set also
+    // exhausts) FAILED again.
+    await this.db
+      .update(notificationLog)
+      .set({ status: 'PENDING', updatedAt: new Date() })
+      .where(eq(notificationLog.id, row.id));
+
+    await this.deliveryQueue.enqueue({
+      logId: row.id,
+      tenantId,
+      channel: row.channel,
+      params: {
+        ...(row.recipientPhone ? { phone: row.recipientPhone } : {}),
+        ...(row.recipientEmail ? { email: row.recipientEmail } : {}),
+        ...(row.subject ? { subject: row.subject } : {}),
+        body: row.body,
+        tenantId,
+      },
+    });
   }
 
   async getUnreadCount(tenantId: number, userId: number): Promise<number> {

@@ -71,6 +71,13 @@ const STATUS_COLORS: Record<string, 'default' | 'success' | 'warning' | 'danger'
   CANCELLED: 'danger',
 };
 
+function openPdfInNewTab(blob: Blob) {
+  const url = URL.createObjectURL(blob);
+  window.open(url, '_blank');
+  // Revoke after the new tab has had time to load the object URL, not immediately.
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}
+
 export default function PurchaseOrderDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -144,6 +151,12 @@ export default function PurchaseOrderDetailPage() {
     onError: (e: Error) => toast.error(e.message),
   });
 
+  const pdfMutation = useMutation({
+    mutationFn: () => purchaseOrderApi.pdf(Number(id)),
+    onSuccess: (blob) => openPdfInNewTab(blob as Blob),
+    onError: (e: Error) => toast.error(e.message),
+  });
+
   if (isLoading) return <ERPDetailSkeleton />;
   if (!po) return <ERPEmptyState type="no-data" title="Purchase order not found" />;
 
@@ -160,15 +173,22 @@ export default function PurchaseOrderDetailPage() {
         <div className="flex flex-wrap items-center gap-3">
           <Badge variant={STATUS_COLORS[po.status] ?? 'default'}>{po.status}</Badge>
           {canCreate && po.status === 'DRAFT' && (
-            <Button onClick={() => submitMutation.mutate()} isLoading={submitMutation.isPending}>
+            <Button
+              data-tour-id="po-detail-submit-button"
+              onClick={() => submitMutation.mutate()}
+              isLoading={submitMutation.isPending}
+            >
               Submit
             </Button>
           )}
           {canApprove && (po.status === 'SUBMITTED' || po.status === 'PENDING_APPROVAL') && (
-            <Button onClick={() => setApproveOpen(true)}>Approve</Button>
+            <Button data-tour-id="po-detail-approve-button" onClick={() => setApproveOpen(true)}>
+              Approve
+            </Button>
           )}
           {canCreate && (
             <Button
+              data-tour-id="po-detail-duplicate-button"
               variant="ghost"
               onClick={() => duplicateMutation.mutate()}
               isLoading={duplicateMutation.isPending}
@@ -176,8 +196,19 @@ export default function PurchaseOrderDetailPage() {
               Duplicate
             </Button>
           )}
+          <Button
+            variant="ghost"
+            onClick={() => pdfMutation.mutate()}
+            isLoading={pdfMutation.isPending}
+          >
+            Print
+          </Button>
           {canCancel && !['RECEIVED', 'CLOSED', 'CANCELLED'].includes(po.status) && (
-            <Button variant="danger" onClick={() => setCancelOpen(true)}>
+            <Button
+              data-tour-id="po-detail-cancel-button"
+              variant="danger"
+              onClick={() => setCancelOpen(true)}
+            >
               Cancel
             </Button>
           )}

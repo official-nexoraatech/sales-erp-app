@@ -5,6 +5,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import ERPCommandPalette from '../ERPCommandPalette.js';
 import { useRecentSearchesStore } from '../../../store/recentSearches.store.js';
 import { runAxe, formatViolations } from '../../../testUtils/axe.js';
+import type * as ReactRouterDom from 'react-router-dom';
 
 const searchMock = vi.fn();
 const navigateMock = vi.fn();
@@ -24,7 +25,7 @@ vi.mock('../../../api/endpoints.js', () => ({
 }));
 
 vi.mock('react-router-dom', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('react-router-dom')>();
+  const actual = await importOriginal<typeof ReactRouterDom>();
   return { ...actual, useNavigate: () => navigateMock };
 });
 
@@ -64,12 +65,16 @@ describe('ERPCommandPalette', () => {
     searchMock.mockResolvedValue({
       hits: [
         {
-          id: '7', entity: 'customer', score: 1,
+          id: '7',
+          entity: 'customer',
+          score: 1,
           highlight: { name: ['<em>Ramesh</em> Textiles'] },
           source: { name: 'Ramesh Textiles', phone: '9999999999' },
         },
       ],
-      total: 1, took: 5, query: 'ramesh',
+      total: 1,
+      took: 5,
+      query: 'ramesh',
     });
 
     renderPalette();
@@ -79,6 +84,24 @@ describe('ERPCommandPalette', () => {
     expect(await screen.findByText('Customers')).toBeInTheDocument();
     expect(screen.getByText('Ramesh')).toBeInTheDocument(); // the <em> portion, rendered via <mark>
     expect(screen.getByText('Textiles')).toBeInTheDocument();
+  });
+
+  // Previously the group header showed no count at all — a group's real match total could
+  // silently exceed the handful of rows actually rendered on this one page of combined hits.
+  it('shows a "N total" badge when entityCounts reports more matches than are rendered', async () => {
+    searchMock.mockResolvedValue({
+      hits: [{ id: '7', entity: 'customer', score: 1, source: { name: 'Ramesh Textiles' } }],
+      total: 1,
+      took: 5,
+      query: 'ramesh',
+      entityCounts: { customer: 12 },
+    });
+
+    renderPalette();
+    fireEvent.change(screen.getByLabelText('Search'), { target: { value: 'ramesh' } });
+
+    expect(await screen.findByText('Customers')).toBeInTheDocument();
+    expect(screen.getByText('12 total')).toBeInTheDocument();
   });
 
   it('shows the no-results state for a query with zero hits', async () => {
@@ -93,7 +116,9 @@ describe('ERPCommandPalette', () => {
   it('Enter navigates to the highlighted result, closes the palette, and records it as a recent search', async () => {
     searchMock.mockResolvedValue({
       hits: [{ id: '7', entity: 'customer', score: 1, source: { name: 'Ramesh Textiles' } }],
-      total: 1, took: 1, query: 'ramesh',
+      total: 1,
+      took: 1,
+      query: 'ramesh',
     });
 
     const { onClose } = renderPalette();
@@ -105,7 +130,11 @@ describe('ERPCommandPalette', () => {
 
     expect(navigateMock).toHaveBeenCalledWith('/customers/7');
     expect(onClose).toHaveBeenCalled();
-    expect(useRecentSearchesStore.getState().items[0]).toMatchObject({ id: '7', entity: 'customer', label: 'Ramesh Textiles' });
+    expect(useRecentSearchesStore.getState().items[0]).toMatchObject({
+      id: '7',
+      entity: 'customer',
+      label: 'Ramesh Textiles',
+    });
   });
 
   it('Escape closes the palette without navigating', async () => {
@@ -118,7 +147,9 @@ describe('ERPCommandPalette', () => {
   it('a result with no mapped route renders as non-navigable and does nothing on Enter', async () => {
     searchMock.mockResolvedValue({
       hits: [{ id: '3', entity: 'journal_entry', score: 1, source: { description: 'Manual JE' } }],
-      total: 1, took: 1, query: 'manual',
+      total: 1,
+      took: 1,
+      query: 'manual',
     });
 
     const { onClose } = renderPalette();
@@ -142,13 +173,26 @@ describe('ERPCommandPalette', () => {
     fireEvent.change(screen.getByPlaceholderText('e.g. ACTIVE'), { target: { value: 'OVERDUE' } });
 
     await waitFor(() =>
-      expect(searchMock).toHaveBeenCalledWith(expect.objectContaining({ q: 'inv', status: 'OVERDUE' }))
+      expect(searchMock).toHaveBeenCalledWith(
+        expect.objectContaining({ q: 'inv', status: 'OVERDUE' })
+      )
     );
   });
 
   it('shows saved searches above recent searches when the query is empty, and clicking one re-runs it', async () => {
     savedSearchListMock.mockResolvedValue({
-      content: [{ id: 1, tenantId: 1, userId: 1, name: 'Overdue invoices', query: 'overdue', entity: null, filters: {}, createdAt: '2026-01-01' }],
+      content: [
+        {
+          id: 1,
+          tenantId: 1,
+          userId: 1,
+          name: 'Overdue invoices',
+          query: 'overdue',
+          entity: null,
+          filters: {},
+          createdAt: '2026-01-01',
+        },
+      ],
       totalElements: 1,
     });
 
@@ -164,7 +208,9 @@ describe('ERPCommandPalette', () => {
   it('has no axe accessibility violations with results shown', async () => {
     searchMock.mockResolvedValue({
       hits: [{ id: '7', entity: 'customer', score: 1, source: { name: 'Ramesh Textiles' } }],
-      total: 1, took: 1, query: 'ramesh',
+      total: 1,
+      took: 1,
+      query: 'ramesh',
     });
 
     const { container } = renderPalette();

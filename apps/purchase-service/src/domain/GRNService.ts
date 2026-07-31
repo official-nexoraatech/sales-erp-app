@@ -1,4 +1,4 @@
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, sql, getTableColumns } from 'drizzle-orm';
 import {
   grns,
   grnLines,
@@ -15,7 +15,7 @@ import {
 import type { ErpDatabase } from '@erp/db';
 import { BusinessError, NotFoundError } from '@erp/types';
 import { DuplicateOperationError, isUniqueConstraintViolation } from '@erp/sdk';
-import { GSTCalculator } from './GSTCalculator.js';
+import { GSTCalculator } from '@erp/utils';
 import { ValuationService } from './ValuationService.js';
 import { ulid } from 'ulid';
 
@@ -35,6 +35,17 @@ export interface GRNLineInput {
   cessRate?: number | undefined;
   hsnCode?: string | undefined;
   warehouseId?: number | undefined;
+  // Batch/serial/expiry/QC capture at receipt time (see migration 0088) — all optional so
+  // existing callers that don't track these keep working unchanged.
+  batchNumber?: string | undefined;
+  serialNumbers?: string[] | undefined;
+  expiryDate?: Date | undefined;
+  // acceptedQty defaults to receivedQty - rejectedQty - damagedQty when omitted; if supplied
+  // explicitly it must add up (validated in createInTransaction).
+  acceptedQty?: number | undefined;
+  rejectedQty?: number | undefined;
+  damagedQty?: number | undefined;
+  qcStatus?: 'PENDING' | 'PASSED' | 'FAILED' | 'NA' | undefined;
 }
 
 export interface CreateGRNParams {
@@ -89,6 +100,17 @@ export class GRNService {
           `PO must be APPROVED or PARTIALLY_RECEIVED to create GRN`
         );
 
+      // Purchase audit 2026-07-21 gap-fix: BLANKET/RATE_CONTRACT POs are drawn against
+      // (call-offs) over a long validity window via this same multi-GRN mechanism — once
+      // that window closes, no further GRNs should be creatable against it even if the PO
+      // itself is still APPROVED/PARTIALLY_RECEIVED.
+      if (po.poType !== 'STANDARD' && po.contractValidTill && new Date() > po.contractValidTill) {
+        throw new BusinessError(
+          'CONTRACT_EXPIRED',
+          `Contract PO ${po.poNumber ?? po.id} expired on ${po.contractValidTill.toISOString()} — no further GRNs can be raised against it`
+        );
+      }
+
       // RCM (ES-10): an unregistered supplier doesn't charge GST — buyer self-assesses
       // and pays it directly to the government instead of to the supplier.
       const [supplier] = await trx
@@ -134,6 +156,21 @@ export class GRNService {
               alreadyReceived,
               receivedQty: newlyReceived,
             }
+          );
+        }
+      }
+
+      // QC split validation: accepted + rejected + damaged must reconcile to what was
+      // physically received. Runs before the price-variance/GST computation below since
+      // it's a pure sanity check on the caller's input, independent of PO data.
+      for (const l of params.lines) {
+        const rejectedQty = l.rejectedQty ?? 0;
+        const damagedQty = l.damagedQty ?? 0;
+        const acceptedQty = l.acceptedQty ?? l.receivedQty - rejectedQty - damagedQty;
+        if (Math.abs(acceptedQty + rejectedQty + damagedQty - l.receivedQty) > 0.001) {
+          throw new BusinessError(
+            'QC_QTY_MISMATCH',
+            `Accepted (${acceptedQty}) + rejected (${rejectedQty}) + damaged (${damagedQty}) must equal received qty (${l.receivedQty}) for item ${l.itemId}`
           );
         }
       }
@@ -245,6 +282,15 @@ export class GRNService {
           effectiveUnitCost: String(l.effectiveUnitCost),
           hsnCode: l.hsnCode,
           warehouseId: l.warehouseId ?? params.warehouseId,
+          batchNumber: l.batchNumber,
+          serialNumbers: l.serialNumbers,
+          expiryDate: l.expiryDate,
+          acceptedQty: String(
+            l.acceptedQty ?? l.receivedQty - (l.rejectedQty ?? 0) - (l.damagedQty ?? 0)
+          ),
+          rejectedQty: String(l.rejectedQty ?? 0),
+          damagedQty: String(l.damagedQty ?? 0),
+          qcStatus: l.qcStatus ?? 'NA',
         }))
       );
 
@@ -594,12 +640,22 @@ export class GRNService {
 
   async getWithLines(id: number, tenantId: number) {
     const [grn] = await this.db
-      .select()
+      .select({
+        ...getTableColumns(grns),
+        supplierName: suppliers.displayName,
+        poNumber: purchaseOrders.poNumber,
+      })
       .from(grns)
+      .leftJoin(suppliers, eq(grns.supplierId, suppliers.id))
+      .leftJoin(purchaseOrders, eq(grns.purchaseOrderId, purchaseOrders.id))
       .where(and(eq(grns.id, id), eq(grns.tenantId, tenantId)));
     if (!grn) throw new NotFoundError('GRN', id);
 
-    const lines = await this.db.select().from(grnLines).where(eq(grnLines.grnId, id));
+    const lines = await this.db
+      .select({ ...getTableColumns(grnLines), itemName: items.name })
+      .from(grnLines)
+      .leftJoin(items, eq(grnLines.itemId, items.id))
+      .where(eq(grnLines.grnId, id));
     return { ...grn, lines };
   }
 }

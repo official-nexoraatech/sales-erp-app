@@ -13,7 +13,8 @@ import Button from '../../components/ui/Button.js';
 import Badge, { type BadgeVariant } from '../../components/ui/Badge.js';
 import Modal from '../../components/ui/Modal.js';
 import DateTimePicker from '../../components/ui/DateTimePicker.js';
-import { formatDatetime } from '../../lib/format.js';
+import Input from '../../components/ui/Input.js';
+import { formatDatetime, formatCurrency } from '../../lib/format.js';
 
 interface Campaign {
   id: number;
@@ -36,12 +37,33 @@ interface Campaign {
   failedCount?: number;
 }
 
+interface CampaignVariantStat {
+  id: number;
+  label: string;
+  sent: number;
+  opened: number;
+  clicked: number;
+  converted: number;
+}
+
 interface CampaignStats {
   total: number;
   sent: number;
   delivered: number;
   failed: number;
   pending: number;
+  // CRM-ROADMAP Phase 2, Feature 6 — real numbers for the first time.
+  opened: number;
+  clicked: number;
+  converted: number;
+  openRate: number;
+  clickRate: number;
+  conversionRate: number;
+  // CRM-ROADMAP Phase 3, Feature 3 — spend-vs-revenue.
+  revenue: number;
+  cost: number;
+  roi: number | null;
+  variants: CampaignVariantStat[];
 }
 
 interface CampaignRecipient {
@@ -159,6 +181,20 @@ export default function CampaignDetailPage() {
   });
   const comments = (commentsData as { content?: CampaignComment[] })?.content ?? [];
 
+  // CRM-ROADMAP Phase 3, Feature 5 — per-language variants for this campaign.
+  const { data: translationsData } = useQuery({
+    queryKey: ['campaign-translations', campaignId],
+    queryFn: () => crmApi.campaignTranslations(campaignId),
+    enabled: !!campaignId,
+  });
+  const translations =
+    (
+      translationsData as
+        { content?: Array<{ language: string; messageTemplate: string }> } | undefined
+    )?.content ?? [];
+  const [newLanguage, setNewLanguage] = useState('');
+  const [newLanguageTemplate, setNewLanguageTemplate] = useState('');
+
   function invalidate(): void {
     void qc.invalidateQueries({ queryKey: ['crm-campaign', campaignId] });
     void qc.invalidateQueries({ queryKey: ['campaigns'] });
@@ -232,6 +268,35 @@ export default function CampaignDetailPage() {
     },
     onError: () => toast.error('Failed to add comment'),
   });
+
+  // CRM-ROADMAP Phase 3, Feature 5 — replaces the whole translation set for this campaign.
+  const saveTranslationsMut = useMutation({
+    mutationFn: (next: Array<{ language: string; messageTemplate: string }>) =>
+      crmApi.updateCampaignTranslations(campaignId, next),
+    onSuccess: () => {
+      toast.success('Language variants saved');
+      void qc.invalidateQueries({ queryKey: ['campaign-translations', campaignId] });
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
+  function addLanguageVariant(): void {
+    if (!newLanguage.trim() || !newLanguageTemplate.trim()) return;
+    if (translations.some((t) => t.language === newLanguage.trim())) {
+      toast.error(`A variant for "${newLanguage.trim()}" already exists`);
+      return;
+    }
+    saveTranslationsMut.mutate([
+      ...translations,
+      { language: newLanguage.trim(), messageTemplate: newLanguageTemplate.trim() },
+    ]);
+    setNewLanguage('');
+    setNewLanguageTemplate('');
+  }
+
+  function removeLanguageVariant(language: string): void {
+    saveTranslationsMut.mutate(translations.filter((t) => t.language !== language));
+  }
 
   if (isLoading) return <ERPDetailSkeleton />;
   if (!campaign) return <ERPEmptyState type="no-data" title="Campaign not found" />;
@@ -310,10 +375,11 @@ export default function CampaignDetailPage() {
                 Schedule
               </Button>
               <Button
+                data-tour-id="crm-campaign-detail-send-now-button"
                 onClick={async () => {
                   const ok = await confirm({
                     title: 'Send Campaign',
-                    message: 'Send campaign now?',
+                    message: `This will send "${campaign.name}" via ${campaign.channel} to ${campaign.totalRecipients ?? 'all matching'} recipient(s) right now. This can't be undone.`,
                     confirmLabel: 'Send Now',
                   });
                   if (ok) sendMut.mutate();
@@ -404,6 +470,141 @@ export default function CampaignDetailPage() {
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* CRM-ROADMAP Phase 2, Feature 6 — real engagement numbers for the first time; this
+          block simply doesn't exist until a campaign has actually been sent. */}
+      {canViewAnalytics && stats && stats.total > 0 && (
+        <div className="bg-surface-card border border-default rounded-xl p-4 mb-4">
+          <h3 className="font-semibold mb-3 text-sm">Engagement</h3>
+          <div className="grid grid-cols-3 gap-3 mb-2">
+            {[
+              { label: 'Open Rate', value: stats.openRate, count: stats.opened },
+              { label: 'Click Rate', value: stats.clickRate, count: stats.clicked },
+              { label: 'Conversion Rate', value: stats.conversionRate, count: stats.converted },
+            ].map(({ label, value, count }) => (
+              <div key={label} className="text-center">
+                <p className="text-xl font-bold text-primary">{value}%</p>
+                <p className="text-xs text-secondary">
+                  {label} ({count})
+                </p>
+              </div>
+            ))}
+          </div>
+
+          {stats.variants.length > 0 && (
+            <div className="overflow-x-auto mt-3">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-secondary border-b border-default">
+                    <th className="pb-2">Variant</th>
+                    <th className="pb-2">Sent</th>
+                    <th className="pb-2">Opened</th>
+                    <th className="pb-2">Clicked</th>
+                    <th className="pb-2">Converted</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-default">
+                  {stats.variants.map((v) => (
+                    <tr key={v.id}>
+                      <td className="py-2 font-medium">{v.label}</td>
+                      <td className="py-2">{v.sent}</td>
+                      <td className="py-2">{v.opened}</td>
+                      <td className="py-2">{v.clicked}</td>
+                      <td className="py-2">{v.converted}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* CRM-ROADMAP Phase 3, Feature 3 — spend-vs-revenue. Cost is a live estimate
+          (sentCount × the tenant's configured per-channel rate), not a historical snapshot —
+          see CampaignService.getStats' own comment. */}
+      {canViewAnalytics && stats && stats.total > 0 && (
+        <div className="bg-surface-card border border-default rounded-xl p-4 mb-4">
+          <h3 className="font-semibold mb-3 text-sm">Revenue & Cost</h3>
+          <div className="grid grid-cols-3 gap-3">
+            <div className="text-center">
+              <p className="text-xl font-bold text-primary">{formatCurrency(stats.revenue)}</p>
+              <p className="text-xs text-secondary">Attributed Revenue</p>
+            </div>
+            <div className="text-center">
+              <p className="text-xl font-bold text-primary">{formatCurrency(stats.cost)}</p>
+              <p className="text-xs text-secondary">Estimated Cost</p>
+            </div>
+            <div className="text-center">
+              <p className="text-xl font-bold text-primary">
+                {stats.roi === null ? '—' : `${(stats.roi * 100).toFixed(0)}%`}
+              </p>
+              <p className="text-xs text-secondary">ROI</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* CRM-ROADMAP Phase 3, Feature 5 — a recipient whose preferredLanguage matches one of
+          these gets that variant instead of the base messageTemplate above; everyone else
+          (including when this list is empty) gets the base template unchanged. */}
+      {(translations.length > 0 || canEdit) && (
+        <div className="bg-surface-card border border-default rounded-xl p-4 mb-4">
+          <h3 className="font-semibold mb-3 text-sm">Language Variants</h3>
+          {translations.length === 0 && (
+            <p className="text-sm text-secondary mb-3">
+              No language variants — every recipient gets the base message template above.
+            </p>
+          )}
+          <div className="space-y-2 mb-3">
+            {translations.map((t) => (
+              <div key={t.language} className="border border-default rounded-lg p-3">
+                <div className="flex items-center justify-between mb-1">
+                  <Badge label={t.language} variant="info" />
+                  {canEdit && (
+                    <button
+                      type="button"
+                      className="text-xs text-danger hover:underline"
+                      onClick={() => removeLanguageVariant(t.language)}
+                      disabled={saveTranslationsMut.isPending}
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
+                <p className="text-sm text-secondary whitespace-pre-wrap">{t.messageTemplate}</p>
+              </div>
+            ))}
+          </div>
+          {canEdit && (
+            <div className="flex flex-col sm:flex-row gap-2 items-start">
+              <Input
+                placeholder="Language (e.g. hi, ta)"
+                value={newLanguage}
+                onChange={(e) => setNewLanguage(e.target.value)}
+                className="sm:w-40"
+              />
+              <textarea
+                value={newLanguageTemplate}
+                onChange={(e) => setNewLanguageTemplate(e.target.value)}
+                placeholder="Message for this language…"
+                className="flex-1 rounded-lg border border-default bg-surface-card text-primary text-sm px-3 py-2"
+                rows={2}
+              />
+              <Button
+                onClick={addLanguageVariant}
+                disabled={
+                  saveTranslationsMut.isPending ||
+                  !newLanguage.trim() ||
+                  !newLanguageTemplate.trim()
+                }
+              >
+                Add
+              </Button>
+            </div>
+          )}
         </div>
       )}
 

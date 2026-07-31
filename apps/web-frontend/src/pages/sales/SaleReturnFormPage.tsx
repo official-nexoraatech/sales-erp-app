@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
@@ -11,6 +11,8 @@ import Button from '../../components/ui/Button.js';
 import Input from '../../components/ui/Input.js';
 import Select from '../../components/ui/Select.js';
 import { formatCurrency } from '../../lib/format.js';
+import { toFieldErrors } from '../../lib/zodFieldErrors.js';
+import { saleReturnFormSchema } from '../../schemas/sales-transactions.schema.js';
 
 interface InvoiceLine {
   id: number;
@@ -39,6 +41,7 @@ export default function SaleReturnFormPage() {
   const [reason, setReason] = useState('DEFECTIVE');
   const [returnDate, setReturnDate] = useState<string>(new Date().toISOString().substring(0, 10));
   const [isPhysical, setIsPhysical] = useState(true);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   const { data: invoiceData, isFetching: loadingInvoice } = useQuery({
     queryKey: ['invoice-for-return', loadedInvoiceId],
@@ -63,8 +66,41 @@ export default function SaleReturnFormPage() {
         .filter(({ qty }) => qty > 0)
     : [];
 
+  const handleSubmit = (e: FormEvent): void => {
+    e.preventDefault();
+    if (!invoice) return;
+    const result = saleReturnFormSchema.safeParse({
+      invoiceId: invoice.id,
+      reason,
+      lines: selectedLines.map(({ line, qty }) => ({
+        invoiceLineId: line.id,
+        itemId: line.itemId,
+        quantity: qty,
+      })),
+    });
+    if (!result.success) {
+      setFieldErrors(toFieldErrors(result.error));
+      toast.error('Fix the highlighted fields before saving');
+      return;
+    }
+    setFieldErrors({});
+    createMutation.mutate({
+      invoiceId: invoice.id,
+      customerId: invoice.customerId,
+      branchId: invoice.branchId,
+      returnDate: new Date(returnDate).toISOString(),
+      reason,
+      isPhysicalReturn: isPhysical,
+      lines: selectedLines.map(({ line, qty }) => ({
+        invoiceLineId: line.id,
+        itemId: line.itemId,
+        returnQty: qty,
+      })),
+    });
+  };
+
   return (
-    <div>
+    <form onSubmit={handleSubmit} noValidate>
       <ERPPageHeader
         variant="detail"
         title="New Sale Return"
@@ -82,9 +118,20 @@ export default function SaleReturnFormPage() {
               setInvoiceId(e.target.value);
               setReturnQtys({});
             }}
+            onKeyDown={(e) => {
+              // Enter here means "load this invoice", not "submit the return" — there's
+              // nothing to submit yet until an invoice is loaded and lines are selected.
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                if (invoiceId) setLoadedInvoiceId(Number(invoiceId));
+              }
+            }}
+            error={fieldErrors.invoiceId}
             wrapperClassName="flex-1"
           />
           <Button
+            type="button"
+            data-tour-id="sales-return-new-load-invoice-button"
             variant="outline"
             disabled={!invoiceId}
             isLoading={loadingInvoice}
@@ -93,6 +140,11 @@ export default function SaleReturnFormPage() {
             Load Invoice
           </Button>
         </div>
+        {fieldErrors.lines && (
+          <p className="text-xs text-danger" role="alert">
+            {fieldErrors.lines}
+          </p>
+        )}
 
         {invoice && (
           <div className="border border-default rounded-lg p-3 space-y-2">
@@ -128,6 +180,7 @@ export default function SaleReturnFormPage() {
           label="Reason *"
           value={reason}
           onChange={(e) => setReason(e.target.value)}
+          error={fieldErrors.reason}
           options={[
             { value: 'DEFECTIVE', label: 'Defective' },
             { value: 'WRONG_ITEM', label: 'Wrong Item' },
@@ -136,7 +189,7 @@ export default function SaleReturnFormPage() {
             { value: 'OTHER', label: 'Other' },
           ]}
         />
-        <div className="sm:col-span-2">
+        <div className="sm:col-span-2" data-tour-id="sales-return-new-physical-switch">
           <ERPSwitch
             label="Physical Return"
             description="Stock will be restored to warehouse"
@@ -147,32 +200,18 @@ export default function SaleReturnFormPage() {
       </ERPFormSection>
 
       <ERPStickyFooter>
-        <Button variant="secondary" onClick={() => navigate(LIST_PATH)}>
+        <Button type="button" variant="secondary" onClick={() => navigate(LIST_PATH)}>
           Cancel
         </Button>
         <Button
+          type="submit"
+          data-tour-id="sales-return-new-save-button"
           isLoading={createMutation.isPending}
           disabled={!invoice || selectedLines.length === 0}
-          onClick={() =>
-            invoice &&
-            createMutation.mutate({
-              invoiceId: invoice.id,
-              customerId: invoice.customerId,
-              branchId: invoice.branchId,
-              returnDate: new Date(returnDate).toISOString(),
-              reason,
-              isPhysicalReturn: isPhysical,
-              lines: selectedLines.map(({ line, qty }) => ({
-                invoiceLineId: line.id,
-                itemId: line.itemId,
-                returnQty: qty,
-              })),
-            })
-          }
         >
           Create Return
         </Button>
       </ERPStickyFooter>
-    </div>
+    </form>
   );
 }

@@ -2,10 +2,11 @@ import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { Pencil, Barcode, Printer, Trash2 } from 'lucide-react';
+import { Pencil, Barcode, Printer, Ban } from 'lucide-react';
 import { itemApi, categoryApi, brandApi } from '../../api/endpoints.js';
 import { useDebounce } from '../../hooks/useDebounce.js';
 import { useAuthStore } from '../../store/auth.store.js';
+import { useConfirm } from '../../context/ConfirmContext.js';
 import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
 import ERPEmptyState from '../../components/erp/ERPEmptyState.js';
@@ -42,6 +43,7 @@ interface Brand {
 export default function ItemsPage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const confirm = useConfirm();
   const hasPermission = useAuthStore((s) => s.hasPermission);
   const canCreateItem = hasPermission(PERMISSIONS.ITEM_CREATE);
   const canEditItem = hasPermission(PERMISSIONS.ITEM_EDIT);
@@ -192,10 +194,18 @@ export default function ItemsPage() {
     ...(canDeleteItem
       ? [
           {
-            icon: Trash2,
-            label: 'Delete',
+            icon: Ban,
+            label: 'Discontinue',
             type: 'delete' as const,
-            onClick: (r: Item) => deleteMutation.mutate(r.id),
+            onClick: async (r: Item) => {
+              const ok = await confirm({
+                title: 'Discontinue item?',
+                message: `"${r.name}" will stop appearing for new sales and purchases. Its history on existing invoices/orders is kept. This doesn't delete the item.`,
+                confirmLabel: 'Discontinue',
+                variant: 'primary',
+              });
+              if (ok) deleteMutation.mutate(r.id);
+            },
           },
         ]
       : []),
@@ -209,7 +219,12 @@ export default function ItemsPage() {
         subtitle="Manage your product catalog."
         actions={
           canCreateItem ? (
-            <Button onClick={() => navigate('/inventory/items/new')}>+ New Item</Button>
+            <Button
+              data-tour-id="inventory-items-create-button"
+              onClick={() => navigate('/inventory/items/new')}
+            >
+              + New Item
+            </Button>
           ) : undefined
         }
       />
@@ -257,6 +272,25 @@ export default function ItemsPage() {
           isLoading={isLoading}
           rowKey="id"
           tableId="items"
+          emptyState={
+            debouncedSearch || categoryId || status ? (
+              <ERPEmptyState type="no-results" />
+            ) : (
+              <ERPEmptyState
+                type="no-data"
+                title="No items yet"
+                description="Add your first item to start building your catalog."
+                {...(canCreateItem
+                  ? {
+                      action: {
+                        label: '+ New Item',
+                        onClick: () => navigate('/inventory/items/new'),
+                      },
+                    }
+                  : {})}
+              />
+            )
+          }
           pagination={{ page, pageSize, total: totalElements }}
           onPageChange={setPage}
           onPageSizeChange={(size) => {

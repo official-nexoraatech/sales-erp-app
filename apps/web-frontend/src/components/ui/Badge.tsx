@@ -1,8 +1,8 @@
-import type { ReactNode } from 'react';
+import type { ReactNode, HTMLAttributes } from 'react';
 
 export type BadgeVariant = 'default' | 'success' | 'danger' | 'warning' | 'info' | 'outline';
 
-interface Props {
+interface Props extends HTMLAttributes<HTMLSpanElement> {
   children?: ReactNode;
   variant?: BadgeVariant;
   /** Shows a small colored dot before the label */
@@ -16,18 +16,18 @@ interface Props {
 const VARIANT_CLASSES: Record<BadgeVariant, string> = {
   default: 'bg-surface-raised text-secondary',
   success: 'bg-success-bg text-success-fg',
-  danger:  'bg-danger-bg text-danger-fg',
+  danger: 'bg-danger-bg text-danger-fg',
   warning: 'bg-warning-bg text-warning-fg',
-  info:    'bg-info-bg text-info-fg',
+  info: 'bg-info-bg text-info-fg',
   outline: 'border border-default text-secondary bg-transparent',
 };
 
 const DOT_CLASSES: Record<BadgeVariant, string> = {
   default: 'bg-secondary',
   success: 'bg-success',
-  danger:  'bg-danger',
+  danger: 'bg-danger',
   warning: 'bg-warning',
-  info:    'bg-info',
+  info: 'bg-info',
   outline: 'bg-secondary',
 };
 
@@ -40,14 +40,15 @@ const COLOR_TO_VARIANT: Record<string, BadgeVariant> = {
   indigo: 'default',
 };
 
-export default function Badge({ children, label, variant, color, dot }: Props) {
+export default function Badge({ children, label, variant, color, dot, className, ...rest }: Props) {
   const resolvedVariant: BadgeVariant =
     variant ?? (color ? (COLOR_TO_VARIANT[color] ?? 'default') : 'default');
   const content = children ?? label;
 
   return (
     <span
-      className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium ${VARIANT_CLASSES[resolvedVariant]}`}
+      className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium ${VARIANT_CLASSES[resolvedVariant]}${className ? ` ${className}` : ''}`}
+      {...rest}
     >
       {dot && (
         <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${DOT_CLASSES[resolvedVariant]}`} />

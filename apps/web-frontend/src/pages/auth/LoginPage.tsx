@@ -4,7 +4,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import toast from 'react-hot-toast';
-import { AlertCircle, X, ArrowLeft, CheckCircle2, Building2 } from 'lucide-react';
+import { AlertCircle, X, ArrowLeft, CheckCircle2, Building2, User, Lock } from 'lucide-react';
 import { authApi, mfaApi } from '../../api/endpoints.js';
 import { ApiError } from '../../api/client.js';
 import { useAuthStore } from '../../store/auth.store.js';
@@ -14,7 +14,8 @@ import PasswordInput from '../../components/ui/PasswordInput.js';
 import Button from '../../components/ui/Button.js';
 import Checkbox from '../../components/ui/Checkbox.js';
 import AuthLayout from '../../components/auth/AuthLayout.js';
-import BrandMark from '../../components/marketing/BrandMark.js';
+
+const LOGIN_BUTTON_CLASSES = 'w-full justify-center bg-accent hover:bg-accent-hover text-accent-fg';
 
 const REMEMBER_KEY = 'erp_remembered_login';
 
@@ -465,6 +466,7 @@ export default function LoginPage() {
             placeholder="you@example.com"
             autoComplete="email"
             autoFocus
+            leftIcon={<User className="h-4 w-4" />}
             {...manualForm.register('email')}
             error={manualForm.formState.errors.email?.message}
           />
@@ -472,6 +474,7 @@ export default function LoginPage() {
             label="Password"
             placeholder="••••••••"
             autoComplete="current-password"
+            leftIcon={<Lock className="h-4 w-4" />}
             {...manualForm.register('password')}
             error={manualForm.formState.errors.password?.message}
           />
@@ -480,7 +483,7 @@ export default function LoginPage() {
             checked={rememberMe}
             onChange={(e) => setRememberMe(e.target.checked)}
           />
-          <Button type="submit" className="w-full justify-center" loading={loading} size="lg">
+          <Button type="submit" className={LOGIN_BUTTON_CLASSES} loading={loading} size="lg">
             Sign In
           </Button>
           <button
@@ -503,13 +506,8 @@ export default function LoginPage() {
   if (view === 'password') {
     return (
       <AuthLayout>
-        <div className="flex justify-center mb-8 lg:hidden">
-          <BrandMark />
-        </div>
-        <div className="mb-8">
-          <h1 className="font-display font-semibold text-2xl text-primary hidden lg:block">
-            Welcome back
-          </h1>
+        <div className="mb-8 text-center">
+          <h1 className="font-display font-semibold text-2xl text-primary">Welcome back</h1>
           <p className="text-sm text-secondary mt-1">
             Signing in as <span className="font-medium text-primary">{resolvedEmail}</span>
             {resolvedOrgName ? (
@@ -553,6 +551,7 @@ export default function LoginPage() {
               placeholder="••••••••"
               autoComplete="current-password"
               wrapperClassName="mt-1"
+              leftIcon={<Lock className="h-4 w-4" />}
               autoFocus
               onKeyUp={handlePasswordKeyEvent}
               onKeyDown={handlePasswordKeyEvent}
@@ -572,7 +571,7 @@ export default function LoginPage() {
             onChange={(e) => setRememberMe(e.target.checked)}
           />
 
-          <Button type="submit" className="w-full justify-center" loading={loading} size="lg">
+          <Button type="submit" className={LOGIN_BUTTON_CLASSES} loading={loading} size="lg">
             Sign In
           </Button>
         </form>
@@ -583,12 +582,10 @@ export default function LoginPage() {
   // Default: 'email' — first step of the org-lookup flow
   return (
     <AuthLayout>
-      <div className="flex justify-center mb-8 lg:hidden">
-        <BrandMark />
-      </div>
-      <div className="mb-8 hidden lg:block">
-        <h1 className="font-display font-semibold text-2xl text-primary">Welcome back</h1>
-        <p className="text-sm text-secondary mt-1">Sign in to your account</p>
+      <div className="mb-8 text-center">
+        <h1 className="font-display font-semibold text-2xl text-primary">
+          Please Login to your account
+        </h1>
       </div>
 
       <form onSubmit={emailForm.handleSubmit(onEmailSubmit)} className="space-y-4">
@@ -605,11 +602,12 @@ export default function LoginPage() {
           placeholder="you@example.com"
           autoComplete="email"
           autoFocus
+          leftIcon={<User className="h-4 w-4" />}
           {...emailForm.register('email')}
           error={emailForm.formState.errors.email?.message}
         />
 
-        <Button type="submit" className="w-full justify-center" loading={loading} size="lg">
+        <Button type="submit" className={LOGIN_BUTTON_CLASSES} loading={loading} size="lg">
           Continue
         </Button>
 

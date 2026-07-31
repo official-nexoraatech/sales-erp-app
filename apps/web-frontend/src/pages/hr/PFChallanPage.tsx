@@ -105,7 +105,12 @@ export default function PFChallanPage() {
         actions={
           <div className="flex gap-2 flex-wrap">
             {hasPermission(PERMISSIONS.HR_STATUTORY) && (
-              <Button variant="secondary" onClick={handleExport} disabled={!challan?.rows.length}>
+              <Button
+                data-tour-id="hr-pf-challans-download-button"
+                variant="secondary"
+                onClick={handleExport}
+                disabled={!challan?.rows.length}
+              >
                 Download for EPFO Portal
               </Button>
             )}

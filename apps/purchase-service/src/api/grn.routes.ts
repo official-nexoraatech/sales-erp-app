@@ -1,9 +1,10 @@
 import type { FastifyInstance } from 'fastify';
 import type { PlatformContextFactory } from '@erp/sdk';
-import { grns, suppliers } from '@erp/db';
-import { and, desc, eq, ilike, sql, getTableColumns } from 'drizzle-orm';
+import { getBranchScope } from '@erp/sdk';
+import { grns, grnHistory, suppliers, purchaseOrders } from '@erp/db';
+import { and, desc, eq, ilike, inArray, sql, getTableColumns } from 'drizzle-orm';
 import { z } from 'zod';
-import { PERMISSIONS } from '@erp/types';
+import { PERMISSIONS, ERPError } from '@erp/types';
 import { authenticate } from '../middleware/authenticate.js';
 import { requirePermission } from '../middleware/authorize.js';
 import { GRNService, DuplicateOperationError } from '../domain/GRNService.js';
@@ -20,6 +21,15 @@ const GRNLineSchema = z.object({
   cessRate: z.number().min(0).max(100).default(0),
   hsnCode: z.string().max(20).optional(),
   warehouseId: z.number().int().positive().optional(),
+  batchNumber: z.string().max(100).optional(),
+  serialNumbers: z.array(z.string().max(100)).optional(),
+  expiryDate: z.string().datetime().optional(),
+  // acceptedQty defaults to receivedQty - rejectedQty - damagedQty when omitted (see
+  // GRNService.createInTransaction's QC_QTY_MISMATCH validation).
+  acceptedQty: z.number().nonnegative().optional(),
+  rejectedQty: z.number().nonnegative().default(0),
+  damagedQty: z.number().nonnegative().default(0),
+  qcStatus: z.enum(['PENDING', 'PASSED', 'FAILED', 'NA']).default('NA'),
 });
 
 const CreateGRNSchema = z.object({
@@ -79,10 +89,25 @@ export async function grnRoutes(
       if (q.poId) conditions.push(eq(grns.purchaseOrderId, parseInt(q.poId, 10)));
       if (q.search) conditions.push(ilike(grns.grnNumber, `%${q.search}%`));
 
+      // Purchase audit 2026-07-21 gap-fix (systemic pass): same branch-scoping gap found
+      // and fixed on purchase-orders — turned out to be purchase-service-wide, not PO-only.
+      const branchScope = getBranchScope(req.auth);
+      if (branchScope !== 'all') {
+        if (branchScope.length === 0) {
+          return reply.send({ data: { content: [], totalElements: 0, page, pageSize } });
+        }
+        conditions.push(inArray(grns.branchId, branchScope));
+      }
+
       const rows = await ctx.db.raw
-        .select({ ...getTableColumns(grns), supplierName: suppliers.displayName })
+        .select({
+          ...getTableColumns(grns),
+          supplierName: suppliers.displayName,
+          poNumber: purchaseOrders.poNumber,
+        })
         .from(grns)
         .leftJoin(suppliers, eq(grns.supplierId, suppliers.id))
+        .leftJoin(purchaseOrders, eq(grns.purchaseOrderId, purchaseOrders.id))
         .where(and(...conditions))
         .orderBy(desc(grns.grnDate), desc(grns.id))
         .limit(pageSize)
@@ -103,6 +128,17 @@ export async function grnRoutes(
     preHandler: requirePermission(PERMISSIONS.GRN_CREATE),
     handler: async (req, reply) => {
       const body = CreateGRNSchema.parse(req.body);
+
+      // Purchase audit 2026-07-21 gap-fix (systemic pass, part 3): see purchase-order.routes.ts.
+      const createScope = getBranchScope(req.auth);
+      if (createScope !== 'all' && !createScope.includes(body.branchId)) {
+        throw new ERPError(
+          'GRN_OUT_OF_SCOPE',
+          'Cannot create a GRN outside your assigned branch(es)',
+          403
+        );
+      }
+
       const ctx = ctxFactory.create({
         tenantId: req.auth.tenantId,
         userId: req.auth.userId,
@@ -123,7 +159,10 @@ export async function grnRoutes(
           supplierInvoiceDate: body.supplierInvoiceDate
             ? new Date(body.supplierInvoiceDate)
             : undefined,
-          lines: body.lines,
+          lines: body.lines.map((l) => ({
+            ...l,
+            expiryDate: l.expiryDate ? new Date(l.expiryDate) : undefined,
+          })),
           notes: body.notes,
           createdBy: req.auth.userId,
           clientOperationId: body.operationId,
@@ -186,6 +225,12 @@ export async function grnRoutes(
       });
       const svc = new GRNService(ctx.db.raw);
       const data = await svc.getWithLines(parseInt(id, 10), req.auth.tenantId);
+
+      const branchScope = getBranchScope(req.auth);
+      if (branchScope !== 'all' && !branchScope.includes(data.branchId)) {
+        throw new ERPError('GRN_OUT_OF_SCOPE', 'GRN is outside your assigned branch(es)', 403);
+      }
+
       return reply.send({ data });
     },
   });
@@ -203,7 +248,16 @@ export async function grnRoutes(
       });
       const svc = new GRNService(ctx.db.raw);
       const grnId = parseInt(id, 10);
-      const { lines } = await svc.getWithLines(grnId, req.auth.tenantId);
+      const { branchId, lines } = await svc.getWithLines(grnId, req.auth.tenantId);
+
+      // Purchase audit 2026-07-21 gap-fix (systemic pass, part 2): GRN approval is where
+      // stock/AP/GST all actually post — the highest-value mutating action to close this on,
+      // alongside the same fix already applied to every PO mutating action.
+      const branchScope = getBranchScope(req.auth);
+      if (branchScope !== 'all' && !branchScope.includes(branchId)) {
+        throw new ERPError('GRN_OUT_OF_SCOPE', 'GRN is outside your assigned branch(es)', 403);
+      }
+
       await svc.approve(grnId, req.auth.tenantId, req.auth.userId, body.grnNumber);
 
       // GRNService.approve() writes availableQty/WACC/valuation directly to the shared
@@ -232,9 +286,42 @@ export async function grnRoutes(
         correlationId:
           (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
       });
+      const grnId = parseInt(id, 10);
+      const branchScope = getBranchScope(req.auth);
+      if (branchScope !== 'all') {
+        const [grnRow] = await ctx.db.raw
+          .select({ branchId: grns.branchId })
+          .from(grns)
+          .where(and(eq(grns.id, grnId), eq(grns.tenantId, req.auth.tenantId)));
+        if (grnRow && !branchScope.includes(grnRow.branchId)) {
+          throw new ERPError('GRN_OUT_OF_SCOPE', 'GRN is outside your assigned branch(es)', 403);
+        }
+      }
+
       const svc = new GRNService(ctx.db.raw);
-      await svc.reject(parseInt(id, 10), req.auth.tenantId, req.auth.userId, body.reason);
+      await svc.reject(grnId, req.auth.tenantId, req.auth.userId, body.reason);
       return reply.send({ success: true });
+    },
+  });
+
+  fastify.get('/grns/:id/activity', {
+    preHandler: requirePermission(PERMISSIONS.GRN_VIEW),
+    handler: async (req, reply) => {
+      const { id } = req.params as { id: string };
+      const ctx = ctxFactory.create({
+        tenantId: req.auth.tenantId,
+        userId: req.auth.userId,
+        correlationId:
+          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
+      });
+      const history = await ctx.db.raw
+        .select()
+        .from(grnHistory)
+        .where(
+          and(eq(grnHistory.grnId, parseInt(id, 10)), eq(grnHistory.tenantId, req.auth.tenantId))
+        )
+        .orderBy(desc(grnHistory.createdAt));
+      return reply.send({ data: history });
     },
   });
 }

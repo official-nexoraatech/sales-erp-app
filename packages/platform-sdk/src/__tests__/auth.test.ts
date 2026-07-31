@@ -8,12 +8,14 @@ import { generateKeyPair, exportSPKI, exportPKCS8, SignJWT, importPKCS8 } from '
 import { verifyAccessToken, checkPermission, getBranchScope, AuthTokenError } from '../auth.js';
 
 describe('getBranchScope', () => {
-  it('restricts to the caller\'s assigned branches by default', () => {
+  it("restricts to the caller's assigned branches by default", () => {
     expect(getBranchScope({ permissions: ['INVOICE_VIEW'], branchIds: [1, 2] })).toEqual([1, 2]);
   });
 
   it('returns "all" when the caller holds BRANCH_SCOPE_BYPASS, even with branches assigned', () => {
-    expect(getBranchScope({ permissions: ['INVOICE_VIEW', 'BRANCH_SCOPE_BYPASS'], branchIds: [1] })).toBe('all');
+    expect(
+      getBranchScope({ permissions: ['INVOICE_VIEW', 'BRANCH_SCOPE_BYPASS'], branchIds: [1] })
+    ).toBe('all');
   });
 
   it('returns "all" when the caller has no branch assignments — doesn\'t lock out not-yet-assigned users', () => {
@@ -50,24 +52,40 @@ describe('verifyAccessToken', () => {
     delete process.env['JWT_PUBLIC_KEY'];
   });
 
+  // F17 fix: verifyAccessToken() now checks the `iss` claim (matching auth-service's own
+  // 'erp-auth-service' default, which every real token already carries via
+  // signAccessToken()'s .setIssuer() call) — mirror that here so this helper keeps producing
+  // realistic tokens.
   async function signToken(claims: Record<string, unknown>): Promise<string> {
     const privateKey = await importPKCS8(privateKeyPem, 'RS256');
     return new SignJWT(claims)
       .setProtectedHeader({ alg: 'RS256' })
       .setSubject(String(claims['sub'] ?? '1'))
+      .setIssuer('erp-auth-service')
       .setExpirationTime('1h')
       .sign(privateKey);
   }
 
   it('decodes a validly-signed token into AuthPayload', async () => {
     const token = await signToken({
-      sub: '42', tenantId: 7, email: 'a@b.com', roles: ['ADMIN'], permissions: ['INVOICE_VIEW'], branchIds: [3, 5],
+      sub: '42',
+      tenantId: 7,
+      email: 'a@b.com',
+      roles: ['ADMIN'],
+      permissions: ['INVOICE_VIEW'],
+      branchIds: [3, 5],
     });
 
     const payload = await verifyAccessToken(token);
 
     expect(payload).toEqual({
-      sub: '42', tenantId: 7, email: 'a@b.com', roles: ['ADMIN'], permissions: ['INVOICE_VIEW'], branchIds: [3, 5], userId: 42,
+      sub: '42',
+      tenantId: 7,
+      email: 'a@b.com',
+      roles: ['ADMIN'],
+      permissions: ['INVOICE_VIEW'],
+      branchIds: [3, 5],
+      userId: 42,
     });
   });
 
@@ -86,5 +104,28 @@ describe('verifyAccessToken', () => {
     const token = await signToken({ sub: '1', tenantId: 1 });
 
     await expect(verifyAccessToken(token)).rejects.toThrow(AuthTokenError);
+  });
+
+  it('rejects a correctly-signed token with no issuer claim (F17)', async () => {
+    const privateKey = await importPKCS8(privateKeyPem, 'RS256');
+    const noIssuerToken = await new SignJWT({ sub: '1', tenantId: 1 })
+      .setProtectedHeader({ alg: 'RS256' })
+      .setSubject('1')
+      .setExpirationTime('1h')
+      .sign(privateKey);
+
+    await expect(verifyAccessToken(noIssuerToken)).rejects.toThrow();
+  });
+
+  it('rejects a correctly-signed token with the wrong issuer claim (F17)', async () => {
+    const privateKey = await importPKCS8(privateKeyPem, 'RS256');
+    const wrongIssuerToken = await new SignJWT({ sub: '1', tenantId: 1 })
+      .setProtectedHeader({ alg: 'RS256' })
+      .setSubject('1')
+      .setIssuer('some-other-issuer')
+      .setExpirationTime('1h')
+      .sign(privateKey);
+
+    await expect(verifyAccessToken(wrongIssuerToken)).rejects.toThrow();
   });
 });

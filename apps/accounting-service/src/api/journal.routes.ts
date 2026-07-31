@@ -197,6 +197,8 @@ export async function journalRoutes(
       const journalId = request.params.id;
       const { reason } = ReverseJournalSchema.parse(request.body ?? {});
 
+      await JournalEngine.checkPeriodOpen(ctx.db, tenantId, new Date());
+
       const result = await JournalEngine.reverse(
         ctx.db,
         tenantId,

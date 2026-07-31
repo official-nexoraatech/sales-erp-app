@@ -124,7 +124,9 @@ test.describe('Full-screen item lookup modal', () => {
 
     // Wait for the app to actually be interactive (the omnibox autofocuses on mount) before
     // sending a global key — otherwise this races React's effects attaching the F3 listener.
-    await expect(page.getByRole('combobox')).toBeFocused();
+    await expect(
+      page.getByPlaceholder('Scan barcode, or type name / SKU / alias / code…')
+    ).toBeFocused();
     await page.keyboard.press('F3');
     await expect(page.getByRole('heading', { name: 'Item Lookup' })).toBeVisible();
 
@@ -161,13 +163,17 @@ test.describe('Full-screen item lookup modal', () => {
 
     // Wait for the app to actually be interactive (the omnibox autofocuses on mount) before
     // sending a global key — otherwise this races React's effects attaching the F3 listener.
-    await expect(page.getByRole('combobox')).toBeFocused();
+    await expect(
+      page.getByPlaceholder('Scan barcode, or type name / SKU / alias / code…')
+    ).toBeFocused();
     await page.keyboard.press('F3');
     await expect(page.getByRole('heading', { name: 'Item Lookup' })).toBeVisible();
 
     await page.keyboard.press('Escape');
 
     await expect(page.getByRole('heading', { name: 'Item Lookup' })).not.toBeVisible();
-    await expect(page.getByRole('combobox')).toBeFocused();
+    await expect(
+      page.getByPlaceholder('Scan barcode, or type name / SKU / alias / code…')
+    ).toBeFocused();
   });
 });

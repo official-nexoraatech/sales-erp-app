@@ -144,6 +144,7 @@ export function Gstr2aPage() {
             className="hidden"
           />
           <Button
+            data-tour-id="gst-gstr2a-import-button"
             variant="secondary"
             onClick={() => fileInputRef.current?.click()}
             disabled={importMutation.isPending}

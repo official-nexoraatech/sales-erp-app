@@ -7,19 +7,27 @@ import { PERMISSIONS } from '@erp/types';
 import { authenticate } from '../middleware/authenticate.js';
 import { requirePermission, requireAnyPermission } from '../middleware/authorize.js';
 import { QuotationService } from '../domain/QuotationService.js';
+import { QuotationNotificationService } from '../domain/QuotationNotificationService.js';
+import { sendError } from './http-errors.js';
+import { MAX_CASHIER_DISCOUNT_PCT } from '../domain/discount-policy.js';
 
-const QuotationLineSchema = z.object({
-  itemId: z.number().int().positive(),
-  variantId: z.number().int().positive().optional(),
-  description: z.string().max(500).optional(),
-  quantity: z.number().positive(),
-  unitId: z.number().int().positive().optional(),
-  unitPrice: z.number().nonnegative(),
-  discountPct: z.number().min(0).max(100).default(0),
-  discountAmount: z.number().min(0).default(0),
-  gstRate: z.number().min(0).max(100),
-  hsnCode: z.string().max(20).optional(),
-});
+const QuotationLineSchema = z
+  .object({
+    itemId: z.number().int().positive(),
+    variantId: z.number().int().positive().optional(),
+    description: z.string().max(500).optional(),
+    quantity: z.number().positive(),
+    unitId: z.number().int().positive().optional(),
+    unitPrice: z.number().nonnegative(),
+    discountPct: z.number().min(0).max(100).default(0),
+    discountAmount: z.number().min(0).default(0),
+    gstRate: z.number().min(0).max(100),
+    hsnCode: z.string().max(20).optional(),
+  })
+  .refine((line) => !(line.discountPct > 0 && line.discountAmount > 0), {
+    message: 'Provide either a flat discount amount or a percentage discount for a line, not both',
+    path: ['discountAmount'],
+  });
 
 const CreateQuotationSchema = z.object({
   customerId: z.number().int().positive(),
@@ -87,6 +95,21 @@ export async function quotationRoutes(
     preHandler: requireAnyPermission([PERMISSIONS.QUOTATION_CREATE, PERMISSIONS.INVOICE_CREATE]),
     handler: async (req, reply) => {
       const body = CreateQuotationSchema.parse(req.body);
+
+      // H-5 fix: this ceiling was previously enforced only in POS (pos.routes.ts) — a plain
+      // QUOTATION_CREATE holder could apply a 100% line discount with no manager approval.
+      if (!req.auth.permissions.includes(PERMISSIONS.DISCOUNT_OVERRIDE)) {
+        const overLimitLine = body.lines.find((l) => l.discountPct > MAX_CASHIER_DISCOUNT_PCT);
+        if (overLimitLine) {
+          return sendError(
+            reply,
+            403,
+            'DISCOUNT_LIMIT_EXCEEDED',
+            `Discount above ${MAX_CASHIER_DISCOUNT_PCT}% requires a manager to complete this quotation`
+          );
+        }
+      }
+
       const ctx = ctxFactory.create({
         tenantId: req.auth.tenantId,
         userId: req.auth.userId,
@@ -117,6 +140,15 @@ export async function quotationRoutes(
         customerId: body.customerId,
         branchId: body.branchId,
         status: 'DRAFT',
+      });
+      // M-16 fix: no route in this file wrote to the audit log at all.
+      await ctx.audit.log({
+        action: 'CREATE',
+        entityType: 'quotation',
+        entityId: id,
+        after: { quotationNumber, customerId: body.customerId, status: 'DRAFT' },
+        actorEmail: req.auth.email,
+        ipAddress: req.ip,
       });
 
       return reply.code(201).send({ data: { id, quotationNumber } });
@@ -155,6 +187,17 @@ export async function quotationRoutes(
         quotationId: parseInt(id, 10),
         status: 'SENT',
       });
+      await ctx.audit.log({
+        action: 'STATUS_CHANGE',
+        entityType: 'quotation',
+        entityId: parseInt(id, 10),
+        after: { status: 'SENT' },
+        actorEmail: req.auth.email,
+        ipAddress: req.ip,
+      });
+      // H-9 fix: "send" previously only flipped the status column — nothing was actually
+      // transmitted to the customer.
+      await QuotationNotificationService.notifyQuotationSent(ctx, parseInt(id, 10));
       return reply.send({ success: true });
     },
   });
@@ -174,6 +217,14 @@ export async function quotationRoutes(
       await ctx.events.publish('quotation', parseInt(id, 10), 'QUOTATION_UPDATED', {
         quotationId: parseInt(id, 10),
         status: 'ACCEPTED',
+      });
+      await ctx.audit.log({
+        action: 'STATUS_CHANGE',
+        entityType: 'quotation',
+        entityId: parseInt(id, 10),
+        after: { status: 'ACCEPTED' },
+        actorEmail: req.auth.email,
+        ipAddress: req.ip,
       });
       return reply.send({ success: true });
     },
@@ -195,6 +246,14 @@ export async function quotationRoutes(
         quotationId: parseInt(id, 10),
         status: 'REJECTED',
       });
+      await ctx.audit.log({
+        action: 'STATUS_CHANGE',
+        entityType: 'quotation',
+        entityId: parseInt(id, 10),
+        after: { status: 'REJECTED' },
+        actorEmail: req.auth.email,
+        ipAddress: req.ip,
+      });
       return reply.send({ success: true });
     },
   });
@@ -213,6 +272,14 @@ export async function quotationRoutes(
       // QuotationService.convert() already writes a QUOTATION_CONVERTED outbox event
       // inside its own transaction — no separate publish needed here.
       const result = await svc.convert(parseInt(id, 10), req.auth.tenantId, req.auth.userId);
+      await ctx.audit.log({
+        action: 'STATUS_CHANGE',
+        entityType: 'quotation',
+        entityId: parseInt(id, 10),
+        after: { status: 'CONVERTED' },
+        actorEmail: req.auth.email,
+        ipAddress: req.ip,
+      });
       return reply.send({ data: result });
     },
   });
@@ -236,6 +303,14 @@ export async function quotationRoutes(
       await ctx.events.publish('quotation', parseInt(id, 10), 'QUOTATION_UPDATED', {
         quotationId: parseInt(id, 10),
         status: 'EXPIRED',
+      });
+      await ctx.audit.log({
+        action: 'STATUS_CHANGE',
+        entityType: 'quotation',
+        entityId: parseInt(id, 10),
+        after: { status: 'EXPIRED' },
+        actorEmail: req.auth.email,
+        ipAddress: req.ip,
       });
       return reply.send({ success: true });
     },

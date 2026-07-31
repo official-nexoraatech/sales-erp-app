@@ -5,6 +5,7 @@ import {
   posSessions,
   posHeldSales,
   invoices,
+  invoiceLines,
   items,
   customers,
   organizationSettings,
@@ -19,7 +20,7 @@ import {
 import type { ErpDatabase } from '@erp/db';
 import { and, desc, eq, isNull, sql } from 'drizzle-orm';
 import { z } from 'zod';
-import { PERMISSIONS, BusinessError } from '@erp/types';
+import { PERMISSIONS, BusinessError, ValidationError } from '@erp/types';
 import { authenticate } from '../middleware/authenticate.js';
 import { requireAnyPermission } from '../middleware/authorize.js';
 import {
@@ -30,11 +31,7 @@ import {
 import { PaymentService } from '../domain/PaymentService.js';
 import { LoyaltyService } from '../domain/LoyaltyService.js';
 import { sendError } from './http-errors.js';
-
-// Cashiers can discount up to this without approval; anything higher requires a user
-// whose role carries DISCOUNT_OVERRIDE (SALES_MANAGER/ADMIN/OWNER by default) — reuses
-// the existing RBAC permission rather than a new PIN/approval subsystem.
-const MAX_CASHIER_DISCOUNT_PCT = 10;
+import { MAX_CASHIER_DISCOUNT_PCT } from '../domain/discount-policy.js';
 
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
@@ -125,6 +122,10 @@ const POSSaleSchema = z.object({
   paymentMode: z.enum(['CASH', 'CARD', 'UPI']),
   amountTendered: z.number().nonnegative(),
   loyaltyPointsRedeem: z.number().int().nonnegative().default(0),
+  // CRM-ROADMAP Phase 2, Feature 3: redeem a specific catalog reward instead of a raw
+  // points->currency amount. Mutually exclusive with loyaltyPointsRedeem — a sale applies at
+  // most one loyalty redemption.
+  redeemCatalogItemId: z.number().int().positive().optional(),
   // Split payment — when provided, overrides paymentMode/amountTendered above (which
   // remain for backward compatibility with a single-mode sale).
   payments: z
@@ -323,6 +324,9 @@ export async function posRoutes(
       if (!branchInScope(req.auth, body.branchId)) {
         return sendError(reply, 403, 'BRANCH_ACCESS_DENIED', 'You are not assigned to this branch');
       }
+      if (body.loyaltyPointsRedeem > 0 && body.redeemCatalogItemId) {
+        throw new ValidationError('A sale can redeem raw points or a catalog reward, not both');
+      }
       const ctx = ctxFactory.create({
         tenantId: req.auth.tenantId,
         userId: req.auth.userId,
@@ -356,7 +360,6 @@ export async function posRoutes(
       if (!session) return sendError(reply, 400, 'NO_OPEN_SESSION', 'No open POS session found');
 
       const svc = new InvoiceService(ctx.db.raw);
-      const invoiceNumber = `POS-${req.auth.tenantId}-${Date.now()}`;
 
       let invoiceId: number;
       try {
@@ -423,6 +426,7 @@ export async function posRoutes(
       let grandTotal = 0;
       let redemptionValue = 0;
       let loyaltyPointsEarned = 0;
+      let invoiceNumber: string | null = null;
       const paymentIds: number[] = [];
 
       try {
@@ -432,7 +436,14 @@ export async function posRoutes(
           const trxPaymentSvc = new PaymentService(trxDb);
           const trxLoyaltySvc = new LoyaltyService(trxDb);
 
-          await trxInvoiceSvc.confirm(invoiceId, req.auth.tenantId, invoiceNumber, req.auth.userId);
+          // C-7 fix: invoiceNumber is now generated server-side inside confirm() (gap-free,
+          // FY-scoped sequence) — returned directly instead of echoing a discarded
+          // client-side placeholder.
+          invoiceNumber = await trxInvoiceSvc.confirm(
+            invoiceId,
+            req.auth.tenantId,
+            req.auth.userId
+          );
 
           const [inv] = await trxDb
             .select({ grandTotal: invoices.grandTotal })
@@ -442,7 +453,22 @@ export async function posRoutes(
 
           // Loyalty redemption reduces the amount due before cash/card/UPI is collected —
           // recorded as its own Payment row (paymentMode LOYALTY) so it shows in reconciliation.
-          if (body.loyaltyPointsRedeem > 0 && body.customerId) {
+          // Either a raw points->currency amount OR a specific catalog reward (CRM-ROADMAP
+          // Phase 2, Feature 3), never both — validated above before this transaction opened.
+          if (body.redeemCatalogItemId && body.customerId) {
+            const reward = await trxLoyaltySvc.redeemCatalogItem(
+              req.auth.tenantId,
+              body.customerId,
+              body.redeemCatalogItemId,
+              'POS_SALE',
+              invoiceId,
+              req.auth.userId
+            );
+            redemptionValue =
+              reward.rewardType === 'DISCOUNT_PERCENT'
+                ? round2((grandTotal * reward.rewardValue) / 100)
+                : reward.rewardValue;
+          } else if (body.loyaltyPointsRedeem > 0 && body.customerId) {
             redemptionValue = await trxLoyaltySvc.redeemPoints(
               req.auth.tenantId,
               body.customerId,
@@ -451,26 +477,27 @@ export async function posRoutes(
               invoiceId,
               req.auth.userId
             );
-            if (redemptionValue > 0) {
-              const loyaltyPaymentId = await trxPaymentSvc.create({
-                tenantId: req.auth.tenantId,
-                branchId: body.branchId,
-                customerId: body.customerId,
-                paymentNumber: `PAY-${req.auth.tenantId}-${Date.now()}-0`,
-                paymentDate: new Date(),
-                paymentMode: 'LOYALTY',
-                amount: redemptionValue,
-                posSessionId: body.sessionId,
-                createdBy: req.auth.userId,
-              });
-              await trxPaymentSvc.allocate(
-                loyaltyPaymentId,
-                req.auth.tenantId,
-                [{ invoiceId, amount: redemptionValue }],
-                req.auth.userId
-              );
-              paymentIds.push(loyaltyPaymentId);
-            }
+          }
+
+          if (redemptionValue > 0) {
+            const loyaltyPaymentId = await trxPaymentSvc.create({
+              tenantId: req.auth.tenantId,
+              branchId: body.branchId,
+              customerId: body.customerId!,
+              paymentNumber: `PAY-${req.auth.tenantId}-${Date.now()}-0`,
+              paymentDate: new Date(),
+              paymentMode: 'LOYALTY',
+              amount: redemptionValue,
+              posSessionId: body.sessionId,
+              createdBy: req.auth.userId,
+            });
+            await trxPaymentSvc.allocate(
+              loyaltyPaymentId,
+              req.auth.tenantId,
+              [{ invoiceId, amount: redemptionValue }],
+              req.auth.userId
+            );
+            paymentIds.push(loyaltyPaymentId);
           }
 
           // Record and allocate the payment(s) taken at the till — without this, a POS sale
@@ -534,6 +561,19 @@ export async function posRoutes(
             })
             .where(eq(posSessions.id, body.sessionId));
         });
+
+        // Same cross-service item-cache gap GRN receipts had (fixed 2026-07-17) — a POS sale
+        // confirms the invoice above, writing availableQty/valuation directly to `items`, so
+        // inventory-service's Redis item-cache needs invalidating too.
+        const soldLines = await ctx.db.raw
+          .select({ itemId: invoiceLines.itemId })
+          .from(invoiceLines)
+          .where(eq(invoiceLines.invoiceId, invoiceId));
+        await Promise.all(
+          [...new Set(soldLines.map((l) => l.itemId))].map((itemId) =>
+            ctx.cache.del(`item:${itemId}`)
+          )
+        );
       } catch (err) {
         if (err instanceof InsufficientStockError) {
           // OFFLINE-07: create() already committed a DRAFT invoice (its own transaction,
@@ -659,6 +699,7 @@ export async function posRoutes(
           customCode: items.customCode,
           price: priceExpr,
           gstRate: items.gstRate,
+          cessRate: items.cessRate,
           stockQty: stockExpr,
           matchedOn: matchedOnExpr,
         })
@@ -735,6 +776,7 @@ export async function posRoutes(
           customCode: r.customCode,
           price: parseFloat(String(r.price)),
           gstRate: r.gstRate !== null ? Number(r.gstRate) : 18,
+          cessRate: r.cessRate !== null ? Number(r.cessRate) : 0,
           stock: { qty: parseFloat(String(r.stockQty)) },
           matchedOn: r.matchedOn,
         })),

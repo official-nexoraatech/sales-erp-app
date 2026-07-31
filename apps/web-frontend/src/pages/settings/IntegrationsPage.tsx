@@ -106,6 +106,7 @@ export default function IntegrationsPage() {
         subtitle="Subscribe external systems to key business events with signed, verifiable webhook deliveries."
         actions={
           <Button
+            data-tour-id="settings-integrations-create-button"
             size="sm"
             onClick={() => {
               setEditingId(null);

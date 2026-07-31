@@ -1,14 +1,26 @@
 import type { FastifyInstance } from 'fastify';
-import { createHash } from 'crypto';
+import { createHash, randomBytes } from 'crypto';
+import argon2 from 'argon2';
 import type { PlatformContextFactory } from '@erp/sdk';
-import { customers, customersHistory, customerCommunicationPreferences } from '@erp/db';
-import { and, eq, isNull, or, ilike, sql } from 'drizzle-orm';
+import {
+  customers,
+  customersHistory,
+  customerCommunicationPreferences,
+  crmAccounts,
+  crmPortalAccounts,
+  crmPortalPasswordTokens,
+} from '@erp/db';
+import { and, eq, isNull, or, ilike, sql, getTableColumns } from 'drizzle-orm';
 import { z } from 'zod';
 import { BusinessError, NotFoundError, OptimisticLockError, ValidationError } from '@erp/types';
 import { PERMISSIONS, OptionalGSTINSchema, OptionalPANSchema } from '@erp/types';
+import { createLogger } from '@erp/logger';
 import { authenticate } from '../middleware/authenticate.js';
 import { requirePermission } from '../middleware/authorize.js';
 import { CustomerCacheService } from '../domain/CustomerCacheService.js';
+import { CustomerService } from '../domain/CustomerService.js';
+
+const logger = createLogger({ serviceName: 'sales-service' });
 
 const CustomerSchema = z.object({
   displayName: z.string().min(2).max(200),
@@ -47,6 +59,9 @@ const CustomerSchema = z.object({
     })
     .optional(),
   branchId: z.number().int().positive(),
+  // CRM-ROADMAP Phase 1, Feature 1 (Contact & Account Hierarchy): optional link to a
+  // crm_accounts row — existing callers that never send this are unaffected.
+  accountId: z.number().int().positive().optional(),
   creditLimit: z.number().min(0).default(0),
   creditDays: z.number().int().min(0).default(0),
   creditLimitEnabled: z.boolean().default(false),
@@ -56,6 +71,10 @@ const CustomerSchema = z.object({
   notes: z.string().max(5000).optional(),
   tags: z.array(z.string()).default([]),
   customFields: z.record(z.unknown()).default({}),
+  // CRM-ROADMAP Phase 3, Feature 5 (Multi-language Communication): BCP-47-ish tag, e.g. 'hi'/
+  // 'ta'/'en'. Omitted means no preference — CampaignService.send() falls back to the campaign's
+  // base messageTemplate for this customer.
+  preferredLanguage: z.string().max(10).optional(),
   // OFFLINE-05: client-generated idempotency key, attached at offline-queue time — optional
   // so every other (non-offline) caller is unaffected, same convention as
   // POSSaleSchema.operationId in pos.routes.ts.
@@ -64,6 +83,10 @@ const CustomerSchema = z.object({
 
 const CustomerUpdateSchema = CustomerSchema.extend({
   version: z.number().int().min(0),
+});
+
+const BlockSchema = z.object({
+  reason: z.string().min(1).max(500),
 });
 
 const OptOutSchema = z.object({
@@ -97,16 +120,55 @@ function simpleHash(value: string): string {
   return createHash('sha256').update(value.toUpperCase()).digest('hex').substring(0, 64);
 }
 
-// OFFLINE-05: mirrors InvoiceService.ts's isUniqueViolation — without this translation, a
-// retried offline-customer-sync's unique-constraint hit surfaces as an opaque 500 instead
-// of being recognized as "already synced, return the existing record."
-function isUniqueViolation(err: unknown, constraintName: string): boolean {
-  return (
-    typeof err === 'object' &&
-    err !== null &&
-    (err as { code?: unknown }).code === '23505' &&
-    (err as { constraint_name?: unknown }).constraint_name === constraintName
-  );
+// ─── Customer Portal Account provisioning (CRM-ROADMAP Phase 3, Feature 2) ─────────────
+const PortalAccountSchema = z.object({
+  email: z.string().email().max(320),
+});
+
+// Longer than the staff password-reset token's 1hr (PASSWORD_RESET_TOKEN_TTL_MS default) —
+// an invite email may sit unread for a while before the customer gets to it.
+const PORTAL_INVITE_TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
+const CUSTOMER_PORTAL_URL = process.env['CUSTOMER_PORTAL_URL'] ?? 'http://localhost:5176';
+
+function sha256Hex(input: string): string {
+  return createHash('sha256').update(input).digest('hex');
+}
+
+function generateSecureToken(bytes = 32): string {
+  return randomBytes(bytes).toString('hex');
+}
+
+// Fire-and-forget, same pattern as InvoiceNotificationService — a notification-service outage
+// must never block provisioning. Uses send-raw-internal (pre-rendered body), same as that
+// service's other customer-facing notices, rather than send-internal's DB-backed eventType
+// template lookup, which would need a default template seeded for every tenant first.
+function sendPortalInviteEmail(input: {
+  tenantId: number;
+  customerName: string;
+  email: string;
+  setPasswordLink: string;
+}): void {
+  const notificationUrl = process.env['NOTIFICATION_SERVICE_URL'] ?? 'http://localhost:3014';
+  const internalKey = process.env['INTERNAL_API_KEY'] ?? '';
+  const body = `Hi ${input.customerName}, you've been invited to your customer portal account. Set your password here: ${input.setPasswordLink}`;
+
+  fetch(`${notificationUrl}/notifications/send-raw-internal`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-internal-key': internalKey },
+    body: JSON.stringify({
+      tenantId: input.tenantId,
+      eventType: 'PORTAL_ACCOUNT_INVITE',
+      channel: 'EMAIL',
+      recipientEmail: input.email,
+      subject: 'Your customer portal account',
+      body,
+    }),
+  }).catch((err: unknown) => {
+    logger.warn(
+      { err, email: input.email },
+      'Portal account invite email delivery failed (non-fatal)'
+    );
+  });
 }
 
 export async function customerRoutes(
@@ -166,9 +228,12 @@ export async function customerRoutes(
         );
       }
 
+      // CRM-ROADMAP Phase 1, Feature 1: left-joined account name so the list can show
+      // account-level grouping without an N+1 lookup per row.
       const rows = await ctx.db.raw
-        .select()
+        .select({ ...getTableColumns(customers), accountName: crmAccounts.name })
         .from(customers)
+        .leftJoin(crmAccounts, eq(customers.accountId, crmAccounts.id))
         .where(whereClause)
         .limit(size)
         .offset(page * size);
@@ -343,73 +408,13 @@ export async function customerRoutes(
       if (!body.success)
         throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
 
-      // Duplicate detection — warn on same mobile
-      const [dup] = await ctx.db.raw
-        .select()
-        .from(customers)
-        .where(
-          and(
-            eq(customers.phone, body.data.phone),
-            eq(customers.tenantId, tenantId),
-            isNull(customers.deletedAt)
-          )
-        );
+      const { created, warnings, alreadyExisted } = await CustomerService.create(ctx.db.raw, {
+        tenantId,
+        createdBy: userId,
+        ...body.data,
+      });
+      if (alreadyExisted) return reply.code(200).send({ data: created, warnings: [] });
 
-      const warnings: string[] = [];
-      if (dup) {
-        warnings.push(
-          `Another customer with phone ${body.data.phone} already exists (id: ${dup.id})`
-        );
-      }
-
-      // Encrypt GSTIN/PAN (simplified: store plaintext here; real impl uses PlatformContext.encryption)
-      const gstinHash = body.data.gstin ? simpleHash(body.data.gstin) : null;
-      const panHash = body.data.pan ? simpleHash(body.data.pan) : null;
-
-      // Auto-generate customer code
-      const customerCode = `CUST${Date.now()}`;
-
-      let created: typeof customers.$inferSelect | undefined;
-      try {
-        [created] = await ctx.db.raw
-          .insert(customers)
-          .values({
-            tenantId,
-            createdBy: userId,
-            customerCode,
-            ...body.data,
-            gstin: body.data.gstin || null,
-            gstinHash,
-            pan: body.data.pan || null,
-            panHash,
-            creditLimit: String(body.data.creditLimit),
-            openingBalance: String(body.data.openingBalance),
-            clientOperationId: body.data.operationId,
-          } as unknown as typeof customers.$inferInsert)
-          .returning();
-      } catch (err) {
-        // OFFLINE-05: this operationId was already claimed by a prior (or concurrent) sync
-        // of the same offline-queued customer — return the already-committed original
-        // record instead of creating a duplicate.
-        if (
-          isUniqueViolation(err, 'customers_tenant_client_operation_id') &&
-          body.data.operationId
-        ) {
-          const [existing] = await ctx.db.raw
-            .select()
-            .from(customers)
-            .where(
-              and(
-                eq(customers.tenantId, tenantId),
-                eq(customers.clientOperationId, body.data.operationId)
-              )
-            );
-          if (existing) return reply.code(200).send({ data: existing, warnings: [] });
-        }
-        throw err;
-      }
-
-      if (!created) throw new Error('Customer creation failed unexpectedly');
       await ctx.events.publish(
         'customer',
         created.id,
@@ -573,6 +578,156 @@ export async function customerRoutes(
           optOutWhatsapp: updated.optOutWhatsapp,
           optOutEmail: updated.optOutEmail,
         },
+      });
+
+      return reply.code(200).send({ data: updated });
+    }
+  );
+
+  // ── POST /customers/:id/block — H-3 fix: customers.status='BLOCKED' was schema-valid
+  // (blockedReason/blockedAt/blockedBy columns, customers_history changeType) but no route
+  // ever set it, and CUSTOMER_BLOCK was a dead permission constant. ──────────────────────
+  fastify.post<{ Params: { id: string } }>(
+    '/customers/:id/block',
+    { preHandler: [authenticate, requirePermission(PERMISSIONS.CUSTOMER_BLOCK)] },
+    async (request, reply) => {
+      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
+      const ctx = ctxFactory.create({
+        tenantId,
+        userId,
+        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
+      });
+      const id = parseInt(request.params.id, 10);
+
+      const body = BlockSchema.safeParse(request.body);
+      if (!body.success)
+        throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
+
+      const [existing] = await ctx.db.raw
+        .select()
+        .from(customers)
+        .where(
+          and(eq(customers.id, id), eq(customers.tenantId, tenantId), isNull(customers.deletedAt))
+        );
+      if (!existing) throw new NotFoundError('Customer', id);
+      if (existing.status === 'BLOCKED')
+        throw new BusinessError('ALREADY_BLOCKED', 'Customer is already blocked');
+
+      let updated: typeof customers.$inferSelect | undefined;
+      await ctx.db.transaction(async (trx) => {
+        await trx.raw.insert(customersHistory).values({
+          customerId: id,
+          tenantId,
+          changedBy: userId,
+          changedAt: new Date(),
+          previousData: existing as unknown as Record<string, unknown>,
+          changeType: 'BLOCK',
+        });
+
+        const [row] = await trx.raw
+          .update(customers)
+          .set({
+            status: 'BLOCKED',
+            blockedReason: body.data.reason,
+            blockedAt: new Date(),
+            blockedBy: userId,
+            updatedAt: new Date(),
+            version: existing.version + 1,
+          })
+          .where(and(eq(customers.id, id), eq(customers.tenantId, tenantId)))
+          .returning();
+        updated = row;
+      });
+      if (!updated) throw new Error('Customer block failed unexpectedly');
+
+      await customerCache.invalidateCustomer(ctx.cache, id);
+      await ctx.events.publish(
+        'customer',
+        id,
+        'CUSTOMER_UPDATED',
+        updated as unknown as Record<string, unknown>
+      );
+      await ctx.audit.log({
+        action: 'UPDATE',
+        entityType: 'customer',
+        entityId: id,
+        before: { status: existing.status },
+        after: { status: updated.status, blockedReason: updated.blockedReason },
+        changedFields: ['status', 'blockedReason', 'blockedAt', 'blockedBy'],
+        actorEmail: (request as unknown as AuthedRequest).auth.email,
+        ipAddress: (request as unknown as AuthedRequest).ip,
+      });
+
+      return reply.code(200).send({ data: updated });
+    }
+  );
+
+  // ── POST /customers/:id/unblock ───────────────────────────────────────────
+  fastify.post<{ Params: { id: string } }>(
+    '/customers/:id/unblock',
+    { preHandler: [authenticate, requirePermission(PERMISSIONS.CUSTOMER_BLOCK)] },
+    async (request, reply) => {
+      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
+      const ctx = ctxFactory.create({
+        tenantId,
+        userId,
+        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
+      });
+      const id = parseInt(request.params.id, 10);
+
+      const [existing] = await ctx.db.raw
+        .select()
+        .from(customers)
+        .where(
+          and(eq(customers.id, id), eq(customers.tenantId, tenantId), isNull(customers.deletedAt))
+        );
+      if (!existing) throw new NotFoundError('Customer', id);
+      if (existing.status !== 'BLOCKED')
+        throw new BusinessError('NOT_BLOCKED', 'Customer is not currently blocked');
+
+      let updated: typeof customers.$inferSelect | undefined;
+      await ctx.db.transaction(async (trx) => {
+        await trx.raw.insert(customersHistory).values({
+          customerId: id,
+          tenantId,
+          changedBy: userId,
+          changedAt: new Date(),
+          previousData: existing as unknown as Record<string, unknown>,
+          changeType: 'UNBLOCK',
+        });
+
+        const [row] = await trx.raw
+          .update(customers)
+          .set({
+            status: 'ACTIVE',
+            blockedReason: null,
+            blockedAt: null,
+            blockedBy: null,
+            updatedAt: new Date(),
+            version: existing.version + 1,
+          })
+          .where(and(eq(customers.id, id), eq(customers.tenantId, tenantId)))
+          .returning();
+        updated = row;
+      });
+      if (!updated) throw new Error('Customer unblock failed unexpectedly');
+
+      await customerCache.invalidateCustomer(ctx.cache, id);
+      await ctx.events.publish(
+        'customer',
+        id,
+        'CUSTOMER_UPDATED',
+        updated as unknown as Record<string, unknown>
+      );
+      await ctx.audit.log({
+        action: 'UPDATE',
+        entityType: 'customer',
+        entityId: id,
+        before: { status: existing.status },
+        after: { status: updated.status },
+        changedFields: ['status', 'blockedReason', 'blockedAt', 'blockedBy'],
+        actorEmail: (request as unknown as AuthedRequest).auth.email,
+        ipAddress: (request as unknown as AuthedRequest).ip,
       });
 
       return reply.code(200).send({ data: updated });
@@ -829,6 +984,98 @@ export async function customerRoutes(
         data: {
           message: 'Use POST /exports/generate with entityType=CUSTOMER via scheduler-service',
         },
+      });
+    }
+  );
+
+  // ── POST /customers/:id/portal-account — staff-provisioned invite ────────
+  // CRM-ROADMAP Phase 3, Feature 2 (Self-Service Customer Portal): a customer never
+  // self-registers. Idempotent — calling again for a customer that already has an account
+  // just re-sends a fresh invite (e.g. the first email bounced), it does not error.
+  fastify.post<{ Params: { id: string } }>(
+    '/customers/:id/portal-account',
+    { preHandler: [authenticate, requirePermission(PERMISSIONS.PORTAL_ACCOUNT_MANAGE)] },
+    async (request, reply) => {
+      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
+      const ctx = ctxFactory.create({
+        tenantId,
+        userId,
+        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
+      });
+      const id = parseInt(request.params.id, 10);
+
+      const body = PortalAccountSchema.safeParse(request.body);
+      if (!body.success)
+        throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
+
+      const [customer] = await ctx.db.raw
+        .select()
+        .from(customers)
+        .where(
+          and(eq(customers.id, id), eq(customers.tenantId, tenantId), isNull(customers.deletedAt))
+        );
+      if (!customer) throw new NotFoundError('Customer', id);
+
+      let [account] = await ctx.db.raw
+        .select()
+        .from(crmPortalAccounts)
+        .where(and(eq(crmPortalAccounts.customerId, id), eq(crmPortalAccounts.tenantId, tenantId)));
+
+      if (!account) {
+        // Unusable until set-password succeeds — never given out, so it never matches any
+        // password a real caller could supply. Avoids a nullable passwordHash column just to
+        // represent "invited but hasn't set a password yet".
+        const placeholderHash = await argon2.hash(generateSecureToken(32), {
+          type: argon2.argon2id,
+        });
+        [account] = await ctx.db.raw
+          .insert(crmPortalAccounts)
+          .values({
+            tenantId,
+            customerId: id,
+            email: body.data.email,
+            passwordHash: placeholderHash,
+            isActive: true,
+            mustResetPassword: true,
+          })
+          .returning();
+      } else {
+        [account] = await ctx.db.raw
+          .update(crmPortalAccounts)
+          .set({ email: body.data.email, updatedAt: new Date() })
+          .where(eq(crmPortalAccounts.id, account.id))
+          .returning();
+      }
+      if (!account) throw new Error('Portal account provisioning failed unexpectedly');
+
+      const plainToken = generateSecureToken(32);
+      const tokenHash = sha256Hex(plainToken);
+      const expiresAt = new Date(Date.now() + PORTAL_INVITE_TOKEN_TTL_MS);
+
+      await ctx.db.raw.insert(crmPortalPasswordTokens).values({
+        portalAccountId: account.id,
+        tenantId,
+        tokenHash,
+        expiresAt,
+      });
+
+      const setPasswordLink = `${CUSTOMER_PORTAL_URL}/set-password?token=${plainToken}`;
+      sendPortalInviteEmail({
+        tenantId,
+        customerName: customer.displayName,
+        email: body.data.email,
+        setPasswordLink,
+      });
+
+      await ctx.audit.log({
+        action: 'CREATE',
+        entityType: 'crm_portal_account',
+        entityId: account.id,
+        after: { customerId: id, email: account.email, isActive: account.isActive },
+      });
+
+      return reply.code(201).send({
+        data: { id: account.id, customerId: id, email: account.email, isActive: account.isActive },
       });
     }
   );

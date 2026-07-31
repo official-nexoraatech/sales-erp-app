@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { PlatformContextFactory } from '@erp/sdk';
+import { PlatformEventBus } from '@erp/sdk';
 import {
   leaveTypes,
   employeeLeaveBalance,
@@ -23,6 +24,12 @@ const ApplyLeaveSchema = z.object({
   endDate: z.string().max(10),
   reason: z.string().max(1000).optional(),
   documentUrl: z.string().max(500).optional(),
+});
+
+const LeaveApplicationsQuerySchema = z.object({
+  startDate: z.string().max(10).optional(),
+  endDate: z.string().max(10).optional(),
+  employeeId: z.coerce.number().int().positive().optional(),
 });
 
 const RejectLeaveSchema = z.object({
@@ -213,44 +220,50 @@ export async function leaveRoutes(
         }
       }
 
-      const [created] = await ctx.db.raw
-        .insert(leaveApplications)
-        .values({
-          tenantId,
-          createdBy: userId,
+      const created = await ctx.db.transaction(async (trx) => {
+        const [row] = await trx.raw
+          .insert(leaveApplications)
+          .values({
+            tenantId,
+            createdBy: userId,
+            employeeId: body.data.employeeId,
+            leaveTypeId: body.data.leaveTypeId,
+            startDate: body.data.startDate,
+            endDate: body.data.endDate,
+            days: String(days),
+            reason: body.data.reason,
+            documentUrl: body.data.documentUrl,
+            status: 'PENDING',
+          } as typeof leaveApplications.$inferInsert)
+          .returning();
+
+        if (!row) throw new Error('Leave application insert failed');
+
+        // Mark days as pending in balance
+        if (balance) {
+          await trx.raw
+            .update(employeeLeaveBalance)
+            .set({
+              pendingDays: String(parseFloat(balance.pendingDays) + days),
+              updatedAt: new Date(),
+            })
+            .where(eq(employeeLeaveBalance.id, balance.id));
+        }
+
+        const eventBus = new PlatformEventBus(trx, tenantId, userId, ctx.tenant.correlationId);
+        await eventBus.publishInTransaction('leave_application', row.id, 'LEAVE_APPLIED', {
+          leaveApplicationId: row.id,
           employeeId: body.data.employeeId,
-          leaveTypeId: body.data.leaveTypeId,
-          startDate: body.data.startDate,
-          endDate: body.data.endDate,
-          days: String(days),
-          reason: body.data.reason,
-          documentUrl: body.data.documentUrl,
-          status: 'PENDING',
-        } as typeof leaveApplications.$inferInsert)
-        .returning();
+          employeeName: emp.displayName,
+          startDate: row.startDate,
+          endDate: row.endDate,
+          status: row.status,
+          tenantId,
+        });
 
-      if (!created) throw new Error('Leave application insert failed');
-
-      // Mark days as pending in balance
-      if (balance) {
-        await ctx.db.raw
-          .update(employeeLeaveBalance)
-          .set({
-            pendingDays: String(parseFloat(balance.pendingDays) + days),
-            updatedAt: new Date(),
-          })
-          .where(eq(employeeLeaveBalance.id, balance.id));
-      }
-
-      await ctx.events.publish('leave_application', created.id, 'LEAVE_APPLIED', {
-        leaveApplicationId: created.id,
-        employeeId: body.data.employeeId,
-        employeeName: emp.displayName,
-        startDate: created.startDate,
-        endDate: created.endDate,
-        status: created.status,
-        tenantId,
+        return row;
       });
+
       await ctx.audit.log({
         action: 'CREATE',
         entityType: 'leave_application',
@@ -360,20 +373,21 @@ export async function leaveRoutes(
               set: { status: 'LEAVE', updatedAt: new Date() },
             });
         }
-      });
 
-      const [approvedEmp] = await ctx.db.raw
-        .select({ displayName: employees.displayName })
-        .from(employees)
-        .where(eq(employees.id, app.employeeId));
-      await ctx.events.publish('leave_application', id, 'LEAVE_APPROVED', {
-        leaveApplicationId: id,
-        employeeId: app.employeeId,
-        employeeName: approvedEmp?.displayName,
-        startDate: app.startDate,
-        endDate: app.endDate,
-        status: 'APPROVED',
-        tenantId,
+        const [approvedEmp] = await trx.raw
+          .select({ displayName: employees.displayName })
+          .from(employees)
+          .where(eq(employees.id, app.employeeId));
+        const eventBus = new PlatformEventBus(trx, tenantId, userId, ctx.tenant.correlationId);
+        await eventBus.publishInTransaction('leave_application', id, 'LEAVE_APPROVED', {
+          leaveApplicationId: id,
+          employeeId: app.employeeId,
+          employeeName: approvedEmp?.displayName,
+          startDate: app.startDate,
+          endDate: app.endDate,
+          status: 'APPROVED',
+          tenantId,
+        });
       });
       await ctx.audit.log({
         action: 'UPDATE',
@@ -415,50 +429,53 @@ export async function leaveRoutes(
       const days = parseFloat(app.days);
       const year = new Date(app.startDate).getFullYear();
 
-      await ctx.db.raw
-        .update(leaveApplications)
-        .set({
-          status: 'REJECTED',
-          rejectedBy: userId,
-          rejectedAt: new Date(),
-          rejectionReason: body.data.rejectionReason,
-          updatedAt: new Date(),
-        })
-        .where(eq(leaveApplications.id, id));
-
-      const [balance] = await ctx.db.raw
-        .select()
-        .from(employeeLeaveBalance)
-        .where(
-          and(
-            eq(employeeLeaveBalance.tenantId, tenantId),
-            eq(employeeLeaveBalance.employeeId, app.employeeId),
-            eq(employeeLeaveBalance.leaveTypeId, app.leaveTypeId),
-            eq(employeeLeaveBalance.year, year)
-          )
-        );
-      if (balance) {
-        await ctx.db.raw
-          .update(employeeLeaveBalance)
+      await ctx.db.transaction(async (trx) => {
+        await trx.raw
+          .update(leaveApplications)
           .set({
-            pendingDays: String(Math.max(0, parseFloat(balance.pendingDays) - days)),
+            status: 'REJECTED',
+            rejectedBy: userId,
+            rejectedAt: new Date(),
+            rejectionReason: body.data.rejectionReason,
             updatedAt: new Date(),
           })
-          .where(eq(employeeLeaveBalance.id, balance.id));
-      }
+          .where(eq(leaveApplications.id, id));
 
-      const [rejectedEmp] = await ctx.db.raw
-        .select({ displayName: employees.displayName })
-        .from(employees)
-        .where(eq(employees.id, app.employeeId));
-      await ctx.events.publish('leave_application', id, 'LEAVE_REJECTED', {
-        leaveApplicationId: id,
-        employeeId: app.employeeId,
-        employeeName: rejectedEmp?.displayName,
-        startDate: app.startDate,
-        endDate: app.endDate,
-        status: 'REJECTED',
-        tenantId,
+        const [balance] = await trx.raw
+          .select()
+          .from(employeeLeaveBalance)
+          .where(
+            and(
+              eq(employeeLeaveBalance.tenantId, tenantId),
+              eq(employeeLeaveBalance.employeeId, app.employeeId),
+              eq(employeeLeaveBalance.leaveTypeId, app.leaveTypeId),
+              eq(employeeLeaveBalance.year, year)
+            )
+          );
+        if (balance) {
+          await trx.raw
+            .update(employeeLeaveBalance)
+            .set({
+              pendingDays: String(Math.max(0, parseFloat(balance.pendingDays) - days)),
+              updatedAt: new Date(),
+            })
+            .where(eq(employeeLeaveBalance.id, balance.id));
+        }
+
+        const [rejectedEmp] = await trx.raw
+          .select({ displayName: employees.displayName })
+          .from(employees)
+          .where(eq(employees.id, app.employeeId));
+        const eventBus = new PlatformEventBus(trx, tenantId, userId, ctx.tenant.correlationId);
+        await eventBus.publishInTransaction('leave_application', id, 'LEAVE_REJECTED', {
+          leaveApplicationId: id,
+          employeeId: app.employeeId,
+          employeeName: rejectedEmp?.displayName,
+          startDate: app.startDate,
+          endDate: app.endDate,
+          status: 'REJECTED',
+          tenantId,
+        });
       });
       await ctx.audit.log({
         action: 'UPDATE',
@@ -503,59 +520,62 @@ export async function leaveRoutes(
       const year = new Date(app.startDate).getFullYear();
       const wasApproved = app.status === 'APPROVED';
 
-      await ctx.db.raw
-        .update(leaveApplications)
-        .set({
-          status: 'CANCELLED',
-          cancelledBy: userId,
-          cancelledAt: new Date(),
-          updatedAt: new Date(),
-        })
-        .where(eq(leaveApplications.id, id));
+      await ctx.db.transaction(async (trx) => {
+        await trx.raw
+          .update(leaveApplications)
+          .set({
+            status: 'CANCELLED',
+            cancelledBy: userId,
+            cancelledAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .where(eq(leaveApplications.id, id));
 
-      const [balance] = await ctx.db.raw
-        .select()
-        .from(employeeLeaveBalance)
-        .where(
-          and(
-            eq(employeeLeaveBalance.tenantId, tenantId),
-            eq(employeeLeaveBalance.employeeId, app.employeeId),
-            eq(employeeLeaveBalance.leaveTypeId, app.leaveTypeId),
-            eq(employeeLeaveBalance.year, year)
-          )
-        );
-      if (balance) {
-        if (wasApproved) {
-          await ctx.db.raw
-            .update(employeeLeaveBalance)
-            .set({
-              usedDays: String(Math.max(0, parseFloat(balance.usedDays) - days)),
-              updatedAt: new Date(),
-            })
-            .where(eq(employeeLeaveBalance.id, balance.id));
-        } else {
-          await ctx.db.raw
-            .update(employeeLeaveBalance)
-            .set({
-              pendingDays: String(Math.max(0, parseFloat(balance.pendingDays) - days)),
-              updatedAt: new Date(),
-            })
-            .where(eq(employeeLeaveBalance.id, balance.id));
+        const [balance] = await trx.raw
+          .select()
+          .from(employeeLeaveBalance)
+          .where(
+            and(
+              eq(employeeLeaveBalance.tenantId, tenantId),
+              eq(employeeLeaveBalance.employeeId, app.employeeId),
+              eq(employeeLeaveBalance.leaveTypeId, app.leaveTypeId),
+              eq(employeeLeaveBalance.year, year)
+            )
+          );
+        if (balance) {
+          if (wasApproved) {
+            await trx.raw
+              .update(employeeLeaveBalance)
+              .set({
+                usedDays: String(Math.max(0, parseFloat(balance.usedDays) - days)),
+                updatedAt: new Date(),
+              })
+              .where(eq(employeeLeaveBalance.id, balance.id));
+          } else {
+            await trx.raw
+              .update(employeeLeaveBalance)
+              .set({
+                pendingDays: String(Math.max(0, parseFloat(balance.pendingDays) - days)),
+                updatedAt: new Date(),
+              })
+              .where(eq(employeeLeaveBalance.id, balance.id));
+          }
         }
-      }
 
-      const [cancelledEmp] = await ctx.db.raw
-        .select({ displayName: employees.displayName })
-        .from(employees)
-        .where(eq(employees.id, app.employeeId));
-      await ctx.events.publish('leave_application', id, 'LEAVE_CANCELLED', {
-        leaveApplicationId: id,
-        employeeId: app.employeeId,
-        employeeName: cancelledEmp?.displayName,
-        startDate: app.startDate,
-        endDate: app.endDate,
-        status: 'CANCELLED',
-        tenantId,
+        const [cancelledEmp] = await trx.raw
+          .select({ displayName: employees.displayName })
+          .from(employees)
+          .where(eq(employees.id, app.employeeId));
+        const eventBus = new PlatformEventBus(trx, tenantId, userId, ctx.tenant.correlationId);
+        await eventBus.publishInTransaction('leave_application', id, 'LEAVE_CANCELLED', {
+          leaveApplicationId: id,
+          employeeId: app.employeeId,
+          employeeName: cancelledEmp?.displayName,
+          startDate: app.startDate,
+          endDate: app.endDate,
+          status: 'CANCELLED',
+          tenantId,
+        });
       });
       await ctx.audit.log({
         action: 'UPDATE',
@@ -599,10 +619,12 @@ export async function leaveRoutes(
         userId,
         correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
       });
-      const q = request.query as { startDate?: string; endDate?: string; employeeId?: string };
+      const query = LeaveApplicationsQuerySchema.safeParse(request.query);
+      if (!query.success)
+        throw new ValidationError(query.error.errors.map((e) => e.message).join('; '));
+      const q = query.data;
       const conditions = [eq(leaveApplications.tenantId, tenantId)];
-      if (q.employeeId)
-        conditions.push(eq(leaveApplications.employeeId, parseInt(q.employeeId, 10)));
+      if (q.employeeId) conditions.push(eq(leaveApplications.employeeId, q.employeeId));
       if (q.startDate) conditions.push(gte(leaveApplications.endDate, q.startDate));
       if (q.endDate) conditions.push(lte(leaveApplications.startDate, q.endDate));
       const rows = await ctx.db.raw

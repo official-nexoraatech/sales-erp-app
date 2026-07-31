@@ -99,15 +99,6 @@ export default function StockValuationPage() {
   const totalStockValue = rows.reduce((sum, r) => sum + r.totalValue, 0);
   const warehouses: Warehouse[] = (whData as { content?: Warehouse[] })?.content ?? [];
 
-  const footer = (
-    <>
-      <td className="px-3 py-2 text-primary" colSpan={5}>
-        TOTAL STOCK VALUE
-      </td>
-      <td className="px-3 py-2 text-right font-mono">{fmt(totalStockValue)}</td>
-    </>
-  );
-
   return (
     <ERPErrorBoundary>
       <div className="space-y-4">
@@ -128,7 +119,7 @@ export default function StockValuationPage() {
         />
 
         <div className="flex flex-wrap gap-3 p-4 bg-surface-card border border-default rounded-xl">
-          <div className="w-64">
+          <div className="w-64" data-tour-id="inventory-valuation-warehouse-filter">
             <Select
               label="Filter by Warehouse"
               value={warehouseId}
@@ -144,13 +135,25 @@ export default function StockValuationPage() {
           </div>
         </div>
 
+        {rows.length > 0 && (
+          <div className="flex items-center gap-2 px-4 py-2 rounded-lg bg-surface-subtle text-sm text-secondary">
+            Total Stock Value:{' '}
+            <span className="font-mono text-primary font-medium">{fmt(totalStockValue)}</span>
+          </div>
+        )}
+
         <ERPDataGrid<StockValuationRow>
           columns={COLUMNS}
           data={rows}
           isLoading={isLoading}
           rowKey={(r) => r.itemId}
           density="compact"
-          footer={footer}
+          // This report has no server-side pagination — a large tenant's full stock-on-hand
+          // renders in one response, so the grid virtualizes rows instead of mounting all of
+          // them at once (see WEB-FRONTEND-AUDIT-2026-07-24.md, High #4). Virtualized mode
+          // doesn't support a table `footer`; the total now shows in the strip above instead.
+          virtualized
+          virtualizedHeight={560}
         />
       </div>
     </ERPErrorBoundary>

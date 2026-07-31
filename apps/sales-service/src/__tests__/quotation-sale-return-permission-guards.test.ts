@@ -137,6 +137,56 @@ describe('POST /quotations — requireAnyPermission([QUOTATION_CREATE, INVOICE_C
   });
 });
 
+// H-5 fix: this ceiling was previously enforced only in POS (pos.routes.ts) — a plain
+// QUOTATION_CREATE holder could apply a 100% line discount with no manager approval.
+const VALID_QUOTATION_BODY = {
+  customerId: 1,
+  branchId: 1,
+  placeOfSupply: 'MH',
+  sellerStateCode: 'MH',
+  validUntil: '2026-12-31T00:00:00.000Z',
+  lines: [{ itemId: 1, quantity: 1, unitPrice: 100, gstRate: 18 }],
+};
+
+describe('DISCOUNT_OVERRIDE guard on POST /quotations', () => {
+  let app: FastifyInstance;
+  beforeAll(async () => {
+    app = Fastify({ logger: false });
+    await quotationRoutes(app, mockCtxFactory);
+  });
+  afterAll(() => app.close());
+
+  it('returns 403 when a >10% line discount is submitted without DISCOUNT_OVERRIDE', async () => {
+    const token = await makeToken([PERMISSIONS.QUOTATION_CREATE]);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/quotations',
+      headers: { Authorization: `Bearer ${token}` },
+      payload: {
+        ...VALID_QUOTATION_BODY,
+        lines: [{ itemId: 1, quantity: 1, unitPrice: 100, gstRate: 18, discountPct: 50 }],
+      },
+    });
+    expect(res.statusCode).toBe(403);
+    const body = JSON.parse(res.body) as { error: { code: string } };
+    expect(body.error.code).toBe('DISCOUNT_LIMIT_EXCEEDED');
+  });
+
+  it('does not return 403 for a >10% line discount when the caller has DISCOUNT_OVERRIDE', async () => {
+    const token = await makeToken([PERMISSIONS.QUOTATION_CREATE, PERMISSIONS.DISCOUNT_OVERRIDE]);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/quotations',
+      headers: { Authorization: `Bearer ${token}` },
+      payload: {
+        ...VALID_QUOTATION_BODY,
+        lines: [{ itemId: 1, quantity: 1, unitPrice: 100, gstRate: 18, discountPct: 50 }],
+      },
+    });
+    expect(res.statusCode).not.toBe(403);
+  });
+});
+
 describe('GET /sale-returns — requireAnyPermission([SALE_RETURN_VIEW, INVOICE_VIEW])', () => {
   let app: FastifyInstance;
   beforeAll(async () => {

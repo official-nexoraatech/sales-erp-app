@@ -1,4 +1,5 @@
 # Global Search (Elasticsearch) Completion Report
+
 **Date:** 2026-07-05
 **Status:** COMPLETE
 
@@ -88,7 +89,7 @@ permission. The second pass fixed that source bug directly: added a new `GRN_UPD
 `role-defaults.ts` (OWNER/ADMIN/SUPER_ADMIN get it automatically via their full-permission
 spread), backfilled existing tenants via migration
 `0030_grn_update_permission_backfill.sql`, and rewrote `attachment.routes.ts` so each route
-checks the permission matching the attachment's *actual* `entityType` — `PO_VIEW`/`PO_UPDATE`
+checks the permission matching the attachment's _actual_ `entityType` — `PO_VIEW`/`PO_UPDATE`
 for `PURCHASE_ORDER`, `GRN_VIEW`/`GRN_UPDATE` for `GRN` — rather than one permission for both.
 Upload/list know `entityType` from the request (multipart field / query param) before doing any
 work; download/delete only learn it after looking up the row (`PlatformAttachments.get(id)`,
@@ -226,9 +227,11 @@ pickers are lower-traffic and left for a follow-up pass.
       exists yet — this codebase is still pre-launch, per current project state)
 - [ ] Elasticsearch cluster provisioned and reachable from search-service in the target
       environment (`ELASTICSEARCH_URL` / API key env vars)
-- [ ] Per-tenant ES indices created for every existing tenant
-      (`POST /admin/search/indices/:tenantId` or equivalent bulk script) before first use —
-      new tenants get theirs created automatically at tenant-provisioning time
+- [x] Per-tenant ES indices created for every existing tenant — **was never actually true until
+      2026-07-19** (see Production-Readiness Audit below); "new tenants get theirs created
+      automatically at tenant-provisioning time" was also false until this session. Verify
+      again against the target environment's own ES cluster before go-live — this checklist
+      item was previously marked done from code inspection alone, never from a live cluster.
 - [ ] `search-service-group` Kafka consumer confirmed consuming all topics in
       `SEARCH_SYNC_TOPICS` in the target environment (check consumer lag)
 - [ ] `search.full-reindex` and `search.incremental-sync` scheduled jobs confirmed registered
@@ -238,3 +241,209 @@ pickers are lower-traffic and left for a follow-up pass.
 - [x] CI pipeline runs the Playwright E2E smoke suite (`e2e` job in
       `.github/workflows/ci.yml`, installs chromium + runs `pnpm test:e2e` against
       `apps/web-frontend`)
+
+## Production-Readiness Audit — 2026-07-19
+
+Full audit against a **real, live Elasticsearch 8.17 + Kafka + Postgres stack** (this repo's
+`docker-compose.yml`), not mocked `fetch`/Kafka like every prior verification of this feature.
+This is the first time this feature was ever exercised against a real cluster, and it surfaced
+four real bugs — the first two meant **every tenant's search index, for every entity, forever,
+had silently never been created with its intended mapping**:
+
+1. **CRITICAL — `index.max_ngram_diff` violation broke every index creation call, always.**
+   `ERP_ANALYSIS_SETTINGS`'s `erp_ngram_tokenizer` spans `min_gram: 3` to `max_gram: 12` (a diff
+   of 9), but Elasticsearch's default `index.max_ngram_diff` is `1`. Every
+   `createTenantIndices()`/`fullReindex()` PUT, for every entity, for every tenant, returned
+   HTTP 400 `illegal_argument_exception` — the entire documented analyzer/synonym/ngram/fuzzy
+   relevance model had **never once been active** for a single tenant. Fixed by adding
+   `max_ngram_diff: 9` to `ERP_ANALYSIS_SETTINGS` in `SearchEngine.ts`.
+2. **CRITICAL — a logging bug masked bug #1 completely.** The success/failure branch treated
+   _any_ 400 response as "index already exists, fine" (`status !== 400`) instead of checking
+   specifically for `resource_already_exists_exception`. Every failed creation logged "ES index
+   created" at info level — there was no way to have noticed bug #1 from logs alone. Fixed via
+   a new `isIndexAlreadyExistsError()` helper checking `error.type` specifically, applied to
+   both `createTenantIndices()` and `fullReindex()` (the latter's PUT result wasn't checked at
+   all before this fix).
+3. **CRITICAL — tenant provisioning never created real indices.**
+   `TenantProvisioner.createEsIndices()` (tenant-service) hand-rolled its own direct
+   Elasticsearch PUT calls for only 5 of the 30 entities, under **plural** index names
+   (`customers`/`items`/`invoices`/`suppliers`/`employees`) that predate a rename to singular
+   entity names elsewhere in the codebase, with a simpler/different analyzer — completely
+   disconnected from `SearchEngine.ENTITY_MAPPINGS`, the actual source of truth. Confirmed live:
+   every tenant had these 5 legacy indices sitting empty, while real documents (via Kafka events
+   calling `SearchEngine.index()`) fell through to ES's auto-create-index default — no custom
+   analyzers, wrong field types inferred from JSON (e.g. `creditLimit`/`tenantId` as `text`
+   instead of `double`/`keyword`), and an un-intended default replica count. Fixed by adding
+   `POST /internal/search/create-tenant-indices` to search-service's internal routes (same
+   internal-key-gated convention as reindex/bulk-index) and having `TenantProvisioner` call it
+   instead of touching Elasticsearch directly — matching this codebase's "only the owning
+   service touches its own store" convention. **Cluster-wide cleanup performed this session**:
+   deleted all ~150 orphaned/mis-mapped/stray indices across the dev cluster's 17 real tenants
+   (plus stray `erp_90xxxx_payment` indices from unrelated test-tenant-ID pollution) and
+   recreated all 510 (17 tenants × 30 entities) correctly — cluster health green, 0 unassigned
+   shards, `replicas: 0` as designed. **A fresh backfill/reindex is still required in every
+   other environment** (staging/prod, once they exist) after this fix deploys — this cleanup was
+   dev-cluster-only and this codebase is pre-launch with no real tenant data at stake.
+4. **HIGH — unbounded `from` param crashes past page ~500.** `GET /search`'s Zod schema
+   capped `size` at 100 but put no ceiling on `from` — a caller paging past result 10,000 (very
+   plausible at ERP scale: browsing an unfiltered list of millions of invoices) got
+   Elasticsearch's raw `illegal_argument_exception` (`index.max_result_window`) bubbling up as
+   an opaque 500 instead of a clean 400. Fixed by capping `from` at 9900 in `SearchQuerySchema`
+   (`9900 + size's max of 100 = 10000`). Deep result sets need the scroll/`search_after` API,
+   not `from`/`size` — out of scope here; this just turns an ugly crash into an honest "narrow
+   your search" 400.
+
+**Live-verified after fixes** (real ES 8.17, real Postgres rows for tenant 2, real HTTP calls
+through `GET /search` with RS256 JWTs, not mocks):
+
+- Synonym expansion ("cloth" → matches "Textile"), ngram partial substring match, and fuzzy
+  typo tolerance all now genuinely work against indexed data — none of the three ever worked
+  before this session, per bugs #1–#3 above.
+- Numeric fields (`creditLimit`) now correctly typed `double`, not `text`.
+- RBAC entity-permission gating (403 on missing `*_VIEW`) and untyped global-search filtering
+  (silently drops ungranted entities) both hold under real requests.
+- Cross-tenant isolation confirmed with two real signed JWTs (tenant 2 vs. tenant 34) — a
+  query that matches tenant 2's real customer data returns zero hits under tenant 34's token.
+- Unicode/emoji and an ES-query-injection-shaped payload (`'; DROP TABLE customers;--`) both
+  handled safely — the query text is always a JSON value inside `multi_match`, never
+  string-concatenated into a DSL string, so there's no ES-query-injection surface here.
+- Bounded load test: 25,000 synthetic item documents bulk-indexed in ~9.3s (~2,700 docs/sec,
+  single-node dev cluster, `BATCH_SIZE: 500`). Query p50/p95 latency on that volume: exact match
+  33/86ms, ngram partial 36/42ms, fuzzy typo 19/22ms, sorted-by-numeric-field 30/186ms — all
+  well under the 300ms budget this feature's own analytics dashboard warns above. This is a
+  single-node dev-cluster measurement at 25K records, **not** a production capacity benchmark —
+  real "millions of records / 500 concurrent users" sizing needs a proper multi-node ES cluster
+  test, which needs dedicated infrastructure this session didn't have.
+
+**Not exercised this session** (flagged, not fixed): a true concurrent-user load test (500
+simultaneous searchers), the scheduler-service `search.full-reindex`/`search.incremental-sync`
+cron jobs against a live run (no scheduler-service process was started), and the Playwright E2E
+suite re-run against the now-fixed backend (it already ran mocked at the HTTP boundary per the
+original Testing section above; a live re-run was out of scope for this pass).
+
+## Enterprise Audit + Fix Pass — 2026-07-23
+
+Full architecture/gap-analysis review of the entire search feature (indexing, query engine,
+ranking, filters/facets, event-driven sync, multi-tenancy, security, performance, monitoring,
+audit, API surface, integration with all 7 owning services) before any code was touched, per
+this session's explicit "no assumptions, present findings first" instruction. Six findings were
+selected by the user for fixes (out of a larger list — see "Findings not fixed" below); all six
+were implemented, unit-tested, and live-verified against this repo's real Elasticsearch 8.17 +
+Kafka + Postgres stack (tenant 2, the existing "QA E2E Test Co" tenant), not just mocks.
+
+### 1. CRITICAL — the `stock` entity had zero indexing path; fixed, now event-driven
+
+`stock` (per-warehouse item quantity) had a full ES mapping, permission (`STOCK_VIEW`), and
+index provisioned for every tenant — but no event anywhere ever indexed a document into it, and
+scheduler-service's backfill explicitly excluded it ("a running balance, not a discrete row").
+`GET /search?entity=stock` always silently returned zero results. It was also absent from the
+frontend's entity config, so no UI ever surfaced it either.
+
+**Fix:** `InventoryLedgerService.upsertProjection()` (the single funnel every stock movement —
+GRN receipt, sale, adjustment, transfer — already passes through to update
+`projection_stock_level`) now also publishes a `STOCK_LEVEL_CHANGED` outbox event with the
+post-movement absolute quantity plus denormalized item/warehouse names (two lightweight
+indexed-PK lookups, the same order of magnitude of DB cost the valuation calls on this same
+path already incur). `eventEntityMap.ts` gained an `idFromPayload` extension point (every other
+entity keeps the default `aggregateId`-based id) since `stock`'s natural key is
+`item × warehouse × variant`, not a single row id. Added a real backfill/reindex source
+(`GET /internal/search-sync/stock` in inventory-service, joining `projection_stock_level` with
+`items`/`warehouses`) — the "not a discrete row" rationale for excluding it from backfill turned
+out to be incorrect; it's exactly as row-based as everything else the backfill job already
+covers. Wired `stock` into the frontend's `SEARCH_ENTITY_CONFIG` (routes to `/inventory/stock`,
+the existing Stock Levels page).
+
+**Live-verified:** real `addStock()` call against tenant 2 (item "Cotton Saree", warehouse "QA
+E2E Warehouse") produced a correct `STOCK_LEVEL_CHANGED` outbox row and updated
+`projection_stock_level`; a live bulk-index + `GET /search?entity=stock&q=cotton` against real
+ES returned the document with correct highlighting; search-service's real Kafka consumer group
+confirmed subscribed to the new `erp.stock.level.changed` topic.
+
+### 2. Zod validation added to `internal.routes.ts`
+
+Unlike every JWT-gated route in this service, the internal-key-gated routes (used by
+scheduler-service and tenant-service, which have no JWT to validate against) took
+`tenantId`/`entity`/`documents` straight off `request.body` with zero schema — a missing
+`tenantId` would have silently built an ES index name like `erp_undefined_item`. Added Zod
+schemas matching the rest of the codebase's convention. Live-verified: a request with a missing
+`tenantId` now returns `422 VALIDATION_ERROR` instead of corrupting an index name.
+
+### 3. Route-level rate-limit override for `/search` and `/search/suggest`
+
+The platform-wide global rate limiter is effectively IP-keyed, not tenant-keyed, for every
+service including this one (a documented, pre-existing platform-wide characteristic — see
+`packages/platform-sdk/src/rate-limit.ts`'s own comment: a globally-registered limiter runs at
+`onRequest`, before any route's `authenticate` preHandler populates `request.auth`). At 200/min,
+this is tuned for occasional admin/CRUD traffic, not a command palette firing a request on every
+300ms-debounced keystroke for every logged-in user — a handful of concurrent users behind one
+office IP could exhaust it inside a minute of normal typing. Raised the ceiling to 600/min for
+these two specific, cheap, read-only, legitimately-high-frequency routes rather than building
+true tenant-aware keying (which would require re-verifying the JWT a second time before
+`authenticate` runs, since `@fastify/rate-limit`'s key generator also executes at `onRequest`) —
+a deliberate scope call, documented inline at both call sites.
+
+### 4. Search-specific Prometheus metrics
+
+Investigation found the "DLQ backlog" metric gap I initially flagged was already solved
+platform-wide: `erp_dlq_depth` (event-service's `OutboxRelayWorker.refreshGauges()`) queries
+`dlq_items` ungrouped by consumer, so it already reflects search-service's own dead-letter
+entries — no new code needed there. What was genuinely missing: `erp_search_sync_failure_total`
+(consumer sync failures by event type — depth alone hides history once an item is
+retried/discarded) and `erp_search_reindex_total` (documents processed by reindex/bulk-index, by
+entity and outcome) — both previously visible only in service logs. Live-verified present in
+`/metrics` output after a real service boot.
+
+### 5. Audit logging for destructive admin routes
+
+`DELETE /admin/search/indices` (wipes every index for a tenant), `POST /admin/search/reindex/:entity`,
+`POST /admin/search/bulk-index`, and `POST /admin/search/indices` previously left no audit trail
+at all, unlike every other admin/destructive action in this codebase. Added
+`PlatformAuditLogger` calls (best-effort, never blocks the actual action on a logging failure).
+Live-verified: a real `POST /admin/search/indices` call against tenant 2 produced a genuine
+`audit_log` row (`action: CREATE_INDICES, entity_type: search_index, tenant_id: 2, user_id: 1`).
+
+### 6. Real per-entity result-count aggregation (facets)
+
+An untyped, multi-entity search's palette group headers previously showed no count at all, and
+implicitly could only ever reflect whatever fraction of one flat, `size`-capped, combined-
+relevance page happened to be each type — a high-volume but lower-BM25-scored entity could be
+entirely invisible despite having real matches. Added an ES `terms` aggregation on the `_index`
+metadata field (only for multi-index searches; a single-`entity` search already has an exact
+`total`), parsed into `SearchResult.entityCounts`, surfaced in the command palette as a
+"N total" badge on any group whose real total exceeds what's actually rendered. Live-verified:
+a real multi-entity search for "cotton" against tenant 2 returned
+`entityCounts: {customer: 17, stock: 1}`.
+
+### Findings surfaced but not fixed (out of this pass's approved scope)
+
+- No real per-entity result-allocation strategy beyond the new count display — a single flat
+  top-N query across all permitted indices, sorted by combined BM25 score, is still how the
+  actual returned page is chosen; a very differently-scored entity's matches can still be
+  under-represented in the visible rows even though the count badge now reveals when this
+  happens.
+- `attachment` still has no backfill/reindex source (deliberate, pre-existing — no
+  owning-entity listing endpoint built for it) — real-time Kafka indexing is its only path, so a
+  DLQ'd attachment event has no full-reindex safety net, unlike every other entity now including
+  `stock`.
+- `search_analytics.query` has no trigram (GIN) index for `/search/suggest`'s `similarity()`
+  call — fine at current per-tenant analytics volume, worth a follow-up if that table grows very
+  large for a single tenant.
+- True horizontal scaling (multi-node ES cluster, shard/replica strategy beyond the current
+  single-shard/zero-replica dev-cluster default) was out of scope — this pre-launch codebase has
+  no production ES cluster to size against yet (see `[[project_dev_phase_no_data]]`).
+
+### Testing
+
+- 3 new/expanded search-service test files (`search-engine-entity-counts.test.ts` new;
+  `search-internal-reindex-authz.test.ts` and `search-admin-authz.test.ts` extended) — 85 tests
+  total in the package, all green.
+- `inventory-service`'s `ledger-service.test.ts` updated for the new outbox-publish DB calls in
+  `upsertProjection()` — 6 tests green (2 pre-existing, unrelated test-file failures in that
+  package, confirmed present on a clean `git stash` baseline before any of this session's
+  changes, are out of scope for this pass).
+- `web-frontend`'s `ERPCommandPalette.test.tsx` extended with an entity-counts badge test — 11
+  tests green.
+- Full `tsc --noEmit` clean across search-service, inventory-service, scheduler-service,
+  web-frontend, `@erp/logger`, `@erp/types`.
+- Live end-to-end verification against the real docker-compose stack (Postgres/Kafka/
+  Elasticsearch), documented per-fix above — not just mocked unit tests.

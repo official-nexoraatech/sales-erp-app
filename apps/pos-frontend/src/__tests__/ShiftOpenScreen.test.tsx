@@ -9,6 +9,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { setTokens } from '../auth.js';
 import { getActiveSessionId } from '../session.js';
 import { setSelectedBranch } from '../branchStore.js';
+import { getCachedSellerStateCode } from '../orgStore.js';
 import ShiftOpenScreen from '../ShiftOpenScreen.js';
 import { runAxe, formatViolations } from '../testUtils/axe.js';
 
@@ -65,6 +66,39 @@ describe('ShiftOpenScreen', () => {
     await waitFor(() => expect(openBody).not.toBeNull());
     expect(openBody).toEqual({ branchId: 1, warehouseId: 10, openingCash: 2000 });
     expect(getActiveSessionId()).toBe(55);
+  });
+
+  it('caches the seller GST state code from the tenant GSTIN right after opening a shift', async () => {
+    // Regression: a brand-new device that had never completed POSScreen's own org-info
+    // fetch used to reach salePayload() with no cached state code at all, falling back to a
+    // hardcoded '27' (Maharashtra) — the same wrong-state bug this cache was built to fix,
+    // just narrowed to this bootstrap window. Opening a shift is inherently online, so it's
+    // the natural point to guarantee this is cached before POSScreen is ever reached.
+    setTokens(fakeJwt({ tenantId: 1, branchIds: [1] }), 'refresh-1');
+    setSelectedBranch(1, 10);
+    expect(getCachedSellerStateCode()).toBeNull();
+
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      const u = String(url);
+      if (u.includes('/pos/sessions/open') && init?.method === 'POST') {
+        return Promise.resolve(jsonResponse(201, { data: { id: 55, sessionNumber: 'POS-1-55' } }));
+      }
+      if (u.includes('/organization')) {
+        return Promise.resolve(jsonResponse(200, { data: { gstin: '09ABCDE1234F1Z5' } }));
+      }
+      return Promise.resolve(jsonResponse(200, { data: [] }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderShiftOpen();
+
+    const openingCashInput = await screen.findByLabelText(/Opening Cash/);
+    fireEvent.change(openingCashInput, { target: { value: '2000' } });
+    const submitButton = screen.getByRole('button', { name: 'Open Shift' });
+    await waitFor(() => expect(submitButton).not.toBeDisabled());
+    fireEvent.click(submitButton);
+
+    await waitFor(() => expect(getCachedSellerStateCode()).toBe('09'));
   });
 
   it('disables submission when no branch/warehouse has been persisted', async () => {

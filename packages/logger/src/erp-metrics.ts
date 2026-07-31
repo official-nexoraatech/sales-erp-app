@@ -24,19 +24,25 @@ import {
   type Registry,
 } from 'prom-client';
 
-function getOrCreateCounter<T extends string>(config: ConstructorParameters<typeof Counter<T>>[0]): Counter<T> {
+function getOrCreateCounter<T extends string>(
+  config: ConstructorParameters<typeof Counter<T>>[0]
+): Counter<T> {
   const existing = register.getSingleMetric(config.name);
   if (existing) return existing as Counter<T>;
   return new Counter(config);
 }
 
-function getOrCreateGauge<T extends string>(config: ConstructorParameters<typeof Gauge<T>>[0]): Gauge<T> {
+function getOrCreateGauge<T extends string>(
+  config: ConstructorParameters<typeof Gauge<T>>[0]
+): Gauge<T> {
   const existing = register.getSingleMetric(config.name);
   if (existing) return existing as Gauge<T>;
   return new Gauge(config);
 }
 
-function getOrCreateHistogram<T extends string>(config: ConstructorParameters<typeof Histogram<T>>[0]): Histogram<T> {
+function getOrCreateHistogram<T extends string>(
+  config: ConstructorParameters<typeof Histogram<T>>[0]
+): Histogram<T> {
   const existing = register.getSingleMetric(config.name);
   if (existing) return existing as Histogram<T>;
   return new Histogram(config);
@@ -86,8 +92,12 @@ export const erpSagaCompensationTotal = getOrCreateCounter({
 
 export const erpDlqDepth = getOrCreateGauge({
   name: 'erp_dlq_depth',
-  help: 'Number of events in the dead-letter queue (publish failures after max retries)',
-  labelNames: ['event_type'],
+  help: 'Number of PENDING events in the dead-letter queue, by topic',
+  // Labeled by 'topic' (not 'event_type') to match the existing DLQDepthHigh alert rule
+  // (`sum(erp_dlq_depth) by (topic)`) and the erp-hardening Grafana panel's legendFormat
+  // ("{{ topic }}") in infrastructure/docker/prometheus/alert-rules.yml — both were already
+  // written against this label name before this gauge was ever set anywhere.
+  labelNames: ['topic'],
 });
 
 export const erpOutboxPendingCount = getOrCreateGauge({
@@ -169,6 +179,52 @@ export const erpReplicaFallbackTotal = getOrCreateCounter({
   labelNames: ['service'],
 });
 
+// ─── Scheduled job metrics (scheduler-service JobRegistry) ─────────────────
+// Until now, none of scheduler-service's 44 registered cron jobs emitted any metric at all —
+// job success/failure/duration was only ever visible in service logs, not Prometheus/Grafana/
+// Alertmanager, unlike every other subsystem in this file. tenant_id is deliberately NOT a
+// label here (unlike erpInvoiceCreateTotal etc.) — job_name × status is already ~130+ series
+// across 44 jobs, and multiplying that by tenant count risks real cardinality blowup for
+// tenant-scoped jobs that run once per active tenant.
+
+export const erpJobExecutionTotal = getOrCreateCounter({
+  name: 'erp_job_execution_total',
+  help: 'Total scheduled job executions by outcome',
+  labelNames: ['job_name', 'status'], // status: 'completed' | 'failed' | 'skipped'
+});
+
+export const erpJobDurationSeconds = getOrCreateHistogram({
+  name: 'erp_job_duration_seconds',
+  help: 'Duration of scheduled job executions in seconds',
+  labelNames: ['job_name'],
+  buckets: [0.1, 0.5, 1, 5, 15, 30, 60, 300, 900],
+});
+
+export const erpJobLastSuccessTimestamp = getOrCreateGauge({
+  name: 'erp_job_last_success_timestamp',
+  help: 'Unix timestamp of the last successful completion of a scheduled job',
+  labelNames: ['job_name'],
+});
+
+// ─── Search-service metrics ─────────────────────────────────────────────────
+// Search-service's DLQ entries already surface through the shared erpDlqDepth gauge above
+// (dlq_items isn't scoped by consumer, so event-service's OutboxRelayWorker.refreshGauges()
+// already counts them) — these two are what that shared gauge can't show: failure *rate* by
+// event type (a DLQ item disappears once retried/discarded, so depth alone hides history),
+// and reindex/bulk-index document outcomes, both previously visible only in service logs.
+
+export const erpSearchSyncFailureTotal = getOrCreateCounter({
+  name: 'erp_search_sync_failure_total',
+  help: 'Total search-index sync failures in the Kafka consumer, by event type',
+  labelNames: ['event_type'],
+});
+
+export const erpSearchReindexTotal = getOrCreateCounter({
+  name: 'erp_search_reindex_total',
+  help: 'Total documents processed by search-service reindex/bulk-index calls, by entity and outcome',
+  labelNames: ['entity', 'outcome'], // outcome: 'indexed' | 'failed'
+});
+
 // ─── Bootstrap helper ────────────────────────────────────────────────────────
 
 /**
@@ -176,10 +232,7 @@ export const erpReplicaFallbackTotal = getOrCreateCounter({
  * and register ERP metrics on the given registry (or the default global registry).
  * Call once per service at startup.
  */
-export function initializeErpMetrics(
-  serviceName: string,
-  registry?: Registry
-): void {
+export function initializeErpMetrics(serviceName: string, registry?: Registry): void {
   const config: Parameters<typeof collectDefaultMetrics>[0] = {
     labels: {
       service: serviceName,

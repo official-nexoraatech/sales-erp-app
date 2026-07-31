@@ -2,6 +2,19 @@
 import type { ErpDatabase, ReplicaRouter } from '@erp/db';
 import type Redis from 'ioredis';
 import { TenantScopedCache } from '@erp/sdk';
+import { decryptField } from '@erp/utils/server';
+import { requireEnv } from '@erp/config';
+
+// payroll_slips' component/gross/net columns are AES-256-GCM ciphertext (2026-07-20 HR audit,
+// G5) — raw SQL can't decrypt them, so HR reports that touch salary figures fetch ciphertext
+// and decrypt here before returning rows. Never throws on a plain/legacy value: decryptField
+// itself requires the iv:authTag:ciphertext format, so this only ever runs against real
+// ciphertext produced by encryptField.
+function decryptAmount(ciphertext: string | null | undefined): number {
+  if (!ciphertext) return 0;
+  const encKey = requireEnv('FIELD_ENCRYPTION_KEY');
+  return parseFloat(decryptField(ciphertext, encKey)) || 0;
+}
 
 export interface ReportParams {
   fromDate?: string;
@@ -89,7 +102,11 @@ export class ReportEngine {
     };
   }
 
-  private async runQuery(slug: string, tenantId: number, params: ReportParams): Promise<ReportRow[]> {
+  private async runQuery(
+    slug: string,
+    tenantId: number,
+    params: ReportParams
+  ): Promise<ReportRow[]> {
     const db = this.replicaRouter ? await this.replicaRouter.forRead() : this.db;
     const tid = tenantId;
     const from = params.fromDate ?? params.date ?? params.asOfDate ?? '2000-01-01';
@@ -138,7 +155,7 @@ export class ReportEngine {
           LEFT JOIN customers c ON c.id = i.customer_id AND c.tenant_id = ${tid}
           WHERE i.tenant_id = ${tid}
             AND i.invoice_date BETWEEN ${from}::date AND ${to}::date
-            AND i.status != 'CANCELLED'
+            AND i.status NOT IN ('CANCELLED', 'DRAFT')
             AND (${params.branchId ?? null}::int IS NULL OR i.branch_id = ${params.branchId ?? null}::int)
           GROUP BY c.id, c.display_name, c.phone
           ORDER BY total_sales DESC
@@ -147,19 +164,21 @@ export class ReportEngine {
       }
 
       case 'sales-by-item': {
-        // ✓ tenant_id filtered — ES-05 audit
+        // FIXED: units has no `symbol` column (real: abbreviation); invoice_lines has no
+        // cost_price column at all — COGS is derived from items.wacc_cost (tenant-wide WACC),
+        // matching the same fallback used by stock-summary/dashboard.routes.ts elsewhere.
         const res = await db.execute(sql`
           SELECT
             it.item_code,
             it.name AS item_name,
             cat.name AS category,
             SUM(il.quantity) AS quantity_sold,
-            u.symbol AS unit,
+            u.abbreviation AS unit,
             SUM(il.line_total) AS revenue,
-            SUM(il.quantity * COALESCE(il.cost_price, 0)) AS cogs,
-            SUM(il.line_total) - SUM(il.quantity * COALESCE(il.cost_price, 0)) AS gross_profit,
+            SUM(il.quantity * COALESCE(it.wacc_cost, 0)) AS cogs,
+            SUM(il.line_total) - SUM(il.quantity * COALESCE(it.wacc_cost, 0)) AS gross_profit,
             CASE WHEN SUM(il.line_total) > 0 THEN
-              ROUND(((SUM(il.line_total) - SUM(il.quantity * COALESCE(il.cost_price, 0))) / SUM(il.line_total) * 100)::numeric, 2)
+              ROUND(((SUM(il.line_total) - SUM(il.quantity * COALESCE(it.wacc_cost, 0))) / SUM(il.line_total) * 100)::numeric, 2)
             ELSE 0 END AS gross_margin
           FROM invoice_lines il
           JOIN invoices i ON i.id = il.invoice_id AND i.tenant_id = ${tid}
@@ -168,10 +187,10 @@ export class ReportEngine {
           LEFT JOIN units u ON u.id = it.unit_id
           WHERE i.tenant_id = ${tid}
             AND i.invoice_date BETWEEN ${from}::date AND ${to}::date
-            AND i.status != 'CANCELLED'
+            AND i.status NOT IN ('CANCELLED', 'DRAFT')
             AND (${params.categoryId ?? null}::int IS NULL OR it.category_id = ${params.categoryId ?? null}::int)
             AND (${params.branchId ?? null}::int IS NULL OR i.branch_id = ${params.branchId ?? null}::int)
-          GROUP BY it.id, it.item_code, it.name, cat.name, u.symbol
+          GROUP BY it.id, it.item_code, it.name, cat.name, u.abbreviation
           ORDER BY revenue DESC
         `);
         return res as unknown as ReportRow[];
@@ -186,7 +205,7 @@ export class ReportEngine {
             JOIN invoices i ON i.id = il.invoice_id
             WHERE i.tenant_id = ${tid}
               AND i.invoice_date BETWEEN ${from}::date AND ${to}::date
-              AND i.status != 'CANCELLED'
+              AND i.status NOT IN ('CANCELLED', 'DRAFT')
           )
           SELECT
             COALESCE(cat.name, 'Uncategorized') AS category,
@@ -200,7 +219,7 @@ export class ReportEngine {
           LEFT JOIN categories cat ON cat.id = it.category_id
           WHERE i.tenant_id = ${tid}
             AND i.invoice_date BETWEEN ${from}::date AND ${to}::date
-            AND i.status != 'CANCELLED'
+            AND i.status NOT IN ('CANCELLED', 'DRAFT')
           GROUP BY cat.id, cat.name
           ORDER BY revenue DESC
         `);
@@ -219,7 +238,7 @@ export class ReportEngine {
           JOIN users u ON u.id = i.created_by AND u.tenant_id = ${tid}
           WHERE i.tenant_id = ${tid}
             AND i.invoice_date BETWEEN ${from}::date AND ${to}::date
-            AND i.status != 'CANCELLED'
+            AND i.status NOT IN ('CANCELLED', 'DRAFT')
           GROUP BY u.id, u.first_name, u.last_name
           ORDER BY revenue DESC
         `);
@@ -250,7 +269,7 @@ export class ReportEngine {
           WHERE i.tenant_id = ${tid}
             AND i.invoice_date <= ${asOf}::date
             AND (i.grand_total - COALESCE(i.paid_amount, 0)) > 0
-            AND i.status NOT IN ('CANCELLED', 'PAID')
+            AND i.status NOT IN ('CANCELLED', 'PAID', 'DRAFT')
             AND (${params.customerId ?? null}::int IS NULL OR i.customer_id = ${params.customerId ?? null}::int)
           ORDER BY days_bucket DESC, balance_due DESC
         `);
@@ -258,7 +277,8 @@ export class ReportEngine {
       }
 
       case 'customer-ledger': {
-        // ✓ tenant_id filtered — ES-05 audit
+        // FIXED: payments has no receipt_number (real: payment_number); credit_notes has no
+        // issued_date column at all (real: created_at).
         const res = await db.execute(sql`
           SELECT date, type, reference, debit, credit,
             SUM(debit - credit) OVER (ORDER BY date, id) AS balance
@@ -267,19 +287,19 @@ export class ReportEngine {
               i.grand_total AS debit, 0 AS credit, i.id
             FROM invoices i
             WHERE i.tenant_id = ${tid} AND i.customer_id = ${params.customerId ?? 0}::int
-              AND i.invoice_date BETWEEN ${from}::date AND ${to}::date AND i.status != 'CANCELLED'
+              AND i.invoice_date BETWEEN ${from}::date AND ${to}::date AND i.status NOT IN ('CANCELLED', 'DRAFT')
             UNION ALL
-            SELECT p.payment_date AS date, 'Payment' AS type, p.receipt_number AS reference,
+            SELECT p.payment_date AS date, 'Payment' AS type, p.payment_number AS reference,
               0 AS debit, p.amount AS credit, p.id
             FROM payments p
             WHERE p.tenant_id = ${tid} AND p.customer_id = ${params.customerId ?? 0}::int
               AND p.payment_date BETWEEN ${from}::date AND ${to}::date
             UNION ALL
-            SELECT cn.issued_date AS date, 'Credit Note' AS type, cn.credit_note_number AS reference,
+            SELECT cn.created_at::date AS date, 'Credit Note' AS type, cn.credit_note_number AS reference,
               0 AS debit, cn.amount AS credit, cn.id
             FROM credit_notes cn
             WHERE cn.tenant_id = ${tid} AND cn.customer_id = ${params.customerId ?? 0}::int
-              AND cn.issued_date BETWEEN ${from}::date AND ${to}::date
+              AND cn.created_at::date BETWEEN ${from}::date AND ${to}::date
           ) sub
           ORDER BY date, id
         `);
@@ -287,15 +307,16 @@ export class ReportEngine {
       }
 
       case 'payment-collection-report': {
-        // ✓ tenant_id filtered — ES-05 audit
+        // FIXED: payments has no receipt_number/reference_number columns (real:
+        // payment_number/transaction_reference) — aliased back to the registry's expected keys.
         const res = await db.execute(sql`
           SELECT
             p.payment_date::date AS payment_date,
-            p.receipt_number,
+            p.payment_number AS receipt_number,
             COALESCE(c.display_name, 'Walk-in') AS customer_name,
             p.payment_mode AS mode,
             p.amount,
-            p.reference_number AS reference
+            p.transaction_reference AS reference
           FROM payments p
           LEFT JOIN customers c ON c.id = p.customer_id AND c.tenant_id = ${tid}
           WHERE p.tenant_id = ${tid}
@@ -307,33 +328,36 @@ export class ReportEngine {
       }
 
       case 'credit-note-report': {
-        // ✓ tenant_id filtered — ES-05 audit
+        // FIXED: credit_notes has no issued_date column (real: created_at) and no reason
+        // column of its own — reason is derived from the linked sale_return when the credit
+        // note originated from a return, falling back to the freeform notes field otherwise.
         const res = await db.execute(sql`
           SELECT
             cn.credit_note_number,
-            cn.issued_date::date AS date,
+            cn.created_at::date AS date,
             COALESCE(c.display_name, 'Walk-in') AS customer_name,
-            cn.reason,
+            COALESCE(sr.reason, cn.notes) AS reason,
             cn.amount,
             cn.status
           FROM credit_notes cn
           LEFT JOIN customers c ON c.id = cn.customer_id AND c.tenant_id = ${tid}
+          LEFT JOIN sale_returns sr ON sr.id = cn.sale_return_id AND sr.tenant_id = ${tid}
           WHERE cn.tenant_id = ${tid}
-            AND cn.issued_date BETWEEN ${from}::date AND ${to}::date
-          ORDER BY cn.issued_date DESC
+            AND cn.created_at::date BETWEEN ${from}::date AND ${to}::date
+          ORDER BY cn.created_at DESC
         `);
         return res as unknown as ReportRow[];
       }
 
       case 'sales-return-report': {
-        // ✓ tenant_id filtered — ES-05 audit
+        // FIXED: sale_returns has no total_return_amount column (real: total_amount).
         const res = await db.execute(sql`
           SELECT
             sr.return_number,
             sr.return_date::date AS date,
             i.invoice_number AS original_invoice,
             COALESCE(c.display_name, 'Walk-in') AS customer_name,
-            sr.total_return_amount AS return_amount,
+            sr.total_amount AS return_amount,
             sr.reason
           FROM sale_returns sr
           LEFT JOIN invoices i ON i.id = sr.invoice_id
@@ -346,21 +370,25 @@ export class ReportEngine {
       }
 
       case 'delivery-challan-report': {
-        // ✓ tenant_id filtered — ES-05 audit
+        // FIXED: delivery_challans has no total_quantity/total_value columns of its own —
+        // quantity is summed from delivery_challan_lines, value comes from the header's
+        // existing subtotal field.
         const res = await db.execute(sql`
           SELECT
             dc.challan_number,
             dc.challan_date::date AS date,
             COALESCE(c.display_name, 'Walk-in') AS customer_name,
-            dc.total_quantity AS total_qty,
-            dc.total_value,
+            COALESCE(SUM(dcl.quantity), 0) AS total_qty,
+            dc.subtotal AS total_value,
             dc.status,
             i.invoice_number AS converted_invoice
           FROM delivery_challans dc
           LEFT JOIN customers c ON c.id = dc.customer_id AND c.tenant_id = ${tid}
           LEFT JOIN invoices i ON i.id = dc.converted_invoice_id
+          LEFT JOIN delivery_challan_lines dcl ON dcl.challan_id = dc.id AND dcl.tenant_id = ${tid}
           WHERE dc.tenant_id = ${tid}
             AND dc.challan_date BETWEEN ${from}::date AND ${to}::date
+          GROUP BY dc.id, dc.challan_number, dc.challan_date, c.display_name, dc.subtotal, dc.status, i.invoice_number
           ORDER BY dc.challan_date DESC
         `);
         return res as unknown as ReportRow[];
@@ -388,26 +416,54 @@ export class ReportEngine {
       }
 
       case 'pos-summary-report': {
-        // ✓ tenant_id filtered — ES-05 audit
+        // FIXED: payments has no invoice_id column — the only link to an invoice is via
+        // payment_allocations (paymentId -> invoiceId). Restructured as invoice-level and
+        // mode-level pre-aggregations joined on (date, cashier) so an invoice with multiple
+        // payment allocations (e.g. split cash+UPI) is never double-counted in total_sales —
+        // the previous query's SUM(DISTINCT i.grand_total) attempted the same thing but dedupes
+        // by *value*, silently undercounting whenever two different invoices share an amount.
         const res = await db.execute(sql`
+          WITH pos_invoices AS (
+            SELECT DISTINCT i.id, i.invoice_date, i.created_by, i.grand_total
+            FROM invoices i
+            WHERE i.tenant_id = ${tid}
+              AND i.invoice_date BETWEEN ${from}::date AND ${to}::date
+              AND i.status != 'CANCELLED'
+              AND (${params.branchId ?? null}::int IS NULL OR i.branch_id = ${params.branchId ?? null}::int)
+              AND EXISTS (
+                SELECT 1 FROM payment_allocations pa
+                JOIN payments p ON p.id = pa.payment_id AND p.tenant_id = ${tid}
+                WHERE pa.invoice_id = i.id AND p.pos_session_id IS NOT NULL
+              )
+          ),
+          invoice_totals AS (
+            SELECT pi.invoice_date::date AS date, pi.created_by,
+              COUNT(*)::int AS total_transactions,
+              SUM(pi.grand_total) AS total_sales
+            FROM pos_invoices pi
+            GROUP BY pi.invoice_date::date, pi.created_by
+          ),
+          mode_totals AS (
+            SELECT pi.invoice_date::date AS date, pi.created_by, p.payment_mode,
+              SUM(pa.amount) AS amount
+            FROM pos_invoices pi
+            JOIN payment_allocations pa ON pa.invoice_id = pi.id
+            JOIN payments p ON p.id = pa.payment_id AND p.tenant_id = ${tid} AND p.pos_session_id IS NOT NULL
+            GROUP BY pi.invoice_date::date, pi.created_by, p.payment_mode
+          )
           SELECT
-            i.invoice_date::date AS date,
+            it.date,
             CONCAT(u.first_name, ' ', u.last_name) AS cashier,
-            COUNT(DISTINCT i.id)::int AS total_transactions,
-            SUM(CASE WHEN p.payment_mode = 'CASH' THEN p.amount ELSE 0 END) AS cash_sales,
-            SUM(CASE WHEN p.payment_mode = 'CARD' THEN p.amount ELSE 0 END) AS card_sales,
-            SUM(CASE WHEN p.payment_mode = 'UPI' THEN p.amount ELSE 0 END) AS upi_sales,
-            SUM(DISTINCT i.grand_total) AS total_sales
-          FROM invoices i
-          JOIN users u ON u.id = i.created_by AND u.tenant_id = ${tid}
-          JOIN payments p ON p.invoice_id = i.id AND p.tenant_id = ${tid}
-          WHERE i.tenant_id = ${tid}
-            AND i.invoice_date BETWEEN ${from}::date AND ${to}::date
-            AND p.pos_session_id IS NOT NULL
-            AND i.status != 'CANCELLED'
-            AND (${params.branchId ?? null}::int IS NULL OR i.branch_id = ${params.branchId ?? null}::int)
-          GROUP BY i.invoice_date::date, u.id, u.first_name, u.last_name
-          ORDER BY i.invoice_date::date DESC
+            it.total_transactions,
+            COALESCE(SUM(CASE WHEN mt.payment_mode = 'CASH' THEN mt.amount ELSE 0 END), 0) AS cash_sales,
+            COALESCE(SUM(CASE WHEN mt.payment_mode = 'CARD' THEN mt.amount ELSE 0 END), 0) AS card_sales,
+            COALESCE(SUM(CASE WHEN mt.payment_mode = 'UPI' THEN mt.amount ELSE 0 END), 0) AS upi_sales,
+            it.total_sales
+          FROM invoice_totals it
+          JOIN users u ON u.id = it.created_by AND u.tenant_id = ${tid}
+          LEFT JOIN mode_totals mt ON mt.date = it.date AND mt.created_by = it.created_by
+          GROUP BY it.date, it.created_by, u.first_name, u.last_name, it.total_transactions, it.total_sales
+          ORDER BY it.date DESC
         `);
         return res as unknown as ReportRow[];
       }
@@ -429,7 +485,7 @@ export class ReportEngine {
           LEFT JOIN categories cat ON cat.id = it.category_id
           WHERE i.tenant_id = ${tid}
             AND i.invoice_date BETWEEN ${from}::date AND ${to}::date
-            AND i.status != 'CANCELLED'
+            AND i.status NOT IN ('CANCELLED', 'DRAFT')
           GROUP BY it.id, it.name, cat.name
           ORDER BY ${sortCol === 'revenue' ? sql`revenue` : sql`quantity_sold`} DESC
           LIMIT ${lim}
@@ -439,19 +495,20 @@ export class ReportEngine {
 
       case 'slow-moving-items': {
         const maxQty = Number(p(params.maxSalesQty, 5));
+        // FIXED: projection_stock_level has no quantity_on_hand column (real: available_qty).
         // ✓ tenant_id filtered — ES-05 audit
         const res = await db.execute(sql`
           SELECT
             it.item_code,
             it.name AS item_name,
             cat.name AS category,
-            COALESCE(sl.quantity_on_hand, 0) AS current_stock,
+            COALESCE(sl.available_qty, 0) AS current_stock,
             COALESCE(sales.qty_sold, 0) AS quantity_sold,
             sales.last_sale_date
           FROM items it
           LEFT JOIN categories cat ON cat.id = it.category_id
           LEFT JOIN (
-            SELECT item_id, SUM(quantity_on_hand) AS quantity_on_hand
+            SELECT item_id, SUM(available_qty) AS available_qty
             FROM projection_stock_level WHERE tenant_id = ${tid} GROUP BY item_id
           ) sl ON sl.item_id = it.id
           LEFT JOIN (
@@ -463,14 +520,14 @@ export class ReportEngine {
           ) sales ON sales.item_id = it.id
           WHERE it.tenant_id = ${tid}
             AND COALESCE(sales.qty_sold, 0) <= ${maxQty}
-            AND COALESCE(sl.quantity_on_hand, 0) > 0
+            AND COALESCE(sl.available_qty, 0) > 0
           ORDER BY quantity_sold ASC, current_stock DESC
         `);
         return res as unknown as ReportRow[];
       }
 
       case 'customer-statement': {
-        // ✓ tenant_id filtered — ES-05 audit
+        // FIXED: payments has no receipt_number column (real: payment_number).
         const res = await db.execute(sql`
           SELECT date, description, debit, credit,
             SUM(debit - credit) OVER (ORDER BY date, id) AS balance
@@ -479,9 +536,9 @@ export class ReportEngine {
               i.grand_total AS debit, 0 AS credit, i.id
             FROM invoices i
             WHERE i.tenant_id = ${tid} AND i.customer_id = ${params.customerId ?? 0}::int
-              AND i.invoice_date BETWEEN ${from}::date AND ${to}::date AND i.status != 'CANCELLED'
+              AND i.invoice_date BETWEEN ${from}::date AND ${to}::date AND i.status NOT IN ('CANCELLED', 'DRAFT')
             UNION ALL
-            SELECT p.payment_date AS date, CONCAT('Payment - ', p.receipt_number) AS description,
+            SELECT p.payment_date AS date, CONCAT('Payment - ', p.payment_number) AS description,
               0 AS debit, p.amount AS credit, p.id
             FROM payments p
             WHERE p.tenant_id = ${tid} AND p.customer_id = ${params.customerId ?? 0}::int
@@ -493,16 +550,32 @@ export class ReportEngine {
       }
 
       case 'loyalty-points-report': {
+        // H-8 fix: openingPoints/earned/redeemed were hardcoded to 0 despite a real, populated
+        // loyalty_transactions table (points signed: EARN positive, REDEEM/EXPIRE negative —
+        // see LoyaltyService.ts) simply never being queried. opening_points is derived as
+        // closing minus the period's net change rather than stored directly, since no
+        // per-period opening-balance snapshot exists.
         // ✓ tenant_id filtered — ES-05 audit
         const res = await db.execute(sql`
           SELECT
             c.display_name AS customer_name,
             c.phone,
             c.loyalty_points AS closing_points,
-            0 AS opening_points,
-            0 AS earned,
-            0 AS redeemed
+            c.loyalty_points - COALESCE(lt.net_change, 0) AS opening_points,
+            COALESCE(lt.earned, 0) AS earned,
+            COALESCE(lt.redeemed, 0) AS redeemed
           FROM customers c
+          LEFT JOIN (
+            SELECT
+              customer_id,
+              SUM(points) AS net_change,
+              SUM(CASE WHEN type = 'EARN' THEN points ELSE 0 END) AS earned,
+              SUM(CASE WHEN type = 'REDEEM' THEN -points ELSE 0 END) AS redeemed
+            FROM loyalty_transactions
+            WHERE tenant_id = ${tid}
+              AND created_at::date BETWEEN ${from}::date AND ${to}::date
+            GROUP BY customer_id
+          ) lt ON lt.customer_id = c.id
           WHERE c.tenant_id = ${tid}
             AND c.loyalty_points > 0
           ORDER BY c.loyalty_points DESC
@@ -527,7 +600,7 @@ export class ReportEngine {
           LEFT JOIN customers c ON c.id = i.customer_id AND c.tenant_id = ${tid}
           WHERE i.tenant_id = ${tid}
             AND i.invoice_date BETWEEN ${from}::date AND ${to}::date
-            AND i.status != 'CANCELLED'
+            AND i.status NOT IN ('CANCELLED', 'DRAFT')
             AND COALESCE(i.discount_amount, 0) > 0
           ORDER BY i.invoice_date DESC
         `);
@@ -601,15 +674,16 @@ export class ReportEngine {
       }
 
       case 'purchase-by-item': {
-        // ✓ tenant_id filtered — ES-05 audit
+        // FIXED: grn_lines has no quantity_received/unit_cost columns (real:
+        // received_qty/grn_rate).
         const res = await db.execute(sql`
           SELECT
             it.item_code,
             it.name AS item_name,
-            SUM(gl.quantity_received) AS quantity_received,
-            SUM(gl.quantity_received * gl.unit_cost) AS total_cost,
-            CASE WHEN SUM(gl.quantity_received) > 0 THEN
-              ROUND((SUM(gl.quantity_received * gl.unit_cost) / SUM(gl.quantity_received))::numeric, 4)
+            SUM(gl.received_qty) AS quantity_received,
+            SUM(gl.received_qty * gl.grn_rate) AS total_cost,
+            CASE WHEN SUM(gl.received_qty) > 0 THEN
+              ROUND((SUM(gl.received_qty * gl.grn_rate) / SUM(gl.received_qty))::numeric, 4)
             ELSE 0 END AS avg_cost
           FROM grn_lines gl
           JOIN grns g ON g.id = gl.grn_id AND g.tenant_id = ${tid}
@@ -624,28 +698,35 @@ export class ReportEngine {
 
       case 'outstanding-payables': {
         const asOf = params.asOfDate ?? new Date().toISOString().slice(0, 10);
-        // ✓ tenant_id filtered — ES-05 audit
+        // FIXED: grns has no due_date/paid_amount columns at all. due_date is derived from
+        // grn_date + the supplier's credit_days (same field suppliers already carry for terms);
+        // paid_amount is summed from supplier_payment_allocations, the real GRN-level payment
+        // link (supplier_payments itself has no grn_id — it's allocated per-GRN via this table).
         const res = await db.execute(sql`
           SELECT
             s.display_name AS supplier_name,
             g.grn_number,
             g.grn_date::date AS grn_date,
-            g.due_date::date AS due_date,
+            (g.grn_date::date + (s.credit_days || ' days')::interval)::date AS due_date,
             g.grand_total AS total_amount,
-            COALESCE(g.paid_amount, 0) AS paid_amount,
-            g.grand_total - COALESCE(g.paid_amount, 0) AS balance_due,
+            COALESCE(spa.paid_amount, 0) AS paid_amount,
+            g.grand_total - COALESCE(spa.paid_amount, 0) AS balance_due,
             CASE
-              WHEN (${asOf}::date - g.due_date::date) <= 0 THEN 'Current'
-              WHEN (${asOf}::date - g.due_date::date) <= 30 THEN '1-30 days'
-              WHEN (${asOf}::date - g.due_date::date) <= 60 THEN '31-60 days'
-              WHEN (${asOf}::date - g.due_date::date) <= 90 THEN '61-90 days'
+              WHEN (${asOf}::date - (g.grn_date::date + (s.credit_days || ' days')::interval)::date) <= 0 THEN 'Current'
+              WHEN (${asOf}::date - (g.grn_date::date + (s.credit_days || ' days')::interval)::date) <= 30 THEN '1-30 days'
+              WHEN (${asOf}::date - (g.grn_date::date + (s.credit_days || ' days')::interval)::date) <= 60 THEN '31-60 days'
+              WHEN (${asOf}::date - (g.grn_date::date + (s.credit_days || ' days')::interval)::date) <= 90 THEN '61-90 days'
               ELSE '90+ days'
             END AS days_bucket
           FROM grns g
           JOIN suppliers s ON s.id = g.supplier_id AND s.tenant_id = ${tid}
+          LEFT JOIN (
+            SELECT grn_id, SUM(amount) AS paid_amount
+            FROM supplier_payment_allocations WHERE tenant_id = ${tid} GROUP BY grn_id
+          ) spa ON spa.grn_id = g.id
           WHERE g.tenant_id = ${tid}
             AND g.grn_date <= ${asOf}::date
-            AND (g.grand_total - COALESCE(g.paid_amount, 0)) > 0
+            AND (g.grand_total - COALESCE(spa.paid_amount, 0)) > 0
             AND g.status NOT IN ('CANCELLED')
             AND (${params.supplierId ?? null}::int IS NULL OR g.supplier_id = ${params.supplierId ?? null}::int)
           ORDER BY days_bucket DESC, balance_due DESC
@@ -677,20 +758,21 @@ export class ReportEngine {
       }
 
       case 'purchase-order-status': {
-        // ✓ tenant_id filtered — ES-05 audit
+        // FIXED: purchase_order_lines has no quantity/received_quantity/po_id columns (real:
+        // ordered_qty/received_qty/purchase_order_id).
         const res = await db.execute(sql`
           SELECT
             po.po_number,
             po.po_date::date AS po_date,
             s.display_name AS supplier_name,
-            COALESCE(SUM(pol.quantity), 0) AS ordered_qty,
-            COALESCE(SUM(pol.received_quantity), 0) AS received_qty,
-            COALESCE(SUM(pol.quantity - pol.received_quantity), 0) AS pending_qty,
+            COALESCE(SUM(pol.ordered_qty), 0) AS ordered_qty,
+            COALESCE(SUM(pol.received_qty), 0) AS received_qty,
+            COALESCE(SUM(pol.ordered_qty - pol.received_qty), 0) AS pending_qty,
             po.grand_total AS total_value,
             po.status
           FROM purchase_orders po
           JOIN suppliers s ON s.id = po.supplier_id AND s.tenant_id = ${tid}
-          LEFT JOIN purchase_order_lines pol ON pol.po_id = po.id
+          LEFT JOIN purchase_order_lines pol ON pol.purchase_order_id = po.id
           WHERE po.tenant_id = ${tid}
             AND po.po_date BETWEEN ${from}::date AND ${to}::date
             AND (${params.status ?? null}::text IS NULL OR po.status = ${params.status ?? null}::text)
@@ -701,14 +783,14 @@ export class ReportEngine {
       }
 
       case 'purchase-return-report': {
-        // ✓ tenant_id filtered — ES-05 audit
+        // FIXED: purchase_returns has no total_return_amount column (real: grand_total).
         const res = await db.execute(sql`
           SELECT
             pr.return_number,
             pr.return_date::date AS date,
             s.display_name AS supplier_name,
             g.grn_number AS original_grn,
-            pr.total_return_amount AS return_amount,
+            pr.grand_total AS return_amount,
             pr.status
           FROM purchase_returns pr
           JOIN suppliers s ON s.id = pr.supplier_id AND s.tenant_id = ${tid}
@@ -721,7 +803,8 @@ export class ReportEngine {
       }
 
       case 'grn-report': {
-        // ✓ tenant_id filtered — ES-05 audit
+        // FIXED: grn_lines has no quantity_received/unit_cost columns (real:
+        // received_qty/grn_rate).
         const res = await db.execute(sql`
           SELECT
             g.grn_number,
@@ -729,8 +812,8 @@ export class ReportEngine {
             s.display_name AS supplier_name,
             w.name AS warehouse_name,
             COUNT(gl.id)::int AS item_count,
-            SUM(gl.quantity_received) AS total_qty,
-            SUM(gl.quantity_received * gl.unit_cost) AS total_value,
+            SUM(gl.received_qty) AS total_qty,
+            SUM(gl.received_qty * gl.grn_rate) AS total_value,
             g.status
           FROM grns g
           JOIN suppliers s ON s.id = g.supplier_id AND s.tenant_id = ${tid}
@@ -746,17 +829,25 @@ export class ReportEngine {
       }
 
       case 'expense-report': {
-        // ✓ tenant_id filtered — ES-05 audit
+        // FIXED: expenses has no vendor_name/amount/gst_amount columns (real: total_amount;
+        // GST lives per-line on expense_lines, summed here; vendor comes from the optional
+        // supplier link, nullable since expenses like RENT have no supplier-master record) and
+        // no expense_category column (real: expense_type).
         const res = await db.execute(sql`
           SELECT
             e.expense_date::date AS date,
             e.expense_number,
-            e.vendor_name AS vendor,
-            e.expense_category AS category,
+            COALESCE(s.display_name, 'N/A') AS vendor,
+            e.expense_type AS category,
             e.description,
-            e.amount,
-            e.gst_amount AS gst
+            e.total_amount AS amount,
+            COALESCE(el.gst_total, 0) AS gst
           FROM expenses e
+          LEFT JOIN suppliers s ON s.id = e.supplier_id AND s.tenant_id = ${tid}
+          LEFT JOIN (
+            SELECT expense_id, SUM(gst_amount) AS gst_total
+            FROM expense_lines WHERE tenant_id = ${tid} GROUP BY expense_id
+          ) el ON el.expense_id = e.id
           WHERE e.tenant_id = ${tid}
             AND e.expense_date BETWEEN ${from}::date AND ${to}::date
           ORDER BY e.expense_date DESC
@@ -785,7 +876,7 @@ export class ReportEngine {
       }
 
       case 'supplier-payment-report': {
-        // ✓ tenant_id filtered — ES-05 audit
+        // FIXED: supplier_payments has no reference_number column (real: transaction_reference).
         const res = await db.execute(sql`
           SELECT
             sp.payment_date::date AS payment_date,
@@ -793,7 +884,7 @@ export class ReportEngine {
             s.display_name AS supplier_name,
             sp.payment_mode AS mode,
             sp.amount,
-            sp.reference_number AS reference
+            sp.transaction_reference AS reference
           FROM supplier_payments sp
           JOIN suppliers s ON s.id = sp.supplier_id AND s.tenant_id = ${tid}
           WHERE sp.tenant_id = ${tid}
@@ -805,14 +896,15 @@ export class ReportEngine {
       }
 
       case 'price-trend': {
-        // ✓ tenant_id filtered — ES-05 audit
+        // FIXED: grn_lines has no quantity_received/unit_cost columns (real:
+        // received_qty/grn_rate).
         const res = await db.execute(sql`
           SELECT
             g.grn_date::date AS date,
             g.grn_number,
             s.display_name AS supplier_name,
-            gl.quantity_received AS quantity,
-            gl.unit_cost
+            gl.received_qty AS quantity,
+            gl.grn_rate AS unit_cost
           FROM grn_lines gl
           JOIN grns g ON g.id = gl.grn_id AND g.tenant_id = ${tid}
           JOIN suppliers s ON s.id = g.supplier_id
@@ -826,23 +918,29 @@ export class ReportEngine {
 
       // â”€â”€ INVENTORY REPORTS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       case 'stock-summary': {
-        // ✓ tenant_id filtered — ES-05 audit
+        // FIXED: previously selected psl.quantity_on_hand/psl.fifo_unit_cost — neither column
+        // exists on projection_stock_level (real columns: available_qty, reserved_qty,
+        // last_movement_at); every one of these report cases 500'd with a Postgres
+        // "column does not exist" error. valuation_cost uses items.wacc_cost (tenant-wide
+        // WACC) as the per-unit estimate — there is no single scalar FIFO cost at this
+        // granularity (FIFO tracks multiple cost layers), matching the same fallback-to-
+        // estimate approach inventory-service's own valuation.routes.ts already uses.
         const res = await db.execute(sql`
           SELECT
             it.item_code,
             it.name AS item_name,
             cat.name AS category,
             w.name AS warehouse,
-            psl.quantity_on_hand,
+            psl.available_qty AS quantity_on_hand,
             it.reorder_level,
-            psl.fifo_unit_cost AS valuation_cost,
-            psl.quantity_on_hand * COALESCE(psl.fifo_unit_cost, 0) AS total_value
+            it.wacc_cost AS valuation_cost,
+            psl.available_qty * COALESCE(it.wacc_cost, 0) AS total_value
           FROM projection_stock_level psl
           JOIN items it ON it.id = psl.item_id AND it.tenant_id = ${tid}
           JOIN warehouses w ON w.id = psl.warehouse_id AND w.tenant_id = ${tid}
           LEFT JOIN categories cat ON cat.id = it.category_id
           WHERE psl.tenant_id = ${tid}
-            AND psl.quantity_on_hand > 0
+            AND psl.available_qty > 0
             AND (${params.warehouseId ?? null}::int IS NULL OR psl.warehouse_id = ${params.warehouseId ?? null}::int)
             AND (${params.categoryId ?? null}::int IS NULL OR it.category_id = ${params.categoryId ?? null}::int)
           ORDER BY it.name, w.name
@@ -851,52 +949,53 @@ export class ReportEngine {
       }
 
       case 'stock-movement': {
-        // ✓ tenant_id filtered — ES-05 audit
+        // FIXED: inventory_ledger has no transaction_date/transaction_type columns (real:
+        // created_at, movement_type — enum STOCK_IN/STOCK_OUT/ADJUSTMENT/TRANSFER_IN/
+        // TRANSFER_OUT/OPENING/RESERVATION/RESERVATION_RELEASE, not the PURCHASE_RECEIPT/
+        // SALE_ISSUE/etc values this query filtered on). Opening/adjusted qty use the
+        // ledger's own quantity_before/quantity_after delta rather than reinterpreting a
+        // movement type, which is exact regardless of movement classification.
         const res = await db.execute(sql`
           SELECT
             it.name AS item_name,
             w.name AS warehouse,
-            COALESCE(SUM(CASE WHEN il.transaction_date < ${from}::date THEN
-              CASE WHEN il.transaction_type IN ('PURCHASE_RECEIPT','TRANSFER_IN','ADJUSTMENT_IN','OPENING') THEN il.quantity ELSE -il.quantity END
-            ELSE 0 END), 0) AS opening_qty,
-            COALESCE(SUM(CASE WHEN il.transaction_date BETWEEN ${from}::date AND ${to}::date
-              AND il.transaction_type IN ('PURCHASE_RECEIPT','TRANSFER_IN') THEN il.quantity ELSE 0 END), 0) AS received_qty,
-            COALESCE(SUM(CASE WHEN il.transaction_date BETWEEN ${from}::date AND ${to}::date
-              AND il.transaction_type IN ('SALE_ISSUE','TRANSFER_OUT') THEN il.quantity ELSE 0 END), 0) AS issued_qty,
-            COALESCE(SUM(CASE WHEN il.transaction_date BETWEEN ${from}::date AND ${to}::date
-              AND il.transaction_type IN ('ADJUSTMENT_IN','ADJUSTMENT_OUT') THEN
-              CASE WHEN il.transaction_type = 'ADJUSTMENT_IN' THEN il.quantity ELSE -il.quantity END
-            ELSE 0 END), 0) AS adjusted_qty,
-            psl.quantity_on_hand AS closing_qty
+            COALESCE(SUM(CASE WHEN il.created_at < ${from}::date
+              THEN (il.quantity_after - il.quantity_before) ELSE 0 END), 0) AS opening_qty,
+            COALESCE(SUM(CASE WHEN il.created_at BETWEEN ${from}::date AND ${to}::date
+              AND il.movement_type IN ('STOCK_IN','TRANSFER_IN') THEN il.quantity ELSE 0 END), 0) AS received_qty,
+            COALESCE(SUM(CASE WHEN il.created_at BETWEEN ${from}::date AND ${to}::date
+              AND il.movement_type IN ('STOCK_OUT','TRANSFER_OUT') THEN il.quantity ELSE 0 END), 0) AS issued_qty,
+            COALESCE(SUM(CASE WHEN il.created_at BETWEEN ${from}::date AND ${to}::date
+              AND il.movement_type = 'ADJUSTMENT' THEN (il.quantity_after - il.quantity_before) ELSE 0 END), 0) AS adjusted_qty,
+            psl.available_qty AS closing_qty
           FROM inventory_ledger il
           JOIN items it ON it.id = il.item_id AND it.tenant_id = ${tid}
           JOIN warehouses w ON w.id = il.warehouse_id AND w.tenant_id = ${tid}
-          LEFT JOIN projection_stock_level psl ON psl.item_id = il.item_id AND psl.warehouse_id = il.warehouse_id AND psl.tenant_id = ${tid}
+          LEFT JOIN projection_stock_level psl ON psl.item_id = il.item_id AND psl.warehouse_id = il.warehouse_id AND psl.tenant_id = ${tid} AND psl.variant_id IS NULL
           WHERE il.tenant_id = ${tid}
             AND (${params.itemId ?? null}::int IS NULL OR il.item_id = ${params.itemId ?? null}::int)
             AND (${params.warehouseId ?? null}::int IS NULL OR il.warehouse_id = ${params.warehouseId ?? null}::int)
-          GROUP BY it.name, w.name, psl.quantity_on_hand
+          GROUP BY it.name, w.name, psl.available_qty
           ORDER BY it.name, w.name
         `);
         return res as unknown as ReportRow[];
       }
 
       case 'inventory-valuation': {
-        const asOf = params.asOfDate ?? new Date().toISOString().slice(0, 10);
-        // ✓ tenant_id filtered — ES-05 audit
+        // FIXED: same quantity_on_hand/fifo_unit_cost column-drift as stock-summary above.
         const res = await db.execute(sql`
           SELECT
             it.item_code,
             it.name AS item_name,
             cat.name AS category,
-            psl.quantity_on_hand,
-            psl.fifo_unit_cost,
-            psl.quantity_on_hand * COALESCE(psl.fifo_unit_cost, 0) AS total_value
+            psl.available_qty AS quantity_on_hand,
+            it.wacc_cost AS fifo_unit_cost,
+            psl.available_qty * COALESCE(it.wacc_cost, 0) AS total_value
           FROM projection_stock_level psl
           JOIN items it ON it.id = psl.item_id AND it.tenant_id = ${tid}
           LEFT JOIN categories cat ON cat.id = it.category_id
           WHERE psl.tenant_id = ${tid}
-            AND psl.quantity_on_hand > 0
+            AND psl.available_qty > 0
             AND (${params.warehouseId ?? null}::int IS NULL OR psl.warehouse_id = ${params.warehouseId ?? null}::int)
           ORDER BY total_value DESC
         `);
@@ -904,47 +1003,50 @@ export class ReportEngine {
       }
 
       case 'reorder-report': {
-        // ✓ tenant_id filtered — ES-05 audit
+        // FIXED: same quantity_on_hand drift; items.reorder_quantity doesn't exist (real:
+        // reorder_qty); items has no preferred_supplier_id column/relationship anywhere in
+        // the schema, so that join is dropped rather than guessed.
         const res = await db.execute(sql`
           SELECT
             it.item_code,
             it.name AS item_name,
             w.name AS warehouse,
-            psl.quantity_on_hand AS current_stock,
+            psl.available_qty AS current_stock,
             it.reorder_level,
-            GREATEST(it.reorder_quantity, 0) AS reorder_qty,
-            s.display_name AS preferred_supplier
+            GREATEST(it.reorder_qty, 0) AS reorder_qty
           FROM projection_stock_level psl
           JOIN items it ON it.id = psl.item_id AND it.tenant_id = ${tid}
           JOIN warehouses w ON w.id = psl.warehouse_id AND w.tenant_id = ${tid}
-          LEFT JOIN suppliers s ON s.id = it.preferred_supplier_id
           WHERE psl.tenant_id = ${tid}
-            AND psl.quantity_on_hand <= COALESCE(it.reorder_level, 0)
+            AND psl.available_qty <= COALESCE(it.reorder_level, 0)
             AND (${params.warehouseId ?? null}::int IS NULL OR psl.warehouse_id = ${params.warehouseId ?? null}::int)
-          ORDER BY (it.reorder_level - psl.quantity_on_hand) DESC
+          ORDER BY (it.reorder_level - psl.available_qty) DESC
         `);
         return res as unknown as ReportRow[];
       }
 
       case 'stock-ageing': {
         const asOf = params.asOfDate ?? new Date().toISOString().slice(0, 10);
-        // ✓ tenant_id filtered — ES-05 audit
+        // FIXED: transaction_date/transaction_type don't exist (real: created_at,
+        // movement_type); 'PURCHASE_RECEIPT' isn't a real movement_type value — a GRN
+        // receipt is movement_type='STOCK_IN' with reference_type='GRN'.
         const res = await db.execute(sql`
           SELECT
             it.name AS item_name,
             cat.name AS category,
-            SUM(CASE WHEN (${asOf}::date - il.transaction_date) <= 30 THEN il.quantity ELSE 0 END) AS qty0to30,
-            SUM(CASE WHEN (${asOf}::date - il.transaction_date) BETWEEN 31 AND 60 THEN il.quantity ELSE 0 END) AS qty31to60,
-            SUM(CASE WHEN (${asOf}::date - il.transaction_date) BETWEEN 61 AND 90 THEN il.quantity ELSE 0 END) AS qty61to90,
-            SUM(CASE WHEN (${asOf}::date - il.transaction_date) > 90 THEN il.quantity ELSE 0 END) AS qty90plus,
+            SUM(CASE WHEN (${asOf}::date - il.created_at::date) <= 30 THEN il.quantity ELSE 0 END) AS qty0to30,
+            SUM(CASE WHEN (${asOf}::date - il.created_at::date) BETWEEN 31 AND 60 THEN il.quantity ELSE 0 END) AS qty31to60,
+            SUM(CASE WHEN (${asOf}::date - il.created_at::date) BETWEEN 61 AND 90 THEN il.quantity ELSE 0 END) AS qty61to90,
+            SUM(CASE WHEN (${asOf}::date - il.created_at::date) > 90 THEN il.quantity ELSE 0 END) AS qty90plus,
             SUM(il.quantity) AS total_qty,
             SUM(il.quantity * COALESCE(il.unit_cost, 0)) AS total_value
           FROM inventory_ledger il
           JOIN items it ON it.id = il.item_id AND it.tenant_id = ${tid}
           LEFT JOIN categories cat ON cat.id = it.category_id
           WHERE il.tenant_id = ${tid}
-            AND il.transaction_type IN ('PURCHASE_RECEIPT')
-            AND il.transaction_date <= ${asOf}::date
+            AND il.movement_type = 'STOCK_IN'
+            AND il.reference_type = 'GRN'
+            AND il.created_at <= ${asOf}::date
             AND (${params.warehouseId ?? null}::int IS NULL OR il.warehouse_id = ${params.warehouseId ?? null}::int)
           GROUP BY it.id, it.name, cat.name
           ORDER BY total_value DESC
@@ -953,63 +1055,68 @@ export class ReportEngine {
       }
 
       case 'physical-verification-report': {
-        // ✓ tenant_id filtered — ES-05 audit
+        // FIXED: physical_verifications has no verification_date (real: created_at);
+        // physical_verification_lines has no pv_id/book_quantity/physical_quantity/
+        // variance_quantity (real: verification_id, system_qty, physical_qty, variance).
         const res = await db.execute(sql`
           SELECT
             pv.verification_number,
-            pv.verification_date::date AS date,
+            pv.created_at::date AS date,
             w.name AS warehouse_name,
             it.name AS item_name,
-            pvl.book_quantity AS book_qty,
-            pvl.physical_quantity AS physical_qty,
-            pvl.variance_quantity AS variance,
-            pvl.variance_quantity * COALESCE(psl.fifo_unit_cost, 0) AS variance_value
+            pvl.system_qty AS book_qty,
+            pvl.physical_qty,
+            pvl.variance,
+            pvl.variance * COALESCE(it.wacc_cost, 0) AS variance_value
           FROM physical_verifications pv
           JOIN warehouses w ON w.id = pv.warehouse_id AND w.tenant_id = ${tid}
-          JOIN physical_verification_lines pvl ON pvl.pv_id = pv.id
-          JOIN items it ON it.id = pvl.item_id
-          LEFT JOIN projection_stock_level psl ON psl.item_id = pvl.item_id AND psl.warehouse_id = pv.warehouse_id AND psl.tenant_id = ${tid}
+          JOIN physical_verification_lines pvl ON pvl.verification_id = pv.id
+          JOIN items it ON it.id = pvl.item_id AND it.tenant_id = ${tid}
           WHERE pv.tenant_id = ${tid}
-            AND pv.verification_date BETWEEN ${from}::date AND ${to}::date
-          ORDER BY pv.verification_date DESC
+            AND pv.created_at BETWEEN ${from}::date AND ${to}::date
+          ORDER BY pv.created_at DESC
         `);
         return res as unknown as ReportRow[];
       }
 
       case 'stock-transfer-report': {
-        // ✓ tenant_id filtered — ES-05 audit
+        // FIXED: stock_transfers has no transfer_date column (real: created_at).
         const res = await db.execute(sql`
           SELECT
             st.transfer_number,
-            st.transfer_date::date AS transfer_date,
+            st.created_at::date AS transfer_date,
             fw.name AS from_warehouse,
             tw.name AS to_warehouse,
             COUNT(stl.id)::int AS item_count,
-            SUM(stl.quantity) AS total_qty,
-            SUM(stl.quantity * COALESCE(stl.unit_cost, 0)) AS total_value,
+            SUM(stl.dispatched_qty) AS total_qty,
+            SUM(stl.dispatched_qty * COALESCE(stl.unit_cost, 0)) AS total_value,
             st.status
           FROM stock_transfers st
           JOIN warehouses fw ON fw.id = st.from_warehouse_id AND fw.tenant_id = ${tid}
           JOIN warehouses tw ON tw.id = st.to_warehouse_id AND tw.tenant_id = ${tid}
           LEFT JOIN stock_transfer_lines stl ON stl.transfer_id = st.id
           WHERE st.tenant_id = ${tid}
-            AND st.transfer_date BETWEEN ${from}::date AND ${to}::date
-          GROUP BY st.id, st.transfer_number, st.transfer_date, fw.name, tw.name, st.status
-          ORDER BY st.transfer_date DESC
+            AND st.created_at BETWEEN ${from}::date AND ${to}::date
+          GROUP BY st.id, st.transfer_number, st.created_at, fw.name, tw.name, st.status
+          ORDER BY st.created_at DESC
         `);
         return res as unknown as ReportRow[];
       }
 
       case 'fabric-roll-report': {
-        // ✓ tenant_id filtered — ES-05 audit
+        // FIXED: fabric_rolls has no colour/total_metres/used_metres columns (real:
+        // original_meters, remaining_meters; no colour column at all — dropped from the
+        // registry below). Aliased to the registry's British "metres" spelling explicitly —
+        // the previous American "meters" aliases silently mismatched every column key after
+        // snake->camel conversion, so the table rendered with correct row counts but every
+        // cell blank.
         const res = await db.execute(sql`
           SELECT
             fr.roll_number,
             it.name AS item_name,
-            fr.colour,
-            fr.total_metres,
-            fr.used_metres,
-            fr.total_metres - fr.used_metres AS remaining_metres,
+            fr.original_meters AS total_metres,
+            fr.original_meters - fr.remaining_meters AS used_metres,
+            fr.remaining_meters AS remaining_metres,
             fr.status
           FROM fabric_rolls fr
           JOIN items it ON it.id = fr.item_id AND it.tenant_id = ${tid}
@@ -1022,19 +1129,19 @@ export class ReportEngine {
       }
 
       case 'warehouse-wise-stock': {
-        // ✓ tenant_id filtered — ES-05 audit
+        // FIXED: same quantity_on_hand/fifo_unit_cost drift as stock-summary above.
         const res = await db.execute(sql`
           SELECT
             w.name AS warehouse,
             it.item_code,
             it.name AS item_name,
-            psl.quantity_on_hand,
-            psl.quantity_on_hand * COALESCE(psl.fifo_unit_cost, 0) AS total_value
+            psl.available_qty AS quantity_on_hand,
+            psl.available_qty * COALESCE(it.wacc_cost, 0) AS total_value
           FROM projection_stock_level psl
           JOIN items it ON it.id = psl.item_id AND it.tenant_id = ${tid}
           JOIN warehouses w ON w.id = psl.warehouse_id AND w.tenant_id = ${tid}
           WHERE psl.tenant_id = ${tid}
-            AND psl.quantity_on_hand > 0
+            AND psl.available_qty > 0
             AND (${params.warehouseId ?? null}::int IS NULL OR psl.warehouse_id = ${params.warehouseId ?? null}::int)
             AND (${params.categoryId ?? null}::int IS NULL OR it.category_id = ${params.categoryId ?? null}::int)
           ORDER BY w.name, it.name
@@ -1043,27 +1150,27 @@ export class ReportEngine {
       }
 
       case 'stock-ledger': {
-        // ✓ tenant_id filtered — ES-05 audit
+        // FIXED: transaction_date/transaction_type/reference_number don't exist (real:
+        // created_at, movement_type, reference_type + reference_id — no single formatted
+        // reference string column). movement_type is explicitly aliased to transaction_type —
+        // the registry's key, which the unaliased column's own camelCase (movementType) didn't
+        // match, leaving that column blank despite the query itself running fine.
         const res = await db.execute(sql`
           SELECT
-            il.transaction_date::date AS date,
-            il.transaction_type,
-            il.reference_number AS reference,
-            CASE WHEN il.transaction_type IN ('PURCHASE_RECEIPT','TRANSFER_IN','ADJUSTMENT_IN','OPENING','RETURN_IN')
-              THEN il.quantity ELSE 0 END AS in_qty,
-            CASE WHEN il.transaction_type IN ('SALE_ISSUE','TRANSFER_OUT','ADJUSTMENT_OUT','RETURN_OUT')
-              THEN il.quantity ELSE 0 END AS out_qty,
-            SUM(CASE WHEN il.transaction_type IN ('PURCHASE_RECEIPT','TRANSFER_IN','ADJUSTMENT_IN','OPENING','RETURN_IN')
-              THEN il.quantity ELSE -il.quantity END)
-              OVER (ORDER BY il.transaction_date, il.id) AS balance,
+            il.created_at::date AS date,
+            il.movement_type AS transaction_type,
+            (il.reference_type || ' #' || COALESCE(il.reference_id::text, '')) AS reference,
+            CASE WHEN il.quantity_after >= il.quantity_before THEN (il.quantity_after - il.quantity_before) ELSE 0 END AS in_qty,
+            CASE WHEN il.quantity_after < il.quantity_before THEN (il.quantity_before - il.quantity_after) ELSE 0 END AS out_qty,
+            SUM(il.quantity_after - il.quantity_before) OVER (ORDER BY il.created_at, il.id) AS balance,
             il.unit_cost,
-            il.quantity * il.unit_cost AS total_value
+            il.quantity * COALESCE(il.unit_cost, 0) AS total_value
           FROM inventory_ledger il
           WHERE il.tenant_id = ${tid}
             AND il.item_id = ${params.itemId ?? 0}::int
-            AND il.transaction_date BETWEEN ${from}::date AND ${to}::date
+            AND il.created_at BETWEEN ${from}::date AND ${to}::date
             AND (${params.warehouseId ?? null}::int IS NULL OR il.warehouse_id = ${params.warehouseId ?? null}::int)
-          ORDER BY il.transaction_date, il.id
+          ORDER BY il.created_at, il.id
         `);
         return res as unknown as ReportRow[];
       }
@@ -1071,72 +1178,75 @@ export class ReportEngine {
       case 'dead-stock-report': {
         const days = Number(p(params.daysSinceMovement, 180));
         const asOf = params.asOfDate ?? new Date().toISOString().slice(0, 10);
-        // ✓ tenant_id filtered — ES-05 audit
+        // FIXED: same quantity_on_hand/fifo_unit_cost drift, plus inventory_ledger has no
+        // transaction_date (real: created_at); projection_stock_level.last_movement_at is
+        // maintained on every movement type already, so use it directly instead of
+        // re-deriving MAX(created_at) from the ledger.
         const res = await db.execute(sql`
           SELECT
             it.item_code,
             it.name AS item_name,
             cat.name AS category,
-            psl.quantity_on_hand AS current_stock,
-            MAX(il.transaction_date)::date AS last_movement_date,
-            (${asOf}::date - MAX(il.transaction_date)::date) AS days_idle,
-            psl.quantity_on_hand * COALESCE(psl.fifo_unit_cost, 0) AS stock_value
+            psl.available_qty AS current_stock,
+            psl.last_movement_at::date AS last_movement_date,
+            (${asOf}::date - psl.last_movement_at::date) AS days_idle,
+            psl.available_qty * COALESCE(it.wacc_cost, 0) AS stock_value
           FROM projection_stock_level psl
           JOIN items it ON it.id = psl.item_id AND it.tenant_id = ${tid}
           LEFT JOIN categories cat ON cat.id = it.category_id
-          LEFT JOIN inventory_ledger il ON il.item_id = psl.item_id AND il.tenant_id = ${tid}
           WHERE psl.tenant_id = ${tid}
-            AND psl.quantity_on_hand > 0
-          GROUP BY it.id, it.item_code, it.name, cat.name, psl.quantity_on_hand, psl.fifo_unit_cost
-          HAVING (${asOf}::date - MAX(il.transaction_date)::date) >= ${days}
-            OR MAX(il.transaction_date) IS NULL
+            AND psl.available_qty > 0
+            AND (${asOf}::date - psl.last_movement_at::date >= ${days} OR psl.last_movement_at IS NULL)
           ORDER BY days_idle DESC NULLS LAST
         `);
         return res as unknown as ReportRow[];
       }
 
       case 'adjustment-report': {
-        // ✓ tenant_id filtered — ES-05 audit
+        // FIXED: stock_adjustments has no adjustment_date/reason columns (real: created_at;
+        // reason lives per-line on stock_adjustment_lines, not on the header).
         const res = await db.execute(sql`
           SELECT
             sa.adjustment_number,
-            sa.adjustment_date::date AS date,
+            sa.created_at::date AS date,
             w.name AS warehouse,
             it.name AS item_name,
             sa.adjustment_type,
             sal.quantity,
-            sa.reason,
+            sal.reason,
             sal.quantity * COALESCE(sal.unit_cost, 0) AS value_impact
           FROM stock_adjustments sa
           JOIN warehouses w ON w.id = sa.warehouse_id AND w.tenant_id = ${tid}
           JOIN stock_adjustment_lines sal ON sal.adjustment_id = sa.id
-          JOIN items it ON it.id = sal.item_id
+          JOIN items it ON it.id = sal.item_id AND it.tenant_id = ${tid}
           WHERE sa.tenant_id = ${tid}
-            AND sa.adjustment_date BETWEEN ${from}::date AND ${to}::date
-          ORDER BY sa.adjustment_date DESC
+            AND sa.created_at BETWEEN ${from}::date AND ${to}::date
+          ORDER BY sa.created_at DESC
         `);
         return res as unknown as ReportRow[];
       }
 
       case 'reservation-report': {
         const asOf = params.asOfDate ?? new Date().toISOString().slice(0, 10);
-        // ✓ tenant_id filtered — ES-05 audit
+        // FIXED: same quantity_on_hand drift; stock_reservations has no reserved_quantity
+        // column (real: quantity).
         const res = await db.execute(sql`
           SELECT
             it.name AS item_name,
             w.name AS warehouse,
-            SUM(sr.reserved_quantity) AS reserved_qty,
-            psl.quantity_on_hand - SUM(sr.reserved_quantity) AS available_qty,
-            psl.quantity_on_hand AS total_qty,
+            SUM(sr.quantity) AS reserved_qty,
+            psl.available_qty - SUM(sr.quantity) AS available_qty,
+            psl.available_qty AS total_qty,
             STRING_AGG(DISTINCT sr.reference_type || ' ' || sr.reference_id::text, ', ') AS reserved_for
           FROM stock_reservations sr
           JOIN items it ON it.id = sr.item_id AND it.tenant_id = ${tid}
           JOIN warehouses w ON w.id = sr.warehouse_id AND w.tenant_id = ${tid}
-          LEFT JOIN projection_stock_level psl ON psl.item_id = sr.item_id AND psl.warehouse_id = sr.warehouse_id AND psl.tenant_id = ${tid}
+          LEFT JOIN projection_stock_level psl ON psl.item_id = sr.item_id AND psl.warehouse_id = sr.warehouse_id AND psl.tenant_id = ${tid} AND psl.variant_id IS NULL
           WHERE sr.tenant_id = ${tid}
+            AND sr.status = 'ACTIVE'
             AND sr.expires_at >= ${asOf}::date
             AND (${params.warehouseId ?? null}::int IS NULL OR sr.warehouse_id = ${params.warehouseId ?? null}::int)
-          GROUP BY it.id, it.name, w.id, w.name, psl.quantity_on_hand
+          GROUP BY it.id, it.name, w.id, w.name, psl.available_qty
           ORDER BY reserved_qty DESC
         `);
         return res as unknown as ReportRow[];
@@ -1144,18 +1254,21 @@ export class ReportEngine {
 
       // â”€â”€ FINANCIAL REPORTS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       case 'day-book': {
-        // ✓ tenant_id filtered — ES-26 (fixed: real columns are debit_amount/credit_amount/created_at;
-        // there is no entry_type/debit_credit/amount/entry_date column on financial_entries)
+        // FIXED: joined on j.id = fe.journal_id, but journals.id is a bigserial while
+        // financial_entries.journal_id is the varchar(26) ULID business identifier stored on
+        // journals as journals.journal_id — comparing bigint to varchar is a hard Postgres type
+        // error. Also selected j.journal_number, which doesn't exist anywhere on journals —
+        // journal_id (the ULID) IS the display identifier (see journal.routes.ts's own lookups).
         const res = await db.execute(sql`
           SELECT
             fe.created_at::time AS time,
             CASE WHEN fe.debit_amount > 0 THEN 'DEBIT' ELSE 'CREDIT' END AS type,
-            j.journal_number AS reference,
+            j.journal_id AS reference,
             fe.description,
             fe.debit_amount AS debit,
             fe.credit_amount AS credit
           FROM financial_entries fe
-          JOIN journals j ON j.id = fe.journal_id AND j.tenant_id = ${tid}
+          JOIN journals j ON j.journal_id = fe.journal_id AND j.tenant_id = ${tid}
           WHERE fe.tenant_id = ${tid}
             AND fe.created_at::date = ${from}::date
           ORDER BY fe.created_at
@@ -1164,19 +1277,20 @@ export class ReportEngine {
       }
 
       case 'account-ledger': {
-        // ✓ tenant_id filtered — ES-26 (fixed: real columns are debit_amount/credit_amount/created_at,
-        // not amount/debit_credit/entry_date)
+        // FIXED: same journals join type-mismatch (j.id is bigserial, fe.journal_id is the
+        // journals.journal_id varchar(26) ULID) and nonexistent journal_number column as
+        // day-book above.
         const res = await db.execute(sql`
           SELECT
             fe.created_at::date AS date,
-            j.journal_number,
+            j.journal_id AS journal_number,
             fe.description,
             fe.debit_amount AS debit,
             fe.credit_amount AS credit,
             SUM(fe.debit_amount - fe.credit_amount)
               OVER (ORDER BY fe.created_at, fe.id) AS balance
           FROM financial_entries fe
-          JOIN journals j ON j.id = fe.journal_id AND j.tenant_id = ${tid}
+          JOIN journals j ON j.journal_id = fe.journal_id AND j.tenant_id = ${tid}
           WHERE fe.tenant_id = ${tid}
             AND fe.account_id = ${params.accountId ?? 0}::int
             AND fe.created_at >= ${from}::date AND fe.created_at < (${to}::date + INTERVAL '1 day')
@@ -1220,8 +1334,10 @@ export class ReportEngine {
         return rows
           .map((r): ReportRow => {
             const openingBalance = Number(r.opening_balance);
-            const openingDr = (r.opening_balance_type === 'DEBIT' ? openingBalance : 0) + Number(r.pre_debit);
-            const openingCr = (r.opening_balance_type === 'CREDIT' ? openingBalance : 0) + Number(r.pre_credit);
+            const openingDr =
+              (r.opening_balance_type === 'DEBIT' ? openingBalance : 0) + Number(r.pre_debit);
+            const openingCr =
+              (r.opening_balance_type === 'CREDIT' ? openingBalance : 0) + Number(r.pre_credit);
             const periodDebit = Number(r.period_debit);
             const periodCredit = Number(r.period_credit);
             const closingDr = openingDr + periodDebit;
@@ -1237,8 +1353,14 @@ export class ReportEngine {
               closing_credit: closingCr > closingDr ? closingCr - closingDr : 0,
             };
           })
-          .filter((r) =>
-            r['opening_debit'] || r['opening_credit'] || r['period_debit'] || r['period_credit'] || r['closing_debit'] || r['closing_credit']
+          .filter(
+            (r) =>
+              r['opening_debit'] ||
+              r['opening_credit'] ||
+              r['period_debit'] ||
+              r['period_credit'] ||
+              r['closing_debit'] ||
+              r['closing_credit']
           );
       }
 
@@ -1273,6 +1395,14 @@ export class ReportEngine {
           HAVING SUM(fe.debit_amount) <> 0 OR SUM(fe.credit_amount) <> 0
           ORDER BY category, a.account_code
         `);
+        // NOTE (audit 2026-07-23): this registry endpoint has no computed gross/operating/net
+        // profit subtotals (unlike accounting-service's ReportsEngine.getProfitLoss()) — a
+        // consumer built directly on the raw rows must re-derive them. An earlier attempt to fix
+        // this by appending synthetic "SUBTOTAL" rows into this same flat array was reverted: it
+        // broke the "every row is a real GL account" contract every category-based consumer of
+        // this endpoint (including the generic Reports Browser table) relies on. A real fix
+        // needs a dedicated `summary` field on ReportResult, reviewed against every consumer of
+        // this registry (Reports Browser UI, CSV/PDF export) — not a rushed shape change here.
         return res as unknown as ReportRow[];
       }
 
@@ -1302,23 +1432,83 @@ export class ReportEngine {
           GROUP BY a.id, a.account_code, a.name, a.account_type, a.normal_balance, a.opening_balance, a.opening_balance_type
           ORDER BY a.account_type, a.account_code
         `);
-        return res as unknown as ReportRow[];
+        const rows = res as unknown as ReportRow[];
+
+        // Revenue/expense accounts only roll into Retained Earnings via a formal year-end close.
+        // During an open year, this report is structurally off by exactly the unclosed net P&L
+        // unless that P&L is shown as a "Current Year Earnings" equity line — same fix already
+        // applied in accounting-service's ReportsEngine.getBalanceSheet(); mirrored here so both
+        // live Balance Sheet endpoints reconcile instead of disagreeing by the unclosed P&L amount.
+        const [openFy] = (await db.execute(sql`
+          SELECT start_date FROM financial_years
+          WHERE tenant_id = ${tid} AND status != 'CLOSED' AND start_date <= ${asOf}::date
+          ORDER BY start_date DESC LIMIT 1
+        `)) as unknown as Array<{ start_date: string }>;
+
+        if (openFy) {
+          const [plRow] = (await db.execute(sql`
+            SELECT
+              COALESCE(SUM(CASE WHEN a.account_type = 'INCOME' THEN fe.credit_amount - fe.debit_amount ELSE 0 END), 0)
+                - COALESCE(SUM(CASE WHEN a.account_type IN ('EXPENSE', 'CONTRA') THEN fe.debit_amount - fe.credit_amount ELSE 0 END), 0)
+                AS net_profit
+            FROM accounts a
+            JOIN financial_entries fe ON fe.account_id = a.id AND fe.tenant_id = ${tid}
+              AND fe.created_at >= ${openFy.start_date}::date
+              AND fe.created_at < (${asOf}::date + INTERVAL '1 day')
+            WHERE a.tenant_id = ${tid}
+              AND a.account_type IN ('INCOME', 'EXPENSE', 'CONTRA')
+              AND a.deleted_at IS NULL
+          `)) as unknown as Array<{ net_profit: string }>;
+
+          const netProfit = Number(plRow?.net_profit ?? 0);
+          if (Math.abs(netProfit) > 0.01) {
+            rows.push({
+              section: 'EQUITY',
+              account_code: '3090',
+              account_name: 'Current Year Earnings',
+              amount: netProfit,
+            });
+          }
+        }
+
+        return rows;
       }
 
       case 'cash-flow-report': {
         // ✓ tenant_id filtered — ES-17 (fixed: derives cash movement from CASH_AND_BANK accounts using
         // real debit_amount/credit_amount/created_at columns, not the nonexistent amount/entry_date)
-        const cashRows = (await db.execute(sql`
+        //
+        // Classify each cash movement by the account_sub_type of its counter-account in the same
+        // journal, same LATERAL-join approach as accounting-service's ReportsEngine.getCashFlow() —
+        // this used to bucket everything as "Operating", which materially misstated Operating Cash
+        // Flow (a headline solvency metric) for any tenant with loan or fixed-asset activity, and
+        // disagreed with the accounting-service module's own Cash Flow page for the same tenant/period.
+        const classifiedRows = (await db.execute(sql`
           SELECT
-            COALESCE(SUM(fe.debit_amount), 0) AS total_in,
-            COALESCE(SUM(fe.credit_amount), 0) AS total_out
+            (fe.debit_amount - fe.credit_amount)::NUMERIC AS net_amount,
+            counter.account_sub_type AS counter_sub_type
           FROM accounts a
-          JOIN financial_entries fe ON fe.account_id = a.id AND fe.tenant_id = ${tid}
-            AND fe.created_at >= ${from}::date AND fe.created_at < (${to}::date + INTERVAL '1 day')
-          WHERE a.tenant_id = ${tid}
+          JOIN financial_entries fe
+            ON fe.account_id = a.id
+           AND fe.tenant_id  = ${tid}
+           AND fe.created_at >= ${from}::date AND fe.created_at < (${to}::date + INTERVAL '1 day')
+          LEFT JOIN LATERAL (
+            SELECT ca.account_sub_type
+            FROM financial_entries fe2
+            JOIN accounts ca
+              ON ca.id = fe2.account_id
+             AND ca.tenant_id = ${tid}
+            WHERE fe2.journal_id = fe.journal_id
+              AND fe2.tenant_id  = ${tid}
+              AND fe2.id        != fe.id
+              AND ca.account_sub_type IS DISTINCT FROM 'CASH_AND_BANK'
+            ORDER BY fe2.id ASC
+            LIMIT 1
+          ) counter ON true
+          WHERE a.tenant_id      = ${tid}
             AND a.account_sub_type = 'CASH_AND_BANK'
             AND a.deleted_at IS NULL
-        `)) as unknown as Array<{ total_in: string; total_out: string }>;
+        `)) as unknown as Array<{ net_amount: string; counter_sub_type: string | null }>;
 
         const openingRows = (await db.execute(sql`
           WITH per_account AS (
@@ -1337,15 +1527,75 @@ export class ReportEngine {
           SELECT COALESCE(SUM(ob_signed + pre_movement), 0) AS balance FROM per_account
         `)) as unknown as Array<{ balance: string }>;
 
-        const totalIn = Number(cashRows[0]?.total_in ?? 0);
-        const totalOut = Number(cashRows[0]?.total_out ?? 0);
+        let operatingIn = 0;
+        let operatingOut = 0;
+        const investingBuckets = new Map<string, number>();
+        const financingBuckets = new Map<string, number>();
+
+        for (const row of classifiedRows) {
+          const amount = Number(row.net_amount);
+          const counterSubType = row.counter_sub_type;
+
+          if (counterSubType === 'FIXED_ASSET' || counterSubType === 'ACCUMULATED_DEPRECIATION') {
+            const label =
+              amount >= 0 ? 'Proceeds from disposal of fixed assets' : 'Purchase of fixed assets';
+            investingBuckets.set(label, (investingBuckets.get(label) ?? 0) + amount);
+          } else if (counterSubType === 'LONG_TERM_LIABILITY') {
+            const label = amount >= 0 ? 'Bank loan received' : 'Bank loan repaid';
+            financingBuckets.set(label, (financingBuckets.get(label) ?? 0) + amount);
+          } else if (counterSubType === 'EQUITY') {
+            const label = amount >= 0 ? "Owner's capital introduced" : "Owner's drawings";
+            financingBuckets.set(label, (financingBuckets.get(label) ?? 0) + amount);
+          } else if (amount >= 0) {
+            operatingIn += amount;
+          } else {
+            operatingOut += amount;
+          }
+        }
+
+        const netOperating = operatingIn + operatingOut;
+        const netInvesting = Array.from(investingBuckets.values()).reduce((s, v) => s + v, 0);
+        const netFinancing = Array.from(financingBuckets.values()).reduce((s, v) => s + v, 0);
         const openingCash = Number(openingRows[0]?.balance ?? 0);
-        const netMovement = totalIn - totalOut;
+        const netMovement = netOperating + netInvesting + netFinancing;
         const closingCash = openingCash + netMovement;
 
         const rows: ReportRow[] = [
-          { section: 'Operating Activities', description: 'Cash received from customers & others', amount: totalIn },
-          { section: 'Operating Activities', description: 'Cash paid to suppliers & expenses', amount: -totalOut },
+          {
+            section: 'Operating Activities',
+            description: 'Cash received from customers',
+            amount: operatingIn,
+          },
+          {
+            section: 'Operating Activities',
+            description: 'Cash paid to suppliers',
+            amount: operatingOut,
+          },
+          {
+            section: 'Operating Activities',
+            description: 'Net Cash from Operating Activities',
+            amount: netOperating,
+          },
+          ...Array.from(investingBuckets, ([description, amount]) => ({
+            section: 'Investing Activities',
+            description,
+            amount,
+          })),
+          {
+            section: 'Investing Activities',
+            description: 'Net Cash from Investing Activities',
+            amount: netInvesting,
+          },
+          ...Array.from(financingBuckets, ([description, amount]) => ({
+            section: 'Financing Activities',
+            description,
+            amount,
+          })),
+          {
+            section: 'Financing Activities',
+            description: 'Net Cash from Financing Activities',
+            amount: netFinancing,
+          },
           { section: 'Summary', description: 'Net Cash Movement', amount: netMovement },
           { section: 'Summary', description: 'Opening Cash & Bank Balance', amount: openingCash },
           { section: 'Summary', description: 'Closing Cash & Bank Balance', amount: closingCash },
@@ -1377,19 +1627,19 @@ export class ReportEngine {
       }
 
       case 'bank-book': {
-        // ✓ tenant_id filtered — ES-26 (fixed: real columns are debit_amount/credit_amount/created_at,
-        // not amount/debit_credit/entry_date)
+        // FIXED: same journals join type-mismatch and nonexistent journal_number column as
+        // day-book/account-ledger above.
         const res = await db.execute(sql`
           SELECT
             fe.created_at::date AS date,
             fe.description,
-            j.journal_number AS reference,
+            j.journal_id AS reference,
             fe.debit_amount AS debit,
             fe.credit_amount AS credit,
             SUM(fe.debit_amount - fe.credit_amount)
               OVER (ORDER BY fe.created_at, fe.id) AS balance
           FROM financial_entries fe
-          JOIN journals j ON j.id = fe.journal_id AND j.tenant_id = ${tid}
+          JOIN journals j ON j.journal_id = fe.journal_id AND j.tenant_id = ${tid}
           JOIN bank_accounts ba ON ba.account_id = fe.account_id AND ba.tenant_id = ${tid}
           WHERE fe.tenant_id = ${tid}
             AND ba.id = ${params.bankAccountId ?? 0}::int
@@ -1400,30 +1650,52 @@ export class ReportEngine {
       }
 
       case 'tds-report': {
-        // ✓ tenant_id filtered — ES-05 audit
+        // FIXED: tds_entries has no deductee_type/pan_number/gross_amount/status/entry_date
+        // columns at all (real: supplier_id (FK)/taxable_amount/deposit_status/
+        // period_month+period_year, no single date column). PAN comes from the linked
+        // supplier; deductee type is derived from the 4th character of the PAN, which the
+        // Income Tax Department's PAN format standard fixes to the holder's entity type
+        // (C=Company, P=Individual, H=HUF, F=Firm, A=AOP, T=Trust, B=BOI, L=Local Authority,
+        // J=Artificial Judicial Person, G=Government) — not invented, a real documented rule.
         const res = await db.execute(sql`
           SELECT
-            te.deductee_type,
-            te.pan_number,
+            CASE SUBSTRING(s.pan, 4, 1)
+              WHEN 'C' THEN 'Company' WHEN 'P' THEN 'Individual' WHEN 'H' THEN 'HUF'
+              WHEN 'F' THEN 'Firm' WHEN 'A' THEN 'AOP' WHEN 'T' THEN 'Trust'
+              WHEN 'B' THEN 'BOI' WHEN 'L' THEN 'Local Authority'
+              WHEN 'J' THEN 'Artificial Judicial Person' WHEN 'G' THEN 'Government'
+              ELSE 'Unknown'
+            END AS deductee_type,
+            s.pan AS pan_number,
             te.tds_section AS section,
-            te.gross_amount,
+            te.taxable_amount AS gross_amount,
             te.tds_rate,
             te.tds_amount,
-            te.status
+            te.deposit_status AS status
           FROM tds_entries te
+          JOIN suppliers s ON s.id = te.supplier_id AND s.tenant_id = ${tid}
           WHERE te.tenant_id = ${tid}
-            AND te.entry_date BETWEEN ${from}::date AND ${to}::date
-          ORDER BY te.entry_date DESC
+            AND (te.period_year * 100 + te.period_month)
+              BETWEEN (EXTRACT(YEAR FROM ${from}::date)::int * 100 + EXTRACT(MONTH FROM ${from}::date)::int)
+              AND (EXTRACT(YEAR FROM ${to}::date)::int * 100 + EXTRACT(MONTH FROM ${to}::date)::int)
+          ORDER BY te.period_year DESC, te.period_month DESC
         `);
         return res as unknown as ReportRow[];
       }
 
       case 'depreciation-schedule': {
-        // ✓ tenant_id filtered — ES-05 audit
+        // FIXED: fixed_assets has no asset_name/asset_category columns (real: name/category);
+        // asset_depreciation_schedule has no financial_year column at all (real:
+        // period_month/period_year) — the "25-26"-style FY string param is parsed in JS
+        // (matching NumberSeriesEngine's own FY format) into the April-start/March-end year
+        // pair the schedule actually stores.
+        const fyRaw = parseInt(String(params.financialYear ?? '').split('-')[0] ?? '', 10);
+        const fyStartYear = fyRaw < 100 ? 2000 + fyRaw : fyRaw;
+        const fyEndYear = fyStartYear + 1;
         const res = await db.execute(sql`
           SELECT
-            fa.asset_name,
-            fa.asset_category,
+            fa.name AS asset_name,
+            fa.category AS asset_category,
             fa.purchase_date::date AS purchase_date,
             ads.opening_value,
             0 AS additions,
@@ -1432,45 +1704,84 @@ export class ReportEngine {
           FROM fixed_assets fa
           JOIN asset_depreciation_schedule ads ON ads.asset_id = fa.id AND ads.tenant_id = ${tid}
           WHERE fa.tenant_id = ${tid}
-            AND ads.financial_year = ${params.financialYear ?? ''}::text
-          ORDER BY fa.asset_name
+            AND (
+              (ads.period_year = ${fyStartYear} AND ads.period_month >= 4)
+              OR (ads.period_year = ${fyEndYear} AND ads.period_month <= 3)
+            )
+          ORDER BY fa.name, ads.period_year, ads.period_month
         `);
         return res as unknown as ReportRow[];
       }
 
       case 'journal-report': {
-        // ✓ tenant_id filtered — ES-05 audit
+        // FIXED: journals has no journal_date/journal_number/total_debit/total_credit columns
+        // (real: posted_at, journal_id (the ULID business identifier); there is no header-level
+        // debit/credit total at all — it's derived here from the journal's financial_entries,
+        // which by the DEFERRED validate_journal_balance trigger are always balanced).
         const res = await db.execute(sql`
           SELECT
-            j.journal_date::date AS journal_date,
-            j.journal_number,
+            j.posted_at::date AS journal_date,
+            j.journal_id AS journal_number,
             j.description,
-            j.total_debit,
-            j.total_credit
+            COALESCE(fe.total_debit, 0) AS total_debit,
+            COALESCE(fe.total_credit, 0) AS total_credit
           FROM journals j
+          LEFT JOIN (
+            SELECT journal_id, SUM(debit_amount) AS total_debit, SUM(credit_amount) AS total_credit
+            FROM financial_entries WHERE tenant_id = ${tid} GROUP BY journal_id
+          ) fe ON fe.journal_id = j.journal_id
           WHERE j.tenant_id = ${tid}
-            AND j.journal_date BETWEEN ${from}::date AND ${to}::date
-          ORDER BY j.journal_date DESC
+            AND j.posted_at BETWEEN ${from}::date AND (${to}::date + INTERVAL '1 day')
+          ORDER BY j.posted_at DESC
         `);
         return res as unknown as ReportRow[];
       }
 
       case 'profit-center-report': {
-        // ✓ tenant_id filtered — ES-05 audit
+        // FIXED (logic bug, not a schema error): cogs/expenses/margin were hardcoded to 0, and
+        // gross_profit/net_profit both just repeated total_sales verbatim — every branch always
+        // showed 100% margin with no cost basis at all. cogs is now derived from
+        // items.wacc_cost (same fallback used by sales-by-item/dashboard.routes.ts elsewhere in
+        // this file), expenses from the expenses table's real per-branch total_amount.
         const res = await db.execute(sql`
+          WITH sales AS (
+            SELECT i.branch_id, SUM(i.grand_total) AS total_sales
+            FROM invoices i
+            WHERE i.tenant_id = ${tid} AND i.status != 'CANCELLED'
+              AND i.invoice_date BETWEEN ${from}::date AND ${to}::date
+            GROUP BY i.branch_id
+          ),
+          cost_of_goods AS (
+            SELECT i.branch_id, SUM(il.quantity * COALESCE(it.wacc_cost, 0)) AS cogs
+            FROM invoice_lines il
+            JOIN invoices i ON i.id = il.invoice_id AND i.tenant_id = ${tid}
+            JOIN items it ON it.id = il.item_id AND it.tenant_id = ${tid}
+            WHERE i.tenant_id = ${tid} AND i.status != 'CANCELLED'
+              AND i.invoice_date BETWEEN ${from}::date AND ${to}::date
+            GROUP BY i.branch_id
+          ),
+          branch_expenses AS (
+            SELECT e.branch_id, SUM(e.total_amount) AS expenses
+            FROM expenses e
+            WHERE e.tenant_id = ${tid}
+              AND e.expense_date BETWEEN ${from}::date AND ${to}::date
+            GROUP BY e.branch_id
+          )
           SELECT
             b.name AS branch,
-            COALESCE(SUM(CASE WHEN i.status != 'CANCELLED' THEN i.grand_total END), 0) AS total_sales,
-            0 AS cogs,
-            COALESCE(SUM(CASE WHEN i.status != 'CANCELLED' THEN i.grand_total END), 0) AS gross_profit,
-            0 AS expenses,
-            COALESCE(SUM(CASE WHEN i.status != 'CANCELLED' THEN i.grand_total END), 0) AS net_profit,
-            0 AS margin
+            COALESCE(s.total_sales, 0) AS total_sales,
+            COALESCE(cg.cogs, 0) AS cogs,
+            COALESCE(s.total_sales, 0) - COALESCE(cg.cogs, 0) AS gross_profit,
+            COALESCE(be.expenses, 0) AS expenses,
+            COALESCE(s.total_sales, 0) - COALESCE(cg.cogs, 0) - COALESCE(be.expenses, 0) AS net_profit,
+            CASE WHEN COALESCE(s.total_sales, 0) > 0 THEN
+              ROUND(((COALESCE(s.total_sales, 0) - COALESCE(cg.cogs, 0) - COALESCE(be.expenses, 0)) / s.total_sales * 100)::numeric, 2)
+            ELSE 0 END AS margin
           FROM branches b
-          LEFT JOIN invoices i ON i.branch_id = b.id AND i.tenant_id = ${tid}
-            AND i.invoice_date BETWEEN ${from}::date AND ${to}::date
+          LEFT JOIN sales s ON s.branch_id = b.id
+          LEFT JOIN cost_of_goods cg ON cg.branch_id = b.id
+          LEFT JOIN branch_expenses be ON be.branch_id = b.id
           WHERE b.tenant_id = ${tid}
-          GROUP BY b.id, b.name
           ORDER BY net_profit DESC
         `);
         return res as unknown as ReportRow[];
@@ -1501,26 +1812,45 @@ export class ReportEngine {
       // â”€â”€ HR REPORTS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       case 'payroll-report': {
         const [year, month] = (params.month ?? '2024-01').split('-');
-        // ✓ tenant_id filtered — ES-05 audit
+        // ✓ tenant_id filtered — ES-05 audit. Column names corrected 2026-07-20 (this query
+        // referenced e.department/ps.total_allowances/pr.pay_period_start — none of which
+        // exist on the real schema; every execution failed with a SQL error).
         const res = await db.execute(sql`
           SELECT
             e.employee_code,
             CONCAT(e.first_name, ' ', e.last_name) AS employee_name,
-            e.department,
+            d.name AS department,
             ps.basic_salary,
-            ps.total_allowances AS allowances,
+            ps.hra_amount,
+            ps.da_amount,
+            ps.other_allowances,
+            ps.piece_rate_amount,
             ps.gross_salary,
             ps.total_deductions AS deductions,
             ps.net_salary
           FROM payroll_slips ps
           JOIN payroll_runs pr ON pr.id = ps.payroll_run_id AND pr.tenant_id = ${tid}
           JOIN employees e ON e.id = ps.employee_id AND e.tenant_id = ${tid}
+          LEFT JOIN departments d ON d.id = e.department_id AND d.tenant_id = ${tid}
           WHERE pr.tenant_id = ${tid}
-            AND EXTRACT(YEAR FROM pr.pay_period_start) = ${Number(year)}
-            AND EXTRACT(MONTH FROM pr.pay_period_start) = ${Number(month)}
+            AND pr.period_year = ${Number(year)}
+            AND pr.period_month = ${Number(month)}
           ORDER BY e.employee_code
         `);
-        return res as unknown as ReportRow[];
+        return (res as unknown as Record<string, string | null>[]).map((r) => ({
+          employee_code: r['employee_code'],
+          employee_name: r['employee_name'],
+          department: r['department'],
+          basic_salary: decryptAmount(r['basic_salary']),
+          allowances:
+            decryptAmount(r['hra_amount']) +
+            decryptAmount(r['da_amount']) +
+            decryptAmount(r['other_allowances']) +
+            decryptAmount(r['piece_rate_amount']),
+          gross_salary: decryptAmount(r['gross_salary']),
+          deductions: decryptAmount(r['deductions']),
+          net_salary: decryptAmount(r['net_salary']),
+        })) as unknown as ReportRow[];
       }
 
       case 'attendance-report': {
@@ -1546,37 +1876,45 @@ export class ReportEngine {
       }
 
       case 'leave-report': {
-        // ✓ tenant_id filtered — ES-05 audit
+        // ✓ tenant_id filtered — ES-05 audit. Column names corrected 2026-07-20 (referenced
+        // la.leave_type/from_date/to_date/number_of_days — real columns are leave_type_id
+        // (FK)/start_date/end_date/days; every execution failed with a SQL error).
         const res = await db.execute(sql`
           SELECT
             CONCAT(e.first_name, ' ', e.last_name) AS employee_name,
-            la.leave_type,
-            la.from_date::date AS from_date,
-            la.to_date::date AS to_date,
-            la.number_of_days AS days,
+            lt.name AS leave_type,
+            la.start_date::date AS from_date,
+            la.end_date::date AS to_date,
+            la.days,
             la.status,
             la.reason
           FROM leave_applications la
           JOIN employees e ON e.id = la.employee_id AND e.tenant_id = ${tid}
+          LEFT JOIN leave_types lt ON lt.id = la.leave_type_id AND lt.tenant_id = ${tid}
           WHERE la.tenant_id = ${tid}
-            AND la.from_date BETWEEN ${from}::date AND ${to}::date
-          ORDER BY la.from_date DESC
+            AND la.start_date BETWEEN ${from}::date AND ${to}::date
+          ORDER BY la.start_date DESC
         `);
         return res as unknown as ReportRow[];
       }
 
       case 'employee-master-report': {
-        // ✓ tenant_id filtered — ES-05 audit
+        // ✓ tenant_id filtered — ES-05 audit. Column names corrected 2026-07-20 (referenced
+        // e.department/designation/date_of_joining/contact_number as plain text columns —
+        // real schema has department_id/designation_id FKs, joining_date, phone; every
+        // execution failed with a SQL error).
         const res = await db.execute(sql`
           SELECT
             e.employee_code,
             CONCAT(e.first_name, ' ', e.last_name) AS employee_name,
-            e.department,
-            e.designation,
-            e.date_of_joining::date AS date_of_joining,
+            d.name AS department,
+            des.name AS designation,
+            e.joining_date::date AS date_of_joining,
             e.status,
-            e.contact_number
+            e.phone AS contact_number
           FROM employees e
+          LEFT JOIN departments d ON d.id = e.department_id AND d.tenant_id = ${tid}
+          LEFT JOIN designations des ON des.id = e.designation_id AND des.tenant_id = ${tid}
           WHERE e.tenant_id = ${tid}
             AND (${params.status ?? null}::text IS NULL OR e.status = ${params.status ?? null}::text)
           ORDER BY e.employee_code
@@ -1585,23 +1923,27 @@ export class ReportEngine {
       }
 
       case 'alteration-report': {
-        // ✓ tenant_id filtered — ES-05 audit
+        // ✓ tenant_id filtered — ES-05 audit. Column names corrected 2026-07-20 (referenced
+        // ao.alteration_number/order_date/total_pieces/assigned_tailor_id/total_charges and a
+        // customers join — alteration_orders has no customer_id join needed (customer_name is
+        // denormalized on the row) and none of those other columns exist; every execution
+        // failed with a SQL error).
         const res = await db.execute(sql`
           SELECT
-            ao.alteration_number,
-            ao.order_date::date AS date,
-            COALESCE(c.display_name, 'Walk-in') AS customer_name,
+            ao.order_number AS alteration_number,
+            ao.received_date::date AS date,
+            COALESCE(ao.customer_name, 'Walk-in') AS customer_name,
             CONCAT(e.first_name, ' ', e.last_name) AS tailor_name,
-            ao.total_pieces,
-            ao.delivery_date::date AS delivery_date,
+            (SELECT COALESCE(SUM((item->>'quantity')::numeric), 0)
+               FROM jsonb_array_elements(ao.items) AS item) AS total_pieces,
+            ao.delivered_at::date AS delivery_date,
             ao.status,
-            ao.total_charges AS charges
+            ao.total_amount AS charges
           FROM alteration_orders ao
-          LEFT JOIN customers c ON c.id = ao.customer_id AND c.tenant_id = ${tid}
-          LEFT JOIN employees e ON e.id = ao.assigned_tailor_id AND e.tenant_id = ${tid}
+          LEFT JOIN employees e ON e.id = ao.assigned_to_id AND e.tenant_id = ${tid}
           WHERE ao.tenant_id = ${tid}
-            AND ao.order_date BETWEEN ${from}::date AND ${to}::date
-          ORDER BY ao.order_date DESC
+            AND ao.received_date BETWEEN ${from}::date AND ${to}::date
+          ORDER BY ao.received_date DESC
         `);
         return res as unknown as ReportRow[];
       }
@@ -1625,6 +1967,140 @@ export class ReportEngine {
         return res as unknown as ReportRow[];
       }
 
+      // 2026-07-20 HR audit: this module's report registry had no Salary Register,
+      // Department Summary, Joining, or Exit report at all — added below.
+      case 'salary-register': {
+        const [year, month] = (params.month ?? '2024-01').split('-');
+        const res = await db.execute(sql`
+          SELECT
+            e.employee_code,
+            CONCAT(e.first_name, ' ', e.last_name) AS employee_name,
+            d.name AS department,
+            e.uan,
+            ps.basic_salary,
+            ps.gross_salary,
+            ps.pf_employee,
+            ps.esi_employee,
+            ps.professional_tax,
+            ps.tds_deduction,
+            ps.loan_deduction,
+            ps.total_deductions,
+            ps.net_salary
+          FROM payroll_slips ps
+          JOIN payroll_runs pr ON pr.id = ps.payroll_run_id AND pr.tenant_id = ${tid}
+          JOIN employees e ON e.id = ps.employee_id AND e.tenant_id = ${tid}
+          LEFT JOIN departments d ON d.id = e.department_id AND d.tenant_id = ${tid}
+          WHERE pr.tenant_id = ${tid}
+            AND pr.period_year = ${Number(year)}
+            AND pr.period_month = ${Number(month)}
+          ORDER BY e.employee_code
+        `);
+        return (res as unknown as Record<string, string | null>[]).map((r) => ({
+          employee_code: r['employee_code'],
+          employee_name: r['employee_name'],
+          department: r['department'],
+          uan: r['uan'],
+          basic_salary: decryptAmount(r['basic_salary']),
+          gross_salary: decryptAmount(r['gross_salary']),
+          pf_employee: decryptAmount(r['pf_employee']),
+          esi_employee: decryptAmount(r['esi_employee']),
+          professional_tax: decryptAmount(r['professional_tax']),
+          tds_deduction: decryptAmount(r['tds_deduction']),
+          loan_deduction: decryptAmount(r['loan_deduction']),
+          total_deductions: decryptAmount(r['total_deductions']),
+          net_salary: decryptAmount(r['net_salary']),
+        })) as unknown as ReportRow[];
+      }
+
+      case 'department-summary-report': {
+        const [year, month] = (params.month ?? '2024-01').split('-');
+        // Headcount is as-of-now (current department assignment); payroll cost is for the
+        // selected period — these can drift apart for employees who transferred departments
+        // mid-period, which is expected/acceptable for a summary-level report.
+        const headcountRes = await db.execute(sql`
+          SELECT d.id AS department_id, d.name AS department, COUNT(e.id)::int AS headcount
+          FROM departments d
+          LEFT JOIN employees e ON e.department_id = d.id AND e.tenant_id = ${tid} AND e.status = 'ACTIVE'
+          WHERE d.tenant_id = ${tid}
+          GROUP BY d.id, d.name
+          ORDER BY d.name
+        `);
+        const payrollRes = await db.execute(sql`
+          SELECT e.department_id, ps.gross_salary, ps.net_salary
+          FROM payroll_slips ps
+          JOIN payroll_runs pr ON pr.id = ps.payroll_run_id AND pr.tenant_id = ${tid}
+          JOIN employees e ON e.id = ps.employee_id AND e.tenant_id = ${tid}
+          WHERE pr.tenant_id = ${tid} AND pr.period_year = ${Number(year)} AND pr.period_month = ${Number(month)}
+        `);
+        const costByDept = new Map<number | null, { gross: number; net: number }>();
+        for (const row of payrollRes as unknown as {
+          department_id: number | null;
+          gross_salary: string;
+          net_salary: string;
+        }[]) {
+          const existing = costByDept.get(row.department_id) ?? { gross: 0, net: 0 };
+          existing.gross += decryptAmount(row.gross_salary);
+          existing.net += decryptAmount(row.net_salary);
+          costByDept.set(row.department_id, existing);
+        }
+        return (
+          headcountRes as unknown as {
+            department_id: number;
+            department: string;
+            headcount: number;
+          }[]
+        ).map((d) => {
+          const cost = costByDept.get(d.department_id) ?? { gross: 0, net: 0 };
+          return {
+            department: d.department,
+            headcount: d.headcount,
+            total_gross_salary: Math.round(cost.gross * 100) / 100,
+            total_net_salary: Math.round(cost.net * 100) / 100,
+          };
+        }) as unknown as ReportRow[];
+      }
+
+      case 'joining-report': {
+        // ✓ tenant_id filtered
+        const res = await db.execute(sql`
+          SELECT
+            e.employee_code,
+            CONCAT(e.first_name, ' ', e.last_name) AS employee_name,
+            d.name AS department,
+            des.name AS designation,
+            e.joining_date::date AS joining_date,
+            e.employment_type
+          FROM employees e
+          LEFT JOIN departments d ON d.id = e.department_id AND d.tenant_id = ${tid}
+          LEFT JOIN designations des ON des.id = e.designation_id AND des.tenant_id = ${tid}
+          WHERE e.tenant_id = ${tid}
+            AND e.joining_date BETWEEN ${from}::date AND ${to}::date
+          ORDER BY e.joining_date DESC
+        `);
+        return res as unknown as ReportRow[];
+      }
+
+      case 'exit-report': {
+        // ✓ tenant_id filtered
+        const res = await db.execute(sql`
+          SELECT
+            e.employee_code,
+            CONCAT(e.first_name, ' ', e.last_name) AS employee_name,
+            d.name AS department,
+            e.joining_date::date AS joining_date,
+            e.exit_date::date AS exit_date,
+            e.exit_reason,
+            (e.exit_date - e.joining_date) AS tenure_days
+          FROM employees e
+          LEFT JOIN departments d ON d.id = e.department_id AND d.tenant_id = ${tid}
+          WHERE e.tenant_id = ${tid}
+            AND e.exit_date IS NOT NULL
+            AND e.exit_date BETWEEN ${from}::date AND ${to}::date
+          ORDER BY e.exit_date DESC
+        `);
+        return res as unknown as ReportRow[];
+      }
+
       // â”€â”€ GST REPORTS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       case 'gst-register': {
         // ✓ tenant_id filtered — ES-05 audit
@@ -1638,7 +2114,7 @@ export class ReportEngine {
               i.subtotal AS taxable_value, i.cgst_amount AS cgst, i.sgst_amount AS sgst, i.igst_amount AS igst
             FROM invoices i LEFT JOIN customers c ON c.id = i.customer_id AND c.tenant_id = ${tid}
             WHERE i.tenant_id = ${tid} AND i.invoice_date BETWEEN ${from}::date AND ${to}::date
-              AND i.status != 'CANCELLED'
+              AND i.status NOT IN ('CANCELLED', 'DRAFT')
               AND (${params.type ?? null}::text IS NULL OR ${params.type ?? null}::text = 'SALES')
             UNION ALL
             SELECT g.grn_date AS date, 'Purchase GRN' AS document_type,
@@ -1655,24 +2131,30 @@ export class ReportEngine {
       }
 
       case 'gstr1-report': {
-        // ✓ tenant_id filtered — ES-05 audit
+        // FIXED (logic bug, not a missing column): gst_rate was hardcoded to 0 despite
+        // invoice_lines carrying a real per-line gst_rate — different items on the same invoice
+        // can carry different rates, so this now reports at invoice+rate granularity (summing
+        // each rate bucket's own taxable/tax amounts) instead of one blended, rate-less row per
+        // invoice, matching how GSTR-1 is actually filed rate-by-rate.
         const res = await db.execute(sql`
           SELECT
             i.invoice_date::date AS invoice_date,
             i.invoice_number,
             COALESCE(c.gstin, 'URP') AS customer_gstin,
             COALESCE(c.display_name, 'Walk-in') AS customer_name,
-            i.subtotal AS taxable_value,
-            0 AS gst_rate,
-            i.cgst_amount AS cgst,
-            i.sgst_amount AS sgst,
-            i.igst_amount AS igst
-          FROM invoices i
+            SUM(il.taxable_amount) AS taxable_value,
+            il.gst_rate,
+            SUM(il.cgst_amount) AS cgst,
+            SUM(il.sgst_amount) AS sgst,
+            SUM(il.igst_amount) AS igst
+          FROM invoice_lines il
+          JOIN invoices i ON i.id = il.invoice_id AND i.tenant_id = ${tid}
           LEFT JOIN customers c ON c.id = i.customer_id AND c.tenant_id = ${tid}
           WHERE i.tenant_id = ${tid}
             AND i.invoice_date BETWEEN ${from}::date AND ${to}::date
             AND i.status NOT IN ('CANCELLED', 'DRAFT')
-          ORDER BY i.invoice_date
+          GROUP BY i.id, i.invoice_date, i.invoice_number, c.gstin, c.display_name, il.gst_rate
+          ORDER BY i.invoice_date, i.invoice_number, il.gst_rate
         `);
         return res as unknown as ReportRow[];
       }
@@ -1770,7 +2252,8 @@ export class ReportEngine {
             AND i.invoice_date BETWEEN ${from}::date AND ${to}::date AND i.status != 'CANCELLED'
         `);
         const rows = res as unknown as ReportRow[];
-        if (cache) await cache.setJson(cacheKey, rows, GST_PAYABLE_CACHE_TTL_SECONDS).catch(() => undefined);
+        if (cache)
+          await cache.setJson(cacheKey, rows, GST_PAYABLE_CACHE_TTL_SECONDS).catch(() => undefined);
         return rows;
       }
 
@@ -1797,17 +2280,22 @@ export class ReportEngine {
       // ── AR / AP AGING REPORTS ──────────────────────────────────────────────────
       case 'ar-aging': {
         const asOf = params.asOfDate ?? new Date().toISOString().slice(0, 10);
+        // M-12 fix: this bucketed by invoice_date ("how old is this invoice") while
+        // outstanding-receivables bucketed the exact same concept by due_date ("how overdue is
+        // this receivable") — the same tenant got two different answers for "days overdue"
+        // depending which report they ran. due_date is the standard AR-ageing convention (a
+        // 45-day-old invoice on 60-day terms isn't overdue at all); aligned to match.
         // ✓ tenant_id filtered — ES-05 audit
         const res = await db.execute(sql`
           SELECT
             COALESCE(c.display_name, 'Walk-in') AS customer_name,
-            SUM(CASE WHEN (${asOf}::date - i.invoice_date::date) BETWEEN 0 AND 30
+            SUM(CASE WHEN (${asOf}::date - i.due_date::date) BETWEEN 0 AND 30
               THEN (i.grand_total - COALESCE(i.paid_amount, 0)) ELSE 0 END) AS days0to30,
-            SUM(CASE WHEN (${asOf}::date - i.invoice_date::date) BETWEEN 31 AND 60
+            SUM(CASE WHEN (${asOf}::date - i.due_date::date) BETWEEN 31 AND 60
               THEN (i.grand_total - COALESCE(i.paid_amount, 0)) ELSE 0 END) AS days31to60,
-            SUM(CASE WHEN (${asOf}::date - i.invoice_date::date) BETWEEN 61 AND 90
+            SUM(CASE WHEN (${asOf}::date - i.due_date::date) BETWEEN 61 AND 90
               THEN (i.grand_total - COALESCE(i.paid_amount, 0)) ELSE 0 END) AS days61to90,
-            SUM(CASE WHEN (${asOf}::date - i.invoice_date::date) > 90
+            SUM(CASE WHEN (${asOf}::date - i.due_date::date) > 90
               THEN (i.grand_total - COALESCE(i.paid_amount, 0)) ELSE 0 END) AS days90plus,
             SUM(i.grand_total - COALESCE(i.paid_amount, 0)) AS total_outstanding
           FROM invoices i
@@ -1825,25 +2313,31 @@ export class ReportEngine {
 
       case 'ap-aging': {
         const asOf = params.asOfDate ?? new Date().toISOString().slice(0, 10);
-        // ✓ tenant_id filtered — ES-05 audit
+        // FIXED: grns has no paid_amount column at all — paid amount is summed from
+        // supplier_payment_allocations, the real GRN-level payment link, same fix as
+        // outstanding-payables above.
         const res = await db.execute(sql`
           SELECT
             s.display_name AS supplier_name,
             SUM(CASE WHEN (${asOf}::date - g.grn_date::date) BETWEEN 0 AND 30
-              THEN (g.grand_total - COALESCE(g.paid_amount, 0)) ELSE 0 END) AS days0to30,
+              THEN (g.grand_total - COALESCE(spa.paid_amount, 0)) ELSE 0 END) AS days0to30,
             SUM(CASE WHEN (${asOf}::date - g.grn_date::date) BETWEEN 31 AND 60
-              THEN (g.grand_total - COALESCE(g.paid_amount, 0)) ELSE 0 END) AS days31to60,
+              THEN (g.grand_total - COALESCE(spa.paid_amount, 0)) ELSE 0 END) AS days31to60,
             SUM(CASE WHEN (${asOf}::date - g.grn_date::date) BETWEEN 61 AND 90
-              THEN (g.grand_total - COALESCE(g.paid_amount, 0)) ELSE 0 END) AS days61to90,
+              THEN (g.grand_total - COALESCE(spa.paid_amount, 0)) ELSE 0 END) AS days61to90,
             SUM(CASE WHEN (${asOf}::date - g.grn_date::date) > 90
-              THEN (g.grand_total - COALESCE(g.paid_amount, 0)) ELSE 0 END) AS days90plus,
-            SUM(g.grand_total - COALESCE(g.paid_amount, 0)) AS total_outstanding
+              THEN (g.grand_total - COALESCE(spa.paid_amount, 0)) ELSE 0 END) AS days90plus,
+            SUM(g.grand_total - COALESCE(spa.paid_amount, 0)) AS total_outstanding
           FROM grns g
           JOIN suppliers s ON s.id = g.supplier_id AND s.tenant_id = ${tid}
+          LEFT JOIN (
+            SELECT grn_id, SUM(amount) AS paid_amount
+            FROM supplier_payment_allocations WHERE tenant_id = ${tid} GROUP BY grn_id
+          ) spa ON spa.grn_id = g.id
           WHERE g.tenant_id = ${tid}
             AND g.grn_date::date <= ${asOf}::date
             AND g.status NOT IN ('CANCELLED')
-            AND (g.grand_total - COALESCE(g.paid_amount, 0)) > 0
+            AND (g.grand_total - COALESCE(spa.paid_amount, 0)) > 0
             AND (${params.supplierId ?? null}::int IS NULL OR g.supplier_id = ${params.supplierId ?? null}::int)
           GROUP BY s.id, s.display_name
           ORDER BY total_outstanding DESC
@@ -1920,6 +2414,77 @@ export class ReportEngine {
         return res as unknown as ReportRow[];
       }
 
+      case 'purchase-analytics': {
+        const toDate = params.toDate ?? new Date().toISOString().slice(0, 10);
+        const fromDate = params.fromDate ?? defaultTrendFromDate();
+        // ✓ tenant_id filtered
+        const res = await db.execute(sql`
+          SELECT
+            TO_CHAR(DATE_TRUNC('month', g.grn_date), 'YYYY-MM') AS month,
+            COUNT(g.id)::int AS grn_count,
+            SUM(g.grand_total) AS spend,
+            SUM(CASE WHEN g.has_price_variance THEN 1 ELSE 0 END)::int AS price_variance_count
+          FROM grns g
+          WHERE g.tenant_id = ${tid}
+            AND g.status = 'APPROVED'
+            AND g.grn_date BETWEEN ${fromDate}::date AND ${toDate}::date
+          GROUP BY DATE_TRUNC('month', g.grn_date)
+          ORDER BY DATE_TRUNC('month', g.grn_date)
+        `);
+        return res as unknown as ReportRow[];
+      }
+
+      case 'supplier-performance': {
+        const toDate = params.toDate ?? new Date().toISOString().slice(0, 10);
+        const fromDate = params.fromDate ?? defaultTrendFromDate();
+        // ✓ tenant_id filtered
+        const res = await db.execute(sql`
+          WITH grn_stats AS (
+            SELECT
+              g.supplier_id,
+              COUNT(g.id)::int AS grn_count,
+              SUM(g.grand_total) AS total_purchased,
+              SUM(CASE WHEN g.has_price_variance THEN 1 ELSE 0 END)::int AS variance_count,
+              SUM(CASE WHEN po.expected_delivery_date IS NOT NULL
+                    AND g.grn_date::date <= po.expected_delivery_date::date THEN 1 ELSE 0 END)::int AS on_time_count,
+              SUM(CASE WHEN po.expected_delivery_date IS NOT NULL THEN 1 ELSE 0 END)::int AS delivery_tracked_count
+            FROM grns g
+            LEFT JOIN purchase_orders po ON po.id = g.purchase_order_id AND po.tenant_id = g.tenant_id
+            WHERE g.tenant_id = ${tid}
+              AND g.status = 'APPROVED'
+              AND g.grn_date BETWEEN ${fromDate}::date AND ${toDate}::date
+            GROUP BY g.supplier_id
+          ),
+          return_stats AS (
+            SELECT supplier_id, COUNT(id)::int AS return_count
+            FROM purchase_returns
+            WHERE tenant_id = ${tid} AND status = 'APPROVED'
+            GROUP BY supplier_id
+          )
+          SELECT
+            s.display_name AS supplier_name,
+            gs.grn_count,
+            gs.total_purchased,
+            CASE WHEN gs.delivery_tracked_count > 0
+              THEN ROUND((gs.on_time_count::numeric / gs.delivery_tracked_count) * 100, 1)
+              ELSE NULL
+            END AS on_time_delivery_pct,
+            CASE WHEN gs.grn_count > 0
+              THEN ROUND((gs.variance_count::numeric / gs.grn_count) * 100, 1)
+              ELSE 0
+            END AS price_variance_pct,
+            CASE WHEN gs.grn_count > 0
+              THEN ROUND((COALESCE(rs.return_count, 0)::numeric / gs.grn_count) * 100, 1)
+              ELSE 0
+            END AS return_rate_pct
+          FROM grn_stats gs
+          JOIN suppliers s ON s.id = gs.supplier_id AND s.tenant_id = ${tid}
+          LEFT JOIN return_stats rs ON rs.supplier_id = gs.supplier_id
+          ORDER BY gs.total_purchased DESC
+        `);
+        return res as unknown as ReportRow[];
+      }
+
       case 'hr-headcount-by-department': {
         // ✓ tenant_id filtered — ES-17
         const res = await db.execute(sql`
@@ -1939,24 +2504,65 @@ export class ReportEngine {
       case 'hr-salary-cost-trend': {
         const fromYm = params.fromDate ?? from;
         const toYm = params.toDate ?? to;
-        // ✓ tenant_id filtered — ES-17 (sums plaintext salary components — grossSalary/netSalary are
-        // AES-256-GCM encrypted and must not be summed in SQL)
-        const res = await db.execute(sql`
+        // FIXED: basic_salary/hra_amount/da_amount/other_allowances/piece_rate_amount/
+        // total_deductions are all AES-256-GCM ciphertext (text) as of migration 0085 — this
+        // report predates that migration and still summed them in raw SQL ("text + text"/
+        // SUM(text) is invalid Postgres and errors on every run). Fetches raw rows per
+        // employee-month instead and aggregates decrypted values in JS, same pattern as
+        // payroll-report/salary-register/department-summary-report elsewhere in this file.
+        const rows = (await db.execute(sql`
           SELECT
-            pr.period_year::text || '-' || LPAD(pr.period_month::text, 2, '0') AS month,
-            COUNT(DISTINCT ps.employee_id)::int AS employee_count,
-            SUM(ps.basic_salary + ps.hra_amount + ps.da_amount + ps.other_allowances + ps.piece_rate_amount) AS gross_salary_cost,
-            SUM(ps.total_deductions) AS total_deductions
+            pr.period_year, pr.period_month, ps.employee_id,
+            ps.basic_salary, ps.hra_amount, ps.da_amount, ps.other_allowances, ps.piece_rate_amount,
+            ps.total_deductions
           FROM payroll_slips ps
           JOIN payroll_runs pr ON pr.id = ps.payroll_run_id AND pr.tenant_id = ${tid}
           WHERE pr.tenant_id = ${tid}
             AND (pr.period_year * 100 + pr.period_month)
               BETWEEN (EXTRACT(YEAR FROM ${fromYm}::date)::int * 100 + EXTRACT(MONTH FROM ${fromYm}::date)::int)
               AND (EXTRACT(YEAR FROM ${toYm}::date)::int * 100 + EXTRACT(MONTH FROM ${toYm}::date)::int)
-          GROUP BY pr.period_year, pr.period_month
-          ORDER BY pr.period_year, pr.period_month
-        `);
-        return res as unknown as ReportRow[];
+        `)) as unknown as Array<{
+          period_year: number;
+          period_month: number;
+          employee_id: number;
+          basic_salary: string | null;
+          hra_amount: string | null;
+          da_amount: string | null;
+          other_allowances: string | null;
+          piece_rate_amount: string | null;
+          total_deductions: string | null;
+        }>;
+
+        const byMonth = new Map<
+          string,
+          { employees: Set<number>; gross: number; deductions: number }
+        >();
+        for (const r of rows) {
+          const month = `${r.period_year}-${String(r.period_month).padStart(2, '0')}`;
+          const bucket = byMonth.get(month) ?? {
+            employees: new Set<number>(),
+            gross: 0,
+            deductions: 0,
+          };
+          bucket.employees.add(r.employee_id);
+          bucket.gross +=
+            decryptAmount(r.basic_salary) +
+            decryptAmount(r.hra_amount) +
+            decryptAmount(r.da_amount) +
+            decryptAmount(r.other_allowances) +
+            decryptAmount(r.piece_rate_amount);
+          bucket.deductions += decryptAmount(r.total_deductions);
+          byMonth.set(month, bucket);
+        }
+
+        return Array.from(byMonth.entries())
+          .sort(([a], [b]) => (a < b ? -1 : 1))
+          .map(([month, b]) => ({
+            month,
+            employee_count: b.employees.size,
+            gross_salary_cost: Math.round(b.gross * 100) / 100,
+            total_deductions: Math.round(b.deductions * 100) / 100,
+          })) as unknown as ReportRow[];
       }
 
       case 'hr-hires-vs-exits': {
@@ -2000,4 +2606,3 @@ export class ReportEngine {
     }
   }
 }
-

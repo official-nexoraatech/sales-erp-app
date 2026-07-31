@@ -1,5 +1,5 @@
 ﻿import { useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { journalApi } from '../../api/endpoints.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
@@ -119,8 +119,13 @@ export default function LedgerPage() {
                     <td className="px-4 py-2.5 text-secondary text-xs">
                       {formatDatetime(tx.transactionDate)}
                     </td>
-                    <td className="px-4 py-2.5 font-mono text-xs text-link">
-                      {tx.journalId.slice(0, 16)}…
+                    <td className="px-4 py-2.5 font-mono text-xs">
+                      <Link
+                        to={`/accounting/journals/${tx.journalId}`}
+                        className="text-link hover:underline"
+                      >
+                        {tx.journalId.slice(0, 16)}…
+                      </Link>
                     </td>
                     <td className="px-4 py-2.5 text-primary max-w-xs truncate">{tx.description}</td>
                     <td className="px-4 py-2.5 text-right font-mono text-success">

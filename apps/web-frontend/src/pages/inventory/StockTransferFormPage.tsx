@@ -1,4 +1,4 @@
-﻿import { useState } from 'react';
+﻿import { useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
@@ -11,6 +11,8 @@ import ERPStickyFooter from '../../components/erp/ERPStickyFooter.js';
 import Button from '../../components/ui/Button.js';
 import Input from '../../components/ui/Input.js';
 import Select from '../../components/ui/Select.js';
+import { toFieldErrors } from '../../lib/zodFieldErrors.js';
+import { stockTransferFormSchema } from '../../schemas/inventory-transactions.schema.js';
 
 interface TransferLine {
   itemId: number;
@@ -38,6 +40,7 @@ export default function StockTransferFormPage() {
   const [notes, setNotes] = useState('');
   const [lines, setLines] = useState<TransferLine[]>([]);
   const [itemSearch, setItemSearch] = useState('');
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   const { data: whData } = useQuery({
     queryKey: ['warehouses'],
@@ -89,19 +92,19 @@ export default function StockTransferFormPage() {
     setLines((prev) => prev.filter((_, i) => i !== idx));
   }
 
-  function handleSubmit(): void {
-    if (!fromWarehouseId || !toWarehouseId) {
-      toast.error('Select both warehouses');
+  function handleSubmit(e: FormEvent): void {
+    e.preventDefault();
+    const result = stockTransferFormSchema.safeParse({
+      fromWarehouseId: fromWarehouseId ? Number(fromWarehouseId) : undefined,
+      toWarehouseId: toWarehouseId ? Number(toWarehouseId) : undefined,
+      lines: lines.map((l) => ({ itemId: l.itemId, quantity: l.requestedQty })),
+    });
+    if (!result.success) {
+      setFieldErrors(toFieldErrors(result.error));
+      toast.error('Fix the highlighted fields before saving');
       return;
     }
-    if (fromWarehouseId === toWarehouseId) {
-      toast.error('Source and destination must differ');
-      return;
-    }
-    if (lines.length === 0) {
-      toast.error('Add at least one item');
-      return;
-    }
+    setFieldErrors({});
 
     createMutation.mutate({
       fromWarehouseId: Number(fromWarehouseId),
@@ -116,7 +119,7 @@ export default function StockTransferFormPage() {
   }
 
   return (
-    <div>
+    <form onSubmit={handleSubmit} noValidate>
       <ERPPageHeader
         variant="detail"
         title="New Stock Transfer"
@@ -131,6 +134,7 @@ export default function StockTransferFormPage() {
             required
             value={fromWarehouseId}
             onChange={(e) => setFromWarehouseId(e.target.value)}
+            error={fieldErrors.fromWarehouseId}
             options={[
               { value: '', label: 'Select source...' },
               ...warehouses.map((w) => ({ value: String(w.id), label: w.name })),
@@ -141,6 +145,7 @@ export default function StockTransferFormPage() {
             required
             value={toWarehouseId}
             onChange={(e) => setToWarehouseId(e.target.value)}
+            error={fieldErrors.toWarehouseId}
             options={[
               { value: '', label: 'Select destination...' },
               ...warehouses.map((w) => ({ value: String(w.id), label: w.name })),
@@ -161,13 +166,22 @@ export default function StockTransferFormPage() {
             label="Search item to add"
             value={itemSearch}
             onChange={(e) => setItemSearch(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') e.preventDefault();
+            }}
             placeholder="Type item name..."
           />
+          {fieldErrors.lines && (
+            <p className="text-xs text-danger mt-2" role="alert">
+              {fieldErrors.lines}
+            </p>
+          )}
           {itemResults.length > 0 && (
             <div className="mt-1 border border-default rounded-lg divide-y bg-surface-card max-h-48 overflow-y-auto">
               {itemResults.map((item) => (
                 <button
                   key={item.id}
+                  type="button"
                   className="w-full text-left px-3 py-2 text-sm hover:bg-surface-raised"
                   onClick={() => addLine(item)}
                 >
@@ -204,7 +218,7 @@ export default function StockTransferFormPage() {
                       onChange={(e) =>
                         updateLine(idx, 'requestedQty', parseFloat(e.target.value) || 0)
                       }
-                      className="w-28 rounded border-default bg-surface-card text-sm px-2 py-1"
+                      className={`w-28 rounded border bg-surface-card text-sm px-2 py-1 ${fieldErrors[`lines.${idx}.quantity`] ? 'border-danger' : 'border-default'}`}
                     />
                   </td>
                   <td className="py-2">
@@ -220,6 +234,7 @@ export default function StockTransferFormPage() {
                   </td>
                   <td className="py-2">
                     <button
+                      type="button"
                       onClick={() => removeLine(idx)}
                       className="text-danger hover:text-danger"
                     >
@@ -234,13 +249,13 @@ export default function StockTransferFormPage() {
       </div>
 
       <ERPStickyFooter>
-        <Button variant="secondary" onClick={() => navigate('/inventory/transfers')}>
+        <Button type="button" variant="secondary" onClick={() => navigate('/inventory/transfers')}>
           Cancel
         </Button>
-        <Button onClick={handleSubmit} isLoading={createMutation.isPending}>
+        <Button type="submit" isLoading={createMutation.isPending}>
           Create Transfer
         </Button>
       </ERPStickyFooter>
-    </div>
+    </form>
   );
 }

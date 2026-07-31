@@ -12,7 +12,7 @@ import { z } from 'zod';
 import { ValidationError, PERMISSIONS } from '@erp/types';
 import { timingSafeEqual } from 'node:crypto';
 import { NotificationEngine } from '../domain/NotificationEngine.js';
-import type { NotificationServiceConfig } from '../config.js';
+import type { DeliveryEnqueuer } from '../domain/DeliveryQueue.js';
 import { authenticate, authenticateStream } from '../middleware/authenticate.js';
 import { requirePermission } from '../middleware/authorize.js';
 import {
@@ -42,6 +42,9 @@ const SendRawInternalSchema = z.object({
   channel: z.enum(['SMS', 'EMAIL', 'WHATSAPP', 'IN_APP']),
   recipientPhone: z.string().optional(),
   recipientEmail: z.string().email().optional(),
+  // Required for IN_APP sends to be scoped to a recipient — GET /notifications and
+  // /unread-count both filter by recipientUserId, which sendRaw previously never set.
+  recipientUserId: z.number().int().positive().optional(),
   subject: z.string().optional(),
   body: z.string().min(1),
   idempotencyKey: z.string().min(1).max(200).optional(),
@@ -53,6 +56,10 @@ const SendRawInternalSchema = z.object({
   senderOverride: z
     .object({ name: z.string().optional(), addressOrNumber: z.string().optional() })
     .optional(),
+  // CRM-ROADMAP Phase 1, Feature 6 — DLT/TRAI SMS Compliance. Omitted/absent means
+  // 'TRANSACTIONAL' (see NotificationEngine.SendRawInput's own comment) — only
+  // sales-service's CampaignService explicitly sets 'PROMOTIONAL'.
+  category: z.enum(['PROMOTIONAL', 'TRANSACTIONAL']).optional(),
 });
 
 function requireInternalKey(
@@ -88,10 +95,10 @@ type AuthedRequest = { auth: { tenantId: number; userId?: number } };
 export async function notificationRoutes(
   fastify: FastifyInstance,
   db: ErpDatabase,
-  config: NotificationServiceConfig,
+  deliveryQueue: DeliveryEnqueuer,
   redis: Redis
 ): Promise<void> {
-  const engine = new NotificationEngine(db, config);
+  const engine = new NotificationEngine(db, deliveryQueue);
 
   // ── POST /notifications/send — Send a notification ──────────────────────
   fastify.post(
@@ -180,6 +187,7 @@ export async function notificationRoutes(
       const {
         recipientPhone,
         recipientEmail,
+        recipientUserId,
         subject,
         idempotencyKey,
         mediaUrl,
@@ -191,6 +199,7 @@ export async function notificationRoutes(
         ...rest,
         ...(recipientPhone !== undefined ? { recipientPhone } : {}),
         ...(recipientEmail !== undefined ? { recipientEmail } : {}),
+        ...(recipientUserId !== undefined ? { recipientUserId } : {}),
         ...(subject !== undefined ? { subject } : {}),
         ...(idempotencyKey !== undefined ? { idempotencyKey } : {}),
         ...(mediaUrl !== undefined ? { mediaUrl } : {}),
@@ -421,6 +430,74 @@ export async function notificationRoutes(
         );
 
       return reply.code(200).send({ data: { message: 'Marked as read' } });
+    }
+  );
+
+  // ── POST /notifications/:id/retry — Manually retry one FAILED notification ─
+  // Notification-service audit 2026-07-23: a FAILED notification was permanently terminal —
+  // no automated re-drive (see retry-failed-internal below) and no way for an admin to retry
+  // one on demand. Scoped by tenantId (same IDOR-prevention pattern as /:id/read) so a user in
+  // one tenant can't retry — or discover the existence of — another tenant's notification.
+  fastify.post<{ Params: { id: string } }>(
+    '/notifications/:id/retry',
+    { preHandler: [authenticate, requirePermission(PERMISSIONS.NOTIFICATION_SEND)] },
+    async (request, reply) => {
+      const { tenantId } = (request as unknown as AuthedRequest).auth;
+      const id = parseInt(request.params.id, 10);
+
+      const result = await engine.retrySingle(tenantId, id);
+      if (!result) {
+        return reply.code(404).send({
+          error: {
+            code: 'NOT_FOUND',
+            message: 'No FAILED notification with that id for this tenant',
+          },
+        });
+      }
+      return reply.code(200).send({ data: result });
+    }
+  );
+
+  // ── POST /notifications/retry-failed-internal — Scheduler-triggered retry sweep ─
+  fastify.post('/notifications/retry-failed-internal', async (request, reply) => {
+    if (!requireInternalKey(request as never, reply as never)) return;
+    const tenantId = parseInt((request.query as { tenantId?: string }).tenantId ?? '', 10);
+    if (!tenantId) {
+      return reply
+        .code(400)
+        .send({ error: { code: 'MISSING_TENANT_ID', message: 'tenantId query param required' } });
+    }
+
+    const result = await engine.retryFailed(tenantId);
+    return reply.code(200).send({ data: result });
+  });
+
+  // ── GET /notifications/preferences — List current user's channel prefs ───
+  // Notification-service audit 2026-07-23: POST existed to save preferences but there was no
+  // way to read them back — the frontend had no way to render current state before editing.
+  fastify.get(
+    '/notifications/preferences',
+    { preHandler: authenticate },
+    async (request, reply) => {
+      const { tenantId, userId = 0 } = (request as unknown as AuthedRequest).auth;
+      const rows = await db
+        .select({
+          eventType: notificationPreferences.eventType,
+          smsEnabled: notificationPreferences.smsEnabled,
+          emailEnabled: notificationPreferences.emailEnabled,
+          whatsappEnabled: notificationPreferences.whatsappEnabled,
+          inAppEnabled: notificationPreferences.inAppEnabled,
+          quietHoursEnabled: notificationPreferences.quietHoursEnabled,
+        })
+        .from(notificationPreferences)
+        .where(
+          and(
+            eq(notificationPreferences.tenantId, tenantId),
+            eq(notificationPreferences.userId, userId)
+          )
+        );
+
+      return reply.code(200).send({ data: { content: rows } });
     }
   );
 

@@ -122,7 +122,9 @@ export const invoices = pgTable(
     roundingAmount: decimal('rounding_amount', { precision: 8, scale: 2 }).notNull().default('0'),
     loyaltyPointsEarned: integer('loyalty_points_earned').notNull().default(0),
     loyaltyPointsRedeemed: integer('loyalty_points_redeemed').notNull().default(0),
-    loyaltyRedemptionValue: decimal('loyalty_redemption_value', { precision: 10, scale: 2 }).notNull().default('0'),
+    loyaltyRedemptionValue: decimal('loyalty_redemption_value', { precision: 10, scale: 2 })
+      .notNull()
+      .default('0'),
     pdfUrl: text('pdf_url'),
     pdfGeneratedAt: timestamp('pdf_generated_at', { withTimezone: true }),
     notes: text('notes'),
@@ -154,6 +156,26 @@ export const invoices = pgTable(
     index('idx_invoices_tenant_customer_date').on(t.tenantId, t.customerId, t.createdAt),
     index('idx_invoices_tenant_date').on(t.tenantId, t.createdAt),
     index('idx_invoices_tenant_status_created').on(t.tenantId, t.status, t.createdAt),
+  ]
+);
+
+// Product audit 2026-07-31, Phase 1 Step 10: tracks which payment-reminder stage (days-overdue
+// threshold) has already fired per invoice, so the daily reminder job never re-sends the same
+// stage twice. See migration 0150.
+export const invoiceReminderLog = pgTable(
+  'invoice_reminder_log',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    tenantId: integer('tenant_id').notNull(),
+    invoiceId: integer('invoice_id').notNull(),
+    stage: varchar('stage', { length: 20 })
+      .notNull()
+      .$type<'DAY_0' | 'DAY_7' | 'DAY_15' | 'DAY_30'>(),
+    sentAt: timestamp('sent_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    unique('invoice_reminder_log_unique').on(t.tenantId, t.invoiceId, t.stage),
+    index('idx_invoice_reminder_log_invoice').on(t.tenantId, t.invoiceId),
   ]
 );
 
@@ -223,10 +245,7 @@ export const posSessions = pgTable(
     branchId: integer('branch_id').notNull(),
     warehouseId: integer('warehouse_id').notNull(),
     sessionNumber: varchar('session_number', { length: 50 }).notNull(),
-    status: varchar('status', { length: 20 })
-      .notNull()
-      .default('OPEN')
-      .$type<'OPEN' | 'CLOSED'>(),
+    status: varchar('status', { length: 20 }).notNull().default('OPEN').$type<'OPEN' | 'CLOSED'>(),
     openedBy: integer('opened_by').notNull(),
     closedBy: integer('closed_by'),
     openingCash: decimal('opening_cash', { precision: 15, scale: 2 }).notNull().default('0'),
@@ -257,9 +276,7 @@ export const posHeldSales = pgTable(
     createdBy: integer('created_by').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
-  (t) => [
-    index('idx_pos_held_sales_tenant_session').on(t.tenantId, t.sessionId),
-  ]
+  (t) => [index('idx_pos_held_sales_tenant_session').on(t.tenantId, t.sessionId)]
 );
 
 // ─── Payments ─────────────────────────────────────────────────────────────────
@@ -274,10 +291,16 @@ export const payments = pgTable(
     paymentDate: timestamp('payment_date', { withTimezone: true }).notNull(),
     paymentMode: varchar('payment_mode', { length: 30 })
       .notNull()
-      .$type<'CASH' | 'CARD' | 'UPI' | 'CHEQUE' | 'NEFT' | 'RTGS' | 'CREDIT_NOTE' | 'ADVANCE' | 'LOYALTY'>(),
+      .$type<
+        'CASH' | 'CARD' | 'UPI' | 'CHEQUE' | 'NEFT' | 'RTGS' | 'CREDIT_NOTE' | 'ADVANCE' | 'LOYALTY'
+      >(),
     amount: decimal('amount', { precision: 15, scale: 2 }).notNull(),
-    allocatedAmount: decimal('allocated_amount', { precision: 15, scale: 2 }).notNull().default('0'),
-    unallocatedAmount: decimal('unallocated_amount', { precision: 15, scale: 2 }).notNull().default('0'),
+    allocatedAmount: decimal('allocated_amount', { precision: 15, scale: 2 })
+      .notNull()
+      .default('0'),
+    unallocatedAmount: decimal('unallocated_amount', { precision: 15, scale: 2 })
+      .notNull()
+      .default('0'),
     status: varchar('status', { length: 30 })
       .notNull()
       .default('RECEIVED')
@@ -292,6 +315,10 @@ export const payments = pgTable(
     transactionReference: varchar('transaction_reference', { length: 100 }),
     notes: text('notes'),
     posSessionId: integer('pos_session_id'),
+    // M-8: client-generated idempotency key — same convention as invoices.clientOperationId
+    // (migration 0031). NULL never collides under the unique index, so callers that don't
+    // supply it are unaffected.
+    clientOperationId: varchar('client_operation_id', { length: 100 }),
     createdBy: integer('created_by').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
@@ -299,6 +326,7 @@ export const payments = pgTable(
   },
   (t) => [
     unique('payments_tenant_number').on(t.tenantId, t.paymentNumber),
+    unique('payments_tenant_client_operation_id').on(t.tenantId, t.clientOperationId),
     index('idx_payments_tenant_customer').on(t.tenantId, t.customerId),
     index('idx_payments_date').on(t.tenantId, t.paymentDate),
     index('idx_payments_status').on(t.tenantId, t.status),
@@ -462,6 +490,10 @@ export const deliveryChallans = pgTable(
     convertedInvoiceId: integer('converted_invoice_id'),
     convertedAt: timestamp('converted_at', { withTimezone: true }),
     dispatchedAt: timestamp('dispatched_at', { withTimezone: true }),
+    // M-6: cancel() previously didn't exist at all despite CANCELLED being a valid status.
+    cancelledAt: timestamp('cancelled_at', { withTimezone: true }),
+    cancellationReason: text('cancellation_reason'),
+    cancelledBy: integer('cancelled_by'),
     createdBy: integer('created_by').notNull(),
     updatedBy: integer('updated_by'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
@@ -491,9 +523,7 @@ export const deliveryChallanLines = pgTable(
     hsnCode: varchar('hsn_code', { length: 20 }),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
-  (t) => [
-    index('idx_dc_lines_challan').on(t.challanId),
-  ]
+  (t) => [index('idx_dc_lines_challan').on(t.challanId)]
 );
 
 // ─── CQRS Projections (Sales) ─────────────────────────────────────────────────
@@ -506,7 +536,9 @@ export const projectionDashboardDaily = pgTable(
     date: timestamp('date', { withTimezone: true }).notNull(),
     salesCount: integer('sales_count').notNull().default(0),
     salesAmount: decimal('sales_amount', { precision: 15, scale: 2 }).notNull().default('0'),
-    collectedAmount: decimal('collected_amount', { precision: 15, scale: 2 }).notNull().default('0'),
+    collectedAmount: decimal('collected_amount', { precision: 15, scale: 2 })
+      .notNull()
+      .default('0'),
     returnCount: integer('return_count').notNull().default(0),
     returnAmount: decimal('return_amount', { precision: 15, scale: 2 }).notNull().default('0'),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),

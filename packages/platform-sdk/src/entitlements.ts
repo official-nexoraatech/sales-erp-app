@@ -20,6 +20,26 @@ async function getMaxLimit(
   return tenant?.settings?.[key] ?? null;
 }
 
+// Distinct lock-key discriminators so a maxUsers lock never blocks a maxBranches check (or
+// vice versa) for the same tenant — arbitrary, just needs to be stable and unique per limit.
+const LOCK_KEY_DISCRIMINANT: Record<'maxUsers' | 'maxBranches', number> = {
+  maxUsers: 1001,
+  maxBranches: 1002,
+};
+
+// Postgres advisory transaction lock scoped to (tenantId, limit key). Must be called inside
+// an open transaction — it's automatically released at commit/rollback, so a caller can never
+// leak it by forgetting to release. Callers should acquire this *before* the count check and
+// keep the same transaction open through the subsequent insert, so the check-then-insert
+// sequence is serialized per tenant and can no longer race past the plan limit.
+export async function acquireTenantLimitLock(
+  db: ErpDatabase,
+  tenantId: number,
+  key: 'maxUsers' | 'maxBranches'
+): Promise<void> {
+  await db.execute(sql`SELECT pg_advisory_xact_lock(${tenantId}, ${LOCK_KEY_DISCRIMINANT[key]})`);
+}
+
 export async function assertUnderUserLimit(db: ErpDatabase, tenantId: number): Promise<void> {
   const max = await getMaxLimit(db, tenantId, 'maxUsers');
   if (max === null) return;

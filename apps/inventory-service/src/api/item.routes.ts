@@ -9,7 +9,7 @@ import {
   priceListItems,
   inventoryLedger,
 } from '@erp/db';
-import { and, eq, isNull, or, ilike, sql } from 'drizzle-orm';
+import { and, eq, isNull, or, ilike, sql, getTableColumns } from 'drizzle-orm';
 import { z } from 'zod';
 import {
   BusinessError,
@@ -140,10 +140,16 @@ export async function itemRoutes(
         categoryId?: string;
         brandId?: string;
         status?: string;
+        priceListId?: string;
       };
 
       const page = Math.max(0, parseInt(query.page ?? '0', 10));
       const size = Math.min(100, parseInt(query.size ?? '20', 10));
+      // H-4 fix: a customer's assigned price list was stored but never applied anywhere
+      // outside POS — back-office Invoice/Quotation forms always defaulted to the item's
+      // flat salePrice. Optional param, additive: every existing caller (no priceListId)
+      // gets the exact same rows as before.
+      const priceListId = query.priceListId ? parseInt(query.priceListId, 10) : undefined;
 
       let whereClause = and(eq(items.tenantId, tenantId), isNull(items.deletedAt));
       if (query.categoryId)
@@ -166,9 +172,30 @@ export async function itemRoutes(
         );
       }
 
-      const rows = await ctx.db.raw
-        .select()
+      // Same conditional-join pattern as pos.routes.ts's /pos/items/search — only joined when
+      // priceListId is actually present, so every other caller's query plan is unaffected.
+      let rowsQuery = ctx.db.raw
+        .select({
+          ...getTableColumns(items),
+          ...(priceListId !== undefined
+            ? { salePrice: sql<string>`COALESCE(${priceListItems.salePrice}, ${items.salePrice})` }
+            : {}),
+        })
         .from(items)
+        .$dynamic();
+
+      if (priceListId !== undefined) {
+        rowsQuery = rowsQuery.leftJoin(
+          priceListItems,
+          and(
+            eq(priceListItems.itemId, items.id),
+            eq(priceListItems.tenantId, items.tenantId),
+            eq(priceListItems.priceListId, priceListId)
+          )
+        );
+      }
+
+      const rows = await rowsQuery
         .where(whereClause)
         .limit(size)
         .offset(page * size);
@@ -515,6 +542,61 @@ export async function itemRoutes(
     }
   );
 
+  // ── PUT /items/:id/variants/:variantId ───────────────────────────────────
+  // Previously only bulk-create existed — a variant could never be edited (price
+  // correction, barcode fix) or deactivated once created (item variants had a fully
+  // working stock/ledger backend but no way to manage the variant record itself).
+  const VariantUpdateSchema = VariantSchema.extend({ version: z.number().int().min(0) });
+  fastify.put<{ Params: { id: string; variantId: string } }>(
+    '/items/:id/variants/:variantId',
+    { preHandler: [authenticate, requirePermission(PERMISSIONS.ITEM_EDIT)] },
+    async (request, reply) => {
+      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
+      const ctx = ctxFactory.create({
+        tenantId,
+        userId,
+        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
+      });
+      const itemId = parseInt(request.params.id, 10);
+      const variantId = parseInt(request.params.variantId, 10);
+
+      const body = VariantUpdateSchema.safeParse(request.body);
+      if (!body.success)
+        throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
+
+      const [existing] = await ctx.db.raw
+        .select()
+        .from(itemVariants)
+        .where(
+          and(
+            eq(itemVariants.id, variantId),
+            eq(itemVariants.itemId, itemId),
+            eq(itemVariants.tenantId, tenantId),
+            isNull(itemVariants.deletedAt)
+          )
+        );
+      if (!existing) throw new NotFoundError('ItemVariant', variantId);
+
+      const { version, ...rest } = body.data;
+      const result = await ctx.db.raw
+        .update(itemVariants)
+        .set({
+          ...rest,
+          salePrice: String(rest.salePrice),
+          purchasePrice: String(rest.purchasePrice),
+          mrp: rest.mrp !== undefined ? String(rest.mrp) : undefined,
+          updatedAt: new Date(),
+          version: existing.version + 1,
+        })
+        .where(and(eq(itemVariants.id, variantId), eq(itemVariants.version, version)))
+        .returning();
+
+      if (result.length === 0) throw new OptimisticLockError('ItemVariant');
+
+      return reply.code(200).send({ data: result[0] });
+    }
+  );
+
   // ── POST /items/:id/barcode/generate ─────────────────────────────────────
   fastify.post<{ Params: { id: string } }>(
     '/items/:id/barcode/generate',
@@ -557,7 +639,7 @@ export async function itemRoutes(
       await ctx.db.raw
         .update(items)
         .set({ barcode: generatedBarcode, barcodeType, updatedAt: new Date() })
-        .where(eq(items.id, id));
+        .where(and(eq(items.id, id), eq(items.tenantId, tenantId)));
 
       return reply.code(200).send({ data: { barcode: generatedBarcode, barcodeType, itemId: id } });
     }
@@ -639,6 +721,12 @@ export async function itemRoutes(
       });
       const priceListId = parseInt(request.params.id, 10);
 
+      const [priceList] = await ctx.db.raw
+        .select({ id: priceLists.id })
+        .from(priceLists)
+        .where(and(eq(priceLists.id, priceListId), eq(priceLists.tenantId, tenantId)));
+      if (!priceList) throw new NotFoundError('PriceList', priceListId);
+
       const ItemPriceSchema = z.array(
         z.object({
           itemId: z.number().int().positive(),
@@ -654,7 +742,11 @@ export async function itemRoutes(
         throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
 
       // Upsert price list items
-      await ctx.db.raw.delete(priceListItems).where(eq(priceListItems.priceListId, priceListId));
+      await ctx.db.raw
+        .delete(priceListItems)
+        .where(
+          and(eq(priceListItems.priceListId, priceListId), eq(priceListItems.tenantId, tenantId))
+        );
       if (body.data.length > 0) {
         await ctx.db.raw.insert(priceListItems).values(
           body.data.map((i) => ({

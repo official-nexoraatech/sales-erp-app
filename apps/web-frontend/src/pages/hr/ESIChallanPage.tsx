@@ -104,7 +104,12 @@ export default function ESIChallanPage() {
         actions={
           <div className="flex gap-2 flex-wrap">
             {hasPermission(PERMISSIONS.HR_STATUTORY) && (
-              <Button variant="secondary" onClick={handleExport} disabled={!challan?.rows.length}>
+              <Button
+                data-tour-id="hr-esi-challans-download-button"
+                variant="secondary"
+                onClick={handleExport}
+                disabled={!challan?.rows.length}
+              >
                 Download for ESIC Portal
               </Button>
             )}

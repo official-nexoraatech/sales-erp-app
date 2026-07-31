@@ -17,7 +17,16 @@ const MappingSchema = z.object({
   transform: z.enum(['TRIM', 'UPPERCASE', 'LOWERCASE', 'DATE_ISO', 'NUMBER']).optional(),
 });
 
-const VALID_ENTITIES: ImportEntity[] = ['customer', 'supplier', 'item', 'employee', 'opening-stock', 'attendance'];
+const VALID_ENTITIES: ImportEntity[] = [
+  'customer',
+  'supplier',
+  'item',
+  'employee',
+  'opening-stock',
+  'attendance',
+  'account',
+  'lead',
+];
 
 export async function importRoutes(fastify: FastifyInstance, db: ErpDatabase): Promise<void> {
   const engine = new ImportEngine(db);
@@ -28,17 +37,27 @@ export async function importRoutes(fastify: FastifyInstance, db: ErpDatabase): P
     { preHandler: authenticate },
     async (request, reply) => {
       if (!hasPermission(request, PERMISSIONS.IMPORT_VIEW)) {
-        return reply.code(403).send({ error: { code: 'PERMISSION_DENIED', message: 'Missing permission: IMPORT_VIEW' } });
+        return reply.code(403).send({
+          error: { code: 'PERMISSION_DENIED', message: 'Missing permission: IMPORT_VIEW' },
+        });
       }
 
       const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
       const { entityType, csvData, fileName } = request.body;
 
       if (!VALID_ENTITIES.includes(entityType as ImportEntity)) {
-        return reply.code(422).send({ error: { code: 'INVALID_ENTITY_TYPE', message: `Unknown entity: ${entityType}` } });
+        return reply.code(422).send({
+          error: { code: 'INVALID_ENTITY_TYPE', message: `Unknown entity: ${entityType}` },
+        });
       }
 
-      const jobId = await engine.createJob(tenantId, userId, entityType as ImportEntity, csvData, fileName);
+      const jobId = await engine.createJob(
+        tenantId,
+        userId,
+        entityType as ImportEntity,
+        csvData,
+        fileName
+      );
       return reply.code(201).send({ data: { jobId, message: 'Upload accepted' } });
     }
   );
@@ -49,7 +68,9 @@ export async function importRoutes(fastify: FastifyInstance, db: ErpDatabase): P
     { preHandler: authenticate },
     async (request, reply) => {
       if (!hasPermission(request, PERMISSIONS.IMPORT_VIEW)) {
-        return reply.code(403).send({ error: { code: 'PERMISSION_DENIED', message: 'Missing permission: IMPORT_VIEW' } });
+        return reply.code(403).send({
+          error: { code: 'PERMISSION_DENIED', message: 'Missing permission: IMPORT_VIEW' },
+        });
       }
 
       const { tenantId } = (request as unknown as AuthedRequest).auth;
@@ -70,7 +91,9 @@ export async function importRoutes(fastify: FastifyInstance, db: ErpDatabase): P
     { preHandler: authenticate },
     async (request, reply) => {
       if (!hasPermission(request, PERMISSIONS.IMPORT_VIEW)) {
-        return reply.code(403).send({ error: { code: 'PERMISSION_DENIED', message: 'Missing permission: IMPORT_VIEW' } });
+        return reply.code(403).send({
+          error: { code: 'PERMISSION_DENIED', message: 'Missing permission: IMPORT_VIEW' },
+        });
       }
 
       const { tenantId } = (request as unknown as AuthedRequest).auth;
@@ -85,7 +108,9 @@ export async function importRoutes(fastify: FastifyInstance, db: ErpDatabase): P
     { preHandler: authenticate },
     async (request, reply) => {
       if (!hasPermission(request, PERMISSIONS.IMPORT_EXECUTE)) {
-        return reply.code(403).send({ error: { code: 'PERMISSION_DENIED', message: 'Missing permission: IMPORT_EXECUTE' } });
+        return reply.code(403).send({
+          error: { code: 'PERMISSION_DENIED', message: 'Missing permission: IMPORT_EXECUTE' },
+        });
       }
 
       const { tenantId, permissions } = (request as unknown as AuthedRequest).auth;
@@ -100,7 +125,9 @@ export async function importRoutes(fastify: FastifyInstance, db: ErpDatabase): P
     { preHandler: authenticate },
     async (request, reply) => {
       if (!hasPermission(request, PERMISSIONS.IMPORT_VIEW)) {
-        return reply.code(403).send({ error: { code: 'PERMISSION_DENIED', message: 'Missing permission: IMPORT_VIEW' } });
+        return reply.code(403).send({
+          error: { code: 'PERMISSION_DENIED', message: 'Missing permission: IMPORT_VIEW' },
+        });
       }
 
       const { tenantId } = (request as unknown as AuthedRequest).auth;
@@ -127,7 +154,11 @@ export async function importRoutes(fastify: FastifyInstance, db: ErpDatabase): P
         const interval = setInterval(async () => {
           try {
             const current = await engine.getStatus(tenantId, request.params.jobId);
-            send({ status: current.status, importedRows: current.successRows, totalRows: current.totalRows });
+            send({
+              status: current.status,
+              importedRows: current.successRows,
+              totalRows: current.totalRows,
+            });
             if (['COMPLETED', 'FAILED', 'ROLLED_BACK'].includes(current.status)) {
               reply.raw.write('event: done\ndata: {}\n\n');
               reply.raw.end();
@@ -153,7 +184,9 @@ export async function importRoutes(fastify: FastifyInstance, db: ErpDatabase): P
     { preHandler: authenticate },
     async (request, reply) => {
       if (!hasPermission(request, PERMISSIONS.IMPORT_ROLLBACK)) {
-        return reply.code(403).send({ error: { code: 'PERMISSION_DENIED', message: 'Missing permission: IMPORT_ROLLBACK' } });
+        return reply.code(403).send({
+          error: { code: 'PERMISSION_DENIED', message: 'Missing permission: IMPORT_ROLLBACK' },
+        });
       }
 
       const { tenantId } = (request as unknown as AuthedRequest).auth;
@@ -169,12 +202,17 @@ export async function importRoutes(fastify: FastifyInstance, db: ErpDatabase): P
     async (request, reply) => {
       const { entityType } = request.params;
       if (!VALID_ENTITIES.includes(entityType as ImportEntity)) {
-        return reply.code(404).send({ error: { code: 'NOT_FOUND', message: `Unknown entity: ${entityType}` } });
+        return reply
+          .code(404)
+          .send({ error: { code: 'NOT_FOUND', message: `Unknown entity: ${entityType}` } });
       }
 
       const template = engine.getTemplate(entityType as ImportEntity);
       reply.raw.setHeader('Content-Type', 'text/csv');
-      reply.raw.setHeader('Content-Disposition', `attachment; filename="${entityType}-template.csv"`);
+      reply.raw.setHeader(
+        'Content-Disposition',
+        `attachment; filename="${entityType}-template.csv"`
+      );
       return reply.code(200).send(template);
     }
   );

@@ -85,8 +85,14 @@ scrape_configs:
     metrics_path: '/metrics'
     scrape_interval: 15s
 
-  # api-gateway target removed (ES-27) — still a stub, not a running service. See
-  # ERP-PLANNING/phase-completions/ES-27_COMPLETION.md and TECH_AUDIT.md §Reverse Proxy.
+  # api-gateway: real, running code since PG-001 (2026-07-16 frontend cutover) — the
+  # ES-27 "still a stub" removal no longer applies. Re-added 2026-07-23 API Gateway audit
+  # (the gateway had zero Prometheus coverage until now).
+  - job_name: 'erp-api-gateway'
+    static_configs:
+      - targets: ['host.docker.internal:3000']
+    metrics_path: '/metrics'
+    scrape_interval: 15s
 
   - job_name: 'erp-hr-service'
     static_configs:
@@ -112,9 +118,12 @@ scrape_configs:
       - targets: ['host.docker.internal:9100']
     scrape_interval: 30s
 
-  - job_name: 'kafka'
+  # Own container/hostname (see docker-compose.yml's kafka-exporter service comment) —
+  # this previously pointed at 'kafka:9308', but the broker itself never bound that port,
+  # so this scrape target was always down.
+  - job_name: 'kafka-exporter'
     static_configs:
-      - targets: ['kafka:9308']
+      - targets: ['kafka-exporter:9308']
     metrics_path: '/metrics'
     scrape_interval: 30s
 

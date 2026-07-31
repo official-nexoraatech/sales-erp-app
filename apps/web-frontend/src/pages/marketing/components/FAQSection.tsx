@@ -61,16 +61,22 @@ export default function FAQSection() {
               <div key={faq.id}>
                 <button
                   type="button"
-                  className="w-full flex items-center justify-between gap-4 py-4 text-left"
+                  className="w-full flex items-center justify-between gap-4 py-4 px-2 -mx-2 rounded-lg text-left transition-colors duration-normal hover:bg-surface-card"
                   aria-expanded={isOpen}
                   onClick={() => setOpenIndex(isOpen ? null : i)}
                 >
                   <span className="text-sm font-medium text-primary">{faq.question}</span>
                   <ChevronDown
-                    className={`h-4 w-4 text-secondary shrink-0 transition-transform ${isOpen ? 'rotate-180' : ''}`}
+                    className={`h-4 w-4 text-secondary shrink-0 transition-transform duration-normal ${isOpen ? 'rotate-180' : ''}`}
                   />
                 </button>
-                {isOpen && <p className="pb-4 text-sm text-secondary">{faq.answer}</p>}
+                <div
+                  className={`grid transition-[grid-template-rows] duration-slow ${isOpen ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}
+                >
+                  <div className="overflow-hidden">
+                    <p className="pb-4 px-2 text-sm text-secondary">{faq.answer}</p>
+                  </div>
+                </div>
               </div>
             );
           })}

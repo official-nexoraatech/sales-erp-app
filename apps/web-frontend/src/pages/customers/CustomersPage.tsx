@@ -33,6 +33,9 @@ interface Customer {
   status: string;
   creditLimit?: string;
   openingBalance?: string;
+  // CRM-ROADMAP Phase 1, Feature 1: left-joined from crm_accounts, null for customers
+  // with no linked B2B account.
+  accountName?: string;
 }
 
 export default function CustomersPage() {
@@ -128,6 +131,12 @@ export default function CustomersPage() {
       render: (r) => <Badge variant="info">{r.customerType}</Badge>,
     },
     {
+      key: 'accountName',
+      header: 'Account',
+      render: (r) =>
+        r.accountName ? <span className="text-secondary">{r.accountName}</span> : '–',
+    },
+    {
       key: 'status',
       header: 'Status',
       sortable: true,
@@ -168,7 +177,12 @@ export default function CustomersPage() {
         subtitle="Manage your customer database."
         actions={
           canCreateCustomer ? (
-            <Button onClick={() => navigate('/customers/new')}>+ New Customer</Button>
+            <Button
+              data-tour-id="customers-create-button"
+              onClick={() => navigate('/customers/new')}
+            >
+              + New Customer
+            </Button>
           ) : undefined
         }
       />

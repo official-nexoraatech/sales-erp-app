@@ -25,6 +25,26 @@ describe('useCart', () => {
     expect(result.current.grandTotal).toBe(236);
   });
 
+  it('includes cessRate in the line total, matching GSTCalculator.computeLine server-side', () => {
+    const { result } = renderHook(() => useCart());
+    const cessItem: POSItem = {
+      id: 3,
+      name: 'Aerated Drink',
+      salePrice: '100.00',
+      gstRate: 18,
+      cessRate: 12,
+    };
+
+    act(() => result.current.addItem(cessItem));
+    // taxable 100 + gst 18 + cess 12 = 130, previously this dropped cess and totaled 118.
+    expect(result.current.cart).toEqual([
+      expect.objectContaining({ itemId: 3, cessRate: 12, lineTotal: 130 }),
+    ]);
+
+    act(() => result.current.updateQty(3, 2));
+    expect(result.current.cart).toEqual([expect.objectContaining({ lineTotal: 260 })]);
+  });
+
   it('updateQty to zero removes the line entirely', () => {
     const { result } = renderHook(() => useCart());
     act(() => result.current.addItem(ITEM_A));
@@ -111,6 +131,28 @@ describe('useCart', () => {
     expect(result.current.highlightedLineItemId).toBeNull();
   });
 
+  it('derives the totals breakdown (items/quantity/subtotal/discount/tax) from the cart lines', () => {
+    const { result } = renderHook(() => useCart());
+    act(() => {
+      result.current.addItem(ITEM_A); // 100 @ 18% GST
+      result.current.addItem(ITEM_B); // 25 @ 12% GST
+      result.current.addItem(ITEM_B);
+    });
+
+    expect(result.current.totalItems).toBe(2);
+    expect(result.current.totalQuantity).toBe(3);
+    expect(result.current.subtotal).toBe(150); // 100 + 25*2
+
+    act(() => result.current.updateDiscount(1, 10));
+    // Item A: 100 * 10% = 10 discount, taxable 90, GST 18% = 16.2 tax
+    // Item B (qty 2): no discount, taxable 50, GST 12% = 6 tax
+    expect(result.current.discountAmount).toBe(10);
+    expect(result.current.taxAmount).toBeCloseTo(22.2);
+    expect(result.current.grandTotal).toBeCloseTo(
+      result.current.cart.reduce((s, l) => s + l.lineTotal, 0)
+    );
+  });
+
   it('restoreCart (held-sale resume) replaces the cart wholesale and clears stale selection', () => {
     const { result } = renderHook(() => useCart());
     act(() => result.current.addItem(ITEM_A));
@@ -123,6 +165,7 @@ describe('useCart', () => {
         quantity: 3,
         unitPrice: 50,
         gstRate: 5,
+        cessRate: 0,
         discountPct: 0,
         lineTotal: 157.5,
       },

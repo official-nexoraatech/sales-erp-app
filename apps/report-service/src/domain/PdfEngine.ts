@@ -8,6 +8,7 @@ import {
   DELIVERY_CHALLAN_TEMPLATE,
   PURCHASE_ORDER_TEMPLATE,
   PAYMENT_RECEIPT_TEMPLATE,
+  PAYMENT_VOUCHER_TEMPLATE,
   SALARY_SLIP_TEMPLATE,
   PROFIT_LOSS_TEMPLATE,
 } from '../templates/index.js';
@@ -20,6 +21,7 @@ export type DocumentType =
   | 'DELIVERY_CHALLAN'
   | 'PURCHASE_ORDER'
   | 'PAYMENT_RECEIPT'
+  | 'PAYMENT_VOUCHER'
   | 'SALARY_SLIP'
   | 'PROFIT_LOSS';
 
@@ -29,6 +31,7 @@ const TEMPLATE_MAP: Record<DocumentType, string> = {
   DELIVERY_CHALLAN: DELIVERY_CHALLAN_TEMPLATE,
   PURCHASE_ORDER: PURCHASE_ORDER_TEMPLATE,
   PAYMENT_RECEIPT: PAYMENT_RECEIPT_TEMPLATE,
+  PAYMENT_VOUCHER: PAYMENT_VOUCHER_TEMPLATE,
   SALARY_SLIP: SALARY_SLIP_TEMPLATE,
   PROFIT_LOSS: PROFIT_LOSS_TEMPLATE,
 };
@@ -39,12 +42,19 @@ Handlebars.registerHelper('inrFormat', (value: number) => {
 });
 Handlebars.registerHelper('dateFormat', (date: string | Date) => {
   if (!date) return '';
-  return new Date(date).toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  return new Date(date).toLocaleDateString('en-IN', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  });
 });
 Handlebars.registerHelper('numberWords', (num: number) => numberToWords(num));
-Handlebars.registerHelper('ifEquals', function (this: unknown, a: unknown, b: unknown, options: Handlebars.HelperOptions) {
-  return a === b ? options.fn(this) : options.inverse(this);
-});
+Handlebars.registerHelper(
+  'ifEquals',
+  function (this: unknown, a: unknown, b: unknown, options: Handlebars.HelperOptions) {
+    return a === b ? options.fn(this) : options.inverse(this);
+  }
+);
 Handlebars.registerHelper('last4', (value: string | undefined | null) => {
   if (!value) return '';
   return value.slice(-4);
@@ -78,11 +88,17 @@ export class PdfEngine {
   async generate(options: PdfGenerateOptions): Promise<Buffer> {
     const template = TEMPLATE_MAP[options.documentType];
     if (!template) {
-      throw new BusinessError('UNKNOWN_DOCUMENT_TYPE', `Unknown document type: ${options.documentType}`);
+      throw new BusinessError(
+        'UNKNOWN_DOCUMENT_TYPE',
+        `Unknown document type: ${options.documentType}`
+      );
     }
 
     if (!this.browser) {
-      throw new BusinessError('PDF_ENGINE_NOT_INITIALIZED', 'PdfEngine.init() must be called first');
+      throw new BusinessError(
+        'PDF_ENGINE_NOT_INITIALIZED',
+        'PdfEngine.init() must be called first'
+      );
     }
 
     const compiled = Handlebars.compile(template);
@@ -109,10 +125,40 @@ export class PdfEngine {
 
 // Indian number-to-words conversion (up to crores)
 function numberToWords(amount: number): string {
-  const ones = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine',
-    'Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen',
-    'Eighteen', 'Nineteen'];
-  const tens = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
+  const ones = [
+    '',
+    'One',
+    'Two',
+    'Three',
+    'Four',
+    'Five',
+    'Six',
+    'Seven',
+    'Eight',
+    'Nine',
+    'Ten',
+    'Eleven',
+    'Twelve',
+    'Thirteen',
+    'Fourteen',
+    'Fifteen',
+    'Sixteen',
+    'Seventeen',
+    'Eighteen',
+    'Nineteen',
+  ];
+  const tens = [
+    '',
+    '',
+    'Twenty',
+    'Thirty',
+    'Forty',
+    'Fifty',
+    'Sixty',
+    'Seventy',
+    'Eighty',
+    'Ninety',
+  ];
 
   function convertBelow100(n: number): string {
     if (n < 20) return ones[n] ?? '';
@@ -122,10 +168,29 @@ function numberToWords(amount: number): string {
   function convert(n: number): string {
     if (n === 0) return '';
     if (n < 100) return convertBelow100(n);
-    if (n < 1000) return (ones[Math.floor(n / 100)] ?? '') + ' Hundred' + (n % 100 !== 0 ? ' ' + convertBelow100(n % 100) : '');
-    if (n < 100000) return convert(Math.floor(n / 1000)) + ' Thousand' + (n % 1000 !== 0 ? ' ' + convert(n % 1000) : '');
-    if (n < 10000000) return convert(Math.floor(n / 100000)) + ' Lakh' + (n % 100000 !== 0 ? ' ' + convert(n % 100000) : '');
-    return convert(Math.floor(n / 10000000)) + ' Crore' + (n % 10000000 !== 0 ? ' ' + convert(n % 10000000) : '');
+    if (n < 1000)
+      return (
+        (ones[Math.floor(n / 100)] ?? '') +
+        ' Hundred' +
+        (n % 100 !== 0 ? ' ' + convertBelow100(n % 100) : '')
+      );
+    if (n < 100000)
+      return (
+        convert(Math.floor(n / 1000)) +
+        ' Thousand' +
+        (n % 1000 !== 0 ? ' ' + convert(n % 1000) : '')
+      );
+    if (n < 10000000)
+      return (
+        convert(Math.floor(n / 100000)) +
+        ' Lakh' +
+        (n % 100000 !== 0 ? ' ' + convert(n % 100000) : '')
+      );
+    return (
+      convert(Math.floor(n / 10000000)) +
+      ' Crore' +
+      (n % 10000000 !== 0 ? ' ' + convert(n % 10000000) : '')
+    );
   }
 
   const rupees = Math.floor(amount);

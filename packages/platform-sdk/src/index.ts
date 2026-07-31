@@ -77,6 +77,11 @@ export type { CircuitBreakerOptions } from './circuitBreaker.js';
 export { buildHealthResponse, registerHealthRoute, checkKafka, checkDatabase } from './health.js';
 export type { HealthCheckFn, HealthRouteApp, HealthCheckResponse } from './health.js';
 
+export {
+  omitFieldsWithoutPermission,
+  omitFieldsFromListWithoutPermission,
+} from './field-visibility.js';
+
 export { tenantOrIpKeyGenerator, RATE_LIMIT_DEFAULTS } from './rate-limit.js';
 export type { RateLimitRequest } from './rate-limit.js';
 
@@ -105,7 +110,11 @@ export {
   subscribeToTenantStatusInvalidations,
 } from './tenantStatus.js';
 
-export { assertUnderUserLimit, assertUnderBranchLimit } from './entitlements.js';
+export {
+  assertUnderUserLimit,
+  assertUnderBranchLimit,
+  acquireTenantLimitLock,
+} from './entitlements.js';
 
 export {
   DuplicateOperationError,

@@ -1,8 +1,9 @@
-// POS search-first redesign, Phase 1 — covers the new omnibox (GET /pos/items/search):
-// typed fuzzy search producing a virtualized dropdown, keyboard-only selection (Arrow +
-// Enter), and Escape closing the dropdown without losing the typed text. Same mocked-API
-// tier/conventions as checkout-smoke.spec.ts (see that file's header comment for why the
-// login/mock helpers are duplicated here rather than shared).
+// POS dashboard redesign — the omnibox no longer shows a live autocomplete dropdown while
+// typing. Enter now runs a single search: a unique match is added directly, no match falls back
+// to the barcode/quick-item resolution path, and multiple matches point the cashier at Browse
+// Catalog instead of guessing. Same mocked-API tier/conventions as checkout-smoke.spec.ts (see
+// that file's header comment for why the login/mock helpers are duplicated here rather than
+// shared).
 import { test, expect, type Route, type Page } from '@playwright/test';
 
 const CORS_HEADERS = {
@@ -109,53 +110,62 @@ const SEARCH_RESULT = {
   matchedOn: 'name',
 };
 
-test.describe('Omnibox fuzzy search', () => {
-  test('typing a fuzzy query shows a virtualized dropdown, and Enter adds the highlighted result to the cart', async ({
+test.describe('Omnibox search (no live suggestions)', () => {
+  test('typing a query shows no dropdown until Enter is pressed', async ({ page }) => {
+    await seedDeviceBranch(page);
+    await login(page);
+
+    await page.route('**/pos/items/search**', (route) =>
+      mockSearchJson(route, { data: [SEARCH_RESULT], nextCursor: null, tookMs: 4 })
+    );
+
+    const omnibox = page.getByPlaceholder(/Scan barcode, or type name/i);
+    await omnibox.fill('popln');
+
+    // No live dropdown/listbox appears while typing.
+    await expect(page.getByRole('listbox')).toHaveCount(0);
+    await expect(page.getByText('Cotton Poplin 2m')).not.toBeVisible();
+  });
+
+  test('Enter with a unique match adds it straight to the cart', async ({ page }) => {
+    await seedDeviceBranch(page);
+    await login(page);
+
+    await page.route('**/pos/items/search**', (route) =>
+      mockSearchJson(route, { data: [SEARCH_RESULT], nextCursor: null, tookMs: 4 })
+    );
+
+    const omnibox = page.getByPlaceholder(/Scan barcode, or type name/i);
+    await omnibox.fill('cotton poplin');
+    await omnibox.press('Enter');
+
+    await expect(page.getByText('Current Sale')).toBeVisible();
+    await expect(page.getByText('Cotton Poplin 2m')).toBeVisible();
+    // Omnibox clears and refocuses once the item is added.
+    await expect(omnibox).toHaveValue('');
+    await expect(omnibox).toBeFocused();
+  });
+
+  test('Enter with multiple matches points the cashier at Browse Catalog instead of guessing', async ({
     page,
   }) => {
     await seedDeviceBranch(page);
     await login(page);
 
     await page.route('**/pos/items/search**', (route) =>
-      mockSearchJson(route, { data: [SEARCH_RESULT], nextCursor: null, tookMs: 4 })
+      mockSearchJson(route, {
+        data: [SEARCH_RESULT, { ...SEARCH_RESULT, itemId: 100, name: 'Cotton Poplin 3m' }],
+        nextCursor: null,
+        tookMs: 4,
+      })
     );
 
-    const omnibox = page.getByRole('combobox');
-    await omnibox.fill('popln');
-
-    const option = page.getByRole('option', { name: /Cotton Poplin 2m/i });
-    await expect(option).toBeVisible();
-    await expect(page.getByText('SKU-1042')).toBeVisible();
-    await expect(page.getByText('₹180.00')).toBeVisible();
-
-    // Keyboard-only: Arrow Down keeps the single result highlighted, Enter adds it — no mouse.
-    await omnibox.press('ArrowDown');
+    const omnibox = page.getByPlaceholder(/Scan barcode, or type name/i);
+    await omnibox.fill('cotton poplin');
     await omnibox.press('Enter');
 
-    await expect(page.getByText('Current Sale')).toBeVisible();
-    await expect(page.getByText('Cotton Poplin 2m')).toBeVisible();
-    // Omnibox clears and the dropdown closes once the item is added.
-    await expect(omnibox).toHaveValue('');
-    await expect(option).not.toBeVisible();
-  });
-
-  test('Escape closes the dropdown without clearing the typed query', async ({ page }) => {
-    await seedDeviceBranch(page);
-    await login(page);
-
-    await page.route('**/pos/items/search**', (route) =>
-      mockSearchJson(route, { data: [SEARCH_RESULT], nextCursor: null, tookMs: 4 })
-    );
-
-    const omnibox = page.getByRole('combobox');
-    await omnibox.fill('popln');
-
-    const option = page.getByRole('option', { name: /Cotton Poplin 2m/i });
-    await expect(option).toBeVisible();
-
-    await omnibox.press('Escape');
-
-    await expect(option).not.toBeVisible();
-    await expect(omnibox).toHaveValue('popln');
+    await expect(page.getByText(/use Browse Catalog \(F3\) to pick one/i)).toBeVisible();
+    // Nothing was added to the cart on an ambiguous match.
+    await expect(page.getByText('Cotton Poplin 2m')).not.toBeVisible();
   });
 });

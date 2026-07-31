@@ -27,5 +27,14 @@ export async function authenticate(request: FastifyRequest, reply: FastifyReply)
     return;
   }
 
+  // CRM-ROADMAP Phase 3, Feature 2 (Self-Service Customer Portal, Finding 1): a CUSTOMER-role
+  // portal JWT must never reach auth-service's own staff-only routes (session management can
+  // revoke ANY session by numeric id — exactly the cross-service collision Finding 1 flagged).
+  // Portal auth routes (portal-auth.routes.ts) are public and never gated by this middleware.
+  if (request.auth.roles.includes('CUSTOMER')) {
+    await reply.code(401).send({ error: 'Portal sessions cannot access staff endpoints' });
+    return;
+  }
+
   await assertTenantActive(request.auth.tenantId, request.auth.permissions);
 }

@@ -1,13 +1,9 @@
-import { useEffect, useRef, useState, type RefObject } from 'react';
+import { useState, type RefObject } from 'react';
 import { SearchInput } from '@erp/ui';
-import { useDebouncedValue } from '../../hooks/useDebouncedValue.js';
+import toast from 'react-hot-toast';
 import { useBarcodeScanDetector } from '../../hooks/useBarcodeScanDetector.js';
-import { useItemSearch } from '../../hooks/useItemSearch.js';
-import POSAutocompleteList from './POSAutocompleteList.js';
+import { searchItemsOnce } from '../../hooks/useItemSearch.js';
 import type { POSItem, POSSearchResult } from './types.js';
-
-const DEBOUNCE_MS = 180;
-const MIN_QUERY_LENGTH = 2;
 
 interface Props {
   barcodeRef: RefObject<HTMLInputElement | null>;
@@ -17,10 +13,15 @@ interface Props {
   onToggleCamera: () => void;
   /** Scanner-cadence exact match, and the typed-but-unmatched fallback — same barcode lookup path as before. */
   onSubmit: (value: string) => void;
-  /** A result picked from the fuzzy dropdown — already has full item data, no lookup round trip needed. */
+  /** A result picked from the one-shot search, already has full item data, no lookup round trip needed. */
   onSelectItem: (item: POSItem) => void;
 }
 
+// Search-on-submit only — no live dropdown while typing. Enter either resolves a scanner-speed
+// value straight to the barcode lookup, or (for a typed value) runs a single search against the
+// catalog: a unique match is added directly, no matches falls back to the barcode/quick-item
+// resolution path, and multiple matches point the cashier at Browse Catalog (F3) rather than
+// guessing which one they meant.
 export function POSOmnibox({
   barcodeRef,
   videoRef,
@@ -31,31 +32,13 @@ export function POSOmnibox({
   onSelectItem,
 }: Props) {
   const [query, setQuery] = useState('');
-  const [isOpen, setIsOpen] = useState(false);
-  const [highlightedIndex, setHighlightedIndex] = useState(0);
-  const debouncedQuery = useDebouncedValue(query, DEBOUNCE_MS);
+  const [isSearching, setIsSearching] = useState(false);
   const scanDetector = useBarcodeScanDetector();
-  const listboxRef = useRef<HTMLDivElement>(null);
 
-  const searchEnabled = debouncedQuery.trim().length >= MIN_QUERY_LENGTH;
-
-  const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isFetching } = useItemSearch(
-    debouncedQuery,
-    {},
-    searchEnabled
-  );
-  const results = data?.pages.flatMap((p) => p.data) ?? [];
-  const showDropdown = isOpen && searchEnabled;
-
-  // A fresh set of results (new debounced query) always starts highlighting the top match.
-  useEffect(() => {
-    setHighlightedIndex(0);
-  }, [debouncedQuery]);
-
-  const clearAndClose = () => {
+  const clearAndFocus = () => {
     setQuery('');
-    setIsOpen(false);
     scanDetector.reset();
+    barcodeRef.current?.focus();
   };
 
   const handleSelect = (item: POSSearchResult) => {
@@ -64,103 +47,74 @@ export function POSOmnibox({
       name: item.name,
       salePrice: String(item.price),
       gstRate: item.gstRate,
+      cessRate: item.cessRate,
       ...(item.barcode ? { barcode: item.barcode } : {}),
     });
-    clearAndClose();
-    barcodeRef.current?.focus();
+    clearAndFocus();
+  };
+
+  const handleSubmit = async (value: string) => {
+    if (scanDetector.isLikelyScan(value)) {
+      onSubmit(value);
+      setQuery('');
+      scanDetector.reset();
+      return;
+    }
+
+    setIsSearching(true);
+    try {
+      const results = await searchItemsOnce(value);
+      if (results.length === 1) {
+        handleSelect(results[0]!);
+      } else if (results.length === 0) {
+        onSubmit(value);
+        setQuery('');
+        scanDetector.reset();
+      } else {
+        toast(`Multiple items match "${value}" — use Browse Catalog (F3) to pick one`);
+      }
+    } catch {
+      // search request itself failed — fall back to the same resolution path a barcode uses
+      onSubmit(value);
+      setQuery('');
+      scanDetector.reset();
+    } finally {
+      setIsSearching(false);
+    }
   };
 
   return (
-    <div className="flex flex-col gap-3">
-      <div className="relative">
-        <SearchInput
-          ref={barcodeRef}
-          size="xl"
-          role="combobox"
-          aria-expanded={showDropdown && results.length > 0}
-          aria-controls="pos-omnibox-listbox"
-          aria-activedescendant={
-            showDropdown && results[highlightedIndex]
-              ? `pos-result-${results[highlightedIndex]!.itemId}`
-              : undefined
+    <div className="flex flex-col gap-3 w-full">
+      <SearchInput
+        ref={barcodeRef}
+        size="xl"
+        placeholder="Scan barcode, or type name / SKU / alias / code…"
+        value={query}
+        onBarcodeClick={onToggleCamera}
+        barcodeActive={cameraOpen}
+        loading={isSearching}
+        className={
+          scanFlash === 'success'
+            ? 'border-success shadow-[0_0_0_4px_color-mix(in_srgb,var(--color-success)_20%,transparent)] bg-success-bg'
+            : scanFlash === 'error'
+              ? 'border-danger shadow-[0_0_0_4px_color-mix(in_srgb,var(--color-danger)_20%,transparent)] bg-danger-bg'
+              : ''
+        }
+        onChange={(e) => {
+          const value = e.target.value;
+          setQuery(value);
+          if (!value) scanDetector.reset();
+        }}
+        onClear={() => clearAndFocus()}
+        onKeyDown={(e) => {
+          if (e.key.length === 1) scanDetector.recordKeystroke();
+          if (e.key === 'Enter') {
+            const value = query.trim();
+            if (!value || isSearching) return;
+            void handleSubmit(value);
           }
-          placeholder="Scan barcode, or type name / SKU / alias / code…"
-          value={query}
-          onBarcodeClick={onToggleCamera}
-          barcodeActive={cameraOpen}
-          loading={isFetching && !isFetchingNextPage}
-          className={
-            scanFlash === 'success'
-              ? 'border-success shadow-[0_0_0_4px_color-mix(in_srgb,var(--color-success)_20%,transparent)] bg-success-bg'
-              : scanFlash === 'error'
-                ? 'border-danger shadow-[0_0_0_4px_color-mix(in_srgb,var(--color-danger)_20%,transparent)] bg-danger-bg'
-                : ''
-          }
-          onChange={(e) => {
-            const value = e.target.value;
-            setQuery(value);
-            setIsOpen(value.trim().length > 0);
-            if (!value) scanDetector.reset();
-          }}
-          onClear={() => clearAndClose()}
-          onKeyDown={(e) => {
-            if (e.key.length === 1) scanDetector.recordKeystroke();
-
-            if (e.key === 'ArrowDown') {
-              if (!showDropdown || results.length === 0) return;
-              e.preventDefault();
-              e.nativeEvent.stopPropagation();
-              setHighlightedIndex((i) => (i + 1) % results.length);
-            } else if (e.key === 'ArrowUp') {
-              if (!showDropdown || results.length === 0) return;
-              e.preventDefault();
-              e.nativeEvent.stopPropagation();
-              setHighlightedIndex((i) => (i - 1 + results.length) % results.length);
-            } else if (e.key === 'Escape') {
-              if (showDropdown) {
-                e.nativeEvent.stopPropagation();
-                setIsOpen(false);
-              }
-            } else if (e.key === 'Enter') {
-              const value = query.trim();
-              if (!value) return;
-              if (scanDetector.isLikelyScan(value)) {
-                onSubmit(value);
-              } else if (showDropdown && results[highlightedIndex]) {
-                handleSelect(results[highlightedIndex]!);
-                return;
-              } else {
-                onSubmit(value);
-              }
-              clearAndClose();
-            }
-          }}
-        />
-
-        {showDropdown && (
-          <div
-            ref={listboxRef}
-            className="absolute top-full left-0 right-0 mt-1 bg-surface-overlay border border-default rounded-xl shadow-token-lg overflow-hidden"
-            style={{ zIndex: 'var(--z-dropdown)' }}
-          >
-            {results.length === 0 ? (
-              <div className="px-4 py-3 text-sm text-secondary">
-                {isFetching ? 'Searching…' : `No items match "${debouncedQuery}"`}
-              </div>
-            ) : (
-              <POSAutocompleteList
-                results={results}
-                highlightedIndex={highlightedIndex}
-                onSelect={handleSelect}
-                onHover={setHighlightedIndex}
-                hasNextPage={Boolean(hasNextPage)}
-                isFetchingNextPage={isFetchingNextPage}
-                onLoadMore={() => void fetchNextPage()}
-              />
-            )}
-          </div>
-        )}
-      </div>
+        }}
+      />
 
       {cameraOpen && (
         <div className="rounded-xl overflow-hidden border-2 border-focus bg-black">

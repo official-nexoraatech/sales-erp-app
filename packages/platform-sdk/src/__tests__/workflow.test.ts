@@ -27,6 +27,7 @@ describe.skipIf(!DB_URL)('WorkflowEngine — role approver resolution', () => {
   let activeUser1: number;
   let activeUser2: number;
   let inactiveUser: number;
+  let outsiderUser: number;
   const cleanupInstanceIds: number[] = [];
   const cleanupDefinitionIds: number[] = [];
 
@@ -75,6 +76,9 @@ describe.skipIf(!DB_URL)('WorkflowEngine — role approver resolution', () => {
     activeUser1 = await makeUser(`wf-active1-${suffix}@example.com`, true);
     activeUser2 = await makeUser(`wf-active2-${suffix}@example.com`, true);
     inactiveUser = await makeUser(`wf-inactive-${suffix}@example.com`, false);
+    // Deliberately not assigned TEST_APPROVER_ROLE — used to prove a non-approver can't
+    // force-decide someone else's pending approval (see the NOT_ELIGIBLE_APPROVER test below).
+    outsiderUser = await makeUser(`wf-outsider-${suffix}@example.com`, true);
 
     await db.insert(userRoles).values([
       { userId: activeUser1, roleId, tenantId },
@@ -96,7 +100,9 @@ describe.skipIf(!DB_URL)('WorkflowEngine — role approver resolution', () => {
         .where(inArray(workflowDefinitions.id, cleanupDefinitionIds));
     }
     await db.delete(userRoles).where(eq(userRoles.tenantId, tenantId));
-    await db.delete(users).where(inArray(users.id, [activeUser1, activeUser2, inactiveUser]));
+    await db
+      .delete(users)
+      .where(inArray(users.id, [activeUser1, activeUser2, inactiveUser, outsiderUser]));
     await db.delete(roles).where(eq(roles.id, roleId));
     await db.delete(tenants).where(eq(tenants.id, tenantId));
   });
@@ -233,5 +239,55 @@ describe.skipIf(!DB_URL)('WorkflowEngine — role approver resolution', () => {
     await engine.approve({ instanceId: instance!.id, nodeId: 'node_1', userId: activeUser2 });
     status = await engine.getStatus(instance!.id);
     expect(status.status).toBe('APPROVED');
+  });
+
+  it('rejects approve()/reject() from a user who is not an eligible pending approver for the node', async () => {
+    const triggerEvent = `TEST_NOT_ELIGIBLE_${randomUUID()}`;
+    await seedDefinition(
+      [
+        {
+          id: 'node_1',
+          name: 'Approver',
+          type: 'APPROVAL',
+          approverType: 'ROLE',
+          approverRef: 'TEST_APPROVER_ROLE',
+        },
+      ],
+      triggerEvent
+    );
+
+    const engine = new WorkflowEngine(db, tenantId, activeUser1, randomUUID());
+    const instance = await engine.trigger({
+      event: triggerEvent,
+      entityType: 'TestEntity',
+      entityId: 4,
+      userId: activeUser1,
+      correlationId: randomUUID(),
+    });
+    cleanupInstanceIds.push(instance!.id);
+
+    // outsiderUser holds no role on this workflow and has no approval row at all — must not
+    // be able to force-approve or force-reject someone else's pending decision.
+    const outsiderEngine = new WorkflowEngine(db, tenantId, outsiderUser, randomUUID());
+    await expect(
+      outsiderEngine.approve({ instanceId: instance!.id, nodeId: 'node_1', userId: outsiderUser })
+    ).rejects.toThrow('not an eligible, pending approver');
+    await expect(
+      outsiderEngine.reject({
+        instanceId: instance!.id,
+        nodeId: 'node_1',
+        userId: outsiderUser,
+        comment: 'nope',
+      })
+    ).rejects.toThrow('not an eligible, pending approver');
+
+    // Instance must remain untouched — still pending, still awaiting a real approver.
+    const status = await engine.getStatus(instance!.id);
+    expect(status.status).toBe('PENDING');
+
+    // The real approver can still act normally afterward.
+    await engine.approve({ instanceId: instance!.id, nodeId: 'node_1', userId: activeUser1 });
+    const finalStatus = await engine.getStatus(instance!.id);
+    expect(finalStatus.status).toBe('APPROVED');
   });
 });

@@ -4,6 +4,7 @@ import type { PlatformContextFactory } from '@erp/sdk';
 import {
   invoices,
   invoiceHistory,
+  invoiceLines,
   customers,
   organizationSettings,
   einvoiceData,
@@ -19,21 +20,27 @@ import { requirePermission } from '../middleware/authorize.js';
 import { InvoiceService, DuplicateOperationError } from '../domain/InvoiceService.js';
 import { InvoiceNotificationService } from '../domain/InvoiceNotificationService.js';
 import { sendError } from './http-errors.js';
+import { MAX_CASHIER_DISCOUNT_PCT } from '../domain/discount-policy.js';
 
-const InvoiceLineSchema = z.object({
-  itemId: z.number().int().positive(),
-  variantId: z.number().int().positive().optional(),
-  description: z.string().max(500).optional(),
-  quantity: z.number().positive(),
-  unitId: z.number().int().positive().optional(),
-  unitPrice: z.number().nonnegative(),
-  discountPct: z.number().min(0).max(100).default(0),
-  discountAmount: z.number().min(0).default(0),
-  gstRate: z.number().min(0).max(100),
-  cessRate: z.number().min(0).max(100).default(0),
-  hsnCode: z.string().max(20).optional(),
-  warehouseId: z.number().int().positive().optional(),
-});
+const InvoiceLineSchema = z
+  .object({
+    itemId: z.number().int().positive(),
+    variantId: z.number().int().positive().optional(),
+    description: z.string().max(500).optional(),
+    quantity: z.number().positive(),
+    unitId: z.number().int().positive().optional(),
+    unitPrice: z.number().nonnegative(),
+    discountPct: z.number().min(0).max(100).default(0),
+    discountAmount: z.number().min(0).default(0),
+    gstRate: z.number().min(0).max(100),
+    cessRate: z.number().min(0).max(100).default(0),
+    hsnCode: z.string().max(20).optional(),
+    warehouseId: z.number().int().positive().optional(),
+  })
+  .refine((line) => !(line.discountPct > 0 && line.discountAmount > 0), {
+    message: 'Provide either a flat discount amount or a percentage discount for a line, not both',
+    path: ['discountAmount'],
+  });
 
 const CreateInvoiceSchema = z.object({
   customerId: z.number().int().positive(),
@@ -60,10 +67,6 @@ const CreateInvoiceSchema = z.object({
   // exactly as before). A network-timeout retry of this route with the same operationId
   // returns the original invoice instead of creating a duplicate DRAFT.
   operationId: z.string().max(100).optional(),
-});
-
-const ConfirmSchema = z.object({
-  invoiceNumber: z.string().min(1).max(50),
 });
 
 const CancelSchema = z.object({
@@ -155,6 +158,20 @@ export async function invoiceRoutes(
           'PERMISSION_DENIED',
           `Forbidden — missing permission: ${PERMISSIONS.PRICE_FLOOR_OVERRIDE}`
         );
+      }
+      // H-5 fix: this ceiling was previously enforced only in POS (pos.routes.ts) — a plain
+      // INVOICE_CREATE holder could apply a 100% line discount on a back-office invoice with
+      // no manager approval at all, the identical action POS blocks above 10%.
+      if (!req.auth.permissions.includes(PERMISSIONS.DISCOUNT_OVERRIDE)) {
+        const overLimitLine = body.lines.find((l) => l.discountPct > MAX_CASHIER_DISCOUNT_PCT);
+        if (overLimitLine) {
+          return sendError(
+            reply,
+            403,
+            'DISCOUNT_LIMIT_EXCEEDED',
+            `Discount above ${MAX_CASHIER_DISCOUNT_PCT}% requires a manager to complete this invoice`
+          );
+        }
       }
 
       const ctx = ctxFactory.create({
@@ -255,7 +272,6 @@ export async function invoiceRoutes(
     preHandler: requirePermission(PERMISSIONS.INVOICE_CREATE),
     handler: async (req, reply) => {
       const { id } = req.params as { id: string };
-      const body = ConfirmSchema.parse(req.body);
       const ctx = ctxFactory.create({
         tenantId: req.auth.tenantId,
         userId: req.auth.userId,
@@ -263,19 +279,36 @@ export async function invoiceRoutes(
           (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
       });
       const svc = new InvoiceService(ctx.db.raw);
-      await svc.confirm(parseInt(id, 10), req.auth.tenantId, body.invoiceNumber, req.auth.userId);
+      // C-7 fix: invoiceNumber is now generated server-side (gap-free, FY-scoped sequence) —
+      // no longer accepted from the client at all.
+      const invoiceNumber = await svc.confirm(parseInt(id, 10), req.auth.tenantId, req.auth.userId);
+
+      // Same cross-service item-cache gap GRN receipts had (fixed 2026-07-17) — confirming an
+      // invoice writes availableQty/valuation directly to `items`, so inventory-service's
+      // Redis item-cache needs the same invalidation or it serves pre-sale stock for up to the
+      // full 5-minute TTL.
+      const confirmedLines = await ctx.db.raw
+        .select({ itemId: invoiceLines.itemId })
+        .from(invoiceLines)
+        .where(eq(invoiceLines.invoiceId, parseInt(id, 10)));
+      await Promise.all(
+        [...new Set(confirmedLines.map((l) => l.itemId))].map((itemId) =>
+          ctx.cache.del(`item:${itemId}`)
+        )
+      );
+
       await ctx.audit.log({
         action: 'STATUS_CHANGE',
         entityType: 'invoice',
         entityId: parseInt(id, 10),
         before: { status: 'DRAFT' },
-        after: { status: 'CONFIRMED', invoiceNumber: body.invoiceNumber },
+        after: { status: 'CONFIRMED', invoiceNumber },
         changedFields: ['status', 'invoiceNumber'],
         actorEmail: req.auth.email,
         ipAddress: req.ip,
       });
       await InvoiceNotificationService.notifyInvoiceConfirmed(ctx, parseInt(id, 10));
-      return reply.send({ success: true });
+      return reply.send({ success: true, data: { invoiceNumber } });
     },
   });
 
@@ -291,7 +324,16 @@ export async function invoiceRoutes(
           (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
       });
       const svc = new InvoiceService(ctx.db.raw);
+      const cancelledLines = await ctx.db.raw
+        .select({ itemId: invoiceLines.itemId })
+        .from(invoiceLines)
+        .where(eq(invoiceLines.invoiceId, parseInt(id, 10)));
       await svc.cancel(parseInt(id, 10), req.auth.tenantId, req.auth.userId, body.reason);
+      await Promise.all(
+        [...new Set(cancelledLines.map((l) => l.itemId))].map((itemId) =>
+          ctx.cache.del(`item:${itemId}`)
+        )
+      );
       await ctx.audit.log({
         action: 'STATUS_CHANGE',
         entityType: 'invoice',
@@ -360,7 +402,11 @@ export async function invoiceRoutes(
           address: org?.address,
           bankDetails: org?.bankDetails,
           termsAndConditions: org?.termsAndConditions,
-          logoUrl: org?.logoUrl,
+          // organizationSettings.logoUrl was renamed to logoObjectKey (F14, 2026-07-23) — it
+          // was never actually settable before that fix, so this has always been null/undefined
+          // in practice; kept as the `logoUrl` key here since that's what report-service's PDF
+          // template (`templates/index.ts`) expects, not resolved to a real URL by this fix.
+          logoUrl: org?.logoObjectKey,
         },
         invoiceNumber: invoice.invoiceNumber,
         invoiceDate: invoice.invoiceDate,

@@ -1,7 +1,7 @@
 import { eq, and, sql, inArray, getTableColumns } from 'drizzle-orm';
 import { aliasedTable } from 'drizzle-orm/alias';
 import { stockTransfers, stockTransferLines, warehouses, items } from '@erp/db';
-import { ERPError } from '@erp/types';
+import { ERPError, BusinessError } from '@erp/types';
 import type { ErpDatabase } from '@erp/db';
 import { InventoryLedgerService } from './InventoryLedgerService.js';
 
@@ -33,6 +33,26 @@ export class StockTransferService {
     createdBy: number;
   }) {
     return this.db.transaction(async (trx) => {
+      // Previously unchecked anywhere — a DISCONTINUED or soft-deleted item could still be
+      // transferred, undermining the whole point of discontinuing/deleting it.
+      const itemIds = [...new Set(params.lines.map((l) => l.itemId))];
+      if (itemIds.length > 0) {
+        const rows = await trx
+          .select({ id: items.id, status: items.status, deletedAt: items.deletedAt })
+          .from(items)
+          .where(and(inArray(items.id, itemIds), eq(items.tenantId, params.tenantId)));
+        const byId = new Map(rows.map((r) => [r.id, r]));
+        for (const itemId of itemIds) {
+          const item = byId.get(itemId);
+          if (!item || item.deletedAt || item.status === 'DISCONTINUED') {
+            throw new BusinessError(
+              'ITEM_NOT_TRANSACTABLE',
+              `Item ${itemId} is discontinued or deleted and cannot be transferred`
+            );
+          }
+        }
+      }
+
       const [transfer] = await trx
         .insert(stockTransfers)
         .values({
@@ -246,6 +266,17 @@ export class StockTransferService {
           .where(eq(stockTransferLines.id, upd.lineId));
 
         if (!line || line.tenantId !== tenantId) continue;
+
+        // Previously unbounded — a caller could pass a receivedQty greater than what was
+        // ever dispatched, crediting the destination warehouse with stock that was never
+        // actually sent (fabricating stock from nothing).
+        const dispatchedQty = parseFloat(line.dispatchedQty);
+        if (upd.receivedQty > dispatchedQty + 0.0001) {
+          throw new BusinessError(
+            'RECEIVED_QTY_EXCEEDS_DISPATCHED',
+            `Received qty ${upd.receivedQty} exceeds dispatched qty ${dispatchedQty} for line ${line.id}`
+          );
+        }
 
         await new InventoryLedgerService(db).addStock({
           tenantId,

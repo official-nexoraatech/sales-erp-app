@@ -7,14 +7,19 @@ import {
   tenants,
   customers,
   customerInteractions,
+  customerSegments,
   projectionCustomerBalance,
 } from '@erp/db';
 import { and, eq, inArray, isNull, lt, lte, sql } from 'drizzle-orm';
 import { QuotationService } from '../domain/QuotationService.js';
-import { LoyaltyService } from '../domain/LoyaltyService.js';
+import { LoyaltyService, EXPIRY_WARNING_WINDOW_DAYS } from '../domain/LoyaltyService.js';
 import { HealthScoringService } from '../domain/HealthScoringService.js';
 import { CampaignService } from '../domain/CampaignService.js';
 import { PaymentReminderService, shouldSendChannel } from '../domain/PaymentReminderService.js';
+import { SegmentService, type SegmentFilterDefinition } from '../domain/SegmentService.js';
+import { JourneyService } from '../domain/JourneyService.js';
+import { ReferralService } from '../domain/ReferralService.js';
+import { FestivalIntelligenceService } from '../domain/FestivalIntelligenceService.js';
 
 // ES-16/ES-18: same notification-service circuit breaker pattern as campaigns —
 // a downed notification-service should fail fast for every remaining customer.
@@ -101,6 +106,69 @@ export async function internalRoutes(
     },
   });
 
+  // ── CRM-ROADMAP Phase 2, Feature 3 — Point-expiry-warning notification (all active tenants) ─
+  // Only meaningful now that earnPoints() actually sets expiry_date (see LoyaltyService.ts's own
+  // comment on the pipeline that never fired before this feature).
+  fastify.post('/loyalty/expiry-warnings/send', {
+    handler: async (req, reply) => {
+      if (!requireInternalKey(req as never, reply as never)) return;
+      const { createDatabaseClient } = await import('@erp/db');
+      const db = createDatabaseClient({ url: process.env['DATABASE_URL']! });
+      const notificationUrl = process.env['NOTIFICATION_SERVICE_URL'] ?? 'http://localhost:3014';
+      const internalKey = process.env['INTERNAL_API_KEY'] ?? '';
+
+      const activeTenants = await db
+        .select({ id: tenants.id })
+        .from(tenants)
+        .where(eq(tenants.status, 'ACTIVE'));
+
+      let candidateCount = 0;
+      let sent = 0;
+      for (const tenant of activeTenants) {
+        const svc = new LoyaltyService(db);
+        const expiring = await svc.getExpiringPoints(tenant.id, EXPIRY_WARNING_WINDOW_DAYS);
+        candidateCount += expiring.length;
+
+        for (const row of expiring) {
+          const [customer] = await db
+            .select({
+              displayName: customers.displayName,
+              phone: customers.phone,
+              optOutWhatsapp: customers.optOutWhatsapp,
+              optOutSms: customers.optOutSms,
+            })
+            .from(customers)
+            .where(and(eq(customers.id, row.customerId), eq(customers.tenantId, tenant.id)));
+          if (!customer || (customer.optOutWhatsapp && customer.optOutSms)) continue;
+
+          try {
+            const channels = customer.optOutWhatsapp ? ['SMS'] : ['WHATSAPP'];
+            const json = await birthdayNotificationBreaker.fire(
+              notificationUrl,
+              internalKey,
+              JSON.stringify({
+                tenantId: tenant.id,
+                eventType: 'LOYALTY_POINTS_EXPIRING',
+                recipientPhone: customer.phone,
+                templateData: {
+                  customerName: customer.displayName,
+                  points: row.expiringPoints,
+                  expiryDate: row.expiryDate.toISOString().slice(0, 10),
+                },
+                channels,
+              })
+            );
+            if (json.data?.results?.[0]?.status === 'SENT') sent++;
+          } catch {
+            // best-effort — continue to next customer (includes circuit-open ServiceUnavailableError)
+          }
+        }
+      }
+
+      return reply.send({ data: { tenantsProcessed: activeTenants.length, candidateCount, sent } });
+    },
+  });
+
   // Mark overdue invoices
   fastify.post('/invoices/mark-overdue', {
     handler: async (req, reply) => {
@@ -140,6 +208,118 @@ export async function internalRoutes(
       return reply.send({
         data: { tenantsProcessed: activeTenants.length, customersScored: scored },
       });
+    },
+  });
+
+  // ── CRM-ROADMAP Phase 3, Feature 1 — Nightly AI predictions (churn/next-best-action/
+  // product recommendations), all active tenants. Never computed synchronously on page load —
+  // 07-PERFORMANCE-PLAN.md §3 is explicit that this is a hard requirement.
+  fastify.post('/crm/predictions/compute', {
+    handler: async (req, reply) => {
+      if (!requireInternalKey(req as never, reply as never)) return;
+      const { createDatabaseClient } = await import('@erp/db');
+      const db = createDatabaseClient({ url: process.env['DATABASE_URL']! });
+
+      const activeTenants = await db
+        .select({ id: tenants.id })
+        .from(tenants)
+        .where(eq(tenants.status, 'ACTIVE'));
+
+      let customersProcessed = 0;
+      for (const tenant of activeTenants) {
+        const result = await HealthScoringService.computeAndCachePredictions(db, tenant.id);
+        customersProcessed += result.customersProcessed;
+      }
+      return reply.send({ data: { tenantsProcessed: activeTenants.length, customersProcessed } });
+    },
+  });
+
+  // ── CRM-ROADMAP Phase 4, Feature 3 — Nightly Festival Intelligence suggestions, all active
+  // tenants. Cheap to run nightly even though seasons themselves are infrequent — the compute
+  // logic itself only ever writes a row when a tenant has a completed prior-year season of that
+  // type to compare against, same reasoning as the AI-predictions job's own always-nightly cadence.
+  fastify.post('/crm/festival-suggestions/compute', {
+    handler: async (req, reply) => {
+      if (!requireInternalKey(req as never, reply as never)) return;
+      const { createDatabaseClient } = await import('@erp/db');
+      const db = createDatabaseClient({ url: process.env['DATABASE_URL']! });
+
+      const activeTenants = await db
+        .select({ id: tenants.id })
+        .from(tenants)
+        .where(eq(tenants.status, 'ACTIVE'));
+
+      let suggestionsWritten = 0;
+      for (const tenant of activeTenants) {
+        const result = await FestivalIntelligenceService.computeAndCacheSuggestions(db, tenant.id);
+        suggestionsWritten += result.suggestionsWritten;
+      }
+      return reply.send({ data: { tenantsProcessed: activeTenants.length, suggestionsWritten } });
+    },
+  });
+
+  // ── CRM-ROADMAP Phase 2, Feature 7 — Nightly segment-membership-cache refresh ───
+  // (all active tenants, every behavioral-operator segment). Static-field-only segments are
+  // skipped entirely — they're cheap enough to always compute live (SegmentService.
+  // needsMembershipCache).
+  fastify.post('/crm/segment-membership/refresh', {
+    handler: async (req, reply) => {
+      if (!requireInternalKey(req as never, reply as never)) return;
+      const { createDatabaseClient } = await import('@erp/db');
+      const db = createDatabaseClient({ url: process.env['DATABASE_URL']! });
+
+      const activeTenants = await db
+        .select({ id: tenants.id })
+        .from(tenants)
+        .where(eq(tenants.status, 'ACTIVE'));
+
+      let segmentsRefreshed = 0;
+      let customersCached = 0;
+      for (const tenant of activeTenants) {
+        const segments = await db
+          .select()
+          .from(customerSegments)
+          .where(eq(customerSegments.tenantId, tenant.id));
+        for (const segment of segments) {
+          const filterDefinition = segment.filterDefinition as SegmentFilterDefinition | null;
+          if (!SegmentService.needsMembershipCache(filterDefinition)) continue;
+          const where = SegmentService.customWhere(tenant.id, filterDefinition!);
+          const count = await SegmentService.refreshMembershipCache(
+            db,
+            tenant.id,
+            segment.id,
+            where
+          );
+          segmentsRefreshed++;
+          customersCached += count;
+        }
+      }
+      return reply.send({
+        data: { tenantsProcessed: activeTenants.length, segmentsRefreshed, customersCached },
+      });
+    },
+  });
+
+  // ── CRM-ROADMAP Phase 2, Feature 6 — Nightly campaign-conversion attribution ─────
+  // (all active tenants). "Converted" means the recipient's customer made a qualifying
+  // purchase after the send, within the attribution window — not tied to whether they clicked
+  // the tracked link (see CampaignService.attributeConversions' own doc comment for why).
+  fastify.post('/crm/campaign-conversions/attribute', {
+    handler: async (req, reply) => {
+      if (!requireInternalKey(req as never, reply as never)) return;
+      const { createDatabaseClient } = await import('@erp/db');
+      const db = createDatabaseClient({ url: process.env['DATABASE_URL']! });
+
+      const activeTenants = await db
+        .select({ id: tenants.id })
+        .from(tenants)
+        .where(eq(tenants.status, 'ACTIVE'));
+
+      let totalConverted = 0;
+      for (const tenant of activeTenants) {
+        totalConverted += await CampaignService.attributeConversions(db, tenant.id);
+      }
+      return reply.send({ data: { tenantsProcessed: activeTenants.length, totalConverted } });
     },
   });
 
@@ -397,6 +577,69 @@ export async function internalRoutes(
     },
   });
 
+  // ── CRM-ROADMAP Phase 2, Feature 2 — Journey engine tick (all active tenants) ─
+  // Per-tenant: enroll new segment matches, then evaluate every ACTIVE enrollment whose
+  // nextEvaluationAt is due. JourneyService.evaluateDueEnrollments checks the
+  // crm.journey_engine.enabled feature flag itself and no-ops per-tenant when disabled.
+  fastify.post('/crm/journeys/evaluate-due', {
+    handler: async (req, reply) => {
+      if (!requireInternalKey(req as never, reply as never)) return;
+      const { createDatabaseClient } = await import('@erp/db');
+      const db = createDatabaseClient({ url: process.env['DATABASE_URL']! });
+
+      const activeTenants = await db
+        .select({ id: tenants.id })
+        .from(tenants)
+        .where(eq(tenants.status, 'ACTIVE'));
+
+      let enrolled = 0;
+      let evaluated = 0;
+      let failed = 0;
+      for (const tenant of activeTenants) {
+        try {
+          const ctx = ctxFactory.create({
+            tenantId: tenant.id,
+            userId: 0,
+            correlationId: `journey-tick-${tenant.id}`,
+          });
+          const result = await JourneyService.evaluateDueEnrollments(ctx);
+          enrolled += result.enrolled;
+          evaluated += result.evaluated;
+        } catch {
+          failed++;
+        }
+      }
+
+      return reply.send({
+        data: { tenantsProcessed: activeTenants.length, enrolled, evaluated, failed },
+      });
+    },
+  });
+
+  // ── CRM-ROADMAP Phase 2, Feature 4 — Referral payout attribution (all active tenants) ─
+  // For every PENDING reward, checks whether the referee now resolves to a real customer with
+  // a qualifying purchase, and pays out both parties if so. FLAGGED rewards are skipped
+  // entirely — they wait for a REFERRAL_CONFIGURE reviewer to approve or reject them first.
+  fastify.post('/referral/attribute-purchases', {
+    handler: async (req, reply) => {
+      if (!requireInternalKey(req as never, reply as never)) return;
+      const { createDatabaseClient } = await import('@erp/db');
+      const db = createDatabaseClient({ url: process.env['DATABASE_URL']! });
+
+      const activeTenants = await db
+        .select({ id: tenants.id })
+        .from(tenants)
+        .where(eq(tenants.status, 'ACTIVE'));
+
+      let totalPaid = 0;
+      for (const tenant of activeTenants) {
+        totalPaid += await ReferralService.attributeQualifyingPurchases(db, tenant.id);
+      }
+
+      return reply.send({ data: { tenantsProcessed: activeTenants.length, totalPaid } });
+    },
+  });
+
   // ── PG-026 — Weekly credit-limit review (single tenant, tenantScoped job) ─
   // Customers whose current running balance (projection_customer_balance) has
   // reached or passed CREDIT_LIMIT_REVIEW_THRESHOLD (default 90%) of their limit.
@@ -480,6 +723,57 @@ export async function internalRoutes(
       }
 
       return reply.send({ data: { atRiskCount: atRisk.length, customers: atRisk } });
+    },
+  });
+
+  // ── CRM-ROADMAP Phase 1, Feature 4 — Ticket SLA-breach sweep ─────────────────
+  // Indexed on (tenant_id, status, sla_due_at) (07-PERFORMANCE-PLAN.md §2) — never a
+  // full-table scan, runs frequently by nature. Escalation notification dispatched here
+  // (same shape as credit-limit-review's own notification call above), not by the scheduler
+  // job itself — scheduler-service's cron jobs are thin HTTP callers, business logic (including
+  // "who to notify") stays in the owning service.
+  fastify.post('/crm/tickets/sla-breach-sweep', {
+    handler: async (req, reply) => {
+      if (!requireInternalKey(req as never, reply as never)) return;
+      const tenantId = parseInt((req.query as { tenantId?: string }).tenantId ?? '', 10);
+      if (!tenantId)
+        return reply
+          .code(400)
+          .send({ error: { code: 'MISSING_TENANT_ID', message: 'tenantId query param required' } });
+
+      const { createDatabaseClient } = await import('@erp/db');
+      const db = createDatabaseClient({ url: process.env['DATABASE_URL']! });
+      const { TicketService } = await import('../domain/TicketService.js');
+
+      const breached = await TicketService.sweepSlaBreaches(db, tenantId);
+
+      if (breached.length > 0) {
+        const notificationUrl = process.env['NOTIFICATION_SERVICE_URL'] ?? 'http://localhost:3014';
+        const internalKey = process.env['INTERNAL_API_KEY'] ?? '';
+        for (const ticket of breached) {
+          if (!ticket.assignedTo) continue;
+          try {
+            await sendRawNotification(
+              notificationUrl,
+              internalKey,
+              JSON.stringify({
+                tenantId,
+                eventType: 'TICKET_SLA_BREACHED',
+                channel: 'IN_APP',
+                recipientUserId: ticket.assignedTo,
+                subject: `SLA breached: ${ticket.ticketNumber}`,
+                body: `Ticket ${ticket.ticketNumber} ("${ticket.subject}") has breached its SLA.`,
+              })
+            );
+          } catch {
+            // best-effort per ticket — one delivery failure doesn't block the rest; the
+            // breach itself is already durably recorded (slaBreached=true + outbox event)
+            // regardless of whether this notification succeeds.
+          }
+        }
+      }
+
+      return reply.send({ data: { breachedCount: breached.length, tickets: breached } });
     },
   });
 }

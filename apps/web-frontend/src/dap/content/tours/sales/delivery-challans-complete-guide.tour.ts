@@ -1,0 +1,147 @@
+import type { TourDefinition } from '../../schema.js';
+import { PERMISSIONS } from '../../../../constants/permissions.js';
+
+// Deep-dive companion to `sales-delivery-challans-overview`. Grounded against
+// DeliveryChallanService.ts (apps/sales-service): create(), dispatch(), and convertToInvoice()
+// never reference inventory, accounting, or GST tables/events at all — a delivery challan is
+// confirmed, code-level, to be pure paperwork. That's the one fact worth making sure every
+// user internalizes, since it's easy to assume "goods left the building" means "stock moved."
+const tour: TourDefinition = {
+  id: 'sales-delivery-challans-complete-guide',
+  version: 1,
+  type: 'complete',
+  title: 'Delivery Challans — complete guide',
+  description:
+    'What a delivery challan is for, why it has no GST fields, and why dispatching one never touches stock or the books by itself.',
+  module: 'sales',
+  estimatedMinutes: 5,
+  requiredPermissions: [PERMISSIONS.INVOICE_VIEW],
+  steps: [
+    {
+      id: 'purpose',
+      route: 'sales/delivery-challans',
+      title: 'Why this page exists',
+      body: 'A delivery challan is a dispatch note — proof of what left your warehouse and when, without being a tax invoice. Warehouse and dispatch staff use it for goods going out before billing is finalized: a sample shipment, goods sent on approval, or a delivery where the invoice will follow later.',
+      placement: 'center',
+      mode: 'informational',
+      requiredPermission: PERMISSIONS.INVOICE_VIEW,
+    },
+    {
+      id: 'when-to-use',
+      route: 'sales/delivery-challans',
+      title: 'When to use a Challan instead of an Invoice',
+      body: "Use a challan when goods need to physically leave before you're ready to bill — the customer hasn't confirmed final quantities, or billing happens on a monthly cycle separate from dispatch. If you're ready to bill right now, skip the challan and create an invoice directly.",
+      placement: 'center',
+      mode: 'informational',
+      requiredPermission: PERMISSIONS.INVOICE_VIEW,
+    },
+    {
+      id: 'prerequisites',
+      route: 'sales/delivery-challans',
+      title: 'Before you start',
+      body: "Simpler than an invoice — there's no tax to calculate here.",
+      placement: 'center',
+      mode: 'informational',
+      requiredPermission: PERMISSIONS.INVOICE_VIEW,
+      calloutTitle: 'Before you start',
+      calloutVariant: 'warning',
+      businessImpact: [
+        'The customer, branch, and warehouse must all be set — same as an invoice.',
+        "There's no GST rate or discount field on this form at all — a challan is a pre-tax document by design.",
+        'Every line needs a quantity greater than zero, same as an invoice.',
+      ],
+    },
+    {
+      id: 'create-customer',
+      route: 'sales/delivery-challans/new',
+      target: '[data-tour-id="sales-challan-new-customer-select"]',
+      title: 'Selecting the customer',
+      body: "A plain dropdown, not a search-as-you-type field like Invoices and Quotations use — for a tenant with many customers, scroll or use the browser's type-ahead inside the list.",
+      placement: 'bottom',
+      mode: 'informational',
+      requiredPermission: PERMISSIONS.INVOICE_CREATE,
+    },
+    {
+      id: 'create-save',
+      route: 'sales/delivery-challans/new',
+      target: '[data-tour-id="sales-challan-new-save-button"]',
+      title: 'Save as Draft',
+      body: "Creates the challan as DRAFT. Like every other action on this page, saving has no effect on stock or accounting — it's purely a record of intent to dispatch.",
+      placement: 'top',
+      mode: 'informational',
+      requiredPermission: PERMISSIONS.INVOICE_CREATE,
+    },
+    {
+      id: 'detail-dispatch',
+      route: 'sales/delivery-challans',
+      title: 'On the challan detail page: Dispatch',
+      body: "Flips the challan to DISPATCHED — a status change only, fired immediately with no confirmation prompt. It doesn't deduct stock; it's a record that the goods physically left, not a system-enforced stock movement.",
+      placement: 'center',
+      mode: 'informational',
+      requiredPermission: PERMISSIONS.INVOICE_CREATE,
+    },
+    {
+      id: 'detail-convert',
+      route: 'sales/delivery-challans',
+      title: 'On the challan detail page: Convert to Invoice',
+      body: "Marks the challan CONVERTED and opens a new invoice pre-filled with its customer and line items — but still without GST rates or discounts, since the challan never had them. This is where you'll set pricing and tax for the first time.",
+      placement: 'center',
+      mode: 'informational',
+      requiredPermission: PERMISSIONS.INVOICE_CREATE,
+    },
+    {
+      id: 'business-impact',
+      route: 'sales/delivery-challans',
+      title: 'What a delivery challan actually touches',
+      body: "Nothing — and that's the whole point of this document.",
+      placement: 'center',
+      mode: 'informational',
+      requiredPermission: PERMISSIONS.INVOICE_VIEW,
+      calloutTitle: 'Business impact',
+      calloutVariant: 'info',
+      businessImpact: [
+        'Inventory: no effect at Create, Dispatch, or Convert — stock only moves when the resulting invoice is confirmed.',
+        'Accounting: no journal entry, ever.',
+        'GST: no ledger entry — a challan carries no tax.',
+        "Reports: doesn't appear in Sales Analytics, Trial Balance, or Stock Valuation.",
+        'Dashboard: not counted anywhere until it becomes a confirmed invoice.',
+        'Customer Outstanding: unaffected.',
+      ],
+    },
+    {
+      id: 'common-mistakes',
+      route: 'sales/delivery-challans',
+      title: 'Common mistakes',
+      body: 'The single biggest one is assuming dispatch means the stock system already knows.',
+      placement: 'center',
+      mode: 'informational',
+      requiredPermission: PERMISSIONS.INVOICE_VIEW,
+      calloutTitle: 'Common mistakes',
+      calloutVariant: 'warning',
+      businessImpact: [
+        "Assuming Dispatch deducts stock — it doesn't; the Stock page won't reflect this until the linked invoice is confirmed.",
+        "Letting dispatched challans sit un-converted for weeks — until converted and confirmed, there's no invoice, no revenue, and no GST record for goods that already left.",
+        "Forgetting a challan has no GST or discount fields — don't expect the converted invoice's totals to auto-match a verbal quote given at dispatch time.",
+        'Looking for an "Edit" button on a saved challan — there isn\'t one; create a new one if the items or quantities were wrong.',
+      ],
+    },
+    {
+      id: 'best-practices',
+      route: 'sales/delivery-challans',
+      title: 'Best practices',
+      body: 'Treat a challan as step one of a two-step process, not the finish line.',
+      placement: 'center',
+      mode: 'informational',
+      requiredPermission: PERMISSIONS.INVOICE_VIEW,
+      calloutTitle: 'Best practices',
+      calloutVariant: 'success',
+      businessImpact: [
+        'Convert to invoice promptly after dispatch — the longer it waits, the further your books lag behind what physically shipped.',
+        'Use "View Invoice" on a converted challan to confirm pricing landed the way you expected.',
+        "For same-day billing, skip the challan entirely and create the invoice directly — it's one fewer step for no loss of functionality.",
+      ],
+    },
+  ],
+};
+
+export default tour;

@@ -1,4 +1,4 @@
-import { and, eq, sql, desc, lt, getTableColumns } from 'drizzle-orm';
+import { and, eq, sql, desc, lt, getTableColumns, inArray } from 'drizzle-orm';
 import {
   purchaseOrders,
   purchaseOrderLines,
@@ -8,10 +8,11 @@ import {
   items,
   projectionSupplierBalance,
   outboxEvents,
+  organizationSettings,
 } from '@erp/db';
 import type { ErpDatabase } from '@erp/db';
 import { BusinessError, NotFoundError, VendorCreditLimitExceededError } from '@erp/types';
-import { GSTCalculator } from './GSTCalculator.js';
+import { GSTCalculator } from '@erp/utils';
 import { ulid } from 'ulid';
 
 export interface POLineInput {
@@ -40,6 +41,10 @@ export interface CreatePOParams {
   notes?: string | undefined;
   termsAndConditions?: string | undefined;
   createdBy: number;
+  poType?: 'STANDARD' | 'BLANKET' | 'RATE_CONTRACT' | undefined;
+  contractValidFrom?: Date | undefined;
+  contractValidTill?: Date | undefined;
+  requisitionId?: number | undefined;
 }
 
 export class PurchaseOrderService {
@@ -47,6 +52,41 @@ export class PurchaseOrderService {
 
   async create(params: CreatePOParams): Promise<number> {
     return this.db.transaction(async (trx) => {
+      // Was `params.sellerStateCode ?? params.placeOfSupply` — when a caller omitted
+      // sellerStateCode (the frontend PO form never collected it), that fallback made
+      // `sellerStateCode === placeOfSupply` trivially true, silently forcing CGST+SGST
+      // on every PO regardless of whether the supplier is actually in another state.
+      // Fall back to the supplier's own registered address first — genuinely correct in
+      // the common case — before ever falling back to placeOfSupply.
+      const [supplierForState] = await trx
+        .select({ billingAddress: suppliers.billingAddress })
+        .from(suppliers)
+        .where(and(eq(suppliers.id, params.supplierId), eq(suppliers.tenantId, params.tenantId)));
+      const resolvedSellerStateCode =
+        params.sellerStateCode ??
+        supplierForState?.billingAddress?.stateCode ??
+        params.placeOfSupply;
+
+      // Previously unchecked anywhere — a DISCONTINUED or soft-deleted item could still be
+      // ordered from a supplier, undermining the whole point of discontinuing/deleting it.
+      const poItemIds = [...new Set(params.lines.map((l) => l.itemId))];
+      if (poItemIds.length > 0) {
+        const itemRows = await trx
+          .select({ id: items.id, status: items.status, deletedAt: items.deletedAt })
+          .from(items)
+          .where(and(inArray(items.id, poItemIds), eq(items.tenantId, params.tenantId)));
+        const itemById = new Map(itemRows.map((r) => [r.id, r]));
+        for (const itemId of poItemIds) {
+          const item = itemById.get(itemId);
+          if (!item || item.deletedAt || item.status === 'DISCONTINUED') {
+            throw new BusinessError(
+              'ITEM_NOT_TRANSACTABLE',
+              `Item ${itemId} is discontinued or deleted and cannot be ordered`
+            );
+          }
+        }
+      }
+
       const computedLines = params.lines.map((l, i) => {
         const gst = GSTCalculator.computeLine({
           unitPrice: l.unitPrice,
@@ -54,7 +94,7 @@ export class PurchaseOrderService {
           discountPct: l.discountPct ?? 0,
           discountAmount: l.discountAmount ?? 0,
           gstRate: l.gstRate,
-          sellerStateCode: params.sellerStateCode ?? params.placeOfSupply,
+          sellerStateCode: resolvedSellerStateCode,
           placeOfSupply: params.placeOfSupply,
         });
         return { ...l, ...gst, lineNumber: i + 1 };
@@ -72,7 +112,7 @@ export class PurchaseOrderService {
           poDate: params.poDate,
           expectedDeliveryDate: params.expectedDeliveryDate,
           placeOfSupply: params.placeOfSupply,
-          sellerStateCode: params.sellerStateCode,
+          sellerStateCode: resolvedSellerStateCode,
           subtotal: String(totals.subtotal),
           discountAmount: String(totals.discountAmount),
           taxableAmount: String(totals.taxableAmount),
@@ -83,6 +123,10 @@ export class PurchaseOrderService {
           notes: params.notes,
           termsAndConditions: params.termsAndConditions,
           createdBy: params.createdBy,
+          poType: params.poType ?? 'STANDARD',
+          contractValidFrom: params.contractValidFrom,
+          contractValidTill: params.contractValidTill,
+          requisitionId: params.requisitionId,
         })
         .returning({ id: purchaseOrders.id });
 
@@ -173,7 +217,11 @@ export class PurchaseOrderService {
     tenantId: number,
     userId: number,
     poNumber: string,
-    overrideCreditLimit = false
+    overrideCreditLimit = false,
+    // Purchase audit 2026-07-21: tiered approval — already validated at the route layer
+    // (caller holds PO_APPROVE_HIGH_VALUE) before this is set true, same convention as
+    // overrideCreditLimit above.
+    hasHighValueApproval = false
   ): Promise<void> {
     await this.db.transaction(async (trx) => {
       const [po] = await trx
@@ -183,6 +231,23 @@ export class PurchaseOrderService {
       if (!po) throw new NotFoundError('PurchaseOrder', id);
       if (!['SUBMITTED', 'PENDING_APPROVAL'].includes(po.status))
         throw new BusinessError('INVALID_STATUS', `Cannot approve PO in status ${po.status}`);
+
+      if (!hasHighValueApproval) {
+        const [org] = await trx
+          .select({ purchaseApprovalThreshold: organizationSettings.purchaseApprovalThreshold })
+          .from(organizationSettings)
+          .where(eq(organizationSettings.tenantId, tenantId));
+        const threshold = org?.purchaseApprovalThreshold
+          ? parseFloat(String(org.purchaseApprovalThreshold))
+          : null;
+        if (threshold !== null && parseFloat(String(po.grandTotal)) > threshold) {
+          throw new BusinessError(
+            'HIGH_VALUE_APPROVAL_REQUIRED',
+            `PO total ${po.grandTotal} exceeds the ${threshold} approval threshold — requires an approver with PO_APPROVE_HIGH_VALUE`,
+            { grandTotal: po.grandTotal, threshold }
+          );
+        }
+      }
 
       if (!overrideCreditLimit) {
         const [supplier] = await trx

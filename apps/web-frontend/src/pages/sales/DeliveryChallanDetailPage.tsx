@@ -23,8 +23,10 @@ interface ChallanDetail {
   id: number;
   challanNumber: string;
   customerId: number;
+  customerName?: string;
   branchId: number;
   warehouseId: number;
+  warehouseName?: string;
   status: string;
   challanDate: string;
   subtotal: string;
@@ -89,6 +91,7 @@ export default function DeliveryChallanDetailPage() {
         <div className="flex flex-wrap items-center gap-3">
           {canCreateChallan && c.status === 'DRAFT' && (
             <Button
+              data-tour-id="sales-challan-detail-dispatch-button"
               variant="ghost"
               isLoading={dispatchMutation.isPending}
               onClick={() => dispatchMutation.mutate()}
@@ -97,12 +100,17 @@ export default function DeliveryChallanDetailPage() {
             </Button>
           )}
           {canCreateChallan && ['DRAFT', 'DISPATCHED'].includes(c.status) && (
-            <Button isLoading={convertMutation.isPending} onClick={() => convertMutation.mutate()}>
+            <Button
+              data-tour-id="sales-challan-detail-convert-button"
+              isLoading={convertMutation.isPending}
+              onClick={() => convertMutation.mutate()}
+            >
               Convert to Invoice
             </Button>
           )}
           {c.convertedInvoiceId && (
             <Button
+              data-tour-id="sales-challan-detail-view-invoice-button"
               variant="ghost"
               onClick={() => navigate(`/sales/invoices/${c.convertedInvoiceId}`)}
             >
@@ -115,10 +123,10 @@ export default function DeliveryChallanDetailPage() {
       {/* Summary cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         {[
-          { label: 'Customer', value: `ID: ${c.customerId}` },
+          { label: 'Customer', value: c.customerName ?? `ID: ${c.customerId}` },
           { label: 'Challan Date', value: formatDate(c.challanDate) },
           { label: 'Subtotal', value: formatCurrency(parseFloat(c.subtotal)) },
-          { label: 'Warehouse', value: `ID: ${c.warehouseId}` },
+          { label: 'Warehouse', value: c.warehouseName ?? `ID: ${c.warehouseId}` },
         ].map(({ label, value }) => (
           <div key={label} className="bg-surface-card border border-default rounded-xl p-4">
             <div className="text-xs text-secondary">{label}</div>

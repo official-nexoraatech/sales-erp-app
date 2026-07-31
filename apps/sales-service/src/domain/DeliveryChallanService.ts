@@ -1,5 +1,5 @@
-import { and, eq } from 'drizzle-orm';
-import { deliveryChallans, deliveryChallanLines, invoices } from '@erp/db';
+import { and, eq, getTableColumns } from 'drizzle-orm';
+import { deliveryChallans, deliveryChallanLines, customers, warehouses } from '@erp/db';
 import type { ErpDatabase } from '@erp/db';
 import { BusinessError, NotFoundError } from '@erp/types';
 
@@ -31,9 +31,7 @@ export class DeliveryChallanService {
 
   async create(params: CreateChallanParams): Promise<number> {
     return this.db.transaction(async (trx) => {
-      const subtotal = params.lines.reduce(
-        (s, l) => s + (l.unitPrice ?? 0) * l.quantity, 0
-      );
+      const subtotal = params.lines.reduce((s, l) => s + (l.unitPrice ?? 0) * l.quantity, 0);
 
       const [row] = await trx
         .insert(deliveryChallans)
@@ -52,7 +50,8 @@ export class DeliveryChallanService {
         })
         .returning({ id: deliveryChallans.id });
 
-      if (!row) throw new BusinessError('CHALLAN_CREATE_FAILED', 'Failed to create delivery challan');
+      if (!row)
+        throw new BusinessError('CHALLAN_CREATE_FAILED', 'Failed to create delivery challan');
 
       await trx.insert(deliveryChallanLines).values(
         params.lines.map((l, i) => ({
@@ -80,15 +79,26 @@ export class DeliveryChallanService {
       .where(and(eq(deliveryChallans.id, id), eq(deliveryChallans.tenantId, tenantId)));
     if (!challan) throw new NotFoundError('Delivery challan not found');
     if (challan.status !== 'DRAFT')
-      throw new BusinessError('INVALID_STATUS', `Cannot dispatch challan in status ${challan.status}`);
+      throw new BusinessError(
+        'INVALID_STATUS',
+        `Cannot dispatch challan in status ${challan.status}`
+      );
 
     await this.db
       .update(deliveryChallans)
-      .set({ status: 'DISPATCHED', dispatchedAt: new Date(), updatedBy: userId, updatedAt: new Date() })
+      .set({
+        status: 'DISPATCHED',
+        dispatchedAt: new Date(),
+        updatedBy: userId,
+        updatedAt: new Date(),
+      })
       .where(and(eq(deliveryChallans.id, id), eq(deliveryChallans.tenantId, tenantId)));
   }
 
-  async convertToInvoice(id: number, tenantId: number): Promise<{ challanId: number; lines: typeof deliveryChallanLines.$inferSelect[] }> {
+  async convertToInvoice(
+    id: number,
+    tenantId: number
+  ): Promise<{ challanId: number; lines: (typeof deliveryChallanLines.$inferSelect)[] }> {
     const [challan] = await this.db
       .select()
       .from(deliveryChallans)
@@ -96,8 +106,14 @@ export class DeliveryChallanService {
     if (!challan) throw new NotFoundError('Delivery challan not found');
     if (challan.status === 'CONVERTED')
       throw new BusinessError('ALREADY_CONVERTED', 'Challan already converted to invoice');
-    if (challan.status === 'CANCELLED')
-      throw new BusinessError('INVALID_STATUS', 'Cannot convert cancelled challan');
+    // M-6 fix: this used to allow converting straight from DRAFT, silently skipping dispatch —
+    // the whole point of a Delivery Challan is to record that goods actually left the
+    // warehouse before they're billed.
+    if (challan.status !== 'DISPATCHED')
+      throw new BusinessError(
+        'INVALID_STATUS',
+        `Cannot convert challan in status ${challan.status} — must be DISPATCHED`
+      );
 
     const lines = await this.db
       .select()
@@ -107,17 +123,62 @@ export class DeliveryChallanService {
     return { challanId: id, lines };
   }
 
-  async markConverted(id: number, tenantId: number, invoiceId: number, userId: number): Promise<void> {
+  // M-6 fix: no cancel() method existed at all despite CANCELLED being a valid, referenced
+  // status. Only cancellable from DRAFT — once dispatched, goods have physically left the
+  // warehouse, so a simple status flip is no longer accurate (that needs a real return flow).
+  async cancel(id: number, tenantId: number, userId: number, reason: string): Promise<void> {
+    const [challan] = await this.db
+      .select()
+      .from(deliveryChallans)
+      .where(and(eq(deliveryChallans.id, id), eq(deliveryChallans.tenantId, tenantId)));
+    if (!challan) throw new NotFoundError('Delivery challan not found');
+    if (challan.status !== 'DRAFT')
+      throw new BusinessError(
+        'INVALID_STATUS',
+        `Cannot cancel challan in status ${challan.status} — must be DRAFT`
+      );
+
     await this.db
       .update(deliveryChallans)
-      .set({ status: 'CONVERTED', convertedInvoiceId: invoiceId, convertedAt: new Date(), updatedBy: userId, updatedAt: new Date() })
+      .set({
+        status: 'CANCELLED',
+        cancelledAt: new Date(),
+        cancellationReason: reason,
+        cancelledBy: userId,
+        updatedBy: userId,
+        updatedAt: new Date(),
+      })
+      .where(and(eq(deliveryChallans.id, id), eq(deliveryChallans.tenantId, tenantId)));
+  }
+
+  async markConverted(
+    id: number,
+    tenantId: number,
+    invoiceId: number,
+    userId: number
+  ): Promise<void> {
+    await this.db
+      .update(deliveryChallans)
+      .set({
+        status: 'CONVERTED',
+        convertedInvoiceId: invoiceId,
+        convertedAt: new Date(),
+        updatedBy: userId,
+        updatedAt: new Date(),
+      })
       .where(and(eq(deliveryChallans.id, id), eq(deliveryChallans.tenantId, tenantId)));
   }
 
   async getWithLines(id: number, tenantId: number) {
     const [challan] = await this.db
-      .select()
+      .select({
+        ...getTableColumns(deliveryChallans),
+        customerName: customers.displayName,
+        warehouseName: warehouses.name,
+      })
       .from(deliveryChallans)
+      .leftJoin(customers, eq(deliveryChallans.customerId, customers.id))
+      .leftJoin(warehouses, eq(deliveryChallans.warehouseId, warehouses.id))
       .where(and(eq(deliveryChallans.id, id), eq(deliveryChallans.tenantId, tenantId)));
     if (!challan) throw new NotFoundError('Delivery challan not found');
     const lines = await this.db

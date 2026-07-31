@@ -62,15 +62,23 @@
   --border-error: #ef4444;
 
   /* ── Semantic — Success ─────────────────────────────────────────────────── */
-  --color-success: #16a34a;
-  --color-success-hover: #15803d;
+  /* --color-success was #16a34a (3.30:1 on --surface-card) — fails WCAG AA's 4.5:1 for
+     normal-size text, which matters because it's used directly as body/label text (not just
+     inside the safe -bg/-fg badge pairs below) on several screens. Shifted to the shade
+     already used for -hover (5.01:1, passes comfortably); -hover moved one step darker to
+     keep the same relative hover-darkens-further relationship. Dark mode already passes
+     (8.76:1) and is unchanged. */
+  --color-success: #15803d;
+  --color-success-hover: #166534;
   --color-success-bg: #f0fdf4;
   --color-success-border: #bbf7d0;
   --color-success-foreground: #14532d;
 
   /* ── Semantic — Warning ─────────────────────────────────────────────────── */
-  --color-warning: #d97706;
-  --color-warning-hover: #b45309;
+  /* Same fix as --color-success above — was #d97706 (3.19:1), now the former -hover shade
+     (5.02:1). Dark mode already passes (8.40:1) and is unchanged. */
+  --color-warning: #b45309;
+  --color-warning-hover: #92400e;
   --color-warning-bg: #fffbeb;
   --color-warning-border: #fde68a;
   --color-warning-foreground: #78350f;
@@ -117,6 +125,7 @@
   --z-overlay: 500;
   --z-modal: 600;
   --z-popover: 700;
+  --z-tour: 800;
   --z-toast: 900;
 
   /* ── Spacing ────────────────────────────────────────────────────────────── */

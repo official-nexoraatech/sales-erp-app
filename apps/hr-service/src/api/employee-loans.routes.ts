@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { PlatformContextFactory } from '@erp/sdk';
+import { PlatformEventBus } from '@erp/sdk';
 import { z } from 'zod';
 import { ValidationError } from '@erp/types';
 import { PERMISSIONS } from '@erp/types';
@@ -29,55 +30,108 @@ export async function employeeLoanRoutes(
   fastify: FastifyInstance,
   ctxFactory: PlatformContextFactory
 ): Promise<void> {
-  fastify.post('/employee-loans', { preHandler: [authenticate, requirePermission(PERMISSIONS.EMPLOYEE_LOAN_MANAGE)] }, async (request, reply) => {
-    const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-    const ctx = ctxFactory.create({ tenantId, userId, correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID() });
-    const body = CreateLoanSchema.safeParse(request.body);
-    if (!body.success) throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
+  fastify.post(
+    '/employee-loans',
+    { preHandler: [authenticate, requirePermission(PERMISSIONS.EMPLOYEE_LOAN_MANAGE)] },
+    async (request, reply) => {
+      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
+      const ctx = ctxFactory.create({
+        tenantId,
+        userId,
+        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
+      });
+      const body = CreateLoanSchema.safeParse(request.body);
+      if (!body.success)
+        throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
 
-    const loan = await EmployeeLoanService.create(ctx.db, tenantId, userId, body.data);
+      const loan = await ctx.db.transaction(async (trx) => {
+        const created = await EmployeeLoanService.create(trx, tenantId, userId, body.data);
+        const eventBus = new PlatformEventBus(trx, tenantId, userId, ctx.tenant.correlationId);
+        await eventBus.publishInTransaction(
+          'employee_loan',
+          created.id,
+          'EMPLOYEE_LOAN_DISBURSED',
+          {
+            employeeLoanId: created.id,
+            employeeId: created.employeeId,
+            tenantId,
+            principalAmount: created.principalAmount,
+            disbursedAmount: created.disbursedAmount,
+          }
+        );
+        return created;
+      });
+      await ctx.audit.log({
+        action: 'CREATE',
+        entityType: 'employee_loan',
+        entityId: loan.id,
+        metadata: { employeeId: loan.employeeId },
+      });
 
-    await ctx.events.publish('employee_loan', loan.id, 'EMPLOYEE_LOAN_DISBURSED', {
-      employeeLoanId: loan.id,
-      employeeId: loan.employeeId,
-      tenantId,
-      principalAmount: loan.principalAmount,
-      disbursedAmount: loan.disbursedAmount,
-    });
-    await ctx.audit.log({ action: 'CREATE', entityType: 'employee_loan', entityId: loan.id, metadata: { employeeId: loan.employeeId } });
+      return reply.code(201).send({ data: loan });
+    }
+  );
 
-    return reply.code(201).send({ data: loan });
-  });
+  fastify.get(
+    '/employee-loans',
+    { preHandler: [authenticate, requirePermission(PERMISSIONS.EMPLOYEE_LOAN_MANAGE)] },
+    async (request, reply) => {
+      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
+      const ctx = ctxFactory.create({
+        tenantId,
+        userId,
+        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
+      });
+      const query = ListLoansQuerySchema.safeParse(request.query);
+      if (!query.success)
+        throw new ValidationError(query.error.errors.map((e) => e.message).join('; '));
 
-  fastify.get('/employee-loans', { preHandler: [authenticate, requirePermission(PERMISSIONS.EMPLOYEE_LOAN_MANAGE)] }, async (request, reply) => {
-    const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-    const ctx = ctxFactory.create({ tenantId, userId, correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID() });
-    const query = ListLoansQuerySchema.safeParse(request.query);
-    if (!query.success) throw new ValidationError(query.error.errors.map((e) => e.message).join('; '));
+      const loans = await EmployeeLoanService.list(ctx.db, tenantId, query.data.employeeId);
+      return reply.code(200).send({ data: loans });
+    }
+  );
 
-    const loans = await EmployeeLoanService.list(ctx.db, tenantId, query.data.employeeId);
-    return reply.code(200).send({ data: loans });
-  });
+  fastify.get<{ Params: { id: string } }>(
+    '/employee-loans/:id',
+    { preHandler: [authenticate, requirePermission(PERMISSIONS.EMPLOYEE_LOAN_MANAGE)] },
+    async (request, reply) => {
+      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
+      const ctx = ctxFactory.create({
+        tenantId,
+        userId,
+        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
+      });
+      const id = parseInt(request.params.id, 10);
 
-  fastify.get<{ Params: { id: string } }>('/employee-loans/:id', { preHandler: [authenticate, requirePermission(PERMISSIONS.EMPLOYEE_LOAN_MANAGE)] }, async (request, reply) => {
-    const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-    const ctx = ctxFactory.create({ tenantId, userId, correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID() });
-    const id = parseInt(request.params.id, 10);
+      const { loan, history } = await EmployeeLoanService.getById(ctx.db, tenantId, id);
+      return reply.code(200).send({ data: { ...loan, history } });
+    }
+  );
 
-    const { loan, history } = await EmployeeLoanService.getById(ctx.db, tenantId, id);
-    return reply.code(200).send({ data: { ...loan, history } });
-  });
+  fastify.patch<{ Params: { id: string } }>(
+    '/employee-loans/:id',
+    { preHandler: [authenticate, requirePermission(PERMISSIONS.EMPLOYEE_LOAN_MANAGE)] },
+    async (request, reply) => {
+      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
+      const ctx = ctxFactory.create({
+        tenantId,
+        userId,
+        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
+      });
+      const id = parseInt(request.params.id, 10);
+      const body = UpdateLoanStatusSchema.safeParse(request.body);
+      if (!body.success)
+        throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
 
-  fastify.patch<{ Params: { id: string } }>('/employee-loans/:id', { preHandler: [authenticate, requirePermission(PERMISSIONS.EMPLOYEE_LOAN_MANAGE)] }, async (request, reply) => {
-    const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-    const ctx = ctxFactory.create({ tenantId, userId, correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID() });
-    const id = parseInt(request.params.id, 10);
-    const body = UpdateLoanStatusSchema.safeParse(request.body);
-    if (!body.success) throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
+      const loan = await EmployeeLoanService.updateStatus(ctx.db, tenantId, id, body.data.status);
+      await ctx.audit.log({
+        action: 'UPDATE',
+        entityType: 'employee_loan',
+        entityId: id,
+        metadata: { action: body.data.status },
+      });
 
-    const loan = await EmployeeLoanService.updateStatus(ctx.db, tenantId, id, body.data.status);
-    await ctx.audit.log({ action: 'UPDATE', entityType: 'employee_loan', entityId: id, metadata: { action: body.data.status } });
-
-    return reply.code(200).send({ data: loan });
-  });
+      return reply.code(200).send({ data: loan });
+    }
+  );
 }

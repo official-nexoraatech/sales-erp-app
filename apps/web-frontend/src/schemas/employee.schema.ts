@@ -52,6 +52,8 @@ export const employeeFormSchema = z.object({
   employmentType: z.enum(EMPLOYMENT_TYPES),
   departmentId: z.preprocess(blankToUndefined, z.coerce.number().int().positive().optional()),
   designationId: z.preprocess(blankToUndefined, z.coerce.number().int().positive().optional()),
+  shiftId: z.preprocess(blankToUndefined, z.coerce.number().int().positive().optional()),
+  userId: z.preprocess(blankToUndefined, z.coerce.number().int().positive().optional()),
   joiningDate: z.string().min(1, 'Required').max(10),
   version: z.number().int().min(0).optional(),
 });

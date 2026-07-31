@@ -26,7 +26,26 @@ vi.mock('@erp/db', () => ({
   projectionDashboardDaily: { tenantId: 'tenant_id', branchId: 'branch_id', date: 'date' },
   projectionCustomerBalance: { tenantId: 'tenant_id', customerId: 'customer_id' },
   quotations: {},
+  numberSeriesConfig: {
+    tenantId: 'tenant_id',
+    seriesType: 'series_type',
+    financialYear: 'financial_year',
+    currentSeq: 'current_seq',
+  },
   inventoryLedger: {},
+  inventoryFifoLayers: {},
+  inventoryWarehouseValuation: {
+    tenantId: 'tenant_id',
+    itemId: 'item_id',
+    warehouseId: 'warehouse_id',
+    variantId: 'variant_id',
+  },
+  projectionStockLevel: {
+    tenantId: 'tenant_id',
+    itemId: 'item_id',
+    warehouseId: 'warehouse_id',
+    variantId: 'variant_id',
+  },
   sagaLog: {},
   webhookSubscriptions: {
     id: 'id',
@@ -42,11 +61,14 @@ vi.mock('@erp/db', () => ({
 vi.mock('drizzle-orm', () => ({
   and: vi.fn((...args) => ({ type: 'and', args })),
   eq: vi.fn((col, val) => ({ type: 'eq', col, val })),
+  isNull: vi.fn((col) => ({ type: 'isNull', col })),
+  asc: vi.fn((col) => ({ type: 'asc', col })),
   sql: vi.fn((s) => s),
   desc: vi.fn((c) => c),
 }));
 
 import { InvoiceService } from '../domain/InvoiceService.js';
+import { numberSeriesConfig } from '@erp/db';
 
 // Chainable mock query builder: every method returns `this`, and the object is
 // directly `await`-able (via `.then`) OR terminable via `.returning()` — both
@@ -66,6 +88,7 @@ function makeTrx(script: unknown[], insertedValues: unknown[] = []) {
     'update',
     'set',
     'onConflictDoUpdate',
+    'onConflictDoNothing',
     'for',
   ]) {
     chainable[m] = vi.fn(() => chainable);
@@ -125,12 +148,15 @@ describe('InvoiceService.confirm — ES-03 inventory ledger', () => {
   it('writes one STOCK_OUT inventory_ledger row per invoice line, inside the transaction', async () => {
     const script = [
       [invoiceRow], // select invoice
-      [], // ES-14: duplicate invoice-number check — no clash found
+      [{ currentSeq: 0, formatTemplate: 'INV/{FY-SHORT}/{SEQ:5}' }], // C-7: NumberSeriesEngine select existing config
+      [{ currentSeq: 1, formatTemplate: 'INV/{FY-SHORT}/{SEQ:5}' }], // C-7: NumberSeriesEngine update...returning
       [], // ES-14: period closure check — no closure row found
       [lineRow], // select lines
       [{ id: 5, availableQty: '90.000' }], // update items ... returning (deduct)
       [{ costingMethod: 'WACC', waccCost: '0', currentStockValue: '0' }], // ES-13: ValuationService item lookup
       undefined, // ES-13: ValuationService update items.current_stock_value (WACC branch)
+      [], // PG-032: select inventoryWarehouseValuation .for('update') — no existing row
+      undefined, // insert projectionStockLevel .onConflictDoUpdate()
       undefined, // insert inventoryLedger
       undefined, // update invoices status
       undefined, // insert projectionDashboardDaily + onConflict
@@ -145,7 +171,7 @@ describe('InvoiceService.confirm — ES-03 inventory ledger', () => {
     const db = makeDb(script);
     const svc = new InvoiceService(db as never);
 
-    await svc.confirm(1, 1, 'INV-0001', 99);
+    await svc.confirm(1, 1, 99);
 
     const trx = (db.transaction as ReturnType<typeof vi.fn>).mock.calls[0]![0] as never;
     void trx;
@@ -155,12 +181,15 @@ describe('InvoiceService.confirm — ES-03 inventory ledger', () => {
   it('ES-13: populates inventory_ledger.cogs_per_unit and emits COGS_CALCULATED when the item has a non-zero WACC cost', async () => {
     const script = [
       [invoiceRow], // select invoice
-      [], // ES-14: duplicate invoice-number check — no clash found
+      [{ currentSeq: 0, formatTemplate: 'INV/{FY-SHORT}/{SEQ:5}' }], // C-7: NumberSeriesEngine select existing config
+      [{ currentSeq: 1, formatTemplate: 'INV/{FY-SHORT}/{SEQ:5}' }], // C-7: NumberSeriesEngine update...returning
       [], // ES-14: period closure check — no closure row found
       [lineRow], // select lines
       [{ id: 5, availableQty: '90.000' }], // update items ... returning (deduct)
       [{ costingMethod: 'WACC', waccCost: '50', currentStockValue: '5000' }], // ValuationService item lookup
       undefined, // ValuationService update items.current_stock_value
+      [], // PG-032: select inventoryWarehouseValuation .for('update') — no existing row
+      undefined, // insert projectionStockLevel .onConflictDoUpdate()
       undefined, // insert inventoryLedger
       undefined, // update invoices status
       undefined, // insert projectionDashboardDaily + onConflict
@@ -177,7 +206,7 @@ describe('InvoiceService.confirm — ES-03 inventory ledger', () => {
     const db = makeDb(script, insertedValues);
     const svc = new InvoiceService(db as never);
 
-    await svc.confirm(1, 1, 'INV-0001', 99);
+    await svc.confirm(1, 1, 99);
 
     const ledgerRow = insertedValues.find(
       (v): v is { movementType: string; cogsPerUnit: string } =>
@@ -211,7 +240,20 @@ describe('InvoiceService.confirm — ES-03 inventory ledger', () => {
     ]) {
       trx[m] = vi.fn(() => trx);
     }
-    trx['returning'] = vi.fn(() => Promise.resolve([{ id: 5, availableQty: '90.000' }]));
+    // C-7: this test's shared canned `.returning()` value was written for the "update
+    // items...returning" stock-deduct step — NumberSeriesEngine's own update()...returning()
+    // now also runs before that, so it must be branched by target table to avoid handing the
+    // deduct step's shape (no formatTemplate/currentSeq) to the number-series formatter.
+    let lastUpdateTarget: unknown;
+    trx['update'] = vi.fn((table: unknown) => {
+      lastUpdateTarget = table;
+      return trx;
+    });
+    trx['returning'] = vi.fn(() =>
+      lastUpdateTarget === numberSeriesConfig
+        ? Promise.resolve([{ currentSeq: 1, formatTemplate: 'INV/{FY-SHORT}/{SEQ:5}' }])
+        : Promise.resolve([{ id: 5, availableQty: '90.000' }])
+    );
     trx['execute'] = vi.fn(() => Promise.resolve([])); // ES-14: period closure check — no closure row found
     trx['insert'] = vi.fn((table: unknown) => {
       // Simulate the ledger insert throwing — the values() call that follows
@@ -242,8 +284,6 @@ describe('InvoiceService.confirm — ES-03 inventory ledger', () => {
     };
     const svc = new InvoiceService(db as never);
 
-    await expect(svc.confirm(1, 1, 'INV-0001', 99)).rejects.toThrow(
-      'simulated ledger insert failure'
-    );
+    await expect(svc.confirm(1, 1, 99)).rejects.toThrow('simulated ledger insert failure');
   });
 });

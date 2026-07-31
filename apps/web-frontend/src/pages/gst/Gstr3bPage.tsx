@@ -109,6 +109,7 @@ export function Gstr3bPage() {
         </div>
         {canFileGstr3b && (
           <Button
+            data-tour-id="gst-gstr3b-export-button"
             variant="primary"
             onClick={() => exportMutation.mutate()}
             disabled={exportMutation.isPending || !result}

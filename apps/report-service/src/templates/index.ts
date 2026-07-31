@@ -375,6 +375,52 @@ export const PAYMENT_RECEIPT_TEMPLATE = `<!DOCTYPE html>
 </body>
 </html>`;
 
+// Distinct from PAYMENT_RECEIPT_TEMPLATE (money coming IN from a customer, "Received From")
+// — this is money going OUT to a supplier, so it says "Paid To"/"PAYMENT VOUCHER" instead of
+// reusing the receipt's inverted wording.
+export const PAYMENT_VOUCHER_TEMPLATE = `<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8">
+<style>
+  * { margin:0;padding:0;box-sizing:border-box;font-family:Arial,sans-serif;font-size:13px; }
+  body { padding:20px; }
+  .voucher { border:2px solid #333;padding:20px;max-width:600px;margin:0 auto; }
+  .header { text-align:center;border-bottom:1px dashed #999;padding-bottom:10px;margin-bottom:10px; }
+  .org-name { font-size:22px;font-weight:bold; }
+  .title { font-size:18px;font-weight:bold;color:#555;margin-top:5px; }
+  .row { display:flex;justify-content:space-between;margin:6px 0; }
+  .label { font-weight:bold;color:#444; }
+  .amount-box { background:#f5f5f5;border:1px solid #ccc;padding:10px;text-align:center;margin-top:10px; }
+  .amount { font-size:24px;font-weight:bold;color:#c62828; }
+  .words { font-size:11px;color:#555;font-style:italic; }
+</style>
+</head>
+<body>
+  <div class="voucher">
+    <div class="header">
+      <div class="org-name">{{org.name}}</div>
+      <div>{{org.address.line1}}, {{org.address.city}}</div>
+      <div class="title">PAYMENT VOUCHER</div>
+    </div>
+    <div class="row"><span class="label">Voucher #:</span><span>{{voucherNumber}}</span></div>
+    <div class="row"><span class="label">Date:</span><span>{{dateFormat voucherDate}}</span></div>
+    <div class="row"><span class="label">Paid To:</span><span>{{supplier.name}}</span></div>
+    <div class="row"><span class="label">Payment Mode:</span><span>{{paymentMode}}</span></div>
+    {{#if chequeNumber}}<div class="row"><span class="label">Cheque #:</span><span>{{chequeNumber}} / {{chequeBank}}</span></div>{{/if}}
+    {{#if transactionReference}}<div class="row"><span class="label">Reference #:</span><span>{{transactionReference}}</span></div>{{/if}}
+    <div class="amount-box">
+      <div class="amount">{{inrFormat amount}}</div>
+      <div class="words">{{numberWords amount}}</div>
+    </div>
+    <div style="text-align:right;margin-top:30px;">
+      <div>For {{org.name}}</div>
+      <br><br>
+      <div>Authorised Signatory</div>
+    </div>
+  </div>
+</body>
+</html>`;
+
 export const SALARY_SLIP_TEMPLATE = `<!DOCTYPE html>
 <html lang="en">
 <head><meta charset="UTF-8">

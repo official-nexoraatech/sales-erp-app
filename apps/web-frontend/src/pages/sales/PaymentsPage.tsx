@@ -2,15 +2,17 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { Split, XCircle } from 'lucide-react';
+import { XCircle } from 'lucide-react';
 import { paymentApi } from '../../api/endpoints.js';
 import { useAuthStore } from '../../store/auth.store.js';
+import { useConfirm } from '../../context/ConfirmContext.js';
 import { PERMISSIONS } from '../../constants/permissions.js';
 import ERPPageHeader from '../../components/erp/ERPPageHeader.js';
 import ERPDataGrid, {
   type ERPColumnDef,
   type ERPRowAction,
 } from '../../components/erp/ERPDataGrid.js';
+import ERPEmptyState from '../../components/erp/ERPEmptyState.js';
 import Button from '../../components/ui/Button.js';
 import Badge from '../../components/ui/Badge.js';
 import { formatDate, formatCurrency } from '../../lib/format.js';
@@ -35,9 +37,18 @@ const STATUS_COLORS: Record<string, 'default' | 'success' | 'warning' | 'danger'
   REFUNDED: 'default',
 };
 
+const STATUS_DESCRIPTIONS: Record<string, string> = {
+  RECEIVED: 'Recorded, but not yet applied to any invoice.',
+  PARTIALLY_ALLOCATED: 'Some of this payment is applied to an invoice; some is still unallocated.',
+  FULLY_ALLOCATED: 'Fully applied to one or more invoices.',
+  BOUNCED: 'Cheque bounced — the accounting entry was reversed automatically.',
+  REFUNDED: 'Refunded to the customer.',
+};
+
 export default function PaymentsPage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const confirm = useConfirm();
   const hasPermission = useAuthStore((s) => s.hasPermission);
   const canManagePayment = hasPermission(PERMISSIONS.PAYMENT_CREATE);
   const [page, setPage] = useState(1);
@@ -96,7 +107,11 @@ export default function PaymentsPage() {
       key: 'status',
       header: 'Status',
       sortable: true,
-      render: (r) => <Badge variant={STATUS_COLORS[r.status] ?? 'default'}>{r.status}</Badge>,
+      render: (r) => (
+        <Badge variant={STATUS_COLORS[r.status] ?? 'default'} title={STATUS_DESCRIPTIONS[r.status]}>
+          {r.status}
+        </Badge>
+      ),
     },
   ];
 
@@ -104,20 +119,18 @@ export default function PaymentsPage() {
     ...(canManagePayment
       ? [
           {
-            label: 'Allocate',
-            icon: Split,
-            onClick: (r: Payment) => navigate(`/sales/payments/${r.id}/allocate`),
-            hidden: (r: Payment) => !(parseFloat(r.unallocatedAmount) > 0),
-          },
-        ]
-      : []),
-    ...(canManagePayment
-      ? [
-          {
             label: 'Mark Bounced',
             icon: XCircle,
             type: 'delete' as const,
-            onClick: (r: Payment) => bounceMutation.mutate({ id: r.id, reason: 'Cheque bounced' }),
+            onClick: async (r: Payment) => {
+              const ok = await confirm({
+                title: 'Mark cheque as bounced?',
+                message: `This reverses the accounting entry for payment ${r.paymentNumber}. It does not automatically update any invoice this payment was applied to.`,
+                confirmLabel: 'Mark Bounced',
+                variant: 'danger',
+              });
+              if (ok) bounceMutation.mutate({ id: r.id, reason: 'Cheque bounced' });
+            },
             hidden: (r: Payment) => !(r.paymentMode === 'CHEQUE' && r.status === 'RECEIVED'),
           },
         ]
@@ -129,10 +142,15 @@ export default function PaymentsPage() {
       <ERPPageHeader
         variant="list"
         title="Payments"
-        subtitle="Record and allocate customer payments"
+        subtitle="Record customer payments received against invoices"
       >
         {canManagePayment && (
-          <Button onClick={() => navigate('/sales/payments/new')}>+ Record Payment</Button>
+          <Button
+            data-tour-id="sales-payments-create-button"
+            onClick={() => navigate('/sales/payments/new')}
+          >
+            + Record Payment
+          </Button>
         )}
       </ERPPageHeader>
 
@@ -141,6 +159,21 @@ export default function PaymentsPage() {
         data={rows}
         isLoading={isLoading}
         rowKey="id"
+        emptyState={
+          <ERPEmptyState
+            type="no-data"
+            title="No payments recorded yet"
+            description="Record a payment against a confirmed invoice, or start from an invoice's own 'Record Payment' button."
+            {...(canManagePayment
+              ? {
+                  action: {
+                    label: '+ Record Payment',
+                    onClick: () => navigate('/sales/payments/new'),
+                  },
+                }
+              : {})}
+          />
+        }
         pagination={{ page, pageSize, total: totalElements }}
         onPageChange={setPage}
         onPageSizeChange={(size) => {

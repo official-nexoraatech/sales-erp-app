@@ -1,6 +1,7 @@
 import { Shirt, Store, Factory } from 'lucide-react';
 import ModuleGlyph from '../../../components/marketing/ModuleGlyph.js';
 import MarketingSection from '../../../components/marketing/MarketingSection.js';
+import { useScrollReveal } from '../../../hooks/useScrollReveal.js';
 
 // Grounded in real, vertical-specific modules confirmed in the codebase — not a generic
 // 10-industry list. Fabric-roll/alteration tracking, POS, and job-work/consignment are real,
@@ -26,6 +27,28 @@ const INDUSTRIES = [
   },
 ];
 
+function IndustryCard({
+  icon,
+  name,
+  description,
+  index,
+}: (typeof INDUSTRIES)[number] & { index: number }) {
+  const { ref, isVisible } = useScrollReveal<HTMLDivElement>();
+  return (
+    <div
+      ref={ref}
+      style={{ transitionDelay: isVisible ? `${Math.min(index, 6) * 60}ms` : '0ms' }}
+      className={`rounded-2xl border border-default bg-surface-card p-7 shadow-token-sm transition-all duration-slow hover:-translate-y-1 hover:border-accent hover:shadow-token-lg ${
+        isVisible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-3'
+      }`}
+    >
+      <ModuleGlyph icon={icon} size="lg" variant="accent" />
+      <h3 className="mt-4 text-lg font-semibold text-primary">{name}</h3>
+      <p className="mt-2 text-sm text-secondary">{description}</p>
+    </div>
+  );
+}
+
 export default function IndustriesSection() {
   return (
     <MarketingSection surface="light" className="py-24">
@@ -38,12 +61,8 @@ export default function IndustriesSection() {
         </h2>
       </div>
       <div className="mt-14 grid md:grid-cols-3 gap-6">
-        {INDUSTRIES.map(({ icon, name, description }) => (
-          <div key={name} className="rounded-2xl border border-default bg-surface-card p-7">
-            <ModuleGlyph icon={icon} size="lg" variant="accent" />
-            <h3 className="mt-4 text-lg font-semibold text-primary">{name}</h3>
-            <p className="mt-2 text-sm text-secondary">{description}</p>
-          </div>
+        {INDUSTRIES.map((industry, index) => (
+          <IndustryCard key={industry.name} {...industry} index={index} />
         ))}
       </div>
     </MarketingSection>

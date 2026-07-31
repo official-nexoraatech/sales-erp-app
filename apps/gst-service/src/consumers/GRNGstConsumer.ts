@@ -166,3 +166,30 @@ export async function handlePurchaseReturnApproved(
     throw err;
   }
 }
+
+interface RcmLiabilityPostedPayload {
+  grnId: number;
+  grnNumber: string;
+  supplierId: number;
+  rcmTaxAmount: string | number;
+}
+
+// G6 fix: the GRN_APPROVED handler above always records ₹0 cgst/sgst/igst for RCM purchases
+// (the shared event payload deliberately zeroes them for accounting-service's benefit — see
+// GstLedgerService.applyRcmLiability's comment). This is the real self-assessed tax amount,
+// applied as a follow-up patch to the row handleGRNApproved already inserted.
+export async function handleRcmLiabilityPosted(
+  event: ERPEventPayload,
+  db: TenantScopedDatabase
+): Promise<void> {
+  const p = event.payload as unknown as RcmLiabilityPostedPayload;
+  const rcmTaxAmount = Number(p.rcmTaxAmount ?? 0);
+  if (rcmTaxAmount <= 0) return;
+
+  try {
+    await GstLedgerService.applyRcmLiability(db, event.tenantId, p.grnId, rcmTaxAmount);
+  } catch (err) {
+    logger.error({ err, grnId: p.grnId }, 'GST ledger: failed to apply RCM_LIABILITY_POSTED');
+    throw err;
+  }
+}

@@ -41,6 +41,7 @@ interface PLData {
   totalOperatingExpenses: number;
   operatingProfit: number;
   totalOtherIncome: number;
+  totalOtherExpenses: number;
   totalFinancialCharges: number;
   netProfit: number;
 }
@@ -248,6 +249,7 @@ export default function ProfitLossPage() {
                 <td colSpan={2} className="h-2" />
               </tr>
               <PLRow label="Other Income" amount={pl.totalOtherIncome} indent={1} />
+              <PLRow label="Other Expenses" amount={-pl.totalOtherExpenses} indent={1} />
               <PLRow label="Financial Charges" amount={-pl.totalFinancialCharges} indent={1} />
               <tr>
                 <td colSpan={2} className="h-px bg-surface-sunken" />

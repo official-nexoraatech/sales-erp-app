@@ -105,9 +105,14 @@ export const customers = pgTable(
     // Loyalty
     loyaltyPoints: integer('loyalty_points').notNull().default(0),
     loyaltyCardNumber: varchar('loyalty_card_number', { length: 50 }),
+    // CRM-ROADMAP Phase 2, Feature 3 — derived from lifetime points earned, never demoted
+    // automatically (see crm_loyalty_tiers' own doc comment). Null = no tier configured/reached.
+    loyaltyTierId: integer('loyalty_tier_id'),
     // CRM — health scoring (Phase 9 M9.2)
     healthScore: integer('health_score'),
-    healthSegment: varchar('health_segment', { length: 20 }).$type<'CHAMPION' | 'LOYAL' | 'AT_RISK' | 'LOST'>(),
+    healthSegment: varchar('health_segment', { length: 20 }).$type<
+      'CHAMPION' | 'LOYAL' | 'AT_RISK' | 'LOST'
+    >(),
     scoredAt: timestamp('scored_at', { withTimezone: true }),
     // CRM — communication opt-out (ES-18)
     optOutSms: boolean('opt_out_sms').notNull().default(false),
@@ -136,6 +141,18 @@ export const customers = pgTable(
     // every other customer-creation path (which never supplies this) is unaffected — same
     // convention as invoices.clientOperationId (see 0031_offline02_pos_sale_idempotency.sql).
     clientOperationId: varchar('client_operation_id', { length: 100 }),
+    // CRM-ROADMAP Phase 1, Feature 1 (Contact & Account Hierarchy): nullable — most
+    // customers (POS/retail) never get one. B2B-relevant customers get an account created
+    // lazily on first B2B action (see AccountService.getOrCreateForCustomer), never
+    // backfilled in bulk (03-DATABASE-MIGRATION-PLAN.md §3).
+    accountId: integer('account_id'),
+    // CRM-ROADMAP Phase 1, Feature 2 (Lead Management & Capture): reverse pointer for
+    // attribution — set only when this customer was created via lead conversion.
+    convertedFromLeadId: integer('converted_from_lead_id'),
+    // CRM-ROADMAP Phase 3, Feature 5 (Multi-language Communication): BCP-47-ish language tag
+    // (e.g. 'hi', 'ta', 'en'). Null = no preference — CampaignService.send() falls back to the
+    // campaign's own base messageTemplate for these customers, unchanged from today's behavior.
+    preferredLanguage: varchar('preferred_language', { length: 10 }),
   },
   (t) => [
     unique('customers_tenant_code').on(t.tenantId, t.customerCode),
@@ -149,6 +166,12 @@ export const customers = pgTable(
     // Phase 13: GIN trigram indexes for pg_trgm fuzzy search
     index('idx_customers_displayname_trgm').on(t.displayName),
     index('idx_customers_companyname_trgm').on(t.companyName),
+    // M-14: GET /customers?search= ORs ilike('%...%') across these three columns too, but
+    // only display_name/company_name had a trigram index — see migration 0100.
+    index('idx_customers_phone_trgm').on(t.phone),
+    index('idx_customers_email_trgm').on(t.email),
+    index('idx_customers_code_trgm').on(t.customerCode),
+    index('idx_customers_account').on(t.accountId, t.tenantId),
   ]
 );
 
@@ -162,7 +185,9 @@ export const customersHistory = pgTable(
     changedBy: integer('changed_by').notNull(),
     changedAt: timestamp('changed_at', { withTimezone: true }).defaultNow().notNull(),
     previousData: jsonb('previous_data').notNull(),
-    changeType: varchar('change_type', { length: 20 }).notNull().$type<'UPDATE' | 'BLOCK' | 'UNBLOCK'>(),
+    changeType: varchar('change_type', { length: 20 })
+      .notNull()
+      .$type<'UPDATE' | 'BLOCK' | 'UNBLOCK'>(),
   },
   (t) => [
     index('idx_customers_history_customer').on(t.customerId),
@@ -223,6 +248,11 @@ export const suppliers = pgTable(
       .$type<'ACTIVE' | 'INACTIVE' | 'BLACKLISTED'>(),
     notes: text('notes'),
     tags: jsonb('tags').$type<string[]>().default([]),
+    // Purchase audit 2026-07-21 gap-fix: manual vendor rating (1.0-5.0), independent of the
+    // purchase-service supplier-performance report's on-the-fly metrics — a persisted,
+    // purchaser-set score usable as a vendor-selection signal during PO/RFQ creation.
+    rating: decimal('rating', { precision: 2, scale: 1 }),
+    ratingNotes: text('rating_notes'),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
     deletedBy: integer('deleted_by'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
@@ -259,6 +289,28 @@ export const suppliersHistory = pgTable(
   ]
 );
 
+// ─── Supplier Contacts (purchase-module enhancement 2026-07-21) ──────────────
+// A supplier only ever had one `contactPerson` free-text field — no way to record more
+// than one real point of contact (e.g. sales rep vs accounts/finance contact).
+export const supplierContacts = pgTable(
+  'supplier_contacts',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    tenantId: integer('tenant_id').notNull(),
+    supplierId: integer('supplier_id').notNull(),
+    name: varchar('name', { length: 200 }).notNull(),
+    designation: varchar('designation', { length: 100 }),
+    phone: varchar('phone', { length: 20 }),
+    email: varchar('email', { length: 255 }),
+    isPrimary: boolean('is_primary').notNull().default(false),
+    notes: text('notes'),
+    createdBy: integer('created_by').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index('idx_supplier_contacts_supplier').on(t.supplierId, t.tenantId)]
+);
+
 export type Warehouse = typeof warehouses.$inferSelect;
 export type NewWarehouse = typeof warehouses.$inferInsert;
 export type Customer = typeof customers.$inferSelect;
@@ -267,3 +319,5 @@ export type CustomerHistory = typeof customersHistory.$inferSelect;
 export type Supplier = typeof suppliers.$inferSelect;
 export type NewSupplier = typeof suppliers.$inferInsert;
 export type SupplierHistory = typeof suppliersHistory.$inferSelect;
+export type SupplierContact = typeof supplierContacts.$inferSelect;
+export type NewSupplierContact = typeof supplierContacts.$inferInsert;

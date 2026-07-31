@@ -146,6 +146,10 @@
   from { opacity: 0; transform: translateX(-4px); }
   to   { opacity: 1; transform: translateX(0); }
 }
+@keyframes tourSpotlightPulse {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--brand-primary) 45%, transparent); }
+  50%      { box-shadow: 0 0 0 6px color-mix(in srgb, var(--brand-primary) 0%, transparent); }
+}
 
 /* 5b. ERPDataGrid `enablePrint` — scopes window.print() to just the table container. */
 @media print {
@@ -167,6 +171,16 @@
 
 * {
   box-sizing: border-box;
+}
+
+/* Unlike `<a href>`, a native `<button>` does not get a pointer cursor from the browser's
+   own UA stylesheet — Tailwind's Preflight doesn't add one either. Every ERP/POS button
+   component (Button, POSButton, ERPTabs, ERPDropdownMenu, ERPPagination, ERPDataGrid's
+   toolbar/action buttons, etc.) renders a plain `<button>`, so this was showing the default
+   arrow cursor app-wide. Centralized here instead of per-component; `:disabled` is excluded
+   so disabled buttons correctly keep their `cursor-not-allowed` styling. */
+button:not(:disabled) {
+  cursor: pointer;
 }
 
 /* Scrollbar */

@@ -127,7 +127,10 @@ export default function CostCentersPage() {
         subtitle="Tag departments or locations for cost-center reporting (optional)"
         actions={
           canManage ? (
-            <Button onClick={() => setShowForm((s) => !s)}>
+            <Button
+              data-tour-id="accounting-cost-centers-create-button"
+              onClick={() => setShowForm((s) => !s)}
+            >
               {showForm ? 'Cancel' : '+ New Cost Center'}
             </Button>
           ) : undefined
