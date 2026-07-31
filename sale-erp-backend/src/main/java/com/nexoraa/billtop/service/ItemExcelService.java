@@ -300,7 +300,7 @@ public class ItemExcelService {
                 itemRepository.save(batchItem);
             }
 
-            Stock stock = stockRepository.findByItemIdAndWarehouseId(batchItem.getId(), warehouse.getId())
+            Stock stock = stockRepository.findByItemId(batchItem.getId())
                     .orElseGet(() -> newStock(batchItem, warehouse));
             boolean createdStock = stock.getId() == null;
             BigDecimal existingQty = stock.getAvailableQty() == null ? ZERO : stock.getAvailableQty();

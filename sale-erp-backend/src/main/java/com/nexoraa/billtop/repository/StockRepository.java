@@ -18,8 +18,7 @@ public interface StockRepository extends JpaRepository<Stock, Long> {
             Long organizationId
     );
 
-    Optional<Stock> findByItemIdAndWarehouseId(
-            Long itemId,
-            Long warehouseId
+    Optional<Stock> findByItemId(
+            Long itemId
     );
 }

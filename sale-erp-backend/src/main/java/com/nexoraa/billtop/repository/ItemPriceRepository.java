@@ -8,7 +8,7 @@ import org.springframework.data.repository.query.Param;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
-// testing not working
+
 public interface ItemPriceRepository extends JpaRepository<ItemPrice, Long> {
 
     Optional<ItemPrice> findTopByItemIdOrderByIdDesc(Long itemId);

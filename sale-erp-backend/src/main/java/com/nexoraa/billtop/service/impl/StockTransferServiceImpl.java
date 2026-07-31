@@ -146,7 +146,7 @@ public class StockTransferServiceImpl implements StockTransferService {
         }
         Warehouse fromWarehouse = stockTransfer.getFromWarehouse();
         Warehouse toWarehouse = stockTransfer.getToWarehouse();
-        Stock stockFromWarehouse = stockRepository.findByItemIdAndWarehouseId(item.getId(), fromWarehouse.getId())
+        Stock stockFromWarehouse = stockRepository.findByItemId(item.getId())
                 .orElse(null);
         BigDecimal availableQty = stockFromWarehouse == null ? TransactionSupport.ZERO : support.defaultZero(stockFromWarehouse.getAvailableQty());
         if (availableQty.compareTo(quantity) < 0) {

@@ -176,7 +176,7 @@ class TransactionSupport {
     }
 
     Stock getStockForItemAndWarehouse(Long itemId, Long warehouseId) {
-        return stockRepository.findByItemIdAndWarehouseId(itemId, warehouseId).orElse(null);
+        return stockRepository.findByItemId(itemId).orElse(null);
     }
 
     Stock increaseStock(
@@ -187,9 +187,8 @@ class TransactionSupport {
             Long referenceId,
             String remarks
     ) {
-        Stock stock = stockRepository.findByItemIdAndWarehouseId(
-                item.getId(),
-                warehouse.getId()
+        Stock stock = stockRepository.findByItemId(
+                item.getId()
         ).orElseGet(() -> {
             BigDecimal inheritedMinimumStock = existingMinimumStockFor(item.getId());
             return Stock.builder()
@@ -230,9 +229,8 @@ class TransactionSupport {
             Long referenceId,
             String remarks
     ) {
-        Stock stock = stockRepository.findByItemIdAndWarehouseId(
-                item.getId(),
-                warehouse.getId()
+        Stock stock = stockRepository.findByItemId(
+                item.getId()
         ).orElseThrow(() -> new BadRequestException(ErrorMessage.INSUFFICIENT_STOCK, "INSUFFICIENT_STOCK"));
 
         BigDecimal availableQty = defaultZero(stock.getAvailableQty());

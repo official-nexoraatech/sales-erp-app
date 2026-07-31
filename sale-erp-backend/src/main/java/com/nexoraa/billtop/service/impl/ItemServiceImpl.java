@@ -242,7 +242,7 @@ public class ItemServiceImpl implements ItemService {
                 .orElse(null);
         itemPriceRepository.save(buildPrice(savedItem, request, price));
         Warehouse warehouse = getActiveWarehouse(request.getWarehouseId());
-        Stock stock = stockRepository.findByItemIdAndWarehouseId(id, warehouse.getId())
+        Stock stock = stockRepository.findByItemId(id)
                 .orElse(null);
         stockRepository.save(buildStock(savedItem, warehouse, request, stock));
         itemStockStatusService.SaveItemStockStatus(savedItem);
