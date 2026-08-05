@@ -87,7 +87,7 @@ public class DashboardServiceImpl implements DashboardService {
         BigDecimal todayExpense = expenseRepository.findByExpenseDateBetweenAndOrganizationIdOrderByExpenseDateAscIdAsc(
                         today,
                         today,
-                        currentOrganizationService.getOrganizationId()
+                        1L
                 )
                 .stream()
                 .map(Expense::getAmount)
@@ -119,8 +119,6 @@ public class DashboardServiceImpl implements DashboardService {
                 .todayPurchase(support.money(todayPurchase))
                 .todayExpense(support.money(todayExpense))
                 .todayCollection(support.money(todayCollection))
-                .cashInHand(financeSupport.totalCashBalance())
-                .bankBalance(financeSupport.totalBankBalance())
                 .stockValue(stockValue())
                 .totalCustomers(contactRepository.countByContactTypeAndOrganizationIdAndStatus(
                         TransactionSupport.CUSTOMER,
