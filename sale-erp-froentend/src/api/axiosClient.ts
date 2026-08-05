@@ -1,5 +1,6 @@
 import axios, { AxiosError } from 'axios';
 import type { AxiosInstance, InternalAxiosRequestConfig } from 'axios';
+import { isSuperAdminRole } from '../auth/featurePermissions';
 import { useAuthStore } from '../store/authStore';
 import { useBranchStore } from '../store/branchStore';
 import toast from 'react-hot-toast';
@@ -15,21 +16,24 @@ const axiosClient: AxiosInstance = axios.create({
   },
 });
 
+const isLoginRequest = (url?: string) => url?.includes('/api/v1/auth/login') || false;
+
 // Request interceptor
 axiosClient.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
     const auth = useAuthStore.getState();
-    if (auth.token && !auth.isSessionValid()) {
+    const skipSessionHeaders = isLoginRequest(config.url);
+    if (!skipSessionHeaders && auth.token && !auth.isSessionValid()) {
       auth.logout();
       window.location.href = '/login';
       return Promise.reject(new Error('Session expired. Please login again.'));
     }
     const token = auth.token;
-    if (token) {
+    if (!skipSessionHeaders && token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
     const selectedBranchId = useBranchStore.getState().selectedBranchId;
-    if (selectedBranchId) {
+    if (!skipSessionHeaders && selectedBranchId && !isSuperAdminRole(auth.user?.role)) {
       config.headers['X-Branch-Id'] = String(selectedBranchId);
     }
     return config;

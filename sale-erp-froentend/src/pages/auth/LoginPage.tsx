@@ -7,6 +7,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import toast from 'react-hot-toast';
 import { authApi } from '../../api/endpoints';
+import { queryClient } from '../../app/queryClient';
 import { getDefaultAuthorizedPath } from '../../auth/featurePermissions';
 import { useAuth } from '../../hooks/useAuth';
 import { authUserFromLoginResponse, isTokenExpired } from '../../utils/authToken';
@@ -59,6 +60,7 @@ export const LoginPage: React.FC = () => {
           toast.error('Login token is expired. Please login again.');
           return;
         }
+        queryClient.removeQueries();
         login(authUser);
         toast.success('Login successful');
         navigate(getDefaultAuthorizedPath(authUser.permissions, authUser.role));

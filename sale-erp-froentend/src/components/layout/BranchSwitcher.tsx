@@ -3,28 +3,39 @@ import { useQuery } from '@tanstack/react-query';
 import { Check, ChevronDown, GitBranch } from 'lucide-react';
 import { branchApi } from '../../api/endpoints';
 import { queryClient } from '../../app/queryClient';
+import { isSuperAdminRole } from '../../auth/featurePermissions';
 import { useAuth } from '../../hooks/useAuth';
 import { useBranch } from '../../hooks/useBranch';
 
 export const BranchSwitcher: React.FC = () => {
-  const { isAuthenticated } = useAuth();
-  const { selectedBranchId, setSelectedBranchId } = useBranch();
+  const { isAuthenticated, user } = useAuth();
+  const { selectedBranchId, setSelectedBranchId, clearSelectedBranch } = useBranch();
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const shouldUseBranch = isAuthenticated && !isSuperAdminRole(user?.role);
 
   const branches = useQuery({
     queryKey: ['my-branches'],
     queryFn: () => branchApi.getMine(),
-    enabled: isAuthenticated,
+    enabled: shouldUseBranch,
   });
   const rows = branches.data?.data || [];
 
-  // Default to the first assigned branch until the user picks one explicitly.
   useEffect(() => {
-    if (!selectedBranchId && rows.length > 0) {
+    if (isSuperAdminRole(user?.role) && selectedBranchId) {
+      clearSelectedBranch();
+      setIsOpen(false);
+    }
+  }, [clearSelectedBranch, selectedBranchId, user?.role]);
+
+  // Default to a valid assigned branch until the user picks one explicitly.
+  useEffect(() => {
+    if (!shouldUseBranch || rows.length === 0) return;
+    const selectedBranchExists = rows.some((branch) => branch.id === selectedBranchId);
+    if (!selectedBranchId || !selectedBranchExists) {
       setSelectedBranchId(rows[0].id);
     }
-  }, [rows, selectedBranchId, setSelectedBranchId]);
+  }, [rows, selectedBranchId, setSelectedBranchId, shouldUseBranch]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -57,7 +68,7 @@ export const BranchSwitcher: React.FC = () => {
     await queryClient.invalidateQueries();
   };
 
-  if (!isAuthenticated || rows.length === 0) return null;
+  if (!shouldUseBranch || rows.length === 0) return null;
 
   const selectedBranch = rows.find((branch) => branch.id === selectedBranchId) || rows[0];
 

@@ -1,10 +1,9 @@
 import { create } from 'zustand';
 import { devtools, persist } from 'zustand/middleware';
+import { isSuperAdminRole } from '../auth/featurePermissions';
 import type { AuthUser } from '../types/auth.types';
 import { isTokenExpired } from '../utils/authToken';
 import { useBranchStore } from './branchStore';
-
-const isSuperAdmin = (role?: string) => role?.trim().toLowerCase() === 'super admin';
 
 interface AuthStore {
   token: string | null;
@@ -29,6 +28,7 @@ const useAuthStore = create<AuthStore>()(
         isAuthenticated: false,
 
         login: (user: AuthUser) => {
+          useBranchStore.getState().clearSelectedBranch();
           localStorage.setItem('authToken', user.accessToken);
           localStorage.setItem('authUser', JSON.stringify(user));
           set({
@@ -59,21 +59,21 @@ const useAuthStore = create<AuthStore>()(
         hasPermission: (permission: string) => {
           const { user, isSessionValid } = get();
           if (!isSessionValid()) return false;
-          if (isSuperAdmin(user?.role)) return true;
+          if (isSuperAdminRole(user?.role)) return true;
           return user?.permissions?.includes(permission) || false;
         },
 
         hasAnyPermission: (permissions: string[]) => {
           const { user, isSessionValid } = get();
           if (!isSessionValid()) return false;
-          if (isSuperAdmin(user?.role)) return true;
+          if (isSuperAdminRole(user?.role)) return true;
           return permissions.some((permission) => user?.permissions?.includes(permission));
         },
 
         hasAllPermissions: (permissions: string[]) => {
           const { user, isSessionValid } = get();
           if (!isSessionValid()) return false;
-          if (isSuperAdmin(user?.role)) return true;
+          if (isSuperAdminRole(user?.role)) return true;
           return permissions.every((permission) => user?.permissions?.includes(permission));
         },
       }),
