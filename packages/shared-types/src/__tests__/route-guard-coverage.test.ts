@@ -121,6 +121,7 @@ const KNOWN_EXCEPTIONS: Record<string, string[]> = {
   // instead of a JWT/permission guard, same shape as every public route file above.
   'sales-service/src/api/inbound-webhooks.routes.ts': [
     '/webhooks/whatsapp',
+    '/webhooks/instagram',
     '/webhooks/email',
     '/webhooks/sms',
     // CRM-ROADMAP Phase 4, Feature 7: Twilio's own webhooks, verified by verifyTwilioSignature

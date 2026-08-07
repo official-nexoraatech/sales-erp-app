@@ -302,4 +302,70 @@ export async function webhookRoutes(
     }
     return reply.code(200).send(challenge);
   });
+
+  // ── Instagram Messaging status webhook ────────────────────────────────
+  // Same Meta HMAC-SHA256 signature scheme as WhatsApp above, but the Messenger-platform
+  // delivery-event shape (entry[].messaging[].delivery.mids) rather than WhatsApp Cloud API's
+  // entry[].changes[].value.statuses[]. Only `delivery` events carry specific message ids — the
+  // `read` event only carries a watermark timestamp with no per-message id, so there is nothing
+  // to match back to a notification_log row and it is intentionally not handled here.
+  fastify.post('/webhooks/instagram/status', async (request, reply) => {
+    const rawBody = (request as RequestWithRawBody).rawBody ?? '';
+    const signature = request.headers['x-hub-signature-256'] as string | undefined;
+    if (!verifyMetaSignature(rawBody, signature, config.instagramAppSecret)) {
+      return reply
+        .code(401)
+        .send({ error: { code: 'UNAUTHORIZED', message: 'Invalid webhook signature' } });
+    }
+
+    const body = request.body as {
+      entry?: Array<{
+        messaging?: Array<{ delivery?: { mids?: string[] } }>;
+      }>;
+    };
+    const messageIds = (body.entry ?? []).flatMap((e) =>
+      (e.messaging ?? []).flatMap((m) => m.delivery?.mids ?? [])
+    );
+
+    let processed = 0;
+    for (const mid of messageIds) {
+      const [logRow] = await db
+        .select()
+        .from(notificationLog)
+        .where(eq(notificationLog.externalMessageId, mid));
+      if (!logRow) continue;
+
+      const isNew = await recordDeliveryEvent(
+        db,
+        logRow.tenantId,
+        logRow.id,
+        'META',
+        `${mid}:DELIVERED`,
+        'DELIVERED'
+      );
+      if (!isNew) continue;
+
+      await applyDeliveryUpdate(db, logRow, 'DELIVERED', undefined);
+      processed++;
+    }
+
+    return reply.code(200).send({ data: { processed } });
+  });
+
+  fastify.get('/webhooks/instagram/status', async (request, reply) => {
+    const query = request.query as Record<string, string | undefined>;
+    const verifyToken = query['hub.verify_token'];
+    const challenge = query['hub.challenge'];
+    if (!verifySharedSecret(verifyToken, config.instagramWebhookVerifyToken)) {
+      return reply
+        .code(403)
+        .send({ error: { code: 'FORBIDDEN', message: 'Invalid verify token' } });
+    }
+    if (!challenge) {
+      return reply
+        .code(400)
+        .send({ error: { code: 'BAD_REQUEST', message: 'Missing hub.challenge' } });
+    }
+    return reply.code(200).send(challenge);
+  });
 }

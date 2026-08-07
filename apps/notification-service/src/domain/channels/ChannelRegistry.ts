@@ -3,6 +3,7 @@ import { SmsChannelProvider } from './SmsChannelProvider.js';
 import { EmailChannelProvider } from './EmailChannelProvider.js';
 import { WhatsAppChannelProvider } from './WhatsAppChannelProvider.js';
 import { InAppChannelProvider } from './InAppChannelProvider.js';
+import { InstagramChannelProvider } from './InstagramChannelProvider.js';
 import type { ChannelName, ChannelProvider } from './types.js';
 
 export class ChannelRegistry {
@@ -21,6 +22,8 @@ export class ChannelRegistry {
       | 'smtpPass'
       | 'whatsappPhoneNumberId'
       | 'whatsappAccessToken'
+      | 'instagramBusinessAccountId'
+      | 'instagramAccessToken'
     >
   ) {
     this.providers = new Map<ChannelName, ChannelProvider>([
@@ -39,6 +42,13 @@ export class ChannelRegistry {
         new WhatsAppChannelProvider(config.whatsappPhoneNumberId, config.whatsappAccessToken),
       ],
       ['IN_APP', new InAppChannelProvider()],
+      [
+        'INSTAGRAM',
+        new InstagramChannelProvider(
+          config.instagramBusinessAccountId,
+          config.instagramAccessToken
+        ),
+      ],
     ]);
   }
 

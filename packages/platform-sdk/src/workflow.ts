@@ -714,6 +714,11 @@ export class WorkflowEngine {
   private async resolveApprovers(
     node: WorkflowNode
   ): Promise<Array<{ userId: number; roleId: number | null }>> {
+    // approverType/approverRef are only optional on the WorkflowNode type to accommodate
+    // automation-service's non-APPROVAL node types (CONDITION/NOTIFICATION/ACTION/DELAY) —
+    // every node this method is ever called with (APPROVAL/PARALLEL_APPROVAL) still always
+    // sets both, same as before this type was widened.
+    if (!node.approverRef) return [];
     if (node.approverType === 'ROLE') {
       const [role] = await this.db
         .select({ id: roles.id })

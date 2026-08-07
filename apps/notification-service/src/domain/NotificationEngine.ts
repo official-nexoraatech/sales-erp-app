@@ -23,7 +23,7 @@ export interface SendNotificationInput {
   recipientPhone?: string;
   recipientEmail?: string;
   templateData: Record<string, unknown>;
-  channels?: Array<'SMS' | 'EMAIL' | 'WHATSAPP' | 'IN_APP'>;
+  channels?: Array<'SMS' | 'EMAIL' | 'WHATSAPP' | 'IN_APP' | 'INSTAGRAM'>;
   idempotencyKey?: string;
 }
 
@@ -40,7 +40,7 @@ export interface NotificationResult {
 export interface SendRawInput {
   tenantId: number;
   eventType: string;
-  channel: 'SMS' | 'EMAIL' | 'WHATSAPP' | 'IN_APP';
+  channel: 'SMS' | 'EMAIL' | 'WHATSAPP' | 'IN_APP' | 'INSTAGRAM';
   recipientPhone?: string;
   recipientEmail?: string;
   /** Required for the notification to appear in the recipient's in-app list/unread count — see IN_APP in ChannelName. */

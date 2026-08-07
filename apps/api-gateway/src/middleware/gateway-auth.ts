@@ -59,6 +59,7 @@ const EXEMPT_PATHS = new Set([
   // a WhatsApp/email/SMS provider posting a reply isn't a logged-in ERP user. Verified by
   // provider signature instead (see inbound-webhooks.routes.ts), same as every entry above.
   '/api/sales/webhooks/whatsapp',
+  '/api/sales/webhooks/instagram',
   '/api/sales/webhooks/email',
   '/api/sales/webhooks/sms',
   // CRM-ROADMAP Phase 4, Feature 7 (CTI / Call Center Integration): Twilio's own callbacks —

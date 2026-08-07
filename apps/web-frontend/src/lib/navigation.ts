@@ -1,5 +1,6 @@
 import {
   LayoutDashboard,
+  ListChecks,
   Building2,
   Store,
   Gift,
@@ -111,6 +112,19 @@ export const NAV_GROUPS: NavGroup[] = [
         label: 'My Profile',
         path: '/my-profile',
         icon: UserCircle2,
+      },
+      {
+        // Identity-scoped (approverId = caller), not permission-gated — same design as
+        // 'My Profile' above. See apps/tenant-service/src/api/approval.routes.ts.
+        label: 'My Approvals',
+        path: '/my-approvals',
+        icon: ClipboardCheck,
+      },
+      {
+        label: 'AI Copilot',
+        path: '/copilot',
+        icon: Sparkles,
+        permission: PERMISSIONS.COPILOT_USE,
       },
     ],
   },
@@ -786,6 +800,18 @@ export const NAV_GROUPS: NavGroup[] = [
         path: '/admin/feature-flags',
         icon: Flag,
         permission: PERMISSIONS.FEATURE_FLAG_VIEW,
+      },
+      {
+        label: 'Business Rules',
+        path: '/settings/rules',
+        icon: ListChecks,
+        permission: PERMISSIONS.RULE_VIEW,
+      },
+      {
+        label: 'Workflow Automation',
+        path: '/settings/automation',
+        icon: GitBranch,
+        permission: PERMISSIONS.AUTOMATION_VIEW,
       },
       {
         label: 'SSO Configuration',

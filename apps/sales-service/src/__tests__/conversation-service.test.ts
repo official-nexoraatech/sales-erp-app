@@ -88,6 +88,12 @@ describe.skipIf(!DB_URL)(
           senderName: 'Store',
           senderAddressOrNumber: 'support@test-tenant.com',
         },
+        {
+          tenantId: TEST_TENANT,
+          channel: 'INSTAGRAM',
+          senderName: 'Store',
+          senderAddressOrNumber: 'ig-business-account-1',
+        },
       ]);
     });
 
@@ -120,6 +126,15 @@ describe.skipIf(!DB_URL)(
           '900000000000'
         );
         expect(tenantId).toBeNull();
+      });
+
+      it('resolves the tenant that owns an Instagram business account address', async () => {
+        const tenantId = await ConversationService.resolveTenantByAddress(
+          db,
+          'INSTAGRAM',
+          'ig-business-account-1'
+        );
+        expect(tenantId).toBe(TEST_TENANT);
       });
     });
 
@@ -243,6 +258,24 @@ describe.skipIf(!DB_URL)(
         });
         expect(conversation.customerId).toBeNull();
         expect(conversation.channel).toBe('EMAIL');
+      });
+
+      it('leaves an unknown Instagram sender unresolved (customerId null) rather than writing the IGSID into a lead phone field', async () => {
+        const { conversation } = await ConversationService.recordInboundMessage(db, TEST_TENANT, {
+          channel: 'INSTAGRAM',
+          externalAddress: '17841400000099',
+          body: 'Do you ship internationally?',
+          provider: 'META',
+          providerMessageId: 'ig-mid-unknown001',
+        });
+        expect(conversation.customerId).toBeNull();
+        expect(conversation.channel).toBe('INSTAGRAM');
+
+        const [lead] = await db
+          .select()
+          .from(crmLeads)
+          .where(and(eq(crmLeads.tenantId, TEST_TENANT), eq(crmLeads.phone, '17841400000099')));
+        expect(lead).toBeUndefined();
       });
 
       it('reopens a CLOSED conversation on a new inbound message', async () => {

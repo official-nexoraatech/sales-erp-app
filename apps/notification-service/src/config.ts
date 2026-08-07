@@ -14,6 +14,8 @@ export interface NotificationServiceConfig {
   smtpPass: string;
   whatsappPhoneNumberId: string;
   whatsappAccessToken: string;
+  instagramBusinessAccountId: string;
+  instagramAccessToken: string;
   jwtPublicKey: string;
   // CP-6 (Campaign Management Platform initiative): delivery-webhook verification secrets.
   // sendgridWebhookPublicKey: SendGrid's Ed25519 "Signed Event Webhook" public key (base64,
@@ -28,6 +30,11 @@ export interface NotificationServiceConfig {
   whatsappAppSecret: string;
   whatsappWebhookVerifyToken: string;
   msg91WebhookSecret: string;
+  // instagramAppSecret/instagramWebhookVerifyToken: same Meta HMAC scheme as WhatsApp above —
+  // separate config keys since a tenant's Instagram integration may live under a different Meta
+  // App than their WhatsApp one (set both to the same value if they share one Meta App).
+  instagramAppSecret: string;
+  instagramWebhookVerifyToken: string;
 }
 
 export async function loadNotificationConfig(): Promise<NotificationServiceConfig> {
@@ -46,10 +53,14 @@ export async function loadNotificationConfig(): Promise<NotificationServiceConfi
     smtpPass: process.env['SMTP_PASS'] ?? '',
     whatsappPhoneNumberId: process.env['WHATSAPP_PHONE_NUMBER_ID'] ?? '',
     whatsappAccessToken: process.env['WHATSAPP_ACCESS_TOKEN'] ?? '',
+    instagramBusinessAccountId: process.env['INSTAGRAM_BUSINESS_ACCOUNT_ID'] ?? '',
+    instagramAccessToken: process.env['INSTAGRAM_ACCESS_TOKEN'] ?? '',
     jwtPublicKey: process.env['JWT_PUBLIC_KEY'] ?? '',
     sendgridWebhookPublicKey: process.env['SENDGRID_WEBHOOK_PUBLIC_KEY'] ?? '',
     whatsappAppSecret: process.env['WHATSAPP_APP_SECRET'] ?? '',
     whatsappWebhookVerifyToken: process.env['WHATSAPP_WEBHOOK_VERIFY_TOKEN'] ?? '',
     msg91WebhookSecret: process.env['MSG91_WEBHOOK_SECRET'] ?? '',
+    instagramAppSecret: process.env['INSTAGRAM_APP_SECRET'] ?? '',
+    instagramWebhookVerifyToken: process.env['INSTAGRAM_WEBHOOK_VERIFY_TOKEN'] ?? '',
   };
 }

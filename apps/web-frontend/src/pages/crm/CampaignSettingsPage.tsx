@@ -16,19 +16,21 @@ interface CommunicationSettings {
   maxPerDayFrequencyCap: number | null;
   notificationRateLimitPerMinute: number | null;
   // CRM-ROADMAP Phase 3, Feature 3
-  costPerMessage: Partial<Record<'SMS' | 'WHATSAPP' | 'EMAIL' | 'IN_APP', number>> | null;
+  costPerMessage: Partial<
+    Record<'SMS' | 'WHATSAPP' | 'EMAIL' | 'IN_APP' | 'INSTAGRAM', number>
+  > | null;
 }
 
 const PLATFORM_DEFAULT_RATE_LIMIT = 200;
 
 interface SenderIdentity {
   id: number;
-  channel: 'SMS' | 'WHATSAPP' | 'EMAIL' | 'IN_APP';
+  channel: 'SMS' | 'WHATSAPP' | 'EMAIL' | 'IN_APP' | 'INSTAGRAM';
   senderName: string;
   senderAddressOrNumber: string;
 }
 
-const CHANNELS = ['SMS', 'WHATSAPP', 'EMAIL', 'IN_APP'] as const;
+const CHANNELS = ['SMS', 'WHATSAPP', 'EMAIL', 'IN_APP', 'INSTAGRAM'] as const;
 
 function ApprovalSection() {
   const { data, isLoading } = useQuery({
@@ -171,9 +173,10 @@ function SenderIdentitySection() {
       </h2>
       <p className="text-xs text-secondary">
         Configure a custom "from" name/address per channel. Only Email delivery actually uses this
-        today — SMS and WhatsApp sender identity requires provider-side business registration (MSG91
-        sender ID, Meta WhatsApp Business number) that can't be changed by a setting alone, so those
-        are saved for reference but not yet applied to outbound sends.
+        today — SMS, WhatsApp and Instagram sender identity requires provider-side business
+        registration (MSG91 sender ID, Meta WhatsApp Business number, Meta Instagram Business
+        Account) that can't be changed by a setting alone, so those are saved for reference but not
+        yet applied to outbound sends.
       </p>
 
       {identities.length > 0 && (
@@ -271,6 +274,7 @@ function CostSection() {
     WHATSAPP: '',
     EMAIL: '',
     IN_APP: '',
+    INSTAGRAM: '',
   });
 
   useEffect(() => {

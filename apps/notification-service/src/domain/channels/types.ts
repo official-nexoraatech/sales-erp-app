@@ -3,9 +3,10 @@
 // existing channel (SMS/EMAIL/WHATSAPP/IN_APP) now implements this interface with no behavior
 // change. Adding a new channel means implementing this interface and registering it in
 // ChannelRegistry — CampaignService, SegmentService, and the campaign schema never change.
-export type ChannelName = 'SMS' | 'EMAIL' | 'WHATSAPP' | 'IN_APP';
+export type ChannelName = 'SMS' | 'EMAIL' | 'WHATSAPP' | 'IN_APP' | 'INSTAGRAM';
 
 export interface ChannelDeliveryParams {
+  /** For INSTAGRAM, carries the recipient's Instagram-scoped ID (IGSID), not a real phone number — same overload ConversationService already uses for the externalAddress field. */
   phone?: string;
   email?: string;
   subject?: string;

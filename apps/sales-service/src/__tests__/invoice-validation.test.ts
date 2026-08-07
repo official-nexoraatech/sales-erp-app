@@ -60,6 +60,23 @@ vi.mock('@erp/db', () => ({
   webhookDeliveries: {},
   eventStore: {},
   eventSnapshots: {},
+  // Enterprise approval chain (WorkflowEngine) — trigger() short-circuits to a no-op
+  // whenever the workflowDefinitions select below returns no match, which is what every
+  // script in this file supplies, so these column-name stubs never need to be exercised
+  // beyond the `eq()`/`and()` mock calls that reference them.
+  workflowDefinitions: {
+    tenantId: 'tenant_id',
+    triggerEvent: 'trigger_event',
+    isActive: 'is_active',
+  },
+  workflowInstances: {
+    id: 'id',
+    tenantId: 'tenant_id',
+    entityType: 'entity_type',
+    entityId: 'entity_id',
+    status: 'status',
+    createdAt: 'created_at',
+  },
 }));
 
 vi.mock('drizzle-orm', () => ({
@@ -67,6 +84,7 @@ vi.mock('drizzle-orm', () => ({
   eq: vi.fn((col, val) => ({ type: 'eq', col, val })),
   sql: vi.fn((s) => s),
   desc: vi.fn((c) => c),
+  inArray: vi.fn((col, vals) => ({ type: 'inArray', col, vals })),
 }));
 
 import { InvoiceService, PriceFloorViolationError } from '../domain/InvoiceService.js';
@@ -187,6 +205,7 @@ describe('ES-14 — InvoiceService.create price floor', () => {
       [{ id: 1 }], // insert invoices ... returning
       undefined, // insert invoiceLines
       undefined, // insert invoiceHistory
+      [], // WorkflowEngine.trigger(): select workflowDefinitions — no active INVOICE_CREATE definition seeded in this fixture, so trigger() no-ops
       undefined, // insert outboxEvents (INVOICE_CREATED)
       [], // EventStoreService.append: select current aggregate version — none yet
       undefined, // EventStoreService.append: insert eventStore row
@@ -208,6 +227,7 @@ describe('InvoiceService.create walk-in sale (customerId 0)', () => {
       [{ id: 7 }], // insert invoices ... returning
       undefined, // insert invoiceLines
       undefined, // insert invoiceHistory
+      [], // WorkflowEngine.trigger(): select workflowDefinitions — no match, no-op
       undefined, // insert outboxEvents (INVOICE_CREATED)
       [], // EventStoreService.append: select current aggregate version — none yet
       undefined, // EventStoreService.append: insert eventStore row
@@ -242,6 +262,7 @@ describe('ES-14/C-7 — InvoiceService.confirm number generation + period closur
   it('confirms and returns the server-generated invoice number when the period is open', async () => {
     const script = [
       [invoiceRow], // select invoice
+      [], // WorkflowEngine approval-gate: no PENDING/REJECTED instance for this invoice
       ...numberSeriesScript,
       [{ status: 'OPEN' }], // period closure check — period is open
       [], // select lines (none)
@@ -264,6 +285,7 @@ describe('ES-14/C-7 — InvoiceService.confirm number generation + period closur
   it('rejects confirm() when the invoice date falls in a closed accounting period', async () => {
     const script = [
       [invoiceRow], // select invoice
+      [], // WorkflowEngine approval-gate: no PENDING/REJECTED instance for this invoice
       ...numberSeriesScript,
       [{ status: 'CLOSED' }], // period closure check — period is closed
     ];

@@ -15,7 +15,7 @@ import { NotFoundError } from '@erp/types';
 import { ulid } from 'ulid';
 import { LeadService } from './LeadService.js';
 
-type Channel = 'WHATSAPP' | 'SMS' | 'EMAIL';
+type Channel = 'WHATSAPP' | 'SMS' | 'EMAIL' | 'INSTAGRAM';
 
 // CRM-ROADMAP Phase 2, Feature 5 (Omnichannel Communication Hub). A two-way inbox — inbound
 // provider webhooks (WhatsApp/SMS/email) write here, keyed by (tenant, channel,
@@ -76,14 +76,19 @@ export class ConversationService {
     // verbatim per this feature's own "unknown sender" edge case. LeadService.capture() requires
     // a phone, which phone-based channels always have — an email-only sender with no matching
     // customer stays unresolved (customerId null, surfaced as "Unknown sender" in the inbox UI),
-    // the roadmap's own alternative for this same edge case.
+    // the roadmap's own alternative for this same edge case. INSTAGRAM's externalAddress is a
+    // Meta-assigned IGSID, not a phone number and not correlatable to customers.phone/email at
+    // all — it follows the same "stays unresolved" path as EMAIL rather than being force-fit into
+    // LeadService.capture()'s phone field, which would write garbage into a real phone column.
     let customerId: number | null = null;
-    if (channel === 'EMAIL') {
-      const [cust] = await db
-        .select({ id: customers.id })
-        .from(customers)
-        .where(and(eq(customers.tenantId, tenantId), eq(customers.email, externalAddress)));
-      customerId = cust?.id ?? null;
+    if (channel === 'EMAIL' || channel === 'INSTAGRAM') {
+      if (channel === 'EMAIL') {
+        const [cust] = await db
+          .select({ id: customers.id })
+          .from(customers)
+          .where(and(eq(customers.tenantId, tenantId), eq(customers.email, externalAddress)));
+        customerId = cust?.id ?? null;
+      }
     } else {
       const [cust] = await db
         .select({ id: customers.id })

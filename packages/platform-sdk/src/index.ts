@@ -37,7 +37,12 @@ export type {
   PendingApprovalItem,
 } from './workflow.js';
 
-export { RuleEngine, SYSTEM_RULE_TEMPLATES } from './rule-engine.js';
+export {
+  RuleEngine,
+  SYSTEM_RULE_TEMPLATES,
+  evaluateCondition,
+  evaluateConditions,
+} from './rule-engine.js';
 export type {
   RuleCondition,
   RuleAction,

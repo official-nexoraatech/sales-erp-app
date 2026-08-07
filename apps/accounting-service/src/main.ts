@@ -62,6 +62,7 @@ import {
 } from './consumers/EmployeeLoanAccountingConsumer.js';
 import { handleRcmLiabilityPosted } from './consumers/RcmAccountingConsumer.js';
 import { handleStockAdjustmentPosted } from './consumers/StockAdjustmentAccountingConsumer.js';
+import { handleCommissionApproved } from './consumers/CommissionAccountingConsumer.js';
 
 initializeTelemetry({ serviceName: 'accounting-service' });
 
@@ -150,6 +151,9 @@ async function bootstrap(): Promise<void> {
       case 'STOCK_ADJUSTMENT_POSTED':
         await handleStockAdjustmentPosted(event, db);
         break;
+      case 'COMMISSION_APPROVED':
+        await handleCommissionApproved(event, db);
+        break;
       default:
         logger.warn({ eventType: event.eventType }, 'Unhandled event type in accounting consumer');
     }
@@ -173,6 +177,7 @@ async function bootstrap(): Promise<void> {
     'erp.employee.loan.repaid',
     'erp.rcm.liability.posted',
     'erp.stock.adjustment.posted',
+    'erp.commission.approved',
   ];
 
   const consumer = new PlatformEventConsumer(

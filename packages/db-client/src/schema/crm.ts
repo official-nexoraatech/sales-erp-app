@@ -532,7 +532,9 @@ export const crmConversations = pgTable(
     id: bigserial('id', { mode: 'number' }).primaryKey(),
     tenantId: integer('tenant_id').notNull(),
     customerId: integer('customer_id'),
-    channel: varchar('channel', { length: 20 }).notNull().$type<'WHATSAPP' | 'SMS' | 'EMAIL'>(),
+    channel: varchar('channel', { length: 20 })
+      .notNull()
+      .$type<'WHATSAPP' | 'SMS' | 'EMAIL' | 'INSTAGRAM'>(),
     externalAddress: varchar('external_address', { length: 200 }).notNull(),
     status: varchar('status', { length: 20 })
       .notNull()
@@ -590,7 +592,7 @@ export const crmCannedResponses = pgTable(
     tenantId: integer('tenant_id').notNull(),
     title: varchar('title', { length: 200 }).notNull(),
     body: text('body').notNull(),
-    channel: varchar('channel', { length: 20 }).$type<'WHATSAPP' | 'SMS' | 'EMAIL'>(),
+    channel: varchar('channel', { length: 20 }).$type<'WHATSAPP' | 'SMS' | 'EMAIL' | 'INSTAGRAM'>(),
     createdBy: integer('created_by').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
@@ -843,7 +845,7 @@ export const tenantSenderIdentity = pgTable(
     tenantId: integer('tenant_id').notNull(),
     channel: varchar('channel', { length: 20 })
       .notNull()
-      .$type<'SMS' | 'WHATSAPP' | 'EMAIL' | 'IN_APP'>(),
+      .$type<'SMS' | 'WHATSAPP' | 'EMAIL' | 'IN_APP' | 'INSTAGRAM'>(),
     senderName: varchar('sender_name', { length: 200 }).notNull(),
     senderAddressOrNumber: varchar('sender_address_or_number', { length: 200 }).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),

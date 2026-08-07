@@ -621,442 +621,512 @@
     {
       "idx": 88,
       "version": "7",
-      "when": 1784605962215,
+      "when": 1790195735804,
       "tag": "0088_grn_batch_serial_qc_tracking",
       "breakpoints": true
     },
     {
       "idx": 89,
       "version": "7",
-      "when": 1784625993988,
+      "when": 1790282135804,
       "tag": "0089_supplier_contacts",
       "breakpoints": true
     },
     {
       "idx": 90,
       "version": "7",
-      "when": 1784626408554,
+      "when": 1790368535804,
       "tag": "0090_po_approval_threshold",
       "breakpoints": true
     },
     {
       "idx": 91,
       "version": "7",
-      "when": 1784900001000,
+      "when": 1790454935804,
       "tag": "0091_purchase_requisitions",
       "breakpoints": true
     },
     {
       "idx": 92,
       "version": "7",
-      "when": 1784900002000,
+      "when": 1790541335804,
       "tag": "0092_rfq_supplier_quotations",
       "breakpoints": true
     },
     {
       "idx": 93,
       "version": "7",
-      "when": 1784900003000,
+      "when": 1790627735804,
       "tag": "0093_po_blanket_contract_and_requisition_link",
       "breakpoints": true
     },
     {
       "idx": 94,
       "version": "7",
-      "when": 1784900004000,
+      "when": 1790714135804,
       "tag": "0094_purchase_invoices",
       "breakpoints": true
     },
     {
       "idx": 95,
       "version": "7",
-      "when": 1784900005000,
+      "when": 1790800535804,
       "tag": "0095_supplier_rating",
       "breakpoints": true
     },
     {
       "idx": 96,
       "version": "7",
-      "when": 1784900006000,
+      "when": 1790886935804,
       "tag": "0096_report_schedule_format_default_excel",
       "breakpoints": true
     },
     {
       "idx": 97,
       "version": "7",
-      "when": 1784900007000,
+      "when": 1790973335804,
       "tag": "0097_sales_manager_customer_block_permission_backfill",
       "breakpoints": true
     },
     {
       "idx": 98,
       "version": "7",
-      "when": 1784900008000,
+      "when": 1791059735804,
       "tag": "0098_payment_client_operation_id",
       "breakpoints": true
     },
     {
       "idx": 99,
       "version": "7",
-      "when": 1784900009000,
+      "when": 1791146135804,
       "tag": "0099_delivery_challan_cancellation",
       "breakpoints": true
     },
     {
       "idx": 100,
       "version": "7",
-      "when": 1784900010000,
+      "when": 1791232535804,
       "tag": "0100_customer_search_indexes",
       "breakpoints": true
     },
     {
       "idx": 101,
       "version": "7",
-      "when": 1784986410000,
+      "when": 1791318935804,
       "tag": "0101_organization_logo_object_key",
       "breakpoints": true
     },
     {
       "idx": 102,
       "version": "7",
-      "when": 1784986411000,
+      "when": 1791405335804,
       "tag": "0102_outbox_next_retry_at",
       "breakpoints": true
     },
     {
       "idx": 103,
       "version": "7",
-      "when": 1785000000000,
+      "when": 1791491735804,
       "tag": "0103_qa_e2e_employee_user_link_backfill",
       "breakpoints": true
     },
     {
       "idx": 104,
       "version": "7",
-      "when": 1785086410000,
+      "when": 1791578135804,
       "tag": "0104_demo_requests",
       "breakpoints": true
     },
     {
       "idx": 105,
       "version": "7",
-      "when": 1785172810000,
+      "when": 1791664535804,
       "tag": "0105_crm_account_hierarchy",
       "breakpoints": true
     },
     {
       "idx": 106,
       "version": "7",
-      "when": 1785259210000,
+      "when": 1791750935804,
       "tag": "0106_crm_account_permission_backfill",
       "breakpoints": true
     },
     {
       "idx": 107,
       "version": "7",
-      "when": 1785345610000,
+      "when": 1791837335804,
       "tag": "0107_crm_lead_management",
       "breakpoints": true
     },
     {
       "idx": 108,
       "version": "7",
-      "when": 1785432010000,
+      "when": 1791923735804,
       "tag": "0108_crm_lead_permission_backfill",
       "breakpoints": true
     },
     {
       "idx": 109,
       "version": "7",
-      "when": 1785518410000,
+      "when": 1792010135804,
       "tag": "0109_crm_360_permission_backfill",
       "breakpoints": true
     },
     {
       "idx": 110,
       "version": "7",
-      "when": 1785604810000,
+      "when": 1792096535804,
       "tag": "0110_crm_ticketing",
       "breakpoints": true
     },
     {
       "idx": 111,
       "version": "7",
-      "when": 1785691210000,
+      "when": 1792182935804,
       "tag": "0111_crm_ticket_permission_backfill",
       "breakpoints": true
     },
     {
       "idx": 112,
       "version": "7",
-      "when": 1785777610000,
+      "when": 1792269335804,
       "tag": "0112_crm_dlt_templates",
       "breakpoints": true
     },
     {
       "idx": 113,
       "version": "7",
-      "when": 1785864010000,
+      "when": 1792355735804,
       "tag": "0113_crm_dlt_permission_backfill",
       "breakpoints": true
     },
     {
       "idx": 114,
       "version": "7",
-      "when": 1785950410000,
+      "when": 1792442135804,
       "tag": "0114_crm_import_batch_tracking",
       "breakpoints": true
     },
     {
       "idx": 115,
       "version": "7",
-      "when": 1786036810000,
+      "when": 1792528535804,
       "tag": "0115_crm_import_permission_backfill",
       "breakpoints": true
     },
     {
       "idx": 116,
       "version": "7",
-      "when": 1786123210000,
+      "when": 1792614935804,
       "tag": "0116_crm_dashboard_permission_backfill",
       "breakpoints": true
     },
     {
       "idx": 117,
       "version": "7",
-      "when": 1786209610000,
+      "when": 1792701335804,
       "tag": "0117_crm_opportunities",
       "breakpoints": true
     },
     {
       "idx": 118,
       "version": "7",
-      "when": 1786296010000,
+      "when": 1792787735804,
       "tag": "0118_crm_opportunity_permission_backfill",
       "breakpoints": true
     },
     {
       "idx": 119,
       "version": "7",
-      "when": 1786382410000,
+      "when": 1792874135804,
       "tag": "0119_crm_segment_membership_cache",
       "breakpoints": true
     },
     {
       "idx": 120,
       "version": "7",
-      "when": 1786468810000,
+      "when": 1792960535804,
       "tag": "0120_crm_campaign_engagement_tracking",
       "breakpoints": true
     },
     {
       "idx": 121,
       "version": "7",
-      "when": 1786555210000,
+      "when": 1793046935804,
       "tag": "0121_crm_customer_journeys",
       "breakpoints": true
     },
     {
       "idx": 122,
       "version": "7",
-      "when": 1786641610000,
+      "when": 1793133335804,
       "tag": "0122_crm_journey_permission_backfill",
       "breakpoints": true
     },
     {
       "idx": 123,
       "version": "7",
-      "when": 1786728010000,
+      "when": 1793219735804,
       "tag": "0123_crm_journey_engine_feature_flag",
       "breakpoints": true
     },
     {
       "idx": 124,
       "version": "7",
-      "when": 1786814410000,
+      "when": 1793306135804,
       "tag": "0124_crm_loyalty_tiers",
       "breakpoints": true
     },
     {
       "idx": 125,
       "version": "7",
-      "when": 1786900810000,
+      "when": 1793392535804,
       "tag": "0125_crm_loyalty_tier_permission_backfill",
       "breakpoints": true
     },
     {
       "idx": 126,
       "version": "7",
-      "when": 1786987210000,
+      "when": 1793478935804,
       "tag": "0126_crm_referral_program",
       "breakpoints": true
     },
     {
       "idx": 127,
       "version": "7",
-      "when": 1787073610000,
+      "when": 1793565335804,
       "tag": "0127_crm_referral_permission_backfill",
       "breakpoints": true
     },
     {
       "idx": 128,
       "version": "7",
-      "when": 1787160010000,
+      "when": 1793651735804,
       "tag": "0128_crm_omnichannel_inbox",
       "breakpoints": true
     },
     {
       "idx": 129,
       "version": "7",
-      "when": 1787246410000,
+      "when": 1793738135804,
       "tag": "0129_crm_conversation_permission_backfill",
       "breakpoints": true
     },
     {
       "idx": 130,
       "version": "7",
-      "when": 1787332810000,
+      "when": 1793824535804,
       "tag": "0130_crm_campaign_roi_attribution",
       "breakpoints": true
     },
     {
       "idx": 131,
       "version": "7",
-      "when": 1787419210000,
+      "when": 1793910935804,
       "tag": "0131_opportunity_value_view_permission_backfill",
       "breakpoints": true
     },
     {
       "idx": 132,
       "version": "7",
-      "when": 1787505610000,
+      "when": 1793997335804,
       "tag": "0132_crm_multilanguage_communication",
       "breakpoints": true
     },
     {
       "idx": 133,
       "version": "7",
-      "when": 1787592010000,
+      "when": 1794083735804,
       "tag": "0133_crm_ai_predictive_intelligence",
       "breakpoints": true
     },
     {
       "idx": 134,
       "version": "7",
-      "when": 1787678410000,
+      "when": 1794170135804,
       "tag": "0134_customer_portal_accounts",
       "breakpoints": true
     },
     {
       "idx": 135,
       "version": "7",
-      "when": 1787764810000,
+      "when": 1794256535804,
       "tag": "0135_customer_portal_permission_backfill",
       "breakpoints": true
     },
     {
       "idx": 136,
       "version": "7",
-      "when": 1787851210000,
+      "when": 1794342935804,
       "tag": "0136_crm_territory_management",
       "breakpoints": true
     },
     {
       "idx": 137,
       "version": "7",
-      "when": 1787937610000,
+      "when": 1794429335804,
       "tag": "0137_crm_territory_permission_backfill",
       "breakpoints": true
     },
     {
       "idx": 138,
       "version": "7",
-      "when": 1788024010000,
+      "when": 1794515735804,
       "tag": "0138_crm_sales_quotas",
       "breakpoints": true
     },
     {
       "idx": 139,
       "version": "7",
-      "when": 1788110410000,
+      "when": 1794602135804,
       "tag": "0139_crm_quota_permission_backfill",
       "breakpoints": true
     },
     {
       "idx": 140,
       "version": "7",
-      "when": 1788196810000,
+      "when": 1794688535804,
       "tag": "0140_crm_festival_suggestions",
       "breakpoints": true
     },
     {
       "idx": 141,
       "version": "7",
-      "when": 1788283210000,
+      "when": 1794774935804,
       "tag": "0141_crm_season_rbac_gap_fix",
       "breakpoints": true
     },
     {
       "idx": 142,
       "version": "7",
-      "when": 1788369610000,
+      "when": 1794861335804,
       "tag": "0142_crm_api_keys_and_export_schedules",
       "breakpoints": true
     },
     {
       "idx": 143,
       "version": "7",
-      "when": 1788456010000,
+      "when": 1794947735804,
       "tag": "0143_crm_api_key_permission_backfill",
       "breakpoints": true
     },
     {
       "idx": 144,
       "version": "7",
-      "when": 1788542410000,
+      "when": 1795034135804,
       "tag": "0144_crm_field_sales",
       "breakpoints": true
     },
     {
       "idx": 145,
       "version": "7",
-      "when": 1788628810000,
+      "when": 1795120535804,
       "tag": "0145_crm_field_sales_permission_backfill",
       "breakpoints": true
     },
     {
       "idx": 146,
       "version": "7",
-      "when": 1788715210000,
+      "when": 1795206935804,
       "tag": "0146_crm_call_logs",
       "breakpoints": true
     },
     {
       "idx": 147,
       "version": "7",
-      "when": 1788801610000,
+      "when": 1795293335804,
       "tag": "0147_crm_call_log_permission_backfill",
       "breakpoints": true
     },
     {
       "idx": 148,
       "version": "7",
-      "when": 1788888010000,
+      "when": 1795379735804,
       "tag": "0148_crm_whatsapp_catalog_orders",
       "breakpoints": true
     },
     {
       "idx": 149,
       "version": "7",
-      "when": 1788974410000,
+      "when": 1795466135804,
       "tag": "0149_rbac_audit_2026_07_31_sales_manager_crm_backfill",
       "breakpoints": true
     },
     {
       "idx": 150,
       "version": "7",
-      "when": 1789060810000,
+      "when": 1795552535804,
       "tag": "0150_invoice_payment_reminder_ladder",
+      "breakpoints": true
+    },
+    {
+      "idx": 151,
+      "version": "7",
+      "when": 1795638935804,
+      "tag": "0151_rule_engine_permission_backfill",
+      "breakpoints": true
+    },
+    {
+      "idx": 152,
+      "version": "7",
+      "when": 1795725335804,
+      "tag": "0152_rule_engine_broken_field_comparison_fix",
+      "breakpoints": true
+    },
+    {
+      "idx": 153,
+      "version": "7",
+      "when": 1795811735804,
+      "tag": "0153_commission_engine",
+      "breakpoints": true
+    },
+    {
+      "idx": 154,
+      "version": "7",
+      "when": 1795898135804,
+      "tag": "0154_commission_permission_backfill",
+      "breakpoints": true
+    },
+    {
+      "idx": 155,
+      "version": "7",
+      "when": 1795984535804,
+      "tag": "0155_automation_engine",
+      "breakpoints": true
+    },
+    {
+      "idx": 156,
+      "version": "7",
+      "when": 1796070935804,
+      "tag": "0156_automation_permission_backfill",
+      "breakpoints": true
+    },
+    {
+      "idx": 157,
+      "version": "7",
+      "when": 1796157335804,
+      "tag": "0157_ai_copilot",
+      "breakpoints": true
+    },
+    {
+      "idx": 158,
+      "version": "7",
+      "when": 1796243735804,
+      "tag": "0158_ai_copilot_permission_backfill",
+      "breakpoints": true
+    },
+    {
+      "idx": 159,
+      "version": "7",
+      "when": 1796330135804,
+      "tag": "0159_engines_owner_admin_permission_backfill",
+      "breakpoints": true
+    },
+    {
+      "idx": 160,
+      "version": "7",
+      "when": 1796416535804,
+      "tag": "0160_commission_accounts_backfill",
       "breakpoints": true
     }
   ]

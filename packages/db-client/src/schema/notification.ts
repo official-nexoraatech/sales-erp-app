@@ -21,7 +21,7 @@ export const notificationTemplates = pgTable(
     eventType: varchar('event_type', { length: 100 }).notNull(),
     channel: varchar('channel', { length: 20 })
       .notNull()
-      .$type<'SMS' | 'EMAIL' | 'WHATSAPP' | 'IN_APP'>(),
+      .$type<'SMS' | 'EMAIL' | 'WHATSAPP' | 'IN_APP' | 'INSTAGRAM'>(),
     subject: varchar('subject', { length: 500 }),
     bodyTemplate: text('body_template').notNull(),
     isActive: boolean('is_active').notNull().default(true),
@@ -48,7 +48,7 @@ export const notificationLog = pgTable(
     eventType: varchar('event_type', { length: 100 }).notNull(),
     channel: varchar('channel', { length: 20 })
       .notNull()
-      .$type<'SMS' | 'EMAIL' | 'WHATSAPP' | 'IN_APP'>(),
+      .$type<'SMS' | 'EMAIL' | 'WHATSAPP' | 'IN_APP' | 'INSTAGRAM'>(),
     recipientUserId: integer('recipient_user_id'),
     recipientPhone: varchar('recipient_phone', { length: 20 }),
     recipientEmail: varchar('recipient_email', { length: 255 }),

@@ -9,10 +9,12 @@ import {
   projectionSupplierBalance,
   outboxEvents,
   organizationSettings,
+  workflowInstances,
 } from '@erp/db';
 import type { ErpDatabase } from '@erp/db';
 import { BusinessError, NotFoundError, VendorCreditLimitExceededError } from '@erp/types';
 import { GSTCalculator } from '@erp/utils';
+import { WorkflowEngine } from '@erp/sdk';
 import { ulid } from 'ulid';
 
 export interface POLineInput {
@@ -167,6 +169,24 @@ export class PurchaseOrderService {
         performedBy: params.createdBy,
       });
 
+      // Enterprise approval chain: WorkflowEngine's seeded "Purchase Order — High Value
+      // Approval" system definition (PO_CREATE, totalAmount > 100000, PURCHASE_MANAGER then
+      // OWNER, 48h escalation) existed since tenant provisioning but was never triggered by
+      // anything — trigger() itself resolves whether an active definition's condition
+      // matches; a no-op (returns null) below the threshold or when deactivated. approve()
+      // below blocks while a triggered instance is PENDING. This is additive to, not a
+      // replacement for, the existing organizationSettings.purchaseApprovalThreshold +
+      // PO_APPROVE_HIGH_VALUE permission gate in approve() — that remains the "who can click
+      // approve" control, this is the "route it to the right role with an SLA" control.
+      await new WorkflowEngine(trx, params.tenantId, params.createdBy, ulid()).trigger({
+        event: 'PO_CREATE',
+        entityType: 'PurchaseOrder',
+        entityId: poId,
+        userId: params.createdBy,
+        correlationId: ulid(),
+        payload: { totalAmount: totals.grandTotal },
+      });
+
       await trx.insert(outboxEvents).values({
         eventId: ulid(),
         eventType: 'PO_CREATED',
@@ -231,6 +251,32 @@ export class PurchaseOrderService {
       if (!po) throw new NotFoundError('PurchaseOrder', id);
       if (!['SUBMITTED', 'PENDING_APPROVAL'].includes(po.status))
         throw new BusinessError('INVALID_STATUS', `Cannot approve PO in status ${po.status}`);
+
+      // Enterprise approval chain: block approving a PO while its triggered WorkflowEngine
+      // approval instance (see create()'s trigger() call above) is still PENDING, or was
+      // REJECTED outright. No instance exists at all for POs that never matched an active
+      // definition's condition, so this is a no-op for most POs.
+      const [blockingInstance] = await trx
+        .select({ status: workflowInstances.status })
+        .from(workflowInstances)
+        .where(
+          and(
+            eq(workflowInstances.tenantId, tenantId),
+            eq(workflowInstances.entityType, 'PurchaseOrder'),
+            eq(workflowInstances.entityId, id),
+            inArray(workflowInstances.status, ['PENDING', 'REJECTED'])
+          )
+        )
+        .orderBy(desc(workflowInstances.createdAt))
+        .limit(1);
+      if (blockingInstance) {
+        throw new BusinessError(
+          blockingInstance.status === 'PENDING' ? 'APPROVAL_PENDING' : 'APPROVAL_REJECTED',
+          blockingInstance.status === 'PENDING'
+            ? 'This purchase order requires manager approval before it can be approved'
+            : 'This purchase order was rejected during approval and cannot be approved'
+        );
+      }
 
       if (!hasHighValueApproval) {
         const [org] = await trx

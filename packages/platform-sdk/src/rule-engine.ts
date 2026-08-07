@@ -81,15 +81,39 @@ function getNestedValue(obj: Record<string, unknown>, field: string): unknown {
   }, obj as unknown);
 }
 
-function evaluateCondition(condition: RuleCondition, data: Record<string, unknown>): boolean {
+// Plain `==`/`!=` intentionally coerces "5" == 5, but silently breaks for booleans:
+// `true == "true"` is `false` in JS (both sides coerce to numbers — "true" becomes NaN). Every
+// condition value authored through the Rules UI's plain-text Input (RulesPage.tsx has no
+// type picker) is a string, so any tenant-authored rule checking a boolean field — including
+// the exact `isOverCreditLimit`/`isAtOrBelowReorderLevel` shape the seeded system templates
+// use — could never match once entered by hand. Found via live E2E testing (a rule created
+// through the actual UI and simulated against real-shaped test data silently returned
+// NOT MATCHED). Explicit boolean<->"true"/"false" normalization before falling back to `==`.
+function looseEquals(actual: unknown, expected: unknown): boolean {
+  if (typeof actual === 'boolean' && typeof expected === 'string') {
+    return actual === (expected.toLowerCase() === 'true');
+  }
+  if (typeof expected === 'boolean' && typeof actual === 'string') {
+    return expected === (actual.toLowerCase() === 'true');
+  }
+  return actual == expected; // intentional loose equality for other type coercion (e.g. "5" == 5)
+}
+
+// Exported so other engines (e.g. automation-service's inline workflow CONDITION nodes) can
+// reuse the same safe, non-eval() condition evaluator instead of writing a second condition
+// DSL — see the plan's "no duplicate logic" cross-cutting decision.
+export function evaluateCondition(
+  condition: RuleCondition,
+  data: Record<string, unknown>
+): boolean {
   const actual = getNestedValue(data, condition.field);
   const expected = condition.value;
 
   switch (condition.operator) {
     case 'EQUALS':
-      return actual == expected; // intentional loose equality for type coercion
+      return looseEquals(actual, expected);
     case 'NOT_EQUALS':
-      return actual != expected;
+      return !looseEquals(actual, expected);
     case 'GREATER_THAN':
       return Number(actual) > Number(expected);
     case 'LESS_THAN':
@@ -105,15 +129,20 @@ function evaluateCondition(condition: RuleCondition, data: Record<string, unknow
     case 'NOT_IN':
       return Array.isArray(expected) && !expected.includes(actual);
     case 'CONTAINS':
-      return typeof actual === 'string' && actual.toLowerCase().includes(String(expected).toLowerCase());
+      return (
+        typeof actual === 'string' && actual.toLowerCase().includes(String(expected).toLowerCase())
+      );
     case 'STARTS_WITH':
-      return typeof actual === 'string' && actual.toLowerCase().startsWith(String(expected).toLowerCase());
+      return (
+        typeof actual === 'string' &&
+        actual.toLowerCase().startsWith(String(expected).toLowerCase())
+      );
     default:
       return false;
   }
 }
 
-function evaluateConditions(
+export function evaluateConditions(
   conditions: RuleCondition[],
   operator: 'AND' | 'OR',
   data: Record<string, unknown>
@@ -126,17 +155,24 @@ function evaluateConditions(
 // ── Pre-built rule templates ──────────────────────────────────────────────────
 export const SYSTEM_RULE_TEMPLATES: Omit<RuleDefinition, 'id' | 'tenantId'>[] = [
   {
+    // Note: this condition checks a single pre-computed boolean (`isOverCreditLimit`) rather
+    // than comparing `customer.outstandingAmount` against `customer.creditLimit` directly —
+    // evaluateCondition() only ever compares a data field against condition.value's *literal*
+    // value, not another data field, so a caller must pre-compute the comparison and pass the
+    // result in as its own field (see InvoiceService.createInTransaction for the call site).
     name: 'Block sale above credit limit',
     entityType: 'SALE',
     eventType: 'SALE_CREATE',
     conditionOperator: 'AND',
-    conditions: [
-      { field: 'customer.creditLimitEnabled', operator: 'EQUALS', value: true },
-      { field: 'customer.outstandingAmount', operator: 'GREATER_THAN_EQUALS', value: 'customer.creditLimit' },
-    ],
+    conditions: [{ field: 'isOverCreditLimit', operator: 'EQUALS', value: true }],
     actions: [
       { type: 'BLOCK', message: 'Customer has exceeded credit limit. Sale blocked.' },
-      { type: 'NOTIFY', message: 'Credit limit exceeded for customer', channel: 'IN_APP', role: 'SALES_MANAGER' },
+      {
+        type: 'NOTIFY',
+        message: 'Credit limit exceeded for customer',
+        channel: 'IN_APP',
+        role: 'SALES_MANAGER',
+      },
     ],
     priority: 1,
     isActive: true,
@@ -146,12 +182,8 @@ export const SYSTEM_RULE_TEMPLATES: Omit<RuleDefinition, 'id' | 'tenantId'>[] = 
     entityType: 'SALE',
     eventType: 'SALE_DISCOUNT',
     conditionOperator: 'AND',
-    conditions: [
-      { field: 'discountPercent', operator: 'LESS_THAN_EQUALS', value: 5 },
-    ],
-    actions: [
-      { type: 'SET_FIELD', field: 'discountApprovalRequired', value: false },
-    ],
+    conditions: [{ field: 'discountPercent', operator: 'LESS_THAN_EQUALS', value: 5 }],
+    actions: [{ type: 'SET_FIELD', field: 'discountApprovalRequired', value: false }],
     priority: 2,
     isActive: true,
   },
@@ -160,11 +192,13 @@ export const SYSTEM_RULE_TEMPLATES: Omit<RuleDefinition, 'id' | 'tenantId'>[] = 
     entityType: 'SALE',
     eventType: 'SALE_DISCOUNT',
     conditionOperator: 'AND',
-    conditions: [
-      { field: 'discountPercent', operator: 'GREATER_THAN', value: 10 },
-    ],
+    conditions: [{ field: 'discountPercent', operator: 'GREATER_THAN', value: 10 }],
     actions: [
-      { type: 'TRIGGER_APPROVAL', role: 'SALES_MANAGER', message: 'Discount above 10% requires manager approval' },
+      {
+        type: 'TRIGGER_APPROVAL',
+        role: 'SALES_MANAGER',
+        message: 'Discount above 10% requires manager approval',
+      },
     ],
     priority: 3,
     isActive: true,
@@ -174,25 +208,27 @@ export const SYSTEM_RULE_TEMPLATES: Omit<RuleDefinition, 'id' | 'tenantId'>[] = 
     entityType: 'STOCK',
     eventType: 'STOCK_REDUCE',
     conditionOperator: 'AND',
-    conditions: [
-      { field: 'resultingQuantity', operator: 'LESS_THAN', value: 0 },
-    ],
-    actions: [
-      { type: 'WARN', message: 'This transaction will result in negative stock' },
-    ],
+    conditions: [{ field: 'resultingQuantity', operator: 'LESS_THAN', value: 0 }],
+    actions: [{ type: 'WARN', message: 'This transaction will result in negative stock' }],
     priority: 4,
     isActive: true,
   },
   {
+    // Same pre-computed-boolean shape as "Block sale above credit limit" above — see that
+    // template's comment. Caller pre-computes `isAtOrBelowReorderLevel` from
+    // `resultingQuantity <= item.reorderLevel` and passes it in the evaluate() data payload.
     name: 'Reorder alert at reorder level',
     entityType: 'STOCK',
     eventType: 'STOCK_REDUCE',
     conditionOperator: 'AND',
-    conditions: [
-      { field: 'resultingQuantity', operator: 'LESS_THAN_EQUALS', value: 'item.reorderLevel' },
-    ],
+    conditions: [{ field: 'isAtOrBelowReorderLevel', operator: 'EQUALS', value: true }],
     actions: [
-      { type: 'NOTIFY', message: 'Item is at or below reorder level', channel: 'IN_APP', role: 'INVENTORY_MANAGER' },
+      {
+        type: 'NOTIFY',
+        message: 'Item is at or below reorder level',
+        channel: 'IN_APP',
+        role: 'INVENTORY_MANAGER',
+      },
     ],
     priority: 5,
     isActive: true,
@@ -207,7 +243,10 @@ export const SYSTEM_RULE_TEMPLATES: Omit<RuleDefinition, 'id' | 'tenantId'>[] = 
       { field: 'settings.requirePoForGrn', operator: 'EQUALS', value: true },
     ],
     actions: [
-      { type: 'BLOCK', message: 'GRN creation requires a linked Purchase Order (configured in settings)' },
+      {
+        type: 'BLOCK',
+        message: 'GRN creation requires a linked Purchase Order (configured in settings)',
+      },
     ],
     priority: 6,
     isActive: true,
@@ -245,12 +284,22 @@ export class RuleEngine {
       const matched = evaluateConditions(conditions, conditionOperator, ctx.data);
 
       if (!matched) {
-        results.push({ ruleId: String(rule.id), ruleName: rule.name, matched: false, actions: [], blocked: false, warnings: [], fieldChanges: {} });
+        results.push({
+          ruleId: String(rule.id),
+          ruleName: rule.name,
+          matched: false,
+          actions: [],
+          blocked: false,
+          warnings: [],
+          fieldChanges: {},
+        });
         continue;
       }
 
       const ruleBlocked = actions.some((a) => a.type === 'BLOCK');
-      const ruleWarnings = actions.filter((a) => a.type === 'WARN').map((a) => a.message ?? 'Warning');
+      const ruleWarnings = actions
+        .filter((a) => a.type === 'WARN')
+        .map((a) => a.message ?? 'Warning');
       const ruleFieldChanges: Record<string, unknown> = {};
 
       for (const action of actions) {
@@ -273,7 +322,10 @@ export class RuleEngine {
         fieldChanges: ruleFieldChanges,
       });
 
-      logger.info({ tenantId: ctx.tenantId, ruleId: rule.id, ruleName: rule.name, blocked: ruleBlocked }, 'Rule matched');
+      logger.info(
+        { tenantId: ctx.tenantId, ruleId: rule.id, ruleName: rule.name, blocked: ruleBlocked },
+        'Rule matched'
+      );
 
       // If blocked, stop evaluating lower-priority rules
       if (ruleBlocked) break;
@@ -292,7 +344,11 @@ export class RuleEngine {
     tenantId: number,
     ruleId: string,
     testData: Record<string, unknown>
-  ): Promise<{ matched: boolean; actions: RuleAction[]; conditionResults: Array<{ condition: RuleCondition; passed: boolean }> }> {
+  ): Promise<{
+    matched: boolean;
+    actions: RuleAction[];
+    conditionResults: Array<{ condition: RuleCondition; passed: boolean }>;
+  }> {
     const [rule] = await this.db
       .select()
       .from(businessRules)

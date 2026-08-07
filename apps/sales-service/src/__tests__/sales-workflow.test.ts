@@ -108,6 +108,26 @@ vi.mock('@erp/db', () => ({
   webhookDeliveries: {},
   eventStore: {},
   eventSnapshots: {},
+  workflowDefinitions: {
+    tenantId: 'tenant_id',
+    triggerEvent: 'trigger_event',
+    isActive: 'is_active',
+  },
+  workflowInstances: {
+    id: 'id',
+    tenantId: 'tenant_id',
+    entityType: 'entity_type',
+    entityId: 'entity_id',
+    status: 'status',
+    createdAt: 'created_at',
+  },
+  businessRules: {
+    tenantId: 'tenant_id',
+    entityType: 'entity_type',
+    eventType: 'event_type',
+    isActive: 'is_active',
+    priority: 'priority',
+  },
 }));
 
 vi.mock('drizzle-orm', () => ({
@@ -176,10 +196,25 @@ function hybridWhere(trx: ReturnType<typeof makeTrx>, value: unknown) {
     returning: (...args: unknown[]) => unknown;
     orderBy: (...args: unknown[]) => { limit: (...args: unknown[]) => Promise<unknown> };
     for: (...args: unknown[]) => Promise<unknown>;
+    limit: (...args: unknown[]) => Promise<unknown>;
   };
   p.returning = (...args: unknown[]) => (trx.returning as (...a: unknown[]) => unknown)(...args);
-  p.orderBy = () => ({ limit: () => Promise.resolve(value ?? []) });
+  // Two distinct .orderBy() usages exist: EventStoreService's version lookup always chains
+  // `.orderBy().limit()`, while RuleEngine.evaluate() awaits `.orderBy(...)` directly with no
+  // `.limit()` — so the returned object must be both a real thenable (awaitable as-is) AND
+  // expose `.limit()` for the other caller.
+  p.orderBy = () => {
+    const op = Promise.resolve(value ?? []) as Promise<unknown> & {
+      limit: (...args: unknown[]) => Promise<unknown>;
+    };
+    op.limit = () => Promise.resolve(value ?? []);
+    return op;
+  };
   p.for = () => Promise.resolve(value ?? []);
+  // WorkflowEngine.trigger()'s workflowDefinitions lookup terminates `.where().limit(1)`
+  // directly, with no `.orderBy()` in between — distinct from the `.orderBy().limit()` shape
+  // above (e.g. EventStoreService's current-version lookup).
+  p.limit = () => Promise.resolve(value ?? []);
   return p;
 }
 
@@ -366,7 +401,24 @@ describe('InvoiceService credit limit', () => {
     trx.where = vi
       .fn()
       .mockResolvedValueOnce([{ creditLimit: '5000', creditLimitEnabled: true }])
-      .mockResolvedValueOnce([{ currentBalance: '4000.00' }]);
+      .mockResolvedValueOnce([{ currentBalance: '4000.00' }])
+      // RuleEngine.evaluate(): select businessRules — the seeded "Block sale above credit
+      // limit" template, matching isOverCreditLimit=true (computed from the two rows above).
+      .mockImplementationOnce(() =>
+        hybridWhere(trx, [
+          {
+            id: 1,
+            name: 'Block sale above credit limit',
+            entityType: 'SALE',
+            eventType: 'SALE_CREATE',
+            conditionOperator: 'AND',
+            conditions: [{ field: 'isOverCreditLimit', operator: 'EQUALS', value: true }],
+            actions: [{ type: 'BLOCK', message: 'Customer has exceeded credit limit.' }],
+            priority: 1,
+            isActive: true,
+          },
+        ])
+      );
 
     const svc = new InvoiceService(db as never);
     await expect(svc.create(baseInvoiceParams as never)).rejects.toBeInstanceOf(

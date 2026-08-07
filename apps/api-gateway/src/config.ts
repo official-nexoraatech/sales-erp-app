@@ -85,6 +85,18 @@ const UPSTREAM_DEFAULTS: Array<{
     apiV2: false,
   },
   { service: 'event', envVar: 'EVENT_SERVICE_URL', default: 'http://localhost:3023', apiV2: false },
+  {
+    service: 'automation',
+    envVar: 'AUTOMATION_SERVICE_URL',
+    default: 'http://localhost:3024',
+    apiV2: true,
+  },
+  {
+    service: 'copilot',
+    envVar: 'AI_COPILOT_SERVICE_URL',
+    default: 'http://localhost:3025',
+    apiV2: true,
+  },
 ];
 
 export interface GatewayConfig {

@@ -56,6 +56,19 @@ vi.mock('@erp/db', () => ({
   webhookDeliveries: {},
   eventStore: {},
   eventSnapshots: {},
+  workflowDefinitions: {
+    tenantId: 'tenant_id',
+    triggerEvent: 'trigger_event',
+    isActive: 'is_active',
+  },
+  workflowInstances: {
+    id: 'id',
+    tenantId: 'tenant_id',
+    entityType: 'entity_type',
+    entityId: 'entity_id',
+    status: 'status',
+    createdAt: 'created_at',
+  },
 }));
 
 vi.mock('drizzle-orm', () => ({
@@ -63,6 +76,7 @@ vi.mock('drizzle-orm', () => ({
   eq: vi.fn((col, val) => ({ type: 'eq', col, val })),
   sql: vi.fn((s) => s),
   desc: vi.fn((c) => c),
+  inArray: vi.fn((col, vals) => ({ type: 'inArray', col, vals })),
 }));
 
 import {
@@ -201,6 +215,7 @@ describe('OFFLINE-02 — InvoiceService.create() idempotency-key dedup', () => {
       [{ id: 1 }], // insert invoices ... returning
       undefined, // insert invoiceLines
       undefined, // insert invoiceHistory
+      [], // WorkflowEngine.trigger(): select workflowDefinitions — no match, no-op
       undefined, // insert outboxEvents (INVOICE_CREATED)
       [], // EventStoreService.append: select current aggregate version — none yet
       undefined, // EventStoreService.append: insert eventStore row
@@ -219,6 +234,7 @@ describe('OFFLINE-02 — InvoiceService.create() idempotency-key dedup', () => {
       [{ id: 10 }],
       undefined,
       undefined,
+      [], // WorkflowEngine.trigger(): select workflowDefinitions — no match, no-op
       undefined,
       [],
       undefined,
@@ -230,6 +246,7 @@ describe('OFFLINE-02 — InvoiceService.create() idempotency-key dedup', () => {
       [{ id: 11 }],
       undefined,
       undefined,
+      [], // WorkflowEngine.trigger(): select workflowDefinitions — no match, no-op
       undefined,
       [],
       undefined,

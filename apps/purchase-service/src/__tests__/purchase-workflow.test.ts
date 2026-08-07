@@ -51,6 +51,19 @@ vi.mock('@erp/db', () => ({
     tenantId: 'tenant_id',
     purchaseApprovalThreshold: 'purchase_approval_threshold',
   },
+  workflowDefinitions: {
+    tenantId: 'tenant_id',
+    triggerEvent: 'trigger_event',
+    isActive: 'is_active',
+  },
+  workflowInstances: {
+    id: 'id',
+    tenantId: 'tenant_id',
+    entityType: 'entity_type',
+    entityId: 'entity_id',
+    status: 'status',
+    createdAt: 'created_at',
+  },
 }));
 
 vi.mock('drizzle-orm', () => ({
@@ -61,6 +74,7 @@ vi.mock('drizzle-orm', () => ({
   sql: vi.fn((s) => s),
   desc: vi.fn((col) => ({ type: 'desc', col })),
   lt: vi.fn((col, val) => ({ type: 'lt', col, val })),
+  inArray: vi.fn((col, vals) => ({ type: 'inArray', col, vals })),
 }));
 
 import { PurchaseOrderService } from '../domain/PurchaseOrderService.js';
@@ -74,8 +88,10 @@ function makeTrx(script: unknown[]) {
   for (const m of [
     'select',
     'from',
+    'innerJoin',
     'where',
     'orderBy',
+    'limit',
     'insert',
     'values',
     'update',
@@ -104,7 +120,7 @@ describe('PurchaseOrderService.approve — re-entry guard', () => {
     };
     const supplierRow = { creditLimit: '0', creditLimitEnabled: false };
     const orgRow = { purchaseApprovalThreshold: null };
-    const script = [[poRow], [orgRow], [supplierRow], undefined, undefined, undefined];
+    const script = [[poRow], [], [orgRow], [supplierRow], undefined, undefined, undefined];
     const trx = makeTrx(script);
     const db = { transaction: vi.fn((fn: (t: typeof trx) => Promise<unknown>) => fn(trx)) };
     const svc = new PurchaseOrderService(db as never);
@@ -136,7 +152,7 @@ describe('PurchaseOrderService.approve — vendor credit limit', () => {
     const supplierRow = { creditLimit: '100000.00', creditLimitEnabled: true };
     const balanceRow = { currentBalance: '60000.00' };
     const orgRow = { purchaseApprovalThreshold: null };
-    const trx = makeTrx([[poRow], [orgRow], [supplierRow], [balanceRow]]);
+    const trx = makeTrx([[poRow], [], [orgRow], [supplierRow], [balanceRow]]);
     const db = { transaction: vi.fn((fn: (t: typeof trx) => Promise<unknown>) => fn(trx)) };
     const svc = new PurchaseOrderService(db as never);
 
@@ -152,7 +168,7 @@ describe('PurchaseOrderService.approve — vendor credit limit', () => {
       grandTotal: '999999.00',
     };
     const orgRow = { purchaseApprovalThreshold: null };
-    const script = [[poRow], [orgRow], undefined, undefined, undefined];
+    const script = [[poRow], [], [orgRow], undefined, undefined, undefined];
     const trx = makeTrx(script);
     const db = { transaction: vi.fn((fn: (t: typeof trx) => Promise<unknown>) => fn(trx)) };
     const svc = new PurchaseOrderService(db as never);
@@ -171,7 +187,7 @@ describe('PurchaseOrderService.approve — tiered/high-value approval', () => {
       grandTotal: '150000.00',
     };
     const orgRow = { purchaseApprovalThreshold: '100000.00' };
-    const trx = makeTrx([[poRow], [orgRow]]);
+    const trx = makeTrx([[poRow], [], [orgRow]]);
     const db = { transaction: vi.fn((fn: (t: typeof trx) => Promise<unknown>) => fn(trx)) };
     const svc = new PurchaseOrderService(db as never);
 
@@ -189,7 +205,7 @@ describe('PurchaseOrderService.approve — tiered/high-value approval', () => {
       grandTotal: '150000.00',
     };
     const supplierRow = { creditLimit: '0', creditLimitEnabled: false };
-    const script = [[poRow], [supplierRow], undefined, undefined, undefined];
+    const script = [[poRow], [], [supplierRow], undefined, undefined, undefined];
     const trx = makeTrx(script);
     const db = { transaction: vi.fn((fn: (t: typeof trx) => Promise<unknown>) => fn(trx)) };
     const svc = new PurchaseOrderService(db as never);
@@ -207,7 +223,7 @@ describe('PurchaseOrderService.approve — tiered/high-value approval', () => {
     };
     const orgRow = { purchaseApprovalThreshold: '100000.00' };
     const supplierRow = { creditLimit: '0', creditLimitEnabled: false };
-    const script = [[poRow], [orgRow], [supplierRow], undefined, undefined, undefined];
+    const script = [[poRow], [], [orgRow], [supplierRow], undefined, undefined, undefined];
     const trx = makeTrx(script);
     const db = { transaction: vi.fn((fn: (t: typeof trx) => Promise<unknown>) => fn(trx)) };
     const svc = new PurchaseOrderService(db as never);

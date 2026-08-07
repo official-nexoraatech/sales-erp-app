@@ -14,7 +14,7 @@ import { formatDatetime } from '../../../lib/format.js';
 interface Conversation {
   id: number;
   customerId: number | null;
-  channel: 'WHATSAPP' | 'SMS' | 'EMAIL';
+  channel: 'WHATSAPP' | 'SMS' | 'EMAIL' | 'INSTAGRAM';
   externalAddress: string;
   status: 'OPEN' | 'ASSIGNED' | 'CLOSED';
   assignedTo: number | null;
@@ -36,10 +36,11 @@ interface CannedResponse {
   body: string;
 }
 
-const CHANNEL_COLORS: Record<string, 'green' | 'blue' | 'gray'> = {
+const CHANNEL_COLORS: Record<string, 'green' | 'blue' | 'gray' | 'indigo'> = {
   WHATSAPP: 'green',
   SMS: 'blue',
   EMAIL: 'gray',
+  INSTAGRAM: 'indigo',
 };
 
 // CRM-ROADMAP Phase 2, Feature 5 — Omnichannel Communication Hub. A split-pane inbox:
@@ -116,7 +117,7 @@ export default function InboxPage() {
       <ERPPageHeader
         variant="list"
         title="Inbox"
-        subtitle="WhatsApp, SMS and email replies in one thread per customer"
+        subtitle="WhatsApp, Instagram, SMS and email replies in one thread per customer"
       />
 
       <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-4 h-[calc(100vh-220px)] min-h-[500px]">

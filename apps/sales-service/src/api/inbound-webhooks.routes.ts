@@ -186,6 +186,85 @@ export async function inboundWebhookRoutes(
     return reply.code(200).send(query['hub.challenge']);
   });
 
+  // ── Instagram Messaging — inbound message webhook ─────────────────────────
+  // Same Meta HMAC signature scheme as WhatsApp above, but Messenger-platform payload shape
+  // (entry[].messaging[]) rather than WhatsApp Cloud API's entry[].changes[].value.messages[] —
+  // Instagram Messaging and Messenger share the same webhook protocol.
+  fastify.post('/webhooks/instagram', async (request, reply) => {
+    const rawBody = (request as RequestWithRawBody).rawBody ?? '';
+    const signature = request.headers['x-hub-signature-256'] as string | undefined;
+    if (!verifyMetaSignature(rawBody, signature, process.env['INSTAGRAM_APP_SECRET'] ?? '')) {
+      return reply
+        .code(401)
+        .send({ error: { code: 'UNAUTHORIZED', message: 'Invalid webhook signature' } });
+    }
+
+    const { createDatabaseClient } = await import('@erp/db');
+    const db = createDatabaseClient({ url: process.env['DATABASE_URL']! });
+
+    const body = request.body as {
+      entry?: Array<{
+        id?: string;
+        messaging?: Array<{
+          sender?: { id?: string };
+          message?: { mid?: string; text?: string; is_echo?: boolean };
+        }>;
+      }>;
+    };
+
+    let processed = 0;
+    for (const entry of body.entry ?? []) {
+      const toAddress = entry.id;
+      if (!toAddress) continue;
+      const tenantId = await ConversationService.resolveTenantByAddress(db, 'INSTAGRAM', toAddress);
+      if (!tenantId) {
+        logger.warn({ toAddress }, 'Instagram inbound webhook: no tenant sender identity matches');
+        continue;
+      }
+
+      for (const msg of entry.messaging ?? []) {
+        // is_echo marks a message this same business account sent (e.g. via the app itself,
+        // outside this platform's own reply path) being echoed back — not a genuine inbound
+        // message, and recording it would double-count an outbound send as an inbound reply.
+        if (msg.message?.is_echo) continue;
+        if (!msg.sender?.id || !msg.message?.mid || !msg.message.text) continue;
+
+        await ConversationService.recordInboundMessage(db, tenantId, {
+          channel: 'INSTAGRAM',
+          externalAddress: msg.sender.id,
+          body: msg.message.text,
+          provider: 'META',
+          providerMessageId: msg.message.mid,
+        });
+        processed++;
+      }
+    }
+
+    return reply.code(200).send({ data: { processed } });
+  });
+
+  // Meta requires a GET verification handshake on webhook registration
+  // (hub.mode/hub.verify_token/hub.challenge) — separate from the signed POST callback above.
+  fastify.get('/webhooks/instagram', async (request, reply) => {
+    const query = request.query as Record<string, string | undefined>;
+    if (
+      !verifySharedSecret(
+        query['hub.verify_token'],
+        process.env['INSTAGRAM_WEBHOOK_VERIFY_TOKEN'] ?? ''
+      )
+    ) {
+      return reply
+        .code(403)
+        .send({ error: { code: 'FORBIDDEN', message: 'Invalid verify token' } });
+    }
+    if (!query['hub.challenge']) {
+      return reply
+        .code(400)
+        .send({ error: { code: 'BAD_REQUEST', message: 'Missing hub.challenge' } });
+    }
+    return reply.code(200).send(query['hub.challenge']);
+  });
+
   // ── Email inbound-parse ───────────────────────────────────────────────────
   // Unlike Meta's fixed protocol above, this integration's payload shape and signature scheme
   // are ours to define — HMAC-SHA256-over-raw-body, the same scheme WebhookDispatchService

@@ -180,7 +180,7 @@ const CampaignCommentSchema = z.object({
 
 // CP-8: per-tenant/per-channel sender identity — upsert, one row per (tenant, channel).
 const SenderIdentitySchema = z.object({
-  channel: z.enum(['SMS', 'WHATSAPP', 'EMAIL', 'IN_APP']),
+  channel: z.enum(['SMS', 'WHATSAPP', 'EMAIL', 'IN_APP', 'INSTAGRAM']),
   senderName: z.string().min(1).max(200),
   senderAddressOrNumber: z.string().min(1).max(200),
 });

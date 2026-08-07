@@ -326,6 +326,15 @@ export const DEFAULT_ACCOUNTS: DefaultAccount[] = [
     parentCode: '2300',
   },
   {
+    // Business Rules Engine, Commission category — see accountCode 6120's comment above.
+    accountCode: '2350',
+    name: 'Commission Payable',
+    accountType: 'LIABILITY',
+    accountSubType: 'OTHER_CURRENT_LIABILITY',
+    normalBalance: 'CREDIT',
+    parentCode: '2300',
+  },
+  {
     accountCode: '2500',
     name: 'Long-term Liabilities',
     accountType: 'LIABILITY',
@@ -590,6 +599,17 @@ export const DEFAULT_ACCOUNTS: DefaultAccount[] = [
   {
     accountCode: '6110',
     name: 'Stock Adjustment Loss',
+    accountType: 'EXPENSE',
+    accountSubType: 'OPERATING_EXPENSE',
+    normalBalance: 'DEBIT',
+    parentCode: '6000',
+  },
+  {
+    // Business Rules Engine, Commission category: CommissionService.approve() requires this
+    // account to exist before the first COMMISSION_APPROVED journal can post — same
+    // "seeded default account, no manual setup step" reasoning as TDS Payable above.
+    accountCode: '6120',
+    name: 'Sales Commission Expense',
     accountType: 'EXPENSE',
     accountSubType: 'OPERATING_EXPENSE',
     normalBalance: 'DEBIT',

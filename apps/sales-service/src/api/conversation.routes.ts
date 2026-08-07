@@ -21,7 +21,7 @@ const AssignSchema = z.object({
 const CannedResponseCreateSchema = z.object({
   title: z.string().min(1).max(200),
   body: z.string().min(1).max(4000),
-  channel: z.enum(['WHATSAPP', 'SMS', 'EMAIL']).optional(),
+  channel: z.enum(['WHATSAPP', 'SMS', 'EMAIL', 'INSTAGRAM']).optional(),
 });
 
 export async function conversationRoutes(

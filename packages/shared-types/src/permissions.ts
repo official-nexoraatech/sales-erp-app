@@ -496,6 +496,24 @@ export const PERMISSIONS = {
   RULE_DELETE: 'RULE_DELETE',
   RULE_SIMULATE: 'RULE_SIMULATE',
 
+  // ── Commission ────────────────────────────────────────────────────────────
+  COMMISSION_VIEW: 'COMMISSION_VIEW',
+  COMMISSION_MANAGE: 'COMMISSION_MANAGE', // create/edit plans and assignments
+  COMMISSION_APPROVE: 'COMMISSION_APPROVE', // DRAFT -> APPROVED, triggers GL posting
+
+  // ── Workflow Automation Engine (automation-service) ────────────────────────
+  AUTOMATION_VIEW: 'AUTOMATION_VIEW',
+  AUTOMATION_CREATE: 'AUTOMATION_CREATE',
+  AUTOMATION_EDIT: 'AUTOMATION_EDIT',
+  AUTOMATION_DELETE: 'AUTOMATION_DELETE',
+  AUTOMATION_EXECUTE: 'AUTOMATION_EXECUTE', // manual trigger + API-key trigger
+
+  // ── AI Copilot (ai-copilot-service) ─────────────────────────────────────────
+  // Gates access to the Copilot feature itself only — data access within a conversation is
+  // still bounded by whatever RBAC the requesting user already has on the APIs its tools call.
+  COPILOT_VIEW: 'COPILOT_VIEW',
+  COPILOT_USE: 'COPILOT_USE',
+
   // ── Price Lists ───────────────────────────────────────────────────────────
   PRICE_LIST_VIEW: 'PRICE_LIST_VIEW',
   PRICE_LIST_CREATE: 'PRICE_LIST_CREATE',

@@ -1,4 +1,4 @@
-import { and, eq, sql, getTableColumns } from 'drizzle-orm';
+import { and, eq, sql, getTableColumns, inArray, desc } from 'drizzle-orm';
 import {
   invoices,
   invoiceLines,
@@ -12,6 +12,7 @@ import {
   deliveryChallans,
   inventoryLedger,
   projectionStockLevel,
+  workflowInstances,
 } from '@erp/db';
 import type { ErpDatabase } from '@erp/db';
 import { BusinessError, NotFoundError, ERPError } from '@erp/types';
@@ -22,12 +23,18 @@ import {
   isUniqueConstraintViolation,
   EventStoreService,
   TenantScopedDatabase,
+  WorkflowEngine,
+  RuleEngine,
 } from '@erp/sdk';
 import { GSTCalculator } from '@erp/utils';
+import { createLogger } from '@erp/logger';
 import { NumberSeriesEngine } from './NumberSeriesEngine.js';
 import { ValuationService } from './ValuationService.js';
 import { enqueueWebhookDeliveries } from './WebhookService.js';
+import { CommissionService } from './CommissionService.js';
 import { ulid } from 'ulid';
+
+const logger = createLogger({ serviceName: 'sales-service' });
 
 export class InsufficientStockError extends ERPError {
   constructor(
@@ -201,7 +208,30 @@ export class InvoiceService {
           const newBalance =
             parseFloat(String(balanceRow?.currentBalance ?? 0)) + totals.grandTotal;
           const limit = parseFloat(String(customer.creditLimit ?? 0));
-          if (limit > 0 && newBalance > limit) {
+          const isOverCreditLimit = limit > 0 && newBalance > limit;
+
+          // Business Rules Engine wiring: the block/warn/notify decision is now
+          // tenant-configurable via business_rules (RuleEngine.evaluate), seeded by default
+          // with the "Block sale above credit limit" system template. isOverCreditLimit is
+          // pre-computed here rather than left to the generic condition evaluator, since
+          // RuleCondition only compares a data field against a literal value, not another
+          // data field — see rule-engine.ts's SYSTEM_RULE_TEMPLATES comment.
+          const ruleResult = await new RuleEngine(trx).evaluate({
+            tenantId: params.tenantId,
+            userId: params.createdBy,
+            entityType: 'SALE',
+            eventType: 'SALE_CREATE',
+            data: {
+              customer: {
+                id: params.customerId,
+                creditLimitEnabled: customer.creditLimitEnabled,
+                creditLimit: limit,
+                outstandingAmount: newBalance,
+              },
+              isOverCreditLimit,
+            },
+          });
+          if (ruleResult.blocked) {
             throw new CreditLimitExceededError(limit, newBalance);
           }
         }
@@ -293,6 +323,22 @@ export class InvoiceService {
         action: 'INVOICE_CREATED',
         toStatus: 'DRAFT',
         performedBy: params.createdBy,
+      });
+
+      // Enterprise approval chain: WorkflowEngine's seeded "Sale Invoice — High Value
+      // Approval" system definition (INVOICE_CREATE, grandTotal > 50000, routes to
+      // SALES_MANAGER, 24h escalation) existed since tenant provisioning but was never
+      // triggered by anything — trigger() itself resolves whether an active definition's
+      // condition matches; a no-op (returns null) for the overwhelming majority of invoices
+      // that fall under the threshold or when the tenant has deactivated the definition.
+      // confirmInTransaction below blocks confirming while a triggered instance is PENDING.
+      await new WorkflowEngine(trx, params.tenantId, params.createdBy, ulid()).trigger({
+        event: 'INVOICE_CREATE',
+        entityType: 'Invoice',
+        entityId: invoiceId,
+        userId: params.createdBy,
+        correlationId: ulid(),
+        payload: { grandTotal: totals.grandTotal },
       });
 
       // Search-service sync: DRAFT invoices have no invoiceNumber yet (assigned at
@@ -435,6 +481,16 @@ export class InvoiceService {
           },
         ],
       });
+
+      // Commission engine: deliberately outside the confirm transaction/saga and non-fatal —
+      // a commission-calculation bug must never block a legitimate sale from being confirmed.
+      // No-ops if the invoice's creator/branch has no active commission assignment.
+      try {
+        await new CommissionService(this.db).computeForInvoice(id, tenantId);
+      } catch (err) {
+        logger.warn({ err, invoiceId: id, tenantId }, 'Commission computation failed (non-fatal)');
+      }
+
       return invoiceNumber;
     } catch (err) {
       const cause = err instanceof SagaExecutionError ? err.cause : err;
@@ -466,6 +522,32 @@ export class InvoiceService {
           'INVALID_STATUS',
           `Cannot confirm invoice in status ${invoice.status}`
         );
+
+      // Enterprise approval chain: block confirming a DRAFT invoice while its triggered
+      // WorkflowEngine approval instance (see createInTransaction's trigger() call above) is
+      // still PENDING, or was REJECTED outright. No instance exists at all for invoices that
+      // never matched an active definition's condition, so this is a no-op for most invoices.
+      const [blockingInstance] = await trx
+        .select({ status: workflowInstances.status })
+        .from(workflowInstances)
+        .where(
+          and(
+            eq(workflowInstances.tenantId, tenantId),
+            eq(workflowInstances.entityType, 'Invoice'),
+            eq(workflowInstances.entityId, id),
+            inArray(workflowInstances.status, ['PENDING', 'REJECTED'])
+          )
+        )
+        .orderBy(desc(workflowInstances.createdAt))
+        .limit(1);
+      if (blockingInstance) {
+        throw new BusinessError(
+          blockingInstance.status === 'PENDING' ? 'APPROVAL_PENDING' : 'APPROVAL_REJECTED',
+          blockingInstance.status === 'PENDING'
+            ? 'This invoice requires manager approval before it can be confirmed'
+            : 'This invoice was rejected during approval and cannot be confirmed'
+        );
+      }
 
       // C-7 fix: server-generated, gap-free, FY-scoped sequential number — replaces the old
       // client-supplied invoiceNumber + proactive duplicate check. Called with this same

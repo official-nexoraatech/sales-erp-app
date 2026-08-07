@@ -2416,6 +2416,289 @@ export const schedulerJobsApi = {
     ),
 };
 
+// Enterprise approval chain (WorkflowEngine, packages/platform-sdk/src/workflow.ts) —
+// identity-scoped to the caller (approverId = requesting user), not permission-gated, so
+// there is no PERMISSIONS.* constant to check before calling these. See
+// apps/tenant-service/src/api/approval.routes.ts.
+export interface PendingApprovalItem {
+  approvalId: number;
+  instanceId: number;
+  nodeId: string;
+  nodeName: string;
+  entityType: string;
+  entityId: number;
+  triggeredByUserId: number;
+  createdAt: string;
+}
+
+export interface WorkflowApprovalStatus {
+  instanceId: number;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'ESCALATED' | 'EXPIRED' | 'CANCELLED';
+  currentNodeId: string | null;
+  pendingApprovals: Array<{
+    id: number;
+    nodeId: string;
+    nodeName: string;
+    approverId: number;
+    action: string;
+  }>;
+  history: Array<{
+    id: number;
+    nodeId: string;
+    nodeName: string;
+    approverId: number;
+    action: string;
+    comment: string | null;
+    decidedAt: string | null;
+    createdAt: string;
+  }>;
+}
+
+export const approvalApi = {
+  pending: () =>
+    apiClient.get<{ content: PendingApprovalItem[]; totalElements: number }>(
+      'tenant',
+      '/approvals/pending'
+    ),
+  status: (instanceId: number) =>
+    apiClient.get<WorkflowApprovalStatus>('tenant', `/approvals/${instanceId}/status`),
+  approve: (instanceId: number, data: { nodeId: string; comment?: string }) =>
+    apiClient.post<{ message: string; instanceId: number }>(
+      'tenant',
+      `/approvals/${instanceId}/approve`,
+      data
+    ),
+  reject: (instanceId: number, data: { nodeId: string; comment: string }) =>
+    apiClient.post<{ message: string; instanceId: number }>(
+      'tenant',
+      `/approvals/${instanceId}/reject`,
+      data
+    ),
+};
+
+// Business Rules Engine (RuleEngine, packages/platform-sdk/src/rule-engine.ts) — full
+// CRUD+simulate API at apps/auth-service/src/routes/rules.ts. See PERMISSIONS.RULE_*.
+export type RuleConditionOperator =
+  | 'EQUALS'
+  | 'NOT_EQUALS'
+  | 'GREATER_THAN'
+  | 'LESS_THAN'
+  | 'GREATER_THAN_EQUALS'
+  | 'LESS_THAN_EQUALS'
+  | 'BETWEEN'
+  | 'IN'
+  | 'NOT_IN'
+  | 'CONTAINS'
+  | 'STARTS_WITH';
+
+export interface RuleCondition {
+  field: string;
+  operator: RuleConditionOperator;
+  value: unknown;
+  value2?: unknown;
+}
+
+export type RuleActionType =
+  'SET_FIELD' | 'ADD_DISCOUNT' | 'BLOCK' | 'WARN' | 'NOTIFY' | 'TRIGGER_APPROVAL';
+
+export interface RuleAction {
+  type: RuleActionType;
+  field?: string;
+  value?: unknown;
+  message?: string;
+  channel?: string;
+  role?: string;
+}
+
+export interface BusinessRule {
+  id: number;
+  tenantId: number;
+  name: string;
+  description: string | null;
+  entityType: string;
+  eventType: string;
+  isActive: boolean;
+  isSystem: boolean;
+  priority: number;
+  conditions: RuleCondition[];
+  actions: RuleAction[];
+  conditionOperator: 'AND' | 'OR';
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RuleFormInput {
+  name: string;
+  entityType: string;
+  eventType: string;
+  conditionOperator: 'AND' | 'OR';
+  conditions: RuleCondition[];
+  actions: RuleAction[];
+  priority: number;
+  isActive: boolean;
+}
+
+export const ruleApi = {
+  list: () => apiClient.get<{ content: BusinessRule[]; totalElements: number }>('auth', '/rules'),
+  get: (id: number) => apiClient.get<BusinessRule>('auth', `/rules/${id}`),
+  create: (data: RuleFormInput) => apiClient.post<BusinessRule>('auth', '/rules', data),
+  update: (id: number, data: RuleFormInput) =>
+    apiClient.put<BusinessRule>('auth', `/rules/${id}`, data),
+  remove: (id: number) => apiClient.delete<{ message: string }>('auth', `/rules/${id}`),
+  toggle: (id: number, isActive: boolean) =>
+    apiClient.patch<{ message: string }>('auth', `/rules/${id}/toggle`, { isActive }),
+  simulate: (ruleId: number, testData: Record<string, unknown>) =>
+    apiClient.post<{
+      matched: boolean;
+      actions: RuleAction[];
+      conditionResults: Array<{ condition: RuleCondition; passed: boolean }>;
+    }>('auth', '/rules/simulate', { ruleId: String(ruleId), testData }),
+};
+
+// Workflow Automation Engine (automation-service) — extends WorkflowEngine's schema with
+// non-approval node types (CONDITION/NOTIFICATION/ACTION/DELAY) and trigger types beyond
+// EVENT. See apps/automation-service/src/api/automation.routes.ts.
+export type AutomationNodeType =
+  'APPROVAL' | 'PARALLEL_APPROVAL' | 'NOTIFICATION' | 'ACTION' | 'CONDITION' | 'DELAY';
+export type AutomationTriggerType = 'EVENT' | 'CRON' | 'WEBHOOK' | 'API';
+
+export interface AutomationNode {
+  id: string;
+  name: string;
+  type: AutomationNodeType;
+  approverType?: 'ROLE' | 'USER' | 'MANAGER';
+  approverRef?: string;
+  nextNodeId?: string;
+  rejectedNodeId?: string;
+  requireAllApprovers?: boolean;
+  conditions?: RuleCondition[];
+  conditionOperator?: 'AND' | 'OR';
+  message?: string;
+  actionEventType?: string;
+  delayMinutes?: number;
+}
+
+export interface WorkflowAutomationDefinition {
+  id: number;
+  tenantId: number;
+  name: string;
+  triggerEvent: string;
+  entityType: string;
+  triggerType: AutomationTriggerType;
+  triggerConfig: Record<string, unknown> | null;
+  nodes: AutomationNode[];
+  isActive: boolean;
+  isSystem: boolean;
+  timeoutHours: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AutomationDefinitionFormInput {
+  name: string;
+  triggerEvent: string;
+  entityType: string;
+  triggerType: AutomationTriggerType;
+  triggerConfig?: Record<string, unknown>;
+  nodes: AutomationNode[];
+  timeoutHours?: number;
+  isActive: boolean;
+}
+
+export interface WorkflowExecutionHistoryRow {
+  id: number;
+  tenantId: number;
+  definitionId: number;
+  triggeredBy: 'EVENT' | 'CRON' | 'WEBHOOK' | 'API' | 'MANUAL';
+  status: 'RUNNING' | 'COMPLETED' | 'FAILED';
+  nodeResults: Array<{ nodeId: string; type: string; status: string; error?: string }>;
+  errorMessage: string | null;
+  startedAt: string;
+  completedAt: string | null;
+}
+
+export const automationApi = {
+  list: () =>
+    apiClient.get<{ content: WorkflowAutomationDefinition[]; totalElements: number }>(
+      'automation',
+      '/automation/definitions'
+    ),
+  get: (id: number) =>
+    apiClient.get<WorkflowAutomationDefinition>('automation', `/automation/definitions/${id}`),
+  create: (data: AutomationDefinitionFormInput) =>
+    apiClient.post<WorkflowAutomationDefinition>('automation', '/automation/definitions', data),
+  update: (id: number, data: AutomationDefinitionFormInput) =>
+    apiClient.put<WorkflowAutomationDefinition>(
+      'automation',
+      `/automation/definitions/${id}`,
+      data
+    ),
+  remove: (id: number) =>
+    apiClient.delete<{ message: string }>('automation', `/automation/definitions/${id}`),
+  toggle: (id: number, isActive: boolean) =>
+    apiClient.patch<{ message: string }>('automation', `/automation/definitions/${id}/toggle`, {
+      isActive,
+    }),
+  trigger: (id: number, payload: Record<string, unknown> = {}) =>
+    apiClient.post<{ message: string }>(
+      'automation',
+      `/automation/definitions/${id}/trigger`,
+      payload
+    ),
+  history: (id: number) =>
+    apiClient.get<{ content: WorkflowExecutionHistoryRow[]; totalElements: number }>(
+      'automation',
+      `/automation/definitions/${id}/history`
+    ),
+};
+
+// AI Copilot (ai-copilot-service) — v1 read-only + draft-generation only, gated by
+// PERMISSIONS.COPILOT_VIEW/COPILOT_USE. See apps/ai-copilot-service/src/api/copilot.routes.ts.
+export interface CopilotConversation {
+  id: number;
+  tenantId: number;
+  userId: number;
+  title: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CopilotMessage {
+  id: number;
+  conversationId: number;
+  role: 'user' | 'assistant' | 'tool';
+  content: string;
+  toolCalls: Array<{ toolUseId: string; toolName: string; input: Record<string, unknown> }> | null;
+  createdAt: string;
+}
+
+export interface CopilotSendResult {
+  conversationId: number;
+  reply: string;
+  toolCalls: Array<{ toolName: string; input: Record<string, unknown> }>;
+}
+
+export const copilotApi = {
+  listConversations: () =>
+    apiClient.get<{ content: CopilotConversation[]; totalElements: number }>(
+      'copilot',
+      '/copilot/conversations'
+    ),
+  getMessages: (conversationId: number) =>
+    apiClient.get<{ content: CopilotMessage[]; totalElements: number }>(
+      'copilot',
+      `/copilot/conversations/${conversationId}/messages`
+    ),
+  sendMessage: (conversationId: number | 'new', message: string) =>
+    apiClient.post<CopilotSendResult>(
+      'copilot',
+      `/copilot/conversations/${conversationId}/messages`,
+      {
+        message,
+      }
+    ),
+};
+
 // CRM-ROADMAP Phase 4, Feature 8 — Public CRM API & BI/Data-Warehouse Export
 export const exportScheduleApi = {
   list: () => apiClient.get('scheduler', '/export-schedules'),

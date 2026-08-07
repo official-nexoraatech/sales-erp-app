@@ -56,6 +56,22 @@ vi.mock('@erp/db', () => ({
   webhookDeliveries: {},
   eventStore: {},
   eventSnapshots: {},
+  // Enterprise approval chain (WorkflowEngine) — trigger() short-circuits to a no-op
+  // whenever the workflowDefinitions select below returns no match, which is what every
+  // script in this file supplies.
+  workflowDefinitions: {
+    tenantId: 'tenant_id',
+    triggerEvent: 'trigger_event',
+    isActive: 'is_active',
+  },
+  workflowInstances: {
+    id: 'id',
+    tenantId: 'tenant_id',
+    entityType: 'entity_type',
+    entityId: 'entity_id',
+    status: 'status',
+    createdAt: 'created_at',
+  },
 }));
 
 vi.mock('drizzle-orm', () => ({
@@ -65,10 +81,11 @@ vi.mock('drizzle-orm', () => ({
   asc: vi.fn((col) => ({ type: 'asc', col })),
   sql: vi.fn((s) => s),
   desc: vi.fn((c) => c),
+  inArray: vi.fn((col, vals) => ({ type: 'inArray', col, vals })),
 }));
 
 import { InvoiceService } from '../domain/InvoiceService.js';
-import { numberSeriesConfig } from '@erp/db';
+import { numberSeriesConfig, workflowInstances } from '@erp/db';
 
 // Chainable mock query builder: every method returns `this`, and the object is
 // directly `await`-able (via `.then`) OR terminable via `.returning()` — both
@@ -148,6 +165,7 @@ describe('InvoiceService.confirm — ES-03 inventory ledger', () => {
   it('writes one STOCK_OUT inventory_ledger row per invoice line, inside the transaction', async () => {
     const script = [
       [invoiceRow], // select invoice
+      [], // WorkflowEngine approval-gate: no PENDING/REJECTED instance for this invoice
       [{ currentSeq: 0, formatTemplate: 'INV/{FY-SHORT}/{SEQ:5}' }], // C-7: NumberSeriesEngine select existing config
       [{ currentSeq: 1, formatTemplate: 'INV/{FY-SHORT}/{SEQ:5}' }], // C-7: NumberSeriesEngine update...returning
       [], // ES-14: period closure check — no closure row found
@@ -181,6 +199,7 @@ describe('InvoiceService.confirm — ES-03 inventory ledger', () => {
   it('ES-13: populates inventory_ledger.cogs_per_unit and emits COGS_CALCULATED when the item has a non-zero WACC cost', async () => {
     const script = [
       [invoiceRow], // select invoice
+      [], // WorkflowEngine approval-gate: no PENDING/REJECTED instance for this invoice
       [{ currentSeq: 0, formatTemplate: 'INV/{FY-SHORT}/{SEQ:5}' }], // C-7: NumberSeriesEngine select existing config
       [{ currentSeq: 1, formatTemplate: 'INV/{FY-SHORT}/{SEQ:5}' }], // C-7: NumberSeriesEngine update...returning
       [], // ES-14: period closure check — no closure row found
@@ -233,6 +252,7 @@ describe('InvoiceService.confirm — ES-03 inventory ledger', () => {
       'from',
       'where',
       'orderBy',
+      'limit',
       'update',
       'set',
       'onConflictDoUpdate',
@@ -247,6 +267,15 @@ describe('InvoiceService.confirm — ES-03 inventory ledger', () => {
     let lastUpdateTarget: unknown;
     trx['update'] = vi.fn((table: unknown) => {
       lastUpdateTarget = table;
+      return trx;
+    });
+    // Enterprise approval chain: the new WorkflowEngine approval-gate select
+    // (.select().from(workflowInstances)...) must resolve to "no blocking instance" ([])
+    // rather than falling into this test's callIndex/results select-sequence below, which
+    // was written before this select existed in confirmInTransaction.
+    let lastFromTarget: unknown;
+    trx['from'] = vi.fn((table: unknown) => {
+      lastFromTarget = table;
       return trx;
     });
     trx['returning'] = vi.fn(() =>
@@ -272,6 +301,10 @@ describe('InvoiceService.confirm — ES-03 inventory ledger', () => {
       return trx;
     });
     (trx as { then: unknown })['then'] = (resolve: (v: unknown) => void) => {
+      if (lastFromTarget === workflowInstances) {
+        resolve([]); // no PENDING/REJECTED approval instance blocking this invoice
+        return;
+      }
       const results = [[invoiceRow], [lineRow]];
       resolve(results[Math.min(callIndex, results.length - 1)]);
     };

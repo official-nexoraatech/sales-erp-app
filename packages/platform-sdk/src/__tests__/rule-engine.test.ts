@@ -1,9 +1,12 @@
 import { describe, it, expect, vi } from 'vitest';
 
 vi.mock('@erp/db', () => {
-  const mockTable = new Proxy({}, {
-    get: (_t, prop) => ({ columnName: String(prop) }),
-  });
+  const mockTable = new Proxy(
+    {},
+    {
+      get: (_t, prop) => ({ columnName: String(prop) }),
+    }
+  );
   return {
     businessRules: mockTable,
     createDatabaseClient: vi.fn(),
@@ -15,7 +18,7 @@ vi.mock('drizzle-orm', () => ({
   and: vi.fn((..._args: unknown[]) => '__and__'),
 }));
 
-import { RuleEngine } from '../rule-engine.js';
+import { RuleEngine, evaluateCondition } from '../rule-engine.js';
 
 const BASE_RULE = {
   id: 'rule-1',
@@ -29,10 +32,6 @@ const BASE_RULE = {
 };
 
 function makeDb(rules: unknown[] = [], singleRule?: unknown) {
-  const list = Object.assign(Promise.resolve(rules), { orderBy: vi.fn().mockResolvedValue(rules) });
-  const single = Object.assign(Promise.resolve(singleRule ? [singleRule] : []), {
-    limit: vi.fn().mockResolvedValue(singleRule ? [singleRule] : []),
-  });
   return {
     select: vi.fn().mockReturnValue({
       from: vi.fn().mockReturnValue({
@@ -46,131 +45,311 @@ function makeDb(rules: unknown[] = [], singleRule?: unknown) {
       }),
     }),
     insert: vi.fn().mockReturnValue({
-      values: vi.fn().mockReturnValue({ onConflictDoNothing: vi.fn().mockResolvedValue(undefined) }),
+      values: vi
+        .fn()
+        .mockReturnValue({ onConflictDoNothing: vi.fn().mockResolvedValue(undefined) }),
     }),
   };
 }
 
+describe('evaluateCondition — EQUALS boolean/string normalization', () => {
+  // Regression: the Rules UI's condition value field is a plain text Input (RulesPage.tsx has
+  // no type picker) — a tenant authoring a rule that checks a boolean field (e.g.
+  // isOverCreditLimit) always ends up with the STRING "true"/"false" stored as the condition's
+  // value. Plain `==` breaks for this specific combination (`true == "true"` is `false` in JS,
+  // unlike the number/string coercion `==` is otherwise relied on for elsewhere in this file),
+  // so no UI-authored boolean rule could ever match real data. Found via live E2E testing.
+  it('matches a real boolean true against a UI-authored string "true" condition', () => {
+    const result = evaluateCondition(
+      { field: 'isOverCreditLimit', operator: 'EQUALS', value: 'true' },
+      { isOverCreditLimit: true }
+    );
+    expect(result).toBe(true);
+  });
+
+  it('matches a real boolean false against a UI-authored string "false" condition', () => {
+    const result = evaluateCondition(
+      { field: 'isOverCreditLimit', operator: 'EQUALS', value: 'false' },
+      { isOverCreditLimit: false }
+    );
+    expect(result).toBe(true);
+  });
+
+  it('does not match boolean true against string "false"', () => {
+    const result = evaluateCondition(
+      { field: 'isOverCreditLimit', operator: 'EQUALS', value: 'false' },
+      { isOverCreditLimit: true }
+    );
+    expect(result).toBe(false);
+  });
+
+  it('still matches boolean-to-boolean (code-seeded templates, unaffected by the fix)', () => {
+    const result = evaluateCondition(
+      { field: 'isOverCreditLimit', operator: 'EQUALS', value: true },
+      { isOverCreditLimit: true }
+    );
+    expect(result).toBe(true);
+  });
+
+  it('still coerces number-vs-string for non-boolean fields (existing behavior preserved)', () => {
+    const result = evaluateCondition({ field: 'qty', operator: 'EQUALS', value: '5' }, { qty: 5 });
+    expect(result).toBe(true);
+  });
+
+  it('NOT_EQUALS also benefits from the same normalization', () => {
+    const result = evaluateCondition(
+      { field: 'isOverCreditLimit', operator: 'NOT_EQUALS', value: 'true' },
+      { isOverCreditLimit: false }
+    );
+    expect(result).toBe(true);
+  });
+});
+
 describe('RuleEngine.evaluate', () => {
   it('returns blocked=true when BLOCK action triggers', async () => {
     const rules = [
-      { ...BASE_RULE, conditions: [{ field: 'amount', operator: 'GREATER_THAN', value: 10000 }], actions: [{ type: 'BLOCK', message: 'Over limit' }] },
+      {
+        ...BASE_RULE,
+        conditions: [{ field: 'amount', operator: 'GREATER_THAN', value: 10000 }],
+        actions: [{ type: 'BLOCK', message: 'Over limit' }],
+      },
     ];
     const engine = new RuleEngine(makeDb(rules) as never);
-    const result = await engine.evaluate({ tenantId: 1, entityType: 'SALE', eventType: 'SALE_CREATE', data: { amount: 15000 } });
+    const result = await engine.evaluate({
+      tenantId: 1,
+      entityType: 'SALE',
+      eventType: 'SALE_CREATE',
+      data: { amount: 15000 },
+    });
     expect(result.blocked).toBe(true);
     expect(result.appliedRuleCount).toBe(1);
   });
 
   it('does not block when condition does not match', async () => {
     const rules = [
-      { ...BASE_RULE, conditions: [{ field: 'amount', operator: 'GREATER_THAN', value: 10000 }], actions: [{ type: 'BLOCK', message: 'Over limit' }] },
+      {
+        ...BASE_RULE,
+        conditions: [{ field: 'amount', operator: 'GREATER_THAN', value: 10000 }],
+        actions: [{ type: 'BLOCK', message: 'Over limit' }],
+      },
     ];
     const engine = new RuleEngine(makeDb(rules) as never);
-    const result = await engine.evaluate({ tenantId: 1, entityType: 'SALE', eventType: 'SALE_CREATE', data: { amount: 5000 } });
+    const result = await engine.evaluate({
+      tenantId: 1,
+      entityType: 'SALE',
+      eventType: 'SALE_CREATE',
+      data: { amount: 5000 },
+    });
     expect(result.blocked).toBe(false);
     expect(result.appliedRuleCount).toBe(0);
   });
 
   it('collects SET_FIELD changes', async () => {
     const rules = [
-      { ...BASE_RULE, conditions: [{ field: 'discountPercent', operator: 'LESS_THAN_EQUALS', value: 5 }], actions: [{ type: 'SET_FIELD', field: 'autoApproved', value: true }] },
+      {
+        ...BASE_RULE,
+        conditions: [{ field: 'discountPercent', operator: 'LESS_THAN_EQUALS', value: 5 }],
+        actions: [{ type: 'SET_FIELD', field: 'autoApproved', value: true }],
+      },
     ];
     const engine = new RuleEngine(makeDb(rules) as never);
-    const result = await engine.evaluate({ tenantId: 1, entityType: 'SALE', eventType: 'SALE_CREATE', data: { discountPercent: 3 } });
+    const result = await engine.evaluate({
+      tenantId: 1,
+      entityType: 'SALE',
+      eventType: 'SALE_CREATE',
+      data: { discountPercent: 3 },
+    });
     expect(result.fieldChanges['autoApproved']).toBe(true);
   });
 
   it('collects WARN messages', async () => {
     const rules = [
-      { ...BASE_RULE, conditions: [{ field: 'quantity', operator: 'LESS_THAN', value: 0 }], actions: [{ type: 'WARN', message: 'Negative quantity' }] },
+      {
+        ...BASE_RULE,
+        conditions: [{ field: 'quantity', operator: 'LESS_THAN', value: 0 }],
+        actions: [{ type: 'WARN', message: 'Negative quantity' }],
+      },
     ];
     const engine = new RuleEngine(makeDb(rules) as never);
-    const result = await engine.evaluate({ tenantId: 1, entityType: 'SALE', eventType: 'SALE_CREATE', data: { quantity: -1 } });
+    const result = await engine.evaluate({
+      tenantId: 1,
+      entityType: 'SALE',
+      eventType: 'SALE_CREATE',
+      data: { quantity: -1 },
+    });
     expect(result.warnings).toContain('Negative quantity');
   });
 
   it('evaluates OR condition correctly', async () => {
     const rules = [
-      { ...BASE_RULE, conditionOperator: 'OR', conditions: [{ field: 'status', operator: 'EQUALS', value: 'DRAFT' }, { field: 'status', operator: 'EQUALS', value: 'PENDING' }], actions: [{ type: 'WARN', message: 'Not finalized' }] },
+      {
+        ...BASE_RULE,
+        conditionOperator: 'OR',
+        conditions: [
+          { field: 'status', operator: 'EQUALS', value: 'DRAFT' },
+          { field: 'status', operator: 'EQUALS', value: 'PENDING' },
+        ],
+        actions: [{ type: 'WARN', message: 'Not finalized' }],
+      },
     ];
     const engine = new RuleEngine(makeDb(rules) as never);
-    const result = await engine.evaluate({ tenantId: 1, entityType: 'SALE', eventType: 'SALE_CREATE', data: { status: 'DRAFT' } });
+    const result = await engine.evaluate({
+      tenantId: 1,
+      entityType: 'SALE',
+      eventType: 'SALE_CREATE',
+      data: { status: 'DRAFT' },
+    });
     expect(result.warnings).toContain('Not finalized');
   });
 
   it('evaluates BETWEEN operator', async () => {
     const rules = [
-      { ...BASE_RULE, conditions: [{ field: 'amount', operator: 'BETWEEN', value: 1000, value2: 5000 }], actions: [{ type: 'SET_FIELD', field: 'tier', value: 'MEDIUM' }] },
+      {
+        ...BASE_RULE,
+        conditions: [{ field: 'amount', operator: 'BETWEEN', value: 1000, value2: 5000 }],
+        actions: [{ type: 'SET_FIELD', field: 'tier', value: 'MEDIUM' }],
+      },
     ];
     const engine = new RuleEngine(makeDb(rules) as never);
-    const result = await engine.evaluate({ tenantId: 1, entityType: 'SALE', eventType: 'SALE_CREATE', data: { amount: 3000 } });
+    const result = await engine.evaluate({
+      tenantId: 1,
+      entityType: 'SALE',
+      eventType: 'SALE_CREATE',
+      data: { amount: 3000 },
+    });
     expect(result.fieldChanges['tier']).toBe('MEDIUM');
   });
 
   it('evaluates IN operator', async () => {
     const rules = [
-      { ...BASE_RULE, conditions: [{ field: 'mode', operator: 'IN', value: ['CASH', 'UPI'] }], actions: [{ type: 'SET_FIELD', field: 'fastTrack', value: true }] },
+      {
+        ...BASE_RULE,
+        conditions: [{ field: 'mode', operator: 'IN', value: ['CASH', 'UPI'] }],
+        actions: [{ type: 'SET_FIELD', field: 'fastTrack', value: true }],
+      },
     ];
     const engine = new RuleEngine(makeDb(rules) as never);
-    const result = await engine.evaluate({ tenantId: 1, entityType: 'SALE', eventType: 'SALE_CREATE', data: { mode: 'UPI' } });
+    const result = await engine.evaluate({
+      tenantId: 1,
+      entityType: 'SALE',
+      eventType: 'SALE_CREATE',
+      data: { mode: 'UPI' },
+    });
     expect(result.fieldChanges['fastTrack']).toBe(true);
   });
 
   it('does not match IN when value not in list', async () => {
     const rules = [
-      { ...BASE_RULE, conditions: [{ field: 'mode', operator: 'IN', value: ['CASH', 'UPI'] }], actions: [{ type: 'BLOCK' }] },
+      {
+        ...BASE_RULE,
+        conditions: [{ field: 'mode', operator: 'IN', value: ['CASH', 'UPI'] }],
+        actions: [{ type: 'BLOCK' }],
+      },
     ];
     const engine = new RuleEngine(makeDb(rules) as never);
-    const result = await engine.evaluate({ tenantId: 1, entityType: 'SALE', eventType: 'SALE_CREATE', data: { mode: 'CREDIT' } });
+    const result = await engine.evaluate({
+      tenantId: 1,
+      entityType: 'SALE',
+      eventType: 'SALE_CREATE',
+      data: { mode: 'CREDIT' },
+    });
     expect(result.blocked).toBe(false);
   });
 
   it('evaluates NOT_IN operator', async () => {
     const rules = [
-      { ...BASE_RULE, conditions: [{ field: 'status', operator: 'NOT_IN', value: ['CANCELLED', 'DRAFT'] }], actions: [{ type: 'SET_FIELD', field: 'canProcess', value: true }] },
+      {
+        ...BASE_RULE,
+        conditions: [{ field: 'status', operator: 'NOT_IN', value: ['CANCELLED', 'DRAFT'] }],
+        actions: [{ type: 'SET_FIELD', field: 'canProcess', value: true }],
+      },
     ];
     const engine = new RuleEngine(makeDb(rules) as never);
-    const result = await engine.evaluate({ tenantId: 1, entityType: 'SALE', eventType: 'SALE_CREATE', data: { status: 'CONFIRMED' } });
+    const result = await engine.evaluate({
+      tenantId: 1,
+      entityType: 'SALE',
+      eventType: 'SALE_CREATE',
+      data: { status: 'CONFIRMED' },
+    });
     expect(result.fieldChanges['canProcess']).toBe(true);
   });
 
   it('evaluates CONTAINS operator (case-insensitive)', async () => {
     const rules = [
-      { ...BASE_RULE, conditions: [{ field: 'name', operator: 'CONTAINS', value: 'fabric' }], actions: [{ type: 'SET_FIELD', field: 'isFabric', value: true }] },
+      {
+        ...BASE_RULE,
+        conditions: [{ field: 'name', operator: 'CONTAINS', value: 'fabric' }],
+        actions: [{ type: 'SET_FIELD', field: 'isFabric', value: true }],
+      },
     ];
     const engine = new RuleEngine(makeDb(rules) as never);
-    const result = await engine.evaluate({ tenantId: 1, entityType: 'SALE', eventType: 'SALE_CREATE', data: { name: 'Blue Fabric Roll' } });
+    const result = await engine.evaluate({
+      tenantId: 1,
+      entityType: 'SALE',
+      eventType: 'SALE_CREATE',
+      data: { name: 'Blue Fabric Roll' },
+    });
     expect(result.fieldChanges['isFabric']).toBe(true);
   });
 
   it('evaluates STARTS_WITH operator', async () => {
     const rules = [
-      { ...BASE_RULE, conditions: [{ field: 'sku', operator: 'STARTS_WITH', value: 'FAB-' }], actions: [{ type: 'SET_FIELD', field: 'category', value: 'FABRIC' }] },
+      {
+        ...BASE_RULE,
+        conditions: [{ field: 'sku', operator: 'STARTS_WITH', value: 'FAB-' }],
+        actions: [{ type: 'SET_FIELD', field: 'category', value: 'FABRIC' }],
+      },
     ];
     const engine = new RuleEngine(makeDb(rules) as never);
-    const result = await engine.evaluate({ tenantId: 1, entityType: 'SALE', eventType: 'SALE_CREATE', data: { sku: 'FAB-001-BLUE' } });
+    const result = await engine.evaluate({
+      tenantId: 1,
+      entityType: 'SALE',
+      eventType: 'SALE_CREATE',
+      data: { sku: 'FAB-001-BLUE' },
+    });
     expect(result.fieldChanges['category']).toBe('FABRIC');
   });
 
   it('stops at BLOCK and skips lower-priority rules', async () => {
     const rules = [
-      { ...BASE_RULE, priority: 1, conditions: [{ field: 'blocked', operator: 'EQUALS', value: true }], actions: [{ type: 'BLOCK', message: 'Blocked' }] },
-      { ...BASE_RULE, id: 'rule-2', priority: 2, conditions: [{ field: 'blocked', operator: 'EQUALS', value: true }], actions: [{ type: 'SET_FIELD', field: 'afterBlock', value: true }] },
+      {
+        ...BASE_RULE,
+        priority: 1,
+        conditions: [{ field: 'blocked', operator: 'EQUALS', value: true }],
+        actions: [{ type: 'BLOCK', message: 'Blocked' }],
+      },
+      {
+        ...BASE_RULE,
+        id: 'rule-2',
+        priority: 2,
+        conditions: [{ field: 'blocked', operator: 'EQUALS', value: true }],
+        actions: [{ type: 'SET_FIELD', field: 'afterBlock', value: true }],
+      },
     ];
     const engine = new RuleEngine(makeDb(rules) as never);
-    const result = await engine.evaluate({ tenantId: 1, entityType: 'SALE', eventType: 'SALE_CREATE', data: { blocked: true } });
+    const result = await engine.evaluate({
+      tenantId: 1,
+      entityType: 'SALE',
+      eventType: 'SALE_CREATE',
+      data: { blocked: true },
+    });
     expect(result.blocked).toBe(true);
     expect(result.fieldChanges['afterBlock']).toBeUndefined();
   });
 
   it('evaluates nested field with dot notation', async () => {
     const rules = [
-      { ...BASE_RULE, conditions: [{ field: 'customer.creditLimitEnabled', operator: 'EQUALS', value: true }], actions: [{ type: 'WARN', message: 'Check credit' }] },
+      {
+        ...BASE_RULE,
+        conditions: [{ field: 'customer.creditLimitEnabled', operator: 'EQUALS', value: true }],
+        actions: [{ type: 'WARN', message: 'Check credit' }],
+      },
     ];
     const engine = new RuleEngine(makeDb(rules) as never);
     const result = await engine.evaluate({
-      tenantId: 1, entityType: 'SALE', eventType: 'SALE_CREATE',
+      tenantId: 1,
+      entityType: 'SALE',
+      eventType: 'SALE_CREATE',
       data: { customer: { creditLimitEnabled: true } },
     });
     expect(result.warnings).toContain('Check credit');
@@ -178,7 +357,12 @@ describe('RuleEngine.evaluate', () => {
 
   it('handles empty rules list gracefully', async () => {
     const engine = new RuleEngine(makeDb([]) as never);
-    const result = await engine.evaluate({ tenantId: 1, entityType: 'SALE', eventType: 'SALE_CREATE', data: {} });
+    const result = await engine.evaluate({
+      tenantId: 1,
+      entityType: 'SALE',
+      eventType: 'SALE_CREATE',
+      data: {},
+    });
     expect(result.blocked).toBe(false);
     expect(result.appliedRuleCount).toBe(0);
     expect(result.warnings).toHaveLength(0);
@@ -187,7 +371,11 @@ describe('RuleEngine.evaluate', () => {
 
 describe('RuleEngine.simulate', () => {
   it('returns matched=true and condition results for matching data', async () => {
-    const rule = { ...BASE_RULE, conditions: [{ field: 'amount', operator: 'GREATER_THAN', value: 5000 }], actions: [{ type: 'BLOCK', message: 'Blocked' }] };
+    const rule = {
+      ...BASE_RULE,
+      conditions: [{ field: 'amount', operator: 'GREATER_THAN', value: 5000 }],
+      actions: [{ type: 'BLOCK', message: 'Blocked' }],
+    };
     const db = makeDb([], rule);
     const engine = new RuleEngine(db as never);
     const result = await engine.simulate(1, 'rule-1', { amount: 8000 });
@@ -197,7 +385,11 @@ describe('RuleEngine.simulate', () => {
   });
 
   it('returns matched=false for non-matching data', async () => {
-    const rule = { ...BASE_RULE, conditions: [{ field: 'amount', operator: 'GREATER_THAN', value: 5000 }], actions: [{ type: 'BLOCK' }] };
+    const rule = {
+      ...BASE_RULE,
+      conditions: [{ field: 'amount', operator: 'GREATER_THAN', value: 5000 }],
+      actions: [{ type: 'BLOCK' }],
+    };
     const db = makeDb([], rule);
     const engine = new RuleEngine(db as never);
     const result = await engine.simulate(1, 'rule-1', { amount: 1000 });

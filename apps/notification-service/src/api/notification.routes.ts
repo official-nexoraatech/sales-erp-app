@@ -26,7 +26,7 @@ const SendSchema = z.object({
   recipientPhone: z.string().optional(),
   recipientEmail: z.string().email().optional(),
   templateData: z.record(z.unknown()).default({}),
-  channels: z.array(z.enum(['SMS', 'EMAIL', 'WHATSAPP', 'IN_APP'])).optional(),
+  channels: z.array(z.enum(['SMS', 'EMAIL', 'WHATSAPP', 'IN_APP', 'INSTAGRAM'])).optional(),
   // ES-26 (M8): callers with a natural dedup key (e.g. invoiceId+reminderDate) should pass this
   // instead of relying on the derived tenant+event+recipient+data+time-bucket hash.
   idempotencyKey: z.string().min(1).max(200).optional(),
@@ -39,7 +39,7 @@ const InternalSendSchema = SendSchema.extend({
 const SendRawInternalSchema = z.object({
   tenantId: z.number().int().positive(),
   eventType: z.string().min(1).default('CRM_CAMPAIGN'),
-  channel: z.enum(['SMS', 'EMAIL', 'WHATSAPP', 'IN_APP']),
+  channel: z.enum(['SMS', 'EMAIL', 'WHATSAPP', 'IN_APP', 'INSTAGRAM']),
   recipientPhone: z.string().optional(),
   recipientEmail: z.string().email().optional(),
   // Required for IN_APP sends to be scoped to a recipient — GET /notifications and

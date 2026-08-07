@@ -8,6 +8,7 @@ import { SmsChannelProvider } from '../domain/channels/SmsChannelProvider.js';
 import { EmailChannelProvider } from '../domain/channels/EmailChannelProvider.js';
 import { WhatsAppChannelProvider } from '../domain/channels/WhatsAppChannelProvider.js';
 import { InAppChannelProvider } from '../domain/channels/InAppChannelProvider.js';
+import { InstagramChannelProvider } from '../domain/channels/InstagramChannelProvider.js';
 import { ChannelRegistry } from '../domain/channels/ChannelRegistry.js';
 
 const sendMailMock = vi.fn().mockResolvedValue({ messageId: 'smtp-msg-1' });
@@ -261,6 +262,61 @@ describe('WhatsAppChannelProvider', () => {
   });
 });
 
+describe('InstagramChannelProvider', () => {
+  it('sends a plain text message keyed by IGSID', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue({ ok: true, json: async () => ({ message_id: 'ig-mid-1' }) });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const provider = new InstagramChannelProvider('ig-business-1', 'ig-token');
+    const result = await provider.send({ phone: '17841400000000', body: 'Hi there', tenantId: 1 });
+
+    const [url, options] = fetchMock.mock.calls[0] as [
+      string,
+      { body: string; headers: Record<string, string> },
+    ];
+    expect(url).toBe('https://graph.facebook.com/v18.0/ig-business-1/messages');
+    expect(options.headers['Authorization']).toBe('Bearer ig-token');
+    const body = JSON.parse(options.body);
+    expect(body.recipient.id).toBe('17841400000000');
+    expect(body.message.text).toBe('Hi there');
+    expect(result.externalId).toBe('ig-mid-1');
+  });
+
+  it('sends an image attachment when mediaUrl+mediaType=image are given', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue({ ok: true, json: async () => ({ message_id: 'ig-mid-2' }) });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const provider = new InstagramChannelProvider('ig-business-1', 'ig-token');
+    await provider.send({
+      phone: '17841400000000',
+      body: 'Check this out!',
+      tenantId: 1,
+      mediaUrl: 'https://example.com/promo.jpg',
+      mediaType: 'image',
+    });
+
+    const [, options] = fetchMock.mock.calls[0] as [string, { body: string }];
+    const body = JSON.parse(options.body);
+    expect(body.message.attachment.type).toBe('image');
+    expect(body.message.attachment.payload.url).toBe('https://example.com/promo.jpg');
+  });
+
+  it('throws when no IGSID is given', async () => {
+    const provider = new InstagramChannelProvider('b', 't');
+    await expect(provider.send({ body: 'Hi', tenantId: 1 })).rejects.toThrow(
+      'Instagram requires a recipient IGSID'
+    );
+  });
+
+  it('supports media', () => {
+    expect(new InstagramChannelProvider('b', 't').supportsMedia).toBe(true);
+  });
+});
+
 describe('InAppChannelProvider', () => {
   it('returns an inapp_ prefixed id with no network call', async () => {
     const fetchMock = vi.fn();
@@ -286,6 +342,8 @@ describe('ChannelRegistry', () => {
     fromEmail: 'a@b.com',
     whatsappPhoneNumberId: 'p',
     whatsappAccessToken: 'tok',
+    instagramBusinessAccountId: 'ig-b',
+    instagramAccessToken: 'ig-tok',
   };
 
   it('resolves every channel to its matching provider instance', () => {
@@ -294,5 +352,6 @@ describe('ChannelRegistry', () => {
     expect(registry.get('EMAIL')).toBeInstanceOf(EmailChannelProvider);
     expect(registry.get('WHATSAPP')).toBeInstanceOf(WhatsAppChannelProvider);
     expect(registry.get('IN_APP')).toBeInstanceOf(InAppChannelProvider);
+    expect(registry.get('INSTAGRAM')).toBeInstanceOf(InstagramChannelProvider);
   });
 });

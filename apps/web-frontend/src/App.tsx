@@ -26,6 +26,8 @@ const LeadCapturePage = lazy(() => import('./pages/marketing/LeadCapturePage.js'
 const ReferralLandingPage = lazy(() => import('./pages/marketing/ReferralLandingPage.js'));
 const DashboardPage = lazy(() => import('./pages/DashboardPage.js'));
 const MyProfilePage = lazy(() => import('./pages/MyProfilePage.js'));
+const MyApprovalsPage = lazy(() => import('./pages/MyApprovalsPage.js'));
+const CopilotChatPage = lazy(() => import('./pages/CopilotChatPage.js'));
 const NotFoundPage = lazy(() => import('./pages/NotFoundPage.js'));
 const NoModulesAssignedPage = lazy(() => import('./pages/NoModulesAssignedPage.js'));
 const AccountSuspendedPage = lazy(() => import('./pages/AccountSuspendedPage.js'));
@@ -48,6 +50,8 @@ const BranchesPage = lazy(() => import('./pages/settings/BranchesPage.js'));
 const BranchFormPage = lazy(() => import('./pages/settings/BranchFormPage.js'));
 const WarehousesPage = lazy(() => import('./pages/settings/WarehousesPage.js'));
 const WarehouseFormPage = lazy(() => import('./pages/settings/WarehouseFormPage.js'));
+const RulesPage = lazy(() => import('./pages/settings/RulesPage.js'));
+const WorkflowBuilderPage = lazy(() => import('./pages/settings/WorkflowBuilderPage.js'));
 
 // Users
 const UsersPage = lazy(() => import('./pages/users/UsersPage.js'));
@@ -526,6 +530,25 @@ export default function App() {
             }
           />
           <Route
+            path="my-approvals"
+            element={
+              <Page>
+                <MyApprovalsPage />
+              </Page>
+            }
+          />
+          <Route
+            path="copilot"
+            element={
+              <Page>
+                <PermissionRoute
+                  permission={PERMISSIONS.COPILOT_USE}
+                  element={<CopilotChatPage />}
+                />
+              </Page>
+            }
+          />
+          <Route
             path="dashboard"
             element={
               <Page>
@@ -561,6 +584,25 @@ export default function App() {
                 <PermissionRoute
                   permission={PERMISSIONS.ORGANIZATION_VIEW}
                   element={<OrganizationPage />}
+                />
+              </Page>
+            }
+          />
+          <Route
+            path="settings/rules"
+            element={
+              <Page>
+                <PermissionRoute permission={PERMISSIONS.RULE_VIEW} element={<RulesPage />} />
+              </Page>
+            }
+          />
+          <Route
+            path="settings/automation"
+            element={
+              <Page>
+                <PermissionRoute
+                  permission={PERMISSIONS.AUTOMATION_VIEW}
+                  element={<WorkflowBuilderPage />}
                 />
               </Page>
             }

@@ -211,6 +211,29 @@ export const ROLE_DEFAULTS: Record<string, Permission[]> = {
     // the next lifecycle step" gap pattern documented throughout this file (e.g. PO_APPROVE,
     // GRN_APPROVE).
     PERMISSIONS.CREDIT_NOTE_ADJUST,
+    // Business Rules Engine wiring: SALES_MANAGER needs read visibility into the
+    // credit-limit/discount-approval rules that now actually govern their own domain's
+    // invoice/quotation flows (see InvoiceService's new RuleEngine.evaluate() call), plus
+    // Simulate to preview a rule change's effect before asking OWNER/ADMIN to create/edit it.
+    // CRUD stays OWNER/ADMIN/SUPER_ADMIN-only (tenant-wide business policy config, same
+    // posture as organizationSettings.purchaseApprovalThreshold), same split as this role's
+    // existing config-vs-execution grants (e.g. LOYALTY_REDEEM without LOYALTY_TIER_MANAGE).
+    PERMISSIONS.RULE_VIEW,
+    PERMISSIONS.RULE_SIMULATE,
+    // Commission engine: SALES_MANAGER views commission earned by their team and can approve
+    // it for payout — same "owns the Sales domain end-to-end" reasoning as every other grant
+    // in this role. Plan/assignment authoring (COMMISSION_MANAGE) stays OWNER/ADMIN-only,
+    // matching the config-vs-execution split used for RULE_VIEW/RULE_SIMULATE above.
+    PERMISSIONS.COMMISSION_VIEW,
+    PERMISSIONS.COMMISSION_APPROVE,
+    // Workflow Automation Engine: same "views/simulates config affecting their domain, but
+    // authoring stays OWNER/ADMIN-only" split as RULE_VIEW/RULE_SIMULATE above.
+    PERMISSIONS.AUTOMATION_VIEW,
+    PERMISSIONS.AUTOMATION_EXECUTE,
+    // AI Copilot: gates the feature itself, not the data it can read — safe to grant broadly
+    // to operational roles since every tool call still inherits the caller's own RBAC.
+    PERMISSIONS.COPILOT_VIEW,
+    PERMISSIONS.COPILOT_USE,
   ],
 
   CASHIER: [
@@ -313,6 +336,18 @@ export const ROLE_DEFAULTS: Record<string, Permission[]> = {
     PERMISSIONS.REORDER_CREATE_PO,
     PERMISSIONS.REPORT_VIEW,
     PERMISSIONS.SEARCH_GLOBAL,
+    // Business Rules Engine wiring: same reasoning as SALES_MANAGER's RULE_VIEW/RULE_SIMULATE
+    // grant above — this role's PO approval-threshold and GRN-PO-match checks now run through
+    // RuleEngine.evaluate(), so it needs read+simulate visibility into rules governing its own
+    // domain. CRUD stays OWNER/ADMIN/SUPER_ADMIN-only.
+    PERMISSIONS.RULE_VIEW,
+    PERMISSIONS.RULE_SIMULATE,
+    // Workflow Automation Engine: same reasoning as SALES_MANAGER's grant above.
+    PERMISSIONS.AUTOMATION_VIEW,
+    PERMISSIONS.AUTOMATION_EXECUTE,
+    // AI Copilot: same reasoning as SALES_MANAGER's grant above.
+    PERMISSIONS.COPILOT_VIEW,
+    PERMISSIONS.COPILOT_USE,
   ],
 
   ACCOUNTANT: [
@@ -420,6 +455,9 @@ export const ROLE_DEFAULTS: Record<string, Permission[]> = {
     PERMISSIONS.STOCK_TRANSFER_VIEW,
     PERMISSIONS.PHYSICAL_VERIFICATION_VIEW,
     PERMISSIONS.FABRIC_ROLL_VIEW,
+    // AI Copilot: same reasoning as SALES_MANAGER's grant above.
+    PERMISSIONS.COPILOT_VIEW,
+    PERMISSIONS.COPILOT_USE,
   ],
 
   INVENTORY_MANAGER: [
@@ -466,6 +504,9 @@ export const ROLE_DEFAULTS: Record<string, Permission[]> = {
     PERMISSIONS.BARCODE_GENERATE,
     PERMISSIONS.BARCODE_PRINT,
     PERMISSIONS.SEARCH_GLOBAL,
+    // AI Copilot: same reasoning as SALES_MANAGER's grant above.
+    PERMISSIONS.COPILOT_VIEW,
+    PERMISSIONS.COPILOT_USE,
   ],
 
   HR_MANAGER: [
@@ -525,6 +566,9 @@ export const ROLE_DEFAULTS: Record<string, Permission[]> = {
     PERMISSIONS.HR_MANAGE,
     PERMISSIONS.REPORT_VIEW,
     PERMISSIONS.SEARCH_GLOBAL,
+    // AI Copilot: same reasoning as SALES_MANAGER's grant above.
+    PERMISSIONS.COPILOT_VIEW,
+    PERMISSIONS.COPILOT_USE,
   ],
 
   STAFF: [

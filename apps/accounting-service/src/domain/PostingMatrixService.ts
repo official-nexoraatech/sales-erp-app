@@ -131,6 +131,17 @@ export const DEFAULT_POSTING_RULES: Record<
       description: 'RCM liability — self-assessed GST on unregistered vendor purchase',
     },
   ],
+  // Business Rules Engine, Commission category: fires when CommissionService.approve()
+  // transitions a DRAFT commission_ledger row to APPROVED (sales-service) — accrues the
+  // liability, not a cash payout (a separate PAID-status action, not yet built, would debit
+  // Commission Payable / credit Cash, same shape as PAYROLL_RUN_DISBURSED above).
+  COMMISSION_APPROVED: [
+    {
+      debitCode: '6120', // Sales Commission Expense
+      creditCode: '2350', // Commission Payable
+      description: 'Sales commission approved — accrual',
+    },
+  ],
   // Audit finding 2026-07-23: Employee Loans Receivable (1340) was debited once at
   // EMPLOYEE_LOAN_DISBURSED but never credited down as EMIs were collected via payroll —
   // hr-service's applyMonthlyDeduction only decremented its own outstandingBalance column,
