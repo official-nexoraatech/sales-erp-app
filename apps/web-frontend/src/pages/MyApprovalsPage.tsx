@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import {
@@ -26,6 +27,7 @@ const STATUS_VARIANT: Record<string, 'default' | 'warning' | 'success' | 'danger
 export default function MyApprovalsPage() {
   const qc = useQueryClient();
   const confirm = useConfirm();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [selected, setSelected] = useState<PendingApprovalItem | null>(null);
   const [rejectComment, setRejectComment] = useState('');
   const [showReject, setShowReject] = useState(false);
@@ -36,6 +38,27 @@ export default function MyApprovalsPage() {
     refetchInterval: 60_000,
   });
   const items: PendingApprovalItem[] = listData?.content ?? [];
+
+  // Notification Center deep-link: an approval notification's route is always /my-approvals
+  // (no per-item detail page exists), but its metadata carries {instanceId, nodeId} — this
+  // resolves that into auto-selecting and scrolling to the exact pending item instead of
+  // leaving the user to find it in the list themselves.
+  const deepLinkInstanceId = searchParams.get('instanceId');
+  useEffect(() => {
+    if (!deepLinkInstanceId || selected || items.length === 0) return;
+    const match = items.find((i) => String(i.instanceId) === deepLinkInstanceId);
+    if (!match) return;
+    setSelected(match);
+    const el = document.getElementById(`approval-item-${match.approvalId}`);
+    el?.scrollIntoView({ block: 'nearest' });
+    // Drop the query param once consumed so a later manual selection/refresh doesn't keep
+    // re-forcing this item back into view.
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.delete('instanceId');
+      return next;
+    });
+  }, [deepLinkInstanceId, items, selected, setSearchParams]);
 
   const { data: statusData, isLoading: statusLoading } = useQuery<WorkflowApprovalStatus>({
     queryKey: ['my-approvals-status', selected?.instanceId],
@@ -98,6 +121,7 @@ export default function MyApprovalsPage() {
               {items.map((item) => (
                 <div
                   key={item.approvalId}
+                  id={`approval-item-${item.approvalId}`}
                   className={`px-3 py-3 rounded-lg border border-default cursor-pointer transition-colors ${
                     selected?.approvalId === item.approvalId
                       ? 'bg-surface-hover'

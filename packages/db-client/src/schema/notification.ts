@@ -64,6 +64,16 @@ export const notificationLog = pgTable(
     deliveredAt: timestamp('delivered_at', { withTimezone: true }),
     errorMessage: text('error_message'),
     metadata: jsonb('metadata').default({}),
+    // Notification Center — deep-link + triage metadata. All nullable: existing rows and
+    // channels other than IN_APP (SMS/EMAIL/WHATSAPP/INSTAGRAM) simply have none of these set.
+    entityType: varchar('entity_type', { length: 50 }),
+    entityId: integer('entity_id'),
+    priority: varchar('priority', { length: 10 }).$type<'LOW' | 'NORMAL' | 'HIGH' | 'CRITICAL'>(),
+    // Named businessCategory (not `category`) — SendRawInput.category already means the
+    // unrelated DLT PROMOTIONAL/TRANSACTIONAL gate; reusing that name would collide with it.
+    businessCategory: varchar('business_category', { length: 30 }).$type<
+      'APPROVAL' | 'SALES' | 'CRM' | 'INVENTORY' | 'FINANCE' | 'WORKFLOW' | 'SYSTEM'
+    >(),
     readAt: timestamp('read_at', { withTimezone: true }),
     // ES-26 (M8): caller-supplied or derived dedup key (tenant+eventType+channel+recipient+
     // templateData hash + 5-min time bucket) — a unique index on (tenantId, idempotencyKey)
@@ -78,6 +88,9 @@ export const notificationLog = pgTable(
     index('idx_notif_log_tenant_status').on(t.tenantId, t.status, t.createdAt),
     index('idx_notif_log_recipient').on(t.recipientUserId, t.tenantId),
     index('idx_notif_log_event').on(t.eventType, t.tenantId),
+    // Covers the Notification Center's list/unread-only queries (GET /notifications) — added
+    // alongside the migration, not as a replacement for idx_notif_log_recipient above.
+    index('idx_notif_log_recipient_unread').on(t.recipientUserId, t.tenantId, t.channel, t.readAt),
     unique('notif_log_idempotency_key').on(t.tenantId, t.idempotencyKey),
   ]
 );

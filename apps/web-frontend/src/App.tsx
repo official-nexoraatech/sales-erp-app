@@ -16,6 +16,7 @@ const SignupPage = lazy(() => import('./pages/auth/SignupPage.js'));
 const ResetPasswordPage = lazy(() => import('./pages/auth/ResetPasswordPage.js'));
 const SecuritySettingsPage = lazy(() => import('./pages/auth/SecuritySettingsPage.js'));
 const PersonalizationPage = lazy(() => import('./pages/settings/PersonalizationPage.js'));
+const NotificationsPage = lazy(() => import('./pages/NotificationsPage.js'));
 
 // Marketing / public site
 const LandingPage = lazy(() => import('./pages/marketing/LandingPage.js'));
@@ -581,6 +582,14 @@ export default function App() {
             element={
               <Page>
                 <PersonalizationPage />
+              </Page>
+            }
+          />
+          <Route
+            path="notifications"
+            element={
+              <Page>
+                <NotificationsPage />
               </Page>
             }
           />

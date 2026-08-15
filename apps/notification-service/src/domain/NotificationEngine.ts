@@ -1,6 +1,6 @@
 import Handlebars from 'handlebars';
 import { createHash } from 'crypto';
-import { eq, and, lt, gte } from 'drizzle-orm';
+import { eq, and, lt, gte, isNull } from 'drizzle-orm';
 import type { ErpDatabase } from '@erp/db';
 import {
   notificationTemplates,
@@ -25,6 +25,15 @@ export interface SendNotificationInput {
   templateData: Record<string, unknown>;
   channels?: Array<'SMS' | 'EMAIL' | 'WHATSAPP' | 'IN_APP' | 'INSTAGRAM'>;
   idempotencyKey?: string;
+  /** Notification Center deep-link metadata — see notification_log.entityType/entityId. */
+  entityType?: string | undefined;
+  entityId?: number | undefined;
+  priority?: 'LOW' | 'NORMAL' | 'HIGH' | 'CRITICAL' | undefined;
+  businessCategory?:
+    'APPROVAL' | 'SALES' | 'CRM' | 'INVENTORY' | 'FINANCE' | 'WORKFLOW' | 'SYSTEM' | undefined;
+  /** Extra deep-link context beyond entityType/entityId — e.g. an APPROVAL notification's
+   * {instanceId, nodeId} so the frontend can call approvalApi.approve/reject inline. */
+  metadata?: Record<string, unknown> | undefined;
 }
 
 export interface NotificationResult {
@@ -61,6 +70,17 @@ export interface SendRawInput {
    * for every campaign it sends) is subject to the DLT gate below.
    */
   category?: 'PROMOTIONAL' | 'TRANSACTIONAL' | undefined;
+  /** Notification Center deep-link metadata — see notification_log.entityType/entityId. Named
+   * businessCategory (not `category`, which above already means the DLT promo/transactional
+   * gate) to avoid colliding with that unrelated, working compliance check. */
+  entityType?: string | undefined;
+  entityId?: number | undefined;
+  priority?: 'LOW' | 'NORMAL' | 'HIGH' | 'CRITICAL' | undefined;
+  businessCategory?:
+    'APPROVAL' | 'SALES' | 'CRM' | 'INVENTORY' | 'FINANCE' | 'WORKFLOW' | 'SYSTEM' | undefined;
+  /** Extra deep-link context beyond entityType/entityId — e.g. an APPROVAL notification's
+   * {instanceId, nodeId} so the frontend can call approvalApi.approve/reject inline. */
+  metadata?: Record<string, unknown> | undefined;
 }
 
 // ES-26 (M8): dedup key for a caller retry landing on an already-recently-sent notification.
@@ -237,6 +257,11 @@ export class NotificationEngine {
           attemptCount: 0,
           createdBy: input.recipientUserId ?? 0,
           idempotencyKey,
+          entityType: input.entityType,
+          entityId: input.entityId,
+          priority: input.priority,
+          businessCategory: input.businessCategory,
+          ...(input.metadata !== undefined ? { metadata: input.metadata } : {}),
         })
         .onConflictDoNothing({ target: [notificationLog.tenantId, notificationLog.idempotencyKey] })
         .returning();
@@ -332,6 +357,11 @@ export class NotificationEngine {
         attemptCount: 0,
         createdBy: input.createdBy ?? 0,
         idempotencyKey,
+        entityType: input.entityType,
+        entityId: input.entityId,
+        priority: input.priority,
+        businessCategory: input.businessCategory,
+        ...(input.metadata !== undefined ? { metadata: input.metadata } : {}),
       })
       .onConflictDoNothing({ target: [notificationLog.tenantId, notificationLog.idempotencyKey] })
       .returning();
@@ -431,6 +461,10 @@ export class NotificationEngine {
   }
 
   async getUnreadCount(tenantId: number, userId: number): Promise<number> {
+    // Bug fix (Notification Center): this never filtered on readAt, so it counted every
+    // ever-delivered IN_APP notification regardless of read state — the bell badge could never
+    // go down, even right after "mark all as read". Confirmed live: two already-read rows
+    // still reported unreadCount: 2 both before and after a real POST /notifications/read-all.
     const rows = await this.db
       .select({ id: notificationLog.id })
       .from(notificationLog)
@@ -439,7 +473,8 @@ export class NotificationEngine {
           eq(notificationLog.tenantId, tenantId),
           eq(notificationLog.recipientUserId, userId),
           eq(notificationLog.channel, 'IN_APP'),
-          eq(notificationLog.status, 'SENT')
+          eq(notificationLog.status, 'SENT'),
+          isNull(notificationLog.readAt)
         )
       );
 

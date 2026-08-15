@@ -13,7 +13,12 @@ export class InvoiceNotificationService {
   static async notifyInvoiceConfirmed(ctx: PlatformContext, invoiceId: number): Promise<void> {
     try {
       const [invoice] = await ctx.db.raw
-        .select({ invoiceNumber: invoices.invoiceNumber, grandTotal: invoices.grandTotal, dueDate: invoices.dueDate, customerId: invoices.customerId })
+        .select({
+          invoiceNumber: invoices.invoiceNumber,
+          grandTotal: invoices.grandTotal,
+          dueDate: invoices.dueDate,
+          customerId: invoices.customerId,
+        })
         .from(invoices)
         .where(and(eq(invoices.id, invoiceId), eq(invoices.tenantId, ctx.tenant.tenantId)));
       if (!invoice) return;
@@ -27,7 +32,9 @@ export class InvoiceNotificationService {
           optOutEmail: customers.optOutEmail,
         })
         .from(customers)
-        .where(and(eq(customers.id, invoice.customerId), eq(customers.tenantId, ctx.tenant.tenantId)));
+        .where(
+          and(eq(customers.id, invoice.customerId), eq(customers.tenantId, ctx.tenant.tenantId))
+        );
       if (!customer) return;
       if (customer.optOutWhatsapp && customer.optOutEmail) return;
 
@@ -40,14 +47,28 @@ export class InvoiceNotificationService {
         fetch(`${notificationUrl}/notifications/send-raw-internal`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'x-internal-key': internalKey },
-          body: JSON.stringify({ tenantId: ctx.tenant.tenantId, eventType: 'INVOICE_CONFIRMED', channel, body, ...extra }),
-        }).catch((err) => logger.warn({ err, invoiceId, channel }, 'Invoice-confirmed notification delivery failed'));
+          body: JSON.stringify({
+            tenantId: ctx.tenant.tenantId,
+            eventType: 'INVOICE_CONFIRMED',
+            channel,
+            body,
+            entityType: 'Invoice',
+            entityId: invoiceId,
+            businessCategory: 'SALES',
+            ...extra,
+          }),
+        }).catch((err) =>
+          logger.warn({ err, invoiceId, channel }, 'Invoice-confirmed notification delivery failed')
+        );
 
       if (!customer.optOutWhatsapp && customer.phone) {
         await send('WHATSAPP', { recipientPhone: customer.phone });
       }
       if (!customer.optOutEmail && customer.email) {
-        await send('EMAIL', { recipientEmail: customer.email, subject: `Invoice ${invoice.invoiceNumber} confirmed` });
+        await send('EMAIL', {
+          recipientEmail: customer.email,
+          subject: `Invoice ${invoice.invoiceNumber} confirmed`,
+        });
       }
     } catch (err) {
       logger.warn({ err, invoiceId }, 'Invoice-confirmed notification failed (non-fatal)');

@@ -6,9 +6,72 @@ import { and, desc, eq, inArray, isNull, or } from 'drizzle-orm';
 import { z } from 'zod';
 import { BusinessError, NotFoundError, OptimisticLockError, ValidationError } from '@erp/types';
 import { PERMISSIONS } from '@erp/types';
+import { createLogger } from '@erp/logger';
 import { authenticate } from '../middleware/authenticate.js';
 import { requirePermission } from '../middleware/authorize.js';
 import { LeadService } from '../domain/LeadService.js';
+
+const logger = createLogger({ serviceName: 'sales-service' });
+
+// One retry after a short delay for a transient failure — a 4xx means the request itself is
+// wrong and retrying won't help, so only a thrown error (network) or 5xx is retried.
+async function sendNotificationWithRetry(
+  url: string,
+  internalKey: string,
+  payload: Record<string, unknown>
+): Promise<void> {
+  const attempts = 2;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-internal-key': internalKey },
+        body: JSON.stringify(payload),
+      });
+      if (res.ok || res.status < 500) return;
+    } catch {
+      // network error — fall through to retry below
+    }
+    if (attempt < attempts) await new Promise((resolve) => setTimeout(resolve, 400));
+  }
+  throw new Error('notification delivery failed after retry');
+}
+
+// Best-effort notification-service call, same fire-and-forget pattern as
+// InvoiceNotificationService.ts — a notification-service outage must never block a lead
+// assignment. One retry on a transient failure before giving up (see sendNotificationWithRetry).
+async function notifyLeadAssigned(
+  tenantId: number,
+  leadId: number,
+  leadLabel: string,
+  assignedUserId: number
+): Promise<void> {
+  try {
+    const notificationUrl = process.env['NOTIFICATION_SERVICE_URL'] ?? 'http://localhost:3014';
+    const internalKey = process.env['INTERNAL_API_KEY'] ?? '';
+    await sendNotificationWithRetry(
+      `${notificationUrl}/notifications/send-raw-internal`,
+      internalKey,
+      {
+        tenantId,
+        eventType: 'LEAD_ASSIGNED',
+        channel: 'IN_APP',
+        recipientUserId: assignedUserId,
+        subject: 'New lead assigned to you',
+        body: `${leadLabel} has been assigned to you.`,
+        entityType: 'Lead',
+        entityId: leadId,
+        businessCategory: 'CRM',
+        priority: 'NORMAL',
+      }
+    );
+  } catch (err) {
+    logger.warn(
+      { err, leadId, assignedUserId },
+      'Lead-assigned notification failed after retry (non-fatal)'
+    );
+  }
+}
 
 // CRM-ROADMAP Phase 1, Feature 2 — Lead Management & Capture.
 
@@ -413,6 +476,13 @@ export async function leadRoutes(
         leadId: id,
         assignedTo: assignedUserId,
       });
+
+      void notifyLeadAssigned(
+        tenantId,
+        id,
+        existing.displayName ?? existing.companyName ?? existing.phone,
+        assignedUserId
+      );
 
       return reply.code(200).send({ data: { leadId: id, assignedTo: assignedUserId } });
     }

@@ -2903,6 +2903,12 @@ export interface InAppNotification {
   body: string;
   createdAt: string;
   readAt: string | null;
+  entityType: string | null;
+  entityId: number | null;
+  priority: 'LOW' | 'NORMAL' | 'HIGH' | 'CRITICAL' | null;
+  businessCategory:
+    'APPROVAL' | 'SALES' | 'CRM' | 'INVENTORY' | 'FINANCE' | 'WORKFLOW' | 'SYSTEM' | null;
+  metadata: Record<string, unknown> | null;
 }
 
 export interface NotificationPreference {
@@ -2915,16 +2921,29 @@ export interface NotificationPreference {
 }
 
 export const notificationsApi = {
-  list: (params?: { page?: number; size?: number }) =>
-    apiClient.get<{
+  list: (params?: {
+    page?: number;
+    pageSize?: number;
+    businessCategory?: string | undefined;
+    unreadOnly?: boolean;
+  }) => {
+    const qs = new URLSearchParams();
+    qs.set('page', String(params?.page ?? 1));
+    qs.set('pageSize', String(params?.pageSize ?? 10));
+    if (params?.businessCategory) qs.set('businessCategory', params.businessCategory);
+    if (params?.unreadOnly) qs.set('unreadOnly', 'true');
+    return apiClient.get<{
       content: InAppNotification[];
       unreadCount: number;
       page: number;
-      size: number;
-    }>('notification', `/notifications?page=${params?.page ?? 0}&size=${params?.size ?? 10}`),
+      pageSize: number;
+      totalElements: number;
+    }>('notification', `/notifications?${qs.toString()}`);
+  },
   unreadCount: () =>
     apiClient.get<{ count: number }>('notification', '/notifications/unread-count'),
   markRead: (id: number) => apiClient.post('notification', `/notifications/${id}/read`),
+  markAllRead: () => apiClient.post('notification', '/notifications/read-all'),
   getPreferences: () =>
     apiClient.get<{ content: NotificationPreference[] }>(
       'notification',

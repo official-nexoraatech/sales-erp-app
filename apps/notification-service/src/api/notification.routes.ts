@@ -7,7 +7,7 @@ import {
   notificationTemplates,
   tenantCommunicationSettings,
 } from '@erp/db';
-import { eq, and, desc } from 'drizzle-orm';
+import { eq, and, desc, isNull, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { ValidationError, PERMISSIONS } from '@erp/types';
 import { timingSafeEqual } from 'node:crypto';
@@ -20,6 +20,17 @@ import {
   DEFAULT_NOTIFICATION_RATE_LIMIT_PER_MINUTE,
 } from '../domain/tenantRateLimit.js';
 
+// Notification Center deep-link metadata, shared by every send-style schema below.
+const NotificationMetaFields = {
+  entityType: z.string().min(1).max(50).optional(),
+  entityId: z.number().int().positive().optional(),
+  priority: z.enum(['LOW', 'NORMAL', 'HIGH', 'CRITICAL']).optional(),
+  businessCategory: z
+    .enum(['APPROVAL', 'SALES', 'CRM', 'INVENTORY', 'FINANCE', 'WORKFLOW', 'SYSTEM'])
+    .optional(),
+  metadata: z.record(z.unknown()).optional(),
+};
+
 const SendSchema = z.object({
   eventType: z.string().min(1),
   recipientUserId: z.number().int().positive().optional(),
@@ -30,6 +41,7 @@ const SendSchema = z.object({
   // ES-26 (M8): callers with a natural dedup key (e.g. invoiceId+reminderDate) should pass this
   // instead of relying on the derived tenant+event+recipient+data+time-bucket hash.
   idempotencyKey: z.string().min(1).max(200).optional(),
+  ...NotificationMetaFields,
 });
 
 const InternalSendSchema = SendSchema.extend({
@@ -60,6 +72,7 @@ const SendRawInternalSchema = z.object({
   // 'TRANSACTIONAL' (see NotificationEngine.SendRawInput's own comment) — only
   // sales-service's CampaignService explicitly sets 'PROMOTIONAL'.
   category: z.enum(['PROMOTIONAL', 'TRANSACTIONAL']).optional(),
+  ...NotificationMetaFields,
 });
 
 function requireInternalKey(
@@ -379,31 +392,74 @@ export async function notificationRoutes(
   });
 
   // ── GET /notifications — List in-app notifications for current user ──────
+  // page/pageSize/totalElements matches this platform's standard list-endpoint convention
+  // (e.g. apps/sales-service/src/api/invoice.routes.ts) — this route previously used a
+  // 0-based `page`/`size` pair with no totalElements, its own one-off shape.
   fastify.get('/notifications', { preHandler: authenticate }, async (request, reply) => {
     const { tenantId, userId = 0 } = (request as unknown as AuthedRequest).auth;
-    const query = request.query as { page?: string; size?: string };
-    const page = parseInt(query.page ?? '0', 10);
-    const size = Math.min(parseInt(query.size ?? '20', 10), 100);
+    const query = request.query as {
+      page?: string;
+      pageSize?: string;
+      businessCategory?: string;
+      unreadOnly?: string;
+    };
+    const page = Math.max(1, parseInt(query.page ?? '1', 10));
+    const pageSize = Math.min(100, parseInt(query.pageSize ?? '20', 10));
+
+    const whereClause = and(
+      eq(notificationLog.tenantId, tenantId),
+      eq(notificationLog.recipientUserId, userId),
+      eq(notificationLog.channel, 'IN_APP'),
+      ...(query.businessCategory
+        ? [
+            eq(
+              notificationLog.businessCategory,
+              query.businessCategory as
+                'APPROVAL' | 'SALES' | 'CRM' | 'INVENTORY' | 'FINANCE' | 'WORKFLOW' | 'SYSTEM'
+            ),
+          ]
+        : []),
+      ...(query.unreadOnly === 'true' ? [isNull(notificationLog.readAt)] : [])
+    );
 
     const items = await db
       .select()
       .from(notificationLog)
-      .where(
-        and(
-          eq(notificationLog.tenantId, tenantId),
-          eq(notificationLog.recipientUserId, userId),
-          eq(notificationLog.channel, 'IN_APP')
-        )
-      )
+      .where(whereClause)
       .orderBy(desc(notificationLog.createdAt), desc(notificationLog.id))
-      .limit(size)
-      .offset(page * size);
+      .limit(pageSize)
+      .offset((page - 1) * pageSize);
+
+    const [totalRow] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(notificationLog)
+      .where(whereClause);
+    const totalElements = totalRow?.count ?? 0;
 
     const unreadCount = await engine.getUnreadCount(tenantId, userId);
 
     return reply.code(200).send({
-      data: { content: items, unreadCount, page, size },
+      data: { content: items, unreadCount, page, pageSize, totalElements },
     });
+  });
+
+  // ── POST /notifications/read-all — Mark every unread in-app notification as read ─
+  fastify.post('/notifications/read-all', { preHandler: authenticate }, async (request, reply) => {
+    const { tenantId, userId = 0 } = (request as unknown as AuthedRequest).auth;
+
+    await db
+      .update(notificationLog)
+      .set({ readAt: new Date(), updatedAt: new Date() })
+      .where(
+        and(
+          eq(notificationLog.tenantId, tenantId),
+          eq(notificationLog.recipientUserId, userId),
+          eq(notificationLog.channel, 'IN_APP'),
+          isNull(notificationLog.readAt)
+        )
+      );
+
+    return reply.code(200).send({ data: { message: 'All notifications marked as read' } });
   });
 
   // ── POST /notifications/:id/read — Mark in-app notification as read ──────
@@ -582,11 +638,50 @@ export async function notificationRoutes(
       // Send initial heartbeat
       reply.raw.write('data: {"type":"connected"}\n\n');
 
-      // Poll every 5 seconds for new notifications
+      // Seed lastSeenId from the newest row that already exists at connect time, so the first
+      // tick below doesn't replay the recipient's entire notification history as "new".
+      const [newest] = await db
+        .select({ id: notificationLog.id })
+        .from(notificationLog)
+        .where(
+          and(
+            eq(notificationLog.tenantId, tenantId),
+            eq(notificationLog.recipientUserId, userId),
+            eq(notificationLog.channel, 'IN_APP')
+          )
+        )
+        .orderBy(desc(notificationLog.id))
+        .limit(1);
+      let lastSeenId = newest?.id ?? 0;
+
+      // Poll every 5 seconds for new notifications. Still a DB poll, not a pub/sub push — kept
+      // deliberately simple (no new infrastructure) but now also surfaces the new rows'
+      // content, not just the unread count, so the panel/list can live-update too.
       const interval = setInterval(async () => {
         try {
           const count = await engine.getUnreadCount(tenantId, userId);
           reply.raw.write(`data: ${JSON.stringify({ type: 'unread_count', count })}\n\n`);
+
+          const newItems = await db
+            .select()
+            .from(notificationLog)
+            .where(
+              and(
+                eq(notificationLog.tenantId, tenantId),
+                eq(notificationLog.recipientUserId, userId),
+                eq(notificationLog.channel, 'IN_APP'),
+                sql`${notificationLog.id} > ${lastSeenId}`
+              )
+            )
+            .orderBy(desc(notificationLog.id))
+            .limit(20);
+
+          if (newItems.length > 0) {
+            lastSeenId = Math.max(lastSeenId, ...newItems.map((n) => n.id));
+            reply.raw.write(
+              `data: ${JSON.stringify({ type: 'new_notifications', items: newItems })}\n\n`
+            );
+          }
         } catch {
           clearInterval(interval);
         }

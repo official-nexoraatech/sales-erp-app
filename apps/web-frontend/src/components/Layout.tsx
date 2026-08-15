@@ -255,7 +255,9 @@ function LayoutContent() {
                 <button
                   data-tour-id="dashboard-approvals-button"
                   onClick={() => setNotificationsOpen((v) => !v)}
-                  aria-label="Notifications"
+                  aria-label={`Notifications${unreadCount > 0 ? `, ${unreadCount} unread` : ''}`}
+                  aria-haspopup="dialog"
+                  aria-expanded={notificationsOpen}
                   className={`p-2 rounded-lg transition-colors relative ${notificationsOpen ? 'bg-primary text-primary-fg' : 'text-secondary hover:bg-surface-raised'}`}
                 >
                   <Bell size={18} />

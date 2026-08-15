@@ -10,6 +10,35 @@ import {
 } from '@erp/db';
 import type { WorkflowNode } from '@erp/db';
 import { NotFoundError, BusinessError, ERPError } from '@erp/types';
+import { createLogger } from '@erp/logger';
+
+const logger = createLogger({ serviceName: 'platform-sdk' });
+
+// One retry after a short delay for a transient failure (network blip, notification-service
+// mid-restart) — a 4xx response means the request itself is wrong and retrying won't help, so
+// only a thrown error (network) or 5xx is retried. Throws only if every attempt failed, so the
+// caller's own catch-and-log still fires as the final backstop.
+async function sendNotificationWithRetry(
+  url: string,
+  internalKey: string,
+  payload: Record<string, unknown>
+): Promise<void> {
+  const attempts = 2;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-internal-key': internalKey },
+        body: JSON.stringify(payload),
+      });
+      if (res.ok || res.status < 500) return;
+    } catch {
+      // network error — fall through to retry below
+    }
+    if (attempt < attempts) await new Promise((resolve) => setTimeout(resolve, 400));
+  }
+  throw new Error('notification delivery failed after retry');
+}
 
 export interface WorkflowTriggerInput {
   event: string;
@@ -432,6 +461,50 @@ export class WorkflowEngine {
     private readonly correlationId: string
   ) {}
 
+  // Best-effort in-app notification — same fire-and-forget fetch-to-notification-service
+  // pattern already duplicated at 30+ call sites across services (no shared SDK client exists
+  // yet for this; adding one is a larger refactor than this change needs). A notification-
+  // service outage must never block an approval decision, so a final failure is only logged —
+  // but a transient one (network blip, notification-service mid-restart) gets one retry first,
+  // rather than silently dropping the notification forever on the first hiccup.
+  private async notifyUser(
+    recipientUserId: number,
+    subject: string,
+    body: string,
+    entityType: string,
+    entityId: number,
+    // Set only for "requires your approval" notifications — lets the frontend call
+    // approvalApi.approve/reject inline without a page navigation.
+    pendingAction?: { instanceId: number; nodeId: string }
+  ): Promise<void> {
+    const notificationUrl = process.env['NOTIFICATION_SERVICE_URL'] ?? 'http://localhost:3014';
+    const internalKey = process.env['INTERNAL_API_KEY'] ?? '';
+    try {
+      await sendNotificationWithRetry(
+        `${notificationUrl}/notifications/send-raw-internal`,
+        internalKey,
+        {
+          tenantId: this.tenantId,
+          eventType: 'WORKFLOW_APPROVAL',
+          channel: 'IN_APP',
+          recipientUserId,
+          subject,
+          body,
+          entityType,
+          entityId,
+          businessCategory: 'APPROVAL',
+          priority: 'HIGH',
+          ...(pendingAction ? { metadata: pendingAction } : {}),
+        }
+      );
+    } catch (err) {
+      logger.warn(
+        { err, tenantId: this.tenantId, recipientUserId, entityType, entityId },
+        'Workflow approval notification failed after retry (non-fatal)'
+      );
+    }
+  }
+
   async trigger(
     input: WorkflowTriggerInput
   ): Promise<typeof workflowInstances.$inferSelect | null> {
@@ -487,6 +560,14 @@ export class WorkflowEngine {
     const approvers = await this.resolveApprovers(firstNode);
     for (const approver of approvers) {
       await this.createApprovalRecord(instance.id, firstNode, approver, input.userId);
+      void this.notifyUser(
+        approver.userId,
+        definition.name,
+        `${firstNode.name} — ${input.entityType} #${input.entityId} requires your approval.`,
+        input.entityType,
+        input.entityId,
+        { instanceId: instance.id, nodeId: firstNode.id }
+      );
     }
 
     return instance;
@@ -648,7 +729,7 @@ export class WorkflowEngine {
     }
 
     if (input.action === 'REJECTED') {
-      await this.finalizeInstance(instance.id, 'REJECTED');
+      await this.finalizeInstance(instance, 'REJECTED');
       return;
     }
 
@@ -689,22 +770,38 @@ export class WorkflowEngine {
         const approvers = await this.resolveApprovers(nextNode);
         for (const approver of approvers) {
           await this.createApprovalRecord(instance.id, nextNode, approver, input.userId);
+          void this.notifyUser(
+            approver.userId,
+            definition.name,
+            `${nextNode.name} — ${instance.entityType} #${instance.entityId} requires your approval.`,
+            instance.entityType,
+            instance.entityId,
+            { instanceId: instance.id, nodeId: nextNode.id }
+          );
         }
         return;
       }
     }
 
-    await this.finalizeInstance(instance.id, 'APPROVED');
+    await this.finalizeInstance(instance, 'APPROVED');
   }
 
   private async finalizeInstance(
-    instanceId: number,
+    instance: typeof workflowInstances.$inferSelect,
     status: 'APPROVED' | 'REJECTED'
   ): Promise<void> {
     await this.db
       .update(workflowInstances)
       .set({ status, completedAt: new Date(), updatedAt: new Date() })
-      .where(eq(workflowInstances.id, instanceId));
+      .where(eq(workflowInstances.id, instance.id));
+
+    void this.notifyUser(
+      instance.triggeredByUserId,
+      `${instance.entityType} #${instance.entityId} ${status.toLowerCase()}`,
+      `Your ${instance.entityType} #${instance.entityId} was ${status.toLowerCase()}.`,
+      instance.entityType,
+      instance.entityId
+    );
   }
 
   // Resolves a node's approver to the real user(s) who can act on it. For ROLE-type nodes

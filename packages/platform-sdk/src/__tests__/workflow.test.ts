@@ -290,4 +290,118 @@ describe.skipIf(!DB_URL)('WorkflowEngine — role approver resolution', () => {
     const finalStatus = await engine.getStatus(instance!.id);
     expect(finalStatus.status).toBe('APPROVED');
   });
+
+  // Notification Center: WorkflowEngine previously never notified anyone — approvers only
+  // discovered a pending item by polling My Approvals, and a requester never learned the
+  // outcome. Only the outbound fetch (an external HTTP boundary) is mocked here; everything
+  // else runs against the real database, same as the rest of this suite.
+  it('notifies each resolved approver on trigger(), and the requester once the decision finalizes', async () => {
+    const fetchSpy = vi
+      .spyOn(global, 'fetch')
+      .mockResolvedValue(new Response('{}', { status: 200 }));
+
+    const triggerEvent = `TEST_NOTIFY_${randomUUID()}`;
+    await seedDefinition(
+      [
+        {
+          id: 'node_1',
+          name: 'Approver',
+          type: 'APPROVAL',
+          approverType: 'ROLE',
+          approverRef: 'TEST_APPROVER_ROLE',
+        },
+      ],
+      triggerEvent
+    );
+
+    const engine = new WorkflowEngine(db, tenantId, activeUser1, randomUUID());
+    const instance = await engine.trigger({
+      event: triggerEvent,
+      entityType: 'TestEntity',
+      entityId: 99,
+      userId: activeUser1,
+      correlationId: randomUUID(),
+    });
+    cleanupInstanceIds.push(instance!.id);
+
+    // notifyUser is fire-and-forget (`void this.notifyUser(...)`) — give its promise a tick.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    const approvalCalls = fetchSpy.mock.calls.filter(([url]) =>
+      String(url).includes('/notifications/send-raw-internal')
+    );
+    expect(approvalCalls.length).toBeGreaterThanOrEqual(2); // one per active role-holder
+    const firstBody = JSON.parse(String(approvalCalls[0]?.[1]?.body)) as Record<string, unknown>;
+    expect(firstBody).toMatchObject({
+      channel: 'IN_APP',
+      entityType: 'TestEntity',
+      entityId: 99,
+      businessCategory: 'APPROVAL',
+      priority: 'HIGH',
+      metadata: { instanceId: instance!.id, nodeId: 'node_1' },
+    });
+
+    fetchSpy.mockClear();
+    await engine.approve({ instanceId: instance!.id, nodeId: 'node_1', userId: activeUser1 });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    const outcomeCalls = fetchSpy.mock.calls.filter(([url]) =>
+      String(url).includes('/notifications/send-raw-internal')
+    );
+    expect(outcomeCalls.length).toBeGreaterThanOrEqual(1);
+    const outcomeBody = JSON.parse(String(outcomeCalls[0]?.[1]?.body)) as Record<string, unknown>;
+    expect(outcomeBody['recipientUserId']).toBe(activeUser1);
+    expect(String(outcomeBody['subject'])).toContain('approved');
+
+    fetchSpy.mockRestore();
+  });
+
+  // Audit follow-up: notifyUser was pure fire-and-forget with no retry — a single transient
+  // notification-service hiccup silently dropped the notification forever. This proves the
+  // retry actually delivers on the second attempt rather than giving up after the first.
+  it('retries once on a transient notification-service failure and still delivers', async () => {
+    const fetchSpy = vi
+      .spyOn(global, 'fetch')
+      .mockResolvedValueOnce(new Response('service unavailable', { status: 503 }))
+      .mockResolvedValue(new Response('{}', { status: 200 }));
+
+    const triggerEvent = `TEST_RETRY_${randomUUID()}`;
+    await seedDefinition(
+      [
+        {
+          id: 'node_1',
+          name: 'Approver',
+          type: 'APPROVAL',
+          approverType: 'ROLE',
+          approverRef: 'TEST_APPROVER_ROLE',
+        },
+      ],
+      triggerEvent
+    );
+
+    const engine = new WorkflowEngine(db, tenantId, activeUser1, randomUUID());
+    const instance = await engine.trigger({
+      event: triggerEvent,
+      entityType: 'TestEntity',
+      entityId: 77,
+      userId: activeUser1,
+      correlationId: randomUUID(),
+    });
+    cleanupInstanceIds.push(instance!.id);
+
+    // notifyUser is fire-and-forget; the retry itself waits ~400ms before its second attempt.
+    await new Promise((resolve) => setTimeout(resolve, 900));
+
+    const calls = fetchSpy.mock.calls.filter(([url]) =>
+      String(url).includes('/notifications/send-raw-internal')
+    );
+    // The mocked 503 only fires on the very first fetch overall, so exactly one of the 2
+    // active role-holders' notifications needed a retry — 3 calls total (1 failed + 1 retry-
+    // success for the first approver, 1 immediate success for the second), not 2. More than
+    // one call per approver is exactly the signal that a retry actually fired, not just that
+    // both approvers happened to get notified.
+    expect(calls.length).toBe(3);
+
+    fetchSpy.mockRestore();
+  });
 });
