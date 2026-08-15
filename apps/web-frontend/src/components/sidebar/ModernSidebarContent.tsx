@@ -27,10 +27,21 @@ const SIDEBAR_EXPANDED_WIDTH = 210;
 const SIDEBAR_COLLAPSED_WIDTH = 56;
 const COLUMN_WIDTH = 210;
 
+// One shared row style for every nav-like control (rail leaves/parents, column leaves/parents)
+// so icon size, icon-to-label gap, active/hover color, and focus ring never drift out of sync
+// between the rail and its flyout columns. Collapsed padding (py-3.5) is deliberately taller
+// than expanded (py-2) — at the rail's 56px width that keeps the tappable area close to the
+// ~44px touch-target guideline instead of shrinking to fit just the 20px icon.
 const itemRowClass = (active: boolean, collapsed: boolean) =>
-  `group relative flex items-center gap-3 rounded-lg text-sm font-medium transition-colors duration-150 ${
-    collapsed ? 'justify-center px-0 py-2.5' : 'px-3 py-2'
+  `group relative flex items-center gap-2.5 rounded-lg text-sm font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus ${
+    collapsed ? 'justify-center px-0 py-3.5' : 'px-3 py-2'
   } ${active ? 'bg-primary-subtle text-brand' : 'text-secondary hover:bg-surface-raised hover:text-primary'}`;
+
+// Two-tier icon scale matching the app's own --icon-md/--icon-sm design tokens (tokens.css) —
+// every primary nav icon (rail + columns) renders at ICON_SIZE, every chevron/utility icon at
+// CHEVRON_SIZE, so nothing in the sidebar is sized ad hoc.
+const ICON_SIZE = 20;
+const CHEVRON_SIZE = 16;
 
 /** One item in the always-visible rail (column 0). Leaves navigate directly; parents open
  * column 1 instead of expanding in place. */
@@ -62,7 +73,7 @@ function NavRailItem({
         title={collapsed ? item.label : undefined}
         className={({ isActive }) => itemRowClass(isActive, collapsed)}
       >
-        <Icon size={19} className="shrink-0" />
+        <Icon size={ICON_SIZE} className="shrink-0" />
         {!collapsed && <span className="truncate">{item.label}</span>}
       </NavLink>
     );
@@ -77,11 +88,11 @@ function NavRailItem({
       title={collapsed ? item.label : undefined}
       className={itemRowClass(active, collapsed)}
     >
-      <Icon size={19} className="shrink-0" />
+      <Icon size={ICON_SIZE} className="shrink-0" />
       {!collapsed && (
         <>
           <span className="flex-1 text-left truncate">{item.label}</span>
-          <ChevronRight size={14} className="shrink-0 text-secondary" />
+          <ChevronRight size={CHEVRON_SIZE} className="shrink-0 text-secondary" />
         </>
       )}
     </button>
@@ -121,7 +132,7 @@ function ColumnPanel({
       className="fixed inset-y-0 w-60 flex flex-col bg-surface-card border-r border-default shadow-token-lg z-[var(--z-popover)] transition-[left] duration-200 ease-out animate-[sidebarFlyoutIn_var(--duration-normal)_ease-out]"
     >
       <div className="flex items-center gap-2.5 px-4 py-4 border-b border-default shrink-0">
-        <ParentIcon size={18} className="text-brand shrink-0" />
+        <ParentIcon size={ICON_SIZE} className="text-brand shrink-0" />
         <span className="font-semibold text-sm text-primary truncate">{parent.label}</span>
       </div>
       <div className="flex-1 overflow-y-auto px-2.5 py-3 space-y-0.5">
@@ -140,9 +151,9 @@ function ColumnPanel({
                 aria-expanded={isOpen}
                 className={itemRowClass(childActive, false)}
               >
-                <ChildIcon size={17} className="shrink-0" />
+                <ChildIcon size={ICON_SIZE} className="shrink-0" />
                 <span className="flex-1 text-left truncate">{child.label}</span>
-                <ChevronRight size={14} className="shrink-0 text-secondary" />
+                <ChevronRight size={CHEVRON_SIZE} className="shrink-0 text-secondary" />
               </button>
             );
           }
@@ -153,7 +164,7 @@ function ColumnPanel({
               onClick={onSelectLeaf}
               className={({ isActive }) => itemRowClass(isActive, false)}
             >
-              <ChildIcon size={17} className="shrink-0" />
+              <ChildIcon size={ICON_SIZE} className="shrink-0" />
               <span className="truncate">{child.label}</span>
             </NavLink>
           );
@@ -249,9 +260,9 @@ export default function ModernSidebarContent({
           <button
             onClick={onToggleCollapse}
             aria-label={isMobile ? 'Close navigation menu' : 'Collapse sidebar'}
-            className="ml-auto p-1.5 rounded-md text-secondary hover:text-primary hover:bg-surface-raised transition-colors shrink-0"
+            className="ml-auto p-1.5 rounded-md text-secondary hover:text-primary hover:bg-surface-raised transition-colors shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
           >
-            {isMobile ? <X size={17} /> : <PanelLeftClose size={17} />}
+            {isMobile ? <X size={CHEVRON_SIZE} /> : <PanelLeftClose size={CHEVRON_SIZE} />}
           </button>
         </div>
       ) : (
@@ -260,7 +271,7 @@ export default function ModernSidebarContent({
             onClick={onToggleCollapse}
             aria-label="Expand sidebar"
             title="Expand sidebar"
-            className="w-9 h-9 rounded-lg hover:opacity-90 transition-opacity"
+            className="w-9 h-9 rounded-lg hover:opacity-90 transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
           >
             <TenantLogo
               className="w-9 h-9 rounded-lg object-cover"
@@ -322,11 +333,11 @@ export default function ModernSidebarContent({
       {/* Bottom utility area — theme toggle + user + logout */}
       <div className="px-3 py-3 border-t border-default space-y-2">
         {showLabels ? (
-          <div className="flex items-center gap-2 px-2 py-1.5 rounded-md text-secondary">
+          <div className="flex items-center gap-2.5 px-2 py-1.5 rounded-md text-secondary">
             {isDark ? (
-              <Moon size={16} className="shrink-0" />
+              <Moon size={CHEVRON_SIZE} className="shrink-0" />
             ) : (
-              <Sun size={16} className="shrink-0" />
+              <Sun size={CHEVRON_SIZE} className="shrink-0" />
             )}
             <Switch
               checked={isDark}
@@ -340,14 +351,14 @@ export default function ModernSidebarContent({
             onClick={() => setMode(isDark ? 'light' : 'dark')}
             aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
             title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
-            className="w-full flex items-center justify-center px-0 py-2 rounded-md text-secondary hover:text-primary hover:bg-surface-raised transition-colors"
+            className="w-full flex items-center justify-center px-0 py-3 rounded-md text-secondary hover:text-primary hover:bg-surface-raised transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
           >
-            {isDark ? <Moon size={16} /> : <Sun size={16} />}
+            {isDark ? <Moon size={CHEVRON_SIZE} /> : <Sun size={CHEVRON_SIZE} />}
           </button>
         )}
 
         {showLabels && user && (
-          <div className="flex items-center gap-2 px-2 py-1.5 text-sm">
+          <div className="flex items-center gap-2.5 px-2 py-1.5 text-sm">
             <div className="w-7 h-7 rounded-full bg-primary flex items-center justify-center text-primary-fg font-semibold text-xs shrink-0">
               {userInitial}
             </div>
@@ -364,9 +375,11 @@ export default function ModernSidebarContent({
           onClick={onLogoutClick}
           aria-label="Logout"
           title={showLabels ? undefined : 'Logout'}
-          className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm text-danger hover:bg-danger-bg transition-colors"
+          className={`w-full flex items-center gap-2.5 px-2 rounded-md text-sm text-danger hover:bg-danger-bg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus ${
+            showLabels ? 'py-1.5' : 'justify-center py-3'
+          }`}
         >
-          <LogOut size={16} className="shrink-0" />
+          <LogOut size={CHEVRON_SIZE} className="shrink-0" />
           {showLabels && 'Logout'}
         </button>
       </div>
