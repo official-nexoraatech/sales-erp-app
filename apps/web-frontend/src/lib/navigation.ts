@@ -61,6 +61,7 @@ import {
   FileSpreadsheet,
   Coins,
   KeyRound,
+  Palette,
   ScrollText,
   Barcode,
   Globe,
@@ -839,6 +840,7 @@ export const NAV_GROUPS: NavGroup[] = [
       },
       { label: 'Security Settings', path: '/security', icon: KeyRound },
       { label: 'Notification Preferences', path: '/notification-preferences', icon: Bell },
+      { label: 'Personalization', path: '/personalization', icon: Palette },
     ],
   },
   {

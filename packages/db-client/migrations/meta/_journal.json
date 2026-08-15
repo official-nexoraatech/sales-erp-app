@@ -1128,6 +1128,13 @@
       "when": 1796416535804,
       "tag": "0160_commission_accounts_backfill",
       "breakpoints": true
+    },
+    {
+      "idx": 161,
+      "version": "7",
+      "when": 1796416535805,
+      "tag": "0161_user_preferences",
+      "breakpoints": true
     }
   ]
 }

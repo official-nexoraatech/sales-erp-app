@@ -23,6 +23,7 @@ export const authApi = {
       firstName: string;
       lastName: string;
       branches: Array<{ id: number; branchId: number; isPrimary: boolean }>;
+      preferences?: { sidebarStyle?: 'modern' | 'classic' } | null;
     }>('auth', '/users/me'),
   updateMe: (data: Record<string, unknown>) => apiClient.put('auth', '/users/me', data),
   changePassword: (data: { currentPassword: string; newPassword: string }) =>

@@ -55,6 +55,10 @@ const UpdateMeSchema = z.object({
   firstName: z.string().min(1).max(100).optional(),
   lastName: z.string().min(1).max(100).optional(),
   phone: z.string().max(20).optional(),
+  preferences: z
+    .object({ sidebarStyle: z.enum(['modern', 'classic']).optional() })
+    .partial()
+    .optional(),
 });
 
 const ChangePasswordSchema = z.object({
@@ -578,9 +582,19 @@ export async function userRoutes(
       .from(users)
       .where(and(eq(users.id, userId), eq(users.tenantId, tenantId)));
     if (!existing) throw new NotFoundError('User', userId);
+    // Shallow-merge preferences with the existing row rather than overwrite the column
+    // outright — a request that only sends sidebarStyle must not wipe out other, unrelated
+    // preference keys added later.
+    const { preferences, ...rest } = body.data;
     const [updated] = await ctx.db.raw
       .update(users)
-      .set({ ...body.data, updatedAt: new Date() })
+      .set({
+        ...rest,
+        ...(preferences
+          ? { preferences: { ...(existing.preferences ?? {}), ...preferences } }
+          : {}),
+        updatedAt: new Date(),
+      })
       .where(eq(users.id, userId))
       .returning();
     if (!updated) throw new Error('User update failed unexpectedly');

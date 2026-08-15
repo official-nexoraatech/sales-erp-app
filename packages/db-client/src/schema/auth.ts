@@ -39,6 +39,9 @@ export const users = pgTable(
     // in this change, nothing writes these columns yet.
     ssoProvider: varchar('sso_provider', { length: 30 }),
     ssoSubject: varchar('sso_subject', { length: 255 }),
+    // Per-user UI personalization (dual-sidebar feature) — nullable, so existing rows read
+    // as "no preference" and application code defaults sidebarStyle to 'modern'.
+    preferences: jsonb('preferences').$type<{ sidebarStyle?: 'modern' | 'classic' | undefined }>(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },

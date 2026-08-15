@@ -11,6 +11,7 @@ export interface AuthUser {
   permissions: string[];
   branchIds: number[];
   totpEnabled?: boolean;
+  preferences?: { sidebarStyle?: 'modern' | 'classic' } | null;
 }
 
 // The admin's own session, stashed while an impersonation token is active — lets
