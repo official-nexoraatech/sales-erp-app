@@ -42,7 +42,7 @@ vi.mock('drizzle-orm', () => ({
   })),
 }));
 
-import { ValuationService } from '../domain/ValuationService.js';
+import { ValuationService } from '@erp/sdk';
 import { StockInsufficientForCostingError } from '@erp/types';
 
 function makeDb(script: unknown[]) {

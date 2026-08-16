@@ -5,12 +5,14 @@ import {
   jobWorkOrderQualityChecks,
   jobWorkOrderHistory,
   inventoryLedger,
+  projectionStockLevel,
   items,
   suppliers,
   outboxEvents,
 } from '@erp/db';
 import type { ErpDatabase } from '@erp/db';
 import { BusinessError, NotFoundError } from '@erp/types';
+import { ValuationService } from '@erp/sdk';
 import { ulid } from 'ulid';
 
 export interface CreateJobWorkOrderParams {
@@ -158,7 +160,15 @@ export class JobWorkOrderService {
         .from(jobWorkOrderMaterials)
         .where(eq(jobWorkOrderMaterials.jobWorkOrderId, id));
 
-      // Deduct each material from stock atomically
+      // Deduct each material from stock atomically. Multi-vertical platform audit
+      // 2026-08-16, Phase 1 consolidation: this used to update items.availableQty and write a
+      // ledger row with placeholder quantityBefore/After ('0'/'0') without ever calling
+      // ValuationService — raw-material consumption for job-work never touched
+      // waccCost/currentStockValue/FIFO layers, so COGS silently ignored job-work material
+      // usage. Now shares the same ValuationService.consumeForStockOut() GRN/sales/adjustments
+      // already use, with real before/after quantities and a projection_stock_level update
+      // (previously missing here too — job-work movements were invisible to the per-warehouse
+      // Stock Levels view, the same class of gap GRNService.approve() was fixed for earlier).
       for (const mat of materials) {
         const qty = parseFloat(String(mat.requiredQty));
         const result = await trx
@@ -174,7 +184,7 @@ export class JobWorkOrderService {
               sql`${items.availableQty} >= ${qty}`
             )
           )
-          .returning({ id: items.id });
+          .returning({ availableQty: items.availableQty });
 
         if (result.length === 0) {
           throw new BusinessError(
@@ -184,6 +194,18 @@ export class JobWorkOrderService {
           );
         }
 
+        const afterQty = parseFloat(String(result[0]!.availableQty));
+        const beforeQty = afterQty + qty;
+
+        const totalCogs = await ValuationService.consumeForStockOut(trx, {
+          tenantId,
+          itemId: mat.itemId,
+          variantId: mat.variantId ?? undefined,
+          warehouseId: mat.warehouseId,
+          quantity: qty,
+        });
+        const cogsPerUnit = qty > 0 ? Math.round((totalCogs / qty) * 100) / 100 : 0;
+
         await trx.insert(inventoryLedger).values({
           tenantId,
           itemId: mat.itemId,
@@ -191,14 +213,24 @@ export class JobWorkOrderService {
           warehouseId: mat.warehouseId,
           movementType: 'STOCK_OUT',
           quantity: String(qty),
-          quantityBefore: '0',
-          quantityAfter: '0',
+          quantityBefore: String(beforeQty),
+          quantityAfter: String(afterQty),
           referenceType: 'JOB_WORK_ORDER',
           referenceId: id,
           unitCost: mat.unitCost,
+          cogsPerUnit: String(cogsPerUnit),
           notes: `Material issued for job work order #${id}`,
           createdBy: userId,
         });
+
+        await JobWorkOrderService.upsertProjection(
+          trx,
+          tenantId,
+          mat.itemId,
+          mat.variantId ?? undefined,
+          mat.warehouseId,
+          -qty
+        );
 
         await trx
           .update(jobWorkOrderMaterials)
@@ -318,31 +350,64 @@ export class JobWorkOrderService {
       const finishedGoodsCost =
         params.receivedQty > 0 ? (materialsCost + jobWorkCharges) / params.receivedQty : 0;
 
-      // Add received finished goods to stock
+      // Add received finished goods to stock. Same Phase 1 consolidation as issueMaterials()
+      // above — finished-goods receipt now goes through the shared ValuationService instead of
+      // bypassing FIFO/WACC entirely, with real ledger before/after and a projection update.
       if (params.receivedQty > 0) {
-        await trx
+        const stockInResult = await trx
           .update(items)
           .set({
             availableQty: sql`${items.availableQty} + ${params.receivedQty}`,
             version: sql`${items.version} + 1`,
           })
-          .where(and(eq(items.id, order.outputItemId), eq(items.tenantId, tenantId)));
+          .where(and(eq(items.id, order.outputItemId), eq(items.tenantId, tenantId)))
+          .returning({ availableQty: items.availableQty });
 
-        await trx.insert(inventoryLedger).values({
+        if (stockInResult.length === 0) {
+          throw new NotFoundError('Item', order.outputItemId);
+        }
+
+        const afterQty = parseFloat(String(stockInResult[0]!.availableQty));
+        const beforeQty = afterQty - params.receivedQty;
+
+        const [ledgerRow] = await trx
+          .insert(inventoryLedger)
+          .values({
+            tenantId,
+            itemId: order.outputItemId,
+            variantId: order.outputVariantId ?? undefined,
+            warehouseId: order.warehouseId,
+            movementType: 'STOCK_IN',
+            quantity: String(params.receivedQty),
+            quantityBefore: String(beforeQty),
+            quantityAfter: String(afterQty),
+            referenceType: 'JOB_WORK_ORDER',
+            referenceId: id,
+            unitCost: String(finishedGoodsCost),
+            notes: `Finished goods received from job work order #${id}`,
+            createdBy: params.userId,
+          })
+          .returning({ id: inventoryLedger.id });
+
+        await ValuationService.applyStockIn(trx, {
           tenantId,
           itemId: order.outputItemId,
           variantId: order.outputVariantId ?? undefined,
           warehouseId: order.warehouseId,
-          movementType: 'STOCK_IN',
-          quantity: String(params.receivedQty),
-          quantityBefore: '0',
-          quantityAfter: '0',
-          referenceType: 'JOB_WORK_ORDER',
-          referenceId: id,
-          unitCost: String(finishedGoodsCost),
-          notes: `Finished goods received from job work order #${id}`,
-          createdBy: params.userId,
+          quantity: params.receivedQty,
+          unitCost: finishedGoodsCost,
+          qtyBeforeStockIn: beforeQty,
+          sourceLedgerId: ledgerRow!.id,
         });
+
+        await JobWorkOrderService.upsertProjection(
+          trx,
+          tenantId,
+          order.outputItemId,
+          order.outputVariantId ?? undefined,
+          order.warehouseId,
+          params.receivedQty
+        );
       }
 
       // Rejected → DAMAGE entry in ledger (no stock impact — already deducted)
@@ -629,5 +694,42 @@ export class JobWorkOrderService {
       overdue,
       completedToday: completedToday.length,
     };
+  }
+
+  // Mirrors InventoryLedgerService's/GRNService's projection_stock_level upsert exactly —
+  // every stock-mutating write path in this codebase keeps this per-warehouse read model
+  // current so Stock Levels/Physical Verification stay accurate; job-work previously didn't.
+  private static async upsertProjection(
+    trx: ErpDatabase,
+    tenantId: number,
+    itemId: number,
+    variantId: number | undefined,
+    warehouseId: number,
+    availableDelta: number
+  ): Promise<void> {
+    await trx
+      .insert(projectionStockLevel)
+      .values({
+        tenantId,
+        itemId,
+        variantId,
+        warehouseId,
+        availableQty: String(Math.max(0, availableDelta)),
+        reservedQty: '0',
+        lastMovementAt: new Date(),
+      })
+      .onConflictDoUpdate({
+        target: [
+          projectionStockLevel.tenantId,
+          projectionStockLevel.itemId,
+          projectionStockLevel.warehouseId,
+          projectionStockLevel.variantId,
+        ],
+        set: {
+          availableQty: sql`projection_stock_level.available_qty + ${availableDelta}`,
+          lastMovementAt: new Date(),
+          updatedAt: new Date(),
+        },
+      });
   }
 }

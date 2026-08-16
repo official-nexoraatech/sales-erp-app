@@ -3,7 +3,7 @@ import { items, inventoryLedger, projectionStockLevel, outboxEvents, warehouses 
 import { ERPError } from '@erp/types';
 import type { ErpDatabase } from '@erp/db';
 import { ulid } from 'ulid';
-import { ValuationService } from './ValuationService.js';
+import { ValuationService } from '@erp/sdk';
 
 export interface StockMovementParams {
   tenantId: number;

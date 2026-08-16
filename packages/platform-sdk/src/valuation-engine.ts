@@ -1,5 +1,5 @@
 import { and, asc, eq, isNull, sql } from 'drizzle-orm';
-import { items, inventoryFifoLayers, inventoryWarehouseValuation } from '@erp/db';
+import { items, inventoryFifoLayers, inventoryLedger, inventoryWarehouseValuation } from '@erp/db';
 import { StockInsufficientForCostingError } from '@erp/types';
 import type { ErpDatabase } from '@erp/db';
 
@@ -23,10 +23,29 @@ export interface StockOutValuationParams {
   quantity: number;
 }
 
-// ES-13: FIFO / WACC costing. Called from within the same DB transaction that
-// writes the STOCK_IN/STOCK_OUT inventory_ledger row, right after items.available_qty
-// is updated — never as a separate cross-service call (see ES-03 completion report
-// on why inventory writes must share the caller's transaction for atomicity).
+export interface LandedCostValuationParams {
+  tenantId: number;
+  itemId: number;
+  grnId: number;
+  grnLineId: number;
+  // Rupee value being added to this line's cost basis — NOT a per-unit cost.
+  additionalValue: number;
+}
+
+// ES-13: FIFO / WACC costing. Called from within the same DB transaction that writes the
+// STOCK_IN/STOCK_OUT inventory_ledger row, right after items.available_qty is updated — never
+// as a separate cross-service call (see ES-03 completion report on why inventory writes must
+// share the caller's transaction for atomicity).
+//
+// Multi-vertical platform audit 2026-08-16, Phase 1 consolidation: this used to be
+// byte-for-byte duplicated (independently, matching the same "reimplement rather than share"
+// pattern the GST calculator had) across inventory-service and purchase-service, and not
+// called at all from production-service — job-work material issue/completion moved
+// items.availableQty directly but never touched waccCost/currentStockValue/FIFO layers, so
+// job-work stock movements were invisible to costing and COGS. All three now call this one
+// shared implementation instead of a same-service copy, since apps may not import each
+// other's src/ (see eslint.config.mjs's no-restricted-imports rule) — a shared @erp/sdk
+// engine is the correct home, the same pattern already used for WorkflowEngine/RuleEngine.
 export class ValuationService {
   static async applyStockIn(db: ErpDatabase, params: StockInValuationParams): Promise<void> {
     const { tenantId, itemId, warehouseId, quantity, unitCost, qtyBeforeStockIn, sourceLedgerId } =
@@ -130,6 +149,82 @@ export class ValuationService {
     );
 
     return totalCogs;
+  }
+
+  // LandedCostService.allocate() runs after a GRN is already approved — applyStockIn above has
+  // already updated items.waccCost/currentStockValue and created any FIFO layer using only the
+  // GRN rate. Without this, a landed cost (freight/customs/etc) allocated afterwards updates
+  // grnLines.effectiveUnitCost for display purposes only — the item's actual costing (WACC
+  // average, FIFO layer) never reflects it, so COGS and stock valuation understate true cost by
+  // the landed cost amount.
+  static async applyLandedCostAdjustment(
+    db: ErpDatabase,
+    params: LandedCostValuationParams
+  ): Promise<void> {
+    const { tenantId, itemId, grnId, grnLineId, additionalValue } = params;
+    if (additionalValue <= 0) return;
+
+    const [item] = await db
+      .select({
+        costingMethod: items.costingMethod,
+        currentStockValue: items.currentStockValue,
+        availableQty: items.availableQty,
+      })
+      .from(items)
+      .where(and(eq(items.id, itemId), eq(items.tenantId, tenantId)))
+      .for('update');
+    if (!item) return;
+
+    const newTotalValue = parseFloat(String(item.currentStockValue)) + additionalValue;
+    const availableQty = parseFloat(String(item.availableQty));
+    const newWacc = availableQty > 0 ? Math.round((newTotalValue / availableQty) * 100) / 100 : 0;
+
+    await db
+      .update(items)
+      .set({ waccCost: String(newWacc), currentStockValue: String(newTotalValue) })
+      .where(and(eq(items.id, itemId), eq(items.tenantId, tenantId)));
+
+    if (item.costingMethod === 'FIFO') {
+      const [ledgerRow] = await db
+        .select({ id: inventoryLedger.id })
+        .from(inventoryLedger)
+        .where(
+          and(
+            eq(inventoryLedger.tenantId, tenantId),
+            eq(inventoryLedger.referenceType, 'GRN'),
+            eq(inventoryLedger.referenceId, grnId),
+            eq(inventoryLedger.referenceLineId, grnLineId)
+          )
+        );
+      if (!ledgerRow) return;
+
+      const [layer] = await db
+        .select({
+          id: inventoryFifoLayers.id,
+          originalQty: inventoryFifoLayers.originalQty,
+          unitCost: inventoryFifoLayers.unitCost,
+        })
+        .from(inventoryFifoLayers)
+        .where(
+          and(
+            eq(inventoryFifoLayers.tenantId, tenantId),
+            eq(inventoryFifoLayers.sourceLedgerId, ledgerRow.id)
+          )
+        )
+        .for('update');
+      if (!layer) return;
+
+      const originalQty = parseFloat(String(layer.originalQty));
+      if (originalQty <= 0) return;
+      const newUnitCost =
+        Math.round((parseFloat(String(layer.unitCost)) + additionalValue / originalQty) * 10000) /
+        10000;
+
+      await db
+        .update(inventoryFifoLayers)
+        .set({ unitCost: String(newUnitCost) })
+        .where(eq(inventoryFifoLayers.id, layer.id));
+    }
   }
 
   private static warehouseValuationWhere(

@@ -30,6 +30,12 @@ export { PlatformFeatureFlags } from './feature-flags.js';
 export type { FeatureFlagValue } from './feature-flags.js';
 
 export { WorkflowEngine, SYSTEM_WORKFLOW_DEFINITIONS } from './workflow.js';
+export { ValuationService } from './valuation-engine.js';
+export type {
+  StockInValuationParams,
+  StockOutValuationParams,
+  LandedCostValuationParams,
+} from './valuation-engine.js';
 export type {
   WorkflowTriggerInput,
   ApprovalDecisionInput,

@@ -2,7 +2,7 @@ import { and, eq, sql } from 'drizzle-orm';
 import { landedCosts, grnLines, grns } from '@erp/db';
 import type { ErpDatabase } from '@erp/db';
 import { BusinessError, NotFoundError } from '@erp/types';
-import { ValuationService } from './ValuationService.js';
+import { ValuationService } from '@erp/sdk';
 
 export interface AddLandedCostParams {
   tenantId: number;

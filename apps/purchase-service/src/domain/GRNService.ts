@@ -16,7 +16,7 @@ import type { ErpDatabase } from '@erp/db';
 import { BusinessError, NotFoundError } from '@erp/types';
 import { DuplicateOperationError, isUniqueConstraintViolation } from '@erp/sdk';
 import { GSTCalculator } from '@erp/utils';
-import { ValuationService } from './ValuationService.js';
+import { ValuationService } from '@erp/sdk';
 import { ulid } from 'ulid';
 
 export { DuplicateOperationError };

@@ -17,7 +17,7 @@ import type { ErpDatabase } from '@erp/db';
 import { BusinessError, NotFoundError } from '@erp/types';
 import { ulid } from 'ulid';
 import { GSTCalculator } from '@erp/utils';
-import { ValuationService } from './ValuationService.js';
+import { ValuationService } from '@erp/sdk';
 
 export interface ReturnLineInput {
   grnLineId: number;
