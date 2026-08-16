@@ -21,20 +21,30 @@ describe('ES-17 — Financial statement correctness', () => {
   let engine: ReportEngine;
 
   // Test 1: P&L — REVENUE 100,000 - EXPENSE 60,000 = NET PROFIT 40,000
+  // Multi-vertical platform audit 2026-08-16, Phase 3 — profit-loss-report is now sourced
+  // from the shared ReportsEngine (@erp/sdk), which computes category/amount from raw
+  // account_type/account_sub_type/total_debits/total_credits (one execute() call), instead
+  // of a query that pre-computed category+signed amount directly in SQL.
   it('profit-loss-report: REVENUE minus EXPENSE equals NET PROFIT', async () => {
     const db = makeDb([
       [
         {
-          category: 'REVENUE',
+          account_id: 1,
           account_code: '4000',
           account_name: 'Sales Revenue',
-          amount: '100000',
+          account_type: 'INCOME',
+          account_sub_type: 'SALES_REVENUE',
+          total_debits: '0',
+          total_credits: '100000',
         },
         {
-          category: 'OPERATING_EXPENSE',
+          account_id: 2,
           account_code: '5000',
           account_name: 'Rent Expense',
-          amount: '60000',
+          account_type: 'EXPENSE',
+          account_sub_type: 'OPERATING_EXPENSE',
+          total_debits: '60000',
+          total_credits: '0',
         },
       ],
     ]);
@@ -58,21 +68,49 @@ describe('ES-17 — Financial statement correctness', () => {
   });
 
   // Test 2: Balance Sheet — Total ASSETS = Total (LIABILITY + EQUITY)
+  // Multi-vertical platform audit 2026-08-16, Phase 3 — balance-sheet-report is now sourced
+  // from the shared ReportsEngine (@erp/sdk): (1) main accounts query with opening_balance/
+  // period_debits/period_credits (the engine computes the signed balance itself, not SQL),
+  // (2) financial_years lookup for the "Current Year Earnings" plug (empty = no open FY, so
+  // no plug added and no 3rd call for the internal getProfitLoss() the plug would need).
   it('balance-sheet-report: total ASSETS equals total LIABILITY + EQUITY', async () => {
     const db = makeDb([
       [
-        { section: 'ASSET', account_code: '1000', account_name: 'Cash & Bank', amount: '150000' },
         {
-          section: 'LIABILITY',
-          account_code: '2000',
-          account_name: 'Accounts Payable',
-          amount: '50000',
+          account_id: 1,
+          account_code: '1000',
+          account_name: 'Cash & Bank',
+          account_type: 'ASSET',
+          account_sub_type: 'CASH_AND_BANK',
+          normal_balance: 'DEBIT',
+          opening_balance: '0',
+          opening_balance_type: 'DEBIT',
+          period_debits: '150000',
+          period_credits: '0',
         },
         {
-          section: 'EQUITY',
+          account_id: 2,
+          account_code: '2000',
+          account_name: 'Accounts Payable',
+          account_type: 'LIABILITY',
+          account_sub_type: 'CURRENT_LIABILITY',
+          normal_balance: 'CREDIT',
+          opening_balance: '0',
+          opening_balance_type: 'CREDIT',
+          period_debits: '0',
+          period_credits: '50000',
+        },
+        {
+          account_id: 3,
           account_code: '3000',
           account_name: 'Owner Capital',
-          amount: '100000',
+          account_type: 'EQUITY',
+          account_sub_type: 'CAPITAL',
+          normal_balance: 'CREDIT',
+          opening_balance: '0',
+          opening_balance_type: 'CREDIT',
+          period_debits: '0',
+          period_credits: '100000',
         },
       ],
       [], // no open financial year found — no "Current Year Earnings" equity plug added
@@ -95,28 +133,39 @@ describe('ES-17 — Financial statement correctness', () => {
   });
 
   // Test 3: Trial Balance — Total DEBIT = Total CREDIT
+  // Multi-vertical platform audit 2026-08-16, Phase 3 — trial-balance-report is now sourced
+  // from the shared ReportsEngine (@erp/sdk), which issues the financial_years lookup FIRST
+  // (empty = no open FY, so all activity counts as "period" rather than folding into
+  // "opening"), THEN the main accounts query — call order matters for the mock sequence.
   it('trial-balance-report: total closing DEBIT equals total closing CREDIT', async () => {
     const db = makeDb([
+      [], // no open financial year found
       [
         {
+          account_id: 1,
           account_code: '1000',
           account_name: 'Cash',
+          account_type: 'ASSET',
+          normal_balance: 'DEBIT',
           opening_balance: '0',
           opening_balance_type: 'DEBIT',
-          pre_debit: '0',
-          pre_credit: '0',
-          period_debit: '500',
-          period_credit: '0',
+          pre_period_debits: '0',
+          pre_period_credits: '0',
+          period_debits: '500',
+          period_credits: '0',
         },
         {
+          account_id: 2,
           account_code: '4000',
           account_name: 'Sales Revenue',
+          account_type: 'INCOME',
+          normal_balance: 'CREDIT',
           opening_balance: '0',
           opening_balance_type: 'CREDIT',
-          pre_debit: '0',
-          pre_credit: '0',
-          period_debit: '0',
-          period_credit: '500',
+          pre_period_debits: '0',
+          pre_period_credits: '0',
+          period_debits: '0',
+          period_credits: '500',
         },
       ],
     ]);
@@ -265,32 +314,48 @@ describe('ES-17 — cash-flow-report', () => {
 });
 
 describe('ES-26 (M5) — profit-loss-report CONTRA account categorization', () => {
+  // Multi-vertical platform audit 2026-08-16, Phase 3 — profit-loss-report is now sourced
+  // from the shared ReportsEngine (@erp/sdk), which buckets by raw account_type/
+  // account_sub_type and computes amount as credits-minus-debits for INCOME, debits-minus-
+  // credits for everything else (including CONTRA) — not a pre-computed category+amount row.
   it('categorizes a CONTRA account as CONTRA_REVENUE (not OTHER) and nets it into COGS matching accounting-service math', async () => {
     const db = makeDb([
       [
         {
-          category: 'REVENUE',
+          account_id: 1,
           account_code: '4000',
           account_name: 'Sales Revenue',
-          amount: '200000',
+          account_type: 'INCOME',
+          account_sub_type: 'SALES_REVENUE',
+          total_debits: '0',
+          total_credits: '200000',
         },
         {
-          category: 'COGS',
+          account_id: 2,
           account_code: '5000',
           account_name: 'Cost of Goods Sold',
-          amount: '50000',
+          account_type: 'EXPENSE',
+          account_sub_type: 'COST_OF_GOODS',
+          total_debits: '50000',
+          total_credits: '0',
         },
         {
-          category: 'CONTRA_REVENUE',
+          account_id: 3,
           account_code: '4900',
           account_name: 'Sales Returns & Allowances',
-          amount: '5000',
+          account_type: 'CONTRA',
+          account_sub_type: null,
+          total_debits: '5000',
+          total_credits: '0',
         },
         {
-          category: 'OPERATING_EXPENSE',
+          account_id: 4,
           account_code: '6000',
           account_name: 'Rent Expense',
-          amount: '30000',
+          account_type: 'EXPENSE',
+          account_sub_type: 'OPERATING_EXPENSE',
+          total_debits: '30000',
+          total_credits: '0',
         },
       ],
     ]);

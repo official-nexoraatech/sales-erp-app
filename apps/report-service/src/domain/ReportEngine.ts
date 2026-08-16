@@ -1,7 +1,7 @@
 ﻿import { sql } from 'drizzle-orm';
 import type { ErpDatabase, ReplicaRouter } from '@erp/db';
 import type Redis from 'ioredis';
-import { TenantScopedCache } from '@erp/sdk';
+import { TenantScopedCache, TenantScopedDatabase, ReportsEngine } from '@erp/sdk';
 import { decryptField } from '@erp/utils/server';
 import { requireEnv } from '@erp/config';
 
@@ -1300,59 +1300,31 @@ export class ReportEngine {
       }
 
       case 'trial-balance-report': {
+        // Multi-vertical platform audit 2026-08-16, Phase 3 — sourced from the shared
+        // ReportsEngine (@erp/sdk) instead of a hand-duplicated query. This fixes a real
+        // divergence: this branch used to treat "period" as an arbitrary caller-supplied
+        // from/to range with no financial-year awareness, while accounting-service's own
+        // Trial Balance page folded pre-FY activity into the opening balance — the two
+        // live Trial Balance endpoints could show different totals for the same tenant/date.
+        // fromDate/date-range params no longer apply to this report (asOf/FY-boundary only),
+        // matching accounting-service's semantics.
         const asOf = params.toDate ?? params.asOfDate ?? to;
-        // ✓ tenant_id filtered — ES-17 (fixed: real columns are debit_amount/credit_amount/created_at,
-        // not amount/debit_credit/entry_date; opening balance now comes from accounts.opening_balance)
-        const rows = (await db.execute(sql`
-          SELECT
-            a.account_code,
-            a.name AS account_name,
-            a.opening_balance,
-            a.opening_balance_type,
-            COALESCE(SUM(CASE WHEN fe.created_at < ${from}::date THEN fe.debit_amount ELSE 0 END), 0) AS pre_debit,
-            COALESCE(SUM(CASE WHEN fe.created_at < ${from}::date THEN fe.credit_amount ELSE 0 END), 0) AS pre_credit,
-            COALESCE(SUM(CASE WHEN fe.created_at >= ${from}::date AND fe.created_at < (${asOf}::date + INTERVAL '1 day') THEN fe.debit_amount ELSE 0 END), 0) AS period_debit,
-            COALESCE(SUM(CASE WHEN fe.created_at >= ${from}::date AND fe.created_at < (${asOf}::date + INTERVAL '1 day') THEN fe.credit_amount ELSE 0 END), 0) AS period_credit
-          FROM accounts a
-          LEFT JOIN financial_entries fe ON fe.account_id = a.id AND fe.tenant_id = ${tid}
-          WHERE a.tenant_id = ${tid}
-            AND a.deleted_at IS NULL
-            AND a.is_active = true
-          GROUP BY a.id, a.account_code, a.name, a.opening_balance, a.opening_balance_type
-          ORDER BY a.account_code
-        `)) as unknown as Array<{
-          account_code: string;
-          account_name: string;
-          opening_balance: string;
-          opening_balance_type: string;
-          pre_debit: string;
-          pre_credit: string;
-          period_debit: string;
-          period_credit: string;
-        }>;
-
-        return rows
-          .map((r): ReportRow => {
-            const openingBalance = Number(r.opening_balance);
-            const openingDr =
-              (r.opening_balance_type === 'DEBIT' ? openingBalance : 0) + Number(r.pre_debit);
-            const openingCr =
-              (r.opening_balance_type === 'CREDIT' ? openingBalance : 0) + Number(r.pre_credit);
-            const periodDebit = Number(r.period_debit);
-            const periodCredit = Number(r.period_credit);
-            const closingDr = openingDr + periodDebit;
-            const closingCr = openingCr + periodCredit;
-            return {
-              account_code: r.account_code,
-              account_name: r.account_name,
-              opening_debit: openingDr > openingCr ? openingDr - openingCr : 0,
-              opening_credit: openingCr > openingDr ? openingCr - openingDr : 0,
-              period_debit: periodDebit,
-              period_credit: periodCredit,
-              closing_debit: closingDr > closingCr ? closingDr - closingCr : 0,
-              closing_credit: closingCr > closingDr ? closingCr - closingDr : 0,
-            };
-          })
+        const report = await ReportsEngine.getTrialBalance(
+          new TenantScopedDatabase(tid, db),
+          tid,
+          asOf
+        );
+        return report.lines
+          .map((l): ReportRow => ({
+            account_code: l.accountCode,
+            account_name: l.accountName,
+            opening_debit: l.openingBalanceType === 'DEBIT' ? l.openingBalance : 0,
+            opening_credit: l.openingBalanceType === 'CREDIT' ? l.openingBalance : 0,
+            period_debit: l.periodDebits,
+            period_credit: l.periodCredits,
+            closing_debit: l.closingDebit,
+            closing_credit: l.closingCredit,
+          }))
           .filter(
             (r) =>
               r['opening_debit'] ||
@@ -1365,36 +1337,40 @@ export class ReportEngine {
       }
 
       case 'profit-loss-report': {
-        // ✓ tenant_id filtered — ES-17 (fixed: account_type is INCOME/EXPENSE/CONTRA, not REVENUE/COGS;
-        // real columns are debit_amount/credit_amount/created_at)
-        const res = await db.execute(sql`
-          SELECT
-            CASE
-              WHEN a.account_type = 'INCOME' AND a.account_sub_type = 'SALES_REVENUE' THEN 'REVENUE'
-              WHEN a.account_type = 'INCOME' THEN 'OTHER_INCOME'
-              WHEN a.account_sub_type = 'COST_OF_GOODS' THEN 'COGS'
-              WHEN a.account_type = 'CONTRA' THEN 'CONTRA_REVENUE'
-              WHEN a.account_sub_type = 'OPERATING_EXPENSE' THEN 'OPERATING_EXPENSE'
-              WHEN a.account_sub_type = 'TAX_EXPENSE' THEN 'TAX_EXPENSE'
-              WHEN a.account_type = 'EXPENSE' THEN 'OTHER_EXPENSE'
-              ELSE 'OTHER'
-            END AS category,
-            a.account_code,
-            a.name AS account_name,
-            CASE WHEN a.account_type = 'INCOME'
-              THEN SUM(fe.credit_amount) - SUM(fe.debit_amount)
-              ELSE SUM(fe.debit_amount) - SUM(fe.credit_amount)
-            END AS amount
-          FROM accounts a
-          JOIN financial_entries fe ON fe.account_id = a.id AND fe.tenant_id = ${tid}
-            AND fe.created_at >= ${from}::date AND fe.created_at < (${to}::date + INTERVAL '1 day')
-          WHERE a.tenant_id = ${tid}
-            AND a.account_type IN ('INCOME', 'EXPENSE', 'CONTRA')
-            AND a.deleted_at IS NULL
-          GROUP BY a.id, a.account_code, a.name, a.account_type, a.account_sub_type
-          HAVING SUM(fe.debit_amount) <> 0 OR SUM(fe.credit_amount) <> 0
-          ORDER BY category, a.account_code
-        `);
+        // Multi-vertical platform audit 2026-08-16, Phase 3 — sourced from the shared
+        // ReportsEngine (@erp/sdk) instead of a hand-duplicated query, so the OTHER_EXPENSE
+        // sub-type-routing fix (previously undercounted real expenses whenever a sub-type was
+        // unset) and the CONTRA→CONTRA_REVENUE categorization live in one place, not two
+        // independently-maintained copies. Row shape (category/account_code/account_name/
+        // amount, one row per real GL account) is unchanged — still no computed subtotals;
+        // see the note below, which still applies unchanged by this move.
+        const pl = await ReportsEngine.getProfitLoss(
+          new TenantScopedDatabase(tid, db),
+          tid,
+          from,
+          to
+        );
+        const category = (label: string, lines: typeof pl.revenue) =>
+          lines.map((l): ReportRow => ({
+            category: label,
+            account_code: l.accountCode,
+            account_name: l.accountName,
+            amount: l.amount,
+          }));
+        const rows = [
+          ...category('REVENUE', pl.revenue),
+          ...category('OTHER_INCOME', pl.otherIncome),
+          ...category('COGS', pl.cogs),
+          ...category('CONTRA_REVENUE', pl.contraRevenue),
+          ...category('OPERATING_EXPENSE', pl.operatingExpenses),
+          ...category('TAX_EXPENSE', pl.financialCharges),
+          ...category('OTHER_EXPENSE', pl.otherExpenses),
+        ].filter((r) => Number(r['amount']) !== 0);
+        rows.sort(
+          (a, b) =>
+            String(a['category']).localeCompare(String(b['category'])) ||
+            String(a['account_code']).localeCompare(String(b['account_code']))
+        );
         // NOTE (audit 2026-07-23): this registry endpoint has no computed gross/operating/net
         // profit subtotals (unlike accounting-service's ReportsEngine.getProfitLoss()) — a
         // consumer built directly on the raw rows must re-derive them. An earlier attempt to fix
@@ -1403,202 +1379,90 @@ export class ReportEngine {
         // this endpoint (including the generic Reports Browser table) relies on. A real fix
         // needs a dedicated `summary` field on ReportResult, reviewed against every consumer of
         // this registry (Reports Browser UI, CSV/PDF export) — not a rushed shape change here.
-        return res as unknown as ReportRow[];
-      }
-
-      case 'balance-sheet-report': {
-        const asOf = params.asOfDate ?? to;
-        // ✓ tenant_id filtered — ES-17 (fixed: account_type is ASSET/LIABILITY/EQUITY with normal_balance
-        // + opening_balance driving the sign, not a naive debit_credit sum)
-        const res = await db.execute(sql`
-          SELECT
-            a.account_type AS section,
-            a.account_code,
-            a.name AS account_name,
-            CASE WHEN a.normal_balance = 'DEBIT' THEN
-              (CASE WHEN a.opening_balance_type = 'DEBIT' THEN a.opening_balance ELSE -a.opening_balance END
-                + COALESCE(SUM(fe.debit_amount), 0) - COALESCE(SUM(fe.credit_amount), 0))
-            ELSE
-              (CASE WHEN a.opening_balance_type = 'CREDIT' THEN a.opening_balance ELSE -a.opening_balance END
-                + COALESCE(SUM(fe.credit_amount), 0) - COALESCE(SUM(fe.debit_amount), 0))
-            END AS amount
-          FROM accounts a
-          LEFT JOIN financial_entries fe ON fe.account_id = a.id AND fe.tenant_id = ${tid}
-            AND fe.created_at < (${asOf}::date + INTERVAL '1 day')
-          WHERE a.tenant_id = ${tid}
-            AND a.account_type IN ('ASSET', 'LIABILITY', 'EQUITY')
-            AND a.deleted_at IS NULL
-            AND a.is_active = true
-          GROUP BY a.id, a.account_code, a.name, a.account_type, a.normal_balance, a.opening_balance, a.opening_balance_type
-          ORDER BY a.account_type, a.account_code
-        `);
-        const rows = res as unknown as ReportRow[];
-
-        // Revenue/expense accounts only roll into Retained Earnings via a formal year-end close.
-        // During an open year, this report is structurally off by exactly the unclosed net P&L
-        // unless that P&L is shown as a "Current Year Earnings" equity line — same fix already
-        // applied in accounting-service's ReportsEngine.getBalanceSheet(); mirrored here so both
-        // live Balance Sheet endpoints reconcile instead of disagreeing by the unclosed P&L amount.
-        const [openFy] = (await db.execute(sql`
-          SELECT start_date FROM financial_years
-          WHERE tenant_id = ${tid} AND status != 'CLOSED' AND start_date <= ${asOf}::date
-          ORDER BY start_date DESC LIMIT 1
-        `)) as unknown as Array<{ start_date: string }>;
-
-        if (openFy) {
-          const [plRow] = (await db.execute(sql`
-            SELECT
-              COALESCE(SUM(CASE WHEN a.account_type = 'INCOME' THEN fe.credit_amount - fe.debit_amount ELSE 0 END), 0)
-                - COALESCE(SUM(CASE WHEN a.account_type IN ('EXPENSE', 'CONTRA') THEN fe.debit_amount - fe.credit_amount ELSE 0 END), 0)
-                AS net_profit
-            FROM accounts a
-            JOIN financial_entries fe ON fe.account_id = a.id AND fe.tenant_id = ${tid}
-              AND fe.created_at >= ${openFy.start_date}::date
-              AND fe.created_at < (${asOf}::date + INTERVAL '1 day')
-            WHERE a.tenant_id = ${tid}
-              AND a.account_type IN ('INCOME', 'EXPENSE', 'CONTRA')
-              AND a.deleted_at IS NULL
-          `)) as unknown as Array<{ net_profit: string }>;
-
-          const netProfit = Number(plRow?.net_profit ?? 0);
-          if (Math.abs(netProfit) > 0.01) {
-            rows.push({
-              section: 'EQUITY',
-              account_code: '3090',
-              account_name: 'Current Year Earnings',
-              amount: netProfit,
-            });
-          }
-        }
-
         return rows;
       }
 
+      case 'balance-sheet-report': {
+        // Multi-vertical platform audit 2026-08-16, Phase 3 — sourced from the shared
+        // ReportsEngine (@erp/sdk) instead of a hand-duplicated query. The "Current Year
+        // Earnings" plug (below) now reuses the full OTHER_EXPENSE-aware P&L calculation
+        // internally instead of a simplified inline sum that could diverge from it in edge
+        // cases (an account with no sub-type, or one outside the enumerated set) — both live
+        // Balance Sheet endpoints now compute the plug the exact same way, not just similarly.
+        const asOf = params.asOfDate ?? to;
+        const bs = await ReportsEngine.getBalanceSheet(
+          new TenantScopedDatabase(tid, db),
+          tid,
+          asOf
+        );
+        const toRow = (s: (typeof bs.assets)[number], section: string): ReportRow => ({
+          section,
+          account_code: s.accountCode,
+          account_name: s.accountName,
+          amount: s.balance,
+        });
+        return [
+          ...bs.assets.map((s) => toRow(s, 'ASSET')),
+          ...bs.liabilities.map((s) => toRow(s, 'LIABILITY')),
+          ...bs.equity.map((s) => toRow(s, 'EQUITY')),
+        ];
+      }
+
       case 'cash-flow-report': {
-        // ✓ tenant_id filtered — ES-17 (fixed: derives cash movement from CASH_AND_BANK accounts using
-        // real debit_amount/credit_amount/created_at columns, not the nonexistent amount/entry_date)
-        //
-        // Classify each cash movement by the account_sub_type of its counter-account in the same
-        // journal, same LATERAL-join approach as accounting-service's ReportsEngine.getCashFlow() —
-        // this used to bucket everything as "Operating", which materially misstated Operating Cash
-        // Flow (a headline solvency metric) for any tenant with loan or fixed-asset activity, and
-        // disagreed with the accounting-service module's own Cash Flow page for the same tenant/period.
-        const classifiedRows = (await db.execute(sql`
-          SELECT
-            (fe.debit_amount - fe.credit_amount)::NUMERIC AS net_amount,
-            counter.account_sub_type AS counter_sub_type
-          FROM accounts a
-          JOIN financial_entries fe
-            ON fe.account_id = a.id
-           AND fe.tenant_id  = ${tid}
-           AND fe.created_at >= ${from}::date AND fe.created_at < (${to}::date + INTERVAL '1 day')
-          LEFT JOIN LATERAL (
-            SELECT ca.account_sub_type
-            FROM financial_entries fe2
-            JOIN accounts ca
-              ON ca.id = fe2.account_id
-             AND ca.tenant_id = ${tid}
-            WHERE fe2.journal_id = fe.journal_id
-              AND fe2.tenant_id  = ${tid}
-              AND fe2.id        != fe.id
-              AND ca.account_sub_type IS DISTINCT FROM 'CASH_AND_BANK'
-            ORDER BY fe2.id ASC
-            LIMIT 1
-          ) counter ON true
-          WHERE a.tenant_id      = ${tid}
-            AND a.account_sub_type = 'CASH_AND_BANK'
-            AND a.deleted_at IS NULL
-        `)) as unknown as Array<{ net_amount: string; counter_sub_type: string | null }>;
-
-        const openingRows = (await db.execute(sql`
-          WITH per_account AS (
-            SELECT
-              a.id,
-              CASE WHEN a.opening_balance_type = 'DEBIT' THEN a.opening_balance ELSE -a.opening_balance END AS ob_signed,
-              COALESCE(SUM(fe.debit_amount), 0) - COALESCE(SUM(fe.credit_amount), 0) AS pre_movement
-            FROM accounts a
-            LEFT JOIN financial_entries fe ON fe.account_id = a.id AND fe.tenant_id = ${tid}
-              AND fe.created_at < ${from}::date
-            WHERE a.tenant_id = ${tid}
-              AND a.account_sub_type = 'CASH_AND_BANK'
-              AND a.deleted_at IS NULL
-            GROUP BY a.id, a.opening_balance, a.opening_balance_type
-          )
-          SELECT COALESCE(SUM(ob_signed + pre_movement), 0) AS balance FROM per_account
-        `)) as unknown as Array<{ balance: string }>;
-
-        let operatingIn = 0;
-        let operatingOut = 0;
-        const investingBuckets = new Map<string, number>();
-        const financingBuckets = new Map<string, number>();
-
-        for (const row of classifiedRows) {
-          const amount = Number(row.net_amount);
-          const counterSubType = row.counter_sub_type;
-
-          if (counterSubType === 'FIXED_ASSET' || counterSubType === 'ACCUMULATED_DEPRECIATION') {
-            const label =
-              amount >= 0 ? 'Proceeds from disposal of fixed assets' : 'Purchase of fixed assets';
-            investingBuckets.set(label, (investingBuckets.get(label) ?? 0) + amount);
-          } else if (counterSubType === 'LONG_TERM_LIABILITY') {
-            const label = amount >= 0 ? 'Bank loan received' : 'Bank loan repaid';
-            financingBuckets.set(label, (financingBuckets.get(label) ?? 0) + amount);
-          } else if (counterSubType === 'EQUITY') {
-            const label = amount >= 0 ? "Owner's capital introduced" : "Owner's drawings";
-            financingBuckets.set(label, (financingBuckets.get(label) ?? 0) + amount);
-          } else if (amount >= 0) {
-            operatingIn += amount;
-          } else {
-            operatingOut += amount;
-          }
-        }
-
-        const netOperating = operatingIn + operatingOut;
-        const netInvesting = Array.from(investingBuckets.values()).reduce((s, v) => s + v, 0);
-        const netFinancing = Array.from(financingBuckets.values()).reduce((s, v) => s + v, 0);
-        const openingCash = Number(openingRows[0]?.balance ?? 0);
-        const netMovement = netOperating + netInvesting + netFinancing;
-        const closingCash = openingCash + netMovement;
-
+        // Multi-vertical platform audit 2026-08-16, Phase 3 — sourced from the shared
+        // ReportsEngine (@erp/sdk), which this branch's classification logic (LATERAL-join
+        // counter-account bucketing into Operating/Investing/Financing) was already hand-copied
+        // from — now genuinely one implementation instead of two kept in sync by comment
+        // convention, closing the gap that let their opening-cash-balance queries diverge once
+        // already (see the engine's own opening-balance comment).
+        const cf = await ReportsEngine.getCashFlow(
+          new TenantScopedDatabase(tid, db),
+          tid,
+          from,
+          to
+        );
         const rows: ReportRow[] = [
-          {
+          ...cf.operatingActivities.map((a) => ({
             section: 'Operating Activities',
-            description: 'Cash received from customers',
-            amount: operatingIn,
-          },
-          {
-            section: 'Operating Activities',
-            description: 'Cash paid to suppliers',
-            amount: operatingOut,
-          },
+            description: a.label,
+            amount: a.amount,
+          })),
           {
             section: 'Operating Activities',
             description: 'Net Cash from Operating Activities',
-            amount: netOperating,
+            amount: cf.netOperating,
           },
-          ...Array.from(investingBuckets, ([description, amount]) => ({
+          ...cf.investingActivities.map((a) => ({
             section: 'Investing Activities',
-            description,
-            amount,
+            description: a.label,
+            amount: a.amount,
           })),
           {
             section: 'Investing Activities',
             description: 'Net Cash from Investing Activities',
-            amount: netInvesting,
+            amount: cf.netInvesting,
           },
-          ...Array.from(financingBuckets, ([description, amount]) => ({
+          ...cf.financingActivities.map((a) => ({
             section: 'Financing Activities',
-            description,
-            amount,
+            description: a.label,
+            amount: a.amount,
           })),
           {
             section: 'Financing Activities',
             description: 'Net Cash from Financing Activities',
-            amount: netFinancing,
+            amount: cf.netFinancing,
           },
-          { section: 'Summary', description: 'Net Cash Movement', amount: netMovement },
-          { section: 'Summary', description: 'Opening Cash & Bank Balance', amount: openingCash },
-          { section: 'Summary', description: 'Closing Cash & Bank Balance', amount: closingCash },
+          { section: 'Summary', description: 'Net Cash Movement', amount: cf.netCashMovement },
+          {
+            section: 'Summary',
+            description: 'Opening Cash & Bank Balance',
+            amount: cf.openingCash,
+          },
+          {
+            section: 'Summary',
+            description: 'Closing Cash & Bank Balance',
+            amount: cf.closingCash,
+          },
         ];
         return rows;
       }

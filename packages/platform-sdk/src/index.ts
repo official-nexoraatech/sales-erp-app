@@ -31,6 +31,18 @@ export type { FeatureFlagValue } from './feature-flags.js';
 
 export { WorkflowEngine, SYSTEM_WORKFLOW_DEFINITIONS } from './workflow.js';
 export { ValuationService } from './valuation-engine.js';
+export { ReportsEngine } from './financial-reports-engine.js';
+export type {
+  TrialBalanceLine,
+  TrialBalanceReport,
+  PLLine,
+  ProfitLossReport,
+  BalanceSheetSection,
+  BalanceSheetReport,
+  PLByCostCenterLine,
+  ProfitLossByCostCenterReport,
+  CashFlowReport,
+} from './financial-reports-engine.js';
 export type {
   StockInValuationParams,
   StockOutValuationParams,
