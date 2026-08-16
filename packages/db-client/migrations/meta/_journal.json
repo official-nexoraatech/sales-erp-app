@@ -1156,6 +1156,13 @@
       "when": 1796416535808,
       "tag": "0164_tenants_vertical",
       "breakpoints": true
+    },
+    {
+      "idx": 165,
+      "version": "7",
+      "when": 1796416535809,
+      "tag": "0165_inventory_batch_expiry_fefo",
+      "breakpoints": true
     }
   ]
 }

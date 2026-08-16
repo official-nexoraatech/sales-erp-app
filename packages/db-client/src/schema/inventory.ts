@@ -71,10 +71,17 @@ export const inventoryFifoLayers = pgTable(
     remainingQty: decimal('remaining_qty', { precision: 15, scale: 3 }).notNull(),
     unitCost: decimal('unit_cost', { precision: 15, scale: 2 }).notNull(),
     sourceLedgerId: integer('source_ledger_id').notNull(),
+    // Multi-vertical platform audit 2026-08-16: threaded from grnLines.batchNumber/expiryDate
+    // (captured on receipt but previously discarded before reaching the stock ledger). Nullable —
+    // cloth-retail FIFO items have no batch/expiry concept and simply never set these. Powers
+    // FEFO consumption ordering (items.fefoEnabled) and the near-expiry automation trigger.
+    batchNumber: varchar('batch_number', { length: 100 }),
+    expiryDate: timestamp('expiry_date', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => [
     index('idx_fifo_layers_consume_order').on(t.tenantId, t.itemId, t.warehouseId, t.receivedAt),
+    index('idx_fifo_layers_fefo_order').on(t.tenantId, t.itemId, t.warehouseId, t.expiryDate),
   ]
 );
 

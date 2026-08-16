@@ -13,6 +13,11 @@ export interface StockInValuationParams {
   qtyBeforeStockIn: number;
   sourceLedgerId: number;
   receivedAt?: Date | undefined;
+  // Multi-vertical platform audit 2026-08-16: threaded from grnLines.batchNumber/expiryDate
+  // (or any other stock-in source that knows its batch/expiry) onto the FIFO layer this
+  // receipt creates. No effect for WACC-costed items, which have no discrete layers.
+  batchNumber?: string | undefined;
+  expiryDate?: Date | undefined;
 }
 
 export interface StockOutValuationParams {
@@ -86,6 +91,8 @@ export class ValuationService {
         remainingQty: String(quantity),
         unitCost: String(unitCost),
         sourceLedgerId,
+        batchNumber: params.batchNumber,
+        expiryDate: params.expiryDate,
       });
     } else {
       // PG-032: FIFO already gets a warehouse dimension for free via inventory_fifo_layers.warehouse_id
@@ -119,6 +126,7 @@ export class ValuationService {
         costingMethod: items.costingMethod,
         waccCost: items.waccCost,
         currentStockValue: items.currentStockValue,
+        fefoEnabled: items.fefoEnabled,
       })
       .from(items)
       .where(and(eq(items.id, itemId), eq(items.tenantId, tenantId)))
@@ -126,7 +134,14 @@ export class ValuationService {
     if (!item) return 0;
 
     if (item.costingMethod === 'FIFO') {
-      return ValuationService.consumeFifoLayers(db, tenantId, itemId, warehouseId, quantity);
+      return ValuationService.consumeFifoLayers(
+        db,
+        tenantId,
+        itemId,
+        warehouseId,
+        quantity,
+        item.fefoEnabled
+      );
     }
 
     const waccCost = parseFloat(String(item.waccCost));
@@ -326,11 +341,17 @@ export class ValuationService {
     tenantId: number,
     itemId: number,
     warehouseId: number,
-    quantity: number
+    quantity: number,
+    fefoEnabled = false
   ): Promise<number> {
     // FOR UPDATE: locks every candidate layer row up front so a concurrent consumer
     // targeting the same layers can't select the same stale remainingQty snapshot —
     // it blocks here until this transaction commits, then re-reads the real values.
+    //
+    // Multi-vertical platform audit 2026-08-16: FEFO mode orders by soonest-expiring first
+    // (nulls — layers with no known expiry — last, falling back to receivedAt among
+    // themselves) instead of strict receipt order, so a batch closer to expiry isn't left
+    // sitting behind an older-received-but-later-expiring one.
     const layers = await db
       .select()
       .from(inventoryFifoLayers)
@@ -342,7 +363,11 @@ export class ValuationService {
           sql`${inventoryFifoLayers.remainingQty} > 0`
         )
       )
-      .orderBy(asc(inventoryFifoLayers.receivedAt))
+      .orderBy(
+        fefoEnabled
+          ? sql`(${inventoryFifoLayers.expiryDate} IS NULL), ${inventoryFifoLayers.expiryDate} ASC, ${inventoryFifoLayers.receivedAt} ASC`
+          : asc(inventoryFifoLayers.receivedAt)
+      )
       .for('update');
 
     let remainingToConsume = quantity;

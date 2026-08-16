@@ -356,7 +356,11 @@ export class GRNService {
           })
           .returning({ id: inventoryLedger.id });
 
-        // ES-13: recalculate WACC / create a FIFO cost layer for this receipt
+        // ES-13: recalculate WACC / create a FIFO cost layer for this receipt.
+        // Multi-vertical platform audit 2026-08-16: batchNumber/expiryDate were captured on
+        // this line at GRN creation but previously discarded here — now threaded onto the FIFO
+        // layer so FEFO issuance (items.fefoEnabled) and expiry alerting have real data to work
+        // with. No effect for WACC-costed items or lines with no batch/expiry recorded.
         await ValuationService.applyStockIn(trx, {
           tenantId,
           itemId: line.itemId,
@@ -367,6 +371,8 @@ export class GRNService {
           qtyBeforeStockIn: beforeQty,
           sourceLedgerId: ledgerRow!.id,
           receivedAt: grn.grnDate,
+          batchNumber: line.batchNumber ?? undefined,
+          expiryDate: line.expiryDate ?? undefined,
         });
 
         // GRN receipts only ever updated the item's global availableQty above, never the

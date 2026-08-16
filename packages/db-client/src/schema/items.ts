@@ -211,6 +211,13 @@ export const items = pgTable(
       .notNull()
       .default('WACC')
       .$type<'FIFO' | 'WACC'>(),
+    // Multi-vertical platform audit 2026-08-16: only meaningful when costingMethod is FIFO —
+    // WACC items have no discrete layers to order. When true, ValuationService.consumeForStockOut
+    // consumes inventory_fifo_layers ordered by expiryDate (FEFO) instead of receivedAt (FIFO),
+    // so perishable items don't have their soonest-to-expire batch skipped in favor of an
+    // older-received-but-later-expiring one. Defaults false: no behavior change for existing
+    // (cloth-retail) FIFO items, which have no expiry concept.
+    fefoEnabled: boolean('fefo_enabled').notNull().default(false),
     waccCost: decimal('wacc_cost', { precision: 15, scale: 2 }).notNull().default('0'),
     currentStockValue: decimal('current_stock_value', { precision: 15, scale: 2 })
       .notNull()
