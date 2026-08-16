@@ -287,6 +287,56 @@ export const ROLE_DEFAULTS: Record<string, Permission[]> = {
     PERMISSIONS.PROMOTION_VIEW,
   ],
 
+  // Multi-vertical platform audit 2026-08-16, Phase 2: a single-location supervisory role
+  // (runs the till AND its own store's stock/promotions/discount approvals) — the roadmap's
+  // "grocery role set" example. Deliberately narrower than SALES_MANAGER/INVENTORY_MANAGER
+  // (no category/brand/unit-master editing, no cross-store purchasing) — this role runs one
+  // store's day-to-day, it doesn't configure the catalog or procurement, which stay with the
+  // existing specialist roles exactly as they do today for cloth-retail tenants.
+  STORE_MANAGER: [
+    // POS supervisory access — unlike CASHIER, this role also holds POS_MANAGE (cash-drawer
+    // report, till reassignment) since it's the on-site supervisor for the till.
+    PERMISSIONS.POS_ACCESS,
+    PERMISSIONS.POS_MANAGE,
+    PERMISSIONS.POS_OPEN_SHIFT,
+    PERMISSIONS.POS_CLOSE_SHIFT,
+    PERMISSIONS.INVOICE_VIEW,
+    PERMISSIONS.INVOICE_CREATE,
+    PERMISSIONS.INVOICE_UPDATE,
+    PERMISSIONS.QUOTATION_VIEW,
+    PERMISSIONS.QUOTATION_CREATE,
+    PERMISSIONS.PAYMENT_VIEW,
+    PERMISSIONS.PAYMENT_CREATE,
+    PERMISSIONS.SALE_RETURN_VIEW,
+    PERMISSIONS.SALE_RETURN_CREATE,
+    PERMISSIONS.SALE_RETURN_APPROVE,
+    PERMISSIONS.CUSTOMER_VIEW,
+    PERMISSIONS.CUSTOMER_CREATE,
+    PERMISSIONS.CUSTOMER_EDIT,
+    PERMISSIONS.CRM_360_VIEW,
+    // Store-local stock: can adjust/count/transfer, but not edit the shared item/category/
+    // brand/unit master (INVENTORY_MANAGER-only) or place purchase orders (PURCHASE_MANAGER-
+    // only) — matches the existing role-separation philosophy for cloth-retail tenants.
+    PERMISSIONS.ITEM_VIEW,
+    PERMISSIONS.STOCK_VIEW,
+    PERMISSIONS.STOCK_ADJUST,
+    PERMISSIONS.STOCK_TRANSFER_VIEW,
+    PERMISSIONS.WAREHOUSE_VIEW,
+    PERMISSIONS.PHYSICAL_VERIFICATION_VIEW,
+    PERMISSIONS.REORDER_VIEW,
+    PERMISSIONS.REPORT_VIEW,
+    PERMISSIONS.LOYALTY_REDEEM,
+    PERMISSIONS.REFERRAL_VIEW,
+    // Authors this store's own multi-buy/BOGO promotions — a store-level pricing decision,
+    // same reasoning as SALES_MANAGER's PROMOTION_MANAGE grant above.
+    PERMISSIONS.PROMOTION_VIEW,
+    PERMISSIONS.PROMOTION_MANAGE,
+    // A store manager approves discounts beyond MAX_CASHIER_DISCOUNT_PCT for their own till,
+    // same tier this role sits at for SALE_RETURN_APPROVE above.
+    PERMISSIONS.DISCOUNT_OVERRIDE,
+    PERMISSIONS.SEARCH_GLOBAL,
+  ],
+
   PURCHASE_MANAGER: [
     // Purchase audit 2026-07-21 gap-fix: Requisition -> RFQ/Quotation -> PO -> Invoice-match
     // are new upstream/downstream stages of this role's existing PO/GRN ownership.

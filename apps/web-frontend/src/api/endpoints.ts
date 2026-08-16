@@ -1110,6 +1110,14 @@ export const deliveryChallanApi = {
     apiClient.post('sales', `/delivery-challans/${id}/convert-to-invoice`, {}),
 };
 
+// Multi-vertical platform audit 2026-08-16, Phase 2 — multi-buy/BOGO pricing promotions.
+export const promotionApi = {
+  list: () => apiClient.get<{ content: unknown[]; totalElements: number }>('sales', '/promotions'),
+  create: (data: Record<string, unknown>) => apiClient.post('sales', '/promotions', data),
+  update: (id: number, data: Record<string, unknown>) =>
+    apiClient.put('sales', `/promotions/${id}`, data),
+};
+
 export const loyaltyApi = {
   balance: (customerId: number) => apiClient.get('sales', `/customers/${customerId}/loyalty`),
   redeem: (data: Record<string, unknown>) => apiClient.post('sales', '/pos/loyalty/redeem', data),

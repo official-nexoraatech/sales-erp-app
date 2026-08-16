@@ -173,6 +173,12 @@ export const NAV_GROUPS: NavGroup[] = [
             icon: Archive,
             permission: PERMISSIONS.INVOICE_VIEW,
           },
+          {
+            label: 'Promotions',
+            path: '/sales/promotions',
+            icon: Tag,
+            permission: PERMISSIONS.PROMOTION_VIEW,
+          },
         ],
       },
       {

@@ -137,6 +137,7 @@ const PaymentFormPage = lazy(() => import('./pages/sales/PaymentFormPage.js'));
 const SaleReturnsPage = lazy(() => import('./pages/sales/SaleReturnsPage.js'));
 const SaleReturnFormPage = lazy(() => import('./pages/sales/SaleReturnFormPage.js'));
 const DeliveryChallansPage = lazy(() => import('./pages/sales/DeliveryChallansPage.js'));
+const PromotionsPage = lazy(() => import('./pages/sales/PromotionsPage.js'));
 const DeliveryChallanFormPage = lazy(() => import('./pages/sales/DeliveryChallanFormPage.js'));
 const DeliveryChallanDetailPage = lazy(() => import('./pages/sales/DeliveryChallanDetailPage.js'));
 
@@ -1430,6 +1431,17 @@ export default function App() {
                 <PermissionRoute
                   permission={PERMISSIONS.INVOICE_VIEW}
                   element={<DeliveryChallanDetailPage />}
+                />
+              </Page>
+            }
+          />
+          <Route
+            path="sales/promotions"
+            element={
+              <Page>
+                <PermissionRoute
+                  permission={PERMISSIONS.PROMOTION_VIEW}
+                  element={<PromotionsPage />}
                 />
               </Page>
             }
