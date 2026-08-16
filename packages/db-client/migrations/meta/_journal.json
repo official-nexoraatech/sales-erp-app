@@ -1170,6 +1170,13 @@
       "when": 1796416535810,
       "tag": "0166_purchase_unit_conversion",
       "breakpoints": true
+    },
+    {
+      "idx": 167,
+      "version": "7",
+      "when": 1796416535811,
+      "tag": "0167_pricing_promotions",
+      "breakpoints": true
     }
   ]
 }

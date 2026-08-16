@@ -610,6 +610,10 @@ export const PERMISSIONS = {
   PROJECTION_MANAGE: 'PROJECTION_MANAGE',
   PERFORMANCE_VIEW: 'PERFORMANCE_VIEW',
 
+  // ── Multi-vertical platform audit 2026-08-16, Phase 2 — multi-buy/BOGO pricing promotions ──
+  PROMOTION_VIEW: 'PROMOTION_VIEW',
+  PROMOTION_MANAGE: 'PROMOTION_MANAGE',
+
   // ── Platform-level permissions — cross-tenant, not scoped to request.auth.tenantId. ──
   // Only assignable to a platform-operator role, never a tenant's own Owner/Admin role.
   PLATFORM_TENANT_MANAGE: 'PLATFORM_TENANT_MANAGE',

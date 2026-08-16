@@ -234,6 +234,13 @@ export const ROLE_DEFAULTS: Record<string, Permission[]> = {
     // to operational roles since every tool call still inherits the caller's own RBAC.
     PERMISSIONS.COPILOT_VIEW,
     PERMISSIONS.COPILOT_USE,
+    // Multi-vertical platform audit 2026-08-16, Phase 2: SALES_MANAGER authors multi-buy/BOGO
+    // pricing promotions, same "owns the Sales domain end-to-end" reasoning as everything else
+    // in this role — same config-vs-execution split as RULE_VIEW/AUTOMATION_VIEW above, but
+    // here MANAGE is granted too since promotions are this role's own pricing decision, not a
+    // platform-level config a lower tier merely executes against.
+    PERMISSIONS.PROMOTION_VIEW,
+    PERMISSIONS.PROMOTION_MANAGE,
   ],
 
   CASHIER: [
@@ -272,6 +279,12 @@ export const ROLE_DEFAULTS: Record<string, Permission[]> = {
     // not cashier-configurable" split as LOYALTY_REDEEM/TIER_MANAGE above. REFERRAL_CONFIGURE
     // (code deactivation, fraud-review) is deliberately not granted here.
     PERMISSIONS.REFERRAL_VIEW,
+    // Multi-vertical platform audit 2026-08-16, Phase 2: same "cashier-permitted, not
+    // cashier-configurable" split as LOYALTY_REDEEM/REFERRAL_VIEW above — checkout itself
+    // (POST /pos/promotions/evaluate) is gated on POS_ACCESS, which CASHIER already holds;
+    // PROMOTION_VIEW is only for seeing the active-promotions list. PROMOTION_MANAGE
+    // (authoring) stays SALES_MANAGER/ADMIN/OWNER-only.
+    PERMISSIONS.PROMOTION_VIEW,
   ],
 
   PURCHASE_MANAGER: [

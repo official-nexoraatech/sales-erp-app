@@ -38,6 +38,7 @@ import { quotationRoutes } from './api/quotation.routes.js';
 import { invoiceRoutes } from './api/invoice.routes.js';
 import { commissionRoutes } from './api/commission.routes.js';
 import { posRoutes } from './api/pos.routes.js';
+import { promotionRoutes } from './api/promotion.routes.js';
 import { paymentRoutes } from './api/payment.routes.js';
 import { saleReturnRoutes } from './api/sale-return.routes.js';
 import { loyaltyRoutes } from './api/loyalty.routes.js';
@@ -330,6 +331,7 @@ async function bootstrap(): Promise<void> {
       await invoiceRoutes(sub, ctxFactory);
       await commissionRoutes(sub, ctxFactory);
       await posRoutes(sub, ctxFactory);
+      await promotionRoutes(sub, ctxFactory);
       await paymentRoutes(sub, ctxFactory);
       await saleReturnRoutes(sub, ctxFactory);
       await loyaltyRoutes(sub, ctxFactory);

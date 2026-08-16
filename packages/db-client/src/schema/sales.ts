@@ -568,3 +568,50 @@ export const projectionCustomerBalance = pgTable(
     index('idx_proj_customer_balance_tenant').on(t.tenantId, t.currentBalance),
   ]
 );
+
+// ─── Pricing Promotions (multi-buy / BOGO) ─────────────────────────────────────
+// Multi-vertical platform audit 2026-08-16, Phase 2: no multi-buy/bundle/tiered-pricing engine
+// existed anywhere in sales-service — only a flat per-line/per-order percentage discount
+// (discount-policy.ts's MAX_CASHIER_DISCOUNT_PCT). Grocery retail relies heavily on "buy 2 get
+// 1 free" style deals; this is a genuinely new capability, not a generalization of cloth-retail
+// code (nothing to generalize away from). Scoped to either a single item or a whole category,
+// not both — PromotionEngine.evaluate() (see domain/PromotionEngine.ts) treats itemId as
+// taking precedence when a line matches both an item-scoped and a category-scoped promotion.
+export const pricingPromotions = pgTable(
+  'pricing_promotions',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    tenantId: integer('tenant_id').notNull(),
+    name: varchar('name', { length: 200 }).notNull(),
+    promotionType: varchar('promotion_type', { length: 30 })
+      .notNull()
+      .$type<'BUY_X_GET_Y_FREE' | 'BUY_X_GET_Y_PERCENT_OFF'>(),
+    // Exactly one of itemId/categoryId should be set (enforced at the service layer, not the
+    // DB, matching this schema's existing convention of app-level rather than CHECK-constraint
+    // validation — see e.g. crmOpportunities.dealType's free-text/no-constraint precedent).
+    itemId: integer('item_id'),
+    categoryId: integer('category_id'),
+    buyQuantity: integer('buy_quantity').notNull(),
+    getQuantity: integer('get_quantity').notNull(),
+    // 100 = fully free (BOGO); < 100 = partial discount on the "get" units (e.g. "buy 2 get 1
+    // at 50% off"). BUY_X_GET_Y_FREE always behaves as if this were 100, ignoring the stored
+    // value, so callers authoring a FREE promotion don't need to also set this correctly.
+    getDiscountPct: decimal('get_discount_pct', { precision: 5, scale: 2 })
+      .notNull()
+      .default('100'),
+    startDate: timestamp('start_date', { withTimezone: true }).notNull(),
+    endDate: timestamp('end_date', { withTimezone: true }).notNull(),
+    isActive: boolean('is_active').notNull().default(true),
+    createdBy: integer('created_by').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    version: integer('version').notNull().default(0),
+  },
+  (t) => [
+    index('idx_pricing_promotions_tenant_item').on(t.tenantId, t.isActive, t.itemId),
+    index('idx_pricing_promotions_tenant_category').on(t.tenantId, t.isActive, t.categoryId),
+  ]
+);
+
+export type PricingPromotion = typeof pricingPromotions.$inferSelect;
+export type NewPricingPromotion = typeof pricingPromotions.$inferInsert;
