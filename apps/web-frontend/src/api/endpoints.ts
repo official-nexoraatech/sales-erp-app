@@ -1118,6 +1118,20 @@ export const promotionApi = {
     apiClient.put('sales', `/promotions/${id}`, data),
 };
 
+export const dayEndApi = {
+  list: (params?: { page?: number; pageSize?: number }) => {
+    const qs = new URLSearchParams();
+    if (params?.page !== undefined) qs.set('page', String(params.page));
+    if (params?.pageSize !== undefined) qs.set('pageSize', String(params.pageSize));
+    return apiClient.get<{ content: unknown[]; totalElements: number }>(
+      'sales',
+      `/pos/day-end?${qs.toString()}`
+    );
+  },
+  generate: (data: { branchId: number; businessDate: string }) =>
+    apiClient.post('sales', '/pos/day-end/generate', data),
+};
+
 export const loyaltyApi = {
   balance: (customerId: number) => apiClient.get('sales', `/customers/${customerId}/loyalty`),
   redeem: (data: Record<string, unknown>) => apiClient.post('sales', '/pos/loyalty/redeem', data),

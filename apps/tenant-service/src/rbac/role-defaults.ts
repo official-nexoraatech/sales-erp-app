@@ -300,6 +300,10 @@ export const ROLE_DEFAULTS: Record<string, Permission[]> = {
     PERMISSIONS.POS_MANAGE,
     PERMISSIONS.POS_OPEN_SHIFT,
     PERMISSIONS.POS_CLOSE_SHIFT,
+    // Store-wide Z-report across every till for the day — the store manager's day-end
+    // reconciliation, one level up from a single till's POS_CLOSE_SHIFT.
+    PERMISSIONS.POS_ZREPORT_VIEW,
+    PERMISSIONS.POS_ZREPORT_GENERATE,
     PERMISSIONS.INVOICE_VIEW,
     PERMISSIONS.INVOICE_CREATE,
     PERMISSIONS.INVOICE_UPDATE,

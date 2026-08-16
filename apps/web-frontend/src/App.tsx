@@ -138,6 +138,7 @@ const SaleReturnsPage = lazy(() => import('./pages/sales/SaleReturnsPage.js'));
 const SaleReturnFormPage = lazy(() => import('./pages/sales/SaleReturnFormPage.js'));
 const DeliveryChallansPage = lazy(() => import('./pages/sales/DeliveryChallansPage.js'));
 const PromotionsPage = lazy(() => import('./pages/sales/PromotionsPage.js'));
+const DayEndSettlementPage = lazy(() => import('./pages/sales/DayEndSettlementPage.js'));
 const DeliveryChallanFormPage = lazy(() => import('./pages/sales/DeliveryChallanFormPage.js'));
 const DeliveryChallanDetailPage = lazy(() => import('./pages/sales/DeliveryChallanDetailPage.js'));
 
@@ -1442,6 +1443,17 @@ export default function App() {
                 <PermissionRoute
                   permission={PERMISSIONS.PROMOTION_VIEW}
                   element={<PromotionsPage />}
+                />
+              </Page>
+            }
+          />
+          <Route
+            path="sales/day-end-settlement"
+            element={
+              <Page>
+                <PermissionRoute
+                  permission={PERMISSIONS.POS_ZREPORT_VIEW}
+                  element={<DayEndSettlementPage />}
                 />
               </Page>
             }

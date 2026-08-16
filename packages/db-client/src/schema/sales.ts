@@ -615,3 +615,59 @@ export const pricingPromotions = pgTable(
 
 export type PricingPromotion = typeof pricingPromotions.$inferSelect;
 export type NewPricingPromotion = typeof pricingPromotions.$inferInsert;
+
+// ─── POS Day-End (Z-Report) Settlements ────────────────────────────────────────
+// Multi-vertical platform audit 2026-08-16, Phase 3: posSessions tracks per-till cash
+// reconciliation only — there was no store-wide, cross-session view for a business day
+// (payment-mode split, tax/discount totals, refunds) across every till. One immutable row
+// per tenant+branch+businessDate — generation is blocked while any session for that day is
+// still OPEN, and the unique constraint below rejects re-generating an already-settled day,
+// mirroring a real Z-reading: it can only be taken once.
+export const posDayEndSettlements = pgTable(
+  'pos_day_end_settlements',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    tenantId: integer('tenant_id').notNull(),
+    branchId: integer('branch_id').notNull(),
+    // Plain YYYY-MM-DD — the calendar date each included session was opened on (a session
+    // that closes past midnight still belongs to the day it started), not a timestamp.
+    businessDate: varchar('business_date', { length: 10 }).notNull(),
+    sessionIds: jsonb('session_ids').notNull().$type<number[]>(),
+    sessionCount: integer('session_count').notNull(),
+    totalTransactions: integer('total_transactions').notNull().default(0),
+    totalSales: decimal('total_sales', { precision: 15, scale: 2 }).notNull().default('0'),
+    totalDiscount: decimal('total_discount', { precision: 15, scale: 2 }).notNull().default('0'),
+    totalTax: decimal('total_tax', { precision: 15, scale: 2 }).notNull().default('0'),
+    // Refunds are matched to a branch+businessDate, not to a specific session — sale returns
+    // carry no posSessionId (see saleReturns above), so a refund is attributed to the store's
+    // day, not a till.
+    totalRefunds: decimal('total_refunds', { precision: 15, scale: 2 }).notNull().default('0'),
+    refundCount: integer('refund_count').notNull().default(0),
+    // e.g. {"CASH": "1234.00", "CARD": "500.00"} — keyed by payments.paymentMode, only modes
+    // actually collected that day are present. Refunds have no recorded payment mode anywhere
+    // in this schema (a pre-existing gap, not introduced here), so this reflects collections
+    // only, not net-of-refunds, per mode.
+    paymentModeBreakdown: jsonb('payment_mode_breakdown').notNull().$type<Record<string, string>>(),
+    openingCashTotal: decimal('opening_cash_total', { precision: 15, scale: 2 })
+      .notNull()
+      .default('0'),
+    closingCashTotal: decimal('closing_cash_total', { precision: 15, scale: 2 })
+      .notNull()
+      .default('0'),
+    expectedCashTotal: decimal('expected_cash_total', { precision: 15, scale: 2 })
+      .notNull()
+      .default('0'),
+    cashVarianceTotal: decimal('cash_variance_total', { precision: 15, scale: 2 })
+      .notNull()
+      .default('0'),
+    generatedBy: integer('generated_by').notNull(),
+    generatedAt: timestamp('generated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    unique('pos_day_end_settlements_tenant_branch_date').on(t.tenantId, t.branchId, t.businessDate),
+    index('idx_pos_day_end_settlements_tenant_date').on(t.tenantId, t.businessDate),
+  ]
+);
+
+export type PosDayEndSettlement = typeof posDayEndSettlements.$inferSelect;
+export type NewPosDayEndSettlement = typeof posDayEndSettlements.$inferInsert;

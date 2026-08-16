@@ -124,6 +124,10 @@ export const PERMISSIONS = {
   POS_APPLY_DISCOUNT: 'POS_APPLY_DISCOUNT',
   POS_VOID_BILL: 'POS_VOID_BILL',
   POS_CASH_DRAWER: 'POS_CASH_DRAWER',
+  // Store-wide Z-report/day-end settlement, across every till for a business day —
+  // distinct from POS_CLOSE_SHIFT, which is per-till only.
+  POS_ZREPORT_VIEW: 'POS_ZREPORT_VIEW',
+  POS_ZREPORT_GENERATE: 'POS_ZREPORT_GENERATE',
 
   // ── Purchase Requisitions ─────────────────────────────────────────────────
   REQUISITION_VIEW: 'REQUISITION_VIEW',

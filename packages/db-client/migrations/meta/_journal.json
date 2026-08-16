@@ -1177,6 +1177,13 @@
       "when": 1796416535811,
       "tag": "0167_pricing_promotions",
       "breakpoints": true
+    },
+    {
+      "idx": 168,
+      "version": "7",
+      "when": 1796416535812,
+      "tag": "0168_pos_day_end_settlements",
+      "breakpoints": true
     }
   ]
 }
