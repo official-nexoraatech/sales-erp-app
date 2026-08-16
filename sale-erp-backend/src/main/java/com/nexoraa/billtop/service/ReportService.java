@@ -3,7 +3,6 @@ package com.nexoraa.billtop.service;
 import com.nexoraa.billtop.dto.ledger.LedgerResponseDto;
 import com.nexoraa.billtop.dto.report.BankStatementEntryResponseDto;
 import com.nexoraa.billtop.dto.report.CustomerDueResponseDto;
-import com.nexoraa.billtop.dto.report.DayBookEntryResponseDto;
 import com.nexoraa.billtop.dto.report.ExpenseReportResponseDto;
 import com.nexoraa.billtop.dto.report.ExpiredItemResponseDto;
 import com.nexoraa.billtop.dto.report.GstReportResponseDto;
@@ -36,7 +35,11 @@ public interface ReportService {
 
     List<StockReportResponseDto> getStockReport();
 
+    List<StockReportResponseDto> getStockReport(Long itemId, Long brandId, Long categoryId, Long warehouseId);
+
     List<StockReportResponseDto> getLowStockReport();
+
+    List<StockReportResponseDto> getLowStockReport(Long categoryId, Long itemId, Long brandId);
 
     /**
      * Super Admin lookups: {@code organizationId} identifies the organization explicitly
@@ -58,8 +61,6 @@ public interface ReportService {
 
     List<TopSellingItemResponseDto> getTopSellingItems(LocalDate fromDate, LocalDate toDate);
 
-    List<DayBookEntryResponseDto> getDayBook(LocalDate date);
-
     List<CustomerDueResponseDto> getCustomerDues(Long customerId);
 
     List<SupplierDueResponseDto> getSupplierDues(Long supplierId);
@@ -68,20 +69,14 @@ public interface ReportService {
 
     List<PaymentReportResponseDto> getSalePayments(LocalDate fromDate, LocalDate toDate, Long customerId, Long paymentMethodId);
 
-    List<ExpenseReportResponseDto> getExpenseReport(LocalDate fromDate, LocalDate toDate, Long categoryId, Long paymentMethodId);
+    List<ExpenseReportResponseDto> getExpenseReport(
+            LocalDate fromDate, LocalDate toDate, Long categoryId, Long subCategoryId, Long paymentMethodId
+    );
 
     List<BankStatementEntryResponseDto> getBankStatement(LocalDate fromDate, LocalDate toDate, Long bankAccountId);
 
-    List<ItemTransactionResponseDto> getItemTransactionsBatch(
-            LocalDate fromDate, LocalDate toDate, Long itemId, Long brandId, String batchNo, Long warehouseId
-    );
-
     List<ItemTransactionResponseDto> getItemTransactionsGeneral(
             LocalDate fromDate, LocalDate toDate, Long itemId, Long brandId, Long warehouseId
-    );
-
-    List<ItemTransactionResponseDto> getItemTransactionsSerial(
-            LocalDate fromDate, LocalDate toDate, Long itemId, Long brandId, String serialImei, Long warehouseId
     );
 
     List<ExpiredItemResponseDto> getExpiredItems(

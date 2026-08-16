@@ -20,5 +20,6 @@ public class StockAdjustmentResponseDto {
     private NameIdResponseDto warehouse;
     private LocalDate adjustmentDate;
     private String reason;
+    private String createdBy;
     private List<StockAdjustmentItemResponseDto> items;
 }

@@ -188,11 +188,9 @@ export const PosPage: React.FC = () => {
         String(item.itemCode || '') === scannedValue ||
         String(item.sku || '') === scannedValue
       );
-      const matchedItem = exactMatch || results[0] || null;
-      if (!matchedItem) return null;
-      console.log('[POS Scanner] Calling get item API:', `/api/v1/items/${matchedItem.id}`);
-      const itemResponse = await itemApi.getById(matchedItem.id);
-      return itemResponse.data || matchedItem;
+      // The search result already carries everything addItem() needs (availableQty, discountPercentage,
+      // taxPercentage) - no need for a second round-trip via getById.
+      return exactMatch || results[0] || null;
     },
     onSuccess: (item) => {
       console.log('[POS Scanner] Item lookup success:', item);
@@ -341,7 +339,9 @@ export const PosPage: React.FC = () => {
       link.href = url;
       link.download = `${customerName}_${timestamp}.pdf`;
       link.click();
-      URL.revokeObjectURL(url);
+      // Revoking immediately after click() can abort the download on some browsers before it's
+      // actually dispatched - delay so repeated downloads in the same session keep working.
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (error: any) {
       toast.error(error?.message || 'Failed to download invoice PDF');
     }

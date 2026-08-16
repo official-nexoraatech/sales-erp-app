@@ -225,6 +225,7 @@ public class StockAdjustmentServiceImpl implements StockAdjustmentService {
                 .warehouse(support.toNameId(adjustment.getWarehouse()))
                 .adjustmentDate(adjustment.getAdjustmentDate())
                 .reason(adjustment.getReason())
+                .createdBy(adjustment.getCreatedBy())
                 .items(stockAdjustmentItemRepository.findByStockAdjustmentIdAndOrganizationIdAndIsDeletedFalse(
                                 adjustment.getId(),
                                 currentOrganizationService.getOrganizationId()

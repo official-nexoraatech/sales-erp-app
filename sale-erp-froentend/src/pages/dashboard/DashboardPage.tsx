@@ -342,7 +342,7 @@ export const DashboardPage: React.FC = () => {
   const salesQuery     = useQuery({ queryKey: ['dashboard-sales', fromDate, toDate], queryFn: () => salesApi.getAll({ page: 0, size: 200, fromDate, toDate }), enabled: canViewSales, retry: false });
   const purchasesQuery = useQuery({ queryKey: ['dashboard-purchases', fromDate, toDate], queryFn: () => purchaseApi.getAll({ page: 0, size: 200, fromDate, toDate }), enabled: canViewPurchases, retry: false });
   const expensesQuery  = useQuery({ queryKey: ['dashboard-expenses', fromDate, toDate], queryFn: () => expenseApi.getAll({ page: 0, size: 200, fromDate, toDate }), enabled: canViewExpenses, retry: false });
-  const lowStockQuery  = useQuery({ queryKey: ['dashboard-low-stock'], queryFn: reportsApi.lowStock, enabled: canViewLowStock, retry: false });
+  const lowStockQuery  = useQuery({ queryKey: ['dashboard-low-stock'], queryFn: () => reportsApi.lowStock(), enabled: canViewLowStock, retry: false });
   const topItemsQuery  = useQuery({ queryKey: ['dashboard-top-selling-items', fromDate, toDate], queryFn: () => reportsApi.topSellingItems(dashboardDateParams), enabled: canViewTopItems, retry: false });
 
   const summary   = summaryQuery.data?.data;

@@ -4,7 +4,6 @@ import com.nexoraa.billtop.dto.ledger.LedgerResponseDto;
 import com.nexoraa.billtop.dto.purchase.PurchaseListResponseDto;
 import com.nexoraa.billtop.dto.report.BankStatementEntryResponseDto;
 import com.nexoraa.billtop.dto.report.CustomerDueResponseDto;
-import com.nexoraa.billtop.dto.report.DayBookEntryResponseDto;
 import com.nexoraa.billtop.dto.report.ExpenseReportResponseDto;
 import com.nexoraa.billtop.dto.report.ExpiredItemResponseDto;
 import com.nexoraa.billtop.dto.report.GstReportResponseDto;
@@ -269,8 +268,31 @@ public class ReportServiceImpl implements ReportService {
 
     @Override
     @Transactional(readOnly = true)
+    public List<StockReportResponseDto> getStockReport(Long itemId, Long brandId, Long categoryId, Long warehouseId) {
+        return filterStockRecords(getStockReport(), itemId, brandId, warehouseId, categoryId);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public List<StockReportResponseDto> getLowStockReport() {
         return lowStockReportForOrganization(currentOrganizationService.getOrganizationId());
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<StockReportResponseDto> getLowStockReport(Long categoryId, Long itemId, Long brandId) {
+        return filterStockRecords(getLowStockReport(), itemId, brandId, null, categoryId);
+    }
+
+    private List<StockReportResponseDto> filterStockRecords(
+            List<StockReportResponseDto> records, Long itemId, Long brandId, Long warehouseId, Long categoryId
+    ) {
+        return records.stream()
+                .filter(record -> itemId == null || itemId.equals(record.getItemId()))
+                .filter(record -> warehouseId == null || warehouseId.equals(record.getWarehouseId()))
+                .filter(record -> brandId == null || brandId.equals(record.getBrandId()))
+                .filter(record -> categoryId == null || categoryId.equals(record.getCategoryId()))
+                .toList();
     }
 
     @Override
@@ -437,7 +459,8 @@ public class ReportServiceImpl implements ReportService {
             }
             TopSellingAccumulator accumulator = accumulators.computeIfAbsent(
                     item.getId(),
-                    id -> new TopSellingAccumulator(item.getId(), item.getItemName())
+                    id -> new TopSellingAccumulator(item.getId(), item.getItemName(),
+                            item.getBrand() == null ? null : item.getBrand().getName())
             );
             accumulator.quantity = accumulator.quantity.add(support.defaultZero(salesItem.getQty()));
             accumulator.totalAmount = accumulator.totalAmount.add(support.defaultZero(salesItem.getTotalAmount()));
@@ -447,46 +470,11 @@ public class ReportServiceImpl implements ReportService {
                 .map(accumulator -> TopSellingItemResponseDto.builder()
                         .itemId(accumulator.itemId)
                         .itemName(accumulator.itemName)
+                        .brandName(accumulator.brandName)
                         .quantity(support.quantity(accumulator.quantity))
                         .totalAmount(support.money(accumulator.totalAmount))
                         .build())
                 .toList();
-    }
-
-    @Override
-    @Transactional(readOnly = true)
-    public List<DayBookEntryResponseDto> getDayBook(LocalDate date) {
-        List<DayBookEntryResponseDto> entries = new ArrayList<>();
-        salesBetween(date, date).forEach(sale -> entries.add(DayBookEntryResponseDto.builder()
-                .date(sale.getInvoiceDate())
-                .type("SALE")
-                .referenceNo(sale.getInvoiceNo())
-                .debit(sale.getGrandTotal())
-                .credit(TransactionSupport.ZERO)
-                .build()));
-        purchasesBetween(date, date).forEach(purchase -> entries.add(DayBookEntryResponseDto.builder()
-                .date(purchase.getPurchaseDate())
-                .type("PURCHASE")
-                .referenceNo(purchase.getPurchaseNo())
-                .debit(TransactionSupport.ZERO)
-                .credit(purchase.getGrandTotal())
-                .build()));
-        paymentRepository.findByPaymentDateAndPaymentTypeInAndOrganizationId(date, List.of(
-                FinanceSupport.PAYMENT_IN,
-                FinanceSupport.PAYMENT_OUT,
-                FinanceSupport.POS,
-                FinanceSupport.EXPENSE
-        ), currentOrganizationService.getOrganizationId()).forEach(payment -> entries.add(DayBookEntryResponseDto.builder()
-                .date(payment.getPaymentDate())
-                .type(payment.getPaymentType())
-                .referenceNo(payment.getPaymentNo())
-                .debit(FinanceSupport.PAYMENT_OUT.equals(payment.getPaymentType()) || FinanceSupport.EXPENSE.equals(payment.getPaymentType())
-                        ? payment.getAmount() : TransactionSupport.ZERO)
-                .credit(FinanceSupport.PAYMENT_IN.equals(payment.getPaymentType()) || FinanceSupport.POS.equals(payment.getPaymentType())
-                        ? payment.getAmount() : TransactionSupport.ZERO)
-                .build()));
-        entries.sort(Comparator.comparing(DayBookEntryResponseDto::getDate));
-        return entries;
     }
 
     @Override
@@ -571,12 +559,16 @@ public class ReportServiceImpl implements ReportService {
 
     @Override
     @Transactional(readOnly = true)
-    public List<ExpenseReportResponseDto> getExpenseReport(LocalDate fromDate, LocalDate toDate, Long categoryId, Long paymentMethodId) {
+    public List<ExpenseReportResponseDto> getExpenseReport(
+            LocalDate fromDate, LocalDate toDate, Long categoryId, Long subCategoryId, Long paymentMethodId
+    ) {
         return expenseRepository.findByExpenseDateBetweenAndOrganizationIdOrderByExpenseDateAscIdAsc(
                         fromDate, toDate, currentOrganizationService.getOrganizationId())
                 .stream()
                 .filter(expense -> categoryId == null
                         || (expense.getExpenseCategory() != null && categoryId.equals(expense.getExpenseCategory().getId())))
+                .filter(expense -> subCategoryId == null
+                        || (expense.getExpenseSubCategory() != null && subCategoryId.equals(expense.getExpenseSubCategory().getId())))
                 .filter(expense -> paymentMethodId == null
                         || (expense.getPaymentMethod() != null && paymentMethodId.equals(expense.getPaymentMethod().getId())))
                 .map(this::toExpenseRecord)
@@ -618,17 +610,6 @@ public class ReportServiceImpl implements ReportService {
 
     @Override
     @Transactional(readOnly = true)
-    public List<ItemTransactionResponseDto> getItemTransactionsBatch(
-            LocalDate fromDate, LocalDate toDate, Long itemId, Long brandId, String batchNo, Long warehouseId
-    ) {
-        return stockTransactionsBetween(fromDate, toDate).stream()
-                .filter(transaction -> matchesItemFilters(transaction, itemId, brandId, warehouseId))
-                .map(this::toItemTransactionRecord)
-                .toList();
-    }
-
-    @Override
-    @Transactional(readOnly = true)
     public List<ItemTransactionResponseDto> getItemTransactionsGeneral(
             LocalDate fromDate, LocalDate toDate, Long itemId, Long brandId, Long warehouseId
     ) {
@@ -636,16 +617,6 @@ public class ReportServiceImpl implements ReportService {
                 .filter(transaction -> matchesItemFilters(transaction, itemId, brandId, warehouseId))
                 .map(this::toItemTransactionRecord)
                 .toList();
-    }
-
-    @Override
-    @Transactional(readOnly = true)
-    public List<ItemTransactionResponseDto> getItemTransactionsSerial(
-            LocalDate fromDate, LocalDate toDate, Long itemId, Long brandId, String serialImei, Long warehouseId
-    ) {
-        // No serial/IMEI tracking table exists in the schema today, so this endpoint
-        // responds correctly but has no data source to draw from.
-        return List.of();
     }
 
     @Override
@@ -798,13 +769,17 @@ public class ReportServiceImpl implements ReportService {
     private StockReportResponseDto toStockRecord(Stock stock) {
         Item item = stock.getItem();
         Warehouse warehouse = stock.getWarehouse();
+        Long itemId = item == null ? null : item.getId();
         BigDecimal availableQty = support.defaultZero(stock.getAvailableQty());
-        BigDecimal stockValue = availableQty.multiply(itemPurchasePrice(item == null ? null : item.getId()));
+        BigDecimal costValue = availableQty.multiply(itemPurchasePrice(itemId));
+        BigDecimal saleValue = availableQty.multiply(itemSalePrice(itemId));
         return StockReportResponseDto.builder()
-                .itemId(item == null ? null : item.getId())
+                .itemId(itemId)
                 .itemName(item == null ? null : item.getItemName())
                 .itemCode(item == null ? null : item.getItemCode())
+                .brandId(item == null || item.getBrand() == null ? null : item.getBrand().getId())
                 .brandName(item == null || item.getBrand() == null ? null : item.getBrand().getName())
+                .categoryId(item == null || item.getCategory() == null ? null : item.getCategory().getId())
                 .categoryName(item == null || item.getCategory() == null ? null : item.getCategory().getName())
                 .unitName(item == null || item.getBaseUnit() == null ? null : item.getBaseUnit().getName())
                 .warehouseId(warehouse == null ? null : warehouse.getId())
@@ -813,7 +788,10 @@ public class ReportServiceImpl implements ReportService {
                 .currentStock(support.quantity(availableQty))
                 .minimumStock(stock.getMinimumStock())
                 .reorderLevel(stock.getReorderLevel())
-                .stockValue(support.money(stockValue))
+                .stockValue(support.money(costValue))
+                .costValue(support.money(costValue))
+                .saleValue(support.money(saleValue))
+                .profitValue(support.money(saleValue.subtract(costValue)))
                 .status(support.defaultZero(stock.getAvailableQty()).compareTo(TransactionSupport.ZERO) <= 0 ? "Out of Stock" : "Low Stock")
                 .build();
     }
@@ -847,6 +825,7 @@ public class ReportServiceImpl implements ReportService {
                 .date(expense.getExpenseDate())
                 .expenseCode(expense.getExpenseNo())
                 .category(expense.getExpenseCategory() == null ? null : expense.getExpenseCategory().getName())
+                .subCategory(expense.getExpenseSubCategory() == null ? null : expense.getExpenseSubCategory().getName())
                 .paymentType(expense.getPaymentMethod() == null ? null : expense.getPaymentMethod().getName())
                 .paidAmount(support.money(expense.getAmount()))
                 .build();
@@ -904,15 +883,26 @@ public class ReportServiceImpl implements ReportService {
                 .orElse(TransactionSupport.ZERO);
     }
 
+    private BigDecimal itemSalePrice(Long itemId) {
+        if (itemId == null) {
+            return TransactionSupport.ZERO;
+        }
+        return itemPriceRepository.findTopByItemIdOrderByIdDesc(itemId)
+                .map(price -> support.defaultZero(price.getSalePrice()))
+                .orElse(TransactionSupport.ZERO);
+    }
+
     private static class TopSellingAccumulator {
         private final Long itemId;
         private final String itemName;
+        private final String brandName;
         private BigDecimal quantity = TransactionSupport.ZERO;
         private BigDecimal totalAmount = TransactionSupport.ZERO;
 
-        private TopSellingAccumulator(Long itemId, String itemName) {
+        private TopSellingAccumulator(Long itemId, String itemName, String brandName) {
             this.itemId = itemId;
             this.itemName = itemName;
+            this.brandName = brandName;
         }
     }
 

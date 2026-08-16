@@ -223,6 +223,7 @@ public class StockTransferServiceImpl implements StockTransferService {
                 .toWarehouse(support.toNameId(transfer.getToWarehouse()))
                 .transferDate(transfer.getTransferDate())
                 .notes(transfer.getNotes())
+                .createdBy(transfer.getCreatedBy())
                 .items(stockTransferItemRepository.findByStockTransferIdAndIsDeletedFalse(transfer.getId()).stream()
                         .map(this::toItemResponse)
                         .toList())

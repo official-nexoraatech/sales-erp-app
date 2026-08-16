@@ -3,16 +3,15 @@ import { useQuery } from '@tanstack/react-query';
 import { Check, ChevronDown, GitBranch } from 'lucide-react';
 import { branchApi } from '../../api/endpoints';
 import { queryClient } from '../../app/queryClient';
-import { isSuperAdminRole } from '../../auth/featurePermissions';
 import { useAuth } from '../../hooks/useAuth';
 import { useBranch } from '../../hooks/useBranch';
 
 export const BranchSwitcher: React.FC = () => {
-  const { isAuthenticated, user } = useAuth();
-  const { selectedBranchId, setSelectedBranchId, clearSelectedBranch } = useBranch();
+  const { isAuthenticated } = useAuth();
+  const { selectedBranchId, setSelectedBranchId } = useBranch();
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const shouldUseBranch = isAuthenticated && !isSuperAdminRole(user?.role);
+  const shouldUseBranch = isAuthenticated;
 
   const branches = useQuery({
     queryKey: ['my-branches'],
@@ -20,13 +19,6 @@ export const BranchSwitcher: React.FC = () => {
     enabled: shouldUseBranch,
   });
   const rows = branches.data?.data || [];
-
-  useEffect(() => {
-    if (isSuperAdminRole(user?.role) && selectedBranchId) {
-      clearSelectedBranch();
-      setIsOpen(false);
-    }
-  }, [clearSelectedBranch, selectedBranchId, user?.role]);
 
   // Default to a valid assigned branch until the user picks one explicitly.
   useEffect(() => {

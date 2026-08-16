@@ -1,6 +1,5 @@
 import axios, { AxiosError } from 'axios';
 import type { AxiosInstance, InternalAxiosRequestConfig } from 'axios';
-import { isSuperAdminRole } from '../auth/featurePermissions';
 import { useAuthStore } from '../store/authStore';
 import { useBranchStore } from '../store/branchStore';
 import toast from 'react-hot-toast';
@@ -33,7 +32,7 @@ axiosClient.interceptors.request.use(
       config.headers.Authorization = `Bearer ${token}`;
     }
     const selectedBranchId = useBranchStore.getState().selectedBranchId;
-    if (!skipSessionHeaders && selectedBranchId && !isSuperAdminRole(auth.user?.role)) {
+    if (!skipSessionHeaders && selectedBranchId) {
       config.headers['X-Branch-Id'] = String(selectedBranchId);
     }
     return config;

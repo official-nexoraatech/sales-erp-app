@@ -17,6 +17,7 @@ public class ExpenseReportResponseDto {
     private LocalDate date;
     private String expenseCode;
     private String category;
+    private String subCategory;
     private String paymentType;
     private BigDecimal paidAmount;
 }

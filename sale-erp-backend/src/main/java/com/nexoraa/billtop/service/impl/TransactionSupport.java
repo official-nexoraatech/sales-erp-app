@@ -201,6 +201,7 @@ class TransactionSupport {
                     .build();
         });
 
+        stock.setWarehouse(warehouse);
         stock.setAvailableQty(quantity(defaultZero(stock.getAvailableQty()).add(quantity)));
         stock.setReservedQty(quantity(defaultZero(stock.getReservedQty())));
         Stock savedStock = stockRepository.save(stock);

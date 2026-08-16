@@ -5,7 +5,6 @@ import com.nexoraa.billtop.dto.ApiResponseDto;
 import com.nexoraa.billtop.dto.ledger.LedgerResponseDto;
 import com.nexoraa.billtop.dto.report.BankStatementEntryResponseDto;
 import com.nexoraa.billtop.dto.report.CustomerDueResponseDto;
-import com.nexoraa.billtop.dto.report.DayBookEntryResponseDto;
 import com.nexoraa.billtop.dto.report.ExpenseReportResponseDto;
 import com.nexoraa.billtop.dto.report.ExpiredItemResponseDto;
 import com.nexoraa.billtop.dto.report.GstReportResponseDto;
@@ -92,13 +91,28 @@ public class ReportController {
     }
 
     @GetMapping("/stocks")
-    public ResponseEntity<ApiResponseDto<List<StockReportResponseDto>>> getStockReport() {
-        return ResponseEntity.ok(ApiResponseDto.success(ResponseMessage.REPORT_RETRIEVED, reportService.getStockReport()));
+    public ResponseEntity<ApiResponseDto<List<StockReportResponseDto>>> getStockReport(
+            @RequestParam(required = false) Long itemId,
+            @RequestParam(required = false) Long brandId,
+            @RequestParam(required = false) Long categoryId,
+            @RequestParam(required = false) Long warehouseId
+    ) {
+        return ResponseEntity.ok(ApiResponseDto.success(
+                ResponseMessage.REPORT_RETRIEVED,
+                reportService.getStockReport(itemId, brandId, categoryId, warehouseId)
+        ));
     }
 
     @GetMapping("/low-stock")
-    public ResponseEntity<ApiResponseDto<List<StockReportResponseDto>>> getLowStockReport() {
-        return ResponseEntity.ok(ApiResponseDto.success(ResponseMessage.REPORT_RETRIEVED, reportService.getLowStockReport()));
+    public ResponseEntity<ApiResponseDto<List<StockReportResponseDto>>> getLowStockReport(
+            @RequestParam(required = false) Long categoryId,
+            @RequestParam(required = false) Long itemId,
+            @RequestParam(required = false) Long brandId
+    ) {
+        return ResponseEntity.ok(ApiResponseDto.success(
+                ResponseMessage.REPORT_RETRIEVED,
+                reportService.getLowStockReport(categoryId, itemId, brandId)
+        ));
     }
 
     @GetMapping("/customer-ledger/{customerId}")
@@ -138,13 +152,6 @@ public class ReportController {
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate toDate
     ) {
         return ResponseEntity.ok(ApiResponseDto.success(ResponseMessage.REPORT_RETRIEVED, reportService.getTopSellingItems(fromDate, toDate)));
-    }
-
-    @GetMapping("/day-book")
-    public ResponseEntity<ApiResponseDto<List<DayBookEntryResponseDto>>> getDayBook(
-            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date
-    ) {
-        return ResponseEntity.ok(ApiResponseDto.success(ResponseMessage.REPORT_RETRIEVED, reportService.getDayBook(date)));
     }
 
     @GetMapping("/customer-dues")
@@ -191,11 +198,12 @@ public class ReportController {
     public ResponseEntity<ApiResponseDto<List<ExpenseReportResponseDto>>> getExpenseItems(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fromDate,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate toDate,
-            @RequestParam(required = false) Long categoryId
+            @RequestParam(required = false) Long categoryId,
+            @RequestParam(required = false) Long subCategoryId
     ) {
         return ResponseEntity.ok(ApiResponseDto.success(
                 ResponseMessage.REPORT_RETRIEVED,
-                reportService.getExpenseReport(fromDate, toDate, categoryId, null)
+                reportService.getExpenseReport(fromDate, toDate, categoryId, subCategoryId, null)
         ));
     }
 
@@ -204,11 +212,12 @@ public class ReportController {
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fromDate,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate toDate,
             @RequestParam(required = false) Long categoryId,
+            @RequestParam(required = false) Long subCategoryId,
             @RequestParam(required = false) Long paymentMethodId
     ) {
         return ResponseEntity.ok(ApiResponseDto.success(
                 ResponseMessage.REPORT_RETRIEVED,
-                reportService.getExpenseReport(fromDate, toDate, categoryId, paymentMethodId)
+                reportService.getExpenseReport(fromDate, toDate, categoryId, subCategoryId, paymentMethodId)
         ));
     }
 
@@ -224,21 +233,6 @@ public class ReportController {
         ));
     }
 
-    @GetMapping("/item-transactions/batch")
-    public ResponseEntity<ApiResponseDto<List<ItemTransactionResponseDto>>> getItemTransactionsBatch(
-            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fromDate,
-            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate toDate,
-            @RequestParam(required = false) Long itemId,
-            @RequestParam(required = false) Long brandId,
-            @RequestParam(required = false) String batchNo,
-            @RequestParam(required = false) Long warehouseId
-    ) {
-        return ResponseEntity.ok(ApiResponseDto.success(
-                ResponseMessage.REPORT_RETRIEVED,
-                reportService.getItemTransactionsBatch(fromDate, toDate, itemId, brandId, batchNo, warehouseId)
-        ));
-    }
-
     @GetMapping("/item-transactions/general")
     public ResponseEntity<ApiResponseDto<List<ItemTransactionResponseDto>>> getItemTransactionsGeneral(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fromDate,
@@ -250,21 +244,6 @@ public class ReportController {
         return ResponseEntity.ok(ApiResponseDto.success(
                 ResponseMessage.REPORT_RETRIEVED,
                 reportService.getItemTransactionsGeneral(fromDate, toDate, itemId, brandId, warehouseId)
-        ));
-    }
-
-    @GetMapping("/item-transactions/serial")
-    public ResponseEntity<ApiResponseDto<List<ItemTransactionResponseDto>>> getItemTransactionsSerial(
-            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fromDate,
-            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate toDate,
-            @RequestParam(required = false) Long itemId,
-            @RequestParam(required = false) Long brandId,
-            @RequestParam(required = false) String serialImei,
-            @RequestParam(required = false) Long warehouseId
-    ) {
-        return ResponseEntity.ok(ApiResponseDto.success(
-                ResponseMessage.REPORT_RETRIEVED,
-                reportService.getItemTransactionsSerial(fromDate, toDate, itemId, brandId, serialImei, warehouseId)
         ));
     }
 

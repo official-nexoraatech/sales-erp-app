@@ -21,5 +21,6 @@ public class StockTransferResponseDto {
     private NameIdResponseDto toWarehouse;
     private LocalDate transferDate;
     private String notes;
+    private String createdBy;
     private List<StockTransferItemResponseDto> items;
 }

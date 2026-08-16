@@ -15,6 +15,7 @@ public class TopSellingItemResponseDto {
 
     private Long itemId;
     private String itemName;
+    private String brandName;
     private BigDecimal quantity;
     private BigDecimal totalAmount;
 }

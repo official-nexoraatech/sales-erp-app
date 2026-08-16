@@ -7,7 +7,6 @@ import {
   cashApi,
   categoryApi,
   customerApi,
-  expenseApi,
   expenseSubCategoryApi,
   itemApi,
   paymentMethodApi,
@@ -39,8 +38,6 @@ interface ReportConfig {
 }
 
 export type ReportKey =
-  | 'batch'
-  | 'serial'
   | 'general'
   | 'purchase'
   | 'itemPurchase'
@@ -61,17 +58,11 @@ export type ReportKey =
   | 'gstr1'
   | 'gstr2'
   | 'stockTransfer'
-  | 'itemStockTransfer'
   | 'stockAdjustment'
-  | 'itemStockAdjustment'
   | 'stock'
-  | 'stockBatch'
-  | 'stockSerial'
-  | 'stockGeneral'
   | 'lowStock'
   | 'inventory'
   | 'topSelling'
-  | 'dayBook'
   | 'expiredItem'
   | 'reorderItem';
 
@@ -118,12 +109,15 @@ const valueByColumn = (row: any, column: string) => {
     if (row?.[key] !== undefined && row?.[key] !== null) return typeof row[key] === 'object' ? row[key]?.name || '' : row[key];
   }
   const aliases: Record<string, string[]> = {
-    date: ['date', 'invoiceDate', 'purchaseDate', 'expenseDate', 'transactionDate', 'createdAt'],
+    date: ['date', 'invoiceDate', 'purchaseDate', 'expenseDate', 'transactionDate', 'transferDate', 'adjustmentDate', 'createdAt'],
     invoicereferenceno: ['invoiceNo', 'referenceNo', 'purchaseNo', 'saleNo', 'invoiceReferenceNo'],
     supplier: ['supplierName', 'supplier'],
     customer: ['customerName', 'customer'],
     partyname: ['partyName', 'customerName', 'supplierName'],
     warehouse: ['warehouseName', 'warehouse'],
+    'worth(cost)': ['costValue'],
+    'worth(sale)': ['saleValue'],
+    'worth(profit)': ['profitValue'],
     grandtotal: ['grandTotal', 'totalAmount', 'total', 'amount'],
     paidamount: ['paidAmount', 'paid', 'amount'],
     balance: ['balance', 'dueAmount'],
@@ -149,7 +143,6 @@ const valueByColumn = (row: any, column: string) => {
     minimumstock: ['minimumStock', 'reorderLevel', 'minStock'],
     unit: ['unitName', 'unit'],
     daysuntilexpiry: ['daysUntilExpiry', 'daysRemaining'],
-    batchno: ['batchNo', 'batchNumber'],
     serialimei: ['serialImei', 'serialNo', 'imei', 'serial'],
     fromwarehouse: ['fromWarehouseName', 'fromWarehouse'],
     towarehouse: ['toWarehouseName', 'toWarehouse'],
@@ -182,6 +175,21 @@ const rowDateValue = (row: any) => {
   return String(raw).slice(0, 10);
 };
 
+// Report DATE columns come from the API as ISO (yyyy-MM-dd, optionally with a time
+// component) - display them as dd-mm-yyyy instead.
+const formatDisplayDate = (value: unknown) => {
+  if (typeof value !== 'string') return value;
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return value;
+  const [, year, month, day] = match;
+  return `${day}-${month}-${year}`;
+};
+
+const cellValue = (row: any, column: string) => {
+  const raw = valueByColumn(row, column);
+  return column === 'DATE' ? formatDisplayDate(raw) : raw;
+};
+
 // Client-side date-range filtering for reports whose fetch endpoint does not
 // filter by date server-side (e.g. Expense, Stock Transfer, Stock Adjustment).
 // Rows without a parseable date are kept so reports that lack a date column are
@@ -197,61 +205,24 @@ const applyClientDateFilter = (rows: any[], fromDate?: string, toDate?: string) 
   });
 };
 
-const exportRows = (columns: string[], rows: any[]) => rows.map((row) => columns.map((column) => String(valueByColumn(row, column) ?? '')));
+const exportRows = (columns: string[], rows: any[]) => rows.map((row) => columns.map((column) => String(cellValue(row, column) ?? '')));
 
 const exportData = (title: string, columns: string[], rows: any[], extension: 'csv' | 'xls') => {
   const separator = extension === 'csv' ? ',' : '\t';
   const content = [columns, ...exportRows(columns, rows)].map((row) => row.map((value) => `"${String(value).replaceAll('"', '""')}"`).join(separator)).join('\n');
-  const blob = new Blob([content], { type: extension === 'csv' ? 'text/csv' : 'application/vnd.ms-excel' });
+  // UTF-8 BOM so Excel detects the encoding correctly for non-ASCII content instead of mangling it.
+  const blob = new Blob(['﻿', content], { type: extension === 'csv' ? 'text/csv;charset=utf-8' : 'application/vnd.ms-excel;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
   link.download = `${title.toLowerCase().replaceAll(' ', '-')}.${extension}`;
   link.click();
-  URL.revokeObjectURL(url);
+  // Delay revoking the blob URL - revoking immediately after click() can abort the download on some
+  // browsers before it's actually dispatched.
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 };
 
 const configs: Record<ReportKey, ReportConfig> = {
-  batch: {
-    title: 'Batch Transaction Report',
-    fields: [
-      { key: 'fromDate', label: 'From Date', type: 'date' },
-      { key: 'toDate', label: 'To Date', type: 'date' },
-      { key: 'itemName', label: 'Item Name', type: 'select', placeholder: 'Select Item' },
-      { key: 'brand', label: 'Brand', type: 'select', placeholder: 'Select Brand' },
-      { key: 'batchNo', label: 'Batch Number', type: 'select', placeholder: 'Select Item' },
-      { key: 'warehouse', label: 'Warehouse', type: 'select', placeholder: 'Select Warehouse' },
-    ],
-    columns: ['#', 'DATE', 'TYPE', 'INVOICE/REFERENCE NO.', 'PARTY NAME', 'WAREHOUSE', 'ITEM NAME', 'BRAND', 'BATCH NO.', 'QUANTITY', 'STOCK'],
-    fetch: (filters) => reportsApi.itemTransactionsBatch({
-      fromDate: formatDateForApi(filters.fromDate),
-      toDate: formatDateForApi(filters.toDate),
-      itemId: filters.itemName || undefined,
-      brandId: filters.brand || undefined,
-      batchNo: filters.batchNo || undefined,
-      warehouseId: filters.warehouse || undefined,
-    }),
-  },
-  serial: {
-    title: 'Serial Transaction Report',
-    fields: [
-      { key: 'fromDate', label: 'From Date', type: 'date' },
-      { key: 'toDate', label: 'To Date', type: 'date' },
-      { key: 'itemName', label: 'Item Name', type: 'select', placeholder: 'Select Item' },
-      { key: 'brand', label: 'Brand', type: 'select', placeholder: 'Select Brand' },
-      { key: 'serial', label: 'Serial/IMEI', type: 'select', placeholder: 'Select Serial/IMEI' },
-      { key: 'warehouse', label: 'Warehouse', type: 'select', placeholder: 'Select Warehouse' },
-    ],
-    columns: ['#', 'DATE', 'TYPE', 'INVOICE/REFERENCE NO.', 'PARTY NAME', 'WAREHOUSE', 'ITEM NAME', 'BRAND', 'SERIAL/IMEI'],
-    fetch: (filters) => reportsApi.itemTransactionsSerial({
-      fromDate: formatDateForApi(filters.fromDate),
-      toDate: formatDateForApi(filters.toDate),
-      itemId: filters.itemName || undefined,
-      brandId: filters.brand || undefined,
-      serialImei: filters.serial || undefined,
-      warehouseId: filters.warehouse || undefined,
-    }),
-  },
   general: {
     title: 'General Transaction Report',
     fields: [
@@ -382,9 +353,17 @@ const configs: Record<ReportKey, ReportConfig> = {
       { key: 'category', label: 'Category', type: 'select', placeholder: 'Choose one thing' },
       { key: 'subcategory', label: 'Subcategory', type: 'select', placeholder: 'Choose one thing' },
     ],
-    columns: ['#', 'DATE', 'REFERENCE NO.', 'CATEGORY', 'SUBCATEGORY', 'GRAND TOTAL', 'PAID AMOUNT', 'BALANCE'],
-    fetch: () => expenseApi.getAll({ page: 0, size: 100 }),
+    columns: ['#', 'DATE', 'EXPENSE CODE', 'CATEGORY', 'SUBCATEGORY', 'PAID AMOUNT'],
+    fetch: (filters) => reportsApi.expenseItems({
+      fromDate: formatDateForApi(filters.fromDate),
+      toDate: formatDateForApi(filters.toDate),
+      categoryId: filters.category || undefined,
+      subCategoryId: filters.subcategory || undefined,
+    }),
   },
+  // Expense line items (item name/unit price/quantity per expense) don't exist in the data model yet
+  // (Expense only stores one category + one amount per record) - shows the same category-level data as
+  // "Expense Report" until expense line items are built (tracked separately).
   expenseItem: {
     title: 'Expense Item Report',
     fields: [
@@ -392,13 +371,13 @@ const configs: Record<ReportKey, ReportConfig> = {
       { key: 'toDate', label: 'To Date', type: 'date' },
       { key: 'category', label: 'Category', type: 'select', placeholder: 'Choose one thing' },
       { key: 'subcategory', label: 'Subcategory', type: 'select', placeholder: 'Choose one thing' },
-      { key: 'expenseItem', label: 'Expense Item', type: 'select', placeholder: 'Select Item' },
     ],
-    columns: ['#', 'DATE', 'EXPENSE CODE', 'ITEM NAME', 'CATEGORY', 'SUBCATEGORY', 'UNIT PRICE', 'QUANTITY', 'TOTAL'],
+    columns: ['#', 'DATE', 'EXPENSE CODE', 'CATEGORY', 'SUBCATEGORY', 'PAID AMOUNT'],
     fetch: (filters) => reportsApi.expenseItems({
       fromDate: formatDateForApi(filters.fromDate),
       toDate: formatDateForApi(filters.toDate),
       categoryId: filters.category || undefined,
+      subCategoryId: filters.subcategory || undefined,
     }),
   },
   expensePayment: {
@@ -415,6 +394,7 @@ const configs: Record<ReportKey, ReportConfig> = {
       fromDate: formatDateForApi(filters.fromDate),
       toDate: formatDateForApi(filters.toDate),
       categoryId: filters.category || undefined,
+      subCategoryId: filters.subcategory || undefined,
       paymentMethodId: filters.paymentType || undefined,
     }),
   },
@@ -487,20 +467,7 @@ const configs: Record<ReportKey, ReportConfig> = {
       { key: 'toDate', label: 'To Date', type: 'date' },
     ],
     columns: ['#', 'TRANSFER CODE', 'DATE', 'CREATED BY'],
-    fetch: () => stockTransferApi.getAll({ page: 0, size: 100 }),
-  },
-  itemStockTransfer: {
-    title: 'Item Stock Transfer Report',
-    fields: [
-      { key: 'fromDate', label: 'From Date', type: 'date' },
-      { key: 'toDate', label: 'To Date', type: 'date' },
-      { key: 'fromWarehouse', label: 'From Warehouse', type: 'select', placeholder: 'Select Warehouse' },
-      { key: 'toWarehouse', label: 'To Warehouse', type: 'select', placeholder: 'Select Warehouse' },
-      { key: 'itemName', label: 'Item Name', type: 'select', placeholder: 'Select Item' },
-      { key: 'brand', label: 'Brand', type: 'select', placeholder: 'Select Brand' },
-    ],
-    columns: ['#', 'TRANSFER CODE', 'DATE', 'FROM WAREHOUSE', 'TO WAREHOUSE', 'ITEM NAME', 'BRAND', 'SERIAL/IMEI NUMBER', 'BATCH NO.', 'QUANTITY'],
-    fetch: () => stockTransferApi.getAll({ page: 0, size: 100 }),
+    fetch: () => stockTransferApi.getAll({ page: 0, size: 1000 }),
   },
   stockAdjustment: {
     title: 'Stock Adjustment Report',
@@ -508,58 +475,13 @@ const configs: Record<ReportKey, ReportConfig> = {
       { key: 'fromDate', label: 'From Date', type: 'date' },
       { key: 'toDate', label: 'To Date', type: 'date' },
     ],
-    columns: ['#', 'DATE', 'ADJUSTMENT CODE', 'REFERENCE NO.', 'CREATED BY'],
-    fetch: () => stockAdjustmentApi.getAll({ page: 0, size: 100 }),
-  },
-  itemStockAdjustment: {
-    title: 'Item Stock Adjustment Report',
-    fields: [
-      { key: 'fromDate', label: 'From Date', type: 'date' },
-      { key: 'toDate', label: 'To Date', type: 'date' },
-      { key: 'warehouse', label: 'Warehouse', type: 'select', placeholder: 'Select Warehouse' },
-      { key: 'itemName', label: 'Item Name', type: 'select', placeholder: 'Select Item' },
-      { key: 'brand', label: 'Brand', type: 'select', placeholder: 'Select Brand' },
-    ],
-    columns: ['#', 'ADJUSTMENT CODE', 'DATE', 'WAREHOUSE', 'ITEM NAME', 'BRAND', 'SERIAL/IMEI NUMBER', 'BATCH NO.', 'QUANTITY', 'UNIT', 'ACTION'],
-    fetch: () => stockAdjustmentApi.getAll({ page: 0, size: 100 }),
+    columns: ['#', 'DATE', 'ADJUSTMENT CODE', 'CREATED BY'],
+    fetch: () => stockAdjustmentApi.getAll({ page: 0, size: 1000 }),
   },
   stock: {
     title: 'Stock Report',
     fields: [],
     columns: ['#', 'ITEM NAME', 'BRAND', 'WAREHOUSE', 'QUANTITY', 'STOCK', 'UNIT PRICE', 'TOTAL'],
-    fetch: () => reportsApi.stocks(),
-  },
-  stockBatch: {
-    title: 'Batch Wise Item Stock Report',
-    fields: [
-      { key: 'itemName', label: 'Item Name', type: 'select', placeholder: 'Select Item' },
-      { key: 'brand', label: 'Brand', type: 'select', placeholder: 'Select Brand' },
-      { key: 'batchNo', label: 'Batch Number', type: 'select', placeholder: 'Select Item' },
-      { key: 'warehouse', label: 'Warehouse', type: 'select', placeholder: 'Select Warehouse' },
-    ],
-    columns: ['#', 'WAREHOUSE', 'ITEM NAME', 'BRAND', 'BATCH NO.', 'DAYS UNTIL EXPIRY', 'AVAILABLE QTY'],
-    fetch: () => reportsApi.stocks(),
-  },
-  stockSerial: {
-    title: 'Serial/IMEI Item Stock Report',
-    fields: [
-      { key: 'itemName', label: 'Item Name', type: 'select', placeholder: 'Select Item' },
-      { key: 'brand', label: 'Brand', type: 'select', placeholder: 'Select Brand' },
-      { key: 'serial', label: 'Serial/IMEI', type: 'select', placeholder: 'Select Serial/IMEI' },
-      { key: 'warehouse', label: 'Warehouse', type: 'select', placeholder: 'Select Warehouse' },
-    ],
-    columns: ['#', 'WAREHOUSE', 'ITEM NAME', 'BRAND', 'SERIAL/IMEI'],
-    fetch: () => reportsApi.stocks(),
-  },
-  stockGeneral: {
-    title: 'General Item Stock Report',
-    fields: [
-      { key: 'itemName', label: 'Item Name', type: 'select', placeholder: 'Select Item' },
-      { key: 'brand', label: 'Brand', type: 'select', placeholder: 'Select Brand' },
-      { key: 'category', label: 'Category', type: 'select', placeholder: 'Choose one thing' },
-      { key: 'warehouse', label: 'Warehouse', type: 'select', placeholder: 'Select Warehouse' },
-    ],
-    columns: ['#', 'WAREHOUSE', 'ITEM CODE', 'ITEM NAME', 'BRAND', 'CATEGORY', 'PURCHASE PRICE', 'SALE PRICE', 'QUANTITY', 'UNIT', 'STOCK VALUE'],
     fetch: () => reportsApi.stocks(),
   },
   lowStock: {
@@ -580,12 +502,6 @@ const configs: Record<ReportKey, ReportConfig> = {
     columns: ['#', 'ITEM NAME', 'BRAND', 'QUANTITY', 'TOTAL SALE', 'GRAND TOTAL'],
     fetch: () => reportsApi.topSellingItems(),
   },
-  dayBook: {
-    title: 'Day Book Report',
-    fields: [{ key: 'date', label: 'Date', type: 'date' }],
-    columns: ['#', 'DATE', 'TYPE', 'INVOICE/REFERENCE NO.', 'PARTY NAME', 'AMOUNT', 'NOTE'],
-    fetch: (filters) => reportsApi.dayBook({ date: formatDateForApi(filters.date) }),
-  },
   expiredItem: {
     title: 'Expired Item Report',
     fields: [
@@ -598,17 +514,15 @@ const configs: Record<ReportKey, ReportConfig> = {
       { key: 'toDate', label: 'To Date', type: 'date' },
       { key: 'itemName', label: 'Item Name', type: 'select', placeholder: 'Select Item' },
       { key: 'brand', label: 'Brand', type: 'select', placeholder: 'Select Brand' },
-      { key: 'batchNo', label: 'Batch Number', type: 'select', placeholder: 'Select Item' },
       { key: 'warehouse', label: 'Warehouse', type: 'select', placeholder: 'Select Warehouse' },
     ],
-    columns: ['#', 'WAREHOUSE', 'ITEM NAME', 'BRAND', 'BATCH NO.', 'DAYS UNTIL EXPIRY', 'QUANTITY'],
+    columns: ['#', 'WAREHOUSE', 'ITEM NAME', 'BRAND', 'DAYS UNTIL EXPIRY', 'QUANTITY'],
     fetch: (filters) => reportsApi.expiredItems({
       filterType: filters.filterType,
       fromDate: formatDateForApi(filters.fromDate),
       toDate: formatDateForApi(filters.toDate),
       itemId: filters.itemName || undefined,
       brandId: filters.brand || undefined,
-      batchNo: filters.batchNo || undefined,
       warehouseId: filters.warehouse || undefined,
     }),
   },
@@ -620,7 +534,11 @@ const configs: Record<ReportKey, ReportConfig> = {
       { key: 'brand', label: 'Brand', type: 'select', placeholder: 'Select Brand' },
     ],
     columns: ['#', 'ITEM NAME', 'BRAND', 'CATEGORY', 'MINIMUM STOCK', 'CURRENT STOCK', 'UNIT'],
-    fetch: () => reportsApi.lowStock(),
+    fetch: (filters) => reportsApi.lowStock({
+      categoryId: filters.category || undefined,
+      itemId: filters.itemName || undefined,
+      brandId: filters.brand || undefined,
+    }),
   },
 };
 
@@ -768,7 +686,7 @@ export const ReportPage: React.FC<{ report: ReportKey }> = ({ report }) => {
               <tbody>
                 {rows.length ? rows.map((row: any, index: number) => (
                   <tr key={index} className="border-b even:bg-gray-50">
-                    {config.columns.map((column) => <td key={column} className="border p-3">{column === '#' ? index + 1 : String(valueByColumn(row, column) ?? '')}</td>)}
+                    {config.columns.map((column) => <td key={column} className="border p-3">{column === '#' ? index + 1 : String(cellValue(row, column) ?? '')}</td>)}
                   </tr>
                 )) : (
                   <tr><td colSpan={config.columns.length} className="bg-gray-50 p-5 text-center">No data available in table</td></tr>

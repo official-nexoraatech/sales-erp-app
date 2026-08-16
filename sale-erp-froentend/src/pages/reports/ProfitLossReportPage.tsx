@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { reportsApi, warehouseApi } from '../../api/endpoints';
+import { reportsApi } from '../../api/endpoints';
 import { Button } from '../../components/ui/Button';
 import { Loader } from '../../components/ui/Loader';
 
@@ -29,10 +29,8 @@ const numberValue = (data: any, keys: string[], fallback = 0) => {
 const amount = (value: number) => value.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 export const ProfitLossReportPage: React.FC = () => {
-  const [filters, setFilters] = useState({ fromDate: defaultFromDate, toDate: defaultToDate, warehouse: '' });
+  const [filters, setFilters] = useState({ fromDate: defaultFromDate, toDate: defaultToDate });
   const [submitted, setSubmitted] = useState<typeof filters | null>(null);
-  const warehouses = useQuery({ queryKey: ['profit-loss-warehouses'], queryFn: () => warehouseApi.getAll() });
-  const warehouseOptions = warehouses.data?.data || [];
   const report = useQuery({
     queryKey: ['report', 'profit-loss', submitted],
     queryFn: () => reportsApi.profitLoss({ fromDate: formatDateForApi(submitted?.fromDate || ''), toDate: formatDateForApi(submitted?.toDate || '') }),
@@ -69,7 +67,6 @@ export const ProfitLossReportPage: React.FC = () => {
         <div className="grid grid-cols-1 gap-5 p-5 md:grid-cols-2">
           <label className="text-sm text-gray-600">From Date<input className={`${inputClass} mt-1`} type="date" value={filters.fromDate} onChange={(event) => setFilters((current) => ({ ...current, fromDate: event.target.value }))} /></label>
           <label className="text-sm text-gray-600">To Date<input className={`${inputClass} mt-1`} type="date" value={filters.toDate} onChange={(event) => setFilters((current) => ({ ...current, toDate: event.target.value }))} /></label>
-          <label className="text-sm text-gray-600">Warehouse<select className={`${inputClass} mt-1`} value={filters.warehouse} onChange={(event) => setFilters((current) => ({ ...current, warehouse: event.target.value }))}><option value="">Select Warehouse</option>{warehouseOptions.map((warehouse) => <option key={warehouse.id} value={warehouse.id}>{warehouse.name}</option>)}</select></label>
         </div>
         <div className="flex gap-3 px-5 pb-5">
           <Button type="button" onClick={() => setSubmitted({ ...filters })}>Submit</Button>

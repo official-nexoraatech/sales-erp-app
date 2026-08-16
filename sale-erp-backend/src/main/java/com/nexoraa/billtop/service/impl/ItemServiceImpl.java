@@ -312,7 +312,7 @@ public class ItemServiceImpl implements ItemService {
     }
 
     private Stock buildStock(Item item, Warehouse warehouse, ItemRequestDto request, Stock stock) {
-        Stock stockRequest = new Stock();
+        Stock stockRequest = stock != null ? stock : new Stock();
         stockRequest.setItem(item);
         stockRequest.setWarehouse(warehouse);
         stockRequest.setAvailableQty(request.getOpeningQuantity());
