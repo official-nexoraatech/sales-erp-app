@@ -359,6 +359,40 @@ export function registerSystemJobs(
     }
   );
 
+  // Multi-vertical platform audit 2026-08-16, Phase 1: batch/expiry now reaches
+  // inventory_fifo_layers (GRNService.approve()) — this closes the loop by publishing a
+  // STOCK_NEAR_EXPIRY event per near-expiring layer. automation-service already subscribes to
+  // every EventTypes topic, so any tenant-authored EVENT-triggered workflow_definition
+  // listening for STOCK_NEAR_EXPIRY fires with zero automation-service code changes.
+  registry.register(
+    'inventory.near-expiry-alert',
+    {
+      cron: '0 7 * * *',
+      description: 'Publish STOCK_NEAR_EXPIRY for FIFO layers expiring within 3 days',
+      tenantScoped: false,
+    },
+    async (_job) => {
+      const inventoryUrl = process.env['INVENTORY_SERVICE_URL'] ?? 'http://localhost:3012';
+      const apiKey = process.env['INTERNAL_API_KEY'] ?? '';
+      try {
+        const res = await inventoryServiceBreaker.fire(
+          inventoryUrl,
+          '/api/v2/inventory/near-expiry-alert',
+          apiKey
+        );
+        const body = (await res.json()) as {
+          data?: { checked?: number; alertsPublished?: number };
+        };
+        logger.info(
+          { checked: body.data?.checked, alertsPublished: body.data?.alertsPublished },
+          'Near-expiry alert check complete'
+        );
+      } catch (err) {
+        logger.warn({ err }, 'Near-expiry alert job failed (non-fatal)');
+      }
+    }
+  );
+
   registry.register(
     'inventory.stock-value-report',
     { cron: '0 6 * * *', description: 'Daily stock valuation snapshot', tenantScoped: true },

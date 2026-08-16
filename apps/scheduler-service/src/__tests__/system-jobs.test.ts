@@ -426,6 +426,25 @@ describe('registerSystemJobs', () => {
     expect(url).toContain('/internal/inventory/reorder-required?tenantId=5');
   });
 
+  it('inventory.near-expiry-alert calls the internal endpoint and never throws on failure', async () => {
+    const registry = buildFakeRegistry();
+    registerSystemJobs(registry as never, buildFakeDb() as never, buildFakeStorage() as never);
+
+    global.fetch = vi.fn(async () => {
+      throw new Error('ECONNREFUSED');
+    }) as unknown as typeof fetch;
+    await expect(
+      registry.handlers.get('inventory.near-expiry-alert')!({}, undefined)
+    ).resolves.toBeUndefined();
+
+    const fetchMock = vi.fn(async () => jsonResponse({ checked: 3, alertsPublished: 1 }));
+    global.fetch = fetchMock as unknown as typeof fetch;
+    await registry.handlers.get('inventory.near-expiry-alert')!({}, undefined);
+    const [url, init] = fetchMock.mock.calls[0] as [string, { method?: string }];
+    expect(url).toContain('/inventory/near-expiry-alert');
+    expect(init.method).toBe('POST');
+  });
+
   it('production.reorder-report emails the tenant contact once when items are below reorder level', async () => {
     const registry = buildFakeRegistry();
     const db = buildFakeDb();

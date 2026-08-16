@@ -9,6 +9,7 @@ import { authenticate } from '../middleware/authenticate.js';
 import { requirePermission } from '../middleware/authorize.js';
 import { createDatabaseClient } from '@erp/db';
 import { runReconciliation } from '../jobs/reconciliation.job.js';
+import { runNearExpiryAlert } from '../jobs/nearExpiryAlert.job.js';
 import { assertWarehouseInScope, getWarehouseScope } from '../domain/WarehouseBranchScope.js';
 
 const StockListQuery = z.object({
@@ -42,6 +43,33 @@ export async function stockRoutes(
       return reply.code(500).send({ error: { code: 'NO_DB', message: 'No DATABASE_URL' } });
     const db = createDatabaseClient({ url: dbUrl });
     const result = await runReconciliation(db);
+    return reply.code(200).send({ data: result });
+  });
+
+  // POST /inventory/near-expiry-alert — internal trigger (scheduler calls this).
+  // Multi-vertical platform audit 2026-08-16: publishes one STOCK_NEAR_EXPIRY outbox event per
+  // FIFO layer expiring within thresholdDays — see jobs/nearExpiryAlert.job.ts.
+  fastify.post('/inventory/near-expiry-alert', async (request, reply) => {
+    const apiKey = (request.headers['x-internal-key'] as string | undefined) ?? '';
+    const expected = process.env['INTERNAL_API_KEY'] ?? '';
+    const keyBuffer = Buffer.from(apiKey);
+    const expectedBuffer = Buffer.from(expected);
+    const matches =
+      !!expected &&
+      keyBuffer.length === expectedBuffer.length &&
+      timingSafeEqual(keyBuffer, expectedBuffer);
+    if (!matches) {
+      return reply
+        .code(401)
+        .send({ error: { code: 'UNAUTHORIZED', message: 'Invalid internal API key' } });
+    }
+    const dbUrl = process.env['DATABASE_URL'];
+    if (!dbUrl)
+      return reply.code(500).send({ error: { code: 'NO_DB', message: 'No DATABASE_URL' } });
+    const db = createDatabaseClient({ url: dbUrl });
+    const thresholdDaysRaw = (request.query as { thresholdDays?: string }).thresholdDays;
+    const thresholdDays = thresholdDaysRaw ? parseInt(thresholdDaysRaw, 10) : undefined;
+    const result = await runNearExpiryAlert(db, thresholdDays);
     return reply.code(200).send({ data: result });
   });
 

@@ -31,6 +31,12 @@ export const EventTypes = {
   STOCK_TRANSFER_COMPLETED: 'STOCK_TRANSFER_COMPLETED',
   STOCK_ADJUSTMENT_POSTED: 'STOCK_ADJUSTMENT_POSTED',
   STOCK_LEVEL_CHANGED: 'STOCK_LEVEL_CHANGED',
+  // Multi-vertical platform audit 2026-08-16 Phase 1: fired per near-expiring FIFO layer by
+  // inventory-service's nearExpiryAlert job — automation-service subscribes to every EventTypes
+  // topic automatically (see apps/automation-service/src/main.ts's topicFor/subscribe), so a
+  // tenant-authored (or system-seeded) EVENT-triggered workflow_definition listening for this
+  // needs zero automation-service code changes to fire.
+  STOCK_NEAR_EXPIRY: 'STOCK_NEAR_EXPIRY',
   // Customer
   CUSTOMER_CREATED: 'CUSTOMER_CREATED',
   CUSTOMER_CREDIT_LIMIT_CHANGED: 'CUSTOMER_CREDIT_LIMIT_CHANGED',
