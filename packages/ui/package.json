@@ -17,6 +17,7 @@
     "lint": "eslint src/"
   },
   "dependencies": {
+    "@erp/types": "workspace:*",
     "@tiptap/pm": "^3",
     "@tiptap/react": "^3",
     "@tiptap/starter-kit": "^3",

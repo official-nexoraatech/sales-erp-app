@@ -33,3 +33,19 @@ export { default as TimePicker, type TimePickerProps } from './TimePicker.js';
 export { default as DateTimePicker, type DateTimePickerProps } from './DateTimePicker.js';
 export { default as RichTextEditor, type RichTextEditorProps } from './RichTextEditor.js';
 export { default as Kbd } from './Kbd.js';
+
+// Multi-vertical platform audit 2026-08-16, Phase 3 — promoted from web-frontend's
+// components/erp/ERP* layer: these had zero web-frontend-specific coupling (no store/router/
+// app-local primitive dependency), unlike ERPPageHeader/ERPDataGrid/ERPEmptyState/etc., which
+// stay app-local. The old web-frontend files are now thin re-export shims, so every existing
+// call site keeps working unchanged.
+export { default as DropdownMenu, type MenuItem } from './DropdownMenu.js';
+export { default as FormSection } from './FormSection.js';
+export { default as Pagination } from './Pagination.js';
+export { TableSkeleton, FormSkeleton, CardSkeleton, DetailSkeleton } from './Skeleton.js';
+export { default as StatCard } from './StatCard.js';
+export { default as StickyFooter } from './StickyFooter.js';
+export { default as Tabs, type TabDef } from './Tabs.js';
+export { default as Drawer } from './Drawer.js';
+export { default as GSTINInput } from './GSTINInput.js';
+export { useFocusTrap } from './useFocusTrap.js';

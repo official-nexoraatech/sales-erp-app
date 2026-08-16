@@ -1604,6 +1604,9 @@ importers:
 
   packages/ui:
     dependencies:
+      '@erp/types':
+        specifier: workspace:*
+        version: link:../shared-types
       '@tiptap/pm':
         specifier: ^3
         version: 3.27.4
