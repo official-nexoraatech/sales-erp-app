@@ -15,7 +15,7 @@ import {
 import type { ErpDatabase } from '@erp/db';
 import { BusinessError, NotFoundError } from '@erp/types';
 import { DuplicateOperationError, isUniqueConstraintViolation } from '@erp/sdk';
-import { GSTCalculator } from '@erp/utils';
+import { GSTCalculator, toBaseUnitQty } from '@erp/utils';
 import { ValuationService } from '@erp/sdk';
 import { ulid } from 'ulid';
 
@@ -323,7 +323,33 @@ export class GRNService {
       // ES-03: previously missing — GRN approval updated available_qty but never wrote
       // to inventory_ledger, leaving GRN receipts out of the stock audit trail.
       for (const line of lines) {
-        const qty = parseFloat(String(line.receivedQty));
+        const rawQty = parseFloat(String(line.receivedQty));
+
+        // Multi-vertical platform audit 2026-08-16: items had exactly one unit — no way to
+        // represent "buy a case of 24, stock/sell by the piece." receivedQty above stays in
+        // this line's own unit (used unchanged by the PO-vs-GRN received-qty ceiling check
+        // below, which compares against purchaseOrderLines.orderedQty in the same unit) —
+        // baseQty is what actually applies to stock/ledger/valuation/projection, converted via
+        // items.purchaseUnitConversionFactor only when this line's unit is the item's
+        // designated purchase unit. No-op (baseQty === rawQty) for every item that hasn't
+        // configured a purchase unit, i.e. every existing item.
+        const [itemUnitInfo] = await trx
+          .select({
+            purchaseUnitId: items.purchaseUnitId,
+            purchaseUnitConversionFactor: items.purchaseUnitConversionFactor,
+          })
+          .from(items)
+          .where(and(eq(items.id, line.itemId), eq(items.tenantId, tenantId)));
+        const qty =
+          itemUnitInfo && line.unitId != null && line.unitId === itemUnitInfo.purchaseUnitId
+            ? toBaseUnitQty(
+                rawQty,
+                itemUnitInfo.purchaseUnitConversionFactor
+                  ? parseFloat(String(itemUnitInfo.purchaseUnitConversionFactor))
+                  : undefined
+              )
+            : rawQty;
+
         const result = await trx
           .update(items)
           .set({
@@ -337,6 +363,12 @@ export class GRNService {
         const beforeQty = afterQty - qty;
         const lineWarehouseId = line.warehouseId ?? grn.warehouseId;
         const unitCost = parseFloat(String(line.grnRate ?? '0'));
+
+        await trx
+          .update(grnLines)
+          .set({ receivedQtyBaseUnit: String(qty) })
+          .where(eq(grnLines.id, line.id));
+
         const [ledgerRow] = await trx
           .insert(inventoryLedger)
           .values({

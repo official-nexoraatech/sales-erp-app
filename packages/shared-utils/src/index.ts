@@ -46,6 +46,23 @@ export function roundToDecimal(num: number, decimals: number): number {
   return Math.round(num * factor) / factor;
 }
 
+// Multi-vertical platform audit 2026-08-16: items had exactly one unit — no way to represent
+// "buy a case of 24, sell/stock by the piece." An item's items.purchaseUnitConversionFactor
+// says how many of its base/stock unit (items.unitId) make up one of its purchase unit
+// (items.purchaseUnitId) — e.g. 24 for a 24-piece case. Undefined/null/<=0 means "no
+// conversion configured," so callers should treat the item as unconverted (factor of 1),
+// which is why this returns the input unchanged rather than throwing — most items will never
+// set a purchase unit at all, and that must stay a true no-op, not an error path.
+export function toBaseUnitQty(purchaseQty: number, conversionFactor?: number | null): number {
+  if (!conversionFactor || conversionFactor <= 0) return purchaseQty;
+  return roundToDecimal(purchaseQty * conversionFactor, 3);
+}
+
+export function fromBaseUnitQty(baseQty: number, conversionFactor?: number | null): number {
+  if (!conversionFactor || conversionFactor <= 0) return baseQty;
+  return roundToDecimal(baseQty / conversionFactor, 3);
+}
+
 export function calculateGst(
   taxableAmount: number,
   gstRate: number,

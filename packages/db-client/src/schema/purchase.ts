@@ -217,7 +217,15 @@ export const grnLines = pgTable(
     variantId: integer('variant_id'),
     description: text('description'),
     orderedQty: decimal('ordered_qty', { precision: 15, scale: 3 }).notNull().default('0'),
+    // receivedQty stays in this line's own unit (unitId below) — the PO-vs-GRN received-qty
+    // ceiling check compares this directly against purchaseOrderLines.orderedQty, which is in
+    // the same unit, so that guard is untouched. Multi-vertical platform audit 2026-08-16:
+    // receivedQtyBaseUnit is the actual quantity applied to items.availableQty/inventory_ledger/
+    // FIFO layers — receivedQty converted via items.purchaseUnitConversionFactor when unitId
+    // below equals the item's purchaseUnitId, else identical to receivedQty. Nullable/backfilled
+    // at approval time; existing rows and single-unit items are unaffected.
     receivedQty: decimal('received_qty', { precision: 15, scale: 3 }).notNull(),
+    receivedQtyBaseUnit: decimal('received_qty_base_unit', { precision: 15, scale: 3 }),
     unitId: integer('unit_id'),
     poRate: decimal('po_rate', { precision: 15, scale: 2 }).notNull().default('0'),
     grnRate: decimal('grn_rate', { precision: 15, scale: 2 }).notNull(),

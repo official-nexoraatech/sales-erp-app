@@ -1163,6 +1163,13 @@
       "when": 1796416535809,
       "tag": "0165_inventory_batch_expiry_fefo",
       "breakpoints": true
+    },
+    {
+      "idx": 166,
+      "version": "7",
+      "when": 1796416535810,
+      "tag": "0166_purchase_unit_conversion",
+      "breakpoints": true
     }
   ]
 }

@@ -421,7 +421,9 @@ describe('GRNService.approve — partial receive updates PO status', () => {
     const script = [
       [grnRow], // select grns
       [lineRow], // select grnLines
+      [{ purchaseUnitId: null, purchaseUnitConversionFactor: null }], // select items (purchase-unit conversion lookup) — no conversion configured
       [{ id: 7, availableQty: '48.000' }], // update items ... returning
+      undefined, // update grnLines SET receivedQtyBaseUnit
       [{ id: 1 }], // insert inventoryLedger ... returning
       [{ costingMethod: 'WACC', currentStockValue: '0' }], // ES-13: ValuationService item lookup
       undefined, // ES-13: ValuationService update items.current_stock_value
@@ -476,7 +478,9 @@ describe('GRNService.approve — ES-23 [M1] over-receipt ceiling guard', () => {
     const script = [
       [grnRow], // select grns
       [lineRow], // select grnLines
+      [{ purchaseUnitId: null, purchaseUnitConversionFactor: null }], // select items (purchase-unit conversion lookup) — no conversion configured
       [{ id: 7, availableQty: '48.000' }], // update items ... returning
+      undefined, // update grnLines SET receivedQtyBaseUnit
       [{ id: 1 }], // insert inventoryLedger ... returning
       [{ costingMethod: 'WACC', currentStockValue: '0' }], // ES-13: ValuationService item lookup
       undefined, // ES-13: ValuationService update items.current_stock_value

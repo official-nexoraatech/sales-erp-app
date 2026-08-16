@@ -166,6 +166,16 @@ export const items = pgTable(
     categoryId: integer('category_id'),
     brandId: integer('brand_id'),
     unitId: integer('unit_id').notNull(),
+    // Multi-vertical platform audit 2026-08-16: unitId above is the item's one base/stock/sale
+    // unit — there was no way to represent "buy a case of 24, stock/sell by the piece."
+    // purchaseUnitId is informational (which unit purchasing is done in, e.g. "Case");
+    // purchaseUnitConversionFactor is how many of the base unitId make up one purchaseUnitId.
+    // Both nullable — an item with neither set behaves exactly as before (single-unit).
+    purchaseUnitId: integer('purchase_unit_id'),
+    purchaseUnitConversionFactor: decimal('purchase_unit_conversion_factor', {
+      precision: 15,
+      scale: 3,
+    }),
     attributeSetId: integer('attribute_set_id'),
     // GST
     hsnCode: varchar('hsn_code', { length: 20 }).notNull(),
