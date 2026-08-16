@@ -251,8 +251,8 @@ export class TenantProvisioner {
     // Found in live QA 2026-07-17: no provisioning step ever seeded a CoA — every journal
     // post silently failed with JOURNAL_INSUFFICIENT_LINES for every tenant, forever, until
     // someone manually clicked "Seed Default Accounts" on the Chart of Accounts page.
-    logger.info({ tenantId }, 'Seeding default Chart of Accounts');
-    await this.seedChartOfAccounts(tenantId);
+    logger.info({ tenantId, vertical }, 'Seeding default Chart of Accounts');
+    await this.seedChartOfAccounts(tenantId, vertical);
     markStep('SEED_CHART_OF_ACCOUNTS');
 
     await this.db
@@ -517,7 +517,7 @@ export class TenantProvisioner {
   // a partial-step failure regardless), but logged at error level rather than warn: unlike a
   // missed welcome email, a tenant with no Chart of Accounts can never post a single
   // accounting journal until someone notices and manually calls POST /accounts/seed.
-  private async seedChartOfAccounts(tenantId: number): Promise<void> {
+  private async seedChartOfAccounts(tenantId: number, vertical: TenantVertical): Promise<void> {
     const accountingUrl = process.env['ACCOUNTING_SERVICE_URL'];
     if (!accountingUrl) {
       logger.error(
@@ -532,7 +532,7 @@ export class TenantProvisioner {
       // automatic-provisioning-time seed in this codebase (workflow definitions, RBAC
       // defaults, etc.), not the admin user, since they never explicitly requested this.
       const res = await fetch(
-        `${accountingUrl}/api/v2/internal/accounts/seed?tenantId=${tenantId}`,
+        `${accountingUrl}/api/v2/internal/accounts/seed?tenantId=${tenantId}&vertical=${vertical}`,
         {
           method: 'POST',
           headers: { 'x-internal-key': internalKey },

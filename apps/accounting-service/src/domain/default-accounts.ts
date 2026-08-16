@@ -634,6 +634,73 @@ export const DEFAULT_ACCOUNTS: DefaultAccount[] = [
   },
 ];
 
+// Multi-vertical platform audit 2026-08-16, Phase 2: DEFAULT_ACCOUNTS' schema has zero
+// cloth-specific columns — only these 7 rows (the sub-category breakdown under Inventory/COGS/
+// Other Income) are actually cloth-flavored; everything else (cash/bank, receivables/payables,
+// GST ledger accounts, fixed assets, payroll, TDS, standard P&L structure) is retail-generic
+// and reused as-is for Grocery. Rather than duplicate the ~85 shared rows, GROCERY_DEFAULT_ACCOUNTS
+// below is DEFAULT_ACCOUNTS with just these swapped out.
+const CLOTH_ONLY_ACCOUNT_CODES = new Set(['1210', '1220', '1230', '4030', '5010', '5020', '5030']);
+
+const GROCERY_VERTICAL_ACCOUNTS: DefaultAccount[] = [
+  {
+    accountCode: '1211',
+    name: 'Perishables Stock',
+    accountType: 'ASSET',
+    accountSubType: 'INVENTORY',
+    normalBalance: 'DEBIT',
+    parentCode: '1200',
+  },
+  {
+    accountCode: '1221',
+    name: 'Packaged / FMCG Stock',
+    accountType: 'ASSET',
+    accountSubType: 'INVENTORY',
+    normalBalance: 'DEBIT',
+    parentCode: '1200',
+  },
+  {
+    accountCode: '1231',
+    name: 'Household & Personal Care Stock',
+    accountType: 'ASSET',
+    accountSubType: 'INVENTORY',
+    normalBalance: 'DEBIT',
+    parentCode: '1200',
+  },
+  {
+    accountCode: '5011',
+    name: 'Purchases — Perishables',
+    accountType: 'EXPENSE',
+    accountSubType: 'COST_OF_GOODS',
+    normalBalance: 'DEBIT',
+    parentCode: '5000',
+  },
+  {
+    accountCode: '5021',
+    name: 'Purchases — Packaged / FMCG Goods',
+    accountType: 'EXPENSE',
+    accountSubType: 'COST_OF_GOODS',
+    normalBalance: 'DEBIT',
+    parentCode: '5000',
+  },
+  {
+    accountCode: '5031',
+    name: 'Purchases — Household & Personal Care',
+    accountType: 'EXPENSE',
+    accountSubType: 'COST_OF_GOODS',
+    normalBalance: 'DEBIT',
+    parentCode: '5000',
+  },
+];
+
+// STOCK_ADJUSTMENT_LOSS (spoilage/shrinkage/expiry write-offs) already posts to the generic
+// '6110' Stock Adjustment Loss account (see PostingMatrixService.DEFAULT_POSTING_RULES) —
+// no grocery-specific write-off account is needed.
+export const GROCERY_DEFAULT_ACCOUNTS: DefaultAccount[] = [
+  ...DEFAULT_ACCOUNTS.filter((a) => !CLOTH_ONLY_ACCOUNT_CODES.has(a.accountCode)),
+  ...GROCERY_VERTICAL_ACCOUNTS,
+];
+
 // Extracted from accounts.routes.ts's POST /accounts/seed so the same seeding logic can also
 // run from tenant-service's provisioning flow (via an internal-key-guarded route — see
 // scheduler-internal.routes.ts's /internal/accounts/seed) instead of only ever being
@@ -645,12 +712,14 @@ export const DEFAULT_ACCOUNTS: DefaultAccount[] = [
 export async function seedDefaultAccounts(
   ctx: PlatformContext,
   tenantId: number,
-  userId: number
+  userId: number,
+  vertical: 'CLOTH_RETAIL' | 'GROCERY' = 'CLOTH_RETAIL'
 ): Promise<number> {
+  const accountList = vertical === 'GROCERY' ? GROCERY_DEFAULT_ACCOUNTS : DEFAULT_ACCOUNTS;
   await ctx.db.transaction(async (trx) => {
     const codeToId = new Map<string, number>();
 
-    const rootAccounts = DEFAULT_ACCOUNTS.filter((a) => !a.parentCode);
+    const rootAccounts = accountList.filter((a) => !a.parentCode);
     for (const acc of rootAccounts) {
       const [inserted] = await trx.raw
         .insert(accounts)
@@ -680,7 +749,7 @@ export async function seedDefaultAccounts(
       if (r.accountCode) codeToId.set(r.accountCode, r.id);
     });
 
-    const childAccounts = DEFAULT_ACCOUNTS.filter((a) => a.parentCode);
+    const childAccounts = accountList.filter((a) => a.parentCode);
     for (const acc of childAccounts) {
       const parentId = acc.parentCode ? codeToId.get(acc.parentCode) : undefined;
       const [inserted] = await trx.raw
@@ -707,9 +776,9 @@ export async function seedDefaultAccounts(
     const eventBus = new PlatformEventBus(trx, tenantId, userId, ctx.tenant.correlationId);
     await eventBus.publishInTransaction('account', tenantId, 'CHART_OF_ACCOUNTS_SEEDED', {
       tenantId,
-      count: DEFAULT_ACCOUNTS.length,
+      count: accountList.length,
     });
   });
 
-  return DEFAULT_ACCOUNTS.length;
+  return accountList.length;
 }

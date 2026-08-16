@@ -183,14 +183,16 @@ export async function schedulerInternalRoutes(
     '/internal/accounts/seed',
     { preHandler: checkInternalKey },
     async (request, reply) => {
-      const tenantId = parseInt((request.query as { tenantId?: string }).tenantId ?? '', 10);
+      const query = request.query as { tenantId?: string; vertical?: string };
+      const tenantId = parseInt(query.tenantId ?? '', 10);
       if (!tenantId)
         return reply
           .code(400)
           .send({ error: { code: 'MISSING_TENANT_ID', message: 'tenantId query param required' } });
 
       const ctx = ctxFactory.create({ tenantId, userId: 0, correlationId: crypto.randomUUID() });
-      const count = await seedDefaultAccounts(ctx, tenantId, 0);
+      const vertical = query.vertical === 'GROCERY' ? 'GROCERY' : 'CLOTH_RETAIL';
+      const count = await seedDefaultAccounts(ctx, tenantId, 0, vertical);
 
       return reply.code(200).send({ data: { message: 'Chart of accounts seeded', count } });
     }
