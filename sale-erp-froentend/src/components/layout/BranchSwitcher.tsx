@@ -1,33 +1,14 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
 import { Check, ChevronDown, GitBranch } from 'lucide-react';
-import { branchApi } from '../../api/endpoints';
 import { queryClient } from '../../app/queryClient';
-import { useAuth } from '../../hooks/useAuth';
 import { useBranch } from '../../hooks/useBranch';
+import { useBranchAutoSelect } from '../../hooks/useBranchAutoSelect';
 
 export const BranchSwitcher: React.FC = () => {
-  const { isAuthenticated } = useAuth();
   const { selectedBranchId, setSelectedBranchId } = useBranch();
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const shouldUseBranch = isAuthenticated;
-
-  const branches = useQuery({
-    queryKey: ['my-branches'],
-    queryFn: () => branchApi.getMine(),
-    enabled: shouldUseBranch,
-  });
-  const rows = branches.data?.data || [];
-
-  // Default to a valid assigned branch until the user picks one explicitly.
-  useEffect(() => {
-    if (!shouldUseBranch || rows.length === 0) return;
-    const selectedBranchExists = rows.some((branch) => branch.id === selectedBranchId);
-    if (!selectedBranchId || !selectedBranchExists) {
-      setSelectedBranchId(rows[0].id);
-    }
-  }, [rows, selectedBranchId, setSelectedBranchId, shouldUseBranch]);
+  const { branches: rows } = useBranchAutoSelect();
 
   useEffect(() => {
     if (!isOpen) return;
@@ -60,7 +41,7 @@ export const BranchSwitcher: React.FC = () => {
     await queryClient.invalidateQueries();
   };
 
-  if (!shouldUseBranch || rows.length === 0) return null;
+  if (rows.length === 0) return null;
 
   const selectedBranch = rows.find((branch) => branch.id === selectedBranchId) || rows[0];
 

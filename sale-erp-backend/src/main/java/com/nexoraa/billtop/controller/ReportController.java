@@ -2,8 +2,6 @@ package com.nexoraa.billtop.controller;
 
 import com.nexoraa.billtop.constants.ResponseMessage;
 import com.nexoraa.billtop.dto.ApiResponseDto;
-import com.nexoraa.billtop.dto.ledger.LedgerResponseDto;
-import com.nexoraa.billtop.dto.report.BankStatementEntryResponseDto;
 import com.nexoraa.billtop.dto.report.CustomerDueResponseDto;
 import com.nexoraa.billtop.dto.report.ExpenseReportResponseDto;
 import com.nexoraa.billtop.dto.report.ExpiredItemResponseDto;
@@ -115,16 +113,6 @@ public class ReportController {
         ));
     }
 
-    @GetMapping("/customer-ledger/{customerId}")
-    public ResponseEntity<ApiResponseDto<LedgerResponseDto>> getCustomerLedger(@PathVariable @Positive Long customerId) {
-        return ResponseEntity.ok(ApiResponseDto.success(ResponseMessage.REPORT_RETRIEVED, reportService.getCustomerLedger(customerId)));
-    }
-
-    @GetMapping("/supplier-ledger/{supplierId}")
-    public ResponseEntity<ApiResponseDto<LedgerResponseDto>> getSupplierLedger(@PathVariable @Positive Long supplierId) {
-        return ResponseEntity.ok(ApiResponseDto.success(ResponseMessage.REPORT_RETRIEVED, reportService.getSupplierLedger(supplierId)));
-    }
-
     @GetMapping("/profit-loss")
     public ResponseEntity<ApiResponseDto<ProfitLossReportResponseDto>> getProfitLoss(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fromDate,
@@ -204,32 +192,6 @@ public class ReportController {
         return ResponseEntity.ok(ApiResponseDto.success(
                 ResponseMessage.REPORT_RETRIEVED,
                 reportService.getExpenseReport(fromDate, toDate, categoryId, subCategoryId, null)
-        ));
-    }
-
-    @GetMapping("/expense-payments")
-    public ResponseEntity<ApiResponseDto<List<ExpenseReportResponseDto>>> getExpensePayments(
-            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fromDate,
-            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate toDate,
-            @RequestParam(required = false) Long categoryId,
-            @RequestParam(required = false) Long subCategoryId,
-            @RequestParam(required = false) Long paymentMethodId
-    ) {
-        return ResponseEntity.ok(ApiResponseDto.success(
-                ResponseMessage.REPORT_RETRIEVED,
-                reportService.getExpenseReport(fromDate, toDate, categoryId, subCategoryId, paymentMethodId)
-        ));
-    }
-
-    @GetMapping("/bank-statement")
-    public ResponseEntity<ApiResponseDto<List<BankStatementEntryResponseDto>>> getBankStatement(
-            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fromDate,
-            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate toDate,
-            @RequestParam(required = false) Long bankAccountId
-    ) {
-        return ResponseEntity.ok(ApiResponseDto.success(
-                ResponseMessage.REPORT_RETRIEVED,
-                reportService.getBankStatement(fromDate, toDate, bankAccountId)
         ));
     }
 

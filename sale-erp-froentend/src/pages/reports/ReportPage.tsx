@@ -2,9 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import {
-  bankAccountApi,
   brandApi,
-  cashApi,
   categoryApi,
   customerApi,
   expenseSubCategoryApi,
@@ -49,11 +47,6 @@ export type ReportKey =
   | 'supplierDue'
   | 'expense'
   | 'expenseItem'
-  | 'expensePayment'
-  | 'cashFlow'
-  | 'bankStatement'
-  | 'supplierLedger'
-  | 'customerLedger'
   | 'gst'
   | 'gstr1'
   | 'gstr2'
@@ -78,10 +71,6 @@ const today = new Date();
 const todayIso = toIsoDate(today);
 const defaultFrom = todayIso;
 const defaultTo = todayIso;
-
-// Ledger reports need a valid customer/supplier ID before they can fetch anything
-// meaningful, so unlike other reports they must wait for an explicit Submit.
-const requiresManualSubmit = (report: ReportKey) => report === 'supplierLedger' || report === 'customerLedger';
 
 const formatDateForApi = (value: string) => value;
 
@@ -380,59 +369,6 @@ const configs: Record<ReportKey, ReportConfig> = {
       subCategoryId: filters.subcategory || undefined,
     }),
   },
-  expensePayment: {
-    title: 'Expense Payment Report',
-    fields: [
-      { key: 'fromDate', label: 'From Date', type: 'date' },
-      { key: 'toDate', label: 'To Date', type: 'date' },
-      { key: 'category', label: 'Category', type: 'select', placeholder: 'Choose one thing' },
-      { key: 'subcategory', label: 'Subcategory', type: 'select', placeholder: 'Choose one thing' },
-      { key: 'paymentType', label: 'Payment Type', type: 'select', placeholder: 'Select Supplier' },
-    ],
-    columns: ['#', 'DATE', 'EXPENSE CODE', 'CATEGORY', 'SUBCATEGORY', 'PAYMENT TYPE', 'PAID AMOUNT'],
-    fetch: (filters) => reportsApi.expensePayments({
-      fromDate: formatDateForApi(filters.fromDate),
-      toDate: formatDateForApi(filters.toDate),
-      categoryId: filters.category || undefined,
-      subCategoryId: filters.subcategory || undefined,
-      paymentMethodId: filters.paymentType || undefined,
-    }),
-  },
-  cashFlow: {
-    title: 'Cash flow',
-    fields: [
-      { key: 'fromDate', label: 'From Date', type: 'date' },
-      { key: 'toDate', label: 'To Date', type: 'date' },
-    ],
-    columns: ['#', 'DATE', 'TYPE', 'PARTY NAME', 'DESCRIPTION', 'WITHDRAWAL AMOUNT', 'DEPOSIT AMOUNT', 'BALANCE'],
-    fetch: () => cashApi.getTransactions(),
-  },
-  bankStatement: {
-    title: 'Bank Statement',
-    fields: [
-      { key: 'fromDate', label: 'From Date', type: 'date' },
-      { key: 'toDate', label: 'To Date', type: 'date' },
-      { key: 'bankAccount', label: 'Bank Account', type: 'select', placeholder: 'Select Bank Account' },
-    ],
-    columns: ['#', 'DATE', 'DESCRIPTION', 'WITHDRAWAL AMOUNT', 'DEPOSIT AMOUNT', 'BALANCE'],
-    fetch: (filters) => reportsApi.bankStatement({
-      fromDate: formatDateForApi(filters.fromDate),
-      toDate: formatDateForApi(filters.toDate),
-      bankAccountId: filters.bankAccount || undefined,
-    }),
-  },
-  supplierLedger: {
-    title: 'Supplier Ledger Report',
-    fields: [{ key: 'supplierId', label: 'Supplier ID', type: 'number', placeholder: 'Enter Supplier ID' }],
-    columns: ['#', 'DATE', 'TYPE', 'INVOICE/REFERENCE NO.', 'SUPPLIER', 'DEBIT', 'CREDIT', 'BALANCE'],
-    fetch: (filters) => reportsApi.supplierLedger(Number(filters.supplierId || 0)),
-  },
-  customerLedger: {
-    title: 'Customer Ledger Report',
-    fields: [{ key: 'customerId', label: 'Customer ID', type: 'number', placeholder: 'Enter Customer ID' }],
-    columns: ['#', 'DATE', 'TYPE', 'INVOICE/REFERENCE NO.', 'CUSTOMER', 'DEBIT', 'CREDIT', 'BALANCE'],
-    fetch: (filters) => reportsApi.customerLedger(Number(filters.customerId || 0)),
-  },
   gst: {
     title: 'GST Report',
     fields: [
@@ -556,7 +492,6 @@ const useLookupOptions = () => {
   const expenseSubCategories = useQuery({ queryKey: ['report-lookup', 'expense-subcategories'], queryFn: () => expenseSubCategoryApi.getAll() });
   const warehouses = useQuery({ queryKey: ['report-lookup', 'warehouses'], queryFn: () => warehouseApi.getAll() });
   const paymentMethods = useQuery({ queryKey: ['report-lookup', 'payment-methods'], queryFn: () => paymentMethodApi.getAll() });
-  const bankAccounts = useQuery({ queryKey: ['report-lookup', 'bank-accounts'], queryFn: () => bankAccountApi.getAll() });
 
   return useMemo(() => {
     const warehouseOptions = (warehouses.data?.data || []).map((warehouse) => ({ value: String(warehouse.id), label: warehouse.name }));
@@ -571,7 +506,6 @@ const useLookupOptions = () => {
       fromWarehouse: warehouseOptions,
       toWarehouse: warehouseOptions,
       paymentType: (paymentMethods.data?.data?.content || []).map((method: any) => ({ value: String(method.id), label: method.name })),
-      bankAccount: (bankAccounts.data?.data?.content || []).map((account: any) => ({ value: String(account.id), label: account.bankName ? `${account.bankName} - ${account.accountName}` : account.accountName })),
     } as Record<string, Array<{ value: string; label: string }>>;
   }, [
     customers.data,
@@ -582,16 +516,13 @@ const useLookupOptions = () => {
     expenseSubCategories.data,
     warehouses.data,
     paymentMethods.data,
-    bankAccounts.data,
   ]);
 };
 
 export const ReportPage: React.FC<{ report: ReportKey }> = ({ report }) => {
   const config = configs[report];
   const [filters, setFilters] = useState<Record<string, string>>(() => initialFilters(config));
-  const [submittedFilters, setSubmittedFilters] = useState<Record<string, string> | null>(
-    requiresManualSubmit(report) ? null : initialFilters(config)
-  );
+  const [submittedFilters, setSubmittedFilters] = useState<Record<string, string> | null>(initialFilters(config));
   const lookupOptions = useLookupOptions();
   const rowsQuery = useQuery({
     queryKey: ['report', report, submittedFilters],
@@ -604,13 +535,6 @@ export const ReportPage: React.FC<{ report: ReportKey }> = ({ report }) => {
   }, [rowsQuery.data, submittedFilters]);
 
   const submit = () => {
-    if (['supplierLedger', 'customerLedger'].includes(report)) {
-      const key = report === 'supplierLedger' ? 'supplierId' : 'customerId';
-      if (!Number(filters[key])) {
-        toast.error(`${report === 'supplierLedger' ? 'Supplier' : 'Customer'} ID is required`);
-        return;
-      }
-    }
     if (filters.fromDate && filters.toDate && filters.fromDate > filters.toDate) {
       toast.error('From Date cannot be after To Date');
       return;
@@ -621,7 +545,7 @@ export const ReportPage: React.FC<{ report: ReportKey }> = ({ report }) => {
   const close = () => {
     const reset = initialFilters(config);
     setFilters(reset);
-    setSubmittedFilters(requiresManualSubmit(report) ? null : reset);
+    setSubmittedFilters(reset);
   };
 
   return (

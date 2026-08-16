@@ -39,7 +39,7 @@ import {
 } from '../../auth/featurePermissions';
 import { PERMISSIONS } from '../../auth/permissions';
 
-interface MenuItem {
+export interface MenuItem {
   label: string;
   icon: React.ReactNode;
   href?: string;
@@ -48,7 +48,7 @@ interface MenuItem {
   superAdminOnly?: boolean;
 }
 
-const menuItems: MenuItem[] = [
+export const menuItems: MenuItem[] = [
   {
     label: 'Dashboard',
     icon: <LayoutDashboard size={20} />,
@@ -193,11 +193,6 @@ const menuItems: MenuItem[] = [
       { label: 'Supplier Due', href: '/reports/due/supplier', icon: <BarChart3 size={18} />, access: rule(FEATURE_PERMISSIONS.report.supplierDues) },
       { label: 'Expense', href: '/reports/expense', icon: <BarChart3 size={18} />, access: rule(FEATURE_PERMISSIONS.expense.view) },
       { label: 'Expense Item', href: '/reports/expense/item', icon: <BarChart3 size={18} />, access: rule(FEATURE_PERMISSIONS.report.expenseItems) },
-      { label: 'Expense Payment', href: '/reports/expense/payment', icon: <BarChart3 size={18} />, access: rule(FEATURE_PERMISSIONS.report.expensePayments) },
-      { label: 'Cash flow', href: '/reports/transactions/cash-flow', icon: <BarChart3 size={18} />, access: rule(FEATURE_PERMISSIONS.cash.view) },
-      { label: 'Bank Statement', href: '/reports/transactions/bank-statement', icon: <BarChart3 size={18} />, access: rule(FEATURE_PERMISSIONS.report.bankStatement) },
-      { label: 'Supplier Ledger', href: '/reports/ledger/supplier', icon: <BarChart3 size={18} />, access: rule(FEATURE_PERMISSIONS.report.supplierLedger) },
-      { label: 'Customer Ledger', href: '/reports/ledger/customer', icon: <BarChart3 size={18} />, access: rule(FEATURE_PERMISSIONS.report.customerLedger) },
       { label: 'GST', href: '/reports/gst', icon: <BarChart3 size={18} />, access: rule(FEATURE_PERMISSIONS.report.gst) },
       { label: 'GSTR-1', href: '/reports/gst/gstr-1', icon: <BarChart3 size={18} />, access: rule(FEATURE_PERMISSIONS.report.gst) },
       { label: 'GSTR-2', href: '/reports/gst/gstr-2', icon: <BarChart3 size={18} />, access: rule(FEATURE_PERMISSIONS.report.gst) },

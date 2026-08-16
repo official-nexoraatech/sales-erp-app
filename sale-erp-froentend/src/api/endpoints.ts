@@ -84,6 +84,7 @@ import type {
   UpdateProfileRequest,
   UpdateOrganizationRequest,
   UpdateUserRequest,
+  UserCreateResponse,
   UserListItem,
   UserProfile,
   Warehouse,
@@ -168,6 +169,7 @@ export type {
   UpdateProfileRequest,
   UpdateOrganizationRequest,
   UpdateUserRequest,
+  UserCreateResponse,
   UserListItem,
   UserProfile,
   Warehouse,
@@ -441,7 +443,7 @@ export const smsApi = {
 export const usersApi = {
   getAll: async (params?: any) => normalizeUserList(await axiosClient.get<ApiResponse<UserListItem[] | PageResponse<UserListItem>> | UserListItem[], ApiResponse<UserListItem[] | PageResponse<UserListItem>> | UserListItem[]>('/api/v1/users', { params })),
   create: (payload: CreateUserRequest) =>
-    axiosClient.post<ApiResponse<void>, ApiResponse<void>>('/api/v1/users', payload),
+    axiosClient.post<ApiResponse<UserCreateResponse>, ApiResponse<UserCreateResponse>>('/api/v1/users', payload),
   update: (id: number, payload: UpdateUserRequest) =>
     axiosClient.put<ApiResponse<void>, ApiResponse<void>>(`/api/v1/users/${id}`, payload),
   delete: (id: number) =>
@@ -503,6 +505,10 @@ export const adminRolesApi = {
 export const adminUsersApi = {
   getAll: (params?: { organizationId?: number; search?: string; page?: number; size?: number }) =>
     axiosClient.get<ApiResponse<PageResponse<UserListItem>>, ApiResponse<PageResponse<UserListItem>>>('/api/v2/admin/users', { params }),
+  update: (organizationId: number, id: number, payload: UpdateUserRequest) =>
+    axiosClient.put<ApiResponse<void>, ApiResponse<void>>(`/api/v2/admin/organizations/${organizationId}/users/${id}`, payload),
+  delete: (organizationId: number, id: number) =>
+    axiosClient.delete<ApiResponse<void>, ApiResponse<void>>(`/api/v2/admin/organizations/${organizationId}/users/${id}`),
 };
 
 export const adminItemsApi = {
@@ -772,7 +778,6 @@ export const cashApi = {
 
 export const reportsApi = {
   topSellingItems: (params?: { fromDate?: string; toDate?: string }) => axiosClient.get<ApiResponse<TopSellingItem[]>, ApiResponse<TopSellingItem[]>>('/api/v1/reports/top-selling-items', { params }),
-  supplierLedger: (supplierId: number) => axiosClient.get<ApiResponse<any>, ApiResponse<any>>(`/api/v1/reports/supplier-ledger/${supplierId}`),
   stocks: (params?: any) => axiosClient.get<ApiResponse<any>, ApiResponse<any>>('/api/v1/reports/stocks', { params }),
   sales: (params?: any) => axiosClient.get<ApiResponse<any>, ApiResponse<any>>('/api/v1/reports/sales', { params }),
   purchases: (params?: any) => axiosClient.get<ApiResponse<any>, ApiResponse<any>>('/api/v1/reports/purchases', { params }),
@@ -782,14 +787,11 @@ export const reportsApi = {
   lowStock: (params?: any) => axiosClient.get<ApiResponse<StockReportItem[]>, ApiResponse<StockReportItem[]>>('/api/v1/reports/low-stock', { params }),
   inventoryValuation: () => axiosClient.get<ApiResponse<any>, ApiResponse<any>>('/api/v1/reports/inventory-valuation'),
   gst: (params?: any) => axiosClient.get<ApiResponse<any>, ApiResponse<any>>('/api/v1/reports/gst', { params }),
-  customerLedger: (customerId: number) => axiosClient.get<ApiResponse<any>, ApiResponse<any>>(`/api/v1/reports/customer-ledger/${customerId}`),
   customerDues: (params?: any) => axiosClient.get<ApiResponse<any>, ApiResponse<any>>('/api/v1/reports/customer-dues', { params }),
   supplierDues: (params?: any) => axiosClient.get<ApiResponse<any>, ApiResponse<any>>('/api/v1/reports/supplier-dues', { params }),
   purchasePayments: (params?: any) => axiosClient.get<ApiResponse<any>, ApiResponse<any>>('/api/v1/reports/purchase-payments', { params }),
   salePayments: (params?: any) => axiosClient.get<ApiResponse<any>, ApiResponse<any>>('/api/v1/reports/sale-payments', { params }),
   expenseItems: (params?: any) => axiosClient.get<ApiResponse<any>, ApiResponse<any>>('/api/v1/reports/expense-items', { params }),
-  expensePayments: (params?: any) => axiosClient.get<ApiResponse<any>, ApiResponse<any>>('/api/v1/reports/expense-payments', { params }),
-  bankStatement: (params?: any) => axiosClient.get<ApiResponse<any>, ApiResponse<any>>('/api/v1/reports/bank-statement', { params }),
   itemTransactionsGeneral: (params?: any) => axiosClient.get<ApiResponse<any>, ApiResponse<any>>('/api/v1/reports/item-transactions/general', { params }),
   expiredItems: (params?: any) => axiosClient.get<ApiResponse<any>, ApiResponse<any>>('/api/v1/reports/expired-items', { params }),
 };

@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { Check, Search, ShieldCheck, UserRound } from 'lucide-react';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { adminPermissionsApi, adminUsersApi, permissionsApi, usersApi } from '../../api/endpoints';
 import { queryClient } from '../../app/queryClient';
@@ -11,6 +11,7 @@ import { useAuth } from '../../hooks/useAuth';
 import { isSuperAdminRole } from '../../auth/featurePermissions';
 
 export const UserPermissionsPage: React.FC = () => {
+  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [selectedUserId, setSelectedUserId] = useState(Number(searchParams.get('userId')) || 0);
   const [selectedPermissionIds, setSelectedPermissionIds] = useState<number[]>([]);
@@ -82,6 +83,7 @@ export const UserPermissionsPage: React.FC = () => {
       toast.success('Permissions assigned successfully. The user must sign in again to receive a new token.');
       await queryClient.invalidateQueries({ queryKey: ['permissions', 'user', selectedUserId] });
       await queryClient.invalidateQueries({ queryKey: ['permissions', 'current-user'] });
+      navigate('/users');
     },
     onError: (error: any) => toast.error(error?.message || 'Failed to assign permissions'),
   });

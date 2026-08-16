@@ -1,8 +1,6 @@
 package com.nexoraa.billtop.service.impl;
 
-import com.nexoraa.billtop.dto.ledger.LedgerResponseDto;
 import com.nexoraa.billtop.dto.purchase.PurchaseListResponseDto;
-import com.nexoraa.billtop.dto.report.BankStatementEntryResponseDto;
 import com.nexoraa.billtop.dto.report.CustomerDueResponseDto;
 import com.nexoraa.billtop.dto.report.ExpenseReportResponseDto;
 import com.nexoraa.billtop.dto.report.ExpiredItemResponseDto;
@@ -17,8 +15,6 @@ import com.nexoraa.billtop.dto.report.SummaryReportResponseDto;
 import com.nexoraa.billtop.dto.report.SupplierDueResponseDto;
 import com.nexoraa.billtop.dto.report.TopSellingItemResponseDto;
 import com.nexoraa.billtop.dto.sales.SalesListResponseDto;
-import com.nexoraa.billtop.entity.BankAccount;
-import com.nexoraa.billtop.entity.BankTransaction;
 import com.nexoraa.billtop.entity.Contact;
 import com.nexoraa.billtop.entity.Expense;
 import com.nexoraa.billtop.entity.Item;
@@ -37,9 +33,6 @@ import com.nexoraa.billtop.entity.Warehouse;
 import com.nexoraa.billtop.enums.Status;
 import com.nexoraa.billtop.exception.ResourceNotFoundException;
 import com.nexoraa.billtop.constants.ErrorMessage;
-import com.nexoraa.billtop.repository.BankAccountRepository;
-import com.nexoraa.billtop.repository.BankTransactionRepository;
-import com.nexoraa.billtop.repository.CashTransactionRepository;
 import com.nexoraa.billtop.repository.ExpenseRepository;
 import com.nexoraa.billtop.repository.ItemPriceRepository;
 import com.nexoraa.billtop.repository.OrganizationRepository;
@@ -56,9 +49,7 @@ import com.nexoraa.billtop.repository.StockRepository;
 import com.nexoraa.billtop.repository.StockTransactionRepository;
 import com.nexoraa.billtop.repository.WarehouseRepository;
 import com.nexoraa.billtop.security.CurrentOrganizationService;
-import com.nexoraa.billtop.service.CustomerService;
 import com.nexoraa.billtop.service.ReportService;
-import com.nexoraa.billtop.service.SupplierService;
 import com.nexoraa.billtop.specification.MasterDataSpecification;
 import com.nexoraa.billtop.specification.PurchaseSpecification;
 import com.nexoraa.billtop.specification.SaleSpecification;
@@ -86,17 +77,12 @@ public class ReportServiceImpl implements ReportService {
     private final ItemPriceRepository itemPriceRepository;
     private final SalesItemRepository salesItemRepository;
     private final PaymentRepository paymentRepository;
-    private final BankTransactionRepository bankTransactionRepository;
-    private final CashTransactionRepository cashTransactionRepository;
-    private final CustomerService customerService;
-    private final SupplierService supplierService;
     private final TransactionSupport support;
     private final CurrentOrganizationService currentOrganizationService;
     private final SalesReturnRepository salesReturnRepository;
     private final PurchaseReturnRepository purchaseReturnRepository;
     private final PurchasePaymentRepository purchasePaymentRepository;
     private final SalesPaymentRepository salesPaymentRepository;
-    private final BankAccountRepository bankAccountRepository;
     private final StockTransactionRepository stockTransactionRepository;
     private final OrganizationRepository organizationRepository;
     private final PurchaseItemRepository purchaseItemRepository;
@@ -110,17 +96,12 @@ public class ReportServiceImpl implements ReportService {
             ItemPriceRepository itemPriceRepository,
             SalesItemRepository salesItemRepository,
             PaymentRepository paymentRepository,
-            BankTransactionRepository bankTransactionRepository,
-            CashTransactionRepository cashTransactionRepository,
-            CustomerService customerService,
-            SupplierService supplierService,
             TransactionSupport support,
             CurrentOrganizationService currentOrganizationService,
             SalesReturnRepository salesReturnRepository,
             PurchaseReturnRepository purchaseReturnRepository,
             PurchasePaymentRepository purchasePaymentRepository,
             SalesPaymentRepository salesPaymentRepository,
-            BankAccountRepository bankAccountRepository,
             StockTransactionRepository stockTransactionRepository,
             OrganizationRepository organizationRepository,
             PurchaseItemRepository purchaseItemRepository,
@@ -133,17 +114,12 @@ public class ReportServiceImpl implements ReportService {
         this.itemPriceRepository = itemPriceRepository;
         this.salesItemRepository = salesItemRepository;
         this.paymentRepository = paymentRepository;
-        this.bankTransactionRepository = bankTransactionRepository;
-        this.cashTransactionRepository = cashTransactionRepository;
-        this.customerService = customerService;
-        this.supplierService = supplierService;
         this.support = support;
         this.currentOrganizationService = currentOrganizationService;
         this.salesReturnRepository = salesReturnRepository;
         this.purchaseReturnRepository = purchaseReturnRepository;
         this.purchasePaymentRepository = purchasePaymentRepository;
         this.salesPaymentRepository = salesPaymentRepository;
-        this.bankAccountRepository = bankAccountRepository;
         this.stockTransactionRepository = stockTransactionRepository;
         this.organizationRepository = organizationRepository;
         this.purchaseItemRepository = purchaseItemRepository;
@@ -336,18 +312,6 @@ public class ReportServiceImpl implements ReportService {
         return organizationRepository.findByIdAndStatusAndIsDeletedFalse(organizationId, Status.ACTIVE)
                 .orElseThrow(() -> new ResourceNotFoundException(ErrorMessage.ORGANIZATION_NOT_FOUND, "ORGANIZATION_NOT_FOUND"))
                 .getId();
-    }
-
-    @Override
-    @Transactional(readOnly = true)
-    public LedgerResponseDto getCustomerLedger(Long customerId) {
-        return customerService.getCustomerLedger(customerId);
-    }
-
-    @Override
-    @Transactional(readOnly = true)
-    public LedgerResponseDto getSupplierLedger(Long supplierId) {
-        return supplierService.getSupplierLedger(supplierId);
     }
 
     @Override
@@ -573,39 +537,6 @@ public class ReportServiceImpl implements ReportService {
                         || (expense.getPaymentMethod() != null && paymentMethodId.equals(expense.getPaymentMethod().getId())))
                 .map(this::toExpenseRecord)
                 .toList();
-    }
-
-    @Override
-    @Transactional(readOnly = true)
-    public List<BankStatementEntryResponseDto> getBankStatement(LocalDate fromDate, LocalDate toDate, Long bankAccountId) {
-        Long organizationId = currentOrganizationService.getOrganizationId();
-        List<BankTransaction> transactions = bankAccountId != null
-                ? bankTransactionRepository.findByBankAccountIdAndOrganizationIdAndTransactionDateBetweenOrderByTransactionDateAscIdAsc(
-                        bankAccountId, organizationId, fromDate, toDate)
-                : bankTransactionRepository.findByOrganizationIdAndTransactionDateBetweenOrderByTransactionDateAscIdAsc(
-                        organizationId, fromDate, toDate);
-        BigDecimal balance = bankAccountId == null
-                ? TransactionSupport.ZERO
-                : bankAccountRepository.findById(bankAccountId)
-                        .map(BankAccount::getOpeningBalance)
-                        .map(support::defaultZero)
-                        .orElse(TransactionSupport.ZERO);
-
-        List<BankStatementEntryResponseDto> entries = new ArrayList<>();
-        for (BankTransaction transaction : transactions) {
-            BigDecimal amount = support.defaultZero(transaction.getAmount());
-            boolean isDeposit = FinanceSupport.PAYMENT_IN.equals(transaction.getTransactionType())
-                    || FinanceSupport.POS.equals(transaction.getTransactionType());
-            balance = isDeposit ? balance.add(amount) : balance.subtract(amount);
-            entries.add(BankStatementEntryResponseDto.builder()
-                    .date(transaction.getTransactionDate())
-                    .description(transaction.getRemarks())
-                    .withdrawalAmount(isDeposit ? TransactionSupport.ZERO : support.money(amount))
-                    .depositAmount(isDeposit ? support.money(amount) : TransactionSupport.ZERO)
-                    .balance(support.money(balance))
-                    .build());
-        }
-        return entries;
     }
 
     @Override

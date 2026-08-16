@@ -82,6 +82,7 @@ public class ValidationMessage {
     public static final String ROLE_NAME_REQUIRED = "Role name is required";
     public static final String ROLE_NAME_INVALID = "Role name must be between 2 and 100 characters";
     public static final String ORGANIZATION_ID_REQUIRED = "Organization ID is required";
+    public static final String BRANCH_IDS_REQUIRED = "At least one branch is required";
 
     // Permission Validation
     public static final String PERMISSION_NAME_REQUIRED = "Permission name is required";

@@ -4,6 +4,7 @@ import com.nexoraa.billtop.constants.ResponseMessage;
 import com.nexoraa.billtop.dto.ApiResponseDto;
 import com.nexoraa.billtop.dto.branch.BranchResponseDto;
 import com.nexoraa.billtop.dto.common.FileUploadResponseDto;
+import com.nexoraa.billtop.dto.common.IdResponseDto;
 import com.nexoraa.billtop.dto.user.ChangePasswordRequestDto;
 import com.nexoraa.billtop.dto.user.CreateUserRequestDto;
 import com.nexoraa.billtop.dto.user.UpdateProfileRequestDto;
@@ -44,11 +45,14 @@ public class UserController {
     }
 
     @PostMapping
-    public ResponseEntity<ApiResponseDto<Void>> createUser(
+    public ResponseEntity<ApiResponseDto<IdResponseDto>> createUser(
             @Valid @RequestBody CreateUserRequestDto request
     ) {
-        userService.createUser(request);
-        return ResponseEntity.ok(ApiResponseDto.success(ResponseMessage.USER_CREATED));
+        UserResponseDto created = userService.createUser(request);
+        return ResponseEntity.ok(ApiResponseDto.success(
+                ResponseMessage.USER_CREATED,
+                IdResponseDto.builder().id(created.getId()).build()
+        ));
     }
 
     @GetMapping

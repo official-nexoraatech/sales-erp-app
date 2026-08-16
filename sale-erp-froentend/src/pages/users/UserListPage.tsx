@@ -3,7 +3,7 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { Edit, MoreVertical, ShieldCheck, Trash2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { usersApi } from '../../api/endpoints';
+import { adminUsersApi, usersApi } from '../../api/endpoints';
 import type { UserListItem } from '../../api/endpoints';
 import { queryClient } from '../../app/queryClient';
 import { Button } from '../../components/ui/Button';
@@ -14,13 +14,14 @@ import { useDebounce } from '../../hooks/useDebounce';
 import { formatDate } from '../../utils/formatDate';
 import { useAuth } from '../../hooks/useAuth';
 import { PERMISSIONS } from '../../auth/permissions';
+import { isSuperAdminRole } from '../../auth/featurePermissions';
 import { TableExportButtons } from '../../components/common/TableExportButtons';
-
-const columns = ['Username', 'First Name', 'Last Name', 'Email', 'Mobile', 'Role', 'Status', 'Created at', 'Action'];
+import { OrganizationSelector } from './OrganizationSelector';
 
 export const UserListPage: React.FC = () => {
   const navigate = useNavigate();
-  const { hasPermission } = useAuth();
+  const { user, hasPermission } = useAuth();
+  const isSuperAdmin = isSuperAdminRole(user?.role);
   const { confirmAction, confirmationDialog } = useConfirmation();
   const canCreate = hasPermission(PERMISSIONS.USER_CREATE);
   const canEdit = hasPermission(PERMISSIONS.USER_UPDATE);
@@ -29,16 +30,24 @@ export const UserListPage: React.FC = () => {
   const [pageSize, setPageSize] = useState(10);
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(0);
+  const [organizationId, setOrganizationId] = useState(0);
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const debouncedSearch = useDebounce(search);
+  const columns = isSuperAdmin
+    ? ['Username', 'First Name', 'Last Name', 'Email', 'Mobile', 'Organization', 'Role', 'Status', 'Created at', 'Action']
+    : ['Username', 'First Name', 'Last Name', 'Email', 'Mobile', 'Role', 'Status', 'Created at', 'Action'];
   const users = useQuery({
-    queryKey: ['users', page, pageSize, debouncedSearch],
-    queryFn: () => usersApi.getAll({ page, size: pageSize, search: debouncedSearch }),
+    queryKey: ['users', isSuperAdmin, organizationId, page, pageSize, debouncedSearch],
+    queryFn: () => (isSuperAdmin
+      ? adminUsersApi.getAll({ organizationId: organizationId || undefined, page, size: pageSize, search: debouncedSearch })
+      : usersApi.getAll({ page, size: pageSize, search: debouncedSearch })),
   });
   const rows = users.data?.data?.content || [];
   const allSelected = rows.length > 0 && rows.every((row) => selectedIds.includes(row.id));
   const remove = useMutation({
-    mutationFn: usersApi.delete,
+    mutationFn: (row: UserListItem) => (isSuperAdmin && row.organizationId
+      ? adminUsersApi.delete(row.organizationId, row.id)
+      : usersApi.delete(row.id)),
     onSuccess: () => {
       toast.success('User deleted');
       queryClient.invalidateQueries({ queryKey: ['users'] });
@@ -47,7 +56,17 @@ export const UserListPage: React.FC = () => {
   });
 
   const exportColumns = columns.slice(0, -1);
-  const getExportRows = () => rows.map((row) => [row.userName || row.username || '', row.firstName || '', row.lastName || '', row.email || '', row.mobileNo || row.mobile || '', row.roleName || '', row.status ?? '', row.createdAt || '']);
+  const getExportRows = () => rows.map((row) => [
+    row.userName || row.username || '',
+    row.firstName || '',
+    row.lastName || '',
+    row.email || '',
+    row.mobileNo || row.mobile || '',
+    ...(isSuperAdmin ? [row.organizationName || ''] : []),
+    row.roleName || '',
+    row.status ?? '',
+    row.createdAt || '',
+  ]);
 
   const copy = async () => {
     await navigator.clipboard.writeText([exportColumns, ...getExportRows()].map((entry) => entry.join('\t')).join('\n'));
@@ -74,7 +93,10 @@ export const UserListPage: React.FC = () => {
     if (!selectedIds.length) return toast.error('Select at least one user');
     const confirmed = await confirmAction({ title: 'Delete Users', message: 'Delete selected users?', confirmText: 'Delete', variant: 'danger' });
     if (!confirmed) return;
-    for (const id of selectedIds) await remove.mutateAsync(id);
+    for (const id of selectedIds) {
+      const row = rows.find((entry) => entry.id === id);
+      if (row) await remove.mutateAsync(row);
+    }
     setSelectedIds([]);
   };
 
@@ -86,6 +108,21 @@ export const UserListPage: React.FC = () => {
           <h1 className="text-xl font-semibold uppercase text-gray-900">Users List</h1>
           {canCreate && <Button onClick={() => navigate('/users/create')} className="min-w-[170px]">Create User</Button>}
         </div>
+
+        {isSuperAdmin && (
+          <div className="border-b px-5 py-4">
+            <div className="max-w-xs">
+              <OrganizationSelector
+                value={organizationId}
+                onChange={(id) => { setOrganizationId(id); setPage(0); }}
+                allowClear
+                label="Organization"
+                clearLabel="All Organizations"
+                placeholder="Select organization"
+              />
+            </div>
+          </div>
+        )}
 
         <div className="flex flex-wrap items-center justify-between gap-3 p-5">
           <label className="flex items-center gap-2 text-sm text-gray-600">
@@ -130,10 +167,11 @@ export const UserListPage: React.FC = () => {
                   <td className="border p-3">{row.lastName || ''}</td>
                   <td className="border p-3">{row.email || ''}</td>
                   <td className="border p-3">{row.mobileNo || row.mobile || ''}</td>
+                  {isSuperAdmin && <td className="border p-3">{row.organizationName || ''}</td>}
                   <td className="border p-3">{row.roleName || ''}</td>
                   <td className="border p-3"><span className={`rounded-full px-3 py-1 text-xs font-semibold ${isActive ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>{isActive ? 'ACTIVE' : 'INACTIVE'}</span></td>
                   <td className="border p-3">{row.createdAt ? formatDate(row.createdAt) : ''}</td>
-                  <td className="border p-3"><div className="flex gap-2">{canEdit && <button type="button" title="Edit user" onClick={() => navigate(`/users/${row.id}/edit`, { state: row })} className="text-orange-600"><Edit size={16} /></button>}{canAssignPermissions && <button type="button" title="Assign permissions" onClick={() => navigate(`/users/permissions?userId=${row.id}`)} className="text-blue-600"><ShieldCheck size={16} /></button>}{canDelete && <button type="button" title="Delete user" onClick={async () => { if (await confirmAction({ title: 'Delete User', message: 'Delete this user?', confirmText: 'Delete', variant: 'danger' })) remove.mutate(row.id); }} className="text-red-600"><Trash2 size={16} /></button>}<MoreVertical size={16} /></div></td>
+                  <td className="border p-3"><div className="flex gap-2">{canEdit && <button type="button" title="Edit user" onClick={() => navigate(`/users/${row.id}/edit`, { state: row })} className="text-orange-600"><Edit size={16} /></button>}{canAssignPermissions && <button type="button" title="Assign permissions" onClick={() => navigate(`/users/permissions?userId=${row.id}`)} className="text-blue-600"><ShieldCheck size={16} /></button>}{canDelete && <button type="button" title="Delete user" onClick={async () => { if (await confirmAction({ title: 'Delete User', message: 'Delete this user?', confirmText: 'Delete', variant: 'danger' })) remove.mutate(row); }} className="text-red-600"><Trash2 size={16} /></button>}<MoreVertical size={16} /></div></td>
                 </tr>
                 );
               }) : (

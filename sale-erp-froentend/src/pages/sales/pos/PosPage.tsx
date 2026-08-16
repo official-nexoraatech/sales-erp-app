@@ -1,12 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { Box, ChevronDown, CreditCard, LayoutDashboard, Loader2, Minus, PackageSearch, Plus, Search, Trash2, UserRound, Users } from 'lucide-react';
+import { Box, ChevronDown, CreditCard, Loader2, Minus, PackageSearch, Plus, Search, Trash2, UserRound } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { customerApi, itemApi, paymentMethodApi, posApi, warehouseApi } from '../../../api/endpoints';
 import type { ItemListItem } from '../../../api/endpoints';
-import { getDefaultAuthorizedPath } from '../../../auth/featurePermissions';
+import { canAccessRuleFromPermissions, getDefaultAuthorizedPath, isSuperAdminRole } from '../../../auth/featurePermissions';
 import { PERMISSIONS } from '../../../auth/permissions';
+import { menuItems } from '../../../components/layout/Sidebar';
 import { NumericInput } from '../../../components/ui/NumericInput';
 import { useAuth } from '../../../hooks/useAuth';
 import { useDebounce } from '../../../hooks/useDebounce';
@@ -64,13 +65,25 @@ export const PosPage: React.FC = () => {
   const navigate = useNavigate();
   const { user, hasPermission } = useAuth();
   const defaultPath = getDefaultAuthorizedPath(user?.permissions, user?.role);
-  const canViewDashboard = hasPermission(PERMISSIONS.DASHBOARD_VIEW);
-  const canViewCustomers = hasPermission(PERMISSIONS.CUSTOMER_VIEW);
   const canCreateCustomer = hasPermission(PERMISSIONS.CUSTOMER_CREATE);
-  const canViewSales = hasPermission(PERMISSIONS.SALES_VIEW);
-  const canViewItems = hasPermission(PERMISSIONS.ITEM_VIEW);
-  const canViewPaymentIn = hasPermission(PERMISSIONS.PAYMENT_IN_VIEW);
   const canCreateExpenseMaster = hasPermission(PERMISSIONS.EXPENSE_CREATE);
+  // Flattened, permission-filtered list of every page the user can reach - POS renders outside
+  // AppLayout/Sidebar, so without this a user whose only permissions fall outside the handful of
+  // hardcoded quick links here (e.g. Branches, Warehouses, Payment Notes) has no way to navigate
+  // anywhere else in the app.
+  const navMenuItems = useMemo(() => {
+    const flattened = menuItems.flatMap((item) => item.submenu || [item]);
+    const seen = new Set<string>();
+    return flattened.filter((item) => {
+      if (!item.href || item.href === '/sales/pos' || seen.has(item.href)) return false;
+      if (item.superAdminOnly && !isSuperAdminRole(user?.role)) return false;
+      if (!canAccessRuleFromPermissions(item.access, user?.permissions, user?.role)) return false;
+      seen.add(item.href);
+      return true;
+    });
+  }, [user?.permissions, user?.role]);
+  const [navMenuOpen, setNavMenuOpen] = useState(false);
+  const navMenuRef = useRef<HTMLDivElement | null>(null);
   const [customerId, setCustomerId] = useState(0);
   const [warehouseId, setWarehouseId] = useState(0);
   const [paymentMethodId, setPaymentMethodId] = useState(0);
@@ -116,6 +129,9 @@ export const PosPage: React.FC = () => {
       }
       if (customerSelectRef.current && !customerSelectRef.current.contains(event.target as Node)) {
         setCustomerMenuOpen(false);
+      }
+      if (navMenuRef.current && !navMenuRef.current.contains(event.target as Node)) {
+        setNavMenuOpen(false);
       }
     };
 
@@ -363,13 +379,38 @@ export const PosPage: React.FC = () => {
     <div className="flex h-screen flex-col overflow-hidden bg-[#f5f6ff] text-slate-700">
       <header className="flex h-12 shrink-0 items-center justify-between border-b bg-white px-3 shadow-sm">
         <button onClick={() => navigate(defaultPath)} className="text-xl font-semibold text-blue-600">Texmitra</button>
-        <nav className="hidden items-center gap-5 text-xs text-slate-600 md:flex">
-          {canViewDashboard && <button onClick={() => navigate('/dashboard')} className="flex items-center gap-1 hover:text-blue-600"><LayoutDashboard size={13} />Dashboard</button>}
-          {canViewCustomers && <button onClick={() => navigate('/contacts/customers')} className="flex items-center gap-1 hover:text-blue-600"><Users size={13} />Customer List</button>}
-          {canViewSales && <button onClick={() => navigate('/sales/invoices')} className="flex items-center gap-1 hover:text-blue-600"><CreditCard size={13} />Invoices</button>}
-          {canViewItems && <button onClick={() => navigate('/items')} className="flex items-center gap-1 hover:text-blue-600"><Box size={13} />Item List</button>}
-          {canViewPaymentIn && <button onClick={() => navigate('/sales/payment-in')} className="flex items-center gap-1 hover:text-blue-600"><CreditCard size={13} />Payment In</button>}
-        </nav>
+        {navMenuItems.length > 0 && (
+          <div className="relative" ref={navMenuRef}>
+            <button
+              type="button"
+              onClick={() => setNavMenuOpen((current) => !current)}
+              className="flex items-center gap-1 rounded border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 hover:border-blue-300 hover:text-blue-600"
+              aria-haspopup="menu"
+              aria-expanded={navMenuOpen}
+            >
+              Menu
+              <ChevronDown size={13} className={`transition-transform ${navMenuOpen ? 'rotate-180' : ''}`} />
+            </button>
+            {navMenuOpen && (
+              <div
+                role="menu"
+                className="absolute right-0 top-9 z-40 max-h-96 w-56 overflow-y-auto rounded-lg border border-slate-200 bg-white py-1.5 text-xs shadow-xl"
+              >
+                {navMenuItems.map((item) => (
+                  <button
+                    key={item.href}
+                    type="button"
+                    role="menuitem"
+                    onClick={() => { setNavMenuOpen(false); navigate(item.href!); }}
+                    className="flex w-full items-center gap-2 px-4 py-2 text-left text-slate-600 hover:bg-slate-50 hover:text-blue-600"
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </header>
 
       <main className="flex-1 overflow-y-auto pb-16">

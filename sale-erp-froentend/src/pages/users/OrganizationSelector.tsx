@@ -8,8 +8,13 @@ import { getOrganizationId } from '../organizations/organization.utils';
 interface OrganizationSelectorProps {
   value: number;
   onChange: (organizationId: number) => void;
-  onCreate: () => void;
+  onCreate?: () => void;
   canCreate?: boolean;
+  label?: string;
+  placeholder?: string;
+  /** Adds an "All Organizations" row that resets the filter to 0 - for list-page filters rather than required form fields. */
+  allowClear?: boolean;
+  clearLabel?: string;
 }
 
 export const OrganizationSelector: React.FC<OrganizationSelectorProps> = ({
@@ -17,6 +22,10 @@ export const OrganizationSelector: React.FC<OrganizationSelectorProps> = ({
   onChange,
   onCreate,
   canCreate = false,
+  label = 'Organization *',
+  placeholder = 'Select organization',
+  allowClear = false,
+  clearLabel = 'All Organizations',
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [search, setSearch] = useState('');
@@ -53,7 +62,7 @@ export const OrganizationSelector: React.FC<OrganizationSelectorProps> = ({
 
   return (
     <div ref={containerRef} className="relative w-full">
-      <label className="mb-2 block text-sm font-medium text-gray-700">Organization *</label>
+      {label && <label className="mb-2 block text-sm font-medium text-gray-700">{label}</label>}
 
       <div className="flex">
         <div className="relative min-w-0 flex-1">
@@ -66,7 +75,7 @@ export const OrganizationSelector: React.FC<OrganizationSelectorProps> = ({
                 ? 'border-blue-400 ring-2 ring-blue-100'
                 : 'border-gray-300 hover:border-gray-400 focus:border-blue-400 focus:ring-2 focus:ring-blue-100'
             }`}
-            placeholder="Select organization"
+            placeholder={allowClear && !value ? clearLabel : placeholder}
             value={search}
             onFocus={() => setIsOpen(true)}
             onChange={(event) => {
@@ -104,6 +113,29 @@ export const OrganizationSelector: React.FC<OrganizationSelectorProps> = ({
           role="listbox"
           className={`absolute z-30 mt-0 max-h-72 overflow-y-auto rounded-b-lg border border-t-0 border-blue-300 bg-white shadow-xl ${canCreate ? 'w-[calc(100%-3rem)]' : 'w-full'}`}
         >
+          {allowClear && !search && (
+            <button
+              type="button"
+              role="option"
+              aria-selected={!value}
+              onClick={() => {
+                onChange(0);
+                setSearch('');
+                setIsOpen(false);
+              }}
+              className={`flex w-full items-center gap-4 border-t border-gray-100 px-5 py-4 text-left text-base transition first:border-t-0 ${
+                !value ? 'bg-blue-50 font-semibold text-blue-700' : 'text-gray-800 hover:bg-gray-50'
+              }`}
+            >
+              <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded border ${
+                !value ? 'border-blue-200 bg-white text-blue-600' : 'border-gray-200 bg-gray-50 text-gray-500'
+              }`}>
+                <Building2 size={15} />
+              </span>
+              <span className="min-w-0 flex-1 truncate">{clearLabel}</span>
+              {!value && <Check size={18} className="shrink-0" />}
+            </button>
+          )}
           {organizations.isLoading ? (
             <p className="px-5 py-4 text-sm text-gray-500">Loading organizations...</p>
           ) : rows.length ? (

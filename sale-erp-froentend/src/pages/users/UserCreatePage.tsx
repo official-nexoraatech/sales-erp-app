@@ -3,7 +3,7 @@ import { useMutation } from '@tanstack/react-query';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { UserRound } from 'lucide-react';
-import { usersApi } from '../../api/endpoints';
+import { adminUsersApi, usersApi } from '../../api/endpoints';
 import type { CreateUserRequest, UserListItem } from '../../api/endpoints';
 import { queryClient } from '../../app/queryClient';
 import { Button } from '../../components/ui/Button';
@@ -34,23 +34,26 @@ export const UserCreatePage: React.FC<Props> = ({ mode = 'create' }) => {
     email: state?.email || '',
     mobileNo: state?.mobileNo || state?.mobile || '',
     roleId: state?.roleId || 0,
-    organizationId: Number(searchParams.get('organizationId')) || user?.organizationId || 0,
+    organizationId: Number(searchParams.get('organizationId')) || state?.organizationId || user?.organizationId || 0,
     status: state?.status === false || state?.status === 'INACTIVE' ? 'INACTIVE' : 'ACTIVE',
     branchIds: state?.branchIds || [],
   });
 
   const mutation = useMutation({
-    mutationFn: () => {
+    mutationFn: async (): Promise<{ data?: { id?: number } | void }> => {
       if (mode === 'edit') {
-        const { organizationId: _organizationId, ...payload } = form;
-        return usersApi.update(id, payload);
+        const { organizationId, ...payload } = form;
+        return isSuperAdmin && organizationId
+          ? adminUsersApi.update(organizationId, id, payload)
+          : usersApi.update(id, payload);
       }
       return usersApi.create(form);
     },
-    onSuccess: () => {
+    onSuccess: (response) => {
       toast.success(`User ${mode === 'edit' ? 'updated' : 'created'} successfully`);
       queryClient.invalidateQueries({ queryKey: ['users'] });
-      navigate('/users');
+      const createdUserId = mode === 'create' ? (response?.data as { id?: number } | undefined)?.id : undefined;
+      navigate(createdUserId ? `/users/permissions?userId=${createdUserId}` : '/users');
     },
     onError: (error: any) => toast.error(error?.message || `Failed to ${mode} user`),
   });
@@ -65,6 +68,7 @@ export const UserCreatePage: React.FC<Props> = ({ mode = 'create' }) => {
     if (!form.email.trim()) return toast.error('Email is required');
     if (form.mobileNo && !isValidMobileNumber(form.mobileNo)) return toast.error(MOBILE_VALIDATION_MESSAGE);
     if (!form.roleId) return toast.error('Role is required');
+    if (!form.branchIds || form.branchIds.length === 0) return toast.error('Branch is required');
     if (mode === 'create' && isSuperAdmin && !form.organizationId) return toast.error('Organization is required');
     mutation.mutate();
   };

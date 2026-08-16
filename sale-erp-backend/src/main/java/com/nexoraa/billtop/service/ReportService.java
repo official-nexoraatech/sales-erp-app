@@ -1,7 +1,5 @@
 package com.nexoraa.billtop.service;
 
-import com.nexoraa.billtop.dto.ledger.LedgerResponseDto;
-import com.nexoraa.billtop.dto.report.BankStatementEntryResponseDto;
 import com.nexoraa.billtop.dto.report.CustomerDueResponseDto;
 import com.nexoraa.billtop.dto.report.ExpenseReportResponseDto;
 import com.nexoraa.billtop.dto.report.ExpiredItemResponseDto;
@@ -49,10 +47,6 @@ public interface ReportService {
 
     List<StockReportResponseDto> getLowStockReportForOrganization(Long organizationId);
 
-    LedgerResponseDto getCustomerLedger(Long customerId);
-
-    LedgerResponseDto getSupplierLedger(Long supplierId);
-
     ProfitLossReportResponseDto getProfitLoss(LocalDate fromDate, LocalDate toDate);
 
     List<GstReportResponseDto> getGstReport(LocalDate fromDate, LocalDate toDate);
@@ -72,8 +66,6 @@ public interface ReportService {
     List<ExpenseReportResponseDto> getExpenseReport(
             LocalDate fromDate, LocalDate toDate, Long categoryId, Long subCategoryId, Long paymentMethodId
     );
-
-    List<BankStatementEntryResponseDto> getBankStatement(LocalDate fromDate, LocalDate toDate, Long bankAccountId);
 
     List<ItemTransactionResponseDto> getItemTransactionsGeneral(
             LocalDate fromDate, LocalDate toDate, Long itemId, Long brandId, Long warehouseId

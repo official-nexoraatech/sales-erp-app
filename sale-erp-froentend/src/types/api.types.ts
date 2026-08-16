@@ -117,6 +117,10 @@ export interface ItemCreateResponse {
   itemCode: string;
 }
 
+export interface UserCreateResponse {
+  id: number;
+}
+
 export type ItemImageUploadResponse = string | {
   imageUrl?: string | null;
   objectUrl?: string | null;
