@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import { createDatabaseClient } from '@erp/db';
-import { tenants, roles, users, branches, organizationSettings } from '@erp/db';
-import { eq } from 'drizzle-orm';
+import { tenants, roles, users, branches, organizationSettings, featureFlags } from '@erp/db';
+import { eq, and } from 'drizzle-orm';
 import type { StorageClient } from '@erp/sdk';
 import { TenantProvisioner } from '../domain/TenantProvisioner.js';
 
@@ -63,6 +63,9 @@ describe.skipIf(!DB_URL)('Tenant provisioning integration', () => {
     const [tenant] = await db.select().from(tenants).where(eq(tenants.id, result.tenantId));
     expect(tenant!.status).toBe('ACTIVE');
     expect(tenant!.provisioningStatus).toBe('COMPLETE');
+    // Grocery-expansion audit 2026-08-16: vertical must default to CLOTH_RETAIL for backward
+    // compatibility when the caller doesn't specify one.
+    expect(tenant!.vertical).toBe('CLOTH_RETAIL');
 
     // Roles must be seeded
     const seededRoles = await db.select().from(roles).where(eq(roles.tenantId, result.tenantId));
@@ -87,6 +90,59 @@ describe.skipIf(!DB_URL)('Tenant provisioning integration', () => {
     expect(org).toBeDefined();
     expect(org!.orgName).toBe('Test Cloth Co.');
     expect(org!.createdBy).toBe(result.adminUserId);
+  });
+
+  it('provisions a GROCERY tenant with the vertical template applied (tailoring flag off)', async () => {
+    const slug = `test-grocery-${Date.now()}`;
+    const provisioner = new TenantProvisioner(db, 'http://localhost:9200', makeFakeStorageClient());
+
+    const result = await provisioner.provision({
+      name: 'Test Grocery Co.',
+      slug,
+      contactEmail: `admin-grocery-${Date.now()}@test.example`,
+      adminFirstName: 'Test',
+      adminLastName: 'Admin',
+      adminPassword: 'Test@12345',
+      plan: 'STARTER',
+      vertical: 'GROCERY',
+    });
+
+    try {
+      const [tenant] = await db.select().from(tenants).where(eq(tenants.id, result.tenantId));
+      expect(tenant!.vertical).toBe('GROCERY');
+
+      // hr.tailoring.enabled is globally defaulted to true (see
+      // apps/hr-service/src/api/internal.routes.ts) — a GROCERY tenant must get its own
+      // tenant-scoped override row disabling it, per VERTICAL_DEFAULTS.GROCERY.
+      const [tailoringFlag] = await db
+        .select()
+        .from(featureFlags)
+        .where(
+          and(
+            eq(featureFlags.tenantId, result.tenantId),
+            eq(featureFlags.flagKey, 'hr.tailoring.enabled')
+          )
+        );
+      expect(tailoringFlag).toBeDefined();
+      expect(tailoringFlag!.enabled).toBe(false);
+
+      // Roles are unaffected — VERTICAL_DEFAULTS.GROCERY.excludeRoles is empty today.
+      const seededRoles = await db.select().from(roles).where(eq(roles.tenantId, result.tenantId));
+      expect(seededRoles.map((r) => r.name)).toContain('CASHIER');
+    } finally {
+      // Same reverse-FK cleanup order as afterAll, scoped to this test's own tenant.
+      await db.execute(`DELETE FROM user_roles WHERE tenant_id = ${result.tenantId}`);
+      await db.execute(`DELETE FROM user_branches WHERE tenant_id = ${result.tenantId}`);
+      await db.execute(`DELETE FROM role_permissions WHERE tenant_id = ${result.tenantId}`);
+      await db.execute(`DELETE FROM feature_flags WHERE tenant_id = ${result.tenantId}`);
+      await db
+        .delete(organizationSettings)
+        .where(eq(organizationSettings.tenantId, result.tenantId));
+      await db.delete(users).where(eq(users.tenantId, result.tenantId));
+      await db.delete(roles).where(eq(roles.tenantId, result.tenantId));
+      await db.delete(branches).where(eq(branches.tenantId, result.tenantId));
+      await db.delete(tenants).where(eq(tenants.id, result.tenantId));
+    }
   });
 
   it('can suspend and activate a tenant, clearing suspension metadata and bumping version each transition', async () => {

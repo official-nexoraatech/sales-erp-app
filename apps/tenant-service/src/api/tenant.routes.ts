@@ -151,7 +151,7 @@ export async function tenantRoutes(
         request.auth.email,
         request.ip,
         {},
-        { status: 'ACTIVE', plan: body.data.plan },
+        { status: 'ACTIVE', plan: body.data.plan, vertical: body.data.vertical },
         { source: 'admin_provisioning', slug: body.data.slug, adminUserId: result.adminUserId }
       );
       return reply.code(201).send({

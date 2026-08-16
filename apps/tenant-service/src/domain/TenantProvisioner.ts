@@ -18,6 +18,7 @@ import { randomUUID } from 'node:crypto';
 import { WorkflowEngine, RuleEngine } from '@erp/sdk';
 import type { StorageClient } from '@erp/sdk';
 import { ROLE_DEFAULTS } from '../rbac/role-defaults.js';
+import { VERTICAL_DEFAULTS, type TenantVertical } from '../rbac/vertical-defaults.js';
 import { BillingService } from './BillingService.js';
 
 export interface ProvisionTenantInput {
@@ -26,6 +27,7 @@ export interface ProvisionTenantInput {
   contactEmail: string;
   contactPhone?: string;
   plan?: 'STARTER' | 'GROWTH' | 'ENTERPRISE';
+  vertical?: TenantVertical;
   adminFirstName: string;
   adminLastName: string;
   adminPassword: string;
@@ -73,6 +75,7 @@ export class TenantProvisioner {
 
   async provision(input: ProvisionTenantInput): Promise<ProvisionResult> {
     const startedAt = Date.now();
+    const vertical: TenantVertical = input.vertical ?? 'CLOTH_RETAIL';
     const completedSteps: Record<string, { done: boolean; completedAt: string }> = {};
 
     const markStep = (step: ProvisionStep): void => {
@@ -89,6 +92,7 @@ export class TenantProvisioner {
         contactEmail: input.contactEmail,
         contactPhone: input.contactPhone,
         plan: input.plan ?? 'STARTER',
+        vertical,
         status: 'PROVISIONING',
         provisioningStatus: 'NOT_STARTED',
         provisioningSteps: {},
@@ -124,8 +128,8 @@ export class TenantProvisioner {
       .where(eq(tenants.id, tenantId));
 
     // ── STEP 4: Seed default roles and permissions ──────────────────────────
-    logger.info({ tenantId }, 'Seeding roles and permissions');
-    await this.seedRolesAndPermissions(tenantId);
+    logger.info({ tenantId, vertical }, 'Seeding roles and permissions');
+    await this.seedRolesAndPermissions(tenantId, vertical);
     markStep('SEED_ROLES_PERMISSIONS');
 
     await this.db
@@ -224,8 +228,8 @@ export class TenantProvisioner {
       .where(eq(tenants.id, tenantId));
 
     // ── STEP 8: Set feature flags ────────────────────────────────────────────
-    logger.info({ tenantId }, 'Configuring feature flags');
-    await this.seedFeatureFlags(tenantId);
+    logger.info({ tenantId, vertical }, 'Configuring feature flags');
+    await this.seedFeatureFlags(tenantId, vertical);
     markStep('SET_FEATURE_FLAGS');
 
     await this.db
@@ -298,8 +302,10 @@ export class TenantProvisioner {
     };
   }
 
-  private async seedRolesAndPermissions(tenantId: number): Promise<void> {
+  private async seedRolesAndPermissions(tenantId: number, vertical: TenantVertical): Promise<void> {
+    const { excludeRoles } = VERTICAL_DEFAULTS[vertical];
     for (const [roleName, permissions] of Object.entries(ROLE_DEFAULTS)) {
+      if (excludeRoles.includes(roleName)) continue;
       const [role] = await this.db
         .insert(roles)
         .values({
@@ -413,7 +419,7 @@ export class TenantProvisioner {
     }
   }
 
-  private async seedFeatureFlags(tenantId: number): Promise<void> {
+  private async seedFeatureFlags(tenantId: number, vertical: TenantVertical): Promise<void> {
     const flags = [
       { key: 'pos.enabled', enabled: false },
       { key: 'multi-branch.enabled', enabled: false },
@@ -430,6 +436,9 @@ export class TenantProvisioner {
       { key: 'notification.sms.enabled', enabled: true },
       { key: 'import.bulk.enabled', enabled: true },
       { key: 'audit.detailed.enabled', enabled: true },
+      // Per-vertical overrides (e.g. GROCERY disabling the globally-default-on
+      // hr.tailoring.enabled flag) — see apps/tenant-service/src/rbac/vertical-defaults.ts.
+      ...VERTICAL_DEFAULTS[vertical].featureFlagOverrides,
     ];
 
     for (const flag of flags) {

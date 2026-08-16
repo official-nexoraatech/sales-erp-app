@@ -170,6 +170,62 @@ describe.skipIf(!DB_URL)('WorkflowEngine — role approver resolution', () => {
     expect(pendingForInactiveUser).toHaveLength(0);
   });
 
+  // Multi-vertical platform audit 2026-08-16: evaluateCondition() now delegates to
+  // rule-engine.ts's canonical evaluator instead of its own GT/LT/GTE/LTE/EQ/ALWAYS-only DSL.
+  // Every SYSTEM_WORKFLOW_DEFINITIONS entry that isn't ALWAYS uses the legacy 'GT' operator
+  // (e.g. { field: 'grandTotal', operator: 'GT', value: 50000 }) — this is a regression guard
+  // that the legacy short-form operator still evaluates identically through the shared engine.
+  it('legacy GT conditionExpr operator still gates triggering correctly through the shared rule-engine evaluator', async () => {
+    const triggerEvent = `TEST_GT_${randomUUID()}`;
+    const [def] = await db
+      .insert(workflowDefinitions)
+      .values({
+        tenantId,
+        name: `Test — ${triggerEvent}`,
+        triggerEvent,
+        entityType: 'TestEntity',
+        conditionExpr: { field: 'grandTotal', operator: 'GT', value: 50000 },
+        nodes: [
+          {
+            id: 'node_1',
+            name: 'Approver',
+            type: 'APPROVAL',
+            approverType: 'ROLE',
+            approverRef: 'TEST_APPROVER_ROLE',
+          },
+        ] satisfies WorkflowNode[],
+        timeoutHours: 24,
+        isSystem: false,
+        isActive: true,
+        createdBy: 0,
+      })
+      .returning();
+    cleanupDefinitionIds.push(def!.id);
+
+    const engine = new WorkflowEngine(db, tenantId, activeUser1, randomUUID());
+
+    const belowThreshold = await engine.trigger({
+      event: triggerEvent,
+      entityType: 'TestEntity',
+      entityId: 101,
+      userId: activeUser1,
+      correlationId: randomUUID(),
+      payload: { grandTotal: 40000 },
+    });
+    expect(belowThreshold).toBeNull();
+
+    const aboveThreshold = await engine.trigger({
+      event: triggerEvent,
+      entityType: 'TestEntity',
+      entityId: 102,
+      userId: activeUser1,
+      correlationId: randomUUID(),
+      payload: { grandTotal: 60000 },
+    });
+    expect(aboveThreshold).not.toBeNull();
+    cleanupInstanceIds.push(aboveThreshold!.id);
+  });
+
   it('default (single-decision) semantics: one approver deciding finalizes the instance and clears the other pending row', async () => {
     const triggerEvent = `TEST_SINGLE_DECIDES_${randomUUID()}`;
     await seedDefinition(

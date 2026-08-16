@@ -10,6 +10,7 @@ export const CreateTenantSchema = z.object({
   contactEmail: z.string().email(),
   contactPhone: z.string().min(10).max(15).optional(),
   plan: z.enum(['STARTER', 'GROWTH', 'ENTERPRISE']).optional().default('STARTER'),
+  vertical: z.enum(['CLOTH_RETAIL', 'GROCERY']).optional().default('CLOTH_RETAIL'),
   adminFirstName: z.string().min(1).max(100),
   adminLastName: z.string().min(1).max(100),
   adminPassword: z.string().min(12, 'Admin password must be at least 12 characters').max(128),

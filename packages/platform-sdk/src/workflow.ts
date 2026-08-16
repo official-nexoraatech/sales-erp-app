@@ -11,6 +11,7 @@ import {
 import type { WorkflowNode } from '@erp/db';
 import { NotFoundError, BusinessError, ERPError } from '@erp/types';
 import { createLogger } from '@erp/logger';
+import { evaluateCondition as evaluateRuleCondition, type RuleCondition } from './rule-engine.js';
 
 const logger = createLogger({ serviceName: 'platform-sdk' });
 
@@ -527,7 +528,8 @@ export class WorkflowEngine {
     const condition = definition.conditionExpr as {
       field: string;
       operator: string;
-      value?: number;
+      value?: unknown;
+      value2?: unknown;
     };
     if (!this.evaluateCondition(condition, input.payload ?? {})) return null;
 
@@ -861,28 +863,37 @@ export class WorkflowEngine {
     });
   }
 
+  // Multi-vertical platform audit 2026-08-16: this used to be a second, weaker condition DSL
+  // (GT/LT/GTE/LTE/EQ/ALWAYS, single flat field, no BETWEEN/IN/CONTAINS) duplicating
+  // rule-engine.ts's evaluateCondition — automation-service's WorkflowExecutionEngine already
+  // reuses the rule-engine.ts evaluator for its CONDITION nodes, so this was the one remaining
+  // caller with its own DSL. ALWAYS has no rule-engine.ts equivalent (an empty-conditions
+  // shorthand there instead) so it's handled here before delegating; the legacy short-form
+  // operators map onto rule-engine.ts's long-form ones so every existing seeded/tenant-authored
+  // conditionExpr (all of which use GT/LT/GTE/LTE/EQ/ALWAYS) keeps matching identically, while
+  // new definitions can use the richer operator set (BETWEEN/IN/NOT_IN/CONTAINS/STARTS_WITH)
+  // and nested `field.path` lookups for free.
+  private static readonly LEGACY_OPERATOR_MAP: Record<string, RuleCondition['operator']> = {
+    GT: 'GREATER_THAN',
+    LT: 'LESS_THAN',
+    GTE: 'GREATER_THAN_EQUALS',
+    LTE: 'LESS_THAN_EQUALS',
+    EQ: 'EQUALS',
+  };
+
   private evaluateCondition(
-    condition: { field: string; operator: string; value?: number },
+    condition: { field: string; operator: string; value?: unknown; value2?: unknown },
     payload: Record<string, unknown>
   ): boolean {
     if (condition.operator === 'ALWAYS') return true;
 
-    const fieldValue = payload[condition.field] as number | undefined;
-    if (fieldValue === undefined || condition.value === undefined) return false;
+    const operator =
+      WorkflowEngine.LEGACY_OPERATOR_MAP[condition.operator] ??
+      (condition.operator as RuleCondition['operator']);
 
-    switch (condition.operator) {
-      case 'GT':
-        return fieldValue > condition.value;
-      case 'LT':
-        return fieldValue < condition.value;
-      case 'GTE':
-        return fieldValue >= condition.value;
-      case 'LTE':
-        return fieldValue <= condition.value;
-      case 'EQ':
-        return fieldValue === condition.value;
-      default:
-        return false;
-    }
+    return evaluateRuleCondition(
+      { field: condition.field, operator, value: condition.value, value2: condition.value2 },
+      payload
+    );
   }
 }

@@ -29,6 +29,14 @@ export const tenants = pgTable(
       .notNull()
       .default('STARTER')
       .$type<'STARTER' | 'GROWTH' | 'ENTERPRISE'>(),
+    // Multi-vertical platform audit 2026-08-16: selects which provisioning template
+    // (role set, default feature flags) TenantProvisioner seeds — see
+    // apps/tenant-service/src/rbac/vertical-defaults.ts. Defaults to CLOTH_RETAIL for
+    // backward compatibility with every tenant provisioned before this column existed.
+    vertical: varchar('vertical', { length: 20 })
+      .notNull()
+      .default('CLOTH_RETAIL')
+      .$type<'CLOTH_RETAIL' | 'GROCERY'>(),
     contactEmail: varchar('contact_email', { length: 255 }).notNull(),
     contactPhone: varchar('contact_phone', { length: 20 }),
     gstin: varchar('gstin', { length: 20 }),

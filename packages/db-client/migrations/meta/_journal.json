@@ -1149,6 +1149,13 @@
       "when": 1796416535807,
       "tag": "0163_notification_log_filter_index",
       "breakpoints": true
+    },
+    {
+      "idx": 164,
+      "version": "7",
+      "when": 1796416535808,
+      "tag": "0164_tenants_vertical",
+      "breakpoints": true
     }
   ]
 }
