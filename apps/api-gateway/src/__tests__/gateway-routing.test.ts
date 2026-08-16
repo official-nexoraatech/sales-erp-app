@@ -21,6 +21,7 @@ const ENV_VAR_BY_SERVICE: Record<string, string> = {
   hr: 'HR_SERVICE_URL',
   production: 'PRODUCTION_SERVICE_URL',
   event: 'EVENT_SERVICE_URL',
+  crm: 'CRM_SERVICE_URL',
 };
 
 describe('API gateway — routing', () => {

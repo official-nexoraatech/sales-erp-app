@@ -97,6 +97,10 @@ const UPSTREAM_DEFAULTS: Array<{
     default: 'http://localhost:3025',
     apiV2: true,
   },
+  // Multi-vertical platform audit 2026-08-16, Phase 3 — CRM/Order-to-Cash split scaffold.
+  // No routes are registered on crm-service yet; this entry exists so the split can proceed
+  // incrementally without a second gateway-config change later.
+  { service: 'crm', envVar: 'CRM_SERVICE_URL', default: 'http://localhost:3026', apiV2: true },
 ];
 
 export interface GatewayConfig {

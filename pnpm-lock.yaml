@@ -356,6 +356,64 @@ importers:
         specifier: ^3.2.6
         version: 3.2.6(@types/node@20.19.43)(jiti@2.7.0)(jsdom@25.0.1)(lightningcss@1.32.0)(tsx@4.22.4)(yaml@2.9.0)
 
+  apps/crm-service:
+    dependencies:
+      '@erp/config':
+        specifier: workspace:*
+        version: link:../../packages/config
+      '@erp/db':
+        specifier: workspace:*
+        version: link:../../packages/db-client
+      '@erp/logger':
+        specifier: workspace:*
+        version: link:../../packages/logger
+      '@erp/sdk':
+        specifier: workspace:*
+        version: link:../../packages/platform-sdk
+      '@erp/types':
+        specifier: workspace:*
+        version: link:../../packages/shared-types
+      '@erp/utils':
+        specifier: workspace:*
+        version: link:../../packages/shared-utils
+      '@fastify/cors':
+        specifier: ^11.2.0
+        version: 11.2.0
+      '@fastify/helmet':
+        specifier: ^13.0.2
+        version: 13.0.2
+      '@fastify/multipart':
+        specifier: ^10.0.0
+        version: 10.0.0
+      '@fastify/rate-limit':
+        specifier: ^11.1.0
+        version: 11.1.0
+      drizzle-orm:
+        specifier: ^0.45.2
+        version: 0.45.2(@opentelemetry/api@1.9.1)(gel@2.2.0)(postgres@3.4.9)
+      fastify:
+        specifier: ^5.9.0
+        version: 5.9.0
+      kafkajs:
+        specifier: ^2.2.4
+        version: 2.2.4
+      zod:
+        specifier: ^3.24.0
+        version: 3.25.76
+    devDependencies:
+      '@types/node':
+        specifier: ^20.17.0
+        version: 20.19.43
+      tsx:
+        specifier: ^4.19.2
+        version: 4.22.4
+      typescript:
+        specifier: ^5.7.3
+        version: 5.9.3
+      vitest:
+        specifier: ^3.2.6
+        version: 3.2.6(@types/node@20.19.43)(jiti@2.7.0)(jsdom@25.0.1)(lightningcss@1.32.0)(tsx@4.22.4)(yaml@2.9.0)
+
   apps/customer-portal:
     dependencies:
       '@erp/design-tokens':
