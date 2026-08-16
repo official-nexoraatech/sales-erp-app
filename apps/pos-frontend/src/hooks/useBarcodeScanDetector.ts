@@ -9,7 +9,8 @@ const SCAN_MIN_LENGTH = 4;
 // GS1 modulo-10 check digit, shared by EAN-8/UPC-A/EAN-13/GTIN-14: reverse the digits
 // excluding the check digit, weight 3/1 alternating starting from the one closest to the
 // check digit, sum, check = (10 - sum % 10) % 10.
-function gs1CheckDigitValid(digits: string): boolean {
+// Exported for gs1.ts's variable-weight barcode parser, which validates the same way.
+export function gs1CheckDigitValid(digits: string): boolean {
   const nums = digits.split('').map(Number);
   const check = nums[nums.length - 1]!;
   const body = nums.slice(0, -1).reverse();

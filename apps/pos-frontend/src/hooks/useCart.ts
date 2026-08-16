@@ -49,7 +49,10 @@ export function useCart() {
     return s + round2((taxable * (l.gstRate + l.cessRate)) / 100);
   }, 0);
 
-  const addItem = useCallback((item: POSItem) => {
+  // `quantity` defaults to 1 (a normal scan/tap); a GS1 variable-weight barcode passes the
+  // decoded weight-in-kg instead, so a single scan of a scale label lands the full weight
+  // rather than a qty-1 line the cashier would have to hand-correct.
+  const addItem = useCallback((item: POSItem, quantity = 1) => {
     const price = parseFloat(item.salePrice ?? '0');
     const gstRate = item.gstRate !== undefined && item.gstRate !== null ? Number(item.gstRate) : 18;
     const cessRate =
@@ -62,9 +65,9 @@ export function useCart() {
           l.itemId === item.id
             ? {
                 ...l,
-                quantity: l.quantity + 1,
+                quantity: round2(l.quantity + quantity),
                 lineTotal: computeLineTotal(
-                  l.quantity + 1,
+                  round2(l.quantity + quantity),
                   l.unitPrice,
                   l.gstRate,
                   l.discountPct,
@@ -79,13 +82,13 @@ export function useCart() {
         {
           itemId: item.id,
           itemName: item.name,
-          quantity: 1,
+          quantity,
           unitPrice: price,
           mrp: item.mrp ?? null,
           gstRate,
           cessRate,
           discountPct: 0,
-          lineTotal: computeLineTotal(1, price, gstRate, 0, cessRate),
+          lineTotal: computeLineTotal(quantity, price, gstRate, 0, cessRate),
         },
       ];
     });

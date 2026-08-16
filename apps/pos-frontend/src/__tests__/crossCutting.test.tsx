@@ -346,3 +346,78 @@ describe('Cross-cutting: opening one POS overlay closes any other already open (
     expect(screen.queryByRole('heading', { name: 'Held Sales' })).not.toBeInTheDocument();
   });
 });
+
+describe('Cross-cutting: GS1 variable-weight barcode scan resolves by item code and adds the decoded weight', () => {
+  it('adds the cart line at 1.25 (decoded from the barcode), not the default qty of 1', async () => {
+    const searchQueries: string[] = [];
+    const fetchMock = vi.fn((url: string) => {
+      const u = String(url);
+      if (u.includes('/pos/quick-items')) {
+        return Promise.resolve(
+          jsonResponse(200, { data: [{ id: 1, name: 'Test Item', salePrice: '50', gstRate: 18 }] })
+        );
+      }
+      if (u.includes('/pos/items/search')) {
+        const q = new URL(u, 'http://localhost').searchParams.get('q') ?? '';
+        searchQueries.push(q);
+        // Only the decoded 5-digit item code (never the raw 13-digit barcode) resolves —
+        // exactly what a real /pos/items/search backend would do, since it matches on
+        // items.itemCode/barcode, not the scale label's composite value.
+        if (q === '12345') {
+          return Promise.resolve(
+            jsonResponse(200, {
+              data: [
+                {
+                  itemId: 7,
+                  name: 'Loose Tomatoes',
+                  sku: '12345',
+                  barcode: null,
+                  alias: null,
+                  supplierCode: null,
+                  customCode: null,
+                  price: 40,
+                  mrp: null,
+                  gstRate: 0,
+                  cessRate: 0,
+                  stock: { qty: null },
+                  matchedOn: 'code',
+                },
+              ],
+              nextCursor: null,
+            })
+          );
+        }
+        return Promise.resolve(jsonResponse(200, { data: [], nextCursor: null }));
+      }
+      if (u.includes('/sync/')) {
+        return Promise.resolve(
+          jsonResponse(200, { data: { content: [], totalElements: 0, hasMore: false } })
+        );
+      }
+      return Promise.resolve(jsonResponse(200, { data: [] }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <POSScreen />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+
+    await screen.findByText('Test Item');
+    const barcodeInput = screen.getByPlaceholderText(
+      'Scan barcode, or type name / SKU / alias / code…'
+    );
+    // '2' flag + itemCode '12345' + weight '001250' grams (1.25kg) + valid GS1 check digit —
+    // same fixture as gs1.test.ts.
+    fireEvent.change(barcodeInput, { target: { value: '2123450012503' } });
+    fireEvent.keyDown(barcodeInput, { key: 'Enter' });
+
+    expect(await screen.findByText('Loose Tomatoes')).toBeInTheDocument();
+    expect(searchQueries).toContain('12345');
+    expect(screen.getByLabelText('Quantity for Loose Tomatoes')).toHaveValue(1.25);
+  });
+});

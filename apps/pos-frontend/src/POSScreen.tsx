@@ -66,6 +66,8 @@ import { POSItemLookupModal } from './components/pos/POSItemLookupModal.js';
 import { useCart } from './hooks/useCart.js';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts.js';
 import { isValidBarcodeChecksum } from './hooks/useBarcodeScanDetector.js';
+import { parseGs1VariableWeightBarcode } from './gs1.js';
+import { searchItemsOnce } from './hooks/useItemSearch.js';
 import { POSProductCard } from './components/pos/POSProductCard.js';
 import POSInput from './components/pos/POSInput.js';
 import POSButton from './components/pos/POSButton.js';
@@ -569,6 +571,36 @@ export default function POSScreen() {
   // exactly this purpose.
   const resolveAndAddItem = useCallback(
     async (value: string) => {
+      // Grocery weighing-scale labels encode the item's PLU + weight in the barcode itself
+      // rather than being a fixed registered barcode — resolved by item code (not the raw
+      // 13-digit value) and added at the decoded weight instead of qty 1.
+      const gs1Match = parseGs1VariableWeightBarcode(value);
+      if (gs1Match) {
+        try {
+          const results = await searchItemsOnce(gs1Match.itemCode);
+          const matched = results.find((r) => r.sku === gs1Match.itemCode);
+          if (matched) {
+            addItem(
+              {
+                id: matched.itemId,
+                name: matched.name,
+                salePrice: String(matched.price),
+                mrp: matched.mrp,
+                gstRate: matched.gstRate,
+                cessRate: matched.cessRate,
+                ...(matched.barcode ? { barcode: matched.barcode } : {}),
+              },
+              gs1Match.weightKg
+            );
+            flashFeedback('success');
+            return;
+          }
+        } catch {
+          // lookup failed — fall through to the standard exact-match chain below, which
+          // will report a normal not-found error for the raw scanned value
+        }
+      }
+
       const localMatch = quickItems.find(
         (i) => i.barcode === value || i.name.toLowerCase().includes(value.toLowerCase())
       );
