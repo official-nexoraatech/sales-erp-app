@@ -3,11 +3,18 @@ import { businessSeasons, crmFestivalSuggestions, invoices } from '@erp/db';
 import type { ErpDatabase, CrmFestivalSuggestion } from '@erp/db';
 import { BusinessError, NotFoundError } from '@erp/types';
 
+// Multi-vertical platform audit 2026-08-16, Phase 2: WEDDING_SEASON/SUMMER_COLLECTION are
+// apparel-merchandising concepts with no grocery analog — MONSOON_STOCKUP/HARVEST_SEASON added
+// so a Grocery tenant has season types that actually fit its buying cycles. This loop treats
+// seasonType as an opaque string throughout (no switch/exhaustive-match on the specific
+// values), so widening this list is the only change needed — nothing else to update.
 const SEASON_TYPES = [
   'FESTIVAL_SEASON',
   'WEDDING_SEASON',
   'SUMMER_COLLECTION',
   'YEAR_END_SALE',
+  'MONSOON_STOCKUP',
+  'HARVEST_SEASON',
 ] as const;
 
 // Below this many orders during last year's season window, the suggestion is INSUFFICIENT_DATA

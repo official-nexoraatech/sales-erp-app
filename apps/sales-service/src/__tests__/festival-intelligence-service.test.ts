@@ -224,4 +224,40 @@ describe.skipIf(!DB_URL)('FestivalIntelligenceService', () => {
       ).rejects.toThrow(NotFoundError);
     });
   });
+
+  // Multi-vertical platform audit 2026-08-16, Phase 2: WEDDING_SEASON/SUMMER_COLLECTION have no
+  // grocery analog — MONSOON_STOCKUP/HARVEST_SEASON were added to the seasonType vocabulary
+  // (schema, Zod validation, SEASON_TYPES loop, web-frontend dropdown) for exactly this reason.
+  // Placed last: earlier tests in this file are deliberately cumulative/order-dependent against
+  // the shared TEST_TENANT (see the "computes a PENDING suggestion..." test's own comment on
+  // this), so a MONSOON_STOCKUP-only assertion here can't perturb their zero-state assumptions.
+  it('accepts a grocery-relevant seasonType (MONSOON_STOCKUP) through the full suggestion pipeline', async () => {
+    const [season] = await db
+      .insert(businessSeasons)
+      .values({
+        tenantId: TEST_TENANT,
+        name: 'Monsoon Stock-Up 2025',
+        seasonType: 'MONSOON_STOCKUP',
+        startDate: new Date('2025-06-01'),
+        endDate: new Date('2025-07-31'),
+        createdBy: 1,
+      })
+      .returning();
+    expect(season!.seasonType).toBe('MONSOON_STOCKUP');
+
+    await FestivalIntelligenceService.computeAndCacheSuggestions(db, TEST_TENANT);
+
+    const rows = await FestivalIntelligenceService.list(db, TEST_TENANT);
+    const monsoonSuggestion = rows.find((r) => r.seasonType === 'MONSOON_STOCKUP');
+    expect(monsoonSuggestion).toBeDefined();
+    // Earlier tests in this file seeded invoices in June 2025 (the SUMMER_COLLECTION case),
+    // which falls inside this season's window too — the aggregation query counts by tenant +
+    // date range only, not by which test's season "owns" an invoice — so this ends up on the
+    // real PENDING computation path rather than INSUFFICIENT_DATA (already covered by the
+    // FESTIVAL_SEASON test above). Either path proves the same thing: the widened SEASON_TYPES
+    // loop drives MONSOON_STOCKUP through the identical machinery as the original four values.
+    expect(monsoonSuggestion!.status).toBe('PENDING');
+    expect(monsoonSuggestion!.suggestedYear).toBe(2026);
+    expect(parseFloat(monsoonSuggestion!.suggestedStockMultiplier!)).toBeGreaterThanOrEqual(1);
+  });
 });

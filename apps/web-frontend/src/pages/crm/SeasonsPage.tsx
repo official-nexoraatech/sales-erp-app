@@ -14,7 +14,13 @@ import { formatDate } from '../../lib/format.js';
 
 interface FestivalSuggestion {
   id: number;
-  seasonType: 'FESTIVAL_SEASON' | 'WEDDING_SEASON' | 'SUMMER_COLLECTION' | 'YEAR_END_SALE';
+  seasonType:
+    | 'FESTIVAL_SEASON'
+    | 'WEDDING_SEASON'
+    | 'SUMMER_COLLECTION'
+    | 'YEAR_END_SALE'
+    | 'MONSOON_STOCKUP'
+    | 'HARVEST_SEASON';
   suggestedYear: number;
   status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'INSUFFICIENT_DATA';
   suggestedStartDate: string | null;
@@ -123,7 +129,13 @@ function FestivalSuggestionsPanel({
 interface Season {
   id: number;
   name: string;
-  seasonType: 'FESTIVAL_SEASON' | 'WEDDING_SEASON' | 'SUMMER_COLLECTION' | 'YEAR_END_SALE';
+  seasonType:
+    | 'FESTIVAL_SEASON'
+    | 'WEDDING_SEASON'
+    | 'SUMMER_COLLECTION'
+    | 'YEAR_END_SALE'
+    | 'MONSOON_STOCKUP'
+    | 'HARVEST_SEASON';
   startDate: string;
   endDate: string;
   stockMultiplier: number;

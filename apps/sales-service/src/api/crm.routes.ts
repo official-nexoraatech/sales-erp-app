@@ -246,7 +246,14 @@ const AutomationRuleSchema = z.object({
 
 const SeasonSchema = z.object({
   name: z.string().min(2).max(200),
-  seasonType: z.enum(['FESTIVAL_SEASON', 'WEDDING_SEASON', 'SUMMER_COLLECTION', 'YEAR_END_SALE']),
+  seasonType: z.enum([
+    'FESTIVAL_SEASON',
+    'WEDDING_SEASON',
+    'SUMMER_COLLECTION',
+    'YEAR_END_SALE',
+    'MONSOON_STOCKUP',
+    'HARVEST_SEASON',
+  ]),
   startDate: z.string().datetime(),
   endDate: z.string().datetime(),
   stockMultiplier: z.number().min(0).default(1),

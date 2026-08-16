@@ -13,7 +13,13 @@ import Button from '../../components/ui/Button.js';
 interface Season {
   id: number;
   name: string;
-  seasonType: 'FESTIVAL_SEASON' | 'WEDDING_SEASON' | 'SUMMER_COLLECTION' | 'YEAR_END_SALE';
+  seasonType:
+    | 'FESTIVAL_SEASON'
+    | 'WEDDING_SEASON'
+    | 'SUMMER_COLLECTION'
+    | 'YEAR_END_SALE'
+    | 'MONSOON_STOCKUP'
+    | 'HARVEST_SEASON';
   startDate: string;
   endDate: string;
   stockMultiplier: number;
@@ -28,6 +34,8 @@ const SEASON_TYPES = [
   'WEDDING_SEASON',
   'SUMMER_COLLECTION',
   'YEAR_END_SALE',
+  'MONSOON_STOCKUP',
+  'HARVEST_SEASON',
 ] as const;
 
 const BLANK_FORM = {

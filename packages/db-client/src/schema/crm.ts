@@ -906,7 +906,14 @@ export const businessSeasons = pgTable(
     name: varchar('name', { length: 200 }).notNull(),
     seasonType: varchar('season_type', { length: 30 })
       .notNull()
-      .$type<'FESTIVAL_SEASON' | 'WEDDING_SEASON' | 'SUMMER_COLLECTION' | 'YEAR_END_SALE'>(),
+      .$type<
+        | 'FESTIVAL_SEASON'
+        | 'WEDDING_SEASON'
+        | 'SUMMER_COLLECTION'
+        | 'YEAR_END_SALE'
+        | 'MONSOON_STOCKUP'
+        | 'HARVEST_SEASON'
+      >(),
     startDate: timestamp('start_date', { withTimezone: true }).notNull(),
     endDate: timestamp('end_date', { withTimezone: true }).notNull(),
     stockMultiplier: decimal('stock_multiplier', { precision: 5, scale: 2 }).notNull().default('1'),
@@ -942,7 +949,14 @@ export const crmFestivalSuggestions = pgTable(
     tenantId: integer('tenant_id').notNull(),
     seasonType: varchar('season_type', { length: 30 })
       .notNull()
-      .$type<'FESTIVAL_SEASON' | 'WEDDING_SEASON' | 'SUMMER_COLLECTION' | 'YEAR_END_SALE'>(),
+      .$type<
+        | 'FESTIVAL_SEASON'
+        | 'WEDDING_SEASON'
+        | 'SUMMER_COLLECTION'
+        | 'YEAR_END_SALE'
+        | 'MONSOON_STOCKUP'
+        | 'HARVEST_SEASON'
+      >(),
     // The year this suggestion proposes a season FOR (not the year it was computed in).
     suggestedYear: integer('suggested_year').notNull(),
     status: varchar('status', { length: 20 })
