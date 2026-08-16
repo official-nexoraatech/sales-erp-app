@@ -28,22 +28,22 @@ export const DEFAULT_POSTING_RULES: Record<
   ],
   SUPPLIER_PAYMENT_MADE: [
     {
-      debitCode: '2010', // Accounts Payable
+      debitCode: '2100', // Accounts Payable (Creditors)
       creditCode: '1010', // Cash / Bank
       description: 'Supplier payment made',
     },
   ],
   GRN_APPROVED: [
     {
-      debitCode: '1310', // Inventory Asset
-      creditCode: '2010', // Accounts Payable
+      debitCode: '1200', // Inventory
+      creditCode: '2100', // Accounts Payable (Creditors)
       description: 'Goods receipt — inventory addition',
     },
   ],
   PURCHASE_RETURN_APPROVED: [
     {
-      debitCode: '2010', // Accounts Payable (reduce amount owed to supplier)
-      creditCode: '1310', // Inventory Asset (goods leaving, reverse of GRN_APPROVED)
+      debitCode: '2100', // Accounts Payable (Creditors) (reduce amount owed to supplier)
+      creditCode: '1200', // Inventory (goods leaving, reverse of GRN_APPROVED)
       description: 'Purchase return approved — inventory returned to supplier',
     },
   ],
@@ -63,21 +63,21 @@ export const DEFAULT_POSTING_RULES: Record<
   ],
   EXPENSE_APPROVED: [
     {
-      debitCode: '5200', // Operating Expenses
-      creditCode: '2010', // Accounts Payable
+      debitCode: '6000', // Operating Expenses
+      creditCode: '2100', // Accounts Payable (Creditors)
       description: 'Expense approved',
     },
   ],
   EXPENSE_PAID: [
     {
-      debitCode: '2010', // Accounts Payable
+      debitCode: '2100', // Accounts Payable (Creditors)
       creditCode: '1010', // Cash / Bank
       description: 'Expense paid',
     },
   ],
   PAYROLL_PROCESSED: [
     {
-      debitCode: '5110', // Salaries Expense
+      debitCode: '6010', // Salaries and Wages
       creditCode: '1010', // Cash / Bank
       description: 'Salary disbursed',
     },
@@ -106,13 +106,13 @@ export const DEFAULT_POSTING_RULES: Record<
   STOCK_ADJUSTMENT_LOSS: [
     {
       debitCode: '6110', // Stock Adjustment Loss (damage/shortage/theft/expiry)
-      creditCode: '1310', // Inventory Asset
+      creditCode: '1200', // Inventory
       description: 'Stock adjustment — damage / loss',
     },
   ],
   STOCK_ADJUSTMENT_GAIN: [
     {
-      debitCode: '1310', // Inventory Asset
+      debitCode: '1200', // Inventory
       creditCode: '4100', // Other Income
       description: 'Stock adjustment — excess found',
     },
@@ -158,13 +158,13 @@ export const DEFAULT_POSTING_RULES: Record<
 };
 
 // GST account codes (these are looked up and split into lines)
-const GST_ACCOUNT_CODES = {
+export const GST_ACCOUNT_CODES = {
   CGST_PAYABLE: '2210',
   SGST_PAYABLE: '2220',
   IGST_PAYABLE: '2230',
-  CGST_INPUT: '1410',
-  SGST_INPUT: '1420',
-  IGST_INPUT: '1430',
+  CGST_INPUT: '1321',
+  SGST_INPUT: '1322',
+  IGST_INPUT: '1323',
 };
 
 export interface PostingContext {
@@ -311,7 +311,7 @@ export class PostingMatrixService {
       if (!ctx.isInterstate && ctx.cgstAmount && ctx.sgstAmount) {
         const cgstId = codeToId.get(GST_ACCOUNT_CODES.CGST_INPUT);
         const sgstId = codeToId.get(GST_ACCOUNT_CODES.SGST_INPUT);
-        const apId = codeToId.get('2010');
+        const apId = codeToId.get('2100');
         if (cgstId)
           lines.push({
             accountId: cgstId,
@@ -335,7 +335,7 @@ export class PostingMatrixService {
           });
       } else if (ctx.isInterstate && ctx.igstAmount) {
         const igstId = codeToId.get(GST_ACCOUNT_CODES.IGST_INPUT);
-        const apId = codeToId.get('2010');
+        const apId = codeToId.get('2100');
         if (igstId)
           lines.push({
             accountId: igstId,
@@ -410,7 +410,7 @@ export class PostingMatrixService {
       if (!ctx.isInterstate && ctx.cgstAmount && ctx.sgstAmount) {
         const cgstId = codeToId.get(GST_ACCOUNT_CODES.CGST_INPUT);
         const sgstId = codeToId.get(GST_ACCOUNT_CODES.SGST_INPUT);
-        const apId = codeToId.get('2010');
+        const apId = codeToId.get('2100');
         if (cgstId)
           lines.push({
             accountId: cgstId,
@@ -434,7 +434,7 @@ export class PostingMatrixService {
           });
       } else if (ctx.isInterstate && ctx.igstAmount) {
         const igstId = codeToId.get(GST_ACCOUNT_CODES.IGST_INPUT);
-        const apId = codeToId.get('2010');
+        const apId = codeToId.get('2100');
         if (igstId)
           lines.push({
             accountId: igstId,
