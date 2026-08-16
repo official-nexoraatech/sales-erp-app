@@ -1,6 +1,6 @@
 # ERP Training Guide — CASHIER
 
-## Version 1.0 | Cloth Retail ERP
+## Version 1.0 | NEXORAA ERP
 
 > **Time to complete:** ~70 minutes across 5 modules  
 > **Your most-used screens:** POS Terminal, New Invoice, Sale Returns, Payments

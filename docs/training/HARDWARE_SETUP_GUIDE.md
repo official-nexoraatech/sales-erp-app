@@ -1,6 +1,6 @@
 # Hardware Setup Guide — Barcode Scanner, Label Printer, Receipt Printer
 
-## Version 1.0 | Cloth Retail ERP
+## Version 1.0 | NEXORAA ERP
 
 This ERP does not use custom hardware drivers. Every device listed below is installed as a
 **normal device on the till's operating system** (Windows/Linux/macOS) — the browser-based
@@ -51,9 +51,9 @@ from the browser.
 
 ## Troubleshooting
 
-| Symptom | Likely cause |
-|---|---|
-| Scanner types into the wrong field | Click the barcode input first — some scanners rely on it having keyboard focus |
-| Nothing happens on scan | The value isn't a known barcode/name match — try the camera scanner or search by name |
-| Print dialog shows the wrong printer selected by default | Change the OS default printer, or pick the right one in the print dialog each time |
-| Labels print the wrong size | Confirm the label size selected in **Barcode Labels** matches the stock loaded in the printer |
+| Symptom                                                  | Likely cause                                                                                  |
+| -------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| Scanner types into the wrong field                       | Click the barcode input first — some scanners rely on it having keyboard focus                |
+| Nothing happens on scan                                  | The value isn't a known barcode/name match — try the camera scanner or search by name         |
+| Print dialog shows the wrong printer selected by default | Change the OS default printer, or pick the right one in the print dialog each time            |
+| Labels print the wrong size                              | Confirm the label size selected in **Barcode Labels** matches the stock loaded in the printer |

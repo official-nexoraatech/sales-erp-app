@@ -126,6 +126,10 @@ const ERP_ANALYSIS_SETTINGS = {
         type: 'synonym',
         synonyms: [
           'fabric,cloth,textile',
+          // Multi-vertical platform audit 2026-08-16, Phase 3: grocery-relevant equivalents,
+          // additive alongside the cloth-retail ones above — same list serves every vertical.
+          'grocery,fmcg,kirana,provisions',
+          'vegetable,produce,veggies',
           'customer,client,buyer',
           'invoice,bill,receipt',
           'purchase order,po',

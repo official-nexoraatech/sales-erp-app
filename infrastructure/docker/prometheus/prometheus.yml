@@ -3,7 +3,7 @@ global:
   evaluation_interval: 15s
   external_labels:
     environment: 'local'
-    project: 'cloth-retail-erp'
+    project: 'nexoraa-erp'
 
 alerting:
   alertmanagers:
