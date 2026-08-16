@@ -494,7 +494,8 @@ export const DashboardPage: React.FC = () => {
     return (lowStockQuery.data?.data || []).slice(0, 6).map((item) => ({
       itemId: item.itemId, itemName: item.itemName, brand: item.brandName || '',
       category: item.categoryName || 'General',
-      minimumStock: numberValue(item.reorderLevel), currentStock: numberValue(item.availableQty),
+      minimumStock: numberValue(item.minimumStock ?? item.reorderLevel),
+      currentStock: numberValue(item.currentStock ?? item.availableQty),
       unit: item.unitName || '',
     }));
   }, [lowStockQuery.data?.data, summary?.lowStockDetails, summary?.lowStockItems]);

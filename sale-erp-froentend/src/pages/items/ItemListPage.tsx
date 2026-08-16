@@ -58,7 +58,6 @@ const itemColumns: TableColumn[] = [
   { heading: 'Base Unit', render: (item) => text(item.unitName || item.baseUnitName), exportValue: (item) => text(item.unitName || item.baseUnitName) },
   { heading: 'Purchase Price', render: (item) => formatCurrency(number(item.purchasePrice)), exportValue: (item) => number(item.purchasePrice) },
   { heading: 'Purchase With Tax', render: (item) => formatCurrency(number(item.purchasePriceWithTax)), exportValue: (item) => number(item.purchasePriceWithTax) },
-  { heading: 'Tax %', render: (item) => number(item.taxPercentage), exportValue: (item) => number(item.taxPercentage) },
   { heading: 'Sale Price', render: (item) => formatCurrency(number(item.salePrice)), exportValue: (item) => number(item.salePrice) },
   { heading: 'Wholesale Price', render: (item) => formatCurrency(number(item.wholesalePrice)), exportValue: (item) => number(item.wholesalePrice) },
   { heading: 'MRP', render: (item) => formatCurrency(number(item.mrp)), exportValue: (item) => number(item.mrp) },

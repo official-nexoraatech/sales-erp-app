@@ -725,9 +725,15 @@ export interface ExpenseListItem {
   expenseNo?: string;
   expenseNumber?: string;
   expenseDate: string;
+  expenseCategoryName?: string;
+  expenseSubCategoryName?: string;
+  expenseSubCategoryId?: number;
+  expenseCategory?: { id: number; name: string };
+  expenseSubCategory?: { id: number; name: string };
   categoryName?: string;
   subCategoryName?: string;
   amount: number;
+  paymentMethod?: string | { id: number; name: string };
   paymentType?: string;
   paymentMethodName?: string;
   createdBy?: string;
@@ -737,6 +743,7 @@ export interface ExpenseListItem {
 
 export interface ExpenseRequest {
   expenseCategoryId: number;
+  expenseSubCategoryId?: number;
   expenseDate: string;
   amount: number;
   paymentMethodId: number;
@@ -745,6 +752,7 @@ export interface ExpenseRequest {
 
 export interface ExpenseDetail extends ExpenseListItem {
   expenseCategory?: { id: number; name: string };
+  expenseSubCategory?: { id: number; name: string };
   paymentMethod?: { id: number; name: string };
 }
 
@@ -853,16 +861,20 @@ export interface DashboardSummary {
 export interface StockReportItem {
   itemId: number;
   itemName: string;
+  itemCode?: string;
   warehouseId?: number;
   warehouseName?: string;
   batchId?: number;
   batchNo?: string;
   availableQty: number;
+  currentStock?: number;
+  minimumStock?: number;
   reorderLevel: number;
   stockValue?: number;
   brandName?: string;
   categoryName?: string;
   unitName?: string;
+  status?: string;
 }
 
 export interface TopSellingItem {

@@ -87,7 +87,7 @@ public class DashboardServiceImpl implements DashboardService {
         BigDecimal todayExpense = expenseRepository.findByExpenseDateBetweenAndOrganizationIdOrderByExpenseDateAscIdAsc(
                         today,
                         today,
-                        1L
+                        currentOrganizationService.getOrganizationId()
                 )
                 .stream()
                 .map(Expense::getAmount)

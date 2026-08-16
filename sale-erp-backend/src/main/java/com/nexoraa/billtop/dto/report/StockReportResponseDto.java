@@ -15,11 +15,18 @@ public class StockReportResponseDto {
 
     private Long itemId;
     private String itemName;
+    private String itemCode;
+    private String brandName;
+    private String categoryName;
+    private String unitName;
     private Long warehouseId;
     private String warehouseName;
     private Long batchId;
     private String batchNo;
     private BigDecimal availableQty;
+    private BigDecimal currentStock;
+    private BigDecimal minimumStock;
     private BigDecimal reorderLevel;
     private BigDecimal stockValue;
+    private String status;
 }

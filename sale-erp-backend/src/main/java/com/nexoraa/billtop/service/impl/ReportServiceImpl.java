@@ -803,11 +803,18 @@ public class ReportServiceImpl implements ReportService {
         return StockReportResponseDto.builder()
                 .itemId(item == null ? null : item.getId())
                 .itemName(item == null ? null : item.getItemName())
+                .itemCode(item == null ? null : item.getItemCode())
+                .brandName(item == null || item.getBrand() == null ? null : item.getBrand().getName())
+                .categoryName(item == null || item.getCategory() == null ? null : item.getCategory().getName())
+                .unitName(item == null || item.getBaseUnit() == null ? null : item.getBaseUnit().getName())
                 .warehouseId(warehouse == null ? null : warehouse.getId())
                 .warehouseName(warehouse == null ? null : warehouse.getName())
-                .availableQty(stock.getAvailableQty())
+                .availableQty(support.quantity(availableQty))
+                .currentStock(support.quantity(availableQty))
+                .minimumStock(stock.getMinimumStock())
                 .reorderLevel(stock.getReorderLevel())
                 .stockValue(support.money(stockValue))
+                .status(support.defaultZero(stock.getAvailableQty()).compareTo(TransactionSupport.ZERO) <= 0 ? "Out of Stock" : "Low Stock")
                 .build();
     }
 

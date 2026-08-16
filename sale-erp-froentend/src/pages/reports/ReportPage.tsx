@@ -115,7 +115,7 @@ const valueByColumn = (row: any, column: string) => {
     column.replaceAll(' ', '').replaceAll('/', ''),
   ];
   for (const key of candidates) {
-    if (row?.[key] !== undefined && row?.[key] !== null) return row[key];
+    if (row?.[key] !== undefined && row?.[key] !== null) return typeof row[key] === 'object' ? row[key]?.name || '' : row[key];
   }
   const aliases: Record<string, string[]> = {
     date: ['date', 'invoiceDate', 'purchaseDate', 'expenseDate', 'transactionDate', 'createdAt'],
@@ -129,10 +129,10 @@ const valueByColumn = (row: any, column: string) => {
     balance: ['balance', 'dueAmount'],
     itemname: ['itemName', 'name'],
     brand: ['brandName', 'brand'],
-    quantity: ['quantity', 'qty'],
+    quantity: ['quantity', 'qty', 'availableQty', 'currentStock', 'availableStock'],
     stockimpact: ['stockImpact', 'impact'],
-    stock: ['stock', 'availableQty', 'availableStock'],
-    paymenttype: ['paymentType', 'paymentMethodName'],
+    stock: ['stock', 'availableQty', 'currentStock', 'availableStock'],
+    paymenttype: ['paymentType', 'paymentMethodName', 'paymentMethod'],
     duepayment: ['duePayment', 'dueAmount', 'balance'],
     paymentstatus: ['paymentStatus', 'status'],
     taxamount: ['taxAmount', 'gstAmount'],
@@ -140,13 +140,13 @@ const valueByColumn = (row: any, column: string) => {
     adjustmentcode: ['adjustmentCode', 'adjustmentNo'],
     referenceno: ['referenceNo', 'invoiceNo', 'purchaseNo', 'saleNo', 'expenseNo', 'expenseNumber'],
     expensecode: ['expenseCode', 'expenseNo', 'expenseNumber'],
-    category: ['categoryName', 'category'],
-    subcategory: ['subCategoryName', 'subcategoryName', 'subCategory', 'subcategory'],
+    category: ['expenseCategoryName', 'categoryName', 'expenseCategory', 'category'],
+    subcategory: ['expenseSubCategoryName', 'subCategoryName', 'subcategoryName', 'expenseSubCategory', 'subCategory', 'subcategory'],
     unitprice: ['unitPrice', 'price', 'rate'],
     total: ['total', 'totalAmount', 'grandTotal'],
     currentstock: ['currentStock', 'availableQty', 'availableStock'],
     availableqty: ['availableQty', 'availableStock', 'quantity'],
-    minimumstock: ['minimumStock', 'minStock'],
+    minimumstock: ['minimumStock', 'reorderLevel', 'minStock'],
     unit: ['unitName', 'unit'],
     daysuntilexpiry: ['daysUntilExpiry', 'daysRemaining'],
     batchno: ['batchNo', 'batchNumber'],

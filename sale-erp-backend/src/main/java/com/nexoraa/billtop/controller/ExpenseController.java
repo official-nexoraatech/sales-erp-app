@@ -3,6 +3,7 @@ package com.nexoraa.billtop.controller;
 import com.nexoraa.billtop.constants.ResponseMessage;
 import com.nexoraa.billtop.dto.ApiResponseDto;
 import com.nexoraa.billtop.dto.PageResponseDto;
+import com.nexoraa.billtop.dto.expense.ExpenseListResponseDto;
 import com.nexoraa.billtop.dto.expense.ExpenseRequestDto;
 import com.nexoraa.billtop.dto.expense.ExpenseResponseDto;
 import com.nexoraa.billtop.service.ExpenseService;
@@ -44,15 +45,16 @@ public class ExpenseController {
     }
 
     @GetMapping
-    public ResponseEntity<ApiResponseDto<PageResponseDto<ExpenseResponseDto>>> getExpenses(
+    public ResponseEntity<ApiResponseDto<PageResponseDto<ExpenseListResponseDto>>> getExpenses(
             @RequestParam(defaultValue = "0") @Min(0) int page,
             @RequestParam(defaultValue = "20") @Positive int size,
+            @RequestParam(required = false) String search,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fromDate,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate toDate
     ) {
         return ResponseEntity.ok(ApiResponseDto.success(
                 ResponseMessage.EXPENSES_RETRIEVED,
-                expenseService.getExpenses(page, size, fromDate, toDate)
+                expenseService.getExpenses(page, size, search, fromDate, toDate)
         ));
     }
 

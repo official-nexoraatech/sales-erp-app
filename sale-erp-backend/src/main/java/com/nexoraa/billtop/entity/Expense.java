@@ -35,6 +35,10 @@ public class Expense extends BaseEntity {
     @JoinColumn(name = "expense_category_id")
     private ExpenseCategory expenseCategory;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "expense_sub_category_id")
+    private ExpenseSubCategory expenseSubCategory;
+
     @Column(name = "expense_date")
     private LocalDate expenseDate;
 

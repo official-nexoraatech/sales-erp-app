@@ -21,6 +21,8 @@ public class ExpenseRequestDto {
     @NotNull(message = ValidationMessage.ID_REQUIRED)
     private Long expenseCategoryId;
 
+    private Long expenseSubCategoryId;
+
     @NotNull(message = ValidationMessage.DATE_REQUIRED)
     private LocalDate expenseDate;
 

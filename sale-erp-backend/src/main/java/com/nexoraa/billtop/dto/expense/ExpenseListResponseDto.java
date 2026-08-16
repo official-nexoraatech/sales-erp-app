@@ -1,6 +1,5 @@
 package com.nexoraa.billtop.dto.expense;
 
-import com.nexoraa.billtop.dto.common.NameIdResponseDto;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -13,14 +12,14 @@ import java.time.LocalDate;
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class ExpenseResponseDto {
+public class ExpenseListResponseDto {
 
     private Long expenseId;
     private String expenseNo;
-    private NameIdResponseDto expenseCategory;
-    private NameIdResponseDto expenseSubCategory;
+    private String expenseCategoryName;
+    private String expenseSubCategoryName;
     private LocalDate expenseDate;
     private BigDecimal amount;
-    private NameIdResponseDto paymentMethod;
+    private String paymentMethod;
     private String notes;
 }
