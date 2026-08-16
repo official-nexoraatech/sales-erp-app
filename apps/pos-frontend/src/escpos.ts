@@ -69,6 +69,15 @@ export function buildReceipt(sale: CompletedSale, opts: EscPosOptions = {}): Uin
     out.push(
       ...textLine(twoColumn(`${l.itemName} x${l.quantity}`, `Rs.${l.lineTotal.toFixed(2)}`, width))
     );
+    // Multi-vertical platform audit 2026-08-16, Phase 2: MRP existed on items but was never
+    // carried onto the printed receipt — a near-universal Indian retail/grocery expectation.
+    // Only printed when it differs from the actual sale price, to avoid clutter on the (still
+    // common) cloth-retail case where MRP isn't set at all.
+    if (l.mrp !== null && l.mrp > l.unitPrice) {
+      out.push(
+        ...textLine(`  MRP Rs.${l.mrp.toFixed(2)} (Save Rs.${(l.mrp - l.unitPrice).toFixed(2)})`)
+      );
+    }
   }
   out.push(...textLine('-'.repeat(width)));
   out.push(...cmdBold(true));

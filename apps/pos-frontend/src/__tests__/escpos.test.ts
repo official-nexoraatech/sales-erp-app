@@ -14,6 +14,7 @@ const sale: CompletedSale = {
       itemName: 'Widget',
       quantity: 2,
       unitPrice: 50,
+      mrp: null,
       gstRate: 18,
       cessRate: 0,
       discountPct: 0,
@@ -41,6 +42,23 @@ describe('escpos byte builder', () => {
     expect(text).toContain('Total');
     expect(text).toContain('Rs.118.00');
     expect(text).toContain('Paid via CASH');
+  });
+
+  // Multi-vertical platform audit 2026-08-16, Phase 2: MRP existed on items but was never
+  // carried onto the printed receipt — a near-universal Indian retail/grocery expectation.
+  it('prints MRP and the amount saved when the item has an MRP above the sale price', () => {
+    const saleWithMrp: CompletedSale = {
+      ...sale,
+      lines: [{ ...sale.lines[0]!, mrp: 60 }],
+    };
+    const text = decoder.decode(buildReceipt(saleWithMrp));
+    expect(text).toContain('MRP Rs.60.00');
+    expect(text).toContain('Save Rs.10.00');
+  });
+
+  it('does not print an MRP line when the item has none set', () => {
+    const text = decoder.decode(buildReceipt(sale));
+    expect(text).not.toContain('MRP');
   });
 
   it('includes a change line only when change is positive', () => {

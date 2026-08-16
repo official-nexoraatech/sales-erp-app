@@ -32,6 +32,7 @@ function toSearchResult(
     supplierCode: null,
     customCode: null,
     price: item.salePrice,
+    mrp: item.mrp ?? null,
     gstRate: item.gstRate,
     cessRate: item.cessRate,
     // No stock quantity is synced to the client (no /sync/stock endpoint exists) — `null`

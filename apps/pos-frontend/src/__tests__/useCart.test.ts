@@ -164,6 +164,7 @@ describe('useCart', () => {
         itemName: 'Restored Line',
         quantity: 3,
         unitPrice: 50,
+        mrp: null,
         gstRate: 5,
         cessRate: 0,
         discountPct: 0,

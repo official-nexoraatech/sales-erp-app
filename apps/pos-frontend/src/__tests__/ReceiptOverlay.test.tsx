@@ -21,6 +21,7 @@ const SALE: CompletedSale = {
       itemName: 'Widget',
       quantity: 2,
       unitPrice: 50,
+      mrp: null,
       gstRate: 18,
       cessRate: 0,
       discountPct: 0,

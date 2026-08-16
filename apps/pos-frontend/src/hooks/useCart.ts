@@ -81,6 +81,7 @@ export function useCart() {
           itemName: item.name,
           quantity: 1,
           unitPrice: price,
+          mrp: item.mrp ?? null,
           gstRate,
           cessRate,
           discountPct: 0,

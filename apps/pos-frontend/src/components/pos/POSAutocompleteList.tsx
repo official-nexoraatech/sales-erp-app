@@ -57,6 +57,11 @@ function POSResultRow({
         {stockBadge(item.stock.qty)}
         <span className="text-sm font-semibold text-primary tabular-nums">
           ₹{item.price.toFixed(2)}
+          {item.mrp !== null && item.mrp > item.price && (
+            <span className="ml-1.5 text-xs font-normal text-secondary line-through tabular-nums">
+              ₹{item.mrp.toFixed(2)}
+            </span>
+          )}
         </span>
       </div>
     </div>

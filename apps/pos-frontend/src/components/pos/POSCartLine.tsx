@@ -24,7 +24,11 @@ export function POSCartLine({ line, onUpdateQty, onUpdateDiscount, highlighted }
         <div className="text-sm font-medium text-primary break-words">{line.itemName}</div>
         <div className="text-xs text-secondary flex items-center gap-1 mt-1">
           <span>
-            ₹{line.unitPrice.toFixed(2)} × {line.quantity}
+            ₹{line.unitPrice.toFixed(2)}
+            {line.mrp !== null && line.mrp > line.unitPrice && (
+              <span className="line-through ml-1">₹{line.mrp.toFixed(2)}</span>
+            )}{' '}
+            × {line.quantity}
           </span>
           <input
             id={`pos-cart-discount-${line.itemId}`}

@@ -8,6 +8,7 @@ const cart: CartItem[] = [
     itemName: 'Amul Milk 1L',
     quantity: 1,
     unitPrice: 12,
+    mrp: null,
     gstRate: 5,
     cessRate: 0,
     discountPct: 0,

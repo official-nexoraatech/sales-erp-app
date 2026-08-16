@@ -698,6 +698,11 @@ export async function posRoutes(
           supplierCode: items.supplierCode,
           customCode: items.customCode,
           price: priceExpr,
+          // Multi-vertical platform audit 2026-08-16, Phase 2: MRP existed on items (a
+          // near-universal Indian retail/grocery display expectation, legally required for
+          // packaged/FMCG goods) but this endpoint never selected or returned it — the POS UI
+          // had no data to show even if it wanted to.
+          mrp: items.mrp,
           gstRate: items.gstRate,
           cessRate: items.cessRate,
           stockQty: stockExpr,
@@ -775,6 +780,7 @@ export async function posRoutes(
           supplierCode: r.supplierCode,
           customCode: r.customCode,
           price: parseFloat(String(r.price)),
+          mrp: r.mrp !== null ? parseFloat(String(r.mrp)) : null,
           gstRate: r.gstRate !== null ? Number(r.gstRate) : 18,
           cessRate: r.cessRate !== null ? Number(r.cessRate) : 0,
           stock: { qty: parseFloat(String(r.stockQty)) },

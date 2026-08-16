@@ -14,6 +14,7 @@ const LINE: CartItem = {
   itemName: 'Cotton Poplin',
   quantity: 2,
   unitPrice: 100,
+  mrp: null,
   gstRate: 18,
   cessRate: 0,
   discountPct: 0,
@@ -34,5 +35,19 @@ describe('POSCartLine', () => {
     );
     const violations = await runAxe(container);
     expect(violations, formatViolations(violations)).toHaveLength(0);
+  });
+
+  // Multi-vertical platform audit 2026-08-16, Phase 2: MRP existed on items but was never
+  // carried into the cart — a near-universal Indian retail/grocery display expectation.
+  it('shows a struck-through MRP next to the sale price when the item has one above the sale price', () => {
+    render(
+      <POSCartLine line={{ ...LINE, mrp: 150 }} onUpdateQty={vi.fn()} onUpdateDiscount={vi.fn()} />
+    );
+    expect(screen.getByText('₹150.00')).toBeInTheDocument();
+  });
+
+  it('does not show an MRP when the item has none set', () => {
+    render(<POSCartLine line={LINE} onUpdateQty={vi.fn()} onUpdateDiscount={vi.fn()} />);
+    expect(screen.queryByText(/₹\d+\.\d+.*₹\d+\.\d+/)).not.toBeInTheDocument();
   });
 });
