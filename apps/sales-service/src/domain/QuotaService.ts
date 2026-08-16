@@ -1,9 +1,10 @@
-import { and, eq, inArray, sql } from 'drizzle-orm';
+import { and, eq, gte, inArray, isNull, lt, notInArray, or, sql } from 'drizzle-orm';
 import {
   crmSalesQuotas,
   crmTerritories,
   crmTerritoryBranches,
   crmOpportunities,
+  invoices,
   users,
 } from '@erp/db';
 import type { ErpDatabase, CrmSalesQuota } from '@erp/db';
@@ -47,15 +48,17 @@ function periodBounds(periodYear: number, periodMonth: number): { start: Date; e
 /**
  * CRM-ROADMAP Phase 4, Feature 5 — Sales Forecasting & Quota Management.
  *
- * "Actual" revenue is computed from WON opportunities only (crmOpportunities.value where
- * wonAt falls inside the period) — not from invoices. Invoices in this codebase have no
- * rep-attribution column at all (only branchId/createdBy), so a rep-level quota has no reliable
- * invoice-based actual to compute in the first place; using won-opportunity value for both REP
- * and TERRITORY quotas keeps the two comparable on the same basis, and avoids the double-count
- * risk of also summing invoices.grandTotal for the same deals a won opportunity already
- * auto-converts into a quotation for (see OpportunityService's "mark Won auto-creates
- * quotation" flow). This is a known, deliberate limitation — walk-in/POS sales never tracked as
- * a CRM Opportunity do not count toward quota attainment today.
+ * Multi-vertical platform audit 2026-08-16, Phase 3: "Actual" revenue was computed from WON
+ * opportunities only — a walk-in/POS sale (grocery's dominant sales pattern, never tracked as
+ * a CRM Opportunity) never counted toward quota attainment. Actuals are now the sum of two
+ * non-overlapping sources: WON opportunity value (crmOpportunities.value, wonAt in period), and
+ * invoiced revenue attributed via invoices.createdBy (REP) / invoices.branchId (TERRITORY) —
+ * the same attribution CommissionService already uses for invoice->rep. Overlap is prevented at
+ * the source: an invoice whose quotationId is any opportunity's convertedQuotationId (the "mark
+ * Won auto-creates quotation" link — see crmOpportunities.convertedQuotationId) is excluded from
+ * the invoice sum, since that deal's value is already counted via the opportunity. Every other
+ * invoice — walk-in/POS with no quotation, or a manually quoted sale outside the CRM pipeline —
+ * is new coverage this fix adds.
  */
 export class QuotaService {
   static async create(
@@ -300,7 +303,15 @@ export class QuotaService {
             sql`${crmOpportunities.wonAt} IS NOT NULL AND ${crmOpportunities.wonAt} >= ${start.toISOString()} AND ${crmOpportunities.wonAt} < ${end.toISOString()}`
           )
         );
-      return parseFloat(row?.total ?? '0');
+      const opportunityActual = parseFloat(row?.total ?? '0');
+      const invoiceActual = await QuotaService.computeInvoiceActual(
+        db,
+        tenantId,
+        { createdBy: quota.subjectUserId! },
+        start,
+        end
+      );
+      return opportunityActual + invoiceActual;
     }
 
     const territoryBranchRows = await db
@@ -318,6 +329,66 @@ export class QuotaService {
           eq(crmOpportunities.tenantId, tenantId),
           inArray(crmOpportunities.branchId, branchIds),
           sql`${crmOpportunities.wonAt} IS NOT NULL AND ${crmOpportunities.wonAt} >= ${start.toISOString()} AND ${crmOpportunities.wonAt} < ${end.toISOString()}`
+        )
+      );
+    const opportunityActual = parseFloat(row?.total ?? '0');
+    const invoiceActual = await QuotaService.computeInvoiceActual(
+      db,
+      tenantId,
+      { branchIds },
+      start,
+      end
+    );
+    return opportunityActual + invoiceActual;
+  }
+
+  // Walk-in/POS (and any other non-CRM-pipeline) invoiced revenue, attributed the same way
+  // CommissionService already attributes an invoice to a rep — invoices.createdBy for REP,
+  // invoices.branchId for TERRITORY. Excludes any invoice already counted via a WON
+  // opportunity's auto-created quotation (crmOpportunities.convertedQuotationId), so a deal
+  // never contributes to actuals twice.
+  private static async computeInvoiceActual(
+    db: ErpDatabase,
+    tenantId: number,
+    scope: { createdBy: number } | { branchIds: number[] },
+    start: Date,
+    end: Date
+  ): Promise<number> {
+    if ('branchIds' in scope && scope.branchIds.length === 0) return 0;
+
+    const convertedRows = await db
+      .select({ quotationId: crmOpportunities.convertedQuotationId })
+      .from(crmOpportunities)
+      .where(
+        and(
+          eq(crmOpportunities.tenantId, tenantId),
+          sql`${crmOpportunities.convertedQuotationId} IS NOT NULL`
+        )
+      );
+    const excludedQuotationIds = convertedRows
+      .map((r) => r.quotationId)
+      .filter((id): id is number => id !== null);
+
+    const [row] = await db
+      .select({ total: sql<string>`COALESCE(SUM(${invoices.grandTotal}), 0)` })
+      .from(invoices)
+      .where(
+        and(
+          eq(invoices.tenantId, tenantId),
+          'createdBy' in scope
+            ? eq(invoices.createdBy, scope.createdBy)
+            : inArray(invoices.branchId, scope.branchIds),
+          sql`${invoices.status} NOT IN ('DRAFT', 'CANCELLED')`,
+          gte(invoices.invoiceDate, start),
+          lt(invoices.invoiceDate, end),
+          ...(excludedQuotationIds.length > 0
+            ? [
+                or(
+                  isNull(invoices.quotationId),
+                  notInArray(invoices.quotationId, excludedQuotationIds)
+                )!,
+              ]
+            : [])
         )
       );
     return parseFloat(row?.total ?? '0');
