@@ -33,7 +33,7 @@ export const UnitListPage: React.FC = () => {
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const debouncedSearch = useDebounce(search);
 
-  const units = useQuery({ queryKey: ['units', page, pageSize, debouncedSearch], queryFn: () => unitApi.getAll({ page, size: pageSize, search: debouncedSearch }) });
+  const units = useQuery({ queryKey: ['units', page, pageSize, debouncedSearch], queryFn: () => unitApi.getAll({ page, size: pageSize, search: debouncedSearch }), refetchOnMount: 'always' });
   const remove = useMutation({
     mutationFn: unitApi.delete,
     onSuccess: () => {

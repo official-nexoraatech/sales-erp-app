@@ -39,6 +39,7 @@ export const SaleListPage: React.FC = () => {
   const sales = useQuery({
     queryKey: ['sales', page, pageSize, debounced, fromDate, toDate],
     queryFn: () => salesApi.getAll({ page, size: pageSize, search: debounced, fromDate: fromDate || undefined, toDate: toDate || undefined }),
+    refetchOnMount: 'always',
   });
   const cancel = useMutation({
     mutationFn: salesApi.cancel,

@@ -30,6 +30,7 @@ export const SupplierListPage: React.FC = () => {
   const { data, isLoading } = useQuery({
     queryKey: ['suppliers', page, debouncedSearch],
     queryFn: () => supplierApi.getAll({ page, size: CONSTANTS.ITEMS_PER_PAGE, search: debouncedSearch }),
+    refetchOnMount: 'always',
   });
 
   const deleteMutation = useMutation({

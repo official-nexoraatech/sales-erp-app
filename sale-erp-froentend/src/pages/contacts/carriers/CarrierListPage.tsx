@@ -29,6 +29,7 @@ export const CarrierListPage: React.FC = () => {
   const { data, isLoading, isError } = useQuery({
     queryKey: ['carriers', page, debouncedSearch],
     queryFn: () => carrierApi.getAll({ page, size: CONSTANTS.ITEMS_PER_PAGE, search: debouncedSearch }),
+    refetchOnMount: 'always',
   });
   const deletion = useMutation({
     mutationFn: (id: number) => carrierApi.delete(id),

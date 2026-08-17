@@ -41,6 +41,7 @@ export const PaymentNoteListPage: React.FC = () => {
       priority: priority || undefined,
       noteType: noteType || undefined,
     }),
+    refetchOnMount: 'always',
   });
 
   const rows = paymentNotes.data?.data?.content || [];

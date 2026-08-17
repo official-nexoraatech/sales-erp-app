@@ -38,6 +38,7 @@ export const OrganizationListPage: React.FC = () => {
   const organizations = useQuery({
     queryKey: ['organizations', debouncedSearch],
     queryFn: () => organizationApi.getAll(debouncedSearch),
+    refetchOnMount: 'always',
   });
 
   const allRows = organizations.data?.data?.content || [];

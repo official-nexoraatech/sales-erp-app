@@ -111,6 +111,7 @@ export const ItemListPage: React.FC = () => {
       warehouseId: warehouseId || undefined,
       status: itemStatus || undefined,
     }),
+    refetchOnMount: 'always',
   });
   const categories = useQuery({ queryKey: ['item-list-categories'], queryFn: () => categoryApi.getAll({ page: 0, size: 100, search: '' }), enabled: canViewCategories });
   const brands = useQuery({

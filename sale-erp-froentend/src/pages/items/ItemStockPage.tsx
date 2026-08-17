@@ -10,7 +10,7 @@ import { PageHeader } from '../../components/ui/PageHeader';
 export const ItemStockPage: React.FC = () => {
   const navigate = useNavigate();
   const id = Number(useParams<{ id: string }>().id);
-  const stock = useQuery({ queryKey: ['item-stock', id], queryFn: () => itemApi.getStock(id), enabled: id > 0 });
+  const stock = useQuery({ queryKey: ['item-stock', id], queryFn: () => itemApi.getStock(id), enabled: id > 0, refetchOnMount: 'always' });
   if (stock.isLoading) return <Loader />;
   const data = stock.data?.data;
   return (

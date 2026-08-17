@@ -77,6 +77,7 @@ export const QuotationListPage: React.FC = () => {
       fromDate: fromDate || undefined,
       toDate: toDate || undefined,
     }),
+    refetchOnMount: 'always',
   });
 
   const convert = useMutation({

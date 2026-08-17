@@ -29,7 +29,7 @@ export const BranchListPage: React.FC = () => {
   const [pageSize, setPageSize] = useState(10);
   const [search, setSearch] = useState('');
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
-  const branches = useQuery({ queryKey: ['branches', search], queryFn: () => branchApi.getAll(search) });
+  const branches = useQuery({ queryKey: ['branches', search], queryFn: () => branchApi.getAll(search), refetchOnMount: 'always' });
   const remove = useMutation({
     mutationFn: branchApi.delete,
     onSuccess: () => {

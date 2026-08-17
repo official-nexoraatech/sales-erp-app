@@ -28,7 +28,7 @@ export const StockTransferListPage: React.FC = () => {
   const [selectedUser, setSelectedUser] = useState(user?.userName || '');
   const [search, setSearch] = useState('');
 
-  const transfers = useQuery({ queryKey: ['stock-transfers', page, pageSize], queryFn: () => stockTransferApi.getAll({ page, size: pageSize }) });
+  const transfers = useQuery({ queryKey: ['stock-transfers', page, pageSize], queryFn: () => stockTransferApi.getAll({ page, size: pageSize }), refetchOnMount: 'always' });
   const rows = (transfers.data?.data?.content || [])
     .filter((entry) => !search || JSON.stringify(entry).toLowerCase().includes(search.toLowerCase()))
     .filter((entry) => !fromDate || entry.transferDate >= fromDate)

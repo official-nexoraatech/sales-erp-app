@@ -54,6 +54,7 @@ export const SaleOrderListPage: React.FC = () => {
       toDate: toDate || undefined,
       status: 'PENDING,ACTIVE',
     }),
+    refetchOnMount: 'always',
   });
 
   const cancel = useMutation({

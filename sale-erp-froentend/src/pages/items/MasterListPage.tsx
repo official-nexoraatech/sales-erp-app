@@ -38,7 +38,7 @@ export const MasterListPage: React.FC<Props> = ({ type }) => {
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const debouncedSearch = useDebounce(search);
 
-  const records = useQuery({ queryKey: [type, page, pageSize, debouncedSearch], queryFn: () => api.getAll({ page, size: pageSize, search: debouncedSearch }) });
+  const records = useQuery({ queryKey: [type, page, pageSize, debouncedSearch], queryFn: () => api.getAll({ page, size: pageSize, search: debouncedSearch }), refetchOnMount: 'always' });
   const remove = useMutation({
     mutationFn: api.delete,
     onSuccess: () => {

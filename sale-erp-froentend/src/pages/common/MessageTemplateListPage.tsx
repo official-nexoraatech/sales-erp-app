@@ -60,6 +60,7 @@ export const MessageTemplateListPage: React.FC<Props> = ({ type }) => {
   const records = useQuery({
     queryKey,
     queryFn: () => messageTemplateApi.getAll(type, { page, size: pageSize, search: debouncedSearch }),
+    refetchOnMount: 'always',
   });
 
   const remove = useMutation({

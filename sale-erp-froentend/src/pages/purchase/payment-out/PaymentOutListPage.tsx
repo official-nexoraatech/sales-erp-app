@@ -36,7 +36,7 @@ export const PaymentOutListPage: React.FC = () => {
   const [search, setSearch] = useState('');
 
   const suppliers = useQuery({ queryKey: ['payment-out-suppliers'], queryFn: () => supplierApi.getAll({ page: 0, size: 100, search: '' }) });
-  const payments = useQuery({ queryKey: ['payment-out', page, pageSize], queryFn: () => paymentOutApi.getAll({ page, size: pageSize }), retry: false });
+  const payments = useQuery({ queryKey: ['payment-out', page, pageSize], queryFn: () => paymentOutApi.getAll({ page, size: pageSize }), retry: false, refetchOnMount: 'always' });
 
   const rows = (payments.data?.data?.content || [])
     .filter((payment) => !supplierId || suppliers.data?.data?.content.find((supplier) => supplier.id === supplierId)?.supplierName === (payment.supplierName || payment.partyName))

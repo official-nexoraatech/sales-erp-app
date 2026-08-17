@@ -56,6 +56,7 @@ export const PurchaseListPage: React.FC<Props> = ({ mode = 'bill' }) => {
       toDate: toDate || undefined,
       status: isOrder ? 'ACTIVE,PAID' : 'CREATED',
     }),
+    refetchOnMount: 'always',
   });
 
   const cancel = useMutation({

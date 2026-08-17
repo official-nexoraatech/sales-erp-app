@@ -28,7 +28,7 @@ export const StockAdjustmentListPage: React.FC = () => {
   const [selectedUser, setSelectedUser] = useState(user?.userName || '');
   const [search, setSearch] = useState('');
 
-  const adjustments = useQuery({ queryKey: ['stock-adjustments', page, pageSize], queryFn: () => stockAdjustmentApi.getAll({ page, size: pageSize }) });
+  const adjustments = useQuery({ queryKey: ['stock-adjustments', page, pageSize], queryFn: () => stockAdjustmentApi.getAll({ page, size: pageSize }), refetchOnMount: 'always' });
   const rows = (adjustments.data?.data?.content || [])
     .filter((entry) => !search || JSON.stringify(entry).toLowerCase().includes(search.toLowerCase()))
     .filter((entry) => !fromDate || entry.adjustmentDate >= fromDate)

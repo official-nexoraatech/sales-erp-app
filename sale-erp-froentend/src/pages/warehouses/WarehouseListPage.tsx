@@ -38,7 +38,7 @@ export const WarehouseListPage: React.FC = () => {
   const [pageSize, setPageSize] = useState(10);
   const [search, setSearch] = useState('');
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
-  const warehouses = useQuery({ queryKey: ['warehouses', search], queryFn: () => warehouseApi.getAll(search) });
+  const warehouses = useQuery({ queryKey: ['warehouses', search], queryFn: () => warehouseApi.getAll(search), refetchOnMount: 'always' });
   const remove = useMutation({
     mutationFn: warehouseApi.delete,
     onSuccess: () => {

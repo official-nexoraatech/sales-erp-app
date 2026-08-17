@@ -11,7 +11,7 @@ import { formatCurrency } from '../../utils/formatCurrency';
 export const ItemViewPage: React.FC = () => {
   const navigate = useNavigate();
   const id = Number(useParams<{ id: string }>().id);
-  const item = useQuery({ queryKey: ['item', id], queryFn: () => itemApi.getById(id), enabled: id > 0 });
+  const item = useQuery({ queryKey: ['item', id], queryFn: () => itemApi.getById(id), enabled: id > 0, refetchOnMount: 'always' });
   if (item.isLoading) return <Loader />;
   const data = item.data?.data;
   return (

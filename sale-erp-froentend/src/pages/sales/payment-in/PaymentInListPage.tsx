@@ -39,6 +39,7 @@ export const PaymentInListPage: React.FC = () => {
   const payments = useQuery({
     queryKey: ['payment-in', page, pageSize],
     queryFn: () => paymentInApi.getAll({ page, size: pageSize }),
+    refetchOnMount: 'always',
   });
 
   const rows = (payments.data?.data?.content || [])

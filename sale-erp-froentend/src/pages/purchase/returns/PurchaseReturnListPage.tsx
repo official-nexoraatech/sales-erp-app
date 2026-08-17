@@ -31,7 +31,7 @@ export const PurchaseReturnListPage: React.FC = () => {
   const [search, setSearch] = useState('');
 
   const suppliers = useQuery({ queryKey: ['purchase-return-suppliers'], queryFn: () => supplierApi.getAll({ page: 0, size: 100, search: '' }) });
-  const returns = useQuery({ queryKey: ['purchase-returns', page, pageSize], queryFn: () => purchaseReturnApi.getAll({ page, size: pageSize }) });
+  const returns = useQuery({ queryKey: ['purchase-returns', page, pageSize], queryFn: () => purchaseReturnApi.getAll({ page, size: pageSize }), refetchOnMount: 'always' });
 
   const rows = (returns.data?.data?.content || [])
     .filter((entry) => !supplierId || suppliers.data?.data?.content.find((supplier) => supplier.id === supplierId)?.supplierName === entry.supplierName)

@@ -35,6 +35,7 @@ export const CustomerListPage: React.FC = () => {
         size: CONSTANTS.ITEMS_PER_PAGE,
         search: debouncedSearch,
       }),
+    refetchOnMount: 'always',
   });
 
   const deleteMutation = useMutation({

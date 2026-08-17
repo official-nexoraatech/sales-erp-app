@@ -41,6 +41,7 @@ export const UserListPage: React.FC = () => {
     queryFn: () => (isSuperAdmin
       ? adminUsersApi.getAll({ organizationId: organizationId || undefined, page, size: pageSize, search: debouncedSearch })
       : usersApi.getAll({ page, size: pageSize, search: debouncedSearch })),
+    refetchOnMount: 'always',
   });
   const rows = users.data?.data?.content || [];
   const allSelected = rows.length > 0 && rows.every((row) => selectedIds.includes(row.id));
