@@ -124,6 +124,8 @@ public class ErrorMessage {
     public static final String EMAIL_TEMPLATE_ALREADY_EXISTS = "Email template already exists";
     public static final String INVALID_EMAIL_IDS = "One or more email IDs are invalid";
     public static final String EMAIL_SEND_FAILED = "Email send failed";
+    public static final String EMAIL_ACCOUNT_CONNECTION_FAILED = "Could not connect to that email account - check the SMTP host, port, username, and password";
+    public static final String EMAIL_ACCOUNT_NOT_FOUND = "No connected email account found";
 
     // General Errors
     public static final String BAD_REQUEST = "Bad request";

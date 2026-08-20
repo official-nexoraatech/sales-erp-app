@@ -5,12 +5,17 @@ import com.nexoraa.billtop.dto.PageResponseDto;
 import com.nexoraa.billtop.dto.email.EmailTemplateRequestDto;
 import com.nexoraa.billtop.dto.email.EmailTemplateResponseDto;
 import com.nexoraa.billtop.entity.EmailTemplate;
+import com.nexoraa.billtop.entity.UserEmailAccount;
 import com.nexoraa.billtop.exception.BadRequestException;
 import com.nexoraa.billtop.exception.ResourceNotFoundException;
 import com.nexoraa.billtop.mapper.EmailTemplateMapper;
 import com.nexoraa.billtop.repository.EmailTemplateRepository;
+import com.nexoraa.billtop.repository.UserEmailAccountRepository;
+import com.nexoraa.billtop.security.CredentialEncryptionService;
 import com.nexoraa.billtop.security.CurrentOrganizationService;
+import com.nexoraa.billtop.security.CurrentUserService;
 import com.nexoraa.billtop.service.EmailService;
+import com.nexoraa.billtop.service.UserMailSenderFactory;
 import jakarta.mail.MessagingException;
 import jakarta.mail.internet.AddressException;
 import jakarta.mail.internet.InternetAddress;
@@ -32,6 +37,7 @@ import org.springframework.web.multipart.MultipartFile;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Optional;
 
 @Service
 public class EmailServiceImpl implements EmailService {
@@ -41,6 +47,10 @@ public class EmailServiceImpl implements EmailService {
     private final EmailTemplateRepository emailTemplateRepository;
     private final EmailTemplateMapper emailTemplateMapper;
     private final CurrentOrganizationService currentOrganizationService;
+    private final CurrentUserService currentUserService;
+    private final UserEmailAccountRepository userEmailAccountRepository;
+    private final CredentialEncryptionService credentialEncryptionService;
+    private final UserMailSenderFactory userMailSenderFactory;
     private final JavaMailSender mailSender;
     private final String fromAddress;
 
@@ -48,12 +58,20 @@ public class EmailServiceImpl implements EmailService {
             EmailTemplateRepository emailTemplateRepository,
             EmailTemplateMapper emailTemplateMapper,
             CurrentOrganizationService currentOrganizationService,
+            CurrentUserService currentUserService,
+            UserEmailAccountRepository userEmailAccountRepository,
+            CredentialEncryptionService credentialEncryptionService,
+            UserMailSenderFactory userMailSenderFactory,
             JavaMailSender mailSender,
             @Value("${app.mail.from:${spring.mail.username:no-reply@billtop.com}}") String fromAddress
     ) {
         this.emailTemplateRepository = emailTemplateRepository;
         this.emailTemplateMapper = emailTemplateMapper;
         this.currentOrganizationService = currentOrganizationService;
+        this.currentUserService = currentUserService;
+        this.userEmailAccountRepository = userEmailAccountRepository;
+        this.credentialEncryptionService = credentialEncryptionService;
+        this.userMailSenderFactory = userMailSenderFactory;
         this.mailSender = mailSender;
         this.fromAddress = fromAddress;
     }
@@ -115,15 +133,34 @@ public class EmailServiceImpl implements EmailService {
             throw new BadRequestException(ErrorMessage.BAD_REQUEST, "BAD_REQUEST");
         }
 
+        JavaMailSender senderToUse = mailSender;
+        String senderFromAddress = fromAddress;
+
+        Optional<UserEmailAccount> userAccount = userEmailAccountRepository
+                .findByUserIdAndIsDeletedFalse(currentUserService.getUserId())
+                .filter(account -> Boolean.TRUE.equals(account.getVerified()));
+        if (userAccount.isPresent()) {
+            UserEmailAccount account = userAccount.get();
+            senderToUse = userMailSenderFactory.create(
+                    account.getSmtpHost(),
+                    account.getSmtpPort(),
+                    account.getSmtpUsername(),
+                    credentialEncryptionService.decrypt(account.getSmtpPasswordEncrypted()),
+                    Boolean.TRUE.equals(account.getUseStarttls()),
+                    Boolean.TRUE.equals(account.getUseSsl())
+            );
+            senderFromAddress = account.getFromAddress();
+        }
+
         try {
-            MimeMessage mimeMessage = mailSender.createMimeMessage();
+            MimeMessage mimeMessage = senderToUse.createMimeMessage();
             boolean hasAttachment = file != null && !file.isEmpty();
             MimeMessageHelper helper = new MimeMessageHelper(
                     mimeMessage,
                     hasAttachment,
                     StandardCharsets.UTF_8.name()
             );
-            helper.setFrom(toInternetAddress(fromAddress, ErrorMessage.EMAIL_SEND_FAILED, "EMAIL_SEND_FAILED"));
+            helper.setFrom(toInternetAddress(senderFromAddress, ErrorMessage.EMAIL_SEND_FAILED, "EMAIL_SEND_FAILED"));
             helper.setTo(recipients.toArray(String[]::new));
             helper.setSubject(subject.trim());
             helper.setText(message, false);
@@ -132,7 +169,7 @@ public class EmailServiceImpl implements EmailService {
                 helper.addAttachment(resolveAttachmentName(file), file);
             }
 
-            mailSender.send(mimeMessage);
+            senderToUse.send(mimeMessage);
         } catch (MessagingException | MailException ex) {
             LOGGER.warn("Email send failed for {} recipient(s)", recipients.size(), ex);
             throw new BadRequestException(ErrorMessage.EMAIL_SEND_FAILED, "EMAIL_SEND_FAILED", ex);

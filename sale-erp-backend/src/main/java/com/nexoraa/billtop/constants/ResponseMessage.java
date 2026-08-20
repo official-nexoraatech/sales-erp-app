@@ -233,5 +233,8 @@ public class ResponseMessage {
     public static final String EMAIL_TEMPLATE_RETRIEVED = "Email template retrieved successfully";
     public static final String EMAIL_TEMPLATES_RETRIEVED = "Email templates retrieved successfully";
     public static final String EMAIL_SENT = "Email sent successfully";
+    public static final String EMAIL_ACCOUNT_CONNECTED = "Email account connected successfully";
+    public static final String EMAIL_ACCOUNT_RETRIEVED = "Email account retrieved successfully";
+    public static final String EMAIL_ACCOUNT_DISCONNECTED = "Email account disconnected successfully";
 }
 
