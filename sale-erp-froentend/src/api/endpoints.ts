@@ -563,6 +563,8 @@ export const posApi = {
     axiosClient.post<ApiResponse<PosBillingResponse>, ApiResponse<PosBillingResponse>>('/api/v1/pos/billing', payload),
   downloadInvoicePdf: (saleId: number) =>
     axiosClient.get<Blob, Blob>(`/api/v1/pos/billing/${saleId}/invoice-pdf`, { responseType: 'blob' }),
+  downloadReceiptPdf: (saleId: number) =>
+    axiosClient.get<Blob, Blob>(`/api/v1/pos/billing/${saleId}/receipt-pdf`, { responseType: 'blob' }),
 };
 
 export const salesApi = {
@@ -786,7 +788,6 @@ export const reportsApi = {
   profitLoss: (params?: any) => axiosClient.get<ApiResponse<any>, ApiResponse<any>>('/api/v1/reports/profit-loss', { params }),
   lowStock: (params?: any) => axiosClient.get<ApiResponse<StockReportItem[]>, ApiResponse<StockReportItem[]>>('/api/v1/reports/low-stock', { params }),
   inventoryValuation: () => axiosClient.get<ApiResponse<any>, ApiResponse<any>>('/api/v1/reports/inventory-valuation'),
-  gst: (params?: any) => axiosClient.get<ApiResponse<any>, ApiResponse<any>>('/api/v1/reports/gst', { params }),
   customerDues: (params?: any) => axiosClient.get<ApiResponse<any>, ApiResponse<any>>('/api/v1/reports/customer-dues', { params }),
   supplierDues: (params?: any) => axiosClient.get<ApiResponse<any>, ApiResponse<any>>('/api/v1/reports/supplier-dues', { params }),
   purchasePayments: (params?: any) => axiosClient.get<ApiResponse<any>, ApiResponse<any>>('/api/v1/reports/purchase-payments', { params }),

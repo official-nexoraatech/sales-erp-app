@@ -11,6 +11,7 @@ import { menuItems } from '../../../components/layout/Sidebar';
 import { NumericInput } from '../../../components/ui/NumericInput';
 import { useAuth } from '../../../hooks/useAuth';
 import { useDebounce } from '../../../hooks/useDebounce';
+import { printReceiptPdf } from '../../../lib/qzPrinter';
 import type { CustomerListItem } from '../../../types/customer.types';
 
 interface CartLine extends ItemListItem { quantity: number }
@@ -362,6 +363,15 @@ export const PosPage: React.FC = () => {
       toast.error(error?.message || 'Failed to download invoice PDF');
     }
   };
+  const printReceipt = async (saleId: number) => {
+    try {
+      const blob = await posApi.downloadReceiptPdf(saleId);
+      await printReceiptPdf(blob);
+      toast.success('Receipt sent to printer');
+    } catch (error: any) {
+      toast.error(error?.message || 'Failed to print receipt - is QZ Tray running?');
+    }
+  };
   const submitBill = async (download = false) => {
     if (!customerId) return toast.error('Please select a customer');
     if (!warehouseId) return toast.error('Please select a warehouse');
@@ -369,7 +379,10 @@ export const PosPage: React.FC = () => {
     if (!cart.length) return toast.error('Please add at least one item');
     try {
       const response = await billing.mutateAsync();
-      if (download && response.data?.saleId) await downloadInvoicePdf(response.data.saleId);
+      const saleId = response.data?.saleId;
+      if (!saleId) return;
+      if (download) await downloadInvoicePdf(saleId);
+      else await printReceipt(saleId);
     } catch {
       // The mutation onError handler already reports the API error.
     }

@@ -3,7 +3,6 @@ package com.nexoraa.billtop.service;
 import com.nexoraa.billtop.dto.report.CustomerDueResponseDto;
 import com.nexoraa.billtop.dto.report.ExpenseReportResponseDto;
 import com.nexoraa.billtop.dto.report.ExpiredItemResponseDto;
-import com.nexoraa.billtop.dto.report.GstReportResponseDto;
 import com.nexoraa.billtop.dto.report.InventoryValuationResponseDto;
 import com.nexoraa.billtop.dto.report.ItemInvoiceLineResponseDto;
 import com.nexoraa.billtop.dto.report.ItemTransactionResponseDto;
@@ -48,8 +47,6 @@ public interface ReportService {
     List<StockReportResponseDto> getLowStockReportForOrganization(Long organizationId);
 
     ProfitLossReportResponseDto getProfitLoss(LocalDate fromDate, LocalDate toDate);
-
-    List<GstReportResponseDto> getGstReport(LocalDate fromDate, LocalDate toDate);
 
     InventoryValuationResponseDto getInventoryValuation();
 

@@ -5,7 +5,6 @@ import com.nexoraa.billtop.dto.ApiResponseDto;
 import com.nexoraa.billtop.dto.report.CustomerDueResponseDto;
 import com.nexoraa.billtop.dto.report.ExpenseReportResponseDto;
 import com.nexoraa.billtop.dto.report.ExpiredItemResponseDto;
-import com.nexoraa.billtop.dto.report.GstReportResponseDto;
 import com.nexoraa.billtop.dto.report.InventoryValuationResponseDto;
 import com.nexoraa.billtop.dto.report.ItemInvoiceLineResponseDto;
 import com.nexoraa.billtop.dto.report.ItemTransactionResponseDto;
@@ -119,14 +118,6 @@ public class ReportController {
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate toDate
     ) {
         return ResponseEntity.ok(ApiResponseDto.success(ResponseMessage.REPORT_RETRIEVED, reportService.getProfitLoss(fromDate, toDate)));
-    }
-
-    @GetMapping("/gst")
-    public ResponseEntity<ApiResponseDto<List<GstReportResponseDto>>> getGstReport(
-            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fromDate,
-            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate toDate
-    ) {
-        return ResponseEntity.ok(ApiResponseDto.success(ResponseMessage.REPORT_RETRIEVED, reportService.getGstReport(fromDate, toDate)));
     }
 
     @GetMapping("/inventory-valuation")

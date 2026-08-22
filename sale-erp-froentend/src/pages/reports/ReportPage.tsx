@@ -5,6 +5,7 @@ import {
   brandApi,
   categoryApi,
   customerApi,
+  expenseCategoryApi,
   expenseSubCategoryApi,
   itemApi,
   paymentMethodApi,
@@ -47,9 +48,6 @@ export type ReportKey =
   | 'supplierDue'
   | 'expense'
   | 'expenseItem'
-  | 'gst'
-  | 'gstr1'
-  | 'gstr2'
   | 'stockTransfer'
   | 'stockAdjustment'
   | 'stock'
@@ -138,16 +136,7 @@ const valueByColumn = (row: any, column: string) => {
     withdrawalamount: ['withdrawalAmount', 'debit'],
     depositamount: ['depositAmount', 'credit'],
     description: ['description', 'note', 'notes'],
-    gstinuin: ['gstin', 'gstNumber', 'gstinUin'],
-    taxableamount: ['taxableAmount', 'taxableValue'],
-    transactiontype: ['transactionType', 'type'],
     invoiceno: ['invoiceNo', 'purchaseNo', 'saleNo'],
-    invoicevalue: ['invoiceValue', 'grandTotal', 'totalAmount'],
-    taxrate: ['taxRate', 'taxPercent', 'taxPercentage'],
-    taxablevalue: ['taxableValue', 'taxableAmount'],
-    cgst: ['cgst', 'cgstAmount'],
-    sgst: ['sgst', 'sgstAmount'],
-    igst: ['igst', 'igstAmount'],
     createdby: ['createdBy', 'userName'],
     withdrawal: ['withdrawalAmount', 'debit'],
     deposit: ['depositAmount', 'credit'],
@@ -339,14 +328,14 @@ const configs: Record<ReportKey, ReportConfig> = {
     fields: [
       { key: 'fromDate', label: 'From Date', type: 'date' },
       { key: 'toDate', label: 'To Date', type: 'date' },
-      { key: 'category', label: 'Category', type: 'select', placeholder: 'Choose one thing' },
+      { key: 'expenseCategory', label: 'Category', type: 'select', placeholder: 'Choose one thing' },
       { key: 'subcategory', label: 'Subcategory', type: 'select', placeholder: 'Choose one thing' },
     ],
     columns: ['#', 'DATE', 'EXPENSE CODE', 'CATEGORY', 'SUBCATEGORY', 'PAID AMOUNT'],
     fetch: (filters) => reportsApi.expenseItems({
       fromDate: formatDateForApi(filters.fromDate),
       toDate: formatDateForApi(filters.toDate),
-      categoryId: filters.category || undefined,
+      categoryId: filters.expenseCategory || undefined,
       subCategoryId: filters.subcategory || undefined,
     }),
   },
@@ -358,43 +347,16 @@ const configs: Record<ReportKey, ReportConfig> = {
     fields: [
       { key: 'fromDate', label: 'From Date', type: 'date' },
       { key: 'toDate', label: 'To Date', type: 'date' },
-      { key: 'category', label: 'Category', type: 'select', placeholder: 'Choose one thing' },
+      { key: 'expenseCategory', label: 'Category', type: 'select', placeholder: 'Choose one thing' },
       { key: 'subcategory', label: 'Subcategory', type: 'select', placeholder: 'Choose one thing' },
     ],
     columns: ['#', 'DATE', 'EXPENSE CODE', 'CATEGORY', 'SUBCATEGORY', 'PAID AMOUNT'],
     fetch: (filters) => reportsApi.expenseItems({
       fromDate: formatDateForApi(filters.fromDate),
       toDate: formatDateForApi(filters.toDate),
-      categoryId: filters.category || undefined,
+      categoryId: filters.expenseCategory || undefined,
       subCategoryId: filters.subcategory || undefined,
     }),
-  },
-  gst: {
-    title: 'GST Report',
-    fields: [
-      { key: 'fromDate', label: 'From Date', type: 'date' },
-      { key: 'toDate', label: 'To Date', type: 'date' },
-    ],
-    columns: ['#', 'DATE', 'INVOICE/REFERENCE NO.', 'PARTY NAME', 'GSTIN', 'TAXABLE AMOUNT', 'TAX AMOUNT', 'TOTAL'],
-    fetch: (filters) => reportsApi.gst({ fromDate: formatDateForApi(filters.fromDate), toDate: formatDateForApi(filters.toDate) }),
-  },
-  gstr1: {
-    title: 'GSTR-1 Report',
-    fields: [
-      { key: 'fromDate', label: 'From Date', type: 'date' },
-      { key: 'toDate', label: 'To Date', type: 'date' },
-    ],
-    columns: ['#', 'GSTIN/UIN', 'PARTY NAME', 'TRANSACTION TYPE', 'INVOICE NO.', 'DATE', 'INVOICE VALUE', 'TAX RATE', 'TAXABLE VALUE', 'CGST', 'SGST', 'IGST'],
-    fetch: (filters) => reportsApi.gst({ fromDate: formatDateForApi(filters.fromDate), toDate: formatDateForApi(filters.toDate) }),
-  },
-  gstr2: {
-    title: 'GSTR-2 Report',
-    fields: [
-      { key: 'fromDate', label: 'From Date', type: 'date' },
-      { key: 'toDate', label: 'To Date', type: 'date' },
-    ],
-    columns: ['#', 'GSTIN/UIN', 'PARTY NAME', 'TRANSACTION TYPE', 'INVOICE NO.', 'DATE', 'INVOICE VALUE', 'TAX RATE', 'TAXABLE VALUE', 'CGST', 'SGST', 'IGST'],
-    fetch: (filters) => reportsApi.gst({ fromDate: formatDateForApi(filters.fromDate), toDate: formatDateForApi(filters.toDate) }),
   },
   stockTransfer: {
     title: 'Stock Transfer Report',
@@ -435,7 +397,7 @@ const configs: Record<ReportKey, ReportConfig> = {
   topSelling: {
     title: 'Top Selling Items Report',
     fields: [],
-    columns: ['#', 'ITEM NAME', 'BRAND', 'QUANTITY', 'TOTAL SALE', 'GRAND TOTAL'],
+    columns: ['#', 'ITEM NAME', 'BRAND', 'QUANTITY', 'GRAND TOTAL'],
     fetch: () => reportsApi.topSellingItems(),
   },
   expiredItem: {
@@ -489,6 +451,7 @@ const useLookupOptions = () => {
   const items = useQuery({ queryKey: ['report-lookup', 'items'], queryFn: () => itemApi.getAll({ page: 0, size: 100 }) });
   const brands = useQuery({ queryKey: ['report-lookup', 'brands'], queryFn: () => brandApi.getAll({ page: 0, size: 100 }) });
   const categories = useQuery({ queryKey: ['report-lookup', 'categories'], queryFn: () => categoryApi.getAll({ page: 0, size: 100 }) });
+  const expenseCategories = useQuery({ queryKey: ['report-lookup', 'expense-categories'], queryFn: () => expenseCategoryApi.getAll() });
   const expenseSubCategories = useQuery({ queryKey: ['report-lookup', 'expense-subcategories'], queryFn: () => expenseSubCategoryApi.getAll() });
   const warehouses = useQuery({ queryKey: ['report-lookup', 'warehouses'], queryFn: () => warehouseApi.getAll() });
   const paymentMethods = useQuery({ queryKey: ['report-lookup', 'payment-methods'], queryFn: () => paymentMethodApi.getAll() });
@@ -501,6 +464,7 @@ const useLookupOptions = () => {
       itemName: (items.data?.data?.content || []).map((item) => ({ value: String(item.id), label: item.itemName })),
       brand: (brands.data?.data?.content || []).map((brand) => ({ value: String(brand.id), label: brand.name })),
       category: (categories.data?.data?.content || []).map((category) => ({ value: String(category.id), label: category.name })),
+      expenseCategory: (expenseCategories.data?.data?.content || []).map((category: any) => ({ value: String(category.id), label: category.name })),
       subcategory: (expenseSubCategories.data?.data?.content || []).map((subCategory: any) => ({ value: String(subCategory.id), label: subCategory.name })),
       warehouse: warehouseOptions,
       fromWarehouse: warehouseOptions,
@@ -513,6 +477,7 @@ const useLookupOptions = () => {
     items.data,
     brands.data,
     categories.data,
+    expenseCategories.data,
     expenseSubCategories.data,
     warehouses.data,
     paymentMethods.data,

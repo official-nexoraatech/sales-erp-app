@@ -48,4 +48,13 @@ public class PosBillingController {
                 .contentType(MediaType.APPLICATION_PDF)
                 .body(invoice.content());
     }
+
+    @GetMapping("/{saleId}/receipt-pdf")
+    public ResponseEntity<byte[]> downloadReceiptPdf(@PathVariable @Positive Long saleId) {
+        PosInvoicePdfService.InvoicePdf receipt = posInvoicePdfService.generateReceiptPdf(saleId);
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"" + receipt.fileName() + "\"")
+                .contentType(MediaType.APPLICATION_PDF)
+                .body(receipt.content());
+    }
 }

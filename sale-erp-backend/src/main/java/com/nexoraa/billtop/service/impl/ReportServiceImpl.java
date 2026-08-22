@@ -4,7 +4,6 @@ import com.nexoraa.billtop.dto.purchase.PurchaseListResponseDto;
 import com.nexoraa.billtop.dto.report.CustomerDueResponseDto;
 import com.nexoraa.billtop.dto.report.ExpenseReportResponseDto;
 import com.nexoraa.billtop.dto.report.ExpiredItemResponseDto;
-import com.nexoraa.billtop.dto.report.GstReportResponseDto;
 import com.nexoraa.billtop.dto.report.InventoryValuationResponseDto;
 import com.nexoraa.billtop.dto.report.ItemInvoiceLineResponseDto;
 import com.nexoraa.billtop.dto.report.ItemTransactionResponseDto;
@@ -355,39 +354,6 @@ public class ReportServiceImpl implements ReportService {
                 .expenseWithoutTax(support.money(expenseWithoutTax))
                 .shippingCharge(support.money(shippingCharge))
                 .netSummary(support.money(netSummary))
-                .build();
-    }
-
-    @Override
-    @Transactional(readOnly = true)
-    public List<GstReportResponseDto> getGstReport(LocalDate fromDate, LocalDate toDate) {
-        return salesBetween(fromDate, toDate).stream()
-                .map(this::toGstReportEntry)
-                .sorted(Comparator.comparing(GstReportResponseDto::getDate, Comparator.nullsLast(Comparator.naturalOrder())))
-                .toList();
-    }
-
-    private GstReportResponseDto toGstReportEntry(Sale sale) {
-        BigDecimal taxableAmount = support.defaultZero(sale.getSubTotal()).subtract(support.defaultZero(sale.getDiscountAmount()));
-        BigDecimal totalTax = support.defaultZero(sale.getTaxAmount());
-        BigDecimal halfTax = totalTax.divide(BigDecimal.valueOf(2), 2, RoundingMode.HALF_UP);
-        BigDecimal taxRate = taxableAmount.compareTo(TransactionSupport.ZERO) > 0
-                ? totalTax.multiply(BigDecimal.valueOf(100)).divide(taxableAmount, 2, RoundingMode.HALF_UP)
-                : TransactionSupport.ZERO;
-        Contact customer = sale.getCustomer();
-        return GstReportResponseDto.builder()
-                .date(sale.getInvoiceDate())
-                .invoiceNo(sale.getInvoiceNo())
-                .partyName(support.contactDisplayName(customer))
-                .gstin(customer == null ? null : customer.getGstNumber())
-                .transactionType("SALE")
-                .taxableAmount(support.money(taxableAmount))
-                .taxRate(taxRate)
-                .cgst(halfTax)
-                .sgst(halfTax)
-                .igst(TransactionSupport.ZERO)
-                .taxAmount(support.money(totalTax))
-                .grandTotal(support.money(sale.getGrandTotal()))
                 .build();
     }
 

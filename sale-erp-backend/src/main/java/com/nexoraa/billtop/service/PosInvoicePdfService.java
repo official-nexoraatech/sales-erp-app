@@ -1,5 +1,6 @@
 package com.nexoraa.billtop.service;
 
+import com.lowagie.text.Chunk;
 import com.lowagie.text.Document;
 import com.lowagie.text.DocumentException;
 import com.lowagie.text.Element;
@@ -12,6 +13,7 @@ import com.lowagie.text.Rectangle;
 import com.lowagie.text.pdf.PdfPCell;
 import com.lowagie.text.pdf.PdfPTable;
 import com.lowagie.text.pdf.PdfWriter;
+import com.lowagie.text.pdf.draw.LineSeparator;
 import com.nexoraa.billtop.constants.ErrorMessage;
 import com.nexoraa.billtop.entity.Address;
 import com.nexoraa.billtop.entity.Contact;
@@ -50,6 +52,12 @@ public class PosInvoicePdfService {
     private static final String BILLING_ADDRESS_TYPE = "BILLING";
     private static final DateTimeFormatter INVOICE_DATE_FORMAT = DateTimeFormatter.ofPattern("dd MMM yyyy");
     private static final DateTimeFormatter FILE_TIMESTAMP_FORMAT = DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss");
+    private static final DateTimeFormatter RECEIPT_TIME_FORMAT = DateTimeFormatter.ofPattern("hh:mm a");
+
+    /**
+     * 58mm thermal roll width (2" mobile printer, e.g. DC2M) minus a small margin either side.
+     */
+    private static final float RECEIPT_WIDTH = 164f;
 
     private static final Color BAND_COLOR = new Color(0x17, 0x33, 0x2C);
     private static final Color GOLD_COLOR = new Color(0xC9, 0xA2, 0x4B);
@@ -115,6 +123,34 @@ public class PosInvoicePdfService {
         }
     }
 
+    /**
+     * Renders the same sale as a narrow receipt sized for a 2" (58mm) mobile thermal printer,
+     * for silent auto-print from POS instead of the A4 "Bold Statement" invoice.
+     */
+    @Transactional(readOnly = true)
+    public InvoicePdf generateReceiptPdf(Long saleId) {
+        Long organizationId = currentOrganizationService.getOrganizationId();
+        Sale sale = saleRepository.findByIdAndOrganizationIdAndIsDeletedFalse(saleId, organizationId)
+                .orElseThrow(() -> new ResourceNotFoundException(ErrorMessage.SALE_NOT_FOUND, "SALE_NOT_FOUND"));
+        Organization organization = organizationRepository.findById(organizationId)
+                .orElseThrow(() -> new ResourceNotFoundException(ErrorMessage.ORGANIZATION_NOT_FOUND, "ORGANIZATION_NOT_FOUND"));
+        List<SalesItem> items = salesItemRepository.findBySaleIdAndOrganizationId(saleId, organizationId);
+        Address customerAddress = sale.getCustomer() == null
+                ? null
+                : addressRepository.findByContactIdAndAddressTypeAndOrganizationId(
+                        sale.getCustomer().getId(),
+                        BILLING_ADDRESS_TYPE,
+                        organizationId
+                ).orElse(null);
+
+        try {
+            byte[] content = renderReceipt(sale, organization, items, customerAddress);
+            return new InvoicePdf(content, buildReceiptFileName(sale));
+        } catch (DocumentException ex) {
+            throw new IllegalStateException("Failed to generate receipt PDF", ex);
+        }
+    }
+
     private byte[] render(Sale sale, Organization organization, List<SalesItem> items, Address customerAddress) throws DocumentException {
         Document document = new Document(PageSize.A4, 28, 28, 28, 28);
         ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
@@ -137,6 +173,175 @@ public class PosInvoicePdfService {
 
         document.close();
         return outputStream.toByteArray();
+    }
+
+    private byte[] renderReceipt(Sale sale, Organization organization, List<SalesItem> items, Address customerAddress) throws DocumentException {
+        Document document = new Document(new Rectangle(RECEIPT_WIDTH, estimateReceiptHeight(items.size())), 8, 8, 8, 8);
+        ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+        PdfWriter.getInstance(document, outputStream);
+        document.open();
+
+        document.add(paragraph(organization.getName() == null ? "" : organization.getName().toUpperCase(Locale.ROOT), 9.5f, Font.BOLD, INK_COLOR, Element.ALIGN_CENTER));
+        if (organization.getAddress() != null) {
+            String addressLine = addressLine(organization.getAddress());
+            if (StringUtils.hasText(addressLine)) {
+                document.add(paragraph(addressLine, 6.5f, Font.NORMAL, MUTED_COLOR, Element.ALIGN_CENTER));
+            }
+        }
+        if (StringUtils.hasText(organization.getPhone())) {
+            document.add(paragraph("Mobile " + organization.getPhone(), 6.5f, Font.NORMAL, MUTED_COLOR, Element.ALIGN_CENTER));
+        }
+
+        document.add(receiptDivider());
+        document.add(paragraph("Invoice No: " + sale.getInvoiceNo(), 6.5f, Font.BOLD, INK_COLOR, Element.ALIGN_LEFT));
+        document.add(paragraph(receiptDateTimeLine(sale), 6.5f, Font.NORMAL, MUTED_COLOR, Element.ALIGN_LEFT));
+
+        document.add(receiptDivider());
+        document.add(paragraph("Billed To: " + contactName(sale.getCustomer()), 6.5f, Font.BOLD, INK_COLOR, Element.ALIGN_LEFT));
+        for (String line : customerDetailLines(sale.getCustomer(), customerAddress)) {
+            document.add(paragraph(line, 6f, Font.NORMAL, MUTED_COLOR, Element.ALIGN_LEFT));
+        }
+        for (String line : paymentDetailLines(sale)) {
+            document.add(paragraph(line, 6f, Font.NORMAL, MUTED_COLOR, Element.ALIGN_LEFT));
+        }
+        document.add(paragraph("Status: " + statusLabel(sale.getStatus()), 6.5f, Font.BOLD, INK_COLOR, Element.ALIGN_LEFT));
+
+        document.add(receiptDivider());
+        document.add(buildReceiptItemsTable(items));
+
+        document.add(receiptDivider());
+        document.add(buildReceiptTotalsTable(sale));
+
+        document.add(receiptDivider());
+        String notes = StringUtils.hasText(sale.getNotes())
+                ? sale.getNotes()
+                : "Goods once sold will not be taken back or exchanged.";
+        document.add(paragraph(notes, 6f, Font.NORMAL, MUTED_COLOR, Element.ALIGN_LEFT));
+        document.add(paragraph("Amount in words: " + toWords(sale.getGrandTotal()), 6f, Font.ITALIC, MUTED_COLOR, Element.ALIGN_LEFT));
+
+        document.add(receiptDivider());
+        document.add(paragraph("Thank you for shopping with us!", 7f, Font.BOLD, INK_COLOR, Element.ALIGN_CENTER));
+
+        document.close();
+        return outputStream.toByteArray();
+    }
+
+    private float estimateReceiptHeight(int itemCount) {
+        float header = 150f;
+        float perItem = 24f;
+        float totalsAndFooter = 150f;
+        return header + (itemCount * perItem) + totalsAndFooter;
+    }
+
+    private Paragraph receiptDivider() {
+        LineSeparator line = new LineSeparator(0.5f, 100f, ROW_BORDER_COLOR, Element.ALIGN_CENTER, -2);
+        Paragraph divider = new Paragraph();
+        divider.add(new Chunk(line));
+        divider.setSpacingBefore(3f);
+        divider.setSpacingAfter(3f);
+        return divider;
+    }
+
+    private String receiptDateTimeLine(Sale sale) {
+        String date = sale.getInvoiceDate() == null ? "" : sale.getInvoiceDate().format(INVOICE_DATE_FORMAT);
+        String time = sale.getCreatedAt() == null ? "" : sale.getCreatedAt().format(RECEIPT_TIME_FORMAT);
+        if (StringUtils.hasText(date) && StringUtils.hasText(time)) {
+            return date + "   " + time;
+        }
+        return StringUtils.hasText(date) ? date : time;
+    }
+
+    private PdfPTable buildReceiptItemsTable(List<SalesItem> items) {
+        PdfPTable table = new PdfPTable(new float[]{0.3f, 2.1f, 0.5f, 0.75f, 0.85f});
+        table.setWidthPercentage(100);
+
+        Font headerFont = new Font(Font.HELVETICA, 6f, Font.BOLD, INK_COLOR);
+        addReceiptHeaderCell(table, "No", Element.ALIGN_LEFT, headerFont);
+        addReceiptHeaderCell(table, "Item Name", Element.ALIGN_LEFT, headerFont);
+        addReceiptHeaderCell(table, "Qty", Element.ALIGN_CENTER, headerFont);
+        addReceiptHeaderCell(table, "Rate", Element.ALIGN_RIGHT, headerFont);
+        addReceiptHeaderCell(table, "Amount", Element.ALIGN_RIGHT, headerFont);
+
+        Font nameFont = new Font(Font.HELVETICA, 6.5f, Font.NORMAL, INK_COLOR);
+        Font subFont = new Font(Font.HELVETICA, 5.5f, Font.NORMAL, MUTED_COLOR);
+        Font valueFont = new Font(Font.HELVETICA, 6.5f, Font.NORMAL, INK_COLOR);
+
+        int index = 1;
+        for (SalesItem item : items) {
+            addReceiptBodyCell(table, String.valueOf(index++), Element.ALIGN_LEFT, valueFont);
+
+            PdfPCell nameCell = new PdfPCell();
+            nameCell.setBorder(Rectangle.NO_BORDER);
+            nameCell.setPadding(2f);
+            nameCell.addElement(new Paragraph(item.getItem() == null ? "" : item.getItem().getItemName(), nameFont));
+            String subLine = itemSubLine(item);
+            if (StringUtils.hasText(subLine)) {
+                nameCell.addElement(new Paragraph(subLine, subFont));
+            }
+            table.addCell(nameCell);
+
+            addReceiptBodyCell(table, formatQty(item.getQty()), Element.ALIGN_CENTER, valueFont);
+            addReceiptBodyCell(table, formatMoney(item.getUnitPrice()), Element.ALIGN_RIGHT, valueFont);
+            addReceiptBodyCell(table, formatMoney(item.getTotalAmount()), Element.ALIGN_RIGHT, valueFont);
+        }
+
+        return table;
+    }
+
+    private void addReceiptHeaderCell(PdfPTable table, String text, int alignment, Font font) {
+        PdfPCell cell = new PdfPCell(new Phrase(text, font));
+        cell.setBorder(Rectangle.BOTTOM);
+        cell.setBorderColor(ROW_BORDER_COLOR);
+        cell.setPadding(2f);
+        cell.setHorizontalAlignment(alignment);
+        table.addCell(cell);
+    }
+
+    private void addReceiptBodyCell(PdfPTable table, String text, int alignment, Font font) {
+        PdfPCell cell = new PdfPCell(new Phrase(text, font));
+        cell.setBorder(Rectangle.NO_BORDER);
+        cell.setPadding(2f);
+        cell.setHorizontalAlignment(alignment);
+        cell.setVerticalAlignment(Element.ALIGN_TOP);
+        table.addCell(cell);
+    }
+
+    private PdfPTable buildReceiptTotalsTable(Sale sale) {
+        PdfPTable table = new PdfPTable(new float[]{1f, 1f});
+        table.setWidthPercentage(100);
+        addReceiptTotalRow(table, "Subtotal", formatMoney(sale.getSubTotal()), false);
+        addReceiptTotalRow(table, "Discount", "-" + formatMoney(sale.getDiscountAmount()), false);
+        addReceiptTotalRow(table, "Tax", formatMoney(sale.getTaxAmount()), false);
+        addReceiptTotalRow(table, "Round off", formatMoney(sale.getRoundOff()), false);
+        addReceiptTotalRow(table, "Total Due", formatMoney(sale.getGrandTotal()), true);
+        return table;
+    }
+
+    private void addReceiptTotalRow(PdfPTable table, String label, String value, boolean emphasize) {
+        float size = emphasize ? 8f : 6.5f;
+        Font labelFont = new Font(Font.HELVETICA, size, emphasize ? Font.BOLD : Font.NORMAL, emphasize ? INK_COLOR : MUTED_COLOR);
+        Font valueFont = new Font(Font.HELVETICA, size, emphasize ? Font.BOLD : Font.NORMAL, INK_COLOR);
+
+        PdfPCell labelCell = new PdfPCell(new Phrase(label, labelFont));
+        labelCell.setBorder(Rectangle.NO_BORDER);
+        labelCell.setPadding(2f);
+        table.addCell(labelCell);
+
+        PdfPCell valueCell = new PdfPCell(new Phrase(value, valueFont));
+        valueCell.setBorder(Rectangle.NO_BORDER);
+        valueCell.setPadding(2f);
+        valueCell.setHorizontalAlignment(Element.ALIGN_RIGHT);
+        table.addCell(valueCell);
+    }
+
+    private String buildReceiptFileName(Sale sale) {
+        String safeName = contactName(sale.getCustomer())
+                .replaceAll("[^A-Za-z0-9]+", "_")
+                .replaceAll("^_+|_+$", "");
+        if (safeName.isBlank()) {
+            safeName = "Receipt";
+        }
+        return safeName + "_Receipt_" + LocalDateTime.now().format(FILE_TIMESTAMP_FORMAT) + ".pdf";
     }
 
     private PdfPTable buildBand(Organization organization, Sale sale) {

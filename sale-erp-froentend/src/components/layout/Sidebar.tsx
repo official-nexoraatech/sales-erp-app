@@ -193,9 +193,6 @@ export const menuItems: MenuItem[] = [
       { label: 'Supplier Due', href: '/reports/due/supplier', icon: <BarChart3 size={18} />, access: rule(FEATURE_PERMISSIONS.report.supplierDues) },
       { label: 'Expense', href: '/reports/expense', icon: <BarChart3 size={18} />, access: rule(FEATURE_PERMISSIONS.expense.view) },
       { label: 'Expense Item', href: '/reports/expense/item', icon: <BarChart3 size={18} />, access: rule(FEATURE_PERMISSIONS.report.expenseItems) },
-      { label: 'GST', href: '/reports/gst', icon: <BarChart3 size={18} />, access: rule(FEATURE_PERMISSIONS.report.gst) },
-      { label: 'GSTR-1', href: '/reports/gst/gstr-1', icon: <BarChart3 size={18} />, access: rule(FEATURE_PERMISSIONS.report.gst) },
-      { label: 'GSTR-2', href: '/reports/gst/gstr-2', icon: <BarChart3 size={18} />, access: rule(FEATURE_PERMISSIONS.report.gst) },
       { label: 'Stock Transfer', href: '/reports/stock-transfer', icon: <BarChart3 size={18} />, access: rule(FEATURE_PERMISSIONS.stockTransfer.view) },
       { label: 'Stock Adjustment', href: '/reports/stock-adjustment', icon: <BarChart3 size={18} />, access: rule(FEATURE_PERMISSIONS.stockAdjustment.view) },
       { label: 'Stock Report', href: '/reports/stock', icon: <BarChart3 size={18} />, access: rule(FEATURE_PERMISSIONS.report.stock) },
@@ -239,7 +236,7 @@ const SUBNAV_ACTIVE =
 /* Subpath exclusions for exact-match routes */
 const EXACT_PATHS = new Set([
   '/items', '/users', '/reports/purchase', '/reports/sale',
-  '/reports/gst', '/reports/stock', '/reports/stock-transfer',
+  '/reports/stock', '/reports/stock-transfer',
   '/reports/stock-adjustment', '/reports/expense',
 ]);
 

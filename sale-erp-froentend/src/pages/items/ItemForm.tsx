@@ -154,7 +154,7 @@ export const ItemForm: React.FC<Props> = ({
   useEffect(() => {
     const errorFields = Object.keys(validationErrors);
     const pricingFields = ['purchasePrice', 'profitMargin', 'mrp', 'wholesalePrice', 'discountPercentage', 'salePrice', 'msp'];
-    const stockFields = ['warehouseId', 'manufacturingDate', 'openingQuantity', 'minimumStock', 'expiryDate'];
+    const stockFields = ['warehouseId', 'manufacturingDate', 'openingQuantity', 'minimumStock', 'baseUnitId', 'expiryDate'];
     if (errorFields.some((field) => pricingFields.includes(field))) setActiveTab('pricing');
     else if (errorFields.some((field) => stockFields.includes(field))) setActiveTab('stock');
   }, [validationErrors]);
@@ -249,20 +249,9 @@ export const ItemForm: React.FC<Props> = ({
           </div>
           {renderFieldError('brandId')}
         </label>
-        <label className="text-sm text-gray-600">Opening Quantity <span className="text-red-500">*</span>
-          <NumericInput integer min={1} className={`${controlClass('openingQuantity')} mt-1`} value={form.openingQuantity || ''} onValueChange={(value) => set('openingQuantity', Math.trunc(value))} />
-          {renderFieldError('openingQuantity')}
-        </label>
         <label className="text-sm text-gray-600">Description
           <textarea className={`${controlClass('description', 'h-24 w-full resize-none rounded border border-gray-300 p-3 outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100')} mt-1`} value={form.description} onChange={(event) => set('description', event.target.value)} />
           {renderFieldError('description')}
-        </label>
-        <label className="text-sm text-gray-600">Base Unit
-          <select className={`${controlClass('baseUnitId')} mt-1`} value={form.baseUnitId} disabled={units.isLoading} onChange={(event) => set('baseUnitId', Number(event.target.value))}>
-            <option value={0}>{units.isLoading ? 'Loading units...' : 'Select unit'}</option>
-            {unitRows.map((unit) => <option key={unit.id} value={unit.id}>{unit.name} ({unit.shortName})</option>)}
-          </select>
-          {renderFieldError('baseUnitId')}
         </label>
         <div className="text-sm text-gray-600">
           <span>Upload Image</span>
@@ -280,7 +269,10 @@ export const ItemForm: React.FC<Props> = ({
         </div>
       </div>
       <div className="border-t px-5 py-4"><label className="inline-flex items-center gap-2 text-sm font-semibold"><input type="radio" defaultChecked />Regular</label></div>
-      <div className="px-5 pt-3"><button onClick={() => setActiveTab('pricing')} className={`rounded-t border px-4 py-2 text-sm ${activeTab === 'pricing' ? 'border-green-500 text-green-600' : 'text-blue-600'}`}>$ Pricing</button><button onClick={() => setActiveTab('stock')} className={`rounded-t border px-4 py-2 text-sm ${activeTab === 'stock' ? 'border-green-500 text-green-600' : 'text-blue-600'}`}>▣ Stock</button></div>
+      <div className="flex gap-2 border-b px-5 pt-3">
+        <button onClick={() => setActiveTab('pricing')} className={`rounded-t-md border border-b-0 px-4 py-2 text-sm font-semibold transition-colors ${activeTab === 'pricing' ? 'border-blue-500 bg-blue-500 text-white shadow-sm' : 'border-transparent bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>$ Pricing</button>
+        <button onClick={() => setActiveTab('stock')} className={`rounded-t-md border border-b-0 px-4 py-2 text-sm font-semibold transition-colors ${activeTab === 'stock' ? 'border-blue-500 bg-blue-500 text-white shadow-sm' : 'border-transparent bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>▣ Stock</button>
+      </div>
       {activeTab === 'pricing' ? <div className="grid grid-cols-1 gap-4 border-t p-5 md:grid-cols-3">
         <label className="text-sm text-gray-600">MSP<NumericInput min={0} className={`${highlightControlClass('msp')} mt-1`} value={form.msp || ''} onValueChange={(value) => set('msp', value)} />{renderFieldError('msp')}</label>
         <label className="text-sm text-gray-600">MRP<NumericInput min={0} className={`${highlightControlClass('mrp')} mt-1`} value={form.mrp || ''} onValueChange={(value) => set('mrp', value)} />{renderFieldError('mrp')}</label>
@@ -289,7 +281,7 @@ export const ItemForm: React.FC<Props> = ({
         <label className="text-sm text-gray-600">Discount on MRP<NumericInput min={0} className={`${highlightControlClass('discountPercentage')} mt-1`} value={form.discountPercentage || ''} onValueChange={setDiscountPercentage} />{renderFieldError('discountPercentage')}</label>
         <label className="text-sm text-gray-600">Sale Price<NumericInput min={0} className={`${highlightControlClass('salePrice')} mt-1`} value={form.salePrice || ''} onValueChange={setSalePrice} />{renderFieldError('salePrice')}</label>
         <label className="text-sm text-gray-600">Wholesale Price<NumericInput min={0} className={`${highlightControlClass('wholesalePrice')} mt-1`} value={form.wholesalePrice || ''} onValueChange={setWholesalePrice} />{renderFieldError('wholesalePrice')}</label>
-      </div> : <div className="grid grid-cols-1 gap-4 border-t p-5 md:grid-cols-2">
+      </div> : <div className="grid grid-cols-1 gap-4 border-t p-5 md:grid-cols-3">
         <div>
           <WarehouseSelector
             value={form.warehouseId}
@@ -302,8 +294,16 @@ export const ItemForm: React.FC<Props> = ({
           />
           {renderFieldError('warehouseId')}
         </div>
-        <label className="text-sm text-gray-600">As of Date<input type="date" className={`${highlightControlClass('manufacturingDate')} mt-1`} value={form.manufacturingDate} onChange={(event) => set('manufacturingDate', event.target.value)} />{renderFieldError('manufacturingDate')}</label>
+        <label className="text-sm text-gray-600">Opening Quantity <span className="text-red-500">*</span><NumericInput integer min={1} className={`${highlightControlClass('openingQuantity')} mt-1`} value={form.openingQuantity || ''} onValueChange={(value) => set('openingQuantity', Math.trunc(value))} />{renderFieldError('openingQuantity')}</label>
         <label className="text-sm text-gray-600">Minimum Stock <span className="text-red-500">*</span><NumericInput min={1} className={`${highlightControlClass('minimumStock')} mt-1`} value={form.minimumStock || ''} onValueChange={(value) => set('minimumStock', value)} />{renderFieldError('minimumStock')}</label>
+        <label className="text-sm text-gray-600">Base Unit
+          <select className={`${highlightControlClass('baseUnitId')} mt-1`} value={form.baseUnitId} disabled={units.isLoading} onChange={(event) => set('baseUnitId', Number(event.target.value))}>
+            <option value={0}>{units.isLoading ? 'Loading units...' : 'Select unit'}</option>
+            {unitRows.map((unit) => <option key={unit.id} value={unit.id}>{unit.name} ({unit.shortName})</option>)}
+          </select>
+          {renderFieldError('baseUnitId')}
+        </label>
+        <label className="text-sm text-gray-600">As of Date<input type="date" className={`${highlightControlClass('manufacturingDate')} mt-1`} value={form.manufacturingDate} onChange={(event) => set('manufacturingDate', event.target.value)} />{renderFieldError('manufacturingDate')}</label>
         <label className="text-sm text-gray-600">Exp.Date<input type="date" className={`${highlightControlClass('expiryDate')} mt-1`} value={form.expiryDate} onChange={(event) => set('expiryDate', event.target.value)} />{renderFieldError('expiryDate')}</label>
       </div>}
       <div className="flex gap-3 border-t p-5"><Button onClick={submit} isLoading={loading}>{submitText}</Button><Button variant="secondary" onClick={onCancel}>Close</Button></div>
