@@ -341,28 +341,6 @@ export const PosPage: React.FC = () => {
       window.setTimeout(() => scanAndAddItem(value, 'input-paste'), 0);
     }
   };
-  const downloadInvoicePdf = async (saleId: number) => {
-    try {
-      const blob = await posApi.downloadInvoicePdf(saleId);
-      const customer = customerRows.find((entry) => entry.id === customerId);
-      const customerName = (selectedCustomerLabel || customer?.customerName || 'Walk-in_Customer')
-        .replace(/[^a-z0-9]+/gi, '_')
-        .replace(/^_+|_+$/g, '') || 'Customer';
-      const pad = (value: number) => String(value).padStart(2, '0');
-      const now = new Date();
-      const timestamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `${customerName}_${timestamp}.pdf`;
-      link.click();
-      // Revoking immediately after click() can abort the download on some browsers before it's
-      // actually dispatched - delay so repeated downloads in the same session keep working.
-      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-    } catch (error: any) {
-      toast.error(error?.message || 'Failed to download invoice PDF');
-    }
-  };
   const printReceipt = async (saleId: number) => {
     try {
       const blob = await posApi.downloadReceiptPdf(saleId);
@@ -372,7 +350,7 @@ export const PosPage: React.FC = () => {
       toast.error(error?.message || 'Failed to print receipt - is QZ Tray running?');
     }
   };
-  const submitBill = async (download = false) => {
+  const submitBill = async () => {
     if (!customerId) return toast.error('Please select a customer');
     if (!warehouseId) return toast.error('Please select a warehouse');
     if (!paymentMethodId) return toast.error('Please select a payment method');
@@ -381,8 +359,7 @@ export const PosPage: React.FC = () => {
       const response = await billing.mutateAsync();
       const saleId = response.data?.saleId;
       if (!saleId) return;
-      if (download) await downloadInvoicePdf(saleId);
-      else await printReceipt(saleId);
+      await printReceipt(saleId);
     } catch {
       // The mutation onError handler already reports the API error.
     }
@@ -699,8 +676,7 @@ export const PosPage: React.FC = () => {
       <footer className="fixed inset-x-0 bottom-0 z-20 flex h-12 items-center justify-end gap-3 border-t bg-white px-4 shadow-[0_-2px_8px_rgba(0,0,0,0.06)]">
         <button onClick={() => navigate(defaultPath)} className="rounded bg-slate-100 px-5 py-2 text-sm">Close</button>
         <button onClick={() => setCart([])} className="rounded bg-slate-600 px-5 py-2 text-sm text-white">New</button>
-        <button onClick={() => submitBill(true)} disabled={billing.isPending} className="rounded bg-blue-500 px-5 py-2 text-sm text-white">Save &amp; Download Invoice</button>
-        <button onClick={() => submitBill(false)} disabled={billing.isPending} className="rounded bg-green-500 px-5 py-2 text-sm text-white">Save</button>
+        <button onClick={() => submitBill()} disabled={billing.isPending} className="rounded bg-green-500 px-5 py-2 text-sm text-white">Save &amp; Print</button>
       </footer>
     </div>
   );
