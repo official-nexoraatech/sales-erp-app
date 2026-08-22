@@ -52,8 +52,8 @@ function LayoutContent() {
   const hasUnseenPageTour = useHasUnseenPageTour();
   const { user, logout, hasPermission } = useAuthStore();
   const navGroups = useMemo(
-    () => filterNavGroups(NAV_GROUPS, hasPermission),
-    [hasPermission, user?.permissions]
+    () => filterNavGroups(NAV_GROUPS, hasPermission, new Set(user?.enabledCapabilities ?? [])),
+    [hasPermission, user?.permissions, user?.enabledCapabilities]
   );
 
   // Responsive sidebar — ERP-PLANNING/02_ERP_NAVIGATION_ARCHITECTURE.md §5

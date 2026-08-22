@@ -1,7 +1,12 @@
 /* global crypto, process, fetch, Buffer */
 import type { FastifyInstance } from 'fastify';
 import type { PlatformContextFactory } from '@erp/sdk';
-import { PlatformEventBus } from '@erp/sdk';
+import {
+  PlatformEventBus,
+  requireCapability,
+  tenantScopedHandler,
+  withTenantConnection,
+} from '@erp/sdk';
 import {
   payrollRuns,
   payrollSlips,
@@ -24,8 +29,6 @@ import { authenticate } from '../middleware/authenticate.js';
 import { requirePermission } from '../middleware/authorize.js';
 import { PayrollEngine } from '../domain/PayrollEngine.js';
 import { EmployeeLoanService } from '../domain/EmployeeLoanService.js';
-
-type AuthedRequest = { auth: { tenantId: number; userId: number } };
 
 function requireInternalKey(
   req: { headers: Record<string, string | string[] | undefined> },
@@ -72,6 +75,11 @@ const EmployeeSalarySchema = z.object({
   effectiveFrom: z.string().max(10),
 });
 
+// Phase 9 GUC-per-request rollout — migrated 2026-08-21. Every route except
+// GET /payroll-slips/:id/pdf has no external I/O — neither PayrollEngine nor
+// EmployeeLoanService has fetch() calls. The PDF route fetches report-service (caveat 4,
+// same shape as accounting-service's/purchase-service's PDF routes) — deliberately left
+// unmigrated.
 export async function payrollRoutes(
   fastify: FastifyInstance,
   ctxFactory: PlatformContextFactory
@@ -79,32 +87,34 @@ export async function payrollRoutes(
   // ── Salary Structures ────────────────────────────────────────────────────
   fastify.get(
     '/salary-structures',
-    { preHandler: [authenticate, requirePermission(PERMISSIONS.PAYROLL_VIEW)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
+    {
+      preHandler: [
+        authenticate,
+        requireCapability('HR_PAYROLL', ctxFactory.rawDb, ctxFactory.getRedis()),
+        requirePermission(PERMISSIONS.PAYROLL_VIEW),
+      ],
+    },
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId } = ctx.tenant;
       const rows = await ctx.db.raw
         .select()
         .from(salaryStructures)
         .where(and(eq(salaryStructures.tenantId, tenantId), eq(salaryStructures.isActive, true)));
       return reply.code(200).send({ data: { content: rows, totalElements: rows.length } });
-    }
+    })
   );
 
   fastify.post(
     '/salary-structures',
-    { preHandler: [authenticate, requirePermission(PERMISSIONS.PAYROLL_PROCESS)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
+    {
+      preHandler: [
+        authenticate,
+        requireCapability('HR_PAYROLL', ctxFactory.rawDb, ctxFactory.getRedis()),
+        requirePermission(PERMISSIONS.PAYROLL_PROCESS),
+      ],
+    },
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId, userId } = ctx.tenant;
       const body = SalaryStructureSchema.safeParse(request.body);
       if (!body.success)
         throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
@@ -123,20 +133,21 @@ export async function payrollRoutes(
         .returning();
       if (!created) throw new Error('Salary structure insert failed');
       return reply.code(201).send({ data: created });
-    }
+    })
   );
 
   // ── Employee Salary Assignment (encrypted — never returned in list) ─────
   fastify.post(
     '/employee-salaries',
-    { preHandler: [authenticate, requirePermission(PERMISSIONS.PAYROLL_PROCESS)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
+    {
+      preHandler: [
+        authenticate,
+        requireCapability('HR_PAYROLL', ctxFactory.rawDb, ctxFactory.getRedis()),
+        requirePermission(PERMISSIONS.PAYROLL_PROCESS),
+      ],
+    },
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId, userId } = ctx.tenant;
       const body = EmployeeSalarySchema.safeParse(request.body);
       if (!body.success)
         throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
@@ -211,20 +222,21 @@ export async function payrollRoutes(
       });
       // NEVER log or return decrypted salary figures
       return reply.code(201).send({ data: created });
-    }
+    })
   );
 
   // ── Payroll Runs ─────────────────────────────────────────────────────────
   fastify.post(
     '/payroll-runs',
-    { preHandler: [authenticate, requirePermission(PERMISSIONS.PAYROLL_PROCESS)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
+    {
+      preHandler: [
+        authenticate,
+        requireCapability('HR_PAYROLL', ctxFactory.rawDb, ctxFactory.getRedis()),
+        requirePermission(PERMISSIONS.PAYROLL_PROCESS),
+      ],
+    },
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId, userId } = ctx.tenant;
       const body = CreatePayrollRunSchema.safeParse(request.body);
       if (!body.success)
         throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
@@ -260,38 +272,40 @@ export async function payrollRoutes(
       if (!created) throw new Error('Payroll run insert failed');
       await ctx.audit.log({ action: 'CREATE', entityType: 'payroll_run', entityId: created.id });
       return reply.code(201).send({ data: created });
-    }
+    })
   );
 
   fastify.get(
     '/payroll-runs',
-    { preHandler: [authenticate, requirePermission(PERMISSIONS.PAYROLL_VIEW)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
+    {
+      preHandler: [
+        authenticate,
+        requireCapability('HR_PAYROLL', ctxFactory.rawDb, ctxFactory.getRedis()),
+        requirePermission(PERMISSIONS.PAYROLL_VIEW),
+      ],
+    },
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId } = ctx.tenant;
       const rows = await ctx.db.raw
         .select()
         .from(payrollRuns)
         .where(eq(payrollRuns.tenantId, tenantId));
       return reply.code(200).send({ data: { content: rows, totalElements: rows.length } });
-    }
+    })
   );
 
-  fastify.get<{ Params: { id: string } }>(
+  fastify.get(
     '/payroll-runs/:id',
-    { preHandler: [authenticate, requirePermission(PERMISSIONS.PAYROLL_VIEW)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-      const id = parseInt(request.params.id, 10);
+    {
+      preHandler: [
+        authenticate,
+        requireCapability('HR_PAYROLL', ctxFactory.rawDb, ctxFactory.getRedis()),
+        requirePermission(PERMISSIONS.PAYROLL_VIEW),
+      ],
+    },
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId } = ctx.tenant;
+      const id = parseInt((request.params as { id: string }).id, 10);
       const [run] = await ctx.db.raw
         .select()
         .from(payrollRuns)
@@ -302,7 +316,7 @@ export async function payrollRoutes(
         .from(payrollSlips)
         .where(and(eq(payrollSlips.payrollRunId, id), eq(payrollSlips.tenantId, tenantId)));
       return reply.code(200).send({ data: { ...run, slips } });
-    }
+    })
   );
 
   // Product audit 2026-07-31, Phase 1 Step 8 — the per-employee skip-and-report fix above
@@ -313,14 +327,15 @@ export async function payrollRoutes(
   // so this predicts precisely what Calculate would skip, not an approximation.
   fastify.get(
     '/payroll-runs/preflight',
-    { preHandler: [authenticate, requirePermission(PERMISSIONS.PAYROLL_VIEW)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
+    {
+      preHandler: [
+        authenticate,
+        requireCapability('HR_PAYROLL', ctxFactory.rawDb, ctxFactory.getRedis()),
+        requirePermission(PERMISSIONS.PAYROLL_VIEW),
+      ],
+    },
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId } = ctx.tenant;
 
       const activeEmployees = await ctx.db.raw
         .select({
@@ -355,20 +370,21 @@ export async function payrollRoutes(
           missingSalaryStructure,
         },
       });
-    }
+    })
   );
 
-  fastify.post<{ Params: { id: string } }>(
+  fastify.post(
     '/payroll-runs/:id/calculate',
-    { preHandler: [authenticate, requirePermission(PERMISSIONS.PAYROLL_PROCESS)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-      const id = parseInt(request.params.id, 10);
+    {
+      preHandler: [
+        authenticate,
+        requireCapability('HR_PAYROLL', ctxFactory.rawDb, ctxFactory.getRedis()),
+        requirePermission(PERMISSIONS.PAYROLL_PROCESS),
+      ],
+    },
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId } = ctx.tenant;
+      const id = parseInt((request.params as { id: string }).id, 10);
 
       const [run] = await ctx.db.raw
         .select()
@@ -473,20 +489,21 @@ export async function payrollRoutes(
           totalNet,
         },
       });
-    }
+    })
   );
 
-  fastify.post<{ Params: { id: string } }>(
+  fastify.post(
     '/payroll-runs/:id/approve',
-    { preHandler: [authenticate, requirePermission(PERMISSIONS.PAYROLL_APPROVE)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-      const id = parseInt(request.params.id, 10);
+    {
+      preHandler: [
+        authenticate,
+        requireCapability('HR_PAYROLL', ctxFactory.rawDb, ctxFactory.getRedis()),
+        requirePermission(PERMISSIONS.PAYROLL_APPROVE),
+      ],
+    },
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId, userId } = ctx.tenant;
+      const id = parseInt((request.params as { id: string }).id, 10);
 
       const [run] = await ctx.db.raw
         .select()
@@ -595,20 +612,21 @@ export async function payrollRoutes(
       });
 
       return reply.code(200).send({ data: { message: 'Payroll approved', payrollRunId: id } });
-    }
+    })
   );
 
-  fastify.post<{ Params: { id: string } }>(
+  fastify.post(
     '/payroll-runs/:id/disburse',
-    { preHandler: [authenticate, requirePermission(PERMISSIONS.PAYROLL_APPROVE)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-      const id = parseInt(request.params.id, 10);
+    {
+      preHandler: [
+        authenticate,
+        requireCapability('HR_PAYROLL', ctxFactory.rawDb, ctxFactory.getRedis()),
+        requirePermission(PERMISSIONS.PAYROLL_APPROVE),
+      ],
+    },
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId, userId } = ctx.tenant;
+      const id = parseInt((request.params as { id: string }).id, 10);
 
       const [run] = await ctx.db.raw
         .select()
@@ -665,20 +683,21 @@ export async function payrollRoutes(
       });
 
       return reply.code(200).send({ data: { message: 'Payroll disbursed', payrollRunId: id } });
-    }
+    })
   );
 
-  fastify.get<{ Params: { id: string } }>(
+  fastify.get(
     '/payroll-slips/:id',
-    { preHandler: [authenticate, requirePermission(PERMISSIONS.VIEW_SALARY_DETAILS)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-      const id = parseInt(request.params.id, 10);
+    {
+      preHandler: [
+        authenticate,
+        requireCapability('HR_PAYROLL', ctxFactory.rawDb, ctxFactory.getRedis()),
+        requirePermission(PERMISSIONS.VIEW_SALARY_DETAILS),
+      ],
+    },
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId } = ctx.tenant;
+      const id = parseInt((request.params as { id: string }).id, 10);
 
       const [slip] = await ctx.db.raw
         .select()
@@ -747,14 +766,20 @@ export async function payrollRoutes(
           status: slip.status,
         },
       });
-    }
+    })
   );
 
   fastify.get<{ Params: { id: string } }>(
     '/payroll-slips/:id/pdf',
-    { preHandler: [authenticate, requirePermission(PERMISSIONS.SALARY_SLIP_PRINT)] },
+    {
+      preHandler: [
+        authenticate,
+        requireCapability('HR_PAYROLL', ctxFactory.rawDb, ctxFactory.getRedis()),
+        requirePermission(PERMISSIONS.SALARY_SLIP_PRINT),
+      ],
+    },
     async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
+      const { tenantId, userId } = request.auth;
       const ctx = ctxFactory.create({
         tenantId,
         userId,
@@ -873,17 +898,18 @@ export async function payrollRoutes(
     }
   );
 
-  fastify.post<{ Params: { id: string } }>(
+  fastify.post(
     '/payroll-runs/:id/bulk-send',
-    { preHandler: [authenticate, requirePermission(PERMISSIONS.PAYROLL_APPROVE)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-      const id = parseInt(request.params.id, 10);
+    {
+      preHandler: [
+        authenticate,
+        requireCapability('HR_PAYROLL', ctxFactory.rawDb, ctxFactory.getRedis()),
+        requirePermission(PERMISSIONS.PAYROLL_APPROVE),
+      ],
+    },
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId, userId } = ctx.tenant;
+      const id = parseInt((request.params as { id: string }).id, 10);
       const [run] = await ctx.db.raw
         .select({ id: payrollRuns.id })
         .from(payrollRuns)
@@ -914,7 +940,7 @@ export async function payrollRoutes(
       return reply
         .code(200)
         .send({ data: { message: 'Salary slips queued for sending', count: slips.length } });
-    }
+    })
   );
 
   // ── POST /internal/payroll/prepare?tenantId=... — PG-026, scheduler-triggered ──
@@ -928,129 +954,138 @@ export async function payrollRoutes(
         .code(400)
         .send({ error: { code: 'MISSING_TENANT_ID', message: 'tenantId query param required' } });
 
-    const ctx = ctxFactory.create({ tenantId, userId: 0, correlationId: crypto.randomUUID() });
-    const now = new Date();
-    const periodMonth = now.getUTCMonth() + 1;
-    const periodYear = now.getUTCFullYear();
-
-    let [run] = await ctx.db.raw
-      .select()
-      .from(payrollRuns)
-      .where(
-        and(
-          eq(payrollRuns.tenantId, tenantId),
-          eq(payrollRuns.periodMonth, periodMonth),
-          eq(payrollRuns.periodYear, periodYear)
-        )
+    const result = await withTenantConnection(ctxFactory.rawDb, tenantId, async (db) => {
+      const ctx = ctxFactory.create(
+        { tenantId, userId: 0, correlationId: crypto.randomUUID() },
+        db
       );
-    if (!run) {
-      const [created] = await ctx.db.raw
-        .insert(payrollRuns)
-        .values({
-          tenantId,
-          createdBy: 0,
-          periodMonth,
-          periodYear,
-          workingDays: 26,
-          status: 'DRAFT',
-        } as typeof payrollRuns.$inferInsert)
-        .returning();
-      if (!created) throw new Error('Payroll run insert failed');
-      run = created;
-    }
+      const now = new Date();
+      const periodMonth = now.getUTCMonth() + 1;
+      const periodYear = now.getUTCFullYear();
 
-    if (run.status === 'APPROVED' || run.status === 'DISBURSED') {
-      return reply.code(200).send({
-        data: {
+      let [run] = await ctx.db.raw
+        .select()
+        .from(payrollRuns)
+        .where(
+          and(
+            eq(payrollRuns.tenantId, tenantId),
+            eq(payrollRuns.periodMonth, periodMonth),
+            eq(payrollRuns.periodYear, periodYear)
+          )
+        );
+      if (!run) {
+        const [created] = await ctx.db.raw
+          .insert(payrollRuns)
+          .values({
+            tenantId,
+            createdBy: 0,
+            periodMonth,
+            periodYear,
+            workingDays: 26,
+            status: 'DRAFT',
+          } as typeof payrollRuns.$inferInsert)
+          .returning();
+        if (!created) throw new Error('Payroll run insert failed');
+        run = created;
+      }
+
+      if (run.status === 'APPROVED' || run.status === 'DISBURSED') {
+        return {
           message: 'Payroll run already finalized — skipped',
           payrollRunId: run.id,
           status: run.status,
+          skipped: true as const,
+        };
+      }
+
+      await ctx.db.raw
+        .update(payrollRuns)
+        .set({ status: 'CALCULATING', updatedAt: new Date() })
+        .where(eq(payrollRuns.id, run.id));
+
+      const activeEmployees = await ctx.db.raw
+        .select({ id: employees.id })
+        .from(employees)
+        .where(
+          and(
+            eq(employees.tenantId, tenantId),
+            eq(employees.status, 'ACTIVE'),
+            isNull(employees.deletedAt)
+          )
+        );
+
+      let totalGross = 0;
+      let totalDeductions = 0;
+      let totalNet = 0;
+      const ptStateCache = new Map<number | null, string | null>();
+      // Same skip-and-report handling as the manual /payroll-runs/:id/calculate endpoint above
+      // (see its comment) — this unattended, cron-triggered path used to lack it entirely, so
+      // one employee missing a salary structure aborted the whole run, leaving it stuck in
+      // CALCULATING with no automated retry (this endpoint isn't the one the Calculate button
+      // re-invokes) until a human noticed and manually recalculated from the UI.
+      const skippedList: Array<{ employeeId: number; reason: string }> = [];
+      for (const emp of activeEmployees) {
+        try {
+          const slip = await PayrollEngine.computeSlip(
+            ctx.db,
+            tenantId,
+            emp.id,
+            run.periodMonth,
+            run.periodYear,
+            run.workingDays,
+            ptStateCache
+          );
+          await PayrollEngine.upsertSlip(ctx.db, tenantId, run.id, slip);
+          totalGross += slip.grossSalary;
+          totalDeductions += slip.totalDeductions;
+          totalNet += slip.netSalary;
+        } catch (err) {
+          skippedList.push({
+            employeeId: emp.id,
+            reason: err instanceof Error ? err.message : 'Unknown error',
+          });
+        }
+      }
+
+      const processedCount = activeEmployees.length - skippedList.length;
+      const notes =
+        skippedList.length > 0
+          ? `Skipped ${skippedList.length} employee(s): ${skippedList.map((s) => `#${s.employeeId} (${s.reason})`).join('; ')}`
+          : undefined;
+
+      await ctx.db.raw
+        .update(payrollRuns)
+        .set({
+          status: 'CALCULATED',
+          totalEmployees: processedCount,
+          totalGross: String(Math.round(totalGross * 100) / 100),
+          totalDeductions: String(Math.round(totalDeductions * 100) / 100),
+          totalNet: String(Math.round(totalNet * 100) / 100),
+          notes,
+          updatedAt: new Date(),
+        })
+        .where(eq(payrollRuns.id, run.id));
+
+      await ctx.audit.log({
+        action: 'UPDATE',
+        entityType: 'payroll_run',
+        entityId: run.id,
+        metadata: {
+          action: 'AUTO_PREPARE',
+          employeeCount: processedCount,
+          skippedCount: skippedList.length,
         },
       });
-    }
 
-    await ctx.db.raw
-      .update(payrollRuns)
-      .set({ status: 'CALCULATING', updatedAt: new Date() })
-      .where(eq(payrollRuns.id, run.id));
-
-    const activeEmployees = await ctx.db.raw
-      .select({ id: employees.id })
-      .from(employees)
-      .where(
-        and(
-          eq(employees.tenantId, tenantId),
-          eq(employees.status, 'ACTIVE'),
-          isNull(employees.deletedAt)
-        )
-      );
-
-    let totalGross = 0;
-    let totalDeductions = 0;
-    let totalNet = 0;
-    const ptStateCache = new Map<number | null, string | null>();
-    // Same skip-and-report handling as the manual /payroll-runs/:id/calculate endpoint above
-    // (see its comment) — this unattended, cron-triggered path used to lack it entirely, so
-    // one employee missing a salary structure aborted the whole run, leaving it stuck in
-    // CALCULATING with no automated retry (this endpoint isn't the one the Calculate button
-    // re-invokes) until a human noticed and manually recalculated from the UI.
-    const skipped: Array<{ employeeId: number; reason: string }> = [];
-    for (const emp of activeEmployees) {
-      try {
-        const slip = await PayrollEngine.computeSlip(
-          ctx.db,
-          tenantId,
-          emp.id,
-          run.periodMonth,
-          run.periodYear,
-          run.workingDays,
-          ptStateCache
-        );
-        await PayrollEngine.upsertSlip(ctx.db, tenantId, run.id, slip);
-        totalGross += slip.grossSalary;
-        totalDeductions += slip.totalDeductions;
-        totalNet += slip.netSalary;
-      } catch (err) {
-        skipped.push({
-          employeeId: emp.id,
-          reason: err instanceof Error ? err.message : 'Unknown error',
-        });
-      }
-    }
-
-    const processedCount = activeEmployees.length - skipped.length;
-    const notes =
-      skipped.length > 0
-        ? `Skipped ${skipped.length} employee(s): ${skipped.map((s) => `#${s.employeeId} (${s.reason})`).join('; ')}`
-        : undefined;
-
-    await ctx.db.raw
-      .update(payrollRuns)
-      .set({
-        status: 'CALCULATED',
-        totalEmployees: processedCount,
-        totalGross: String(Math.round(totalGross * 100) / 100),
-        totalDeductions: String(Math.round(totalDeductions * 100) / 100),
-        totalNet: String(Math.round(totalNet * 100) / 100),
-        notes,
-        updatedAt: new Date(),
-      })
-      .where(eq(payrollRuns.id, run.id));
-
-    await ctx.audit.log({
-      action: 'UPDATE',
-      entityType: 'payroll_run',
-      entityId: run.id,
-      metadata: {
-        action: 'AUTO_PREPARE',
+      return {
+        payrollRunId: run.id,
         employeeCount: processedCount,
-        skippedCount: skipped.length,
-      },
+        skipped: skippedList,
+        totalNet,
+      };
     });
 
-    return reply.code(200).send({
-      data: { payrollRunId: run.id, employeeCount: processedCount, skipped, totalNet },
-    });
+    return reply.code(200).send({ data: result });
   });
 
   // ── POST /internal/payroll/send-slips?tenantId=... — PG-026, scheduler-triggered ──
@@ -1064,61 +1099,65 @@ export async function payrollRoutes(
         .code(400)
         .send({ error: { code: 'MISSING_TENANT_ID', message: 'tenantId query param required' } });
 
-    const ctx = ctxFactory.create({ tenantId, userId: 0, correlationId: crypto.randomUUID() });
-    const now = new Date();
-    const periodMonth = now.getUTCMonth() + 1;
-    const periodYear = now.getUTCFullYear();
-
-    const [run] = await ctx.db.raw
-      .select({ id: payrollRuns.id })
-      .from(payrollRuns)
-      .where(
-        and(
-          eq(payrollRuns.tenantId, tenantId),
-          eq(payrollRuns.periodMonth, periodMonth),
-          eq(payrollRuns.periodYear, periodYear)
-        )
+    const result = await withTenantConnection(ctxFactory.rawDb, tenantId, async (db) => {
+      const ctx = ctxFactory.create(
+        { tenantId, userId: 0, correlationId: crypto.randomUUID() },
+        db
       );
-    if (!run)
-      return reply
-        .code(200)
-        .send({ data: { message: 'No payroll run for this period yet — skipped', count: 0 } });
+      const now = new Date();
+      const periodMonth = now.getUTCMonth() + 1;
+      const periodYear = now.getUTCFullYear();
 
-    const slips = await ctx.db.raw
-      .select({ id: payrollSlips.id, employeeId: payrollSlips.employeeId })
-      .from(payrollSlips)
-      .where(
-        and(
-          eq(payrollSlips.payrollRunId, run.id),
-          eq(payrollSlips.tenantId, tenantId),
-          isNull(payrollSlips.slipSentAt)
-        )
-      );
+      const [run] = await ctx.db.raw
+        .select({ id: payrollRuns.id })
+        .from(payrollRuns)
+        .where(
+          and(
+            eq(payrollRuns.tenantId, tenantId),
+            eq(payrollRuns.periodMonth, periodMonth),
+            eq(payrollRuns.periodYear, periodYear)
+          )
+        );
+      if (!run) return { message: 'No payroll run for this period yet — skipped', count: 0 };
 
-    if (slips.length > 0) {
-      await ctx.db.transaction(async (trx) => {
-        await trx.raw
-          .update(payrollSlips)
-          .set({ slipSentAt: new Date() })
-          .where(
-            and(
-              eq(payrollSlips.payrollRunId, run.id),
-              eq(payrollSlips.tenantId, tenantId),
-              isNull(payrollSlips.slipSentAt)
-            )
-          );
+      const slips = await ctx.db.raw
+        .select({ id: payrollSlips.id, employeeId: payrollSlips.employeeId })
+        .from(payrollSlips)
+        .where(
+          and(
+            eq(payrollSlips.payrollRunId, run.id),
+            eq(payrollSlips.tenantId, tenantId),
+            isNull(payrollSlips.slipSentAt)
+          )
+        );
 
-        const eventBus = new PlatformEventBus(trx, tenantId, 0, ctx.tenant.correlationId);
-        for (const slip of slips) {
-          await eventBus.publishInTransaction('payroll_slip', slip.id, 'SALARY_SLIP_READY', {
-            payrollSlipId: slip.id,
-            employeeId: slip.employeeId,
-            tenantId,
-          });
-        }
-      });
-    }
+      if (slips.length > 0) {
+        await ctx.db.transaction(async (trx) => {
+          await trx.raw
+            .update(payrollSlips)
+            .set({ slipSentAt: new Date() })
+            .where(
+              and(
+                eq(payrollSlips.payrollRunId, run.id),
+                eq(payrollSlips.tenantId, tenantId),
+                isNull(payrollSlips.slipSentAt)
+              )
+            );
 
-    return reply.code(200).send({ data: { payrollRunId: run.id, count: slips.length } });
+          const eventBus = new PlatformEventBus(trx, tenantId, 0, ctx.tenant.correlationId);
+          for (const slip of slips) {
+            await eventBus.publishInTransaction('payroll_slip', slip.id, 'SALARY_SLIP_READY', {
+              payrollSlipId: slip.id,
+              employeeId: slip.employeeId,
+              tenantId,
+            });
+          }
+        });
+      }
+
+      return { payrollRunId: run.id, count: slips.length };
+    });
+
+    return reply.code(200).send({ data: result });
   });
 }

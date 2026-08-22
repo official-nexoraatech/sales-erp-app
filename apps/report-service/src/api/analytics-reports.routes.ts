@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { ErpDatabase, ReplicaRouter } from '@erp/db';
+import { withTenantConnection } from '@erp/sdk';
 import type Redis from 'ioredis';
 import { authenticate } from '../middleware/authenticate.js';
 import { requirePermission } from '../middleware/authorize.js';
@@ -111,61 +112,74 @@ export async function analyticsReportsRoutes(
 
       // For async: create a run_history record and return immediately
       if (runAsync || definition.supportsAsync) {
-        const [run] = await db
-          .insert(reportRunHistory)
-          .values({
-            tenantId,
-            reportSlug: req.params.slug,
-            params,
-            format: format as 'PDF' | 'EXCEL' | 'CSV',
-            status: 'PENDING',
-            triggeredBy: 'MANUAL',
-            startedAt: new Date(),
-          })
-          .returning();
+        const run = await withTenantConnection(db, tenantId, async (scopedDb) => {
+          const [row] = await scopedDb
+            .insert(reportRunHistory)
+            .values({
+              tenantId,
+              reportSlug: req.params.slug,
+              params,
+              format: format as 'PDF' | 'EXCEL' | 'CSV',
+              status: 'PENDING',
+              triggeredBy: 'MANUAL',
+              startedAt: new Date(),
+            })
+            .returning();
+          return row!;
+        });
 
-        // Fire and forget
+        // Fire and forget — runs detached from this request's lifecycle (after the 202 below
+        // is already sent), so each DB touch here gets its own withTenantConnection wrap rather
+        // than being covered by a wrap around the route handler (there's nothing left to wrap
+        // by the time this callback runs). engine.generate() scopes its own connection
+        // internally (see ReportEngine.generate()), so it needs no wrap here.
         setImmediate(async () => {
           const startTime = Date.now();
           try {
-            await db
-              .update(reportRunHistory)
-              .set({ status: 'RUNNING' })
-              .where(eq(reportRunHistory.id, run!.id));
+            await withTenantConnection(db, tenantId, (scopedDb) =>
+              scopedDb
+                .update(reportRunHistory)
+                .set({ status: 'RUNNING' })
+                .where(eq(reportRunHistory.id, run.id))
+            );
 
             const result = await engine.generate(req.params.slug, tenantId, params);
 
-            await db
-              .update(reportRunHistory)
-              .set({
-                status: 'COMPLETED',
-                completedAt: new Date(),
-                rowCount: result.totalRows,
-                durationMs: Date.now() - startTime,
-                resultData: {
-                  rows: result.rows,
-                  totalRows: result.totalRows,
-                  generatedAt: result.generatedAt,
-                  totals: formatter.summarize(result, definition),
-                },
-              })
-              .where(eq(reportRunHistory.id, run!.id));
+            await withTenantConnection(db, tenantId, (scopedDb) =>
+              scopedDb
+                .update(reportRunHistory)
+                .set({
+                  status: 'COMPLETED',
+                  completedAt: new Date(),
+                  rowCount: result.totalRows,
+                  durationMs: Date.now() - startTime,
+                  resultData: {
+                    rows: result.rows,
+                    totalRows: result.totalRows,
+                    generatedAt: result.generatedAt,
+                    totals: formatter.summarize(result, definition),
+                  },
+                })
+                .where(eq(reportRunHistory.id, run.id))
+            );
           } catch (err) {
-            await db
-              .update(reportRunHistory)
-              .set({
-                status: 'FAILED',
-                completedAt: new Date(),
-                errorMessage: err instanceof Error ? err.message : String(err),
-                durationMs: Date.now() - startTime,
-              })
-              .where(eq(reportRunHistory.id, run!.id));
+            await withTenantConnection(db, tenantId, (scopedDb) =>
+              scopedDb
+                .update(reportRunHistory)
+                .set({
+                  status: 'FAILED',
+                  completedAt: new Date(),
+                  errorMessage: err instanceof Error ? err.message : String(err),
+                  durationMs: Date.now() - startTime,
+                })
+                .where(eq(reportRunHistory.id, run.id))
+            );
           }
         });
 
         return reply
           .code(202)
-          .send({ data: { runId: run!.id, status: 'PENDING', message: 'Report queued' } });
+          .send({ data: { runId: run.id, status: 'PENDING', message: 'Report queued' } });
       }
 
       // Synchronous run
@@ -213,12 +227,14 @@ export async function analyticsReportsRoutes(
       preHandler: [authenticate, requirePermission('REPORT_VIEW')],
     },
     async (req, reply) => {
-      const runs = await db
-        .select()
-        .from(reportRunHistory)
-        .where(eq(reportRunHistory.tenantId, req.auth.tenantId))
-        .orderBy(desc(reportRunHistory.createdAt))
-        .limit(50);
+      const runs = await withTenantConnection(db, req.auth.tenantId, (scopedDb) =>
+        scopedDb
+          .select()
+          .from(reportRunHistory)
+          .where(eq(reportRunHistory.tenantId, req.auth.tenantId))
+          .orderBy(desc(reportRunHistory.createdAt))
+          .limit(50)
+      );
       return reply.code(200).send({ data: runs });
     }
   );
@@ -230,15 +246,17 @@ export async function analyticsReportsRoutes(
       preHandler: [authenticate, requirePermission('REPORT_VIEW')],
     },
     async (req, reply) => {
-      const [run] = await db
-        .select()
-        .from(reportRunHistory)
-        .where(
-          and(
-            eq(reportRunHistory.id, parseInt(req.params.runId)),
-            eq(reportRunHistory.tenantId, req.auth.tenantId)
+      const [run] = await withTenantConnection(db, req.auth.tenantId, (scopedDb) =>
+        scopedDb
+          .select()
+          .from(reportRunHistory)
+          .where(
+            and(
+              eq(reportRunHistory.id, parseInt(req.params.runId)),
+              eq(reportRunHistory.tenantId, req.auth.tenantId)
+            )
           )
-        );
+      );
       if (!run) {
         return reply.code(404).send({ error: { code: 'NOT_FOUND', message: 'Run not found' } });
       }
@@ -271,20 +289,22 @@ export async function analyticsReportsRoutes(
 
       const unsubscribeToken = randomBytes(32).toString('hex');
 
-      const [schedule] = await db
-        .insert(reportSchedules)
-        .values({
-          tenantId: req.auth.tenantId,
-          reportSlug: parsed.data.reportSlug,
-          params: parsed.data.params,
-          format: parsed.data.format,
-          cronExpression: parsed.data.cronExpression,
-          recipients: parsed.data.recipients,
-          active: 1,
-          unsubscribeToken,
-          createdBy: req.auth.userId,
-        })
-        .returning();
+      const [schedule] = await withTenantConnection(db, req.auth.tenantId, (scopedDb) =>
+        scopedDb
+          .insert(reportSchedules)
+          .values({
+            tenantId: req.auth.tenantId,
+            reportSlug: parsed.data.reportSlug,
+            params: parsed.data.params,
+            format: parsed.data.format,
+            cronExpression: parsed.data.cronExpression,
+            recipients: parsed.data.recipients,
+            active: 1,
+            unsubscribeToken,
+            createdBy: req.auth.userId,
+          })
+          .returning()
+      );
 
       return reply.code(201).send({ data: schedule });
     }
@@ -297,11 +317,13 @@ export async function analyticsReportsRoutes(
       preHandler: [authenticate, requirePermission('REPORT_VIEW')],
     },
     async (req, reply) => {
-      const schedules = await db
-        .select()
-        .from(reportSchedules)
-        .where(eq(reportSchedules.tenantId, req.auth.tenantId))
-        .orderBy(desc(reportSchedules.createdAt));
+      const schedules = await withTenantConnection(db, req.auth.tenantId, (scopedDb) =>
+        scopedDb
+          .select()
+          .from(reportSchedules)
+          .where(eq(reportSchedules.tenantId, req.auth.tenantId))
+          .orderBy(desc(reportSchedules.createdAt))
+      );
       return reply.code(200).send({ data: schedules });
     }
   );
@@ -313,15 +335,17 @@ export async function analyticsReportsRoutes(
       preHandler: [authenticate, requirePermission('REPORT_SCHEDULE')],
     },
     async (req, reply) => {
-      const [deleted] = await db
-        .delete(reportSchedules)
-        .where(
-          and(
-            eq(reportSchedules.id, parseInt(req.params.id)),
-            eq(reportSchedules.tenantId, req.auth.tenantId)
+      const [deleted] = await withTenantConnection(db, req.auth.tenantId, (scopedDb) =>
+        scopedDb
+          .delete(reportSchedules)
+          .where(
+            and(
+              eq(reportSchedules.id, parseInt(req.params.id)),
+              eq(reportSchedules.tenantId, req.auth.tenantId)
+            )
           )
-        )
-        .returning();
+          .returning()
+      );
       if (!deleted) {
         return reply
           .code(404)
@@ -374,6 +398,10 @@ export async function analyticsReportsRoutes(
   );
 
   // GET /api/v2/unsubscribe/:token — unsubscribe from scheduled report
+  // Phase 9 GUC-per-request rollout — caveat 4f (public route, no JWT, tenant unknown until the
+  // token lookup resolves). The lookup by unsubscribeToken is inherently cross-tenant and stays
+  // unscoped; once schedule.tenantId is known, the deactivation runs inside its own
+  // withTenantConnection wrap.
   fastify.get<{ Params: { token: string } }>('/api/v2/unsubscribe/:token', async (req, reply) => {
     const [schedule] = await db
       .select()
@@ -384,7 +412,9 @@ export async function analyticsReportsRoutes(
         .code(404)
         .send({ error: { code: 'NOT_FOUND', message: 'Invalid unsubscribe token' } });
     }
-    await db.update(reportSchedules).set({ active: 0 }).where(eq(reportSchedules.id, schedule.id));
+    await withTenantConnection(db, schedule.tenantId, (scopedDb) =>
+      scopedDb.update(reportSchedules).set({ active: 0 }).where(eq(reportSchedules.id, schedule.id))
+    );
     return reply
       .code(200)
       .send({ data: { message: 'Successfully unsubscribed from scheduled report' } });

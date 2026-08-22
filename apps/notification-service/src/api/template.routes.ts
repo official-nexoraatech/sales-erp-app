@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { ErpDatabase } from '@erp/db';
+import { withTenantConnection } from '@erp/sdk';
 import { notificationTemplates } from '@erp/db';
 import { eq, and, desc } from 'drizzle-orm';
 import Handlebars from 'handlebars';
@@ -47,11 +48,13 @@ export async function templateRoutes(fastify: FastifyInstance, db: ErpDatabase):
   // ── GET /notifications/templates — List this tenant's templates ──────────
   fastify.get('/notifications/templates', { preHandler: guard }, async (request, reply) => {
     const { tenantId } = (request as unknown as AuthedRequest).auth;
-    const rows = await db
-      .select()
-      .from(notificationTemplates)
-      .where(eq(notificationTemplates.tenantId, tenantId))
-      .orderBy(desc(notificationTemplates.createdAt));
+    const rows = await withTenantConnection(db, tenantId, (scopedDb) =>
+      scopedDb
+        .select()
+        .from(notificationTemplates)
+        .where(eq(notificationTemplates.tenantId, tenantId))
+        .orderBy(desc(notificationTemplates.createdAt))
+    );
     return reply.code(200).send({ data: { content: rows } });
   });
 
@@ -62,10 +65,14 @@ export async function templateRoutes(fastify: FastifyInstance, db: ErpDatabase):
     async (request, reply) => {
       const { tenantId } = (request as unknown as AuthedRequest).auth;
       const id = parseInt(request.params.id, 10);
-      const [row] = await db
-        .select()
-        .from(notificationTemplates)
-        .where(and(eq(notificationTemplates.id, id), eq(notificationTemplates.tenantId, tenantId)));
+      const [row] = await withTenantConnection(db, tenantId, (scopedDb) =>
+        scopedDb
+          .select()
+          .from(notificationTemplates)
+          .where(
+            and(eq(notificationTemplates.id, id), eq(notificationTemplates.tenantId, tenantId))
+          )
+      );
       if (!row) {
         return reply
           .code(404)
@@ -83,17 +90,36 @@ export async function templateRoutes(fastify: FastifyInstance, db: ErpDatabase):
       throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
     }
 
-    const [existing] = await db
-      .select({ id: notificationTemplates.id })
-      .from(notificationTemplates)
-      .where(
-        and(
-          eq(notificationTemplates.tenantId, tenantId),
-          eq(notificationTemplates.eventType, body.data.eventType),
-          eq(notificationTemplates.channel, body.data.channel)
-        )
-      );
-    if (existing) {
+    const created = await withTenantConnection(db, tenantId, async (scopedDb) => {
+      const [existing] = await scopedDb
+        .select({ id: notificationTemplates.id })
+        .from(notificationTemplates)
+        .where(
+          and(
+            eq(notificationTemplates.tenantId, tenantId),
+            eq(notificationTemplates.eventType, body.data.eventType),
+            eq(notificationTemplates.channel, body.data.channel)
+          )
+        );
+      if (existing) return { duplicate: true as const };
+
+      const [row] = await scopedDb
+        .insert(notificationTemplates)
+        .values({
+          tenantId,
+          createdBy: userId ?? 0,
+          name: body.data.name,
+          eventType: body.data.eventType,
+          channel: body.data.channel,
+          subject: body.data.subject,
+          bodyTemplate: body.data.bodyTemplate,
+          isSystem: false,
+        })
+        .returning();
+      return { duplicate: false as const, row };
+    });
+
+    if (created.duplicate) {
       return reply.code(409).send({
         error: {
           code: 'DUPLICATE_TEMPLATE',
@@ -102,21 +128,7 @@ export async function templateRoutes(fastify: FastifyInstance, db: ErpDatabase):
       });
     }
 
-    const [created] = await db
-      .insert(notificationTemplates)
-      .values({
-        tenantId,
-        createdBy: userId ?? 0,
-        name: body.data.name,
-        eventType: body.data.eventType,
-        channel: body.data.channel,
-        subject: body.data.subject,
-        bodyTemplate: body.data.bodyTemplate,
-        isSystem: false,
-      })
-      .returning();
-
-    return reply.code(201).send({ data: created });
+    return reply.code(201).send({ data: created.row });
   });
 
   // ── PUT /notifications/templates/:id — Edit a tenant-custom template ─────
@@ -131,16 +143,37 @@ export async function templateRoutes(fastify: FastifyInstance, db: ErpDatabase):
         throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
       }
 
-      const [existing] = await db
-        .select()
-        .from(notificationTemplates)
-        .where(and(eq(notificationTemplates.id, id), eq(notificationTemplates.tenantId, tenantId)));
-      if (!existing) {
+      const outcome = await withTenantConnection(db, tenantId, async (scopedDb) => {
+        const [existing] = await scopedDb
+          .select()
+          .from(notificationTemplates)
+          .where(
+            and(eq(notificationTemplates.id, id), eq(notificationTemplates.tenantId, tenantId))
+          );
+        if (!existing) return { status: 'NOT_FOUND' as const };
+        if (existing.isSystem) return { status: 'SYSTEM_LOCKED' as const };
+
+        await scopedDb
+          .update(notificationTemplates)
+          .set({
+            ...(body.data.name !== undefined ? { name: body.data.name } : {}),
+            ...(body.data.subject !== undefined ? { subject: body.data.subject } : {}),
+            ...(body.data.bodyTemplate !== undefined
+              ? { bodyTemplate: body.data.bodyTemplate }
+              : {}),
+            ...(body.data.isActive !== undefined ? { isActive: body.data.isActive } : {}),
+            updatedAt: new Date(),
+          })
+          .where(eq(notificationTemplates.id, id));
+        return { status: 'OK' as const };
+      });
+
+      if (outcome.status === 'NOT_FOUND') {
         return reply
           .code(404)
           .send({ error: { code: 'NOT_FOUND', message: 'Template not found' } });
       }
-      if (existing.isSystem) {
+      if (outcome.status === 'SYSTEM_LOCKED') {
         return reply.code(400).send({
           error: {
             code: 'SYSTEM_TEMPLATE_LOCKED',
@@ -149,17 +182,6 @@ export async function templateRoutes(fastify: FastifyInstance, db: ErpDatabase):
           },
         });
       }
-
-      await db
-        .update(notificationTemplates)
-        .set({
-          ...(body.data.name !== undefined ? { name: body.data.name } : {}),
-          ...(body.data.subject !== undefined ? { subject: body.data.subject } : {}),
-          ...(body.data.bodyTemplate !== undefined ? { bodyTemplate: body.data.bodyTemplate } : {}),
-          ...(body.data.isActive !== undefined ? { isActive: body.data.isActive } : {}),
-          updatedAt: new Date(),
-        })
-        .where(eq(notificationTemplates.id, id));
 
       return reply.code(200).send({ data: { message: 'Template updated' } });
     }
@@ -173,22 +195,31 @@ export async function templateRoutes(fastify: FastifyInstance, db: ErpDatabase):
       const { tenantId } = (request as unknown as AuthedRequest).auth;
       const id = parseInt(request.params.id, 10);
 
-      const [existing] = await db
-        .select()
-        .from(notificationTemplates)
-        .where(and(eq(notificationTemplates.id, id), eq(notificationTemplates.tenantId, tenantId)));
-      if (!existing) {
+      const outcome = await withTenantConnection(db, tenantId, async (scopedDb) => {
+        const [existing] = await scopedDb
+          .select()
+          .from(notificationTemplates)
+          .where(
+            and(eq(notificationTemplates.id, id), eq(notificationTemplates.tenantId, tenantId))
+          );
+        if (!existing) return { status: 'NOT_FOUND' as const };
+        if (existing.isSystem) return { status: 'SYSTEM_LOCKED' as const };
+
+        await scopedDb.delete(notificationTemplates).where(eq(notificationTemplates.id, id));
+        return { status: 'OK' as const };
+      });
+
+      if (outcome.status === 'NOT_FOUND') {
         return reply
           .code(404)
           .send({ error: { code: 'NOT_FOUND', message: 'Template not found' } });
       }
-      if (existing.isSystem) {
+      if (outcome.status === 'SYSTEM_LOCKED') {
         return reply.code(400).send({
           error: { code: 'SYSTEM_TEMPLATE_LOCKED', message: 'System templates cannot be deleted.' },
         });
       }
 
-      await db.delete(notificationTemplates).where(eq(notificationTemplates.id, id));
       return reply.code(200).send({ data: { message: 'Template deleted' } });
     }
   );

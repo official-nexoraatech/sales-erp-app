@@ -1,6 +1,6 @@
 import type { JobRegistry } from '../JobRegistry.js';
 import { createLogger } from '@erp/logger';
-import { createCircuitBreaker, type StorageClient } from '@erp/sdk';
+import { createCircuitBreaker, withTenantConnection, type StorageClient } from '@erp/sdk';
 import type { ErpDatabase } from '@erp/db';
 import { and, eq, lt, sql } from 'drizzle-orm';
 import {
@@ -210,30 +210,42 @@ export function registerSystemJobs(
     async (_job, tenantId) => {
       if (tenantId === undefined) return;
       try {
-        const rows = (await db.execute(sql`
-          SELECT j.journal_id, j.reference_type, j.reference_id, j.posted_at
-          FROM journals j
-          JOIN financial_entries fe
-            ON fe.journal_id = j.journal_id AND fe.tenant_id = j.tenant_id
-          WHERE j.tenant_id = ${tenantId}
-            AND j.status = 'POSTED'
-            AND j.reference_type IS NOT NULL
-            AND j.posted_at >= NOW() - INTERVAL '2 days'
-          GROUP BY j.journal_id, j.reference_type, j.reference_id, j.posted_at
-          HAVING SUM(fe.debit_amount) = 0 AND SUM(fe.credit_amount) = 0
-          ORDER BY j.posted_at DESC
-        `)) as unknown as Array<{
-          journal_id: string;
-          reference_type: string;
-          reference_id: number | null;
-          posted_at: string;
-        }>;
+        // RLS-readiness follow-up (2026-08-22): already single-tenant per invocation; both DB
+        // reads happen entirely before the one fetch() call below, so one wrap covers both.
+        const { rows, tenant } = await withTenantConnection(db, tenantId, async (scopedDb) => {
+          const rowsInner = (await scopedDb.execute(sql`
+            SELECT j.journal_id, j.reference_type, j.reference_id, j.posted_at
+            FROM journals j
+            JOIN financial_entries fe
+              ON fe.journal_id = j.journal_id AND fe.tenant_id = j.tenant_id
+            WHERE j.tenant_id = ${tenantId}
+              AND j.status = 'POSTED'
+              AND j.reference_type IS NOT NULL
+              AND j.posted_at >= NOW() - INTERVAL '2 days'
+            GROUP BY j.journal_id, j.reference_type, j.reference_id, j.posted_at
+            HAVING SUM(fe.debit_amount) = 0 AND SUM(fe.credit_amount) = 0
+            ORDER BY j.posted_at DESC
+          `)) as unknown as Array<{
+            journal_id: string;
+            reference_type: string;
+            reference_id: number | null;
+            posted_at: string;
+          }>;
+
+          const tenantInner =
+            rowsInner.length > 0
+              ? (
+                  await scopedDb
+                    .select({ contactEmail: tenants.contactEmail })
+                    .from(tenants)
+                    .where(eq(tenants.id, tenantId))
+                )[0]
+              : undefined;
+
+          return { rows: rowsInner, tenant: tenantInner };
+        });
 
         if (rows.length > 0) {
-          const [tenant] = await db
-            .select({ contactEmail: tenants.contactEmail })
-            .from(tenants)
-            .where(eq(tenants.id, tenantId));
           if (tenant?.contactEmail) {
             const notificationUrl =
               process.env['NOTIFICATION_SERVICE_URL'] ?? 'http://localhost:3014';
@@ -1089,44 +1101,58 @@ export function registerSystemJobs(
     async (_job, tenantId) => {
       if (tenantId === undefined) return;
       try {
-        const [settings] = (await db.execute(sql`
-          SELECT payment_reminder_enabled FROM tenant_communication_settings WHERE tenant_id = ${tenantId}
-        `)) as unknown as Array<{ payment_reminder_enabled: boolean }>;
-        if (!settings?.payment_reminder_enabled) {
+        // RLS-readiness follow-up (2026-08-22): this job is already scoped to one tenant per
+        // invocation (JobRegistry schedules one BullMQ job per tenant for tenantScoped jobs), so
+        // this is a simple wrap, not a cross-tenant loop restructure. The per-invoice loop below
+        // interleaves a real fetch() with DB work, so only the DB reads/writes get wrapped —
+        // each in its own short-lived withTenantConnection call — never the fetch calls
+        // themselves, matching the caveat-4g pattern used throughout this rollout.
+        const initialData = await withTenantConnection(db, tenantId, async (scopedDb) => {
+          const [settings] = (await scopedDb.execute(sql`
+            SELECT payment_reminder_enabled FROM tenant_communication_settings WHERE tenant_id = ${tenantId}
+          `)) as unknown as Array<{ payment_reminder_enabled: boolean }>;
+          if (!settings?.payment_reminder_enabled) return null;
+
+          const overdueInvoicesInner = (await scopedDb.execute(sql`
+            SELECT
+              i.id, i.invoice_number, i.balance_due, c.email AS customer_email, c.display_name AS customer_name,
+              GREATEST(0, EXTRACT(DAY FROM (NOW() - i.due_date))::int) AS days_overdue
+            FROM invoices i
+            JOIN customers c ON c.id = i.customer_id AND c.tenant_id = i.tenant_id
+            WHERE i.tenant_id = ${tenantId}
+              AND i.status IN ('CONFIRMED', 'PARTIALLY_PAID', 'OVERDUE')
+              AND i.balance_due > 0
+              AND i.due_date < NOW()
+              AND c.email IS NOT NULL
+          `)) as unknown as Array<{
+            id: number;
+            invoice_number: string;
+            balance_due: string;
+            customer_email: string;
+            customer_name: string;
+            days_overdue: number;
+          }>;
+          if (overdueInvoicesInner.length === 0)
+            return { overdueInvoices: overdueInvoicesInner, alreadySent: [] };
+
+          const alreadySentInner = (await scopedDb.execute(sql`
+            SELECT invoice_id, stage FROM invoice_reminder_log
+            WHERE tenant_id = ${tenantId}
+              AND invoice_id = ANY(${sql.raw(`ARRAY[${overdueInvoicesInner.map((i) => i.id).join(',')}]`)})
+          `)) as unknown as Array<{ invoice_id: number; stage: string }>;
+          return { overdueInvoices: overdueInvoicesInner, alreadySent: alreadySentInner };
+        });
+
+        if (!initialData) {
           logger.info({ tenantId }, 'Payment reminder ladder not enabled for tenant — skipping');
           return;
         }
-
-        const overdueInvoices = (await db.execute(sql`
-          SELECT
-            i.id, i.invoice_number, i.balance_due, c.email AS customer_email, c.display_name AS customer_name,
-            GREATEST(0, EXTRACT(DAY FROM (NOW() - i.due_date))::int) AS days_overdue
-          FROM invoices i
-          JOIN customers c ON c.id = i.customer_id AND c.tenant_id = i.tenant_id
-          WHERE i.tenant_id = ${tenantId}
-            AND i.status IN ('CONFIRMED', 'PARTIALLY_PAID', 'OVERDUE')
-            AND i.balance_due > 0
-            AND i.due_date < NOW()
-            AND c.email IS NOT NULL
-        `)) as unknown as Array<{
-          id: number;
-          invoice_number: string;
-          balance_due: string;
-          customer_email: string;
-          customer_name: string;
-          days_overdue: number;
-        }>;
+        const { overdueInvoices, alreadySent } = initialData;
 
         if (overdueInvoices.length === 0) {
           logger.info({ tenantId }, 'Payment reminder ladder: no overdue invoices');
           return;
         }
-
-        const alreadySent = (await db.execute(sql`
-          SELECT invoice_id, stage FROM invoice_reminder_log
-          WHERE tenant_id = ${tenantId}
-            AND invoice_id = ANY(${sql.raw(`ARRAY[${overdueInvoices.map((i) => i.id).join(',')}]`)})
-        `)) as unknown as Array<{ invoice_id: number; stage: string }>;
         const sentKey = (invoiceId: number, stage: string) => `${invoiceId}:${stage}`;
         const alreadySentSet = new Set(alreadySent.map((r) => sentKey(r.invoice_id, r.stage)));
 
@@ -1167,21 +1193,25 @@ export function registerSystemJobs(
               }),
             });
 
-            await db.execute(sql`
-              INSERT INTO invoice_reminder_log (tenant_id, invoice_id, stage)
-              VALUES (${tenantId}, ${inv.id}, ${due.stage})
-              ON CONFLICT (tenant_id, invoice_id, stage) DO NOTHING
-            `);
+            await withTenantConnection(db, tenantId, (scopedDb) =>
+              scopedDb.execute(sql`
+                INSERT INTO invoice_reminder_log (tenant_id, invoice_id, stage)
+                VALUES (${tenantId}, ${inv.id}, ${due.stage})
+                ON CONFLICT (tenant_id, invoice_id, stage) DO NOTHING
+              `)
+            );
             sentCount += 1;
 
             // Escalate to the tenant's own contact at the final (30-day) stage — this codebase
             // has no per-customer assigned-rep concept to notify instead (see the sales-service
             // schema: customers has no ownerId/assignedRepId field).
             if (due.stage === 'DAY_30') {
-              const [tenant] = await db
-                .select({ contactEmail: tenants.contactEmail })
-                .from(tenants)
-                .where(eq(tenants.id, tenantId));
+              const [tenant] = await withTenantConnection(db, tenantId, (scopedDb) =>
+                scopedDb
+                  .select({ contactEmail: tenants.contactEmail })
+                  .from(tenants)
+                  .where(eq(tenants.id, tenantId))
+              );
               if (tenant?.contactEmail) {
                 try {
                   await fetch(`${notificationUrl}/notifications/send-raw-internal`, {
@@ -1958,13 +1988,22 @@ export function registerSystemJobs(
       // safe pattern for adding a partition to an existing partitioned table (CREATE TABLE
       // ... PARTITION OF ... FOR VALUES FROM/TO) does not lock concurrent writes to other
       // partitions. IF NOT EXISTS makes re-running this job idempotent.
+      //
+      // RLS (0177_enable_rls_journal_entries.sql): a partition does NOT inherit the parent's
+      // ENABLE/FORCE ROW LEVEL SECURITY flags — only the policy object is shared. A freshly
+      // created partition starts with RLS off and would silently return every tenant's rows to
+      // any query naming it directly until these flags are set explicitly. ENABLE/FORCE ROW
+      // LEVEL SECURITY are themselves idempotent (safe to re-run), so no separate guard needed.
       try {
         const nextYear = new Date().getUTCFullYear() + 1;
         const partitionName = `financial_entries_${nextYear}`;
+        const partitionIdent = sql.raw(`"${partitionName}"`);
         await db.execute(sql`
-          CREATE TABLE IF NOT EXISTS ${sql.raw(`"${partitionName}"`)} PARTITION OF ${financialEntries}
+          CREATE TABLE IF NOT EXISTS ${partitionIdent} PARTITION OF ${financialEntries}
           FOR VALUES FROM (${`${nextYear}-01-01 00:00:00+00`}) TO (${`${nextYear + 1}-01-01 00:00:00+00`})
         `);
+        await db.execute(sql`ALTER TABLE ${partitionIdent} ENABLE ROW LEVEL SECURITY`);
+        await db.execute(sql`ALTER TABLE ${partitionIdent} FORCE ROW LEVEL SECURITY`);
         logger.info({ partitionName }, 'Partition maintenance complete');
       } catch (err) {
         logger.warn({ err }, 'Partition maintenance job failed (non-fatal)');

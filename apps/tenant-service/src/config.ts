@@ -22,7 +22,15 @@ export interface TenantServiceConfig {
 }
 
 export async function loadTenantConfig(): Promise<TenantServiceConfig> {
-  const base = await loadConfigWithSecrets('tenant-service');
+  // PG-027 Session 2: RAZORPAY_KEY_ID/RAZORPAY_KEY_SECRET/RAZORPAY_WEBHOOK_SECRET are payment
+  // credentials — same trust tier as FIELD_ENCRYPTION_KEY (auth-service) and DB/JWT secrets, so
+  // they go through the same Vault-in-production, env-var-in-dev/test path via extraSecrets,
+  // not a plain process.env read with no Vault sourcing. Written back into process.env by
+  // loadConfigWithSecrets itself; billing-internal.routes.ts/billing-webhook.routes.ts's own
+  // process.env['RAZORPAY_...'] reads pick these up unchanged in both environments.
+  const base = await loadConfigWithSecrets('tenant-service', {
+    extraSecrets: ['RAZORPAY_KEY_ID', 'RAZORPAY_KEY_SECRET', 'RAZORPAY_WEBHOOK_SECRET'],
+  });
   return {
     port: parseInt(process.env['TENANT_SERVICE_PORT'] ?? '3011', 10),
     databaseUrl: base.databaseUrl,

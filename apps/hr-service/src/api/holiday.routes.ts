@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { PlatformContextFactory } from '@erp/sdk';
+import { tenantScopedHandler } from '@erp/sdk';
 import { holidayCalendars } from '@erp/db';
 import { and, eq, sql } from 'drizzle-orm';
 import { z } from 'zod';
@@ -7,8 +8,6 @@ import { BusinessError, NotFoundError, ValidationError } from '@erp/types';
 import { PERMISSIONS } from '@erp/types';
 import { authenticate } from '../middleware/authenticate.js';
 import { requirePermission } from '../middleware/authorize.js';
-
-type AuthedRequest = { auth: { tenantId: number; userId: number } };
 
 const HolidayQuerySchema = z.object({
   year: z.coerce.number().int().min(2000).max(2100).optional(),
@@ -40,20 +39,16 @@ const NATIONAL_HOLIDAYS_2026_27: Array<{
   { name: 'Navratri / Dussehra', holidayDate: '2026-10-11', holidayType: 'NATIONAL' },
 ];
 
+// Phase 9 GUC-per-request rollout — migrated 2026-08-21. No external I/O.
 export async function holidayRoutes(
   fastify: FastifyInstance,
   ctxFactory: PlatformContextFactory
 ): Promise<void> {
-  fastify.get<{ Querystring: { year?: string } }>(
+  fastify.get(
     '/holidays',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.HR_MANAGE)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId } = ctx.tenant;
       const query = HolidayQuerySchema.safeParse(request.query);
       if (!query.success)
         throw new ValidationError(query.error.errors.map((e) => e.message).join('; '));
@@ -73,19 +68,14 @@ export async function holidayRoutes(
         .orderBy(holidayCalendars.holidayDate);
 
       return reply.code(200).send({ data: { content: rows, totalElements: rows.length } });
-    }
+    })
   );
 
   fastify.post(
     '/holidays',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.HR_MANAGE)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId } = ctx.tenant;
       const body = CreateHolidaySchema.safeParse(request.body);
       if (!body.success)
         throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
@@ -119,20 +109,15 @@ export async function holidayRoutes(
 
       if (!created) throw new Error('Holiday insert failed');
       return reply.code(201).send({ data: created });
-    }
+    })
   );
 
-  fastify.delete<{ Params: { id: string } }>(
+  fastify.delete(
     '/holidays/:id',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.HR_MANAGE)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-      const id = request.params.id;
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId } = ctx.tenant;
+      const id = (request.params as { id: string }).id;
 
       const [existing] = await ctx.db.raw
         .select({ id: holidayCalendars.id })
@@ -145,19 +130,14 @@ export async function holidayRoutes(
         .where(and(eq(holidayCalendars.id, id), eq(holidayCalendars.tenantId, tenantId)));
 
       return reply.code(204).send();
-    }
+    })
   );
 
   fastify.post(
     '/holidays/seed',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.HR_MANAGE)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId } = ctx.tenant;
 
       let seeded = 0;
       for (const holiday of NATIONAL_HOLIDAYS_2026_27) {
@@ -186,6 +166,6 @@ export async function holidayRoutes(
       return reply
         .code(200)
         .send({ data: { message: `Seeded ${seeded} holidays for 2026-27`, seeded } });
-    }
+    })
   );
 }

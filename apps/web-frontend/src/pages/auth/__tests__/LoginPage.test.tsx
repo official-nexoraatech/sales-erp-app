@@ -143,6 +143,30 @@ describe('LoginPage', () => {
     expect(lookupTenantsMock).not.toHaveBeenCalled();
   });
 
+  it('Capability Foundation: enabledCapabilities from authApi.me() reaches the auth store on login', async () => {
+    lookupTenantsMock.mockResolvedValue({
+      tenants: [{ tenantId: 7, name: 'Acme Textiles', slug: 'acme' }],
+    });
+    loginMock.mockResolvedValue({
+      accessToken: fakeJwt({ roles: [], permissions: [] }),
+      refreshToken: 'refresh-token',
+    });
+    meMock.mockResolvedValue({ id: 1, branches: [], enabledCapabilities: ['HR_PAYROLL'] });
+
+    renderPage();
+    fireEvent.change(screen.getByLabelText(/email/i), { target: { value: 'ada@acme.example' } });
+    fireEvent.click(screen.getByRole('button', { name: /continue/i }));
+
+    fireEvent.change(await screen.findByLabelText(/^password$/i), {
+      target: { value: 'correcthorsebattery' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /sign in/i }));
+
+    await waitFor(() =>
+      expect(useAuthStore.getState().user?.enabledCapabilities).toEqual(['HR_PAYROLL'])
+    );
+  });
+
   it('has no axe violations on the initial email step', async () => {
     const { container } = renderPage();
     const violations = await runAxe(container);

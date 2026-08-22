@@ -21,6 +21,10 @@ vi.mock('drizzle-orm', () => ({
   eq: vi.fn((_a: unknown, _b: unknown) => '__eq__'),
   and: vi.fn((..._args: unknown[]) => '__and__'),
   desc: vi.fn((_a: unknown) => '__desc__'),
+  sql: Object.assign(
+    vi.fn(() => '__sql__'),
+    { raw: vi.fn() }
+  ),
 }));
 
 const sendRawMock = vi.fn().mockResolvedValue({ status: 'QUEUED', logId: 1 });
@@ -35,13 +39,18 @@ import { notificationRoutes } from '../api/notification.routes.js';
 const INTERNAL_KEY = 'test-internal-key';
 
 function makeDb(settingsRows: Array<{ limit: number | null }>): ErpDatabase {
-  return {
+  const db: Record<string, unknown> = {
+    // withTenantConnection wraps every route in a transaction that sets the GUC via
+    // `.execute()` before invoking the callback with this same object as the scoped db.
+    execute: async () => undefined,
     select: vi.fn(() => ({
       from: vi.fn(() => ({
         where: vi.fn(() => Promise.resolve(settingsRows)),
       })),
     })),
-  } as unknown as ErpDatabase;
+  };
+  db['transaction'] = (cb: (trx: unknown) => unknown) => cb(db);
+  return db as unknown as ErpDatabase;
 }
 
 function makeRedis(incrValue: number): Redis {

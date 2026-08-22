@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { PlatformContextFactory } from '@erp/sdk';
-import { getBranchScope } from '@erp/sdk';
+import { tenantScopedHandler, getBranchScope, requireCapability } from '@erp/sdk';
 import { z } from 'zod';
 import { ValidationError } from '@erp/types';
 import { PERMISSIONS } from '@erp/types';
@@ -19,40 +19,38 @@ const GenerateSchema = z.object({
   businessDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'businessDate must be YYYY-MM-DD'),
 });
 
-type AuthedRequest = {
-  auth: { tenantId: number; userId: number; permissions: string[]; branchIds: number[] };
-};
-
+// Phase 9 GUC-per-request rollout — migrated 2026-08-21. No external I/O —
+// DayEndSettlementService.generate()/list() have no fetch() calls. Post-hoc ctx.audit.log() is
+// safe per tenantConnection-nested-rollback.test.ts.
 export async function dayEndRoutes(
   fastify: FastifyInstance,
   ctxFactory: PlatformContextFactory
 ): Promise<void> {
   fastify.post(
     '/pos/day-end/generate',
-    { preHandler: [authenticate, requirePermission(PERMISSIONS.POS_ZREPORT_GENERATE)] },
-    async (request, reply) => {
-      const { tenantId, userId, ...auth } = (request as unknown as AuthedRequest).auth;
+    {
+      preHandler: [
+        authenticate,
+        requireCapability('POS', ctxFactory.rawDb, ctxFactory.getRedis()),
+        requirePermission(PERMISSIONS.POS_ZREPORT_GENERATE),
+      ],
+    },
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
       const body = GenerateSchema.safeParse(request.body);
       if (!body.success)
         throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
 
-      const scope = getBranchScope(auth);
+      const scope = getBranchScope(request.auth);
       if (scope !== 'all' && !scope.includes(body.data.branchId)) {
         return sendError(reply, 403, 'BRANCH_ACCESS_DENIED', 'You are not assigned to this branch');
       }
 
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-
       const settlement = await DayEndSettlementService.generate(
         ctx.db.raw,
-        tenantId,
+        ctx.tenant.tenantId,
         body.data.branchId,
         body.data.businessDate,
-        userId
+        ctx.tenant.userId
       );
 
       await ctx.audit.log({
@@ -62,32 +60,32 @@ export async function dayEndRoutes(
         after: settlement as unknown as Record<string, unknown>,
       });
       return reply.code(201).send({ data: settlement });
-    }
+    })
   );
 
   fastify.get(
     '/pos/day-end',
-    { preHandler: [authenticate, requirePermission(PERMISSIONS.POS_ZREPORT_VIEW)] },
-    async (request, reply) => {
-      const { tenantId, ...auth } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId: 0,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
+    {
+      preHandler: [
+        authenticate,
+        requireCapability('POS', ctxFactory.rawDb, ctxFactory.getRedis()),
+        requirePermission(PERMISSIONS.POS_ZREPORT_VIEW),
+      ],
+    },
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
       const q = request.query as { page?: string; pageSize?: string };
       const page = Math.max(1, parseInt(q.page ?? '1', 10));
       const pageSize = Math.min(100, parseInt(q.pageSize ?? '20', 10));
 
-      const branchScope = getBranchScope(auth);
+      const branchScope = getBranchScope(request.auth);
       const result = await DayEndSettlementService.list(
         ctx.db.raw,
-        tenantId,
+        ctx.tenant.tenantId,
         branchScope,
         page,
         pageSize
       );
       return reply.code(200).send({ data: { ...result, page, pageSize } });
-    }
+    })
   );
 }

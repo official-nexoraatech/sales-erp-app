@@ -31,7 +31,7 @@ export async function authenticate(request: FastifyRequest, reply: FastifyReply)
   // portal JWT must never reach auth-service's own staff-only routes (session management can
   // revoke ANY session by numeric id — exactly the cross-service collision Finding 1 flagged).
   // Portal auth routes (portal-auth.routes.ts) are public and never gated by this middleware.
-  if (request.auth.roles.includes('CUSTOMER')) {
+  if (request.auth.roles.includes('CUSTOMER') || request.auth.roles.includes('PARTNER')) {
     await reply.code(401).send({ error: 'Portal sessions cannot access staff endpoints' });
     return;
   }

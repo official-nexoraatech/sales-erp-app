@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { PlatformContextFactory } from '@erp/sdk';
+import { tenantScopedHandler } from '@erp/sdk';
 import { warehouses, inventoryLedger } from '@erp/db';
 import { and, eq, isNull, or, ilike, sql, inArray } from 'drizzle-orm';
 import { z } from 'zod';
@@ -31,10 +32,7 @@ const WarehouseUpdateSchema = WarehouseSchema.extend({
   version: z.number().int().min(0),
 });
 
-type AuthedRequest = {
-  auth: { tenantId: number; userId: number; permissions: string[]; branchIds: number[] };
-};
-
+// Phase 9 GUC-per-request rollout — migrated 2026-08-21. No external I/O.
 export async function warehouseRoutes(
   fastify: FastifyInstance,
   ctxFactory: PlatformContextFactory
@@ -46,14 +44,9 @@ export async function warehouseRoutes(
   fastify.get(
     '/warehouses',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.WAREHOUSE_VIEW)] },
-    async (request, reply) => {
-      const auth = (request as unknown as AuthedRequest).auth;
-      const { tenantId } = auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId: auth.userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const auth = request.auth;
+      const { tenantId } = ctx.tenant;
       const query = request.query as {
         branchId?: string;
         page?: string;
@@ -109,22 +102,17 @@ export async function warehouseRoutes(
 
       const rows = await ctx.db.raw.select().from(warehouses).where(whereClause);
       return reply.code(200).send({ data: { content: rows, totalElements: rows.length } });
-    }
+    })
   );
 
   // ── GET /warehouses/:id ───────────────────────────────────────────────────
   fastify.get<{ Params: { id: string } }>(
     '/warehouses/:id',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.WAREHOUSE_VIEW)] },
-    async (request, reply) => {
-      const auth = (request as unknown as AuthedRequest).auth;
-      const { tenantId } = auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId: auth.userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-      const id = parseInt(request.params.id, 10);
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const auth = request.auth;
+      const { tenantId } = ctx.tenant;
+      const id = parseInt((request.params as { id: string }).id, 10);
 
       const [wh] = await ctx.db.raw
         .select()
@@ -140,7 +128,7 @@ export async function warehouseRoutes(
       if (!wh) throw new NotFoundError('Warehouse', id);
       assertBranchInScope(wh.branchId, auth);
       return reply.code(200).send({ data: wh });
-    }
+    })
   );
 
   // ── POST /warehouses ──────────────────────────────────────────────────────
@@ -152,14 +140,9 @@ export async function warehouseRoutes(
         requireAnyPermission([PERMISSIONS.WAREHOUSE_CREATE, PERMISSIONS.WAREHOUSE_MANAGE]),
       ],
     },
-    async (request, reply) => {
-      const auth = (request as unknown as AuthedRequest).auth;
-      const { tenantId, userId } = auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const auth = request.auth;
+      const { tenantId, userId } = ctx.tenant;
 
       const body = WarehouseSchema.safeParse(request.body);
       if (!body.success)
@@ -203,7 +186,7 @@ export async function warehouseRoutes(
       });
 
       return reply.code(201).send({ data: created });
-    }
+    })
   );
 
   // ── PUT /warehouses/:id ───────────────────────────────────────────────────
@@ -215,15 +198,10 @@ export async function warehouseRoutes(
         requireAnyPermission([PERMISSIONS.WAREHOUSE_UPDATE, PERMISSIONS.WAREHOUSE_MANAGE]),
       ],
     },
-    async (request, reply) => {
-      const auth = (request as unknown as AuthedRequest).auth;
-      const { tenantId, userId } = auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-      const id = parseInt(request.params.id, 10);
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const auth = request.auth;
+      const { tenantId, userId } = ctx.tenant;
+      const id = parseInt((request.params as { id: string }).id, 10);
 
       const body = WarehouseUpdateSchema.safeParse(request.body);
       if (!body.success)
@@ -298,7 +276,7 @@ export async function warehouseRoutes(
       });
 
       return reply.code(200).send({ data: updated });
-    }
+    })
   );
 
   // ── DELETE /warehouses/:id ────────────────────────────────────────────────
@@ -306,15 +284,10 @@ export async function warehouseRoutes(
   fastify.delete<{ Params: { id: string } }>(
     '/warehouses/:id',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.WAREHOUSE_MANAGE)] },
-    async (request, reply) => {
-      const auth = (request as unknown as AuthedRequest).auth;
-      const { tenantId, userId } = auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-      const id = parseInt(request.params.id, 10);
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const auth = request.auth;
+      const { tenantId, userId } = ctx.tenant;
+      const id = parseInt((request.params as { id: string }).id, 10);
 
       const [existing] = await ctx.db.raw
         .select()
@@ -362,6 +335,6 @@ export async function warehouseRoutes(
       await ctx.events.publish('warehouse', id, 'WAREHOUSE_DELETED', { id });
 
       return reply.code(200).send({ data: { message: 'Warehouse deleted', id } });
-    }
+    })
   );
 }

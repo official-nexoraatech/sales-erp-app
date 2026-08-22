@@ -29,6 +29,9 @@ import { organizationRoutes } from './api/organization.routes.js';
 import { ssoConfigRoutes } from './api/sso-config.routes.js';
 import { branchRoutes } from './api/branch.routes.js';
 import { searchSyncInternalRoutes } from './api/search-sync.internal.routes.js';
+import { billingInternalRoutes } from './api/billing-internal.routes.js';
+import { billingWebhookRoutes } from './api/billing-webhook.routes.js';
+import { billingRoutes } from './api/billing.routes.js';
 import { usageRoutes } from './api/usage.routes.js';
 import { faqRoutes } from './api/faq.routes.js';
 import { demoRequestRoutes } from './api/demo-request.routes.js';
@@ -105,11 +108,14 @@ async function bootstrap(): Promise<void> {
   await fastify.register(
     async (sub) => {
       await tenantRoutes(sub, db, config, ctxFactory);
+      await billingRoutes(sub, db);
       await approvalRoutes(sub, db);
       await organizationRoutes(sub, ctxFactory, config);
       await ssoConfigRoutes(sub, ctxFactory);
       await branchRoutes(sub, ctxFactory);
       await searchSyncInternalRoutes(sub, db);
+      await billingInternalRoutes(sub, db, ctxFactory);
+      await billingWebhookRoutes(sub, db);
       await usageRoutes(sub, db);
       await faqRoutes(sub, db);
       await demoRequestRoutes(sub, db, config);

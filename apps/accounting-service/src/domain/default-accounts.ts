@@ -713,8 +713,14 @@ export async function seedDefaultAccounts(
   ctx: PlatformContext,
   tenantId: number,
   userId: number,
-  vertical: 'CLOTH_RETAIL' | 'GROCERY' = 'CLOTH_RETAIL'
+  vertical: 'CLOTH_RETAIL' | 'GROCERY' | 'DISTRIBUTION' | 'MANUFACTURING' = 'CLOTH_RETAIL'
 ): Promise<number> {
+  // Distribution vertical, Phase A: no Distribution-specific accounts needed (a non-perishable
+  // resale business from a COA standpoint, same as CLOTH_RETAIL) — reuses DEFAULT_ACCOUNTS,
+  // per ERP-PLANNING/DISTRIBUTION-ROADMAP/02-domain-model-and-gaps.md §3. An explicit case, not
+  // a fallthrough default, so a future 4th vertical can't silently inherit this by accident.
+  // Manufacturing vertical, Phase A (BOM): same reasoning — no manufacturing-specific COA is in
+  // scope yet, so it also reuses DEFAULT_ACCOUNTS, explicitly (not via the ternary's default arm).
   const accountList = vertical === 'GROCERY' ? GROCERY_DEFAULT_ACCOUNTS : DEFAULT_ACCOUNTS;
   await ctx.db.transaction(async (trx) => {
     const codeToId = new Map<string, number>();

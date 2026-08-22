@@ -25,13 +25,14 @@ import {
   TenantScopedDatabase,
   WorkflowEngine,
   RuleEngine,
+  ValuationService,
 } from '@erp/sdk';
 import { GSTCalculator } from '@erp/utils';
 import { createLogger } from '@erp/logger';
 import { NumberSeriesEngine } from './NumberSeriesEngine.js';
-import { ValuationService } from './ValuationService.js';
 import { enqueueWebhookDeliveries } from './WebhookService.js';
 import { CommissionService } from './CommissionService.js';
+import { PricingResolutionService } from './PricingResolutionService.js';
 import { ulid } from 'ulid';
 
 const logger = createLogger({ serviceName: 'sales-service' });
@@ -94,7 +95,7 @@ export interface InvoiceLineInput {
   description?: string;
   quantity: number;
   unitId?: number;
-  unitPrice: number;
+  unitPrice?: number;
   discountPct?: number;
   discountAmount?: number;
   gstRate: number;
@@ -143,8 +144,29 @@ export class InvoiceService {
 
   private async createInTransaction(params: CreateInvoiceParams): Promise<number> {
     return this.db.transaction(async (trx) => {
+      // Distribution vertical, Phase B: resolve each line's authoritative unitPrice against the
+      // customer's price list before anything else (GST totals, credit-limit check, and the
+      // price-floor check below all need the final resolved price, not the raw client value).
+      // Kept as its own small query rather than folded into Step 1's customer fetch below, since
+      // that fetch is gated behind `customerLimitEnabled`/credit-check logic this change
+      // shouldn't need to touch.
+      let customerPriceListId: number | null = null;
+      if (params.customerId > 0) {
+        const [priceListRow] = await trx
+          .select({ priceListId: customers.priceListId })
+          .from(customers)
+          .where(and(eq(customers.id, params.customerId), eq(customers.tenantId, params.tenantId)));
+        customerPriceListId = priceListRow?.priceListId ?? null;
+      }
+      const resolvedLines = await PricingResolutionService.resolveLines(
+        trx,
+        params.tenantId,
+        customerPriceListId,
+        params.lines
+      );
+
       // Compute line totals first for credit check
-      const computedLines = params.lines.map((l, i) => {
+      const computedLines = resolvedLines.map((l, i) => {
         const gst = GSTCalculator.computeLine({
           unitPrice: l.unitPrice,
           quantity: l.quantity,
@@ -237,9 +259,9 @@ export class InvoiceService {
         }
       }
 
-      // Step 2 — Validate price floor
+      // Step 2 — Validate price floor (against the resolved price, not the raw client value)
       if (!params.overridePriceFloor) {
-        for (const l of params.lines) {
+        for (const l of resolvedLines) {
           const [item] = await trx
             .select({ minSalePrice: items.minSalePrice, trackInventory: items.trackInventory })
             .from(items)

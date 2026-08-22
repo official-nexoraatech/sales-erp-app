@@ -1,21 +1,29 @@
 import type { FastifyInstance } from 'fastify';
 import { and, desc, eq } from 'drizzle-orm';
 import type { ErpDatabase } from '@erp/db';
-import {
-  customers,
-  invoices,
-  invoiceLines,
-  crmTickets,
-  crmTicketMessages,
-  crmReferralRewards,
-  customerCommunicationPreferences,
-} from '@erp/db';
+import { customers, invoices, invoiceLines, customerCommunicationPreferences } from '@erp/db';
 import { z } from 'zod';
+import { createCircuitBreaker, withTenantConnection } from '@erp/sdk';
 import { NotFoundError, ValidationError } from '@erp/types';
 import { requirePortalAuth } from '../middleware/portal-auth.js';
-import { TicketService } from '../domain/TicketService.js';
-import { LoyaltyService } from '../domain/LoyaltyService.js';
-import { ReferralService } from '../domain/ReferralService.js';
+
+// CRM/O2C split — getBalance moved to crm-service; this helper reaches it over HTTP, mirroring
+// customer-360.routes.ts's fetchHealthPredictions.
+async function fetchLoyaltyBalance(
+  crmServiceUrl: string,
+  internalKey: string,
+  tenantId: number,
+  customerId: number
+): Promise<unknown> {
+  const res = await fetch(
+    `${crmServiceUrl}/api/v2/internal/customers/${customerId}/loyalty-balance?tenantId=${tenantId}`,
+    { headers: { 'x-internal-key': internalKey } }
+  );
+  if (!res.ok) throw new Error(`crm-service loyalty-balance call failed: ${res.status}`);
+  const json = (await res.json()) as { data: unknown };
+  return json.data;
+}
+const loyaltyBalanceBreaker = createCircuitBreaker(fetchLoyaltyBalance, 'crm-service');
 
 // CRM-ROADMAP Phase 3, Feature 2 (Self-Service Customer Portal).
 //
@@ -31,16 +39,12 @@ import { ReferralService } from '../domain/ReferralService.js';
 // (request.portalAuth), never a URL/body field of the same name. An ownership mismatch on a
 // customer-scoped row always returns 404 (NotFoundError), never 403 — a 403 would confirm the
 // row exists for a different customer, which is itself a cross-customer information leak.
-
-const TicketCreateSchema = z.object({
-  subject: z.string().min(2).max(300),
-  description: z.string().max(5000).optional(),
-  ticketType: z.enum(['COMPLAINT', 'INQUIRY', 'RETURN_REQUEST', 'OTHER']).default('OTHER'),
-});
-
-const TicketMessageSchema = z.object({
-  body: z.string().min(1).max(5000),
-});
+//
+// Phase 9 GUC-per-request rollout — migrated 2026-08-21 (all but one route). No
+// PlatformContextFactory here (identity comes from request.portalAuth, not req.auth) — uses
+// withTenantConnection(db, tenantId, ...) directly per route, same pattern as ai-copilot-service.
+// GET /portal/loyalty is deliberately NOT migrated: it makes a real fetch() call to crm-service
+// (checklist caveat 4).
 
 const PreferencesSchema = z.object({
   preferences: z
@@ -58,17 +62,20 @@ export async function portalRoutes(fastify: FastifyInstance, db: ErpDatabase): P
   // ── GET /portal/me ────────────────────────────────────────────────────────
   fastify.get('/portal/me', { preHandler: [requirePortalAuth] }, async (request, reply) => {
     const { tenantId, customerId } = request.portalAuth;
-    const [customer] = await db
-      .select({
-        id: customers.id,
-        displayName: customers.displayName,
-        phone: customers.phone,
-        email: customers.email,
-        customerType: customers.customerType,
-        loyaltyPoints: customers.loyaltyPoints,
-      })
-      .from(customers)
-      .where(and(eq(customers.id, customerId), eq(customers.tenantId, tenantId)));
+    const customer = await withTenantConnection(db, tenantId, async (scopedDb) => {
+      const [row] = await scopedDb
+        .select({
+          id: customers.id,
+          displayName: customers.displayName,
+          phone: customers.phone,
+          email: customers.email,
+          customerType: customers.customerType,
+          loyaltyPoints: customers.loyaltyPoints,
+        })
+        .from(customers)
+        .where(and(eq(customers.id, customerId), eq(customers.tenantId, tenantId)));
+      return row;
+    });
     if (!customer) throw new NotFoundError('Customer', customerId);
     return reply.code(200).send({ data: customer });
   });
@@ -76,19 +83,21 @@ export async function portalRoutes(fastify: FastifyInstance, db: ErpDatabase): P
   // ── GET /portal/orders ───────────────────────────────────────────────────
   fastify.get('/portal/orders', { preHandler: [requirePortalAuth] }, async (request, reply) => {
     const { tenantId, customerId } = request.portalAuth;
-    const rows = await db
-      .select({
-        id: invoices.id,
-        invoiceNumber: invoices.invoiceNumber,
-        invoiceDate: invoices.invoiceDate,
-        status: invoices.status,
-        grandTotal: invoices.grandTotal,
-        balanceDue: invoices.balanceDue,
-      })
-      .from(invoices)
-      .where(and(eq(invoices.customerId, customerId), eq(invoices.tenantId, tenantId)))
-      .orderBy(desc(invoices.invoiceDate))
-      .limit(100);
+    const rows = await withTenantConnection(db, tenantId, (scopedDb) =>
+      scopedDb
+        .select({
+          id: invoices.id,
+          invoiceNumber: invoices.invoiceNumber,
+          invoiceDate: invoices.invoiceDate,
+          status: invoices.status,
+          grandTotal: invoices.grandTotal,
+          balanceDue: invoices.balanceDue,
+        })
+        .from(invoices)
+        .where(and(eq(invoices.customerId, customerId), eq(invoices.tenantId, tenantId)))
+        .orderBy(desc(invoices.invoiceDate))
+        .limit(100)
+    );
     return reply.code(200).send({ data: { content: rows, totalElements: rows.length } });
   });
 
@@ -100,185 +109,54 @@ export async function portalRoutes(fastify: FastifyInstance, db: ErpDatabase): P
       const { tenantId, customerId } = request.portalAuth;
       const id = parseInt(request.params.id, 10);
 
-      const [invoice] = await db
-        .select()
-        .from(invoices)
-        .where(
-          and(
-            eq(invoices.id, id),
-            eq(invoices.tenantId, tenantId),
-            eq(invoices.customerId, customerId)
-          )
-        );
-      if (!invoice) throw new NotFoundError('Order', id);
+      const result = await withTenantConnection(db, tenantId, async (scopedDb) => {
+        const [invoice] = await scopedDb
+          .select()
+          .from(invoices)
+          .where(
+            and(
+              eq(invoices.id, id),
+              eq(invoices.tenantId, tenantId),
+              eq(invoices.customerId, customerId)
+            )
+          );
+        if (!invoice) return null;
 
-      const lines = await db.select().from(invoiceLines).where(eq(invoiceLines.invoiceId, id));
+        const lines = await scopedDb
+          .select()
+          .from(invoiceLines)
+          .where(eq(invoiceLines.invoiceId, id));
+        return { ...invoice, lines };
+      });
+      if (!result) throw new NotFoundError('Order', id);
 
-      return reply.code(200).send({ data: { ...invoice, lines } });
+      return reply.code(200).send({ data: result });
     }
   );
 
-  // ── GET /portal/tickets ───────────────────────────────────────────────────
-  fastify.get('/portal/tickets', { preHandler: [requirePortalAuth] }, async (request, reply) => {
-    const { tenantId, customerId } = request.portalAuth;
-    const rows = await db
-      .select()
-      .from(crmTickets)
-      .where(and(eq(crmTickets.customerId, customerId), eq(crmTickets.tenantId, tenantId)))
-      .orderBy(desc(crmTickets.createdAt))
-      .limit(100);
-    return reply.code(200).send({ data: { content: rows, totalElements: rows.length } });
-  });
-
-  // ── POST /portal/tickets ──────────────────────────────────────────────────
-  fastify.post('/portal/tickets', { preHandler: [requirePortalAuth] }, async (request, reply) => {
-    const { tenantId, customerId, sub } = request.portalAuth;
-
-    const body = TicketCreateSchema.safeParse(request.body);
-    if (!body.success)
-      throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
-
-    const created = await TicketService.create(db, {
-      tenantId,
-      customerId,
-      createdByPortalAccountId: parseInt(sub, 10),
-      subject: body.data.subject,
-      description: body.data.description,
-      ticketType: body.data.ticketType,
-    });
-
-    return reply.code(201).send({ data: created });
-  });
-
-  // ── GET /portal/tickets/:id ────────────────────────────────────────────────
-  fastify.get<{ Params: { id: string } }>(
-    '/portal/tickets/:id',
-    { preHandler: [requirePortalAuth] },
-    async (request, reply) => {
-      const { tenantId, customerId } = request.portalAuth;
-      const id = parseInt(request.params.id, 10);
-
-      const [ticket] = await db
-        .select()
-        .from(crmTickets)
-        .where(
-          and(
-            eq(crmTickets.id, id),
-            eq(crmTickets.tenantId, tenantId),
-            eq(crmTickets.customerId, customerId)
-          )
-        );
-      if (!ticket) throw new NotFoundError('Ticket', id);
-
-      return reply.code(200).send({ data: ticket });
-    }
-  );
-
-  // ── GET /portal/tickets/:id/messages ─────────────────────────────────────
-  // Filtered to CUSTOMER_VISIBLE only — internal staff notes on the same ticket must never
-  // reach this endpoint, whatever the caller sends.
-  fastify.get<{ Params: { id: string } }>(
-    '/portal/tickets/:id/messages',
-    { preHandler: [requirePortalAuth] },
-    async (request, reply) => {
-      const { tenantId, customerId } = request.portalAuth;
-      const id = parseInt(request.params.id, 10);
-
-      const [ticket] = await db
-        .select({ id: crmTickets.id })
-        .from(crmTickets)
-        .where(
-          and(
-            eq(crmTickets.id, id),
-            eq(crmTickets.tenantId, tenantId),
-            eq(crmTickets.customerId, customerId)
-          )
-        );
-      if (!ticket) throw new NotFoundError('Ticket', id);
-
-      const rows = await db
-        .select()
-        .from(crmTicketMessages)
-        .where(
-          and(
-            eq(crmTicketMessages.ticketId, id),
-            eq(crmTicketMessages.tenantId, tenantId),
-            eq(crmTicketMessages.visibility, 'CUSTOMER_VISIBLE')
-          )
-        )
-        .orderBy(crmTicketMessages.createdAt);
-
-      return reply.code(200).send({ data: { content: rows, totalElements: rows.length } });
-    }
-  );
-
-  // ── POST /portal/tickets/:id/messages ────────────────────────────────────
-  fastify.post<{ Params: { id: string } }>(
-    '/portal/tickets/:id/messages',
-    { preHandler: [requirePortalAuth] },
-    async (request, reply) => {
-      const { tenantId, customerId } = request.portalAuth;
-      const id = parseInt(request.params.id, 10);
-
-      const body = TicketMessageSchema.safeParse(request.body);
-      if (!body.success)
-        throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
-
-      const [ticket] = await db
-        .select({ id: crmTickets.id })
-        .from(crmTickets)
-        .where(
-          and(
-            eq(crmTickets.id, id),
-            eq(crmTickets.tenantId, tenantId),
-            eq(crmTickets.customerId, customerId)
-          )
-        );
-      if (!ticket) throw new NotFoundError('Ticket', id);
-
-      const [customer] = await db
-        .select({ displayName: customers.displayName })
-        .from(customers)
-        .where(and(eq(customers.id, customerId), eq(customers.tenantId, tenantId)));
-
-      const created = await TicketService.addMessage(
-        db,
-        tenantId,
-        id,
-        null,
-        customer?.displayName ?? 'Customer',
-        'CUSTOMER_VISIBLE',
-        body.data.body
-      );
-
-      return reply.code(201).send({ data: created });
-    }
-  );
+  // Ticket routes (/portal/tickets*) moved to crm-service's own portal.routes.ts — CRM/O2C
+  // split, migration 12.
 
   // ── GET /portal/loyalty ───────────────────────────────────────────────────
+  // CRM/O2C split — getBalance moved to crm-service; reaches it over HTTP now, same
+  // x-internal-key + circuit-breaker pattern as customer-360.routes.ts's fetchHealthPredictions.
+  // Not part of a Promise.allSettled composition (this is a single-purpose endpoint), so a
+  // failed/circuit-open call propagates as a normal error response instead of degrading.
   fastify.get('/portal/loyalty', { preHandler: [requirePortalAuth] }, async (request, reply) => {
     const { tenantId, customerId } = request.portalAuth;
-    const loyaltyService = new LoyaltyService(db);
-    const balance = await loyaltyService.getBalance(customerId, tenantId);
+    const crmServiceUrl = process.env['CRM_SERVICE_URL'] ?? 'http://localhost:3026';
+    const internalKey = process.env['INTERNAL_API_KEY'] ?? '';
+    const balance = await loyaltyBalanceBreaker.fire(
+      crmServiceUrl,
+      internalKey,
+      tenantId,
+      customerId
+    );
     return reply.code(200).send({ data: balance });
   });
 
-  // ── GET /portal/referral ──────────────────────────────────────────────────
-  fastify.get('/portal/referral', { preHandler: [requirePortalAuth] }, async (request, reply) => {
-    const { tenantId, customerId } = request.portalAuth;
-    const code = await ReferralService.getOrCreateCode(db, tenantId, customerId);
-    const rewards = await db
-      .select()
-      .from(crmReferralRewards)
-      .where(
-        and(
-          eq(crmReferralRewards.referrerCustomerId, customerId),
-          eq(crmReferralRewards.tenantId, tenantId)
-        )
-      )
-      .orderBy(desc(crmReferralRewards.createdAt));
-    return reply.code(200).send({ data: { code: code.code, rewards } });
-  });
+  // Referral routes (/portal/referral) moved to crm-service's own portal.routes.ts —
+  // CRM/O2C split, migration 12.
 
   // ── GET /portal/preferences ───────────────────────────────────────────────
   fastify.get(
@@ -286,15 +164,17 @@ export async function portalRoutes(fastify: FastifyInstance, db: ErpDatabase): P
     { preHandler: [requirePortalAuth] },
     async (request, reply) => {
       const { tenantId, customerId } = request.portalAuth;
-      const rows = await db
-        .select()
-        .from(customerCommunicationPreferences)
-        .where(
-          and(
-            eq(customerCommunicationPreferences.customerId, customerId),
-            eq(customerCommunicationPreferences.tenantId, tenantId)
+      const rows = await withTenantConnection(db, tenantId, (scopedDb) =>
+        scopedDb
+          .select()
+          .from(customerCommunicationPreferences)
+          .where(
+            and(
+              eq(customerCommunicationPreferences.customerId, customerId),
+              eq(customerCommunicationPreferences.tenantId, tenantId)
+            )
           )
-        );
+      );
       return reply.code(200).send({ data: { content: rows, totalElements: rows.length } });
     }
   );
@@ -310,37 +190,39 @@ export async function portalRoutes(fastify: FastifyInstance, db: ErpDatabase): P
       if (!body.success)
         throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
 
-      const saved = await Promise.all(
-        body.data.preferences.map(async (pref) => {
-          const [row] = await db
-            .insert(customerCommunicationPreferences)
-            .values({
-              tenantId,
-              customerId,
-              channel: pref.channel,
-              category: pref.category,
-              consented: pref.consented,
-              consentSource: 'CUSTOMER_PORTAL',
-              consentRecordedAt: new Date(),
-              updatedAt: new Date(),
-            })
-            .onConflictDoUpdate({
-              target: [
-                customerCommunicationPreferences.tenantId,
-                customerCommunicationPreferences.customerId,
-                customerCommunicationPreferences.channel,
-                customerCommunicationPreferences.category,
-              ],
-              set: {
+      const saved = await withTenantConnection(db, tenantId, (scopedDb) =>
+        Promise.all(
+          body.data.preferences.map(async (pref) => {
+            const [row] = await scopedDb
+              .insert(customerCommunicationPreferences)
+              .values({
+                tenantId,
+                customerId,
+                channel: pref.channel,
+                category: pref.category,
                 consented: pref.consented,
                 consentSource: 'CUSTOMER_PORTAL',
                 consentRecordedAt: new Date(),
                 updatedAt: new Date(),
-              },
-            })
-            .returning();
-          return row;
-        })
+              })
+              .onConflictDoUpdate({
+                target: [
+                  customerCommunicationPreferences.tenantId,
+                  customerCommunicationPreferences.customerId,
+                  customerCommunicationPreferences.channel,
+                  customerCommunicationPreferences.category,
+                ],
+                set: {
+                  consented: pref.consented,
+                  consentSource: 'CUSTOMER_PORTAL',
+                  consentRecordedAt: new Date(),
+                  updatedAt: new Date(),
+                },
+              })
+              .returning();
+            return row;
+          })
+        )
       );
 
       return reply.code(200).send({ data: { content: saved, totalElements: saved.length } });

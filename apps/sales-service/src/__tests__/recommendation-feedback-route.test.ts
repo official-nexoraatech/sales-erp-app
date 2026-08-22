@@ -1,9 +1,10 @@
 // CRM-ROADMAP Phase 3, Feature 1 — route-level coverage for POST /recommendations/:id/feedback.
-// The dismiss-aware merge logic itself (HealthScoringService.recordFeedback/
-// computeAndCachePredictions) is already covered by health-scoring-service.test.ts; this file
-// covers the thin route wrapper: validation, 404 for an unknown id, and the success path against
-// a real row.
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+// The dismiss-aware merge logic itself (recordFeedback) moved to crm-service (CRM/O2C split)
+// and is covered there by apps/crm-service/src/__tests__/health-scoring-service.test.ts; this
+// file covers the thin route wrapper: validation, and that it forwards to/interprets the
+// crm-service response correctly. Mocks fetch rather than depending on a live crm-service
+// process being up and rebuilt, same as customer-360-degradation.test.ts.
+import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { generateKeyPairSync } from 'node:crypto';
 import { SignJWT, importPKCS8, type KeyLike } from 'jose';
@@ -16,6 +17,11 @@ import { customer360Routes } from '../api/customer-360.routes.js';
 
 const DB_URL = process.env['DATABASE_URL'];
 const TEST_ISSUER = process.env['JWT_ISSUER'] ?? 'erp-auth-service';
+
+process.env['CRM_SERVICE_URL'] = 'http://crm-service.test';
+process.env['INTERNAL_API_KEY'] = 'test-internal-key';
+const fetchMock = vi.fn();
+vi.stubGlobal('fetch', fetchMock);
 
 describe.skipIf(!DB_URL)('POST /recommendations/:id/feedback', () => {
   let db: ReturnType<typeof createDatabaseClient>;
@@ -111,6 +117,7 @@ describe.skipIf(!DB_URL)('POST /recommendations/:id/feedback', () => {
     await db.delete(crmNextBestActions).where(eq(crmNextBestActions.tenantId, TEST_TENANT));
     await db.delete(customers).where(eq(customers.tenantId, TEST_TENANT));
     await db.delete(branches).where(eq(branches.tenantId, TEST_TENANT));
+    vi.unstubAllGlobals();
   });
 
   it('rejects an invalid action value', async () => {
@@ -125,6 +132,8 @@ describe.skipIf(!DB_URL)('POST /recommendations/:id/feedback', () => {
   });
 
   it('404s for a recommendation id that does not exist', async () => {
+    fetchMock.mockResolvedValueOnce({ ok: true, json: async () => ({ data: { updated: false } }) });
+
     const token = await makeToken([PERMISSIONS.CRM_360_VIEW]);
     const res = await app.inject({
       method: 'POST',
@@ -135,7 +144,9 @@ describe.skipIf(!DB_URL)('POST /recommendations/:id/feedback', () => {
     expect(res.statusCode).toBe(404);
   });
 
-  it('dismisses a real recommendation and persists it', async () => {
+  it('dismisses a recommendation via crm-service and returns 200, forwarding the right id/tenant', async () => {
+    fetchMock.mockResolvedValueOnce({ ok: true, json: async () => ({ data: { updated: true } }) });
+
     const token = await makeToken([PERMISSIONS.CRM_360_VIEW]);
     const res = await app.inject({
       method: 'POST',
@@ -145,10 +156,11 @@ describe.skipIf(!DB_URL)('POST /recommendations/:id/feedback', () => {
     });
     expect(res.statusCode).toBe(200);
 
-    const [row] = await db
-      .select()
-      .from(crmNextBestActions)
-      .where(eq(crmNextBestActions.id, actionId));
-    expect(row!.dismissed).toBe(true);
+    const [, options] = fetchMock.mock.calls.at(-1)! as [string, { body: string }];
+    const url = fetchMock.mock.calls.at(-1)![0] as string;
+    expect(url).toContain(`/internal/recommendations/${actionId}/feedback`);
+    const body = JSON.parse(options.body) as { tenantId: number; action: string };
+    expect(body.tenantId).toBe(TEST_TENANT);
+    expect(body.action).toBe('DISMISS');
   });
 });

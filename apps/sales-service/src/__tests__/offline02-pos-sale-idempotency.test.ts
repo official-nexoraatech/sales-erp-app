@@ -12,6 +12,7 @@ import { generateKeyPairSync } from 'node:crypto';
 import { SignJWT, importPKCS8, type KeyLike } from 'jose';
 import { PERMISSIONS } from '@erp/types';
 import type * as InvoiceServiceModule from '../domain/InvoiceService.js';
+import type * as ErpSdk from '@erp/sdk';
 
 vi.mock('@erp/db', () => ({
   posSessions: {
@@ -51,6 +52,16 @@ vi.mock('@erp/db', () => ({
   webhookSubscriptions: {},
   webhookDeliveries: {},
 }));
+
+// Phase 3B (POS capability) — requireCapability() is now called eagerly at route-registration
+// time (posRoutes(app, makeCtxFactory(...)) below), and makeCtxFactory's return value has no
+// rawDb/getRedis (this test's purpose is offline-retry idempotency, not capability resolution,
+// which is covered by pos-capability.test.ts). Mock only requireCapability to always allow —
+// keep the rest of @erp/sdk real, since pos.routes.ts also calls getBranchScope() from it.
+vi.mock('@erp/sdk', async (importOriginal) => {
+  const actual = await importOriginal<typeof ErpSdk>();
+  return { ...actual, requireCapability: () => async () => {} };
+});
 
 vi.mock('drizzle-orm', () => ({
   and: vi.fn((...args) => ({ type: 'and', args })),
@@ -148,6 +159,8 @@ function makeCtxFactory(script: unknown[]) {
       events: { publish: vi.fn() },
       audit: { log: vi.fn() },
     }),
+    rawDb: {},
+    getRedis: () => ({}),
   } as never;
 }
 

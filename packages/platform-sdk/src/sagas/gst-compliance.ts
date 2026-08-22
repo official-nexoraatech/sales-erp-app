@@ -2,6 +2,7 @@ import { eq, and } from 'drizzle-orm';
 import { invoices, einvoiceData, type ErpDatabase } from '@erp/db';
 import { NotFoundError } from '@erp/types';
 import type { SagaStepDefinition, SagaStepFactory } from '../saga.js';
+import { withTenantConnection } from '../tenantConnection.js';
 
 // PG-006: the first registered saga type. Two sequential NIC calls for the same
 // invoice — e-Invoice IRN generation, then (conditionally) e-Way Bill generation —
@@ -44,11 +45,14 @@ export function createGstComplianceStepFactory(
     const userId = payload['userId'] as number;
     const correlationId = payload['correlationId'] as string;
 
-    const [invoice] = await db
-      .select({ grandTotal: invoices.grandTotal })
-      .from(invoices)
-      .where(and(eq(invoices.id, invoiceId), eq(invoices.tenantId, tenantId)))
-      .limit(1);
+    // RLS-readiness follow-up (2026-08-22): was a bare db.select with no GUC set.
+    const [invoice] = await withTenantConnection(db, tenantId, (scopedDb) =>
+      scopedDb
+        .select({ grandTotal: invoices.grandTotal })
+        .from(invoices)
+        .where(and(eq(invoices.id, invoiceId), eq(invoices.tenantId, tenantId)))
+        .limit(1)
+    );
     if (!invoice) throw new NotFoundError('Invoice', invoiceId);
 
     const context: GstComplianceContext = { tenantId, userId, invoiceId, correlationId };
@@ -71,10 +75,17 @@ export function createGstComplianceStepFactory(
         // a manual-review flag (matches EInvoiceEventConsumer's own CANCEL_REQUIRED_MANUALLY
         // status for the same class of irreversible-external-side-effect problem).
         compensate: async (ctx) => {
-          await db
-            .update(einvoiceData)
-            .set({ ewbStatus: 'EWB_GENERATION_FAILED_MANUAL_REVIEW', updatedAt: new Date() })
-            .where(and(eq(einvoiceData.tenantId, ctx.tenantId), eq(einvoiceData.invoiceId, ctx.invoiceId)));
+          await withTenantConnection(db, ctx.tenantId, (scopedDb) =>
+            scopedDb
+              .update(einvoiceData)
+              .set({ ewbStatus: 'EWB_GENERATION_FAILED_MANUAL_REVIEW', updatedAt: new Date() })
+              .where(
+                and(
+                  eq(einvoiceData.tenantId, ctx.tenantId),
+                  eq(einvoiceData.invoiceId, ctx.invoiceId)
+                )
+              )
+          );
         },
       });
     }

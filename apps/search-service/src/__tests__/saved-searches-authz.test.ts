@@ -25,7 +25,14 @@ vi.mock('@erp/types', async (importOriginal) => {
   return { ...actual, PERMISSIONS: { ...actual.PERMISSIONS, SEARCH_GLOBAL: 'SEARCH_GLOBAL' } };
 });
 
-vi.mock('@erp/db', () => ({ savedSearches: { __name: 'savedSearches', tenantId: '__tenantId__', userId: '__userId__', id: '__id__' } }));
+vi.mock('@erp/db', () => ({
+  savedSearches: {
+    __name: 'savedSearches',
+    tenantId: '__tenantId__',
+    userId: '__userId__',
+    id: '__id__',
+  },
+}));
 
 const { eqMock } = vi.hoisted(() => ({ eqMock: vi.fn(() => '__eq__') }));
 
@@ -33,34 +40,49 @@ vi.mock('drizzle-orm', () => ({
   eq: eqMock,
   and: vi.fn(() => '__and__'),
   desc: vi.fn(() => '__desc__'),
+  sql: Object.assign(
+    vi.fn(() => '__sql__'),
+    { raw: vi.fn() }
+  ),
 }));
 
-function authHeader(auth: { tenantId: number; userId: number; permissions: string[] }): Record<string, string> {
+function authHeader(auth: {
+  tenantId: number;
+  userId: number;
+  permissions: string[];
+}): Record<string, string> {
   return { authorization: `Bearer ${JSON.stringify(auth)}` };
 }
 
 function makeFakeDb() {
   const rows: Record<string, unknown>[] = [];
-  return {
-    rows,
-    db: {
-      select: () => ({
-        from: () => ({
-          where: (): unknown => Object.assign(Promise.resolve(rows.slice()), {
+  const db: Record<string, unknown> = {
+    // withTenantConnection wraps every route in a transaction that sets the GUC via
+    // `.execute()` before invoking the callback with this same object as the scoped db.
+    execute: async () => undefined,
+    transaction: async (cb: (trx: unknown) => unknown) => cb(db),
+    select: () => ({
+      from: () => ({
+        where: (): unknown =>
+          Object.assign(Promise.resolve(rows.slice()), {
             orderBy: () => Promise.resolve(rows.slice()),
           }),
-        }),
       }),
-      insert: () => ({
-        values: (val: Record<string, unknown>) => {
-          const created = { id: rows.length + 1, ...val };
-          rows.push(created);
-          return { returning: async () => [created] };
-        },
-      }),
-      delete: () => ({ where: async () => { rows.length = 0; } }),
-    },
+    }),
+    insert: () => ({
+      values: (val: Record<string, unknown>) => {
+        const created = { id: rows.length + 1, ...val };
+        rows.push(created);
+        return { returning: async () => [created] };
+      },
+    }),
+    delete: () => ({
+      where: async () => {
+        rows.length = 0;
+      },
+    }),
   };
+  return { rows, db };
 }
 
 describe('saved-searches routes', () => {
@@ -103,7 +125,9 @@ describe('saved-searches routes', () => {
     });
 
     expect(res.statusCode).toBe(201);
-    const body = JSON.parse(res.body) as { data: { name: string; userId: number; tenantId: number } };
+    const body = JSON.parse(res.body) as {
+      data: { name: string; userId: number; tenantId: number };
+    };
     expect(body.data.name).toBe('Overdue invoices');
     expect(body.data.userId).toBe(7);
     expect(body.data.tenantId).toBe(1);

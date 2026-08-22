@@ -55,8 +55,15 @@ function buildFakeDb(executeResults: unknown[]) {
   const onConflictSets: Array<Record<string, unknown>> = [];
   const updateSets: Array<Record<string, unknown>> = [];
 
-  return {
-    execute: vi.fn(() => Promise.resolve(executeResults[executeIndex++] ?? [])),
+  const db = {
+    // RLS-readiness follow-up (2026-08-22): withTenantConnection's own SET LOCAL call also
+    // goes through this same execute() — swallow that one specifically rather than letting it
+    // consume a slot meant for a real rebuild query (sql is mocked above to return
+    // {strings, values}).
+    execute: vi.fn((query?: { strings?: string[] }) => {
+      if (query?.strings?.some((s) => s.includes('set_config'))) return Promise.resolve([]);
+      return Promise.resolve(executeResults[executeIndex++] ?? []);
+    }),
     insert: vi.fn(() => ({
       values: vi.fn((values: Record<string, unknown>) => {
         insertValues.push(values);
@@ -74,10 +81,15 @@ function buildFakeDb(executeResults: unknown[]) {
         return { where: vi.fn(() => Promise.resolve()) };
       }),
     })),
+    // Rebuild jobs now go through withTenantConnection, which calls
+    // pooledDb.transaction(async trx => { await trx.execute(...); return fn(trx); }) — the
+    // mock runs the callback against itself, same identity pattern used elsewhere.
+    transaction: vi.fn((fn: (trx: unknown) => Promise<unknown>) => fn(db)),
     insertValues,
     onConflictSets,
     updateSets,
   };
+  return db;
 }
 
 afterEach(() => {

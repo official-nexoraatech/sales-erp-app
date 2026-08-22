@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { PlatformContextFactory, TenantScopedDatabase } from '@erp/sdk';
-import { PlatformEventBus } from '@erp/sdk';
+import { PlatformEventBus, tenantScopedHandler, withTenantConnection } from '@erp/sdk';
 import { attendance, shifts, employees, biometricDeviceConfigs } from '@erp/db';
 import { and, eq, gte, inArray, isNull, lte } from 'drizzle-orm';
 import { z } from 'zod';
@@ -14,8 +14,6 @@ import {
   type BiometricColumnMapping,
   type BiometricDeviceConfigInput,
 } from '../domain/BiometricPunchNormalizer.js';
-
-type AuthedRequest = { auth: { tenantId: number; userId: number } };
 
 const MAX_PUNCH_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 const ALLOWED_PUNCH_MIME_TYPES = new Set(['text/csv', 'text/plain']);
@@ -137,6 +135,11 @@ function computeWorkHours(
   };
 }
 
+// Phase 9 GUC-per-request rollout — migrated 2026-08-21. Every route except
+// POST /attendance/import has no external I/O and migrates via tenantScopedHandler.
+// /attendance/import calls scheduler-service 4 times (upload/map/validate/execute) with DB
+// reads before and a DB audit-log write after — restructured per caveat 4g into two separate
+// withTenantConnection wraps, with the scheduler calls running strictly between them.
 export async function attendanceRoutes(
   fastify: FastifyInstance,
   ctxFactory: PlatformContextFactory
@@ -145,31 +148,21 @@ export async function attendanceRoutes(
   fastify.get(
     '/shifts',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.ATTENDANCE_VIEW)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId } = ctx.tenant;
       const rows = await ctx.db.raw
         .select()
         .from(shifts)
         .where(and(eq(shifts.tenantId, tenantId), eq(shifts.isActive, true)));
       return reply.code(200).send({ data: { content: rows, totalElements: rows.length } });
-    }
+    })
   );
 
   fastify.post(
     '/shifts',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.ATTENDANCE_MARK)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId, userId } = ctx.tenant;
       const body = ShiftSchema.safeParse(request.body);
       if (!body.success)
         throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
@@ -191,20 +184,15 @@ export async function attendanceRoutes(
         .returning();
       if (!created) throw new Error('Shift insert failed');
       return reply.code(201).send({ data: created });
-    }
+    })
   );
 
   // ── Mark attendance ───────────────────────────────────────────────────────
   fastify.post(
     '/attendance/mark',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.ATTENDANCE_MARK)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId, userId } = ctx.tenant;
       const body = MarkAttendanceSchema.safeParse(request.body);
       if (!body.success)
         throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
@@ -286,19 +274,14 @@ export async function attendanceRoutes(
         },
       });
       return reply.code(200).send({ data: upserted });
-    }
+    })
   );
 
   fastify.post(
     '/attendance/bulk-mark',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.ATTENDANCE_MARK)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId, userId } = ctx.tenant;
       const body = BulkMarkSchema.safeParse(request.body);
       if (!body.success)
         throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
@@ -372,20 +355,15 @@ export async function attendanceRoutes(
       }
 
       return reply.code(200).send({ data: { processed: results.length, records: results } });
-    }
+    })
   );
 
-  fastify.get<{ Params: { employeeId: string } }>(
+  fastify.get(
     '/attendance/:employeeId',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.ATTENDANCE_VIEW)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-      const employeeId = parseInt(request.params.employeeId, 10);
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId } = ctx.tenant;
+      const employeeId = parseInt((request.params as { employeeId: string }).employeeId, 10);
       const query = AttendanceQuerySchema.safeParse(request.query);
       if (!query.success)
         throw new ValidationError(query.error.errors.map((e) => e.message).join('; '));
@@ -405,20 +383,15 @@ export async function attendanceRoutes(
         .from(attendance)
         .where(and(...conditions));
       return reply.code(200).send({ data: { content: rows, totalElements: rows.length } });
-    }
+    })
   );
 
-  fastify.put<{ Params: { id: string } }>(
+  fastify.put(
     '/attendance/:id/correct',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.ATTENDANCE_CORRECT)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-      const id = parseInt(request.params.id, 10);
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId, userId } = ctx.tenant;
+      const id = parseInt((request.params as { id: string }).id, 10);
       const body = CorrectAttendanceSchema.safeParse(request.body);
       if (!body.success)
         throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
@@ -467,19 +440,15 @@ export async function attendanceRoutes(
         metadata: { reason: body.data.correctionReason },
       });
       return reply.code(200).send({ data: updated });
-    }
+    })
   );
 
   fastify.post(
     '/attendance/import',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.ATTENDANCE_MARK)] },
     async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
+      const { tenantId, userId } = request.auth;
+      const correlationId = (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID();
 
       const file = await request.file();
       if (!file) throw new ValidationError('No file uploaded');
@@ -489,79 +458,89 @@ export async function attendanceRoutes(
       if (buffer.length > MAX_PUNCH_FILE_SIZE)
         throw new ValidationError('File exceeds the 10MB size limit');
 
-      const [configRow] = await ctx.db.raw
-        .select()
-        .from(biometricDeviceConfigs)
-        .where(eq(biometricDeviceConfigs.tenantId, tenantId));
-      const config: BiometricDeviceConfigInput = configRow
-        ? {
-            columnMapping: configRow.columnMapping as unknown as BiometricColumnMapping,
-            dateFormat: configRow.dateFormat,
-          }
-        : DEFAULT_BIOMETRIC_CONFIG;
+      const { csvData, grouped } = await withTenantConnection(
+        ctxFactory.rawDb,
+        tenantId,
+        async (db) => {
+          const ctx = ctxFactory.create({ tenantId, userId, correlationId }, db);
 
-      const { punches } = BiometricPunchNormalizer.parseRawPunches(
-        buffer.toString('utf-8'),
-        config
-      );
-      const grouped = BiometricPunchNormalizer.groupByEmployeeDay(punches);
-      if (grouped.length === 0)
-        throw new BusinessError('IMPORT_EMPTY', 'No valid punch rows found in file');
-
-      // Bulk-resolve employeeCode → {id, shiftId} and each referenced shift in two queries,
-      // not one per row (a month of 2-shift punches for 100 employees is ~6,000 raw punches).
-      const employeeCodes = [...new Set(grouped.map((g) => g.employeeCode))];
-      const employeeRows = await ctx.db.raw
-        .select({
-          id: employees.id,
-          employeeCode: employees.employeeCode,
-          shiftId: employees.shiftId,
-        })
-        .from(employees)
-        .where(
-          and(eq(employees.tenantId, tenantId), inArray(employees.employeeCode, employeeCodes))
-        );
-      const employeeByCode = new Map(employeeRows.map((e) => [e.employeeCode, e]));
-
-      const shiftIds = [
-        ...new Set(employeeRows.map((e) => e.shiftId).filter((id): id is number => id != null)),
-      ];
-      const shiftRows =
-        shiftIds.length > 0
-          ? await ctx.db.raw
-              .select()
-              .from(shifts)
-              .where(and(eq(shifts.tenantId, tenantId), inArray(shifts.id, shiftIds)))
-          : [];
-      const [defaultShift] = await ctx.db.raw
-        .select()
-        .from(shifts)
-        .where(and(eq(shifts.tenantId, tenantId), eq(shifts.isDefault, true)));
-      const shiftById = new Map(shiftRows.map((s) => [s.id, s]));
-
-      const csvRows = grouped.map((g) => {
-        const employee = employeeByCode.get(g.employeeCode);
-        const shift =
-          (employee?.shiftId ? shiftById.get(employee.shiftId) : undefined) ?? defaultShift;
-        const status = BiometricPunchNormalizer.deriveStatus(
-          g.checkInTime,
-          g.checkOutTime,
-          shift
+          const [configRow] = await ctx.db.raw
+            .select()
+            .from(biometricDeviceConfigs)
+            .where(eq(biometricDeviceConfigs.tenantId, tenantId));
+          const config: BiometricDeviceConfigInput = configRow
             ? {
-                startTime: shift.startTime,
-                gracePeriodMinutes: shift.gracePeriodMinutes,
-                halfDayHours: Number(shift.halfDayHours),
+                columnMapping: configRow.columnMapping as unknown as BiometricColumnMapping,
+                dateFormat: configRow.dateFormat,
               }
-            : undefined
-        );
-        const checkInTime = `${g.date}T${g.checkInTime}`;
-        const checkOutTime = g.checkOutTime ? `${g.date}T${g.checkOutTime}` : '';
-        return `${g.employeeCode},${g.date},${status},${checkInTime},${checkOutTime},BIOMETRIC`;
-      });
-      const csvData = [
-        'employeeCode,attendanceDate,status,checkInTime,checkOutTime,source',
-        ...csvRows,
-      ].join('\n');
+            : DEFAULT_BIOMETRIC_CONFIG;
+
+          const { punches } = BiometricPunchNormalizer.parseRawPunches(
+            buffer.toString('utf-8'),
+            config
+          );
+          const grouped = BiometricPunchNormalizer.groupByEmployeeDay(punches);
+          if (grouped.length === 0)
+            throw new BusinessError('IMPORT_EMPTY', 'No valid punch rows found in file');
+
+          // Bulk-resolve employeeCode → {id, shiftId} and each referenced shift in two queries,
+          // not one per row (a month of 2-shift punches for 100 employees is ~6,000 raw punches).
+          const employeeCodes = [...new Set(grouped.map((g) => g.employeeCode))];
+          const employeeRows = await ctx.db.raw
+            .select({
+              id: employees.id,
+              employeeCode: employees.employeeCode,
+              shiftId: employees.shiftId,
+            })
+            .from(employees)
+            .where(
+              and(eq(employees.tenantId, tenantId), inArray(employees.employeeCode, employeeCodes))
+            );
+          const employeeByCode = new Map(employeeRows.map((e) => [e.employeeCode, e]));
+
+          const shiftIds = [
+            ...new Set(employeeRows.map((e) => e.shiftId).filter((id): id is number => id != null)),
+          ];
+          const shiftRows =
+            shiftIds.length > 0
+              ? await ctx.db.raw
+                  .select()
+                  .from(shifts)
+                  .where(and(eq(shifts.tenantId, tenantId), inArray(shifts.id, shiftIds)))
+              : [];
+          const [defaultShift] = await ctx.db.raw
+            .select()
+            .from(shifts)
+            .where(and(eq(shifts.tenantId, tenantId), eq(shifts.isDefault, true)));
+          const shiftById = new Map(shiftRows.map((s) => [s.id, s]));
+
+          const csvRows = grouped.map((g) => {
+            const employee = employeeByCode.get(g.employeeCode);
+            const shift =
+              (employee?.shiftId ? shiftById.get(employee.shiftId) : undefined) ?? defaultShift;
+            const status = BiometricPunchNormalizer.deriveStatus(
+              g.checkInTime,
+              g.checkOutTime,
+              shift
+                ? {
+                    startTime: shift.startTime,
+                    gracePeriodMinutes: shift.gracePeriodMinutes,
+                    halfDayHours: Number(shift.halfDayHours),
+                  }
+                : undefined
+            );
+            const checkInTime = `${g.date}T${g.checkInTime}`;
+            const checkOutTime = g.checkOutTime ? `${g.date}T${g.checkOutTime}` : '';
+            return `${g.employeeCode},${g.date},${status},${checkInTime},${checkOutTime},BIOMETRIC`;
+          });
+          const csvData = [
+            'employeeCode,attendanceDate,status,checkInTime,checkOutTime,source',
+            ...csvRows,
+          ].join('\n');
+
+          return { csvData, grouped };
+        }
+      );
 
       // Hand the normalized rows to scheduler-service's generic ImportEngine (entityType
       // 'attendance') instead of writing a second CSV-parse-validate-execute pipeline here.
@@ -594,15 +573,18 @@ export async function attendanceRoutes(
       await schedulerRequest(`/imports/${jobId}/validate`, 'POST', authHeader);
       const executeRes = await schedulerRequest(`/imports/${jobId}/execute`, 'POST', authHeader);
 
-      await ctx.audit.log({
-        action: 'CREATE',
-        entityType: 'attendance_import',
-        entityId: 0,
-        metadata: {
-          jobId,
-          rowCount: grouped.length,
-          dateRange: [grouped[0]?.date, grouped[grouped.length - 1]?.date],
-        },
+      await withTenantConnection(ctxFactory.rawDb, tenantId, async (db) => {
+        const ctx = ctxFactory.create({ tenantId, userId, correlationId }, db);
+        await ctx.audit.log({
+          action: 'CREATE',
+          entityType: 'attendance_import',
+          entityId: 0,
+          metadata: {
+            jobId,
+            rowCount: grouped.length,
+            dateRange: [grouped[0]?.date, grouped[grouped.length - 1]?.date],
+          },
+        });
       });
 
       return reply.code(202).send({ data: { jobId, ...executeRes.data } });
@@ -612,13 +594,8 @@ export async function attendanceRoutes(
   fastify.get(
     '/attendance/report',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.ATTENDANCE_REPORT)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId } = ctx.tenant;
       const query = ReportQuerySchema.safeParse(request.query);
       if (!query.success)
         throw new ValidationError(query.error.errors.map((e) => e.message).join('; '));
@@ -639,19 +616,14 @@ export async function attendanceRoutes(
           )
         );
       return reply.code(200).send({ data: { content: rows, month: query.data.month } });
-    }
+    })
   );
 
   fastify.get(
     '/attendance/team-summary',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.ATTENDANCE_REPORT)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId } = ctx.tenant;
       const query = ReportQuerySchema.safeParse(request.query);
       if (!query.success)
         throw new ValidationError(query.error.errors.map((e) => e.message).join('; '));
@@ -694,6 +666,6 @@ export async function attendanceRoutes(
       }
 
       return reply.code(200).send({ data: { summary, month: query.data.month } });
-    }
+    })
   );
 }

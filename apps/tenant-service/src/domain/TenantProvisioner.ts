@@ -10,6 +10,7 @@ import {
   featureFlags,
   branches,
   organizationSettings,
+  businessTypes,
 } from '@erp/db';
 import { createLogger } from '@erp/logger';
 import { eq, and, ne, sql } from 'drizzle-orm';
@@ -84,6 +85,17 @@ export class TenantProvisioner {
 
     // ── STEP 1: Create tenant record ────────────────────────────────────────
     logger.info({ slug: input.slug }, 'Provisioning tenant: creating record');
+    // Business Profile Foundation: businessTypeId is the synced twin of `vertical` (ADR-01 —
+    // vertical stays authoritative, this is additive). Resolved here rather than a separate
+    // setTenantBusinessType() helper, since provisioning is currently the only call site that
+    // ever sets it (CLAUDE.md §2 — no abstraction for single-use code).
+    const [businessType] = await this.db
+      .select({ id: businessTypes.id })
+      .from(businessTypes)
+      .where(eq(businessTypes.code, vertical));
+    if (!businessType) {
+      throw new Error(`No business_types row found for vertical: ${vertical}`);
+    }
     const [tenant] = await this.db
       .insert(tenants)
       .values({
@@ -93,6 +105,7 @@ export class TenantProvisioner {
         contactPhone: input.contactPhone,
         plan: input.plan ?? 'STARTER',
         vertical,
+        businessTypeId: businessType.id,
         status: 'PROVISIONING',
         provisioningStatus: 'NOT_STARTED',
         provisioningSteps: {},
@@ -240,6 +253,13 @@ export class TenantProvisioner {
     // ── STEP 9: Assign default plan entitlements (PG-027) ──────────────────
     logger.info({ tenantId, plan: tenant.plan }, 'Assigning plan entitlements');
     await new BillingService(this.db).assignPlanEntitlements(tenantId, tenant.plan);
+    // Distribution vertical, Phase A: assignPlanEntitlements unconditionally enables every flag
+    // in the plan's entitlement template (e.g. GROWTH grants pos.enabled=true), which silently
+    // overrides a vertical's explicit "this business type doesn't use this capability" decision
+    // (e.g. DISTRIBUTION's pos.enabled=false) set moments earlier by seedFeatureFlags. A plan
+    // tier should not be able to reintroduce a capability the business type opted out of, so the
+    // vertical's explicit overrides get re-applied last, here, as the final word.
+    await this.reapplyVerticalFeatureFlagOverrides(tenantId, vertical);
     markStep('ASSIGN_PLAN_ENTITLEMENTS');
 
     await this.db
@@ -420,7 +440,7 @@ export class TenantProvisioner {
   }
 
   private async seedFeatureFlags(tenantId: number, vertical: TenantVertical): Promise<void> {
-    const flags = [
+    const baseFlags = [
       { key: 'pos.enabled', enabled: false },
       { key: 'multi-branch.enabled', enabled: false },
       { key: 'inventory.variants.enabled', enabled: true },
@@ -436,10 +456,17 @@ export class TenantProvisioner {
       { key: 'notification.sms.enabled', enabled: true },
       { key: 'import.bulk.enabled', enabled: true },
       { key: 'audit.detailed.enabled', enabled: true },
-      // Per-vertical overrides (e.g. GROCERY disabling the globally-default-on
-      // hr.tailoring.enabled flag) — see apps/tenant-service/src/rbac/vertical-defaults.ts.
-      ...VERTICAL_DEFAULTS[vertical].featureFlagOverrides,
     ];
+    // Per-vertical overrides (e.g. GROCERY disabling the globally-default-on
+    // hr.tailoring.enabled flag) — see apps/tenant-service/src/rbac/vertical-defaults.ts.
+    // Merged by key (override wins) rather than appended: appending would rely on
+    // insert-order + onConflictDoNothing to decide the winner, which silently drops
+    // any override whose key already exists in baseFlags above.
+    const merged = new Map(baseFlags.map((f) => [f.key, f]));
+    for (const override of VERTICAL_DEFAULTS[vertical].featureFlagOverrides) {
+      merged.set(override.key, override);
+    }
+    const flags = Array.from(merged.values());
 
     for (const flag of flags) {
       try {
@@ -450,6 +477,21 @@ export class TenantProvisioner {
       } catch {
         // ignore duplicates from global flags
       }
+    }
+  }
+
+  private async reapplyVerticalFeatureFlagOverrides(
+    tenantId: number,
+    vertical: TenantVertical
+  ): Promise<void> {
+    for (const override of VERTICAL_DEFAULTS[vertical].featureFlagOverrides) {
+      await this.db
+        .insert(featureFlags)
+        .values({ tenantId, flagKey: override.key, enabled: override.enabled })
+        .onConflictDoUpdate({
+          target: [featureFlags.tenantId, featureFlags.flagKey],
+          set: { enabled: override.enabled, updatedAt: new Date() },
+        });
     }
   }
 

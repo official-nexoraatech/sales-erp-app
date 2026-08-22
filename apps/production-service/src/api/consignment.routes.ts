@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { PlatformContextFactory } from '@erp/sdk';
+import { tenantScopedHandler } from '@erp/sdk';
 import { z } from 'zod';
 import { PERMISSIONS } from '@erp/types';
 import { authenticate } from '../middleware/authenticate.js';
@@ -32,6 +33,11 @@ const CreateSettlementSchema = z.object({
   periodTo: z.string().datetime(),
 });
 
+// Phase 9 GUC-per-request rollout — migrated 2026-08-21. Every write method on
+// ConsignmentService (receive/returnToSupplier/settle/createSettlement) already wraps in one
+// internal this.db.transaction() — see 23-guc-per-request-rollout-checklist.md step 3.
+// recordSale() (row-locked FIFO consumption, covered by consignment-concurrency.integration.
+// test.ts) isn't called from any route here, unaffected by this migration either way.
 export async function consignmentRoutes(
   fastify: FastifyInstance,
   ctxFactory: PlatformContextFactory
@@ -40,17 +46,11 @@ export async function consignmentRoutes(
 
   fastify.post('/consignment/receive', {
     preHandler: requirePermission(PERMISSIONS.CONSIGNMENT_RECEIVE),
-    handler: async (req, reply) => {
+    handler: tenantScopedHandler(ctxFactory, async (req, reply, ctx) => {
       const body = ReceiveSchema.parse(req.body);
-      const ctx = ctxFactory.create({
-        tenantId: req.auth.tenantId,
-        userId: req.auth.userId,
-        correlationId:
-          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
-      });
       const svc = new ConsignmentService(ctx.db.raw);
       const id = await svc.receive({
-        tenantId: req.auth.tenantId,
+        tenantId: ctx.tenant.tenantId,
         supplierId: body.supplierId,
         itemId: body.itemId,
         variantId: body.variantId,
@@ -60,112 +60,87 @@ export async function consignmentRoutes(
         receivedDate: new Date(body.receivedDate),
         referenceNumber: body.referenceNumber,
         notes: body.notes,
-        createdBy: req.auth.userId,
+        createdBy: ctx.tenant.userId,
       });
       return reply.code(201).send({ data: { id } });
-    },
+    }),
   });
 
   fastify.get('/consignment/stock', {
     preHandler: requirePermission(PERMISSIONS.CONSIGNMENT_VIEW),
-    handler: async (req, reply) => {
+    handler: tenantScopedHandler(ctxFactory, async (req, reply, ctx) => {
       const q = req.query as { supplierId?: string };
-      const ctx = ctxFactory.create({
-        tenantId: req.auth.tenantId,
-        userId: req.auth.userId,
-        correlationId:
-          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
-      });
       const svc = new ConsignmentService(ctx.db.raw);
       const data = await svc.listStock(
-        req.auth.tenantId,
+        ctx.tenant.tenantId,
         q.supplierId ? parseInt(q.supplierId, 10) : undefined
       );
       return reply.send({ data });
-    },
+    }),
   });
 
   fastify.get('/consignment/settlements', {
     preHandler: requirePermission(PERMISSIONS.CONSIGNMENT_VIEW),
-    handler: async (req, reply) => {
+    handler: tenantScopedHandler(ctxFactory, async (req, reply, ctx) => {
       const q = req.query as { supplierId?: string };
-      const ctx = ctxFactory.create({
-        tenantId: req.auth.tenantId,
-        userId: req.auth.userId,
-        correlationId:
-          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
-      });
       const svc = new ConsignmentService(ctx.db.raw);
       const data = await svc.listSettlements(
-        req.auth.tenantId,
+        ctx.tenant.tenantId,
         q.supplierId ? parseInt(q.supplierId, 10) : undefined
       );
       return reply.send({ data });
-    },
+    }),
   });
 
   fastify.post('/consignment/settlements', {
     preHandler: requirePermission(PERMISSIONS.CONSIGNMENT_SETTLE),
-    handler: async (req, reply) => {
+    handler: tenantScopedHandler(ctxFactory, async (req, reply, ctx) => {
       const body = CreateSettlementSchema.parse(req.body);
-      const ctx = ctxFactory.create({
-        tenantId: req.auth.tenantId,
-        userId: req.auth.userId,
-        correlationId:
-          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
-      });
       const svc = new ConsignmentService(ctx.db.raw);
       // Same auto-numbering convention as job-work/invoice/quotation routes — settlementNumber
       // was never set anywhere, so every settlement was permanently blank in the list.
-      const settlementNumber = `CS-${req.auth.tenantId}-${Date.now()}`;
+      const settlementNumber = `CS-${ctx.tenant.tenantId}-${Date.now()}`;
       const id = await svc.createSettlement(
-        req.auth.tenantId,
+        ctx.tenant.tenantId,
         settlementNumber,
         body.supplierId,
         new Date(body.periodFrom),
         new Date(body.periodTo),
-        req.auth.userId
+        ctx.tenant.userId
       );
       return reply.code(201).send({ data: { id, settlementNumber } });
-    },
+    }),
   });
 
   fastify.post('/consignment/settle/:id', {
     preHandler: requirePermission(PERMISSIONS.CONSIGNMENT_SETTLE),
-    handler: async (req, reply) => {
+    handler: tenantScopedHandler(ctxFactory, async (req, reply, ctx) => {
       const { id } = req.params as { id: string };
       const body = SettleSchema.parse(req.body);
-      const ctx = ctxFactory.create({
-        tenantId: req.auth.tenantId,
-        userId: req.auth.userId,
-        correlationId:
-          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
-      });
       const svc = new ConsignmentService(ctx.db.raw);
-      await svc.settle(parseInt(id, 10), req.auth.tenantId, body.paymentReference, req.auth.userId);
+      await svc.settle(
+        parseInt(id, 10),
+        ctx.tenant.tenantId,
+        body.paymentReference,
+        ctx.tenant.userId
+      );
       return reply.send({ data: { success: true } });
-    },
+    }),
   });
 
   fastify.post('/consignment/return/:id', {
     preHandler: requirePermission(PERMISSIONS.CONSIGNMENT_RETURN),
-    handler: async (req, reply) => {
+    handler: tenantScopedHandler(ctxFactory, async (req, reply, ctx) => {
       const { id } = req.params as { id: string };
       const body = ReturnSchema.parse(req.body);
-      const ctx = ctxFactory.create({
-        tenantId: req.auth.tenantId,
-        userId: req.auth.userId,
-        correlationId:
-          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
-      });
       const svc = new ConsignmentService(ctx.db.raw);
       await svc.returnToSupplier(
         parseInt(id, 10),
-        req.auth.tenantId,
+        ctx.tenant.tenantId,
         body.returnQty,
-        req.auth.userId
+        ctx.tenant.userId
       );
       return reply.send({ data: { success: true } });
-    },
+    }),
   });
 }

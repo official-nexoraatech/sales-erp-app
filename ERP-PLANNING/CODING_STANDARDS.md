@@ -1,5 +1,7 @@
 # CODING STANDARDS
+
 ## Cloth Retail ERP — Developer Reference
+
 ### Every line of code in this project follows these standards. No exceptions.
 
 ---
@@ -7,6 +9,7 @@
 ## 1. TYPESCRIPT STANDARDS
 
 ### 1.1 Configuration (tsconfig.json — all packages)
+
 ```json
 {
   "compilerOptions": {
@@ -28,6 +31,7 @@
 ```
 
 ### 1.2 Type Rules
+
 ```typescript
 // ALWAYS: explicit return types on public functions
 async function createInvoice(cmd: CreateInvoiceCommand, ctx: PlatformContext): Promise<Invoice> {}
@@ -51,10 +55,11 @@ const invoice = data as Invoice; // WRONG
 
 // ALWAYS: use const assertions for literal types
 const INVOICE_STATUS = ['DRAFT', 'CONFIRMED', 'PAID', 'CANCELLED'] as const;
-type InvoiceStatus = typeof INVOICE_STATUS[number];
+type InvoiceStatus = (typeof INVOICE_STATUS)[number];
 ```
 
 ### 1.3 Null Safety
+
 ```typescript
 // Use optional chaining and nullish coalescing
 const name = customer?.displayName ?? customer?.name ?? 'Unknown';
@@ -119,6 +124,7 @@ apps/sales-service/
 ## 3. NAMING CONVENTIONS
 
 ### Files
+
 ```
 PascalCase:    InvoiceService.ts, CustomerRepository.ts (classes)
 camelCase:     createInvoice.handler.ts, listInvoices.query.ts (functions)
@@ -127,6 +133,7 @@ UPPER_SNAKE:   PERMISSIONS.ts, EVENT_TYPES.ts (constants)
 ```
 
 ### Variables and Functions
+
 ```typescript
 // Variables: camelCase, descriptive nouns
 const invoiceTotal = 10000;
@@ -165,11 +172,12 @@ const GST_RATES = [0, 5, 12, 18, 28] as const;
 ```
 
 ### Database (Drizzle Schema)
+
 ```typescript
 // Table names: snake_case plural
 export const invoices = pgTable('invoices', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
-  tenantId: integer('tenant_id').notNull(),          // camelCase in TS, snake_case in SQL
+  tenantId: integer('tenant_id').notNull(), // camelCase in TS, snake_case in SQL
   invoiceNumber: varchar('invoice_number', { length: 100 }).notNull(),
   grandTotal: decimal('grand_total', { precision: 15, scale: 2 }).notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
@@ -177,6 +185,7 @@ export const invoices = pgTable('invoices', {
 ```
 
 ### API Routes
+
 ```typescript
 // Resource names: kebab-case plural nouns
 '/invoices'
@@ -192,17 +201,29 @@ POST '/purchase-orders/:id/approve'
 ```
 
 ### Events
+
 ```
 {ENTITY}_{PAST_TENSE_VERB}
 INVOICE_CONFIRMED, STOCK_DEDUCTED, PAYMENT_RECEIVED
 CUSTOMER_CREDIT_LIMIT_CHANGED, GRN_APPROVED, LEAVE_APPROVED
 ```
 
+Full policy (topic derivation, ownership, versioning, idempotency, correlation/causation,
+cross-service calls, saga usage): see `EVENT_GOVERNANCE.md`.
+
+### Configuration Layering
+
+How tenant-scoped config (feature flags, plan entitlements, vertical defaults, business-type
+capability metadata) is layered and resolved — precedence order, which layer is code vs. DB vs.
+per-tenant override, and where a new config value should live: see
+`multi-industry-platform/09-configuration-model.md`.
+
 ---
 
 ## 4. ERROR HANDLING
 
 ### 4.1 Error Class Hierarchy
+
 ```typescript
 // packages/shared-types/src/errors.ts
 
@@ -250,13 +271,21 @@ export class InsufficientStockError extends BusinessError {
 
 export class CreditLimitExceededError extends BusinessError {
   constructor(customerId: number, creditLimit: number, newBalance: number) {
-    super('CREDIT_LIMIT_EXCEEDED', 'Credit limit exceeded', { customerId, creditLimit, newBalance });
+    super('CREDIT_LIMIT_EXCEEDED', 'Credit limit exceeded', {
+      customerId,
+      creditLimit,
+      newBalance,
+    });
   }
 }
 
 export class OptimisticLockError extends ERPError {
   constructor(entity: string) {
-    super('OPTIMISTIC_LOCK_CONFLICT', `${entity} was modified by another user. Please refresh and retry.`, 409);
+    super(
+      'OPTIMISTIC_LOCK_CONFLICT',
+      `${entity} was modified by another user. Please refresh and retry.`,
+      409
+    );
   }
 }
 
@@ -268,6 +297,7 @@ export class FinancialPeriodClosedError extends BusinessError {
 ```
 
 ### 4.2 Error Handling in Routes
+
 ```typescript
 // Global error handler in Fastify — auto-converts ERPError to response
 fastify.setErrorHandler((error, request, reply) => {
@@ -278,12 +308,14 @@ fastify.setErrorHandler((error, request, reply) => {
         message: error.message,
         details: error.details,
         correlationId: request.correlationId,
-      }
+      },
     });
   }
   // Log unexpected errors with full stack trace
   request.log.error({ err: error, correlationId: request.correlationId }, 'Unhandled error');
-  return reply.status(500).send({ error: { code: 'INTERNAL_ERROR', message: 'An unexpected error occurred' } });
+  return reply
+    .status(500)
+    .send({ error: { code: 'INTERNAL_ERROR', message: 'An unexpected error occurred' } });
 });
 ```
 
@@ -322,6 +354,7 @@ ctx.logger.info({ action: 'STOCK_DEDUCTED', itemId, qty, warehouseId }, 'Stock d
 ## 6. TESTING STANDARDS
 
 ### 6.1 Test File Location
+
 ```
 src/domain/invoice/Invoice.service.ts
 test/unit/domain/invoice/Invoice.service.test.ts
@@ -330,6 +363,7 @@ test/fixtures/invoice.fixtures.ts
 ```
 
 ### 6.2 Unit Test Pattern
+
 ```typescript
 describe('InvoiceService', () => {
   describe('createInvoice', () => {
@@ -337,46 +371,48 @@ describe('InvoiceService', () => {
       // Arrange
       const ctx = createMockPlatformContext({ tenantId: 1 });
       const cmd: CreateInvoiceCommand = buildInvoiceCommand({
-        sellerState: 'MH', placeOfSupply: 'MH', gstRate: 18
+        sellerState: 'MH',
+        placeOfSupply: 'MH',
+        gstRate: 18,
       });
-      
+
       // Act
       const result = await invoiceService.createInvoice(cmd, ctx);
-      
+
       // Assert
       expect(result.cgstAmount).toBe(result.sgstAmount);
       expect(result.igstAmount).toBe(0);
       expect(result.cgstAmount + result.sgstAmount).toBe(result.totalGst);
     });
-    
+
     it('should throw InsufficientStockError when stock < requested', async () => {
       // Arrange — stock = 3, requesting 5
       // Act + Assert
-      await expect(invoiceService.createInvoice(cmd, ctx))
-        .rejects.toThrow(InsufficientStockError);
+      await expect(invoiceService.createInvoice(cmd, ctx)).rejects.toThrow(InsufficientStockError);
     });
   });
 });
 ```
 
 ### 6.3 Integration Test Pattern
+
 ```typescript
 describe('POST /api/v2/invoices', () => {
   it('should create invoice and deduct stock atomically', async () => {
     // Uses real DB (test database), real Redis
     // No mocks for infrastructure — real integration
     const stockBefore = await db.items.findById(ITEM_ID);
-    
+
     const response = await request(app)
       .post('/api/v2/invoices')
       .set('Authorization', `Bearer ${cashierToken}`)
       .send(buildValidInvoicePayload());
-    
+
     expect(response.status).toBe(201);
-    
+
     const stockAfter = await db.items.findById(ITEM_ID);
     expect(stockAfter.availableQty).toBe(stockBefore.availableQty - REQUESTED_QTY);
-    
+
     // Verify outbox event was written
     const outboxEvent = await db.outboxEvents.findOne({ aggregateId: response.body.data.id });
     expect(outboxEvent.eventType).toBe('INVOICE_CONFIRMED');
@@ -385,6 +421,7 @@ describe('POST /api/v2/invoices', () => {
 ```
 
 ### 6.4 Coverage Requirements
+
 - Unit tests: 80% minimum line coverage
 - Integration tests: all API endpoints covered
 - Critical paths: 100% coverage required:
@@ -398,6 +435,7 @@ describe('POST /api/v2/invoices', () => {
 ## 7. FRONTEND STANDARDS
 
 ### 7.1 Component Structure
+
 ```
 src/
 ├── pages/
@@ -421,12 +459,13 @@ src/
 ```
 
 ### 7.2 Data Fetching (TanStack React Query)
+
 ```typescript
 // ALWAYS use useQuery for reads, useMutation for writes
 const { data, isLoading, isError } = useQuery({
   queryKey: ['invoices', page, size, search, status],
   queryFn: () => invoiceApi.getAll({ page, size, search, status }),
-  staleTime: 30_000,        // 30 seconds before refetch
+  staleTime: 30_000, // 30 seconds before refetch
 });
 
 const createMutation = useMutation({
@@ -443,6 +482,7 @@ const createMutation = useMutation({
 ```
 
 ### 7.3 Permission-Gated UI
+
 ```typescript
 // ALWAYS gate create/edit/delete UI on permissions
 const { hasPermission } = useAuth();
@@ -456,17 +496,22 @@ const canDelete = hasPermission(PERMISSIONS.INVOICE_CANCEL);
 ```
 
 ### 7.4 Form Validation (React Hook Form + Zod)
+
 ```typescript
 const schema = z.object({
   customerName: z.string().min(2, 'Name must be at least 2 characters'),
   grandTotal: z.number().positive('Total must be positive'),
-  gstin: z.string().regex(/^\d{2}[A-Z]{5}\d{4}[A-Z]{1}[A-Z\d]{1}[Z]{1}[A-Z\d]{1}$/, 'Invalid GSTIN').optional(),
+  gstin: z
+    .string()
+    .regex(/^\d{2}[A-Z]{5}\d{4}[A-Z]{1}[A-Z\d]{1}[Z]{1}[A-Z\d]{1}$/, 'Invalid GSTIN')
+    .optional(),
 });
 
 const form = useForm<InvoiceFormData>({ resolver: zodResolver(schema) });
 ```
 
 ### 7.5 Dark Mode
+
 ```typescript
 // ThemeContext wraps app — toggles .dark class on <html> element
 // All dark mode styles use Tailwind dark: prefix
@@ -475,6 +520,7 @@ const form = useForm<InvoiceFormData>({ resolver: zodResolver(schema) });
 ```
 
 ### 7.6 Icon Usage (Lucide React)
+
 ```typescript
 // Import only what you use:
 import { Eye, Edit, Trash2, Plus, ArrowLeft, Search } from 'lucide-react';
@@ -495,21 +541,18 @@ import type { Invoice, CreateInvoiceRequest, PageResponse } from '@erp/types';
 export const invoiceApi = {
   getAll: (params: InvoiceListParams) =>
     apiClient.get<PageResponse<Invoice>>('/invoices', { params }),
-    
-  getById: (id: number) =>
-    apiClient.get<Invoice>(`/invoices/${id}`),
-    
-  create: (data: CreateInvoiceRequest) =>
-    apiClient.post<Invoice>('/invoices', data),
-    
+
+  getById: (id: number) => apiClient.get<Invoice>(`/invoices/${id}`),
+
+  create: (data: CreateInvoiceRequest) => apiClient.post<Invoice>('/invoices', data),
+
   update: (id: number, data: UpdateInvoiceRequest) =>
     apiClient.put<Invoice>(`/invoices/${id}`, data),
-    
+
   cancel: (id: number, reason: string) =>
     apiClient.post<Invoice>(`/invoices/${id}/cancel`, { reason }),
-    
-  exportPdf: (id: number) =>
-    apiClient.get<Blob>(`/invoices/${id}/pdf`, { responseType: 'blob' }),
+
+  exportPdf: (id: number) => apiClient.get<Blob>(`/invoices/${id}/pdf`, { responseType: 'blob' }),
 };
 ```
 
@@ -558,4 +601,4 @@ A feature is DONE only when ALL of the following are true:
 
 ---
 
-*Version: 1.0 | This document never gets shorter — only additions allowed*
+_Version: 1.0 | This document never gets shorter — only additions allowed_

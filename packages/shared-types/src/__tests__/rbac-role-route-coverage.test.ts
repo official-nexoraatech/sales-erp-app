@@ -30,6 +30,13 @@ const WILDCARD_ROLES = new Set(['OWNER', 'ADMIN', 'SUPER_ADMIN']);
 // entry here should read the same way as the ones already present.
 const ADMIN_ONLY_BY_DESIGN = new Set([
   'API_KEY_MANAGE', // tenant-wide public-API credential issuance
+  // Workflow authoring (config) deliberately stays OWNER/ADMIN/SUPER_ADMIN-only, same
+  // config-vs-execution split as RULE_CREATE/COMMISSION_MANAGE — SALES_MANAGER/PURCHASE_MANAGER
+  // already hold AUTOMATION_VIEW/AUTOMATION_EXECUTE for day-to-day use (role-defaults.ts), see
+  // migrations 0156 and 0159 for the explicit decision.
+  'AUTOMATION_CREATE',
+  'AUTOMATION_EDIT',
+  'AUTOMATION_DELETE',
   'BRANCH_MANAGE', // create/edit/delete branch master records
   'CRM_CAMPAIGN_APPROVE', // segregation of duties: creator (SALES_MANAGER) != approver, see role-defaults.ts
   'CRM_CAMPAIGN_SEND', // DLT/TRAI-compliance-sensitive bulk customer messaging, same reasoning as APPROVE
@@ -40,6 +47,7 @@ const ADMIN_ONLY_BY_DESIGN = new Set([
   'FEATURE_FLAG_VIEW',
   'FINANCIAL_YEAR_CLOSE', // rare, high-stakes, irreversible accounting action
   'FINANCIAL_YEAR_OPEN',
+  'IMPERSONATE_PARTNER',
   'IMPERSONATE_PORTAL_CUSTOMER',
   'IMPERSONATE_USER',
   'ITEM_DELETE', // destructive
@@ -47,6 +55,7 @@ const ADMIN_ONLY_BY_DESIGN = new Set([
   'NUMBER_SERIES_CONFIG', // one-time/rare document-numbering setup
   'OPENING_BALANCE_LOCK', // one-time tenant-onboarding action
   'ORG_SETTINGS_EDIT',
+  'PARTNER_ACCOUNT_MANAGE',
   'PLATFORM_TENANT_MANAGE', // cross-tenant, platform-operator only by design (see role-defaults.ts header)
   'PORTAL_ACCOUNT_MANAGE',
   'POSTING_MATRIX_UPDATE', // core accounting-engine configuration
@@ -74,6 +83,30 @@ const DEFERRED_PENDING_PRODUCT_DECISION = new Set([
   'JOB_WORK_ISSUE_MATERIALS',
   'JOB_WORK_QUALITY_CHECK',
   'JOB_WORK_VIEW',
+  // Same "no PRODUCTION_MANAGER role" deferral as the JOB_WORK_*/CONSIGNMENT_* entries above —
+  // BOM, Production Order, Routing, Work Center, and MRP (2026-08-22) are all manufacturing-
+  // vertical capabilities with the same gap, OWNER/ADMIN-only by design until that decision lands.
+  'BOM_CREATE',
+  'BOM_DELETE',
+  'BOM_VIEW',
+  'MRP_CREATE_REQUISITION',
+  'MRP_VIEW',
+  'PRODUCTION_ORDER_CANCEL',
+  'PRODUCTION_ORDER_COMPLETE',
+  'PRODUCTION_ORDER_CREATE',
+  'PRODUCTION_ORDER_ISSUE_MATERIALS',
+  'PRODUCTION_ORDER_QUALITY_CHECK',
+  'PRODUCTION_ORDER_UPDATE',
+  'PRODUCTION_ORDER_VIEW',
+  'ROUTING_CREATE',
+  'ROUTING_DELETE',
+  'ROUTING_VIEW',
+  'WORK_CENTER_CREATE',
+  'WORK_CENTER_UPDATE',
+  'WORK_CENTER_VIEW',
+  // Pre-existing gap, unrelated to the manufacturing vertical above — no COMMISSION_MANAGER (or
+  // similar) named role exists either; found while fixing this scanner's other findings.
+  'COMMISSION_MANAGE',
 ]);
 
 function parseRoleGrants(source: string): Map<string, Set<string>> {

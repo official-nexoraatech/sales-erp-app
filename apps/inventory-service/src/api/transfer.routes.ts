@@ -5,6 +5,7 @@ import { stockTransfers } from '@erp/db';
 import type { ErpDatabase } from '@erp/db';
 import { PERMISSIONS, NotFoundError } from '@erp/types';
 import type { PlatformContextFactory } from '@erp/sdk';
+import { tenantScopedHandler } from '@erp/sdk';
 import { authenticate } from '../middleware/authenticate.js';
 import { requireAnyPermission } from '../middleware/authorize.js';
 import { StockTransferService } from '../domain/StockTransferService.js';
@@ -65,6 +66,8 @@ async function assertTransferInScope(
   }
 }
 
+// Phase 9 GUC-per-request rollout — migrated 2026-08-21. No external I/O —
+// StockTransferService has no fetch() calls.
 export async function transferRoutes(
   fastify: FastifyInstance,
   ctxFactory: PlatformContextFactory
@@ -78,13 +81,7 @@ export async function transferRoutes(
         requireAnyPermission([PERMISSIONS.STOCK_TRANSFER, PERMISSIONS.WAREHOUSE_MANAGE]),
       ],
     },
-    async (request, reply) => {
-      const ctx = ctxFactory.create({
-        tenantId: request.auth.tenantId,
-        userId: request.auth.userId,
-        correlationId: request.id,
-      });
-
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
       const {
         page = 1,
         limit = 50,
@@ -98,7 +95,7 @@ export async function transferRoutes(
       };
       const offset = ((page as number) - 1) * (limit as number);
 
-      const conditions = [eq(stockTransfers.tenantId, request.auth.tenantId)];
+      const conditions = [eq(stockTransfers.tenantId, ctx.tenant.tenantId)];
       if (status)
         conditions.push(
           eq(stockTransfers.status, status as (typeof stockTransfers.$inferSelect)['status'])
@@ -107,7 +104,7 @@ export async function transferRoutes(
 
       // Inventory module audit 2026-07-21: previously unfiltered — any user with
       // STOCK_TRANSFER/WAREHOUSE_MANAGE saw every branch's transfers.
-      const warehouseScope = await getWarehouseScope(ctx.db.raw, request.auth.tenantId, {
+      const warehouseScope = await getWarehouseScope(ctx.db.raw, ctx.tenant.tenantId, {
         permissions: request.auth.permissions,
         branchIds: request.auth.branchIds,
       });
@@ -140,7 +137,7 @@ export async function transferRoutes(
       return reply
         .code(200)
         .send({ data: { content: rows, totalElements: countRow?.count ?? 0, page, limit } });
-    }
+    })
   );
 
   // POST /stock-transfers
@@ -152,13 +149,7 @@ export async function transferRoutes(
         requireAnyPermission([PERMISSIONS.STOCK_TRANSFER, PERMISSIONS.WAREHOUSE_MANAGE]),
       ],
     },
-    async (request, reply) => {
-      const ctx = ctxFactory.create({
-        tenantId: request.auth.tenantId,
-        userId: request.auth.userId,
-        correlationId: request.id,
-      });
-
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
       const body = CreateTransferSchema.parse(
         (request.body as { data?: unknown })?.data ?? request.body
       );
@@ -170,22 +161,17 @@ export async function transferRoutes(
       // not just one — stricter than the read/manage checks below.
       await assertWarehouseInScope(
         ctx.db.raw,
-        request.auth.tenantId,
+        ctx.tenant.tenantId,
         body.fromWarehouseId,
         scopeAuth
       );
-      await assertWarehouseInScope(
-        ctx.db.raw,
-        request.auth.tenantId,
-        body.toWarehouseId,
-        scopeAuth
-      );
+      await assertWarehouseInScope(ctx.db.raw, ctx.tenant.tenantId, body.toWarehouseId, scopeAuth);
       const svc = new StockTransferService(ctx.db.raw);
 
       const transfer = await svc.create({
-        tenantId: request.auth.tenantId,
+        tenantId: ctx.tenant.tenantId,
         ...body,
-        createdBy: request.auth.userId,
+        createdBy: ctx.tenant.userId,
       } as Parameters<typeof svc.create>[0]);
 
       await ctx.audit.log({
@@ -204,7 +190,7 @@ export async function transferRoutes(
       });
 
       return reply.code(201).send({ data: transfer });
-    }
+    })
   );
 
   // PUT /stock-transfers/:id — update DRAFT transfer
@@ -216,28 +202,23 @@ export async function transferRoutes(
         requireAnyPermission([PERMISSIONS.STOCK_TRANSFER, PERMISSIONS.WAREHOUSE_MANAGE]),
       ],
     },
-    async (request, reply) => {
-      const ctx = ctxFactory.create({
-        tenantId: request.auth.tenantId,
-        userId: request.auth.userId,
-        correlationId: request.id,
-      });
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
       const { id } = request.params as { id: string };
       const body = UpdateTransferSchema.parse(
         (request.body as { data?: unknown })?.data ?? request.body
       );
-      await assertTransferInScope(ctx.db.raw, request.auth.tenantId, parseInt(id, 10), {
+      await assertTransferInScope(ctx.db.raw, ctx.tenant.tenantId, parseInt(id, 10), {
         permissions: request.auth.permissions,
         branchIds: request.auth.branchIds,
       });
       const svc = new StockTransferService(ctx.db.raw);
       const transfer = await svc.update(
         parseInt(id, 10),
-        request.auth.tenantId,
+        ctx.tenant.tenantId,
         body as Parameters<typeof svc.update>[2]
       );
       return reply.code(200).send({ data: transfer });
-    }
+    })
   );
 
   // GET /stock-transfers/:id
@@ -249,22 +230,16 @@ export async function transferRoutes(
         requireAnyPermission([PERMISSIONS.STOCK_TRANSFER, PERMISSIONS.WAREHOUSE_MANAGE]),
       ],
     },
-    async (request, reply) => {
-      const ctx = ctxFactory.create({
-        tenantId: request.auth.tenantId,
-        userId: request.auth.userId,
-        correlationId: request.id,
-      });
-
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
       const { id } = request.params as { id: string };
-      await assertTransferInScope(ctx.db.raw, request.auth.tenantId, parseInt(id, 10), {
+      await assertTransferInScope(ctx.db.raw, ctx.tenant.tenantId, parseInt(id, 10), {
         permissions: request.auth.permissions,
         branchIds: request.auth.branchIds,
       });
       const svc = new StockTransferService(ctx.db.raw);
-      const transfer = await svc.getWithLines(parseInt(id, 10), request.auth.tenantId);
+      const transfer = await svc.getWithLines(parseInt(id, 10), ctx.tenant.tenantId);
       return reply.code(200).send({ data: transfer });
-    }
+    })
   );
 
   // POST /stock-transfers/:id/submit
@@ -276,25 +251,16 @@ export async function transferRoutes(
         requireAnyPermission([PERMISSIONS.STOCK_TRANSFER, PERMISSIONS.WAREHOUSE_MANAGE]),
       ],
     },
-    async (request, reply) => {
-      const ctx = ctxFactory.create({
-        tenantId: request.auth.tenantId,
-        userId: request.auth.userId,
-        correlationId: request.id,
-      });
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
       const { id } = request.params as { id: string };
-      await assertTransferInScope(ctx.db.raw, request.auth.tenantId, parseInt(id, 10), {
+      await assertTransferInScope(ctx.db.raw, ctx.tenant.tenantId, parseInt(id, 10), {
         permissions: request.auth.permissions,
         branchIds: request.auth.branchIds,
       });
       const svc = new StockTransferService(ctx.db.raw);
-      const transfer = await svc.submit(
-        parseInt(id, 10),
-        request.auth.tenantId,
-        request.auth.userId
-      );
+      const transfer = await svc.submit(parseInt(id, 10), ctx.tenant.tenantId, ctx.tenant.userId);
       return reply.code(200).send({ data: transfer });
-    }
+    })
   );
 
   // POST /stock-transfers/:id/approve
@@ -306,25 +272,16 @@ export async function transferRoutes(
         requireAnyPermission([PERMISSIONS.STOCK_TRANSFER, PERMISSIONS.WAREHOUSE_MANAGE]),
       ],
     },
-    async (request, reply) => {
-      const ctx = ctxFactory.create({
-        tenantId: request.auth.tenantId,
-        userId: request.auth.userId,
-        correlationId: request.id,
-      });
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
       const { id } = request.params as { id: string };
-      await assertTransferInScope(ctx.db.raw, request.auth.tenantId, parseInt(id, 10), {
+      await assertTransferInScope(ctx.db.raw, ctx.tenant.tenantId, parseInt(id, 10), {
         permissions: request.auth.permissions,
         branchIds: request.auth.branchIds,
       });
       const svc = new StockTransferService(ctx.db.raw);
-      const transfer = await svc.approve(
-        parseInt(id, 10),
-        request.auth.tenantId,
-        request.auth.userId
-      );
+      const transfer = await svc.approve(parseInt(id, 10), ctx.tenant.tenantId, ctx.tenant.userId);
       return reply.code(200).send({ data: transfer });
-    }
+    })
   );
 
   // POST /stock-transfers/:id/dispatch
@@ -336,23 +293,14 @@ export async function transferRoutes(
         requireAnyPermission([PERMISSIONS.STOCK_TRANSFER, PERMISSIONS.WAREHOUSE_MANAGE]),
       ],
     },
-    async (request, reply) => {
-      const ctx = ctxFactory.create({
-        tenantId: request.auth.tenantId,
-        userId: request.auth.userId,
-        correlationId: request.id,
-      });
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
       const { id } = request.params as { id: string };
-      await assertTransferInScope(ctx.db.raw, request.auth.tenantId, parseInt(id, 10), {
+      await assertTransferInScope(ctx.db.raw, ctx.tenant.tenantId, parseInt(id, 10), {
         permissions: request.auth.permissions,
         branchIds: request.auth.branchIds,
       });
       const svc = new StockTransferService(ctx.db.raw);
-      const transfer = await svc.dispatch(
-        parseInt(id, 10),
-        request.auth.tenantId,
-        request.auth.userId
-      );
+      const transfer = await svc.dispatch(parseInt(id, 10), ctx.tenant.tenantId, ctx.tenant.userId);
 
       await ctx.events.publish('STOCK_TRANSFER', transfer.id, 'TRANSFER_DISPATCHED', {
         transferId: transfer.id,
@@ -361,7 +309,7 @@ export async function transferRoutes(
       });
 
       return reply.code(200).send({ data: transfer });
-    }
+    })
   );
 
   // POST /stock-transfers/:id/receive
@@ -373,16 +321,11 @@ export async function transferRoutes(
         requireAnyPermission([PERMISSIONS.STOCK_TRANSFER, PERMISSIONS.WAREHOUSE_MANAGE]),
       ],
     },
-    async (request, reply) => {
-      const ctx = ctxFactory.create({
-        tenantId: request.auth.tenantId,
-        userId: request.auth.userId,
-        correlationId: request.id,
-      });
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
       const { id } = request.params as { id: string };
       const bodyRaw = (request.body as { data?: unknown })?.data ?? request.body;
       const { lines } = z.object({ lines: z.array(ReceiveLineSchema).min(1) }).parse(bodyRaw);
-      await assertTransferInScope(ctx.db.raw, request.auth.tenantId, parseInt(id, 10), {
+      await assertTransferInScope(ctx.db.raw, ctx.tenant.tenantId, parseInt(id, 10), {
         permissions: request.auth.permissions,
         branchIds: request.auth.branchIds,
       });
@@ -390,8 +333,8 @@ export async function transferRoutes(
       const svc = new StockTransferService(ctx.db.raw);
       const transfer = await svc.receive(
         parseInt(id, 10),
-        request.auth.tenantId,
-        request.auth.userId,
+        ctx.tenant.tenantId,
+        ctx.tenant.userId,
         lines
       );
 
@@ -402,7 +345,7 @@ export async function transferRoutes(
       });
 
       return reply.code(200).send({ data: transfer });
-    }
+    })
   );
 
   // POST /stock-transfers/:id/cancel
@@ -414,28 +357,23 @@ export async function transferRoutes(
         requireAnyPermission([PERMISSIONS.STOCK_TRANSFER, PERMISSIONS.WAREHOUSE_MANAGE]),
       ],
     },
-    async (request, reply) => {
-      const ctx = ctxFactory.create({
-        tenantId: request.auth.tenantId,
-        userId: request.auth.userId,
-        correlationId: request.id,
-      });
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
       const { id } = request.params as { id: string };
       const { reason } = CancelSchema.parse(
         (request.body as { data?: unknown })?.data ?? request.body
       );
-      await assertTransferInScope(ctx.db.raw, request.auth.tenantId, parseInt(id, 10), {
+      await assertTransferInScope(ctx.db.raw, ctx.tenant.tenantId, parseInt(id, 10), {
         permissions: request.auth.permissions,
         branchIds: request.auth.branchIds,
       });
       const svc = new StockTransferService(ctx.db.raw);
       const transfer = await svc.cancel(
         parseInt(id, 10),
-        request.auth.tenantId,
-        request.auth.userId,
+        ctx.tenant.tenantId,
+        ctx.tenant.userId,
         reason
       );
       return reply.code(200).send({ data: transfer });
-    }
+    })
   );
 }

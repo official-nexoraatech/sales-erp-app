@@ -7,6 +7,7 @@ import { PERMISSIONS } from '@erp/types';
 import { encryptField } from '@erp/utils/server';
 import { requireEnv } from '@erp/config';
 import type { PlatformContextFactory } from '@erp/sdk';
+import { tenantScopedHandler } from '@erp/sdk';
 import { authenticate } from '../middleware/authenticate.js';
 import { requirePermission } from '../middleware/authorize.js';
 
@@ -33,23 +34,12 @@ function toResponse(row: typeof ssoConfigs.$inferSelect): Record<string, unknown
   return { ...rest, hasClientSecret: Boolean(clientSecretEncrypted) };
 }
 
+// Phase 9 GUC-per-request rollout — migrated 2026-08-21. No external I/O — encryptField/
+// requireEnv are local, synchronous crypto/config helpers.
 export async function ssoConfigRoutes(
   fastify: FastifyInstance,
   ctxFactory: PlatformContextFactory
 ): Promise<void> {
-  function ctxFor(request: {
-    auth: { tenantId: number; userId: number };
-    headers: Record<string, unknown>;
-  }): ReturnType<PlatformContextFactory['create']> {
-    const correlationId =
-      (request.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID();
-    return ctxFactory.create({
-      tenantId: request.auth.tenantId,
-      userId: request.auth.userId,
-      correlationId,
-    });
-  }
-
   // ── GET /sso-config ───────────────────────────────────────────────────────
   // Admin-only config surface (unlike GET /organization) — no other role needs to read IdP
   // issuer/client-id details, so the whole route is permission-gated rather than field-
@@ -57,9 +47,8 @@ export async function ssoConfigRoutes(
   fastify.get(
     '/sso-config',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.SSO_CONFIG_MANAGE)] },
-    async (request, reply) => {
-      const { tenantId } = request.auth;
-      const ctx = ctxFor(request);
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId } = ctx.tenant;
 
       const [config] = await ctx.db.raw
         .select()
@@ -69,16 +58,15 @@ export async function ssoConfigRoutes(
       if (!config) throw new NotFoundError('SSO configuration');
 
       return reply.code(200).send({ data: toResponse(config) });
-    }
+    })
   );
 
   // ── PUT /sso-config ───────────────────────────────────────────────────────
   fastify.put(
     '/sso-config',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.SSO_CONFIG_MANAGE)] },
-    async (request, reply) => {
-      const { tenantId, userId } = request.auth;
-      const ctx = ctxFor(request);
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId, userId } = ctx.tenant;
 
       const body = UpsertSsoConfigSchema.safeParse(request.body);
       if (!body.success) {
@@ -168,7 +156,7 @@ export async function ssoConfigRoutes(
       }
 
       return reply.code(200).send({ data: toResponse(updated!) });
-    }
+    })
   );
 
   // ── DELETE /sso-config ────────────────────────────────────────────────────
@@ -177,9 +165,8 @@ export async function ssoConfigRoutes(
   fastify.delete(
     '/sso-config',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.SSO_CONFIG_MANAGE)] },
-    async (request, reply) => {
-      const { tenantId } = request.auth;
-      const ctx = ctxFor(request);
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId } = ctx.tenant;
 
       const [deleted] = await ctx.db.raw
         .delete(ssoConfigs)
@@ -198,6 +185,6 @@ export async function ssoConfigRoutes(
       });
 
       return reply.code(204).send();
-    }
+    })
   );
 }

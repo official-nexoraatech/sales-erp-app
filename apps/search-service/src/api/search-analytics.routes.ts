@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { ErpDatabase } from '@erp/db';
+import { withTenantConnection } from '@erp/sdk';
 import { searchAnalytics } from '@erp/db';
 import { and, desc, eq, gte, isNull, sql } from 'drizzle-orm';
 import { z } from 'zod';
@@ -24,6 +25,9 @@ const SuggestQuerySchema = z.object({ q: z.string().min(1).max(200) });
 // needed — SEARCH_GLOBAL is already required to have run the search in the first place).
 // Summary/dashboard view is admin-only (SEARCH_REINDEX), matching the other /admin/search/*
 // routes in search.routes.ts.
+//
+// Phase 9 GUC-per-request rollout — migrated 2026-08-21. No PlatformContextFactory in this
+// service, so each route uses withTenantConnection directly. No external I/O in any route here.
 export async function searchAnalyticsRoutes(
   fastify: FastifyInstance,
   db: ErpDatabase
@@ -45,29 +49,32 @@ export async function searchAnalyticsRoutes(
       // Best-effort: attach this click to the caller's most recent matching, not-yet-clicked
       // search event (within the last 5 minutes) rather than requiring the frontend to thread
       // an analytics row id through the whole search->click flow.
-      const [recent] = await db
-        .select({ id: searchAnalytics.id })
-        .from(searchAnalytics)
-        .where(
-          and(
-            eq(searchAnalytics.tenantId, tenantId),
-            eq(searchAnalytics.userId, userId ?? 0),
-            eq(searchAnalytics.query, body.data.query),
-            isNull(searchAnalytics.clickedResultId),
-            gte(searchAnalytics.createdAt, new Date(Date.now() - 5 * 60 * 1000))
+      const recorded = await withTenantConnection(db, tenantId, async (scopedDb) => {
+        const [recent] = await scopedDb
+          .select({ id: searchAnalytics.id })
+          .from(searchAnalytics)
+          .where(
+            and(
+              eq(searchAnalytics.tenantId, tenantId),
+              eq(searchAnalytics.userId, userId ?? 0),
+              eq(searchAnalytics.query, body.data.query),
+              isNull(searchAnalytics.clickedResultId),
+              gte(searchAnalytics.createdAt, new Date(Date.now() - 5 * 60 * 1000))
+            )
           )
-        )
-        .orderBy(desc(searchAnalytics.createdAt))
-        .limit(1);
+          .orderBy(desc(searchAnalytics.createdAt))
+          .limit(1);
 
-      if (recent) {
-        await db
-          .update(searchAnalytics)
-          .set({ clickedResultId: body.data.resultId, clickedEntity: body.data.resultEntity })
-          .where(eq(searchAnalytics.id, recent.id));
-      }
+        if (recent) {
+          await scopedDb
+            .update(searchAnalytics)
+            .set({ clickedResultId: body.data.resultId, clickedEntity: body.data.resultEntity })
+            .where(eq(searchAnalytics.id, recent.id));
+        }
+        return Boolean(recent);
+      });
 
-      return reply.code(200).send({ data: { recorded: Boolean(recent) } });
+      return reply.code(200).send({ data: { recorded } });
     }
   );
 
@@ -91,7 +98,8 @@ export async function searchAnalyticsRoutes(
         throw new ValidationError(parsed.error.errors.map((e) => e.message).join('; '));
       const { q } = parsed.data;
 
-      const rows = await db.execute(sql`
+      const rows = await withTenantConnection(db, tenantId, (scopedDb) =>
+        scopedDb.execute(sql`
       SELECT query, similarity(query, ${q}) AS sim, count(*)::int AS freq
       FROM search_analytics
       WHERE tenant_id = ${tenantId}
@@ -101,7 +109,8 @@ export async function searchAnalyticsRoutes(
       GROUP BY query
       ORDER BY sim DESC, freq DESC
       LIMIT 1
-    `);
+    `)
+      );
       const suggestion = (rows as unknown as Array<{ query: string }>)[0]?.query ?? null;
       return reply.code(200).send({ data: { suggestion } });
     }
@@ -120,37 +129,49 @@ export async function searchAnalyticsRoutes(
       const days = Math.min(parseInt((request.query as { days?: string }).days ?? '7', 10), 90);
       const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
 
-      const [totals] = await db
-        .select({
-          totalSearches: sql<number>`count(*)::int`,
-          noResultCount: sql<number>`count(*) filter (where ${searchAnalytics.resultCount} = 0)::int`,
-          clickedCount: sql<number>`count(*) filter (where ${searchAnalytics.clickedResultId} is not null)::int`,
-          avgLatencyMs: sql<number>`coalesce(avg(${searchAnalytics.latencyMs}), 0)::int`,
-        })
-        .from(searchAnalytics)
-        .where(and(eq(searchAnalytics.tenantId, tenantId), gte(searchAnalytics.createdAt, since)));
+      const { totals, popularQueries, noResultQueries } = await withTenantConnection(
+        db,
+        tenantId,
+        async (scopedDb) => {
+          const [totalsRow] = await scopedDb
+            .select({
+              totalSearches: sql<number>`count(*)::int`,
+              noResultCount: sql<number>`count(*) filter (where ${searchAnalytics.resultCount} = 0)::int`,
+              clickedCount: sql<number>`count(*) filter (where ${searchAnalytics.clickedResultId} is not null)::int`,
+              avgLatencyMs: sql<number>`coalesce(avg(${searchAnalytics.latencyMs}), 0)::int`,
+            })
+            .from(searchAnalytics)
+            .where(
+              and(eq(searchAnalytics.tenantId, tenantId), gte(searchAnalytics.createdAt, since))
+            );
 
-      const popularQueries = await db
-        .select({ query: searchAnalytics.query, count: sql<number>`count(*)::int` })
-        .from(searchAnalytics)
-        .where(and(eq(searchAnalytics.tenantId, tenantId), gte(searchAnalytics.createdAt, since)))
-        .groupBy(searchAnalytics.query)
-        .orderBy(desc(sql`count(*)`))
-        .limit(10);
+          const popular = await scopedDb
+            .select({ query: searchAnalytics.query, count: sql<number>`count(*)::int` })
+            .from(searchAnalytics)
+            .where(
+              and(eq(searchAnalytics.tenantId, tenantId), gte(searchAnalytics.createdAt, since))
+            )
+            .groupBy(searchAnalytics.query)
+            .orderBy(desc(sql`count(*)`))
+            .limit(10);
 
-      const noResultQueries = await db
-        .select({ query: searchAnalytics.query, count: sql<number>`count(*)::int` })
-        .from(searchAnalytics)
-        .where(
-          and(
-            eq(searchAnalytics.tenantId, tenantId),
-            gte(searchAnalytics.createdAt, since),
-            eq(searchAnalytics.resultCount, 0)
-          )
-        )
-        .groupBy(searchAnalytics.query)
-        .orderBy(desc(sql`count(*)`))
-        .limit(10);
+          const noResult = await scopedDb
+            .select({ query: searchAnalytics.query, count: sql<number>`count(*)::int` })
+            .from(searchAnalytics)
+            .where(
+              and(
+                eq(searchAnalytics.tenantId, tenantId),
+                gte(searchAnalytics.createdAt, since),
+                eq(searchAnalytics.resultCount, 0)
+              )
+            )
+            .groupBy(searchAnalytics.query)
+            .orderBy(desc(sql`count(*)`))
+            .limit(10);
+
+          return { totals: totalsRow, popularQueries: popular, noResultQueries: noResult };
+        }
+      );
 
       return reply.code(200).send({
         data: {

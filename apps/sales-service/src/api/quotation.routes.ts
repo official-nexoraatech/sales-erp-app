@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { PlatformContextFactory } from '@erp/sdk';
+import { tenantScopedHandler } from '@erp/sdk';
 import { quotations, customers } from '@erp/db';
 import { and, desc, eq, ilike, sql, getTableColumns } from 'drizzle-orm';
 import { z } from 'zod';
@@ -18,7 +19,7 @@ const QuotationLineSchema = z
     description: z.string().max(500).optional(),
     quantity: z.number().positive(),
     unitId: z.number().int().positive().optional(),
-    unitPrice: z.number().nonnegative(),
+    unitPrice: z.number().nonnegative().optional(),
     discountPct: z.number().min(0).max(100).default(0),
     discountAmount: z.number().min(0).default(0),
     gstRate: z.number().min(0).max(100),
@@ -40,6 +41,13 @@ const CreateQuotationSchema = z.object({
   termsAndConditions: z.string().max(5000).optional(),
 });
 
+// Phase 9 GUC-per-request rollout — migrated 2026-08-21 (all but one route). /quotations/:id/send
+// is deliberately NOT migrated: QuotationNotificationService.notifyQuotationSent() makes a real
+// fetch() call to notification-service — wrapping it would hold a transaction/connection open for
+// that external call. See 23-guc-per-request-rollout-checklist.md's "external I/O mid-handler"
+// caveat. Every other route here has no external I/O (QuotationService.create()/convert() already
+// wrap their own writes in db.transaction(); post-hoc ctx.audit.log()/ctx.events.publish() calls
+// are safe per tenantConnection-nested-rollback.test.ts).
 export async function quotationRoutes(
   fastify: FastifyInstance,
   ctxFactory: PlatformContextFactory
@@ -48,13 +56,7 @@ export async function quotationRoutes(
 
   fastify.get('/quotations', {
     preHandler: requireAnyPermission([PERMISSIONS.QUOTATION_VIEW, PERMISSIONS.INVOICE_VIEW]),
-    handler: async (req, reply) => {
-      const ctx = ctxFactory.create({
-        tenantId: req.auth.tenantId,
-        userId: req.auth.userId,
-        correlationId:
-          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
-      });
+    handler: tenantScopedHandler(ctxFactory, async (req, reply, ctx) => {
       const q = req.query as {
         search?: string;
         status?: string;
@@ -66,7 +68,7 @@ export async function quotationRoutes(
       const pageSize = Math.min(100, parseInt(q.pageSize ?? '20', 10));
       const offset = (page - 1) * pageSize;
 
-      const conditions = [eq(quotations.tenantId, req.auth.tenantId)];
+      const conditions = [eq(quotations.tenantId, ctx.tenant.tenantId)];
       if (q.status) conditions.push(eq(quotations.status, q.status as never));
       if (q.customerId) conditions.push(eq(quotations.customerId, parseInt(q.customerId, 10)));
       if (q.search) conditions.push(ilike(quotations.quotationNumber, `%${q.search}%`));
@@ -88,12 +90,12 @@ export async function quotationRoutes(
       return reply.send({
         data: { content: rows, totalElements: countRow?.count ?? 0, page, pageSize },
       });
-    },
+    }),
   });
 
   fastify.post('/quotations', {
     preHandler: requireAnyPermission([PERMISSIONS.QUOTATION_CREATE, PERMISSIONS.INVOICE_CREATE]),
-    handler: async (req, reply) => {
+    handler: tenantScopedHandler(ctxFactory, async (req, reply, ctx) => {
       const body = CreateQuotationSchema.parse(req.body);
 
       // H-5 fix: this ceiling was previously enforced only in POS (pos.routes.ts) — a plain
@@ -110,18 +112,12 @@ export async function quotationRoutes(
         }
       }
 
-      const ctx = ctxFactory.create({
-        tenantId: req.auth.tenantId,
-        userId: req.auth.userId,
-        correlationId:
-          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
-      });
       const svc = new QuotationService(ctx.db.raw);
 
-      const quotationNumber = `QT-${req.auth.tenantId}-${Date.now()}`;
+      const quotationNumber = `QT-${ctx.tenant.tenantId}-${Date.now()}`;
 
       const id = await svc.create({
-        tenantId: req.auth.tenantId,
+        tenantId: ctx.tenant.tenantId,
         branchId: body.branchId,
         customerId: body.customerId,
         quotationNumber,
@@ -131,7 +127,7 @@ export async function quotationRoutes(
         lines: body.lines,
         notes: body.notes,
         termsAndConditions: body.termsAndConditions,
-        createdBy: req.auth.userId,
+        createdBy: ctx.tenant.userId,
       } as Parameters<typeof svc.create>[0]);
 
       await ctx.events.publish('quotation', id, 'QUOTATION_CREATED', {
@@ -152,25 +148,21 @@ export async function quotationRoutes(
       });
 
       return reply.code(201).send({ data: { id, quotationNumber } });
-    },
+    }),
   });
 
   fastify.get('/quotations/:id', {
     preHandler: requireAnyPermission([PERMISSIONS.QUOTATION_VIEW, PERMISSIONS.INVOICE_VIEW]),
-    handler: async (req, reply) => {
-      const { id } = req.params as { id: string };
-      const ctx = ctxFactory.create({
-        tenantId: req.auth.tenantId,
-        userId: req.auth.userId,
-        correlationId:
-          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
-      });
+    handler: tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { id } = request.params as { id: string };
       const svc = new QuotationService(ctx.db.raw);
-      const data = await svc.getWithLines(parseInt(id, 10), req.auth.tenantId);
+      const data = await svc.getWithLines(parseInt(id, 10), ctx.tenant.tenantId);
       return reply.send({ data });
-    },
+    }),
   });
 
+  // Deliberately NOT migrated — QuotationNotificationService.notifyQuotationSent() makes a real
+  // fetch() call to notification-service. See the file-level comment above.
   fastify.post('/quotations/:id/send', {
     preHandler: requireAnyPermission([PERMISSIONS.QUOTATION_UPDATE, PERMISSIONS.INVOICE_CREATE]),
     handler: async (req, reply) => {
@@ -204,16 +196,10 @@ export async function quotationRoutes(
 
   fastify.post('/quotations/:id/accept', {
     preHandler: requireAnyPermission([PERMISSIONS.QUOTATION_UPDATE, PERMISSIONS.INVOICE_CREATE]),
-    handler: async (req, reply) => {
-      const { id } = req.params as { id: string };
-      const ctx = ctxFactory.create({
-        tenantId: req.auth.tenantId,
-        userId: req.auth.userId,
-        correlationId:
-          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
-      });
+    handler: tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { id } = request.params as { id: string };
       const svc = new QuotationService(ctx.db.raw);
-      await svc.accept(parseInt(id, 10), req.auth.tenantId, req.auth.userId);
+      await svc.accept(parseInt(id, 10), ctx.tenant.tenantId, ctx.tenant.userId);
       await ctx.events.publish('quotation', parseInt(id, 10), 'QUOTATION_UPDATED', {
         quotationId: parseInt(id, 10),
         status: 'ACCEPTED',
@@ -223,25 +209,19 @@ export async function quotationRoutes(
         entityType: 'quotation',
         entityId: parseInt(id, 10),
         after: { status: 'ACCEPTED' },
-        actorEmail: req.auth.email,
-        ipAddress: req.ip,
+        actorEmail: request.auth.email,
+        ipAddress: request.ip,
       });
       return reply.send({ success: true });
-    },
+    }),
   });
 
   fastify.post('/quotations/:id/reject', {
     preHandler: requireAnyPermission([PERMISSIONS.QUOTATION_CANCEL, PERMISSIONS.INVOICE_CREATE]),
-    handler: async (req, reply) => {
-      const { id } = req.params as { id: string };
-      const ctx = ctxFactory.create({
-        tenantId: req.auth.tenantId,
-        userId: req.auth.userId,
-        correlationId:
-          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
-      });
+    handler: tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { id } = request.params as { id: string };
       const svc = new QuotationService(ctx.db.raw);
-      await svc.reject(parseInt(id, 10), req.auth.tenantId, req.auth.userId);
+      await svc.reject(parseInt(id, 10), ctx.tenant.tenantId, ctx.tenant.userId);
       await ctx.events.publish('quotation', parseInt(id, 10), 'QUOTATION_UPDATED', {
         quotationId: parseInt(id, 10),
         status: 'REJECTED',
@@ -251,54 +231,42 @@ export async function quotationRoutes(
         entityType: 'quotation',
         entityId: parseInt(id, 10),
         after: { status: 'REJECTED' },
-        actorEmail: req.auth.email,
-        ipAddress: req.ip,
+        actorEmail: request.auth.email,
+        ipAddress: request.ip,
       });
       return reply.send({ success: true });
-    },
+    }),
   });
 
   fastify.post('/quotations/:id/convert', {
     preHandler: requirePermission(PERMISSIONS.QUOTATION_CONVERT),
-    handler: async (req, reply) => {
-      const { id } = req.params as { id: string };
-      const ctx = ctxFactory.create({
-        tenantId: req.auth.tenantId,
-        userId: req.auth.userId,
-        correlationId:
-          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
-      });
+    handler: tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { id } = request.params as { id: string };
       const svc = new QuotationService(ctx.db.raw);
       // QuotationService.convert() already writes a QUOTATION_CONVERTED outbox event
       // inside its own transaction — no separate publish needed here.
-      const result = await svc.convert(parseInt(id, 10), req.auth.tenantId, req.auth.userId);
+      const result = await svc.convert(parseInt(id, 10), ctx.tenant.tenantId, ctx.tenant.userId);
       await ctx.audit.log({
         action: 'STATUS_CHANGE',
         entityType: 'quotation',
         entityId: parseInt(id, 10),
         after: { status: 'CONVERTED' },
-        actorEmail: req.auth.email,
-        ipAddress: req.ip,
+        actorEmail: request.auth.email,
+        ipAddress: request.ip,
       });
       return reply.send({ data: result });
-    },
+    }),
   });
 
   fastify.post('/quotations/:id/expire', {
     preHandler: requireAnyPermission([PERMISSIONS.QUOTATION_UPDATE, PERMISSIONS.INVOICE_CREATE]),
-    handler: async (req, reply) => {
-      const { id } = req.params as { id: string };
-      const ctx = ctxFactory.create({
-        tenantId: req.auth.tenantId,
-        userId: req.auth.userId,
-        correlationId:
-          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
-      });
+    handler: tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { id } = request.params as { id: string };
       await ctx.db.raw
         .update(quotations)
         .set({ status: 'EXPIRED', updatedAt: new Date() })
         .where(
-          and(eq(quotations.id, parseInt(id, 10)), eq(quotations.tenantId, req.auth.tenantId))
+          and(eq(quotations.id, parseInt(id, 10)), eq(quotations.tenantId, ctx.tenant.tenantId))
         );
       await ctx.events.publish('quotation', parseInt(id, 10), 'QUOTATION_UPDATED', {
         quotationId: parseInt(id, 10),
@@ -309,10 +277,10 @@ export async function quotationRoutes(
         entityType: 'quotation',
         entityId: parseInt(id, 10),
         after: { status: 'EXPIRED' },
-        actorEmail: req.auth.email,
-        ipAddress: req.ip,
+        actorEmail: request.auth.email,
+        ipAddress: request.ip,
       });
       return reply.send({ success: true });
-    },
+    }),
   });
 }

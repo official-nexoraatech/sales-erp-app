@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { PlatformContextFactory } from '@erp/sdk';
+import { tenantScopedHandler } from '@erp/sdk';
 import { saleReturns, customers, invoices } from '@erp/db';
 import { and, desc, eq, sql, getTableColumns } from 'drizzle-orm';
 import { z } from 'zod';
@@ -34,22 +35,19 @@ const ApplyCNSchema = z.object({
   invoiceId: z.number().int().positive(),
 });
 
+// Phase 9 GUC-per-request rollout — migrated 2026-08-21. No external I/O — SaleReturnService has
+// no fetch() calls. Post-hoc ctx.audit.log()/ctx.cache.del() calls are safe per caveat 4b.
 export async function saleReturnRoutes(
   fastify: FastifyInstance,
   ctxFactory: PlatformContextFactory
 ): Promise<void> {
   fastify.addHook('preHandler', authenticate);
 
-  fastify.get('/sale-returns', {
-    preHandler: requireAnyPermission([PERMISSIONS.SALE_RETURN_VIEW, PERMISSIONS.INVOICE_VIEW]),
-    handler: async (req, reply) => {
-      const ctx = ctxFactory.create({
-        tenantId: req.auth.tenantId,
-        userId: req.auth.userId,
-        correlationId:
-          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
-      });
-      const q = req.query as { page?: string; pageSize?: string };
+  fastify.get(
+    '/sale-returns',
+    { preHandler: requireAnyPermission([PERMISSIONS.SALE_RETURN_VIEW, PERMISSIONS.INVOICE_VIEW]) },
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const q = request.query as { page?: string; pageSize?: string };
       const page = Math.max(1, parseInt(q.page ?? '1', 10));
       const pageSize = Math.min(100, parseInt(q.pageSize ?? '20', 10));
 
@@ -62,7 +60,7 @@ export async function saleReturnRoutes(
         .from(saleReturns)
         .leftJoin(customers, eq(saleReturns.customerId, customers.id))
         .leftJoin(invoices, eq(saleReturns.invoiceId, invoices.id))
-        .where(eq(saleReturns.tenantId, req.auth.tenantId))
+        .where(eq(saleReturns.tenantId, ctx.tenant.tenantId))
         .orderBy(desc(saleReturns.returnDate), desc(saleReturns.id))
         .limit(pageSize)
         .offset((page - 1) * pageSize);
@@ -70,31 +68,31 @@ export async function saleReturnRoutes(
       const [countRow] = await ctx.db.raw
         .select({ count: sql<number>`count(*)::int` })
         .from(saleReturns)
-        .where(eq(saleReturns.tenantId, req.auth.tenantId));
+        .where(eq(saleReturns.tenantId, ctx.tenant.tenantId));
 
       return reply.send({
         data: { content: rows, totalElements: countRow?.count ?? 0, page, pageSize },
       });
-    },
-  });
+    })
+  );
 
-  fastify.post('/sale-returns', {
-    preHandler: requireAnyPermission([PERMISSIONS.SALE_RETURN_CREATE, PERMISSIONS.INVOICE_CANCEL]),
-    handler: async (req, reply) => {
-      const body = CreateReturnSchema.parse(req.body);
-      const ctx = ctxFactory.create({
-        tenantId: req.auth.tenantId,
-        userId: req.auth.userId,
-        correlationId:
-          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
-      });
+  fastify.post(
+    '/sale-returns',
+    {
+      preHandler: requireAnyPermission([
+        PERMISSIONS.SALE_RETURN_CREATE,
+        PERMISSIONS.INVOICE_CANCEL,
+      ]),
+    },
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const body = CreateReturnSchema.parse(request.body);
       const svc = new SaleReturnService(ctx.db.raw);
 
-      const returnNumber = `RTN-${req.auth.tenantId}-${Date.now()}`;
-      const creditNoteNumber = `CN-${req.auth.tenantId}-${Date.now()}`;
+      const returnNumber = `RTN-${ctx.tenant.tenantId}-${Date.now()}`;
+      const creditNoteNumber = `CN-${ctx.tenant.tenantId}-${Date.now()}`;
 
       const result = await svc.create({
-        tenantId: req.auth.tenantId,
+        tenantId: ctx.tenant.tenantId,
         branchId: body.branchId,
         returnNumber,
         invoiceId: body.invoiceId,
@@ -106,7 +104,7 @@ export async function saleReturnRoutes(
         lines: body.lines,
         notes: body.notes,
         creditNoteNumber,
-        createdBy: req.auth.userId,
+        createdBy: ctx.tenant.userId,
       } as Parameters<typeof svc.create>[0]);
 
       // Same cross-service item-cache gap GRN receipts had (fixed 2026-07-17) — a physical
@@ -123,52 +121,47 @@ export async function saleReturnRoutes(
         entityType: 'sales_return',
         entityId: result.returnId,
         after: { invoiceId: body.invoiceId, returnNumber, creditNoteId: result.creditNoteId },
-        actorEmail: req.auth.email,
-        ipAddress: req.ip,
+        actorEmail: request.auth.email,
+        ipAddress: request.ip,
       });
 
       return reply.code(201).send({ data: result });
-    },
-  });
+    })
+  );
 
-  fastify.get('/sale-returns/:id', {
-    preHandler: requireAnyPermission([PERMISSIONS.SALE_RETURN_VIEW, PERMISSIONS.INVOICE_VIEW]),
-    handler: async (req, reply) => {
-      const { id } = req.params as { id: string };
-      const ctx = ctxFactory.create({
-        tenantId: req.auth.tenantId,
-        userId: req.auth.userId,
-        correlationId:
-          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
-      });
+  fastify.get(
+    '/sale-returns/:id',
+    { preHandler: requireAnyPermission([PERMISSIONS.SALE_RETURN_VIEW, PERMISSIONS.INVOICE_VIEW]) },
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { id } = request.params as { id: string };
       const [row] = await ctx.db.raw
         .select()
         .from(saleReturns)
         .where(
-          and(eq(saleReturns.id, parseInt(id, 10)), eq(saleReturns.tenantId, req.auth.tenantId))
+          and(eq(saleReturns.id, parseInt(id, 10)), eq(saleReturns.tenantId, ctx.tenant.tenantId))
         );
       if (!row) return sendError(reply, 404, 'NOT_FOUND', 'Sale return not found');
       return reply.send({ data: row });
-    },
-  });
+    })
+  );
 
-  fastify.post('/credit-notes/:id/apply', {
-    preHandler: requireAnyPermission([PERMISSIONS.CREDIT_NOTE_ADJUST, PERMISSIONS.PAYMENT_CREATE]),
-    handler: async (req, reply) => {
-      const { id } = req.params as { id: string };
-      const body = ApplyCNSchema.parse(req.body);
-      const ctx = ctxFactory.create({
-        tenantId: req.auth.tenantId,
-        userId: req.auth.userId,
-        correlationId:
-          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
-      });
+  fastify.post(
+    '/credit-notes/:id/apply',
+    {
+      preHandler: requireAnyPermission([
+        PERMISSIONS.CREDIT_NOTE_ADJUST,
+        PERMISSIONS.PAYMENT_CREATE,
+      ]),
+    },
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { id } = request.params as { id: string };
+      const body = ApplyCNSchema.parse(request.body);
       const svc = new SaleReturnService(ctx.db.raw);
       await svc.applyCreditNote(
         parseInt(id, 10),
         body.invoiceId,
-        req.auth.tenantId,
-        req.auth.userId
+        ctx.tenant.tenantId,
+        ctx.tenant.userId
       );
       // M-16 fix: apply/refund mutate financial state (creditNotes.status, usedAmount,
       // remainingAmount) but neither route wrote to the audit log.
@@ -177,34 +170,34 @@ export async function saleReturnRoutes(
         entityType: 'credit_note',
         entityId: parseInt(id, 10),
         after: { appliedToInvoiceId: body.invoiceId },
-        actorEmail: req.auth.email,
-        ipAddress: req.ip,
+        actorEmail: request.auth.email,
+        ipAddress: request.ip,
       });
       return reply.send({ success: true });
-    },
-  });
+    })
+  );
 
-  fastify.post('/credit-notes/:id/refund', {
-    preHandler: requireAnyPermission([PERMISSIONS.CREDIT_NOTE_ADJUST, PERMISSIONS.PAYMENT_CREATE]),
-    handler: async (req, reply) => {
-      const { id } = req.params as { id: string };
-      const ctx = ctxFactory.create({
-        tenantId: req.auth.tenantId,
-        userId: req.auth.userId,
-        correlationId:
-          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
-      });
+  fastify.post(
+    '/credit-notes/:id/refund',
+    {
+      preHandler: requireAnyPermission([
+        PERMISSIONS.CREDIT_NOTE_ADJUST,
+        PERMISSIONS.PAYMENT_CREATE,
+      ]),
+    },
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { id } = request.params as { id: string };
       const svc = new SaleReturnService(ctx.db.raw);
-      await svc.refundCreditNote(parseInt(id, 10), req.auth.tenantId, req.auth.userId);
+      await svc.refundCreditNote(parseInt(id, 10), ctx.tenant.tenantId, ctx.tenant.userId);
       await ctx.audit.log({
         action: 'STATUS_CHANGE',
         entityType: 'credit_note',
         entityId: parseInt(id, 10),
         after: { status: 'REFUNDED' },
-        actorEmail: req.auth.email,
-        ipAddress: req.ip,
+        actorEmail: request.auth.email,
+        ipAddress: request.ip,
       });
       return reply.send({ success: true });
-    },
-  });
+    })
+  );
 }

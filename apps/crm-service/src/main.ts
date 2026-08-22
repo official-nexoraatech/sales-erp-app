@@ -23,14 +23,41 @@ import {
   createCorrelationIdHook,
 } from '@erp/logger';
 import { loadConfigWithSecrets } from '@erp/config';
+import { dltTemplateRoutes } from './api/dlt-template.routes.js';
+import { territoryRoutes } from './api/territory.routes.js';
+import { fieldVisitRoutes } from './api/field-visit.routes.js';
+import { healthScoringRoutes } from './api/health-scoring.routes.js';
+import { loyaltyRoutes } from './api/loyalty.routes.js';
+import { festivalIntelligenceRoutes } from './api/festival-intelligence.routes.js';
+import { campaignRoutes } from './api/campaign.routes.js';
+import { journeyRoutes } from './api/journey.routes.js';
+import { quotaRoutes } from './api/quota.routes.js';
+import { crmDashboardRoutes } from './api/crm-dashboard.routes.js';
+import { accountRoutes } from './api/account.routes.js';
+import { leadRoutes } from './api/lead.routes.js';
+import { linkTrackingRoutes } from './api/link-tracking.routes.js';
+import { conversationRoutes } from './api/conversation.routes.js';
+import { callRoutes } from './api/call.routes.js';
+import { inboundWebhookRoutes } from './api/inbound-webhooks.routes.js';
+import { opportunityRoutes } from './api/opportunity.routes.js';
+import { apiKeyRoutes } from './api/api-key.routes.js';
+import { publicApiRoutes } from './api/public-api.routes.js';
+import { referralRoutes } from './api/referral.routes.js';
+import { referralPublicRoutes } from './api/referral-public.routes.js';
+import { ticketRoutes } from './api/ticket.routes.js';
+import { portalRoutes } from './api/portal.routes.js';
+import { internalRoutes } from './api/internal.routes.js';
 
 // Multi-vertical platform audit 2026-08-16, Phase 3 — scaffold for the CRM/Order-to-Cash
 // split. sales-service's CRM-domain routes/services (leads, opportunities, campaigns,
 // journeys, territories, quotas, tickets, conversations, referrals, field visits, CTI,
 // public CRM/BI API) move here incrementally; O2C (invoices, quotations, payments, POS,
-// sale returns, commission) stays in sales-service. No routes are registered yet — this is
-// the bare, deployable skeleton (mirrors sales-service/src/main.ts's bootstrap shape) that
-// the actual domain-file migration lands on top of.
+// sale returns, commission) stays in sales-service. dlt-template.routes.ts,
+// territory.routes.ts, and field-visit.routes.ts are the first three migrated files.
+// health-scoring.routes.ts is the fourth — only the cache-read half of HealthScoringService;
+// its O2C-computing half stays in sales-service (see domain/HealthScoringService.ts's header
+// comment) and reaches this service's internal.routes.ts over HTTP. The rest land the same
+// way — mirrors sales-service/src/main.ts's bootstrap shape.
 initializeTelemetry({ serviceName: 'crm-service' });
 
 async function bootstrap(): Promise<void> {
@@ -114,8 +141,61 @@ async function bootstrap(): Promise<void> {
     }
   });
 
-  // TODO(crm-service migration): CRM route registrations land here as domain files move
-  // from sales-service — see ARCHITECTURE_AUDIT notes on route ownership split.
+  // Registered as a true sibling of the authenticated `sub` block below, not nested inside
+  // it — mirrors sales-service/main.ts's internalSub block exactly, which exists specifically
+  // so internal routes don't inherit the authenticated block's `authenticate` preHandler hook
+  // (that block calls fastify.addHook('preHandler', authenticate) directly on its own `sub`
+  // instance, and nested registration would silently inherit it, 401ing every internal call).
+  await fastify.register(
+    async (internalSub) => {
+      await internalRoutes(internalSub, ctxFactory);
+    },
+    { prefix: '/api/v2' }
+  );
+
+  await fastify.register(
+    async (sub) => {
+      await dltTemplateRoutes(sub, ctxFactory);
+      await territoryRoutes(sub, ctxFactory);
+      await fieldVisitRoutes(sub, ctxFactory);
+      await healthScoringRoutes(sub, ctxFactory);
+      await loyaltyRoutes(sub, ctxFactory);
+      await festivalIntelligenceRoutes(sub, ctxFactory);
+      await campaignRoutes(sub, ctxFactory);
+      await journeyRoutes(sub, ctxFactory);
+      await quotaRoutes(sub, ctxFactory);
+      await crmDashboardRoutes(sub, ctxFactory);
+      await accountRoutes(sub, ctxFactory);
+      // POST /leads/capture and GET /c/:trackingToken (below) are public/unauthenticated —
+      // safe to nest in this same `sub` block since, unlike sales-service's main.ts, nothing
+      // here calls fastify.addHook('preHandler', authenticate) on `sub` itself; every route in
+      // this file (including these two) gates itself via its own per-route preHandler array.
+      await leadRoutes(sub, ctxFactory);
+      await linkTrackingRoutes(sub, ctxFactory);
+      await conversationRoutes(sub, ctxFactory);
+      await callRoutes(sub, ctxFactory);
+      // Inbound WhatsApp/email/SMS webhook routes are also public/unauthenticated (a provider
+      // posting a reply isn't a logged-in ERP user) — safe to nest here for the same reason
+      // leadRoutes/linkTrackingRoutes are (no file-level addHook on this `sub` to leak).
+      await inboundWebhookRoutes(sub, ctxFactory);
+      await opportunityRoutes(sub, ctxFactory);
+      await apiKeyRoutes(sub, ctxFactory);
+      // Public CRM API routes authenticate via their own requirePublicApiScope preHandler
+      // (a per-tenant API key, never the staff `authenticate` hook) — safe to nest here for
+      // the same reason leadRoutes/inboundWebhookRoutes are (no file-level addHook to leak).
+      await publicApiRoutes(sub, ctxFactory.rawDb);
+      await referralRoutes(sub, ctxFactory);
+      // GET /r/:code and POST /referral/redeem are public/unauthenticated (a referee clicking
+      // a shared link or redeeming a code isn't logged in) — safe to nest here, same reasoning
+      // as every other public route file in this block.
+      await referralPublicRoutes(sub, ctxFactory);
+      await ticketRoutes(sub, ctxFactory);
+      // Customer Portal ticket/referral routes gate via their own requirePortalAuth preHandler
+      // (a CUSTOMER-role JWT, never the staff `authenticate` hook) — safe to nest here too.
+      await portalRoutes(sub, ctxFactory.rawDb);
+    },
+    { prefix: '/api/v2' }
+  );
 
   const address = await fastify.listen({ port, host: '0.0.0.0' });
   logger.info({ address }, 'CRM service started');

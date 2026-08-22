@@ -1,0 +1,34 @@
+-- Phase 9 GUC-per-request rollout, step 2 — first table enabled for Row-Level Security, per
+-- ERP-PLANNING/multi-industry-platform/13-security-architecture.md's own sequencing: close the
+-- GUC-per-request gap first (done, all 15 services), then enable RLS table-by-table starting
+-- with the highest-value/highest-risk financial tables (invoices, journal entries, payments).
+--
+-- Before this migration, every real code path touching `invoices` was audited for GUC safety
+-- (see 23-guc-per-request-rollout-checklist.md's RLS-readiness section). Two real production
+-- routes were found unsafe and fixed: sales-service's POST /invoices/:id/confirm and
+-- GET /customers/:id/360 (both had a fetch() call interleaved with DB work, restructured per
+-- caveat 4g so the DB work runs inside withTenantConnection and the fetch runs outside it).
+-- A number of background jobs/consumers (scheduler-service cron jobs, gst-service's real
+-- NIC e-Invoice API routes, a Kafka consumer) remain deliberately unmigrated and are a known,
+-- accepted, documented gap — not silently ignored — pending a separate follow-up.
+--
+-- FORCE ROW LEVEL SECURITY is required because erp_app (the application role — see
+-- infrastructure/docker/postgres/init.sql) owns this table, and table owners bypass RLS unless
+-- forced. Postgres superusers (the 'erp' role) always bypass RLS regardless of FORCE — confirmed
+-- empirically that RLS had zero effect when queried as 'erp', which is why all 15 services were
+-- switched to the new non-superuser erp_app role before this migration.
+--
+-- current_tenant_id() (defined in init.sql) raises a hard "Security: tenant context not set.
+-- Access denied." exception when app.current_tenant_id was never set on the connection, rather
+-- than silently hiding rows — confirmed empirically this correctly fires for any pooled
+-- connection that has touched the GUC name before (i.e. virtually every real request through
+-- withTenantConnection's shared connection pool).
+--
+-- No WITH CHECK clause is given, so Postgres uses the USING expression for both read-side
+-- filtering (SELECT/UPDATE/DELETE) and write-side validation (INSERT/UPDATE) — a write attempt
+-- for a tenant_id that doesn't match the session's GUC is rejected, not just hidden afterward.
+ALTER TABLE "invoices" ENABLE ROW LEVEL SECURITY;
+--> statement-breakpoint
+ALTER TABLE "invoices" FORCE ROW LEVEL SECURITY;
+--> statement-breakpoint
+CREATE POLICY "tenant_isolation" ON "invoices" USING (tenant_id = current_tenant_id());

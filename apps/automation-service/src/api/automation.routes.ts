@@ -3,6 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import { eq, and, desc } from 'drizzle-orm';
 import { workflowDefinitions, workflowExecutionHistory } from '@erp/db';
 import type { ErpDatabase } from '@erp/db';
+import { withTenantConnection } from '@erp/sdk';
 import { PERMISSIONS, ValidationError } from '@erp/types';
 import { z } from 'zod';
 import { authenticate } from '../middleware/authenticate.js';
@@ -46,19 +47,25 @@ const DefinitionSchema = z.object({
   isActive: z.boolean().default(true),
 });
 
+// Phase 9 GUC-per-request rollout — migrated 2026-08-21 (CRUD routes only). This service has no
+// PlatformContextFactory, so withTenantConnection is used directly. The two trigger/webhook
+// routes below are deliberately NOT migrated — triggerRegistry.handleManualOrApiTrigger() runs
+// the WorkflowEngine, which can send real notifications and has DELAY nodes (potentially hours),
+// so wrapping them would hold a transaction open indefinitely. See
+// 23-guc-per-request-rollout-checklist.md's "external I/O mid-handler" caveat.
 export async function automationRoutes(
   fastify: FastifyInstance,
   db: ErpDatabase,
   triggerRegistry: TriggerRegistry
 ): Promise<void> {
-  const defSvc = new WorkflowDefinitionService(db);
-
   fastify.addHook('preHandler', authenticate);
 
   fastify.get('/automation/definitions', {
     preHandler: requirePermission(PERMISSIONS.AUTOMATION_VIEW),
     handler: async (req, reply) => {
-      const rows = await defSvc.list(req.auth.tenantId);
+      const rows = await withTenantConnection(db, req.auth.tenantId, (scopedDb) =>
+        new WorkflowDefinitionService(scopedDb).list(req.auth.tenantId)
+      );
       return reply.send({ data: { content: rows, totalElements: rows.length } });
     },
   });
@@ -66,7 +73,9 @@ export async function automationRoutes(
   fastify.get<{ Params: { id: string } }>('/automation/definitions/:id', {
     preHandler: requirePermission(PERMISSIONS.AUTOMATION_VIEW),
     handler: async (req, reply) => {
-      const row = await defSvc.get(Number(req.params.id), req.auth.tenantId);
+      const row = await withTenantConnection(db, req.auth.tenantId, (scopedDb) =>
+        new WorkflowDefinitionService(scopedDb).get(Number(req.params.id), req.auth.tenantId)
+      );
       return reply.send({ data: row });
     },
   });
@@ -77,7 +86,13 @@ export async function automationRoutes(
       const body = DefinitionSchema.safeParse(req.body);
       if (!body.success)
         throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
-      const row = await defSvc.create(req.auth.tenantId, req.auth.userId, body.data as never);
+      const row = await withTenantConnection(db, req.auth.tenantId, (scopedDb) =>
+        new WorkflowDefinitionService(scopedDb).create(
+          req.auth.tenantId,
+          req.auth.userId,
+          body.data as never
+        )
+      );
       return reply.code(201).send({ data: row });
     },
   });
@@ -88,7 +103,13 @@ export async function automationRoutes(
       const body = DefinitionSchema.safeParse(req.body);
       if (!body.success)
         throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
-      const row = await defSvc.update(Number(req.params.id), req.auth.tenantId, body.data as never);
+      const row = await withTenantConnection(db, req.auth.tenantId, (scopedDb) =>
+        new WorkflowDefinitionService(scopedDb).update(
+          Number(req.params.id),
+          req.auth.tenantId,
+          body.data as never
+        )
+      );
       return reply.send({ data: row });
     },
   });
@@ -98,7 +119,13 @@ export async function automationRoutes(
     {
       preHandler: requirePermission(PERMISSIONS.AUTOMATION_EDIT),
       handler: async (req, reply) => {
-        await defSvc.toggle(Number(req.params.id), req.auth.tenantId, Boolean(req.body.isActive));
+        await withTenantConnection(db, req.auth.tenantId, (scopedDb) =>
+          new WorkflowDefinitionService(scopedDb).toggle(
+            Number(req.params.id),
+            req.auth.tenantId,
+            Boolean(req.body.isActive)
+          )
+        );
         return reply.send({ data: { message: 'Updated' } });
       },
     }
@@ -107,7 +134,9 @@ export async function automationRoutes(
   fastify.delete<{ Params: { id: string } }>('/automation/definitions/:id', {
     preHandler: requirePermission(PERMISSIONS.AUTOMATION_DELETE),
     handler: async (req, reply) => {
-      await defSvc.remove(Number(req.params.id), req.auth.tenantId);
+      await withTenantConnection(db, req.auth.tenantId, (scopedDb) =>
+        new WorkflowDefinitionService(scopedDb).remove(Number(req.params.id), req.auth.tenantId)
+      );
       return reply.send({ data: { message: 'Deleted' } });
     },
   });
@@ -131,17 +160,19 @@ export async function automationRoutes(
   fastify.get<{ Params: { id: string } }>('/automation/definitions/:id/history', {
     preHandler: requirePermission(PERMISSIONS.AUTOMATION_VIEW),
     handler: async (req, reply) => {
-      const rows = await db
-        .select()
-        .from(workflowExecutionHistory)
-        .where(
-          and(
-            eq(workflowExecutionHistory.tenantId, req.auth.tenantId),
-            eq(workflowExecutionHistory.definitionId, Number(req.params.id))
+      const rows = await withTenantConnection(db, req.auth.tenantId, (scopedDb) =>
+        scopedDb
+          .select()
+          .from(workflowExecutionHistory)
+          .where(
+            and(
+              eq(workflowExecutionHistory.tenantId, req.auth.tenantId),
+              eq(workflowExecutionHistory.definitionId, Number(req.params.id))
+            )
           )
-        )
-        .orderBy(desc(workflowExecutionHistory.startedAt))
-        .limit(30);
+          .orderBy(desc(workflowExecutionHistory.startedAt))
+          .limit(30)
+      );
       return reply.send({ data: { content: rows, totalElements: rows.length } });
     },
   });

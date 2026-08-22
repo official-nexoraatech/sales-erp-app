@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { PlatformContextFactory, TenantScopedDatabase } from '@erp/sdk';
+import { tenantScopedHandler } from '@erp/sdk';
 import { statutoryChallanFilings } from '@erp/db';
 import { and, eq } from 'drizzle-orm';
 import { z } from 'zod';
@@ -11,8 +12,6 @@ import { PFChallanService } from '../domain/PFChallanService.js';
 import { ESIChallanService } from '../domain/ESIChallanService.js';
 import { PTReportService } from '../domain/PTReportService.js';
 import { Form16Service } from '../domain/Form16Service.js';
-
-type AuthedRequest = { auth: { tenantId: number; userId: number } };
 
 const PeriodQuerySchema = z.object({
   month: z.coerce.number().int().min(1).max(12),
@@ -57,21 +56,19 @@ async function getFiling(
   return filing ?? null;
 }
 
+// Phase 9 GUC-per-request rollout — migrated 2026-08-21. No external I/O — none of
+// PFChallanService/ESIChallanService/PTReportService/Form16Service has fetch() calls; CSV
+// export is computed locally.
 export async function statutoryRoutes(
   fastify: FastifyInstance,
   ctxFactory: PlatformContextFactory
 ): Promise<void> {
   // ── PF Challan ────────────────────────────────────────────────────────────
-  fastify.get<{ Querystring: { month?: string; year?: string } }>(
+  fastify.get(
     '/pf-challans',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.HR_STATUTORY)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId } = ctx.tenant;
       const query = PeriodQuerySchema.safeParse(request.query);
       if (!query.success)
         throw new ValidationError(query.error.errors.map((e) => e.message).join('; '));
@@ -85,19 +82,14 @@ export async function statutoryRoutes(
       const filing = await getFiling(ctx.db, tenantId, 'PF', query.data.month, query.data.year);
 
       return reply.code(200).send({ data: { ...challan, filedAt: filing?.filedAt ?? null } });
-    }
+    })
   );
 
-  fastify.get<{ Querystring: { month?: string; year?: string; format?: string } }>(
+  fastify.get(
     '/pf-challans/export',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.HR_STATUTORY)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId } = ctx.tenant;
       const query = PeriodQuerySchema.safeParse(request.query);
       if (!query.success)
         throw new ValidationError(query.error.errors.map((e) => e.message).join('; '));
@@ -132,19 +124,14 @@ export async function statutoryRoutes(
         `attachment; filename="pf-challan-${query.data.year}-${String(query.data.month).padStart(2, '0')}.csv"`
       );
       return reply.code(200).send(csv);
-    }
+    })
   );
 
   fastify.post(
     '/pf-challans/mark-filed',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.HR_STATUTORY)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId, userId } = ctx.tenant;
       const body = MarkFiledSchema.safeParse(request.body);
       if (!body.success)
         throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
@@ -174,20 +161,15 @@ export async function statutoryRoutes(
       return reply
         .code(200)
         .send({ data: { message: 'PF challan marked as filed', ...body.data } });
-    }
+    })
   );
 
   // ── ESI Challan ───────────────────────────────────────────────────────────
-  fastify.get<{ Querystring: { month?: string; year?: string } }>(
+  fastify.get(
     '/esi-challans',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.HR_STATUTORY)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId } = ctx.tenant;
       const query = PeriodQuerySchema.safeParse(request.query);
       if (!query.success)
         throw new ValidationError(query.error.errors.map((e) => e.message).join('; '));
@@ -201,19 +183,14 @@ export async function statutoryRoutes(
       const filing = await getFiling(ctx.db, tenantId, 'ESI', query.data.month, query.data.year);
 
       return reply.code(200).send({ data: { ...challan, filedAt: filing?.filedAt ?? null } });
-    }
+    })
   );
 
-  fastify.get<{ Querystring: { month?: string; year?: string; format?: string } }>(
+  fastify.get(
     '/esi-challans/export',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.HR_STATUTORY)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId } = ctx.tenant;
       const query = PeriodQuerySchema.safeParse(request.query);
       if (!query.success)
         throw new ValidationError(query.error.errors.map((e) => e.message).join('; '));
@@ -246,19 +223,14 @@ export async function statutoryRoutes(
         `attachment; filename="esi-challan-${query.data.year}-${String(query.data.month).padStart(2, '0')}.csv"`
       );
       return reply.code(200).send(csv);
-    }
+    })
   );
 
   fastify.post(
     '/esi-challans/mark-filed',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.HR_STATUTORY)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId, userId } = ctx.tenant;
       const body = MarkFiledSchema.safeParse(request.body);
       if (!body.success)
         throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
@@ -288,20 +260,15 @@ export async function statutoryRoutes(
       return reply
         .code(200)
         .send({ data: { message: 'ESI challan marked as filed', ...body.data } });
-    }
+    })
   );
 
   // ── Professional Tax Report (2026-07-20 HR audit) ────────────────────────
-  fastify.get<{ Querystring: { month?: string; year?: string } }>(
+  fastify.get(
     '/pt-report',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.HR_STATUTORY)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId } = ctx.tenant;
       const query = PeriodQuerySchema.safeParse(request.query);
       if (!query.success)
         throw new ValidationError(query.error.errors.map((e) => e.message).join('; '));
@@ -315,19 +282,14 @@ export async function statutoryRoutes(
       const filing = await getFiling(ctx.db, tenantId, 'PT', query.data.month, query.data.year);
 
       return reply.code(200).send({ data: { ...report, filedAt: filing?.filedAt ?? null } });
-    }
+    })
   );
 
-  fastify.get<{ Querystring: { month?: string; year?: string; format?: string } }>(
+  fastify.get(
     '/pt-report/export',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.HR_STATUTORY)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId } = ctx.tenant;
       const query = PeriodQuerySchema.safeParse(request.query);
       if (!query.success)
         throw new ValidationError(query.error.errors.map((e) => e.message).join('; '));
@@ -348,19 +310,14 @@ export async function statutoryRoutes(
         `attachment; filename="pt-report-${query.data.year}-${String(query.data.month).padStart(2, '0')}.csv"`
       );
       return reply.code(200).send(csv);
-    }
+    })
   );
 
   fastify.post(
     '/pt-report/mark-filed',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.HR_STATUTORY)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId, userId } = ctx.tenant;
       const body = MarkFiledSchema.safeParse(request.body);
       if (!body.success)
         throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
@@ -388,22 +345,17 @@ export async function statutoryRoutes(
         metadata: { action: 'MARK_FILED', ...body.data },
       });
       return reply.code(200).send({ data: { message: 'PT report marked as filed', ...body.data } });
-    }
+    })
   );
 
   // ── Form 16 ───────────────────────────────────────────────────────────────
-  fastify.get<{ Params: { id: string }; Querystring: { year?: string } }>(
+  fastify.get(
     '/employees/:id/form16',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.VIEW_SALARY_DETAILS)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-      const employeeId = parseInt(request.params.id, 10);
-      const financialYear = request.query.year;
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId } = ctx.tenant;
+      const employeeId = parseInt((request.params as { id: string }).id, 10);
+      const financialYear = (request.query as { year?: string }).year;
       if (!financialYear)
         throw new ValidationError('year query parameter is required, e.g. ?year=2025-26');
 
@@ -414,6 +366,6 @@ export async function statutoryRoutes(
         financialYear
       );
       return reply.code(200).send({ data });
-    }
+    })
   );
 }

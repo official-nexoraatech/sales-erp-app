@@ -68,6 +68,10 @@ export const PERMISSIONS = {
   ITEM_EXPORT: 'ITEM_EXPORT',
   ITEM_BARCODE_PRINT: 'ITEM_BARCODE_PRINT',
 
+  // ── Batch / Expiry Tracking (INVENTORY_BATCH capability) ────────────────────
+  BATCH_VIEW: 'BATCH_VIEW',
+  BATCH_CONFIGURE: 'BATCH_CONFIGURE',
+
   // ── Categories / Brands / Units ──────────────────────────────────────────
   CATEGORY_VIEW: 'CATEGORY_VIEW',
   CATEGORY_CREATE: 'CATEGORY_CREATE',
@@ -377,6 +381,13 @@ export const PERMISSIONS = {
   // customer-facing surface too.
   PORTAL_ACCOUNT_MANAGE: 'PORTAL_ACCOUNT_MANAGE',
   IMPERSONATE_PORTAL_CUSTOMER: 'IMPERSONATE_PORTAL_CUSTOMER',
+  // CRM-ROADMAP Phase 4, Feature 6 (Partner/Channel Portal). Same pair, same reasoning, for the
+  // third auth scope (PARTNER) — a partner is an existing WHOLESALE/B2B customers row, not a
+  // new entity. PARTNER_ACCOUNT_MANAGE gates staff provisioning (POST /customers/:id/partner-
+  // account); IMPERSONATE_PARTNER is kept separate from IMPERSONATE_USER/IMPERSONATE_PORTAL_
+  // CUSTOMER for the same reason those two are kept separate from each other.
+  PARTNER_ACCOUNT_MANAGE: 'PARTNER_ACCOUNT_MANAGE',
+  IMPERSONATE_PARTNER: 'IMPERSONATE_PARTNER',
   // CRM-ROADMAP Phase 4, Feature 4 (Territory Management). No naming collision found for the
   // TERRITORY_* namespace (repo-wide grep). One constant gates CRUD on territories themselves
   // plus branch/user assignment into them — a Sales Ops admin action, not something split into
@@ -581,6 +592,44 @@ export const PERMISSIONS = {
   JOB_WORK_QUALITY_CHECK: 'JOB_WORK_QUALITY_CHECK',
   JOB_WORK_COMPLETE: 'JOB_WORK_COMPLETE',
   JOB_WORK_CANCEL: 'JOB_WORK_CANCEL',
+
+  // Manufacturing vertical, Phase A — Bill of Materials. No BOM_UPDATE: a BOM is versioned by
+  // creating a new one for the same finished item (BOMService.create() auto-deactivates the
+  // prior version) — in-place mutation would retroactively change what past explode()/order
+  // creation calls saw, so that's deliberately not an operation this API exposes.
+  BOM_VIEW: 'BOM_VIEW',
+  BOM_CREATE: 'BOM_CREATE',
+  BOM_DELETE: 'BOM_DELETE',
+
+  // Manufacturing vertical, Phase B — Work Centers. No WORK_CENTER_DELETE: decommissioning is
+  // already fully served by PUT /work-centers/:id { isActive: false } (WORK_CENTER_UPDATE) —
+  // a hard delete of a master record other tables may reference by id adds risk for no
+  // practical gain over that existing path.
+  WORK_CENTER_VIEW: 'WORK_CENTER_VIEW',
+  WORK_CENTER_CREATE: 'WORK_CENTER_CREATE',
+  WORK_CENTER_UPDATE: 'WORK_CENTER_UPDATE',
+
+  // Manufacturing vertical — standalone Production Order (in-house manufacturing)
+  PRODUCTION_ORDER_VIEW: 'PRODUCTION_ORDER_VIEW',
+  PRODUCTION_ORDER_CREATE: 'PRODUCTION_ORDER_CREATE',
+  PRODUCTION_ORDER_UPDATE: 'PRODUCTION_ORDER_UPDATE',
+  PRODUCTION_ORDER_ISSUE_MATERIALS: 'PRODUCTION_ORDER_ISSUE_MATERIALS',
+  PRODUCTION_ORDER_QUALITY_CHECK: 'PRODUCTION_ORDER_QUALITY_CHECK',
+  PRODUCTION_ORDER_COMPLETE: 'PRODUCTION_ORDER_COMPLETE',
+  PRODUCTION_ORDER_CANCEL: 'PRODUCTION_ORDER_CANCEL',
+
+  // Manufacturing vertical — Routing (multi-step operation sequences). No ROUTING_UPDATE, same
+  // versioned-by-recreate reasoning as BOM above (RoutingService.create() auto-deactivates the
+  // prior active routing for the same finished item).
+  ROUTING_VIEW: 'ROUTING_VIEW',
+  ROUTING_CREATE: 'ROUTING_CREATE',
+  ROUTING_DELETE: 'ROUTING_DELETE',
+
+  // Manufacturing vertical — MRP (nets demand through BOM against stock/open POs/open production
+  // orders; MRP_CREATE_REQUISITION gates turning a raw-material shortage into a Purchase Requisition)
+  MRP_VIEW: 'MRP_VIEW',
+  MRP_CREATE_REQUISITION: 'MRP_CREATE_REQUISITION',
+
   BARCODE_VIEW: 'BARCODE_VIEW',
   BARCODE_GENERATE: 'BARCODE_GENERATE',
   BARCODE_PRINT: 'BARCODE_PRINT',

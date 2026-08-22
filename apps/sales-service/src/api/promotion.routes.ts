@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { PlatformContextFactory } from '@erp/sdk';
+import { tenantScopedHandler, requireCapability } from '@erp/sdk';
 import { z } from 'zod';
 import { ValidationError } from '@erp/types';
 import { PERMISSIONS } from '@erp/types';
@@ -55,8 +56,8 @@ const EvaluateCartSchema = z.object({
     .min(1),
 });
 
-type AuthedRequest = { auth: { tenantId: number; userId: number } };
-
+// Phase 9 GUC-per-request rollout — migrated 2026-08-21. No external I/O — PromotionService/
+// PromotionEngine have no fetch() calls. Post-hoc ctx.audit.log() calls are safe per caveat 4b.
 export async function promotionRoutes(
   fastify: FastifyInstance,
   ctxFactory: PlatformContextFactory
@@ -64,38 +65,30 @@ export async function promotionRoutes(
   fastify.get(
     '/promotions',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.PROMOTION_VIEW)] },
-    async (request, reply) => {
-      const { tenantId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId: 0,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-      const rows = await PromotionService.list(ctx.db.raw, tenantId);
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const rows = await PromotionService.list(ctx.db.raw, ctx.tenant.tenantId);
       return reply.code(200).send({ data: { content: rows, totalElements: rows.length } });
-    }
+    })
   );
 
   fastify.post(
     '/promotions',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.PROMOTION_MANAGE)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
       const body = PromotionCreateSchema.safeParse(request.body);
       if (!body.success)
         throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
 
-      const created = await PromotionService.create(ctx.db.raw, tenantId, userId, {
-        ...body.data,
-        startDate: new Date(body.data.startDate),
-        endDate: new Date(body.data.endDate),
-      });
+      const created = await PromotionService.create(
+        ctx.db.raw,
+        ctx.tenant.tenantId,
+        ctx.tenant.userId,
+        {
+          ...body.data,
+          startDate: new Date(body.data.startDate),
+          endDate: new Date(body.data.endDate),
+        }
+      );
 
       await ctx.audit.log({
         action: 'CREATE',
@@ -104,27 +97,22 @@ export async function promotionRoutes(
         after: created as unknown as Record<string, unknown>,
       });
       return reply.code(201).send({ data: created });
-    }
+    })
   );
 
-  fastify.put<{ Params: { id: string } }>(
+  fastify.put(
     '/promotions/:id',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.PROMOTION_MANAGE)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-      const id = parseInt(request.params.id, 10);
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { id: idParam } = request.params as { id: string };
+      const id = parseInt(idParam, 10);
 
       const body = PromotionUpdateSchema.safeParse(request.body);
       if (!body.success)
         throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
 
       const { startDate, endDate, ...rest } = body.data;
-      const updated = await PromotionService.update(ctx.db.raw, tenantId, id, {
+      const updated = await PromotionService.update(ctx.db.raw, ctx.tenant.tenantId, id, {
         ...rest,
         ...(startDate !== undefined ? { startDate: new Date(startDate) } : {}),
         ...(endDate !== undefined ? { endDate: new Date(endDate) } : {}),
@@ -137,7 +125,7 @@ export async function promotionRoutes(
         after: updated as unknown as Record<string, unknown>,
       });
       return reply.code(200).send({ data: updated });
-    }
+    })
   );
 
   // POST /pos/promotions/evaluate — checkout-time evaluation. Returns per-line discount
@@ -149,27 +137,21 @@ export async function promotionRoutes(
     {
       preHandler: [
         authenticate,
+        requireCapability('POS', ctxFactory.rawDb, ctxFactory.getRedis()),
         requireAnyPermission([PERMISSIONS.POS_MANAGE, PERMISSIONS.POS_ACCESS]),
       ],
     },
-    async (request, reply) => {
-      const { tenantId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId: 0,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
       const body = EvaluateCartSchema.safeParse(request.body);
       if (!body.success)
         throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
 
       const applications = await PromotionEngine.evaluateCart(
         ctx.db.raw,
-        tenantId,
+        ctx.tenant.tenantId,
         body.data.lines
       );
       return reply.code(200).send({ data: { applications } });
-    }
+    })
   );
 }

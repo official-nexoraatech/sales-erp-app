@@ -44,6 +44,7 @@ export { default as FormSection } from './FormSection.js';
 export { default as Pagination } from './Pagination.js';
 export { TableSkeleton, FormSkeleton, CardSkeleton, DetailSkeleton } from './Skeleton.js';
 export { default as StatCard } from './StatCard.js';
+export { default as UsageMeter } from './UsageMeter.js';
 export { default as StickyFooter } from './StickyFooter.js';
 export { default as Tabs, type TabDef } from './Tabs.js';
 export { default as Drawer } from './Drawer.js';

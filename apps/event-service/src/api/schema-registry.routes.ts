@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import type { PlatformContextFactory } from '@erp/sdk';
+import type { PlatformContextFactory, JsonSchema } from '@erp/sdk';
 import { SchemaRegistry, SchemaCompatibilityError } from '@erp/sdk';
 import { z } from 'zod';
 import { PERMISSIONS } from '@erp/types';
@@ -19,6 +19,15 @@ const CheckCompatibilityBody = z.object({
   compatibilityMode: z.enum(['BACKWARD', 'FORWARD', 'FULL', 'NONE']).default('BACKWARD'),
 });
 
+// Phase 9 GUC-per-request rollout — deliberately NOT migrated. `schema_registry`
+// (packages/db-client/src/schema/distributed.ts) has no tenant_id column at all: an event's
+// JSON schema (e.g. "invoice.created" v3) is one canonical definition shared by every tenant,
+// not a per-tenant record. No GUC gap exists here to close — same "no tenant dimension at all"
+// category as tenant-service's demo_requests/faq_items. `SchemaRegistry` still takes a
+// `TenantScopedDatabase` (constructed via the un-scoped `ctxFactory.create()` below) only because
+// that's this codebase's common context-passing convention, not because any query it runs is
+// actually tenant-filtered — its methods all read/write schemaRegistryTable via `this.db.raw`
+// with no tenantId predicate anywhere.
 export async function schemaRegistryRoutes(
   fastify: FastifyInstance,
   ctxFactory: PlatformContextFactory
@@ -29,7 +38,11 @@ export async function schemaRegistryRoutes(
   fastify.get('/schema-registry/catalog', {
     preHandler: requirePermission(PERMISSIONS.SCHEMA_REGISTRY_VIEW),
     handler: async (request, reply) => {
-      const ctx = ctxFactory.create({ tenantId: request.auth.tenantId, userId: request.auth.userId, correlationId: (request.headers['x-correlation-id'] as string) ?? 'system' });
+      const ctx = ctxFactory.create({
+        tenantId: request.auth.tenantId,
+        userId: request.auth.userId,
+        correlationId: (request.headers['x-correlation-id'] as string) ?? 'system',
+      });
       const registry = new SchemaRegistry(ctx.db);
       const catalog = await registry.getCatalog();
       return reply.code(200).send({ data: catalog });
@@ -40,36 +53,60 @@ export async function schemaRegistryRoutes(
   fastify.get<{ Params: { type: string } }>('/schema-registry/schemas/:type', {
     preHandler: requirePermission(PERMISSIONS.SCHEMA_REGISTRY_VIEW),
     handler: async (request, reply) => {
-      const ctx = ctxFactory.create({ tenantId: request.auth.tenantId, userId: request.auth.userId, correlationId: (request.headers['x-correlation-id'] as string) ?? 'system' });
+      const ctx = ctxFactory.create({
+        tenantId: request.auth.tenantId,
+        userId: request.auth.userId,
+        correlationId: (request.headers['x-correlation-id'] as string) ?? 'system',
+      });
       const registry = new SchemaRegistry(ctx.db);
       const schema = await registry.getLatest(request.params.type);
 
       if (!schema) {
-        return reply.code(404).send({ error: { code: 'NOT_FOUND', message: `Schema for '${request.params.type}' not found` } });
+        return reply
+          .code(404)
+          .send({
+            error: { code: 'NOT_FOUND', message: `Schema for '${request.params.type}' not found` },
+          });
       }
       return reply.code(200).send({ data: schema });
     },
   });
 
   // GET /schema-registry/schemas/:type/:version — get specific version
-  fastify.get<{ Params: { type: string; version: string } }>('/schema-registry/schemas/:type/:version', {
-    preHandler: requirePermission(PERMISSIONS.SCHEMA_REGISTRY_VIEW),
-    handler: async (request, reply) => {
-      const version = parseInt(request.params.version, 10);
-      if (isNaN(version)) {
-        return reply.code(400).send({ error: { code: 'VALIDATION_ERROR', message: 'Invalid version' } });
-      }
+  fastify.get<{ Params: { type: string; version: string } }>(
+    '/schema-registry/schemas/:type/:version',
+    {
+      preHandler: requirePermission(PERMISSIONS.SCHEMA_REGISTRY_VIEW),
+      handler: async (request, reply) => {
+        const version = parseInt(request.params.version, 10);
+        if (isNaN(version)) {
+          return reply
+            .code(400)
+            .send({ error: { code: 'VALIDATION_ERROR', message: 'Invalid version' } });
+        }
 
-      const ctx = ctxFactory.create({ tenantId: request.auth.tenantId, userId: request.auth.userId, correlationId: (request.headers['x-correlation-id'] as string) ?? 'system' });
-      const registry = new SchemaRegistry(ctx.db);
-      const schema = await registry.getVersion(request.params.type, version);
+        const ctx = ctxFactory.create({
+          tenantId: request.auth.tenantId,
+          userId: request.auth.userId,
+          correlationId: (request.headers['x-correlation-id'] as string) ?? 'system',
+        });
+        const registry = new SchemaRegistry(ctx.db);
+        const schema = await registry.getVersion(request.params.type, version);
 
-      if (!schema) {
-        return reply.code(404).send({ error: { code: 'NOT_FOUND', message: `Schema for '${request.params.type}' v${version} not found` } });
-      }
-      return reply.code(200).send({ data: schema });
-    },
-  });
+        if (!schema) {
+          return reply
+            .code(404)
+            .send({
+              error: {
+                code: 'NOT_FOUND',
+                message: `Schema for '${request.params.type}' v${version} not found`,
+              },
+            });
+        }
+        return reply.code(200).send({ data: schema });
+      },
+    }
+  );
 
   // POST /schema-registry/schemas — register schema
   fastify.post('/schema-registry/schemas', {
@@ -77,17 +114,29 @@ export async function schemaRegistryRoutes(
     handler: async (request, reply) => {
       const parsed = RegisterSchemaBody.safeParse(request.body);
       if (!parsed.success) {
-        return reply.code(400).send({ error: { code: 'VALIDATION_ERROR', message: 'Invalid request body', details: parsed.error.flatten() } });
+        return reply
+          .code(400)
+          .send({
+            error: {
+              code: 'VALIDATION_ERROR',
+              message: 'Invalid request body',
+              details: parsed.error.flatten(),
+            },
+          });
       }
 
-      const ctx = ctxFactory.create({ tenantId: request.auth.tenantId, userId: request.auth.userId, correlationId: (request.headers['x-correlation-id'] as string) ?? 'system' });
+      const ctx = ctxFactory.create({
+        tenantId: request.auth.tenantId,
+        userId: request.auth.userId,
+        correlationId: (request.headers['x-correlation-id'] as string) ?? 'system',
+      });
       const registry = new SchemaRegistry(ctx.db);
 
       try {
         const registerPayload: Parameters<typeof registry.register>[0] = {
           eventType: parsed.data.eventType,
           schemaVersion: parsed.data.schemaVersion,
-          jsonSchema: parsed.data.jsonSchema as import('@erp/sdk').JsonSchema,
+          jsonSchema: parsed.data.jsonSchema as JsonSchema,
           compatibilityMode: parsed.data.compatibilityMode,
           registeredBy: request.auth.email,
         };
@@ -111,20 +160,40 @@ export async function schemaRegistryRoutes(
     handler: async (request, reply) => {
       const parsed = CheckCompatibilityBody.safeParse(request.body);
       if (!parsed.success) {
-        return reply.code(400).send({ error: { code: 'VALIDATION_ERROR', message: 'Invalid request body', details: parsed.error.flatten() } });
+        return reply
+          .code(400)
+          .send({
+            error: {
+              code: 'VALIDATION_ERROR',
+              message: 'Invalid request body',
+              details: parsed.error.flatten(),
+            },
+          });
       }
 
-      const ctx = ctxFactory.create({ tenantId: request.auth.tenantId, userId: request.auth.userId, correlationId: (request.headers['x-correlation-id'] as string) ?? 'system' });
+      const ctx = ctxFactory.create({
+        tenantId: request.auth.tenantId,
+        userId: request.auth.userId,
+        correlationId: (request.headers['x-correlation-id'] as string) ?? 'system',
+      });
       const registry = new SchemaRegistry(ctx.db);
       const existing = await registry.getLatest(request.params.type);
 
       if (!existing) {
-        return reply.code(200).send({ data: { compatible: true, incompatibilities: [], message: 'No existing schema — first version is always compatible' } });
+        return reply
+          .code(200)
+          .send({
+            data: {
+              compatible: true,
+              incompatibilities: [],
+              message: 'No existing schema — first version is always compatible',
+            },
+          });
       }
 
       const result = registry.checkCompatibility(
         existing.jsonSchema,
-        parsed.data.jsonSchema as import('@erp/sdk').JsonSchema,
+        parsed.data.jsonSchema as JsonSchema,
         parsed.data.compatibilityMode
       );
 

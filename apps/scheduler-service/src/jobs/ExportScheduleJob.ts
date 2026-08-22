@@ -5,6 +5,7 @@ import type { Redis } from 'ioredis';
 import type { ErpDatabase } from '@erp/db';
 import { exportSchedules, exportRunHistory } from '@erp/db';
 import type { StorageClient } from '@erp/sdk';
+import { withTenantConnection } from '@erp/sdk';
 import { createLogger } from '@erp/logger';
 import { ExportEngine, type ExportEntity } from '../domain/ExportEngine.js';
 import { ExportFormatter } from '../domain/ExportFormatter.js';
@@ -32,7 +33,6 @@ const SYNC_INTERVAL_MS = 5 * 60 * 1000;
 export class ExportScheduleJob {
   private readonly queue: Queue;
   private readonly worker: Worker;
-  private readonly engine: ExportEngine;
   private readonly formatter: ExportFormatter;
   // scheduleId -> cron pattern currently registered as a BullMQ repeatable job, so a sync tick
   // can detect a changed/removed schedule and re-register rather than accumulate stale entries.
@@ -44,7 +44,6 @@ export class ExportScheduleJob {
     redis: Redis,
     private readonly storage: StorageClient
   ) {
-    this.engine = new ExportEngine(db);
     this.formatter = new ExportFormatter();
     this.queue = new Queue(QUEUE_NAME, { connection: redis });
     this.worker = new Worker(
@@ -72,6 +71,11 @@ export class ExportScheduleJob {
     await this.queue.close();
   }
 
+  // RLS-readiness note (2026-08-22): genuinely cross-tenant by design — must see every
+  // tenant's active schedules in one pass to (re)register BullMQ repeatables, and does no
+  // further per-schedule Postgres work in its own loop body (only queue.add/removeRepeatable,
+  // no DB). Deliberately left unwrapped, same category as other cross-tenant admin-style reads
+  // already accepted elsewhere in this rollout (e.g. tenant-service's GET /admin/tenants).
   private async syncSchedules(): Promise<void> {
     const active = await this.db
       .select()
@@ -113,6 +117,11 @@ export class ExportScheduleJob {
     }
   }
 
+  // RLS-readiness follow-up (2026-08-22): the initial lookup-by-scheduleId can't be
+  // tenant-scoped — the tenantId isn't known until this row is read (caveat 4f, same shape as
+  // notification-service's webhook routes resolving tenant by externalMessageId). Once
+  // schedule.tenantId is known, every subsequent DB call gets its own withTenantConnection
+  // wrap; the MinIO upload is real external I/O and stays outside any transaction (caveat 4g).
   private async runSchedule(scheduleId: number): Promise<void> {
     const [schedule] = await this.db
       .select()
@@ -122,25 +131,33 @@ export class ExportScheduleJob {
       logger.info({ scheduleId }, 'Export schedule run skipped — schedule inactive or deleted');
       return;
     }
+    const tenantId = schedule.tenantId;
 
     const startTime = Date.now();
-    const [run] = await this.db
-      .insert(exportRunHistory)
-      .values({
-        tenantId: schedule.tenantId,
-        scheduleId: schedule.id,
-        entityType: schedule.entityType,
-        format: schedule.format,
-        status: 'RUNNING',
-        startedAt: new Date(),
-      })
-      .returning();
+    const [run] = await withTenantConnection(this.db, tenantId, (scopedDb) =>
+      scopedDb
+        .insert(exportRunHistory)
+        .values({
+          tenantId,
+          scheduleId: schedule.id,
+          entityType: schedule.entityType,
+          format: schedule.format,
+          status: 'RUNNING',
+          startedAt: new Date(),
+        })
+        .returning()
+    );
 
     try {
-      const { columns, rows, totalRows } = await this.engine.query(
-        schedule.tenantId,
-        schedule.entityType as ExportEntity,
-        schedule.filters as Record<string, unknown>
+      const { columns, rows, totalRows } = await withTenantConnection(
+        this.db,
+        tenantId,
+        (scopedDb) =>
+          new ExportEngine(scopedDb).query(
+            tenantId,
+            schedule.entityType as ExportEntity,
+            schedule.filters as Record<string, unknown>
+          )
       );
       const buffer =
         schedule.format === 'XLSX'
@@ -150,7 +167,7 @@ export class ExportScheduleJob {
       const fileName = this.formatter.getFileName(schedule.entityType, schedule.format);
       const mimeType = this.formatter.getContentType(schedule.format);
       const objectKey = await this.storage.uploadFile(
-        schedule.tenantId,
+        tenantId,
         'export-schedules',
         fileName,
         buffer,
@@ -158,33 +175,34 @@ export class ExportScheduleJob {
       );
       const signedUrl = await this.storage.getSignedUrl(objectKey, 7 * 24 * 60 * 60);
 
-      await this.db
-        .update(exportRunHistory)
-        .set({
-          status: 'COMPLETED',
-          completedAt: new Date(),
-          fileUrl: signedUrl,
-          rowCount: totalRows,
-          durationMs: Date.now() - startTime,
-        })
-        .where(eq(exportRunHistory.id, run!.id));
-
-      logger.info(
-        { scheduleId, tenantId: schedule.tenantId, totalRows },
-        'Export schedule run completed'
+      await withTenantConnection(this.db, tenantId, (scopedDb) =>
+        scopedDb
+          .update(exportRunHistory)
+          .set({
+            status: 'COMPLETED',
+            completedAt: new Date(),
+            fileUrl: signedUrl,
+            rowCount: totalRows,
+            durationMs: Date.now() - startTime,
+          })
+          .where(eq(exportRunHistory.id, run!.id))
       );
+
+      logger.info({ scheduleId, tenantId, totalRows }, 'Export schedule run completed');
       await this.notifyRecipients(schedule, signedUrl, totalRows);
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : String(err);
-      await this.db
-        .update(exportRunHistory)
-        .set({
-          status: 'FAILED',
-          completedAt: new Date(),
-          errorMessage,
-          durationMs: Date.now() - startTime,
-        })
-        .where(eq(exportRunHistory.id, run!.id));
+      await withTenantConnection(this.db, tenantId, (scopedDb) =>
+        scopedDb
+          .update(exportRunHistory)
+          .set({
+            status: 'FAILED',
+            completedAt: new Date(),
+            errorMessage,
+            durationMs: Date.now() - startTime,
+          })
+          .where(eq(exportRunHistory.id, run!.id))
+      );
       logger.error({ scheduleId, err: errorMessage }, 'Export schedule run failed');
     }
   }

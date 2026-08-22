@@ -14,7 +14,7 @@ import {
 } from '@erp/db';
 import { eq, and } from 'drizzle-orm';
 import { BusinessError } from '@erp/types';
-import { LoyaltyService, EXPIRY_WARNING_WINDOW_DAYS } from '../domain/LoyaltyService.js';
+import { LoyaltyService } from '../domain/LoyaltyService.js';
 
 const DB_URL = process.env['DATABASE_URL'];
 
@@ -39,6 +39,17 @@ describe.skipIf(!DB_URL)('LoyaltyService — integration (CRM-ROADMAP Phase 2, F
       })
       .returning();
     return row!.id;
+  }
+
+  // Tier evaluation (evaluateTier, stays in sales-service) writes customers.loyaltyTierId
+  // directly — this reads that back via a raw join instead of the now-moved getBalance.
+  async function getTierName(customerId: number): Promise<string | null> {
+    const [row] = await db
+      .select({ tierName: crmLoyaltyTiers.name })
+      .from(customers)
+      .leftJoin(crmLoyaltyTiers, eq(crmLoyaltyTiers.id, customers.loyaltyTierId))
+      .where(and(eq(customers.id, customerId), eq(customers.tenantId, TEST_TENANT)));
+    return row?.tierName ?? null;
   }
 
   beforeAll(async () => {
@@ -116,68 +127,10 @@ describe.skipIf(!DB_URL)('LoyaltyService — integration (CRM-ROADMAP Phase 2, F
       expect(txn!.expiryDate).not.toBeNull();
       expect(new Date(txn!.expiryDate!).getTime()).toBeGreaterThan(Date.now());
     });
-
-    it('an EARN transaction manually pushed past its expiry is actually deducted by expirePoints() (the real pipeline, not just the write side)', async () => {
-      const customerId = await makeCustomer('Loyalty Expiry Fire Customer');
-      await svc.earnPoints(TEST_TENANT, customerId, 1000, 'TEST', 1, 1); // 10 points
-
-      await db
-        .update(loyaltyTransactions)
-        .set({ expiryDate: new Date(Date.now() - 1000) })
-        .where(
-          and(
-            eq(loyaltyTransactions.customerId, customerId),
-            eq(loyaltyTransactions.tenantId, TEST_TENANT),
-            eq(loyaltyTransactions.type, 'EARN')
-          )
-        );
-
-      const expiredCount = await svc.expirePoints(db);
-      expect(expiredCount).toBeGreaterThanOrEqual(1);
-
-      const [customer] = await db
-        .select({ loyaltyPoints: customers.loyaltyPoints })
-        .from(customers)
-        .where(and(eq(customers.id, customerId), eq(customers.tenantId, TEST_TENANT)));
-      expect(customer!.loyaltyPoints).toBe(0);
-    });
   });
 
-  describe('getExpiringPoints', () => {
-    it('returns customers whose points expire within the window, excluding those outside it', async () => {
-      const soonCustomerId = await makeCustomer('Loyalty Expiring Soon Customer');
-      await svc.earnPoints(TEST_TENANT, soonCustomerId, 1000, 'TEST', 1, 1); // 10 points
-      await db
-        .update(loyaltyTransactions)
-        .set({ expiryDate: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000) })
-        .where(
-          and(
-            eq(loyaltyTransactions.customerId, soonCustomerId),
-            eq(loyaltyTransactions.type, 'EARN')
-          )
-        );
-
-      const farCustomerId = await makeCustomer('Loyalty Expiring Far Customer');
-      await svc.earnPoints(TEST_TENANT, farCustomerId, 1000, 'TEST', 1, 1);
-      await db
-        .update(loyaltyTransactions)
-        .set({ expiryDate: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000) })
-        .where(
-          and(
-            eq(loyaltyTransactions.customerId, farCustomerId),
-            eq(loyaltyTransactions.type, 'EARN')
-          )
-        );
-
-      const expiring = await svc.getExpiringPoints(TEST_TENANT, EXPIRY_WARNING_WINDOW_DAYS);
-      const customerIds = expiring.map((e) => e.customerId);
-      expect(customerIds).toContain(soonCustomerId);
-      expect(customerIds).not.toContain(farCustomerId);
-
-      const soonRow = expiring.find((e) => e.customerId === soonCustomerId);
-      expect(soonRow!.expiringPoints).toBe(10);
-    });
-  });
+  // expirePoints/getExpiringPoints moved to crm-service (CRM/O2C split) — covered there by
+  // apps/crm-service/src/__tests__/loyalty-service.test.ts.
 
   describe('tier evaluation — upgrade-only, never demoted', () => {
     it('assigns a tier once lifetime earned crosses its threshold, and upgrades further on a higher threshold', async () => {
@@ -201,13 +154,11 @@ describe.skipIf(!DB_URL)('LoyaltyService — integration (CRM-ROADMAP Phase 2, F
       const customerId = await makeCustomer('Loyalty Tier Customer');
       await svc.earnPoints(TEST_TENANT, customerId, 1000, 'TEST', 1, 1); // 10 points -> Silver
 
-      const afterSilver = await svc.getBalance(customerId, TEST_TENANT);
-      expect(afterSilver.tier).toBe('Silver');
+      expect(await getTierName(customerId)).toBe('Silver');
 
       await svc.earnPoints(TEST_TENANT, customerId, 1500, 'TEST', 2, 1); // +15 = 25 lifetime -> Gold
 
-      const afterGold = await svc.getBalance(customerId, TEST_TENANT);
-      expect(afterGold.tier).toBe('Gold');
+      expect(await getTierName(customerId)).toBe('Gold');
     });
 
     it('never demotes a tier when the current balance drops via redemption', async () => {
@@ -222,13 +173,11 @@ describe.skipIf(!DB_URL)('LoyaltyService — integration (CRM-ROADMAP Phase 2, F
       const customerId = await makeCustomer('Loyalty No Demote Customer');
       await svc.earnPoints(TEST_TENANT, customerId, 1000, 'TEST', 1, 1); // 10 points, crosses threshold -> Platinum
 
-      const beforeRedeem = await svc.getBalance(customerId, TEST_TENANT);
-      expect(beforeRedeem.tier).toBe('Platinum');
+      expect(await getTierName(customerId)).toBe('Platinum');
 
       await svc.redeemPoints(TEST_TENANT, customerId, 10, 'TEST', 1, 1); // balance back to 0
 
-      const afterRedeem = await svc.getBalance(customerId, TEST_TENANT);
-      expect(afterRedeem.tier).toBe('Platinum');
+      expect(await getTierName(customerId)).toBe('Platinum');
     });
   });
 
@@ -304,15 +253,6 @@ describe.skipIf(!DB_URL)('LoyaltyService — integration (CRM-ROADMAP Phase 2, F
       expect(customer!.loyaltyPoints).toBe(50);
     });
 
-    it('createCatalogItem rejects an out-of-range DISCOUNT_PERCENT value', async () => {
-      await expect(
-        svc.createCatalogItem(TEST_TENANT, 1, {
-          name: 'Bad Reward',
-          pointsCost: 100,
-          rewardType: 'DISCOUNT_PERCENT',
-          rewardValue: 150,
-        })
-      ).rejects.toThrow(/between 0 and 100/);
-    });
+    // createCatalogItem moved to crm-service (CRM/O2C split) — covered there.
   });
 });

@@ -18,7 +18,11 @@ vi.mock('../middleware/authenticate.js', () => ({
   ): Promise<void> => {
     const authHeader = request.headers.authorization;
     if (!authHeader?.startsWith('Bearer ')) {
-      reply.code(401).send({ error: { code: 'UNAUTHORIZED', message: 'Missing or invalid Authorization header' } });
+      reply
+        .code(401)
+        .send({
+          error: { code: 'UNAUTHORIZED', message: 'Missing or invalid Authorization header' },
+        });
       return;
     }
     request.auth = JSON.parse(authHeader.slice(7)) as unknown;
@@ -35,10 +39,20 @@ function makeFakeRegistry(): JobRegistry {
   return { listAll: () => [] } as unknown as JobRegistry;
 }
 
+// withTenantConnection wraps GET /jobs in a transaction that sets the GUC via `.execute()`
+// before invoking the callback with the same db object as the scoped db.
+function makeFakeDb(): ErpDatabase {
+  const db: Record<string, unknown> = {
+    execute: async () => undefined,
+  };
+  db['transaction'] = (cb: (trx: unknown) => unknown) => cb(db);
+  return db as unknown as ErpDatabase;
+}
+
 describe('ES-33 — GET /jobs now actually enforces auth (previously always 403, feature unusable)', () => {
   it('no Authorization header → 401 (authenticate rejects before the permission check runs)', async () => {
     const app = Fastify({ logger: false });
-    await schedulerRoutes(app, {} as ErpDatabase, makeFakeRegistry());
+    await schedulerRoutes(app, makeFakeDb(), makeFakeRegistry());
 
     const res = await app.inject({ method: 'GET', url: '/jobs' });
 
@@ -48,7 +62,7 @@ describe('ES-33 — GET /jobs now actually enforces auth (previously always 403,
 
   it('valid JWT without JOB_VIEW → 403', async () => {
     const app = Fastify({ logger: false });
-    await schedulerRoutes(app, {} as ErpDatabase, makeFakeRegistry());
+    await schedulerRoutes(app, makeFakeDb(), makeFakeRegistry());
 
     const res = await app.inject({
       method: 'GET',
@@ -62,7 +76,7 @@ describe('ES-33 — GET /jobs now actually enforces auth (previously always 403,
 
   it('valid JWT with JOB_VIEW → 200 with job list', async () => {
     const app = Fastify({ logger: false });
-    await schedulerRoutes(app, {} as ErpDatabase, makeFakeRegistry());
+    await schedulerRoutes(app, makeFakeDb(), makeFakeRegistry());
 
     const res = await app.inject({
       method: 'GET',

@@ -18,6 +18,18 @@ import Button from '../../components/ui/Button.js';
 import Input from '../../components/ui/Input.js';
 import Select from '../../components/ui/Select.js';
 
+interface Bom {
+  id: number;
+  name: string;
+  isActive: boolean;
+}
+
+interface WorkCenter {
+  id: number;
+  name: string;
+  isActive: boolean;
+}
+
 interface MaterialLine {
   itemId: string;
   requiredQty: string;
@@ -33,6 +45,7 @@ export default function JobWorkOrderCreatePage() {
   const [branchId, setBranchId] = useState('');
   const [warehouseId, setWarehouseId] = useState('');
   const [outputItemId, setOutputItemId] = useState('');
+  const [workCenterId, setWorkCenterId] = useState('');
   const [orderedQty, setOrderedQty] = useState('');
   const [jobWorkRate, setJobWorkRate] = useState('');
   const [orderDate, setOrderDate] = useState(new Date().toISOString().slice(0, 10));
@@ -79,6 +92,45 @@ export default function JobWorkOrderCreatePage() {
   const warehouses =
     ((warehousesData as Record<string, unknown>)?.content as { id: number; name: string }[]) ?? [];
 
+  // Manufacturing vertical, Phase B — optional, purely informational: which work center this
+  // order runs on. Not required — a tenant with no work centers defined sees nothing here.
+  const { data: workCentersData } = useQuery({
+    queryKey: ['work-centers-list'],
+    queryFn: () => productionApi.listWorkCenters(),
+    enabled: hasPermission(PERMISSIONS.WORK_CENTER_VIEW),
+  });
+  const activeWorkCenters = ((workCentersData as WorkCenter[]) ?? []).filter((w) => w.isActive);
+
+  // Manufacturing vertical, Phase A — "Load from BOM": prefills the materials list below from
+  // BOMService.explode() instead of requiring every line to be typed by hand. Only offered once
+  // an output item is picked (BOMs are per finished item); still just a prefill, every line stays
+  // editable afterward.
+  const { data: bomsData } = useQuery({
+    queryKey: ['boms-for-item', outputItemId],
+    queryFn: () => productionApi.listBomsForItem(parseInt(outputItemId, 10)),
+    enabled: !!outputItemId && hasPermission(PERMISSIONS.BOM_VIEW),
+  });
+  const activeBoms = ((bomsData as Bom[]) ?? []).filter((b) => b.isActive);
+  const [selectedBomId, setSelectedBomId] = useState('');
+
+  const loadFromBomMutation = useMutation({
+    mutationFn: (bomId: number) => productionApi.explodeBom(bomId, parseFloat(orderedQty) || 1),
+    onSuccess: (result) => {
+      const exploded =
+        (result as { lines: { componentItemId: number; requiredQty: number }[] }).lines ?? [];
+      setMaterials(
+        exploded.map((l) => ({
+          itemId: String(l.componentItemId),
+          requiredQty: String(l.requiredQty),
+          unitCost: '',
+          warehouseId: '',
+        }))
+      );
+      toast.success('Materials loaded from BOM');
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
   const createMutation = useMutation({
     mutationFn: (payload: Record<string, unknown>) => productionApi.createJobWorkOrder(payload),
     onSuccess: () => {
@@ -110,6 +162,7 @@ export default function JobWorkOrderCreatePage() {
       branchId: parseInt(branchId, 10),
       warehouseId: parseInt(warehouseId, 10),
       outputItemId: parseInt(outputItemId, 10),
+      workCenterId: workCenterId ? parseInt(workCenterId, 10) : undefined,
       orderedQty: parseFloat(orderedQty),
       jobWorkRate: parseFloat(jobWorkRate),
       orderDate: new Date(orderDate).toISOString(),
@@ -205,6 +258,20 @@ export default function JobWorkOrderCreatePage() {
                 </option>
               ))}
             </Select>
+            {activeWorkCenters.length > 0 && (
+              <Select
+                label="Work Center (optional)"
+                value={workCenterId}
+                onChange={(e) => setWorkCenterId(e.target.value)}
+              >
+                <option value="">None</option>
+                {activeWorkCenters.map((w) => (
+                  <option key={w.id} value={w.id}>
+                    {w.name}
+                  </option>
+                ))}
+              </Select>
+            )}
             <Input
               label="Ordered Qty"
               required
@@ -256,6 +323,34 @@ export default function JobWorkOrderCreatePage() {
               + Add Material
             </Button>
           </div>
+
+          {activeBoms.length > 0 && (
+            <div className="flex items-end gap-3 bg-surface-subtle rounded-lg p-3">
+              <div className="flex-1">
+                <Select
+                  label="Load from BOM"
+                  value={selectedBomId}
+                  onChange={(e) => setSelectedBomId(e.target.value)}
+                >
+                  <option value="">Select a BOM to prefill materials</option>
+                  {activeBoms.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.name}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={!selectedBomId || !orderedQty || loadFromBomMutation.isPending}
+                onClick={() => loadFromBomMutation.mutate(parseInt(selectedBomId, 10))}
+              >
+                {loadFromBomMutation.isPending ? 'Loading…' : 'Load'}
+              </Button>
+            </div>
+          )}
           {materials.map((m, idx) => (
             <div key={idx} className="grid grid-cols-5 gap-3 items-end">
               <div className="col-span-2">

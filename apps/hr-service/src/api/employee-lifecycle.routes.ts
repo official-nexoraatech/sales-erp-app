@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { PlatformContextFactory } from '@erp/sdk';
+import { tenantScopedHandler } from '@erp/sdk';
 import {
   employeeNominees,
   employeeExits,
@@ -19,8 +20,6 @@ import { authenticate } from '../middleware/authenticate.js';
 import { requirePermission } from '../middleware/authorize.js';
 import { EmployeeLoanService } from '../domain/EmployeeLoanService.js';
 
-type AuthedRequest = { auth: { tenantId: number; userId: number } };
-
 const NomineeSchema = z.object({
   name: z.string().min(1).max(200),
   relationship: z.enum(['SPOUSE', 'PARENT', 'CHILD', 'SIBLING', 'OTHER']),
@@ -38,22 +37,18 @@ const ExitWorkflowSchema = z.object({
   exitReason: z.string().max(2000).optional(),
 });
 
+// Phase 9 GUC-per-request rollout — migrated 2026-08-21. No external I/O.
 export async function employeeLifecycleRoutes(
   fastify: FastifyInstance,
   ctxFactory: PlatformContextFactory
 ): Promise<void> {
   // ── Nominees ──────────────────────────────────────────────────────────────
-  fastify.get<{ Params: { id: string } }>(
+  fastify.get(
     '/employees/:id/nominees',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.EMPLOYEE_VIEW)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-      const employeeId = parseInt(request.params.id, 10);
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId } = ctx.tenant;
+      const employeeId = parseInt((request.params as { id: string }).id, 10);
       const rows = await ctx.db.raw
         .select()
         .from(employeeNominees)
@@ -61,20 +56,15 @@ export async function employeeLifecycleRoutes(
           and(eq(employeeNominees.tenantId, tenantId), eq(employeeNominees.employeeId, employeeId))
         );
       return reply.code(200).send({ data: { content: rows, totalElements: rows.length } });
-    }
+    })
   );
 
-  fastify.post<{ Params: { id: string } }>(
+  fastify.post(
     '/employees/:id/nominees',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.EMPLOYEE_UPDATE)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-      const employeeId = parseInt(request.params.id, 10);
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId, userId } = ctx.tenant;
+      const employeeId = parseInt((request.params as { id: string }).id, 10);
       const body = NomineeSchema.safeParse(request.body);
       if (!body.success)
         throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
@@ -123,20 +113,15 @@ export async function employeeLifecycleRoutes(
         metadata: { employeeId },
       });
       return reply.code(201).send({ data: created });
-    }
+    })
   );
 
-  fastify.put<{ Params: { id: string; nomineeId: string } }>(
+  fastify.put(
     '/employees/:id/nominees/:nomineeId',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.EMPLOYEE_UPDATE)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-      const nomineeId = parseInt(request.params.nomineeId, 10);
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId } = ctx.tenant;
+      const nomineeId = parseInt((request.params as { nomineeId: string }).nomineeId, 10);
       const body = NomineeSchema.safeParse(request.body);
       if (!body.success)
         throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
@@ -168,20 +153,15 @@ export async function employeeLifecycleRoutes(
         entityId: nomineeId,
       });
       return reply.code(200).send({ data: updated });
-    }
+    })
   );
 
-  fastify.delete<{ Params: { id: string; nomineeId: string } }>(
+  fastify.delete(
     '/employees/:id/nominees/:nomineeId',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.EMPLOYEE_UPDATE)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-      const nomineeId = parseInt(request.params.nomineeId, 10);
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId } = ctx.tenant;
+      const nomineeId = parseInt((request.params as { nomineeId: string }).nomineeId, 10);
 
       const [existing] = await ctx.db.raw
         .select({ id: employeeNominees.id })
@@ -196,22 +176,17 @@ export async function employeeLifecycleRoutes(
         entityId: nomineeId,
       });
       return reply.code(204).send();
-    }
+    })
   );
 
   // ── History (increment/promotion/transfer) — read-only here; written by employee.routes.ts's
   // update route when department/designation/branch/manager change ──────────────────────────
-  fastify.get<{ Params: { id: string } }>(
+  fastify.get(
     '/employees/:id/history',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.EMPLOYEE_VIEW)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-      const employeeId = parseInt(request.params.id, 10);
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId } = ctx.tenant;
+      const employeeId = parseInt((request.params as { id: string }).id, 10);
       const rows = await ctx.db.raw
         .select()
         .from(employeeHistory)
@@ -220,40 +195,30 @@ export async function employeeLifecycleRoutes(
         )
         .orderBy(desc(employeeHistory.effectiveDate), desc(employeeHistory.id));
       return reply.code(200).send({ data: { content: rows, totalElements: rows.length } });
-    }
+    })
   );
 
   // ── Exit workflow: notice period + clearance + Full & Final settlement ──────────────────
-  fastify.get<{ Params: { id: string } }>(
+  fastify.get(
     '/employees/:id/exit-workflow',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.EMPLOYEE_VIEW)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-      const employeeId = parseInt(request.params.id, 10);
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId } = ctx.tenant;
+      const employeeId = parseInt((request.params as { id: string }).id, 10);
       const [row] = await ctx.db.raw
         .select()
         .from(employeeExits)
         .where(and(eq(employeeExits.tenantId, tenantId), eq(employeeExits.employeeId, employeeId)));
       return reply.code(200).send({ data: row ?? null });
-    }
+    })
   );
 
-  fastify.post<{ Params: { id: string } }>(
+  fastify.post(
     '/employees/:id/exit-workflow',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.EMPLOYEE_UPDATE)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-      const employeeId = parseInt(request.params.id, 10);
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId, userId } = ctx.tenant;
+      const employeeId = parseInt((request.params as { id: string }).id, 10);
       const body = ExitWorkflowSchema.safeParse(request.body);
       if (!body.success)
         throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
@@ -301,20 +266,15 @@ export async function employeeLifecycleRoutes(
         metadata: { employeeId },
       });
       return reply.code(existing ? 200 : 201).send({ data: saved });
-    }
+    })
   );
 
-  fastify.post<{ Params: { id: string } }>(
+  fastify.post(
     '/employees/:id/exit-workflow/clear',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.EMPLOYEE_UPDATE)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-      const employeeId = parseInt(request.params.id, 10);
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId, userId } = ctx.tenant;
+      const employeeId = parseInt((request.params as { id: string }).id, 10);
 
       const [existing] = await ctx.db.raw
         .select({ id: employeeExits.id })
@@ -340,23 +300,18 @@ export async function employeeLifecycleRoutes(
         metadata: { action: 'CLEAR' },
       });
       return reply.code(200).send({ data: updated });
-    }
+    })
   );
 
   // Computes the F&F breakup from real data (last-drawn pro-rated salary to LWD, unused
   // paid-leave-balance encashment at the same per-day rate, minus outstanding loan recovery)
   // — a preview only, does not persist until /settle is called.
-  fastify.get<{ Params: { id: string } }>(
+  fastify.get(
     '/employees/:id/exit-workflow/compute-fnf',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.EMPLOYEE_UPDATE)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-      const employeeId = parseInt(request.params.id, 10);
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId } = ctx.tenant;
+      const employeeId = parseInt((request.params as { id: string }).id, 10);
 
       const [exit] = await ctx.db.raw
         .select()
@@ -443,20 +398,15 @@ export async function employeeLifecycleRoutes(
           fnfTotalAmount,
         },
       });
-    }
+    })
   );
 
-  fastify.post<{ Params: { id: string } }>(
+  fastify.post(
     '/employees/:id/exit-workflow/settle',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.EMPLOYEE_UPDATE)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-      const employeeId = parseInt(request.params.id, 10);
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId, userId } = ctx.tenant;
+      const employeeId = parseInt((request.params as { id: string }).id, 10);
       const body = z
         .object({
           proRatedSalaryAmount: z.number(),
@@ -502,6 +452,6 @@ export async function employeeLifecycleRoutes(
         metadata: { action: 'FNF_SETTLE', fnfTotalAmount: body.data.fnfTotalAmount },
       });
       return reply.code(200).send({ data: updated });
-    }
+    })
   );
 }

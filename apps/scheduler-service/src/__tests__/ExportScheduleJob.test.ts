@@ -26,7 +26,17 @@ vi.mock('@erp/db', () => ({
   exportRunHistory: { id: 'id', scheduleId: 'scheduleId' },
 }));
 
-vi.mock('drizzle-orm', () => ({ eq: vi.fn((a: unknown, b: unknown) => ({ type: 'eq', a, b })) }));
+vi.mock('drizzle-orm', () => ({
+  eq: vi.fn((a: unknown, b: unknown) => ({ type: 'eq', a, b })),
+  // withTenantConnection (platform-sdk's tenantConnection.ts) uses sql`` for its SET LOCAL
+  // call — a wholesale drizzle-orm mock without this makes that call throw, not an obvious
+  // error, since this test file's mock is also what tenantConnection.ts resolves 'drizzle-orm'
+  // to inside this test's module graph.
+  sql: Object.assign(
+    vi.fn((strings: unknown) => ({ strings })),
+    { raw: vi.fn() }
+  ),
+}));
 
 const engineQuery = vi.fn();
 vi.mock('../domain/ExportEngine.js', () => ({
@@ -52,7 +62,7 @@ function makeDb(opts: {
   scheduleById?: Record<string, unknown> | undefined;
   insertReturn?: Record<string, unknown>;
 }) {
-  return {
+  const db = {
     select: vi.fn(() => ({
       from: vi.fn(() => ({
         where: vi
@@ -70,7 +80,13 @@ function makeDb(opts: {
     update: vi.fn(() => ({
       set: vi.fn(() => ({ where: vi.fn().mockResolvedValue(undefined) })),
     })),
+    // RLS-readiness follow-up (2026-08-22): runSchedule()'s per-call withTenantConnection
+    // wraps go through pooledDb.transaction(async trx => { await trx.execute(...); return
+    // fn(trx); }) — the mock runs the callback against itself and no-ops the SET LOCAL call.
+    execute: vi.fn(() => Promise.resolve([])),
+    transaction: vi.fn((fn: (trx: unknown) => Promise<unknown>) => fn(db)),
   };
+  return db;
 }
 
 function makeStorage() {

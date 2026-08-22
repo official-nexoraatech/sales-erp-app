@@ -1,9 +1,16 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { eq, and, sql, desc, inArray } from 'drizzle-orm';
-import { items, warehouses, inventoryLedger, projectionStockLevel } from '@erp/db';
+import { eq, and, sql, desc, inArray, isNotNull, lte } from 'drizzle-orm';
+import {
+  items,
+  warehouses,
+  inventoryLedger,
+  projectionStockLevel,
+  inventoryFifoLayers,
+} from '@erp/db';
 import { PERMISSIONS } from '@erp/types';
 import type { PlatformContextFactory } from '@erp/sdk';
+import { requireCapability, tenantScopedHandler } from '@erp/sdk';
 import { timingSafeEqual } from 'node:crypto';
 import { authenticate } from '../middleware/authenticate.js';
 import { requirePermission } from '../middleware/authorize.js';
@@ -19,6 +26,18 @@ const StockListQuery = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(50),
 });
 
+const NearExpiryStockQuery = z.object({
+  warehouseId: z.coerce.number().int().positive().optional(),
+  thresholdDays: z.coerce.number().int().min(1).max(365).default(30),
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+});
+
+// Phase 9 GUC-per-request rollout — migrated 2026-08-21. The two internal-key-guarded
+// reconcile/near-expiry-alert routes below are deliberately left unmigrated (caveat 4e) —
+// runReconciliation/runNearExpiryAlert both operate across every tenant in one query
+// (grouped by tenant_id, no filter), a genuine cross-tenant batch job that doesn't fit
+// the single-tenant GUC wrapper. The 4 authenticated stock/ledger routes are migrated.
 export async function stockRoutes(
   fastify: FastifyInstance,
   ctxFactory: PlatformContextFactory
@@ -77,13 +96,7 @@ export async function stockRoutes(
   fastify.get(
     '/inventory/stock',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.ITEM_VIEW)] },
-    async (request, reply) => {
-      const ctx = ctxFactory.create({
-        tenantId: request.auth.tenantId,
-        userId: request.auth.userId,
-        correlationId: request.id,
-      });
-
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
       const query = StockListQuery.parse(request.query);
       const { page, limit } = query;
       const offset = (page - 1) * limit;
@@ -109,15 +122,15 @@ export async function stockRoutes(
           )
         )
         .innerJoin(warehouses, eq(warehouses.id, projectionStockLevel.warehouseId))
-        .where(eq(projectionStockLevel.tenantId, request.auth.tenantId))
+        .where(eq(projectionStockLevel.tenantId, ctx.tenant.tenantId))
         .$dynamic();
 
-      const warehouseScope = await getWarehouseScope(ctx.db.raw, request.auth.tenantId, {
+      const warehouseScope = await getWarehouseScope(ctx.db.raw, ctx.tenant.tenantId, {
         permissions: request.auth.permissions,
         branchIds: request.auth.branchIds,
       });
       if (query.warehouseId) {
-        await assertWarehouseInScope(ctx.db.raw, request.auth.tenantId, query.warehouseId, {
+        await assertWarehouseInScope(ctx.db.raw, ctx.tenant.tenantId, query.warehouseId, {
           permissions: request.auth.permissions,
           branchIds: request.auth.branchIds,
         });
@@ -152,7 +165,7 @@ export async function stockRoutes(
           )
         )
         .innerJoin(warehouses, eq(warehouses.id, projectionStockLevel.warehouseId))
-        .where(eq(projectionStockLevel.tenantId, request.auth.tenantId))
+        .where(eq(projectionStockLevel.tenantId, ctx.tenant.tenantId))
         .$dynamic();
 
       if (query.warehouseId) {
@@ -175,24 +188,18 @@ export async function stockRoutes(
       return reply
         .code(200)
         .send({ data: { content: rows, totalElements: countRow?.count ?? 0, page, limit } });
-    }
+    })
   );
 
   // GET /inventory/stock/:itemId — stock by warehouse for a specific item
   fastify.get(
     '/inventory/stock/:itemId',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.ITEM_VIEW)] },
-    async (request, reply) => {
-      const ctx = ctxFactory.create({
-        tenantId: request.auth.tenantId,
-        userId: request.auth.userId,
-        correlationId: request.id,
-      });
-
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
       const { itemId } = request.params as { itemId: string };
       const id = parseInt(itemId, 10);
 
-      const warehouseScope = await getWarehouseScope(ctx.db.raw, request.auth.tenantId, {
+      const warehouseScope = await getWarehouseScope(ctx.db.raw, ctx.tenant.tenantId, {
         permissions: request.auth.permissions,
         branchIds: request.auth.branchIds,
       });
@@ -202,7 +209,7 @@ export async function stockRoutes(
 
       let whereClause = and(
         eq(projectionStockLevel.itemId, id),
-        eq(projectionStockLevel.tenantId, request.auth.tenantId)
+        eq(projectionStockLevel.tenantId, ctx.tenant.tenantId)
       );
       if (warehouseScope !== 'all') {
         whereClause = and(whereClause, inArray(projectionStockLevel.warehouseId, warehouseScope));
@@ -221,20 +228,14 @@ export async function stockRoutes(
         .where(whereClause);
 
       return reply.code(200).send({ data: stock });
-    }
+    })
   );
 
   // GET /inventory/ledger/:itemId — paginated ledger entries
   fastify.get(
     '/inventory/ledger/:itemId',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.ITEM_VIEW)] },
-    async (request, reply) => {
-      const ctx = ctxFactory.create({
-        tenantId: request.auth.tenantId,
-        userId: request.auth.userId,
-        correlationId: request.id,
-      });
-
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
       const { itemId } = request.params as { itemId: string };
       const id = parseInt(itemId, 10);
       const {
@@ -252,7 +253,7 @@ export async function stockRoutes(
         .select()
         .from(inventoryLedger)
         .where(
-          and(eq(inventoryLedger.itemId, id), eq(inventoryLedger.tenantId, request.auth.tenantId))
+          and(eq(inventoryLedger.itemId, id), eq(inventoryLedger.tenantId, ctx.tenant.tenantId))
         )
         .orderBy(desc(inventoryLedger.createdAt), desc(inventoryLedger.id))
         .$dynamic();
@@ -263,6 +264,97 @@ export async function stockRoutes(
 
       const entries = await q.limit(limit).offset(offset);
       return reply.code(200).send({ data: entries, meta: { page, limit } });
-    }
+    })
+  );
+
+  // GET /inventory/near-expiry-stock — Phase 2B (INVENTORY_BATCH capability). Visibility only:
+  // lists FIFO layers expiring within thresholdDays (including already-expired remaining
+  // stock, sorted soonest-first) so an operator can act on it manually. Does NOT block sale,
+  // transfer, or adjustment of any listed stock — expiry enforcement is deferred (D2).
+  fastify.get(
+    '/inventory/near-expiry-stock',
+    {
+      preHandler: [
+        authenticate,
+        requireCapability('INVENTORY_BATCH', ctxFactory.rawDb, ctxFactory.getRedis()),
+        requirePermission(PERMISSIONS.BATCH_VIEW),
+      ],
+    },
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const query = NearExpiryStockQuery.parse(request.query);
+      const { page, limit } = query;
+      const offset = (page - 1) * limit;
+      const cutoff = new Date(Date.now() + query.thresholdDays * 24 * 60 * 60 * 1000);
+
+      const warehouseScope = await getWarehouseScope(ctx.db.raw, ctx.tenant.tenantId, {
+        permissions: request.auth.permissions,
+        branchIds: request.auth.branchIds,
+      });
+      if (warehouseScope !== 'all' && warehouseScope.length === 0) {
+        return reply.code(200).send({ data: { content: [], totalElements: 0, page, limit } });
+      }
+      if (query.warehouseId) {
+        await assertWarehouseInScope(ctx.db.raw, ctx.tenant.tenantId, query.warehouseId, {
+          permissions: request.auth.permissions,
+          branchIds: request.auth.branchIds,
+        });
+      }
+
+      let whereClause = and(
+        eq(inventoryFifoLayers.tenantId, ctx.tenant.tenantId),
+        sql`${inventoryFifoLayers.remainingQty} > 0`,
+        isNotNull(inventoryFifoLayers.expiryDate),
+        lte(inventoryFifoLayers.expiryDate, cutoff)
+      );
+      if (query.warehouseId) {
+        whereClause = and(whereClause, eq(inventoryFifoLayers.warehouseId, query.warehouseId));
+      } else if (warehouseScope !== 'all') {
+        whereClause = and(whereClause, inArray(inventoryFifoLayers.warehouseId, warehouseScope));
+      }
+
+      const baseSelect = () =>
+        ctx.db.raw
+          .select({
+            layerId: inventoryFifoLayers.id,
+            itemId: inventoryFifoLayers.itemId,
+            itemName: items.name,
+            itemCode: items.itemCode,
+            warehouseId: inventoryFifoLayers.warehouseId,
+            warehouseName: warehouses.name,
+            batchNumber: inventoryFifoLayers.batchNumber,
+            expiryDate: inventoryFifoLayers.expiryDate,
+            remainingQty: inventoryFifoLayers.remainingQty,
+          })
+          .from(inventoryFifoLayers)
+          .innerJoin(
+            items,
+            and(
+              eq(items.id, inventoryFifoLayers.itemId),
+              eq(items.tenantId, inventoryFifoLayers.tenantId)
+            )
+          )
+          .innerJoin(warehouses, eq(warehouses.id, inventoryFifoLayers.warehouseId))
+          .where(whereClause);
+
+      const rows = await baseSelect()
+        .orderBy(inventoryFifoLayers.expiryDate)
+        .limit(limit)
+        .offset(offset);
+
+      const [countRow] = await ctx.db.raw
+        .select({ count: sql<number>`count(*)::int` })
+        .from(inventoryFifoLayers)
+        .where(whereClause);
+
+      const now = Date.now();
+      const content = rows.map((row) => ({
+        ...row,
+        isExpired: row.expiryDate !== null && row.expiryDate.getTime() < now,
+      }));
+
+      return reply.code(200).send({
+        data: { content, totalElements: countRow?.count ?? 0, page, limit },
+      });
+    })
   );
 }

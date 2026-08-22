@@ -14,6 +14,16 @@ vi.mock('@erp/db', () => ({
   customers: { id: 'id', tenantId: 'tenant_id' },
 }));
 
+// RLS-readiness follow-up (2026-08-22): notifyPaymentReceived now manages its own
+// withTenantConnection wrap (same signature change as InvoiceNotificationService.
+// notifyInvoiceConfirmed) instead of taking a caller-supplied ctx. This is a unit test of the
+// service in isolation, so withTenantConnection is mocked to just invoke the callback directly
+// with the raw db stand-in — no real transaction/GUC machinery needed here.
+vi.mock('@erp/sdk', () => ({
+  withTenantConnection: (rawDb: unknown, _tenantId: number, fn: (db: unknown) => unknown) =>
+    fn(rawDb),
+}));
+
 import { PaymentNotificationService } from '../domain/PaymentNotificationService.js';
 
 const PAYMENT_ROW = {
@@ -23,18 +33,13 @@ const PAYMENT_ROW = {
   customerId: 42,
 };
 
-function makeCtx(customerRow: Record<string, unknown> | undefined) {
+function makeRawDb(customerRow: Record<string, unknown> | undefined) {
   let selectCallCount = 0;
   return {
-    tenant: { tenantId: 1 },
-    db: {
-      raw: {
-        select: () => {
-          selectCallCount += 1;
-          const row = selectCallCount === 1 ? PAYMENT_ROW : customerRow;
-          return { from: () => ({ where: () => Promise.resolve(row ? [row] : []) }) };
-        },
-      },
+    select: () => {
+      selectCallCount += 1;
+      const row = selectCallCount === 1 ? PAYMENT_ROW : customerRow;
+      return { from: () => ({ where: () => Promise.resolve(row ? [row] : []) }) };
     },
   } as never;
 }
@@ -54,13 +59,14 @@ describe('PaymentNotificationService.notifyPaymentReceived', () => {
 
   it('sends WHATSAPP and EMAIL when the customer has both and opted into neither out', async () => {
     await PaymentNotificationService.notifyPaymentReceived(
-      makeCtx({
+      makeRawDb({
         displayName: 'Test Co',
         phone: '9990001111',
         email: 'test@co.com',
         optOutWhatsapp: false,
         optOutEmail: false,
       }),
+      1,
       1
     );
 
@@ -73,13 +79,14 @@ describe('PaymentNotificationService.notifyPaymentReceived', () => {
 
   it('sends only EMAIL when the customer opted out of WhatsApp', async () => {
     await PaymentNotificationService.notifyPaymentReceived(
-      makeCtx({
+      makeRawDb({
         displayName: 'Test Co',
         phone: '9990001111',
         email: 'test@co.com',
         optOutWhatsapp: true,
         optOutEmail: false,
       }),
+      1,
       1
     );
 
@@ -91,12 +98,13 @@ describe('PaymentNotificationService.notifyPaymentReceived', () => {
   });
 
   it('does not throw when the payment is not found', async () => {
-    const ctx = {
-      tenant: { tenantId: 1 },
-      db: { raw: { select: () => ({ from: () => ({ where: () => Promise.resolve([]) }) }) } },
+    const rawDb = {
+      select: () => ({ from: () => ({ where: () => Promise.resolve([]) }) }),
     } as never;
 
-    await expect(PaymentNotificationService.notifyPaymentReceived(ctx, 1)).resolves.toBeUndefined();
+    await expect(
+      PaymentNotificationService.notifyPaymentReceived(rawDb, 1, 1)
+    ).resolves.toBeUndefined();
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });

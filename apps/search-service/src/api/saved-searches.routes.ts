@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { ErpDatabase } from '@erp/db';
+import { withTenantConnection } from '@erp/sdk';
 import { savedSearches } from '@erp/db';
 import { and, desc, eq } from 'drizzle-orm';
 import { z } from 'zod';
@@ -22,60 +23,97 @@ const CreateSavedSearchSchema = z.object({
 // User-scoped, so JWT-authenticated like /search — unlike search-sync.internal.routes.ts
 // (internal-key-gated, for scheduler-service) this always acts as the calling user, never
 // on behalf of an arbitrary tenantId supplied by the caller.
-export async function savedSearchesRoutes(fastify: FastifyInstance, db: ErpDatabase): Promise<void> {
+//
+// Phase 9 GUC-per-request rollout — migrated 2026-08-21. No PlatformContextFactory in this
+// service (plain db passed in), so each route uses withTenantConnection directly. No external
+// I/O — these are the only real Postgres tables this service's user-facing routes touch.
+export async function savedSearchesRoutes(
+  fastify: FastifyInstance,
+  db: ErpDatabase
+): Promise<void> {
   fastify.get('/saved-searches', { preHandler: [authenticate] }, async (request, reply) => {
     if (!hasPermission(request, PERMISSIONS.SEARCH_GLOBAL)) {
-      return reply.code(403).send({ error: { code: 'PERMISSION_DENIED', message: 'Missing permission: SEARCH_GLOBAL' } });
+      return reply
+        .code(403)
+        .send({
+          error: { code: 'PERMISSION_DENIED', message: 'Missing permission: SEARCH_GLOBAL' },
+        });
     }
     const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
 
-    const rows = await db
-      .select()
-      .from(savedSearches)
-      .where(and(eq(savedSearches.tenantId, tenantId), eq(savedSearches.userId, userId)))
-      .orderBy(desc(savedSearches.createdAt));
+    const rows = await withTenantConnection(db, tenantId, (scopedDb) =>
+      scopedDb
+        .select()
+        .from(savedSearches)
+        .where(and(eq(savedSearches.tenantId, tenantId), eq(savedSearches.userId, userId)))
+        .orderBy(desc(savedSearches.createdAt))
+    );
 
     return reply.code(200).send({ data: { content: rows, totalElements: rows.length } });
   });
 
   fastify.post('/saved-searches', { preHandler: [authenticate] }, async (request, reply) => {
     if (!hasPermission(request, PERMISSIONS.SEARCH_GLOBAL)) {
-      return reply.code(403).send({ error: { code: 'PERMISSION_DENIED', message: 'Missing permission: SEARCH_GLOBAL' } });
+      return reply
+        .code(403)
+        .send({
+          error: { code: 'PERMISSION_DENIED', message: 'Missing permission: SEARCH_GLOBAL' },
+        });
     }
     const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
 
     const body = CreateSavedSearchSchema.safeParse(request.body);
-    if (!body.success) throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
+    if (!body.success)
+      throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
 
-    const [created] = await db
-      .insert(savedSearches)
-      .values({
-        tenantId,
-        userId,
-        name: body.data.name,
-        query: body.data.query,
-        entity: body.data.entity,
-        filters: body.data.filters ?? {},
-      })
-      .returning();
+    const created = await withTenantConnection(db, tenantId, async (scopedDb) => {
+      const [row] = await scopedDb
+        .insert(savedSearches)
+        .values({
+          tenantId,
+          userId,
+          name: body.data.name,
+          query: body.data.query,
+          entity: body.data.entity,
+          filters: body.data.filters ?? {},
+        })
+        .returning();
+      return row;
+    });
 
     return reply.code(201).send({ data: created });
   });
 
-  fastify.delete<{ Params: { id: string } }>('/saved-searches/:id', { preHandler: [authenticate] }, async (request, reply) => {
-    if (!hasPermission(request, PERMISSIONS.SEARCH_GLOBAL)) {
-      return reply.code(403).send({ error: { code: 'PERMISSION_DENIED', message: 'Missing permission: SEARCH_GLOBAL' } });
+  fastify.delete<{ Params: { id: string } }>(
+    '/saved-searches/:id',
+    { preHandler: [authenticate] },
+    async (request, reply) => {
+      if (!hasPermission(request, PERMISSIONS.SEARCH_GLOBAL)) {
+        return reply
+          .code(403)
+          .send({
+            error: { code: 'PERMISSION_DENIED', message: 'Missing permission: SEARCH_GLOBAL' },
+          });
+      }
+      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
+      const id = parseInt(request.params.id, 10);
+
+      await withTenantConnection(db, tenantId, async (scopedDb) => {
+        const [existing] = await scopedDb
+          .select()
+          .from(savedSearches)
+          .where(
+            and(
+              eq(savedSearches.id, id),
+              eq(savedSearches.tenantId, tenantId),
+              eq(savedSearches.userId, userId)
+            )
+          );
+        if (!existing) throw new NotFoundError('Saved search', id);
+
+        await scopedDb.delete(savedSearches).where(eq(savedSearches.id, id));
+      });
+      return reply.code(200).send({ data: { message: 'Saved search deleted', id } });
     }
-    const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-    const id = parseInt(request.params.id, 10);
-
-    const [existing] = await db
-      .select()
-      .from(savedSearches)
-      .where(and(eq(savedSearches.id, id), eq(savedSearches.tenantId, tenantId), eq(savedSearches.userId, userId)));
-    if (!existing) throw new NotFoundError('Saved search', id);
-
-    await db.delete(savedSearches).where(eq(savedSearches.id, id));
-    return reply.code(200).send({ data: { message: 'Saved search deleted', id } });
-  });
+  );
 }

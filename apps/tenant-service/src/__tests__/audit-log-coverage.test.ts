@@ -137,15 +137,31 @@ describe('F11 — audit_log coverage on tenant-service mutations', () => {
       insert: () => ({
         values: () => ({ returning: async () => [createdBranch] }),
       }),
-      transaction: async (cb: (trx: { raw: typeof db }) => unknown) => cb({ raw: db }),
+      transaction: async (cb: (trx: typeof db) => unknown) => cb(db),
     };
 
+    // withTenantConnection (called by tenantScopedHandler) calls ctxFactory.rawDb.transaction(cb)
+    // expecting cb's param to have .execute() directly — that's `db` itself. The route's own
+    // nested ctx.db.transaction() (branch.routes.ts's TOCTOU lock) expects its callback's param
+    // to have a `.raw` property instead — a separate wrapper reusing the same underlying db.
     const ctxFactory = {
-      create: () => ({
-        db: { raw: db, transaction: db.transaction },
-        events: { publish: vi.fn().mockResolvedValue(undefined) },
-        audit: { log: auditLog },
-      }),
+      rawDb: db,
+      create: (
+        tenant: { tenantId: number; userId: number; correlationId: string },
+        dbOverride?: typeof db
+      ) => {
+        const scopedDb = dbOverride ?? db;
+        return {
+          db: {
+            raw: scopedDb,
+            transaction: (cb: (trx: { raw: typeof db }) => unknown) =>
+              scopedDb.transaction((trx) => cb({ raw: trx })),
+          },
+          tenant,
+          events: { publish: vi.fn().mockResolvedValue(undefined) },
+          audit: { log: auditLog },
+        };
+      },
     } as never;
 
     const app: FastifyInstance = Fastify({ logger: false });
@@ -175,11 +191,15 @@ describe('F11 — audit_log coverage on tenant-service mutations', () => {
       insert: () => ({
         values: () => ({ returning: async () => [createdOrg] }),
       }),
+      execute: async () => [],
+      transaction: async (cb: (trx: typeof db) => unknown) => cb(db),
     };
 
     const ctxFactory = {
-      create: () => ({
+      rawDb: db,
+      create: (tenant: { tenantId: number; userId: number; correlationId: string }) => ({
         db: { raw: db },
+        tenant,
         events: { publish: vi.fn().mockResolvedValue(undefined) },
         audit: { log: auditLog },
       }),
@@ -225,11 +245,15 @@ describe('F11 — audit_log coverage on tenant-service mutations', () => {
       insert: () => ({
         values: () => ({ returning: async () => [createdConfig] }),
       }),
+      execute: async () => [],
+      transaction: async (cb: (trx: typeof db) => unknown) => cb(db),
     };
 
     const ctxFactory = {
-      create: () => ({
+      rawDb: db,
+      create: (tenant: { tenantId: number; userId: number; correlationId: string }) => ({
         db: { raw: db },
+        tenant,
         events: { publish: vi.fn().mockResolvedValue(undefined) },
         audit: { log: auditLog },
       }),
@@ -282,11 +306,15 @@ describe('F11 — audit_log coverage on tenant-service mutations', () => {
       delete: () => ({
         where: () => ({ returning: async () => [deletedConfig] }),
       }),
+      execute: async () => [],
+      transaction: async (cb: (trx: typeof db) => unknown) => cb(db),
     };
 
     const ctxFactory = {
-      create: () => ({
+      rawDb: db,
+      create: (tenant: { tenantId: number; userId: number; correlationId: string }) => ({
         db: { raw: db },
+        tenant,
         events: { publish: vi.fn().mockResolvedValue(undefined) },
         audit: { log: auditLog },
       }),

@@ -93,6 +93,8 @@ export interface NavItem {
   children?: NavItem[];
   /** Permission required for this exact link, matching the PermissionRoute guard in App.tsx. Omit for items with children (visibility is derived from children) or routes with no guard. */
   permission?: Permission;
+  /** Capability key required for this item's whole feature to be visible (tenant-plan gate, coarser than `permission`). Optional — no current item sets this; see CAPABILITY_REGISTRY (@erp/types). */
+  capabilityKey?: string;
 }
 
 export interface NavGroup {
@@ -386,6 +388,13 @@ export const NAV_GROUPS: NavGroup[] = [
             permission: PERMISSIONS.WAREHOUSE_MANAGE,
           },
           {
+            label: 'Near-Expiry Stock',
+            path: '/inventory/near-expiry',
+            icon: Clock,
+            permission: PERMISSIONS.BATCH_VIEW,
+            capabilityKey: 'INVENTORY_BATCH',
+          },
+          {
             label: 'Fabric Rolls',
             path: '/inventory/fabric-rolls',
             icon: Layers,
@@ -648,6 +657,18 @@ export const NAV_GROUPS: NavGroup[] = [
         ],
       },
       {
+        label: 'Bill of Materials',
+        path: '/production/bom',
+        icon: Layers,
+        permission: PERMISSIONS.BOM_VIEW,
+      },
+      {
+        label: 'Work Centers',
+        path: '/production/work-centers',
+        icon: Factory,
+        permission: PERMISSIONS.WORK_CENTER_VIEW,
+      },
+      {
         label: 'Reorder Report',
         path: '/production/reorder',
         icon: TrendingDown,
@@ -728,6 +749,7 @@ export const NAV_GROUPS: NavGroup[] = [
             path: '/hr/payroll',
             icon: Wallet2,
             permission: PERMISSIONS.PAYROLL_VIEW,
+            capabilityKey: 'HR_PAYROLL',
           },
           {
             label: 'Salary Structures',
@@ -945,14 +967,19 @@ export const NAV_GROUPS: NavGroup[] = [
   },
 ];
 
-/** Keeps an item only if the user can access it: leaves need their own permission (or none, for unguarded routes); parents are kept if any child survives. */
+/** Keeps an item only if the user can access it: capability gate first (coarser — is this even
+ * part of the tenant's plan), then its own permission (or none, for unguarded routes); parents
+ * are kept if any child survives. `enabledCapabilities` is UX filtering only, not a security
+ * boundary — see 08-frontend-navigation.md; backend requireCapability() remains authoritative. */
 export function filterNavItem(
   item: NavItem,
-  hasPermission: (permission: string) => boolean
+  hasPermission: (permission: string) => boolean,
+  enabledCapabilities: Set<string>
 ): NavItem | null {
+  if (item.capabilityKey && !enabledCapabilities.has(item.capabilityKey)) return null;
   if (item.children) {
     const children = item.children
-      .map((child) => filterNavItem(child, hasPermission))
+      .map((child) => filterNavItem(child, hasPermission, enabledCapabilities))
       .filter((child): child is NavItem => child !== null);
     return children.length > 0 ? { ...item, children } : null;
   }
@@ -977,13 +1004,14 @@ export function findNavItemByPath(groups: NavGroup[], path: string): NavItem | n
 
 export function filterNavGroups(
   groups: NavGroup[],
-  hasPermission: (permission: string) => boolean
+  hasPermission: (permission: string) => boolean,
+  enabledCapabilities: Set<string>
 ): NavGroup[] {
   return groups
     .map((group) => ({
       ...group,
       items: group.items
-        .map((item) => filterNavItem(item, hasPermission))
+        .map((item) => filterNavItem(item, hasPermission, enabledCapabilities))
         .filter((item): item is NavItem => item !== null),
     }))
     .filter((group) => group.items.length > 0);

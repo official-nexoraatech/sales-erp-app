@@ -37,44 +37,61 @@ vi.mock('@erp/db', () => ({
   },
 }));
 
+vi.mock('drizzle-orm', () => ({
+  and: vi.fn(() => '__and__'),
+  eq: vi.fn(() => '__eq__'),
+  // tenantScopedHandler (via withTenantConnection in @erp/sdk) uses drizzle-orm's own sql
+  // tagged template internally — a per-file vi.mock('drizzle-orm', ...) replaces the module
+  // for every importer, so it must be included here too or the SET LOCAL call throws.
+  sql: Object.assign(
+    vi.fn(() => '__sql__'),
+    { raw: vi.fn() }
+  ),
+}));
+
 function makeCtxFactory() {
-  return {
-    create: () => ({
-      db: {
-        raw: {
-          select: () => ({
-            from: () => ({
-              // The route code sometimes awaits `.where(...)` directly (a duplicate-existence
-              // check before insert) and sometimes chains `.orderBy(...)` after it (the list
-              // route) — this mock needs to satisfy both shapes, so `where()` returns a
-              // thenable/array-like that's also awaitable on its own.
-              where: () => {
-                const result = Object.assign([...holidayStore], {
-                  orderBy: () => Promise.resolve(holidayStore),
-                });
-                return result;
-              },
-            }),
-          }),
-          insert: () => ({
-            values: (vals: Record<string, unknown>) => ({
-              returning: () => {
-                const row = { id: crypto.randomUUID(), ...vals };
-                holidayStore.push(row);
-                return Promise.resolve([row]);
-              },
-              then: (resolve: (v: unknown) => void) => {
-                const row = { id: crypto.randomUUID(), ...vals };
-                holidayStore.push(row);
-                resolve(undefined);
-              },
-            }),
-          }),
-          delete: () => ({
-            where: () => Promise.resolve(),
-          }),
+  const rawDb = {
+    select: () => ({
+      from: () => ({
+        // The route code sometimes awaits `.where(...)` directly (a duplicate-existence
+        // check before insert) and sometimes chains `.orderBy(...)` after it (the list
+        // route) — this mock needs to satisfy both shapes, so `where()` returns a
+        // thenable/array-like that's also awaitable on its own.
+        where: () => {
+          const result = Object.assign([...holidayStore], {
+            orderBy: () => Promise.resolve(holidayStore),
+          });
+          return result;
         },
-      },
+      }),
+    }),
+    insert: () => ({
+      values: (vals: Record<string, unknown>) => ({
+        returning: () => {
+          const row = { id: crypto.randomUUID(), ...vals };
+          holidayStore.push(row);
+          return Promise.resolve([row]);
+        },
+        then: (resolve: (v: unknown) => void) => {
+          const row = { id: crypto.randomUUID(), ...vals };
+          holidayStore.push(row);
+          resolve(undefined);
+        },
+      }),
+    }),
+    delete: () => ({
+      where: () => Promise.resolve(),
+    }),
+    execute: () => Promise.resolve(),
+  };
+  (rawDb as Record<string, unknown>)['transaction'] = (cb: (trx: typeof rawDb) => unknown) =>
+    cb(rawDb);
+
+  return {
+    rawDb,
+    create: (tenant: { tenantId: number; userId: number; correlationId: string }) => ({
+      db: { raw: rawDb },
+      tenant,
     }),
   };
 }

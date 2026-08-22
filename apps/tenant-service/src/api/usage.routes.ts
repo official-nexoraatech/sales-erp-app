@@ -3,6 +3,7 @@ import type { ErpDatabase } from '@erp/db';
 import { tenants, usageSummary } from '@erp/db';
 import { eq, and, desc } from 'drizzle-orm';
 import { NotFoundError, ValidationError, PERMISSIONS } from '@erp/types';
+import { withTenantConnection } from '@erp/sdk';
 import { authenticate } from '../middleware/authenticate.js';
 import { requirePermission } from '../middleware/authorize.js';
 import { UsagePeriodQuerySchema } from './tenant.schemas.js';
@@ -19,6 +20,14 @@ function currentPeriod(): string {
 
 // PG-028: usage_summary is the only table these routes read from — it's the pre-aggregated
 // rollup, never the raw usage_events table (see Performance section of the gap-prompt).
+//
+// Phase 9 GUC-per-request rollout — migrated 2026-08-21. GET /admin/tenants/:id/usage is a
+// platform-admin lookup of a SPECIFIC tenant (the tenantId comes from the :id param, not the
+// caller's own req.auth.tenantId — a platform admin's JWT tenantId is irrelevant here), so it
+// uses withTenantConnection(db, id, ...) directly, same shape as caveat 5b. GET
+// /admin/tenants/usage-overview is deliberately left unmigrated — its own comment already
+// documents it as "the one legitimate all-tenants query," a genuine cross-tenant read
+// (caveat 4e), not fixable with a single tenantId.
 export async function usageRoutes(fastify: FastifyInstance, db: ErpDatabase): Promise<void> {
   // ── GET /admin/tenants/:id/usage?period=YYYY-MM ─────────────────────────
   fastify.get<{ Params: { id: string }; Querystring: { period?: string } }>(
@@ -31,18 +40,18 @@ export async function usageRoutes(fastify: FastifyInstance, db: ErpDatabase): Pr
         throw new ValidationError('Invalid period — expected YYYY-MM');
       }
       const period = parsedQuery.data.period ?? currentPeriod();
-
-      const [tenant] = await db.select().from(tenants).where(eq(tenants.id, id));
-      if (!tenant) throw new NotFoundError('Tenant', id);
-
       const periodStart = `${period}-01`;
-      const [summary] = await db
-        .select()
-        .from(usageSummary)
-        .where(and(eq(usageSummary.tenantId, id), eq(usageSummary.periodStart, periodStart)));
 
-      return reply.code(200).send({
-        data: {
+      const data = await withTenantConnection(db, id, async (scopedDb) => {
+        const [tenant] = await scopedDb.select().from(tenants).where(eq(tenants.id, id));
+        if (!tenant) throw new NotFoundError('Tenant', id);
+
+        const [summary] = await scopedDb
+          .select()
+          .from(usageSummary)
+          .where(and(eq(usageSummary.tenantId, id), eq(usageSummary.periodStart, periodStart)));
+
+        return {
           period,
           invoiceCount: summary?.invoiceCount ?? 0,
           activeUserCount: summary?.activeUserCount ?? 0,
@@ -52,8 +61,10 @@ export async function usageRoutes(fastify: FastifyInstance, db: ErpDatabase): Pr
             maxUsers: tenant.settings?.maxUsers ?? null,
             maxBranches: tenant.settings?.maxBranches ?? null,
           },
-        },
+        };
       });
+
+      return reply.code(200).send({ data });
     }
   );
 

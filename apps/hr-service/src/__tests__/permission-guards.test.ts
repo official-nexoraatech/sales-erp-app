@@ -8,8 +8,19 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import { generateKeyPairSync } from 'node:crypto';
 import { SignJWT, importPKCS8, type KeyLike } from 'jose';
 import { PERMISSIONS } from '@erp/types';
+import type * as ErpSdk from '@erp/sdk';
 
 // ── Module mocks ──────────────────────────────────────────────────────────
+
+// Phase 3A (HR_PAYROLL capability) — requireCapability() is now called eagerly at
+// route-registration time, and mockCtxFactory below has no rawDb/getRedis (this file's
+// purpose is permission-guard correctness, not capability resolution, which is covered by
+// payroll-capability.test.ts). Mock only requireCapability to always allow — keep the rest of
+// @erp/sdk real, since payroll.routes.ts also uses PlatformEventBus from it.
+vi.mock('@erp/sdk', async (importOriginal) => {
+  const actual = await importOriginal<typeof ErpSdk>();
+  return { ...actual, requireCapability: () => async () => {} };
+});
 
 vi.mock('@erp/db', () => ({
   payrollRuns: {},
@@ -53,6 +64,10 @@ const mockCtxFactory = {
     events: { publish: vi.fn() },
     audit: { log: vi.fn() },
   }),
+  // requireCapability(...) evaluates both arguments eagerly at route-registration time, before
+  // requireCapability itself (mocked above to always allow) ever runs.
+  rawDb: {},
+  getRedis: () => ({}),
 } as never;
 
 async function makeToken(permissions: string[]): Promise<string> {

@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { createHash, randomBytes } from 'crypto';
 import argon2 from 'argon2';
 import type { PlatformContextFactory } from '@erp/sdk';
+import { tenantScopedHandler } from '@erp/sdk';
 import {
   customers,
   customersHistory,
@@ -9,6 +10,8 @@ import {
   crmAccounts,
   crmPortalAccounts,
   crmPortalPasswordTokens,
+  crmPartnerAccounts,
+  crmPartnerPasswordTokens,
 } from '@erp/db';
 import { and, eq, isNull, or, ilike, sql, getTableColumns } from 'drizzle-orm';
 import { z } from 'zod';
@@ -113,8 +116,6 @@ const PreferencesSchema = z.object({
     .min(1),
 });
 
-type AuthedRequest = { auth: { tenantId: number; userId: number; email: string }; ip: string };
-
 function simpleHash(value: string): string {
   // HMAC-like hash for search — in prod use ctx.encryption.searchHash()
   return createHash('sha256').update(value.toUpperCase()).digest('hex').substring(0, 64);
@@ -142,6 +143,11 @@ function generateSecureToken(bytes = 32): string {
 // must never block provisioning. Uses send-raw-internal (pre-rendered body), same as that
 // service's other customer-facing notices, rather than send-internal's DB-backed eventType
 // template lookup, which would need a default template seeded for every tenant first.
+//
+// Deliberately NOT awaited by its caller (fire-and-forget, matches the pre-existing behavior
+// this function already had before the GUC-per-request migration) — the route returns and its
+// wrapping transaction commits without waiting on this fetch(), so it does not hold a connection
+// open for the notification round trip.
 function sendPortalInviteEmail(input: {
   tenantId: number;
   customerName: string;
@@ -171,6 +177,50 @@ function sendPortalInviteEmail(input: {
   });
 }
 
+// ─── Partner Portal Account provisioning (CRM-ROADMAP Phase 4, Feature 6) ──────────────
+// Same shape as the Customer Portal provisioning above, for the PARTNER auth scope.
+const PartnerAccountSchema = z.object({
+  email: z.string().email().max(320),
+});
+
+const PARTNER_INVITE_TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
+const PARTNER_PORTAL_URL = process.env['PARTNER_PORTAL_URL'] ?? 'http://localhost:5177';
+
+// Mirrors sendPortalInviteEmail exactly — fire-and-forget, same reasoning.
+function sendPartnerInviteEmail(input: {
+  tenantId: number;
+  customerName: string;
+  email: string;
+  setPasswordLink: string;
+}): void {
+  const notificationUrl = process.env['NOTIFICATION_SERVICE_URL'] ?? 'http://localhost:3014';
+  const internalKey = process.env['INTERNAL_API_KEY'] ?? '';
+  const body = `Hi ${input.customerName}, you've been invited to your partner account. Set your password here: ${input.setPasswordLink}`;
+
+  fetch(`${notificationUrl}/notifications/send-raw-internal`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-internal-key': internalKey },
+    body: JSON.stringify({
+      tenantId: input.tenantId,
+      eventType: 'PARTNER_ACCOUNT_INVITE',
+      channel: 'EMAIL',
+      recipientEmail: input.email,
+      subject: 'Your partner account',
+      body,
+    }),
+  }).catch((err: unknown) => {
+    logger.warn(
+      { err, email: input.email },
+      'Partner account invite email delivery failed (non-fatal)'
+    );
+  });
+}
+
+// Phase 9 GUC-per-request rollout — migrated 2026-08-21. sendPortalInviteEmail() is
+// fire-and-forget (not awaited) so POST /customers/:id/portal-account is safe to migrate — no
+// held-open transaction across the notification round trip. Post-hoc ctx.audit.log()/
+// ctx.events.publish()/cache invalidation calls are safe per caveat 4b. ctx.db.transaction()
+// calls (PUT /customers/:id, block, unblock) become savepoints of the outer transaction.
 export async function customerRoutes(
   fastify: FastifyInstance,
   ctxFactory: PlatformContextFactory
@@ -181,13 +231,7 @@ export async function customerRoutes(
   fastify.get(
     '/customers',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.CUSTOMER_VIEW)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
       const query = request.query as {
         page?: string;
         size?: string;
@@ -200,7 +244,10 @@ export async function customerRoutes(
       const page = Math.max(0, parseInt(query.page ?? '0', 10));
       const size = Math.min(100, parseInt(query.size ?? '20', 10));
 
-      let whereClause = and(eq(customers.tenantId, tenantId), isNull(customers.deletedAt));
+      let whereClause = and(
+        eq(customers.tenantId, ctx.tenant.tenantId),
+        isNull(customers.deletedAt)
+      );
       if (query.customerType) {
         whereClause = and(
           whereClause,
@@ -246,21 +293,16 @@ export async function customerRoutes(
       return reply.code(200).send({
         data: { content: rows, totalElements: countRow?.count ?? 0, page, size },
       });
-    }
+    })
   );
 
   // ── GET /customers/:id ─────────────────────────────────────────────────────
-  fastify.get<{ Params: { id: string } }>(
+  fastify.get(
     '/customers/:id',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.CUSTOMER_VIEW)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-      const id = parseInt(request.params.id, 10);
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { id: idParam } = request.params as { id: string };
+      const id = parseInt(idParam, 10);
 
       let customer = await customerCache.getCustomer(ctx.cache, id);
       if (!customer) {
@@ -268,7 +310,11 @@ export async function customerRoutes(
           .select()
           .from(customers)
           .where(
-            and(eq(customers.id, id), eq(customers.tenantId, tenantId), isNull(customers.deletedAt))
+            and(
+              eq(customers.id, id),
+              eq(customers.tenantId, ctx.tenant.tenantId),
+              isNull(customers.deletedAt)
+            )
           );
 
         if (!row) throw new NotFoundError('Customer', id);
@@ -276,26 +322,25 @@ export async function customerRoutes(
         await customerCache.setCustomer(ctx.cache, customer);
       }
       return reply.code(200).send({ data: customer });
-    }
+    })
   );
 
   // ── GET /customers/:id/statement ──────────────────────────────────────────
-  fastify.get<{ Params: { id: string } }>(
+  fastify.get(
     '/customers/:id/statement',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.CUSTOMER_VIEW)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-      const id = parseInt(request.params.id, 10);
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { id: idParam } = request.params as { id: string };
+      const id = parseInt(idParam, 10);
       const [customer] = await ctx.db.raw
         .select()
         .from(customers)
         .where(
-          and(eq(customers.id, id), eq(customers.tenantId, tenantId), isNull(customers.deletedAt))
+          and(
+            eq(customers.id, id),
+            eq(customers.tenantId, ctx.tenant.tenantId),
+            isNull(customers.deletedAt)
+          )
         );
       if (!customer) throw new NotFoundError('Customer', id);
       // Phase 5 will supply real invoice + payment data
@@ -309,26 +354,25 @@ export async function customerRoutes(
           _projection: { isStale: true, lagMs: 0 },
         },
       });
-    }
+    })
   );
 
   // ── GET /customers/:id/outstanding ───────────────────────────────────────
-  fastify.get<{ Params: { id: string } }>(
+  fastify.get(
     '/customers/:id/outstanding',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.CUSTOMER_VIEW)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-      const id = parseInt(request.params.id, 10);
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { id: idParam } = request.params as { id: string };
+      const id = parseInt(idParam, 10);
       const [customer] = await ctx.db.raw
         .select()
         .from(customers)
         .where(
-          and(eq(customers.id, id), eq(customers.tenantId, tenantId), isNull(customers.deletedAt))
+          and(
+            eq(customers.id, id),
+            eq(customers.tenantId, ctx.tenant.tenantId),
+            isNull(customers.deletedAt)
+          )
         );
       if (!customer) throw new NotFoundError('Customer', id);
       return reply.code(200).send({
@@ -339,23 +383,18 @@ export async function customerRoutes(
           invoices: [],
         },
       });
-    }
+    })
   );
 
   // ── GET /customers/:id/activity — 360° activity timeline (M9.1) ──────────
   // Aggregates invoices, payments, returns, alterations, loyalty txns and interactions
   // into one chronological feed. Cached in Redis for 60s per (customer, page, size).
-  fastify.get<{ Params: { id: string } }>(
+  fastify.get(
     '/customers/:id/activity',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.CUSTOMER_VIEW)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-      const id = parseInt(request.params.id, 10);
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { id: idParam } = request.params as { id: string };
+      const id = parseInt(idParam, 10);
       const query = request.query as { page?: string; size?: string };
       const page = Math.max(0, parseInt(query.page ?? '0', 10));
       const size = Math.min(100, parseInt(query.size ?? '20', 10));
@@ -364,7 +403,11 @@ export async function customerRoutes(
         .select()
         .from(customers)
         .where(
-          and(eq(customers.id, id), eq(customers.tenantId, tenantId), isNull(customers.deletedAt))
+          and(
+            eq(customers.id, id),
+            eq(customers.tenantId, ctx.tenant.tenantId),
+            isNull(customers.deletedAt)
+          )
         );
       if (!customer) throw new NotFoundError('Customer', id);
 
@@ -379,7 +422,7 @@ export async function customerRoutes(
       const { ActivityTimelineService } = await import('../domain/ActivityTimelineService.js');
       const { items, total } = await ActivityTimelineService.build(
         ctx.db.raw,
-        tenantId,
+        ctx.tenant.tenantId,
         id,
         page,
         size
@@ -389,28 +432,21 @@ export async function customerRoutes(
       return reply
         .code(200)
         .send({ data: { customerId: id, page, size, items, total, _cache: 'MISS' } });
-    }
+    })
   );
 
   // ── POST /customers ────────────────────────────────────────────────────────
   fastify.post(
     '/customers',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.CUSTOMER_CREATE)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
       const body = CustomerSchema.safeParse(request.body);
       if (!body.success)
         throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
 
       const { created, warnings, alreadyExisted } = await CustomerService.create(ctx.db.raw, {
-        tenantId,
-        createdBy: userId,
+        tenantId: ctx.tenant.tenantId,
+        createdBy: ctx.tenant.userId,
         ...body.data,
       });
       if (alreadyExisted) return reply.code(200).send({ data: created, warnings: [] });
@@ -429,21 +465,16 @@ export async function customerRoutes(
       });
 
       return reply.code(201).send({ data: created, warnings });
-    }
+    })
   );
 
   // ── PUT /customers/:id ────────────────────────────────────────────────────
-  fastify.put<{ Params: { id: string } }>(
+  fastify.put(
     '/customers/:id',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.CUSTOMER_EDIT)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-      const id = parseInt(request.params.id, 10);
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { id: idParam } = request.params as { id: string };
+      const id = parseInt(idParam, 10);
 
       const body = CustomerUpdateSchema.safeParse(request.body);
       if (!body.success)
@@ -453,7 +484,11 @@ export async function customerRoutes(
         .select()
         .from(customers)
         .where(
-          and(eq(customers.id, id), eq(customers.tenantId, tenantId), isNull(customers.deletedAt))
+          and(
+            eq(customers.id, id),
+            eq(customers.tenantId, ctx.tenant.tenantId),
+            isNull(customers.deletedAt)
+          )
         );
 
       if (!existing) throw new NotFoundError('Customer', id);
@@ -465,8 +500,8 @@ export async function customerRoutes(
       await ctx.db.transaction(async (trx) => {
         await trx.raw.insert(customersHistory).values({
           customerId: id,
-          tenantId,
-          changedBy: userId,
+          tenantId: ctx.tenant.tenantId,
+          changedBy: ctx.tenant.userId,
           changedAt: new Date(),
           previousData: existing as unknown as Record<string, unknown>,
           changeType: 'UPDATE',
@@ -488,7 +523,7 @@ export async function customerRoutes(
           .where(
             and(
               eq(customers.id, id),
-              eq(customers.tenantId, tenantId),
+              eq(customers.tenantId, ctx.tenant.tenantId),
               eq(customers.version, body.data.version)
             )
           )
@@ -516,26 +551,21 @@ export async function customerRoutes(
         before: existing as unknown as Record<string, unknown>,
         after: updated as unknown as Record<string, unknown>,
         changedFields,
-        actorEmail: (request as unknown as AuthedRequest).auth.email,
-        ipAddress: (request as unknown as AuthedRequest).ip,
+        actorEmail: request.auth.email,
+        ipAddress: request.ip,
       });
 
       return reply.code(200).send({ data: updated });
-    }
+    })
   );
 
   // ── PATCH /customers/:id/opt-out — Communication channel opt-out (ES-18) ─
-  fastify.patch<{ Params: { id: string } }>(
+  fastify.patch(
     '/customers/:id/opt-out',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.CUSTOMER_EDIT)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-      const id = parseInt(request.params.id, 10);
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { id: idParam } = request.params as { id: string };
+      const id = parseInt(idParam, 10);
 
       const body = OptOutSchema.safeParse(request.body);
       if (!body.success)
@@ -545,7 +575,11 @@ export async function customerRoutes(
         .select()
         .from(customers)
         .where(
-          and(eq(customers.id, id), eq(customers.tenantId, tenantId), isNull(customers.deletedAt))
+          and(
+            eq(customers.id, id),
+            eq(customers.tenantId, ctx.tenant.tenantId),
+            isNull(customers.deletedAt)
+          )
         );
       if (!existing) throw new NotFoundError('Customer', id);
 
@@ -559,7 +593,7 @@ export async function customerRoutes(
           ...(body.data.optOutEmail !== undefined ? { optOutEmail: body.data.optOutEmail } : {}),
           updatedAt: new Date(),
         })
-        .where(and(eq(customers.id, id), eq(customers.tenantId, tenantId)))
+        .where(and(eq(customers.id, id), eq(customers.tenantId, ctx.tenant.tenantId)))
         .returning();
       if (!updated) throw new Error('Opt-out update failed unexpectedly');
 
@@ -581,23 +615,18 @@ export async function customerRoutes(
       });
 
       return reply.code(200).send({ data: updated });
-    }
+    })
   );
 
   // ── POST /customers/:id/block — H-3 fix: customers.status='BLOCKED' was schema-valid
   // (blockedReason/blockedAt/blockedBy columns, customers_history changeType) but no route
   // ever set it, and CUSTOMER_BLOCK was a dead permission constant. ──────────────────────
-  fastify.post<{ Params: { id: string } }>(
+  fastify.post(
     '/customers/:id/block',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.CUSTOMER_BLOCK)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-      const id = parseInt(request.params.id, 10);
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { id: idParam } = request.params as { id: string };
+      const id = parseInt(idParam, 10);
 
       const body = BlockSchema.safeParse(request.body);
       if (!body.success)
@@ -607,7 +636,11 @@ export async function customerRoutes(
         .select()
         .from(customers)
         .where(
-          and(eq(customers.id, id), eq(customers.tenantId, tenantId), isNull(customers.deletedAt))
+          and(
+            eq(customers.id, id),
+            eq(customers.tenantId, ctx.tenant.tenantId),
+            isNull(customers.deletedAt)
+          )
         );
       if (!existing) throw new NotFoundError('Customer', id);
       if (existing.status === 'BLOCKED')
@@ -617,8 +650,8 @@ export async function customerRoutes(
       await ctx.db.transaction(async (trx) => {
         await trx.raw.insert(customersHistory).values({
           customerId: id,
-          tenantId,
-          changedBy: userId,
+          tenantId: ctx.tenant.tenantId,
+          changedBy: ctx.tenant.userId,
           changedAt: new Date(),
           previousData: existing as unknown as Record<string, unknown>,
           changeType: 'BLOCK',
@@ -630,11 +663,11 @@ export async function customerRoutes(
             status: 'BLOCKED',
             blockedReason: body.data.reason,
             blockedAt: new Date(),
-            blockedBy: userId,
+            blockedBy: ctx.tenant.userId,
             updatedAt: new Date(),
             version: existing.version + 1,
           })
-          .where(and(eq(customers.id, id), eq(customers.tenantId, tenantId)))
+          .where(and(eq(customers.id, id), eq(customers.tenantId, ctx.tenant.tenantId)))
           .returning();
         updated = row;
       });
@@ -654,32 +687,31 @@ export async function customerRoutes(
         before: { status: existing.status },
         after: { status: updated.status, blockedReason: updated.blockedReason },
         changedFields: ['status', 'blockedReason', 'blockedAt', 'blockedBy'],
-        actorEmail: (request as unknown as AuthedRequest).auth.email,
-        ipAddress: (request as unknown as AuthedRequest).ip,
+        actorEmail: request.auth.email,
+        ipAddress: request.ip,
       });
 
       return reply.code(200).send({ data: updated });
-    }
+    })
   );
 
   // ── POST /customers/:id/unblock ───────────────────────────────────────────
-  fastify.post<{ Params: { id: string } }>(
+  fastify.post(
     '/customers/:id/unblock',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.CUSTOMER_BLOCK)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-      const id = parseInt(request.params.id, 10);
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { id: idParam } = request.params as { id: string };
+      const id = parseInt(idParam, 10);
 
       const [existing] = await ctx.db.raw
         .select()
         .from(customers)
         .where(
-          and(eq(customers.id, id), eq(customers.tenantId, tenantId), isNull(customers.deletedAt))
+          and(
+            eq(customers.id, id),
+            eq(customers.tenantId, ctx.tenant.tenantId),
+            isNull(customers.deletedAt)
+          )
         );
       if (!existing) throw new NotFoundError('Customer', id);
       if (existing.status !== 'BLOCKED')
@@ -689,8 +721,8 @@ export async function customerRoutes(
       await ctx.db.transaction(async (trx) => {
         await trx.raw.insert(customersHistory).values({
           customerId: id,
-          tenantId,
-          changedBy: userId,
+          tenantId: ctx.tenant.tenantId,
+          changedBy: ctx.tenant.userId,
           changedAt: new Date(),
           previousData: existing as unknown as Record<string, unknown>,
           changeType: 'UNBLOCK',
@@ -706,7 +738,7 @@ export async function customerRoutes(
             updatedAt: new Date(),
             version: existing.version + 1,
           })
-          .where(and(eq(customers.id, id), eq(customers.tenantId, tenantId)))
+          .where(and(eq(customers.id, id), eq(customers.tenantId, ctx.tenant.tenantId)))
           .returning();
         updated = row;
       });
@@ -726,32 +758,31 @@ export async function customerRoutes(
         before: { status: existing.status },
         after: { status: updated.status },
         changedFields: ['status', 'blockedReason', 'blockedAt', 'blockedBy'],
-        actorEmail: (request as unknown as AuthedRequest).auth.email,
-        ipAddress: (request as unknown as AuthedRequest).ip,
+        actorEmail: request.auth.email,
+        ipAddress: request.ip,
       });
 
       return reply.code(200).send({ data: updated });
-    }
+    })
   );
 
   // ── GET /customers/:id/preferences — Granular consent (channel x category) ─
-  fastify.get<{ Params: { id: string } }>(
+  fastify.get(
     '/customers/:id/preferences',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.CUSTOMER_VIEW)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-      const id = parseInt(request.params.id, 10);
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { id: idParam } = request.params as { id: string };
+      const id = parseInt(idParam, 10);
 
       const [existing] = await ctx.db.raw
         .select({ id: customers.id })
         .from(customers)
         .where(
-          and(eq(customers.id, id), eq(customers.tenantId, tenantId), isNull(customers.deletedAt))
+          and(
+            eq(customers.id, id),
+            eq(customers.tenantId, ctx.tenant.tenantId),
+            isNull(customers.deletedAt)
+          )
         );
       if (!existing) throw new NotFoundError('Customer', id);
 
@@ -761,26 +792,21 @@ export async function customerRoutes(
         .where(
           and(
             eq(customerCommunicationPreferences.customerId, id),
-            eq(customerCommunicationPreferences.tenantId, tenantId)
+            eq(customerCommunicationPreferences.tenantId, ctx.tenant.tenantId)
           )
         );
 
       return reply.code(200).send({ data: { content: rows, totalElements: rows.length } });
-    }
+    })
   );
 
   // ── PUT /customers/:id/preferences — Upsert one or more preference rows ────
-  fastify.put<{ Params: { id: string } }>(
+  fastify.put(
     '/customers/:id/preferences',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.CUSTOMER_EDIT)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-      const id = parseInt(request.params.id, 10);
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { id: idParam } = request.params as { id: string };
+      const id = parseInt(idParam, 10);
 
       const body = PreferencesSchema.safeParse(request.body);
       if (!body.success)
@@ -790,7 +816,11 @@ export async function customerRoutes(
         .select({ id: customers.id })
         .from(customers)
         .where(
-          and(eq(customers.id, id), eq(customers.tenantId, tenantId), isNull(customers.deletedAt))
+          and(
+            eq(customers.id, id),
+            eq(customers.tenantId, ctx.tenant.tenantId),
+            isNull(customers.deletedAt)
+          )
         );
       if (!existingCustomer) throw new NotFoundError('Customer', id);
 
@@ -799,7 +829,7 @@ export async function customerRoutes(
           const [row] = await ctx.db.raw
             .insert(customerCommunicationPreferences)
             .values({
-              tenantId,
+              tenantId: ctx.tenant.tenantId,
               customerId: id,
               channel: pref.channel,
               category: pref.category,
@@ -835,27 +865,26 @@ export async function customerRoutes(
       });
 
       return reply.code(200).send({ data: { content: saved, totalElements: saved.length } });
-    }
+    })
   );
 
   // ── DELETE /customers/:id — Soft delete ──────────────────────────────────
-  fastify.delete<{ Params: { id: string } }>(
+  fastify.delete(
     '/customers/:id',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.CUSTOMER_DELETE)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-      const id = parseInt(request.params.id, 10);
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { id: idParam } = request.params as { id: string };
+      const id = parseInt(idParam, 10);
 
       const [existing] = await ctx.db.raw
         .select()
         .from(customers)
         .where(
-          and(eq(customers.id, id), eq(customers.tenantId, tenantId), isNull(customers.deletedAt))
+          and(
+            eq(customers.id, id),
+            eq(customers.tenantId, ctx.tenant.tenantId),
+            isNull(customers.deletedAt)
+          )
         );
 
       if (!existing) throw new NotFoundError('Customer', id);
@@ -863,7 +892,7 @@ export async function customerRoutes(
 
       await ctx.db.raw
         .update(customers)
-        .set({ deletedAt: new Date(), deletedBy: userId, status: 'INACTIVE' })
+        .set({ deletedAt: new Date(), deletedBy: ctx.tenant.userId, status: 'INACTIVE' })
         .where(eq(customers.id, id));
 
       await customerCache.invalidateCustomer(ctx.cache, id);
@@ -876,20 +905,14 @@ export async function customerRoutes(
       });
 
       return reply.code(200).send({ data: { message: 'Customer deleted', id } });
-    }
+    })
   );
 
   // ── POST /customers/merge — MDG ───────────────────────────────────────────
   fastify.post(
     '/customers/merge',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.CUSTOMER_MERGE)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
       const MergeSchema = z.object({
         sourceId: z.number().int().positive(),
         targetId: z.number().int().positive(),
@@ -908,7 +931,7 @@ export async function customerRoutes(
         .where(
           and(
             eq(customers.id, body.data.sourceId),
-            eq(customers.tenantId, tenantId),
+            eq(customers.tenantId, ctx.tenant.tenantId),
             isNull(customers.deletedAt)
           )
         );
@@ -918,7 +941,7 @@ export async function customerRoutes(
         .where(
           and(
             eq(customers.id, body.data.targetId),
-            eq(customers.tenantId, tenantId),
+            eq(customers.tenantId, ctx.tenant.tenantId),
             isNull(customers.deletedAt)
           )
         );
@@ -929,8 +952,8 @@ export async function customerRoutes(
       // Archive source before merge
       await ctx.db.raw.insert(customersHistory).values({
         customerId: body.data.sourceId,
-        tenantId,
-        changedBy: userId,
+        tenantId: ctx.tenant.tenantId,
+        changedBy: ctx.tenant.userId,
         previousData: source as unknown as Record<string, unknown>,
         changeType: 'UPDATE',
       });
@@ -938,7 +961,7 @@ export async function customerRoutes(
       // Soft-delete source (all transactions Phase 5+ will re-point to target)
       await ctx.db.raw
         .update(customers)
-        .set({ deletedAt: new Date(), deletedBy: userId, status: 'INACTIVE' })
+        .set({ deletedAt: new Date(), deletedBy: ctx.tenant.userId, status: 'INACTIVE' })
         .where(eq(customers.id, body.data.sourceId));
 
       await ctx.audit.log({
@@ -958,7 +981,7 @@ export async function customerRoutes(
           targetId: body.data.targetId,
         },
       });
-    }
+    })
   );
 
   // ── POST /customers/import — Bulk import ─────────────────────────────────
@@ -992,17 +1015,12 @@ export async function customerRoutes(
   // CRM-ROADMAP Phase 3, Feature 2 (Self-Service Customer Portal): a customer never
   // self-registers. Idempotent — calling again for a customer that already has an account
   // just re-sends a fresh invite (e.g. the first email bounced), it does not error.
-  fastify.post<{ Params: { id: string } }>(
+  fastify.post(
     '/customers/:id/portal-account',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.PORTAL_ACCOUNT_MANAGE)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-      const id = parseInt(request.params.id, 10);
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { id: idParam } = request.params as { id: string };
+      const id = parseInt(idParam, 10);
 
       const body = PortalAccountSchema.safeParse(request.body);
       if (!body.success)
@@ -1012,14 +1030,23 @@ export async function customerRoutes(
         .select()
         .from(customers)
         .where(
-          and(eq(customers.id, id), eq(customers.tenantId, tenantId), isNull(customers.deletedAt))
+          and(
+            eq(customers.id, id),
+            eq(customers.tenantId, ctx.tenant.tenantId),
+            isNull(customers.deletedAt)
+          )
         );
       if (!customer) throw new NotFoundError('Customer', id);
 
       let [account] = await ctx.db.raw
         .select()
         .from(crmPortalAccounts)
-        .where(and(eq(crmPortalAccounts.customerId, id), eq(crmPortalAccounts.tenantId, tenantId)));
+        .where(
+          and(
+            eq(crmPortalAccounts.customerId, id),
+            eq(crmPortalAccounts.tenantId, ctx.tenant.tenantId)
+          )
+        );
 
       if (!account) {
         // Unusable until set-password succeeds — never given out, so it never matches any
@@ -1031,7 +1058,7 @@ export async function customerRoutes(
         [account] = await ctx.db.raw
           .insert(crmPortalAccounts)
           .values({
-            tenantId,
+            tenantId: ctx.tenant.tenantId,
             customerId: id,
             email: body.data.email,
             passwordHash: placeholderHash,
@@ -1054,14 +1081,14 @@ export async function customerRoutes(
 
       await ctx.db.raw.insert(crmPortalPasswordTokens).values({
         portalAccountId: account.id,
-        tenantId,
+        tenantId: ctx.tenant.tenantId,
         tokenHash,
         expiresAt,
       });
 
       const setPasswordLink = `${CUSTOMER_PORTAL_URL}/set-password?token=${plainToken}`;
       sendPortalInviteEmail({
-        tenantId,
+        tenantId: ctx.tenant.tenantId,
         customerName: customer.displayName,
         email: body.data.email,
         setPasswordLink,
@@ -1077,6 +1104,106 @@ export async function customerRoutes(
       return reply.code(201).send({
         data: { id: account.id, customerId: id, email: account.email, isActive: account.isActive },
       });
-    }
+    })
+  );
+
+  // ── POST /customers/:id/partner-account — staff-provisioned invite ──────
+  // CRM-ROADMAP Phase 4, Feature 6 (Partner/Channel Portal): mirrors the portal-account route
+  // above exactly, for the PARTNER auth scope. Unlike that route, this one enforces the one
+  // place "partner-ness" is actually checked — provisioning is rejected for a RETAIL customer,
+  // since a partner is defined as an existing WHOLESALE/B2B customers row (no dedicated
+  // distributor entity — see partner.routes.ts's header comment).
+  fastify.post(
+    '/customers/:id/partner-account',
+    { preHandler: [authenticate, requirePermission(PERMISSIONS.PARTNER_ACCOUNT_MANAGE)] },
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { id: idParam } = request.params as { id: string };
+      const id = parseInt(idParam, 10);
+
+      const body = PartnerAccountSchema.safeParse(request.body);
+      if (!body.success)
+        throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
+
+      const [customer] = await ctx.db.raw
+        .select()
+        .from(customers)
+        .where(
+          and(
+            eq(customers.id, id),
+            eq(customers.tenantId, ctx.tenant.tenantId),
+            isNull(customers.deletedAt)
+          )
+        );
+      if (!customer) throw new NotFoundError('Customer', id);
+      if (!['WHOLESALE', 'B2B'].includes(customer.customerType)) {
+        throw new ValidationError(
+          `Customer ${id} is typed ${customer.customerType} — only WHOLESALE/B2B customers can have a partner account`
+        );
+      }
+
+      let [account] = await ctx.db.raw
+        .select()
+        .from(crmPartnerAccounts)
+        .where(
+          and(
+            eq(crmPartnerAccounts.customerId, id),
+            eq(crmPartnerAccounts.tenantId, ctx.tenant.tenantId)
+          )
+        );
+
+      if (!account) {
+        const placeholderHash = await argon2.hash(generateSecureToken(32), {
+          type: argon2.argon2id,
+        });
+        [account] = await ctx.db.raw
+          .insert(crmPartnerAccounts)
+          .values({
+            tenantId: ctx.tenant.tenantId,
+            customerId: id,
+            email: body.data.email,
+            passwordHash: placeholderHash,
+            isActive: true,
+            mustResetPassword: true,
+          })
+          .returning();
+      } else {
+        [account] = await ctx.db.raw
+          .update(crmPartnerAccounts)
+          .set({ email: body.data.email, updatedAt: new Date() })
+          .where(eq(crmPartnerAccounts.id, account.id))
+          .returning();
+      }
+      if (!account) throw new Error('Partner account provisioning failed unexpectedly');
+
+      const plainToken = generateSecureToken(32);
+      const tokenHash = sha256Hex(plainToken);
+      const expiresAt = new Date(Date.now() + PARTNER_INVITE_TOKEN_TTL_MS);
+
+      await ctx.db.raw.insert(crmPartnerPasswordTokens).values({
+        partnerAccountId: account.id,
+        tenantId: ctx.tenant.tenantId,
+        tokenHash,
+        expiresAt,
+      });
+
+      const setPasswordLink = `${PARTNER_PORTAL_URL}/set-password?token=${plainToken}`;
+      sendPartnerInviteEmail({
+        tenantId: ctx.tenant.tenantId,
+        customerName: customer.displayName,
+        email: body.data.email,
+        setPasswordLink,
+      });
+
+      await ctx.audit.log({
+        action: 'CREATE',
+        entityType: 'crm_partner_account',
+        entityId: account.id,
+        after: { customerId: id, email: account.email, isActive: account.isActive },
+      });
+
+      return reply.code(201).send({
+        data: { id: account.id, customerId: id, email: account.email, isActive: account.isActive },
+      });
+    })
   );
 }

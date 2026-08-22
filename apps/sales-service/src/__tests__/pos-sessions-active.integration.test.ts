@@ -5,13 +5,25 @@
  * behaviors the gap prompt's Testing section calls out: most-recent-OPEN-session-for-the-
  * caller, null when none exists, and isolation from other tenants/users.
  */
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { generateKeyPairSync } from 'node:crypto';
 import { SignJWT, importPKCS8, type KeyLike } from 'jose';
 import { createDatabaseClient, posSessions, branches, warehouses } from '@erp/db';
 import { eq } from 'drizzle-orm';
 import { PERMISSIONS } from '@erp/types';
+import type * as ErpSdk from '@erp/sdk';
+
+// Phase 3B (POS capability) — requireCapability() is now called eagerly at route-registration
+// time (posRoutes(app, fakeCtxFactory) below), and fakeCtxFactory has no rawDb/getRedis (this
+// test's purpose is session-query correctness, not capability resolution, which is covered by
+// pos-capability.test.ts). Mock it to always allow, same pattern as the dedicated capability
+// tests, rather than fabricating a fake redis client this test doesn't otherwise need.
+vi.mock('@erp/sdk', async (importOriginal) => {
+  const actual = await importOriginal<typeof ErpSdk>();
+  return { ...actual, requireCapability: () => async () => {} };
+});
+
 import { posRoutes } from '../api/pos.routes.js';
 
 const DB_URL = process.env['DATABASE_URL'];
@@ -33,6 +45,8 @@ describe.skipIf(!DB_URL)('PG-050 GET /pos/sessions/active — sales-service', ()
       audit: { log: async () => {} },
       tenantId,
     }),
+    rawDb: {},
+    getRedis: () => ({}),
   } as never;
 
   async function makeToken(

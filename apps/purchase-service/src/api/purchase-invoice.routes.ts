@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { PlatformContextFactory } from '@erp/sdk';
-import { getBranchScope } from '@erp/sdk';
+import { getBranchScope, tenantScopedHandler } from '@erp/sdk';
 import { purchaseInvoices } from '@erp/db';
 import { and, eq } from 'drizzle-orm';
 import { z } from 'zod';
@@ -26,42 +26,35 @@ const CreatePurchaseInvoiceSchema = z.object({
   notes: z.string().max(2000).optional(),
 });
 
+// Phase 9 GUC-per-request rollout — migrated 2026-08-21. No external I/O —
+// PurchaseInvoiceService has no fetch() calls.
 export async function purchaseInvoiceRoutes(
   fastify: FastifyInstance,
   ctxFactory: PlatformContextFactory
 ): Promise<void> {
   fastify.addHook('preHandler', authenticate);
 
-  function makeCtx(req: Parameters<typeof authenticate>[0]) {
-    return ctxFactory.create({
-      tenantId: req.auth.tenantId,
-      userId: req.auth.userId,
-      correlationId: (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
-    });
-  }
-
   fastify.get('/purchase-invoices', {
     preHandler: requirePermission(PERMISSIONS.PURCHASE_INVOICE_VIEW),
-    handler: async (req, reply) => {
+    handler: tenantScopedHandler(ctxFactory, async (req, reply, ctx) => {
       const q = req.query as { status?: string };
-      const ctx = makeCtx(req);
       const svc = new PurchaseInvoiceService(ctx.db.raw);
       const branchScope = getBranchScope(req.auth);
       if (branchScope !== 'all' && branchScope.length === 0) {
         return reply.send({ data: { content: [], totalElements: 0 } });
       }
       const rows = await svc.list(
-        req.auth.tenantId,
+        ctx.tenant.tenantId,
         q.status,
         branchScope === 'all' ? undefined : branchScope
       );
       return reply.send({ data: { content: rows, totalElements: rows.length } });
-    },
+    }),
   });
 
   fastify.post('/purchase-invoices', {
     preHandler: requirePermission(PERMISSIONS.PURCHASE_INVOICE_CREATE),
-    handler: async (req, reply) => {
+    handler: tenantScopedHandler(ctxFactory, async (req, reply, ctx) => {
       const body = CreatePurchaseInvoiceSchema.parse(req.body);
 
       const createScope = getBranchScope(req.auth);
@@ -73,10 +66,9 @@ export async function purchaseInvoiceRoutes(
         );
       }
 
-      const ctx = makeCtx(req);
       const svc = new PurchaseInvoiceService(ctx.db.raw);
       const id = await svc.create({
-        tenantId: req.auth.tenantId,
+        tenantId: ctx.tenant.tenantId,
         branchId: body.branchId,
         supplierInvoiceNumber: body.supplierInvoiceNumber,
         supplierId: body.supplierId,
@@ -85,19 +77,18 @@ export async function purchaseInvoiceRoutes(
         invoiceDate: new Date(body.invoiceDate),
         lines: body.lines,
         notes: body.notes,
-        createdBy: req.auth.userId,
+        createdBy: ctx.tenant.userId,
       });
       return reply.code(201).send({ data: { id } });
-    },
+    }),
   });
 
   fastify.get('/purchase-invoices/:id', {
     preHandler: requirePermission(PERMISSIONS.PURCHASE_INVOICE_VIEW),
-    handler: async (req, reply) => {
+    handler: tenantScopedHandler(ctxFactory, async (req, reply, ctx) => {
       const { id } = req.params as { id: string };
-      const ctx = makeCtx(req);
       const svc = new PurchaseInvoiceService(ctx.db.raw);
-      const data = await svc.getWithLines(parseInt(id, 10), req.auth.tenantId);
+      const data = await svc.getWithLines(parseInt(id, 10), ctx.tenant.tenantId);
 
       const branchScope = getBranchScope(req.auth);
       if (branchScope !== 'all' && !branchScope.includes(data.branchId)) {
@@ -109,14 +100,13 @@ export async function purchaseInvoiceRoutes(
       }
 
       return reply.send({ data });
-    },
+    }),
   });
 
   fastify.post('/purchase-invoices/:id/approve', {
     preHandler: requirePermission(PERMISSIONS.PURCHASE_INVOICE_APPROVE),
-    handler: async (req, reply) => {
+    handler: tenantScopedHandler(ctxFactory, async (req, reply, ctx) => {
       const { id } = req.params as { id: string };
-      const ctx = makeCtx(req);
       const approveScope = getBranchScope(req.auth);
       if (approveScope !== 'all') {
         const invoiceId = parseInt(id, 10);
@@ -126,7 +116,7 @@ export async function purchaseInvoiceRoutes(
           .where(
             and(
               eq(purchaseInvoices.id, invoiceId),
-              eq(purchaseInvoices.tenantId, req.auth.tenantId)
+              eq(purchaseInvoices.tenantId, ctx.tenant.tenantId)
             )
           );
         if (row && !approveScope.includes(row.branchId)) {
@@ -138,8 +128,8 @@ export async function purchaseInvoiceRoutes(
         }
       }
       const svc = new PurchaseInvoiceService(ctx.db.raw);
-      await svc.approve(parseInt(id, 10), req.auth.tenantId, req.auth.userId);
+      await svc.approve(parseInt(id, 10), ctx.tenant.tenantId, ctx.tenant.userId);
       return reply.send({ success: true });
-    },
+    }),
   });
 }

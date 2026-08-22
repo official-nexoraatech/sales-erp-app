@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { PlatformContextFactory } from '@erp/sdk';
-import { PlatformEventBus } from '@erp/sdk';
+import { PlatformEventBus, tenantScopedHandler } from '@erp/sdk';
 import {
   leaveTypes,
   employeeLeaveBalance,
@@ -14,8 +14,6 @@ import { BusinessError, NotFoundError, ValidationError } from '@erp/types';
 import { PERMISSIONS } from '@erp/types';
 import { authenticate } from '../middleware/authenticate.js';
 import { requirePermission } from '../middleware/authorize.js';
-
-type AuthedRequest = { auth: { tenantId: number; userId: number } };
 
 const ApplyLeaveSchema = z.object({
   employeeId: z.number().int().positive(),
@@ -42,6 +40,8 @@ function daysBetween(start: string, end: string): number {
   return Math.round((e.getTime() - s.getTime()) / 86400000) + 1;
 }
 
+// Phase 9 GUC-per-request rollout — migrated 2026-08-21. No external I/O — PlatformEventBus
+// writes to the outbox table, it doesn't call fetch().
 export async function leaveRoutes(
   fastify: FastifyInstance,
   ctxFactory: PlatformContextFactory
@@ -50,31 +50,21 @@ export async function leaveRoutes(
   fastify.get(
     '/leave-types',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.LEAVE_VIEW)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId } = ctx.tenant;
       const rows = await ctx.db.raw
         .select()
         .from(leaveTypes)
         .where(and(eq(leaveTypes.tenantId, tenantId), eq(leaveTypes.isActive, true)));
       return reply.code(200).send({ data: { content: rows, totalElements: rows.length } });
-    }
+    })
   );
 
   fastify.post(
     '/leave-types/seed',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.LEAVE_APPROVE)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId, userId } = ctx.tenant;
       const { DEFAULT_LEAVE_TYPES } = await import('../domain/leave-type-seed.js');
 
       let count = 0;
@@ -108,21 +98,16 @@ export async function leaveRoutes(
         metadata: { action: 'SEED', count },
       });
       return reply.code(200).send({ data: { message: 'Leave types seeded', count } });
-    }
+    })
   );
 
   // ── Leave Balance ────────────────────────────────────────────────────────
-  fastify.get<{ Params: { id: string } }>(
+  fastify.get(
     '/employees/:id/leave-balance',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.LEAVE_VIEW)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-      const employeeId = parseInt(request.params.id, 10);
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId } = ctx.tenant;
+      const employeeId = parseInt((request.params as { id: string }).id, 10);
       const year = new Date().getFullYear();
       const rows = await ctx.db.raw
         .select()
@@ -135,20 +120,15 @@ export async function leaveRoutes(
           )
         );
       return reply.code(200).send({ data: { content: rows, year } });
-    }
+    })
   );
 
   // ── Leave Applications ───────────────────────────────────────────────────
   fastify.post(
     '/leave-applications',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.LEAVE_APPLY)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId, userId } = ctx.tenant;
       const body = ApplyLeaveSchema.safeParse(request.body);
       if (!body.success)
         throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
@@ -271,20 +251,15 @@ export async function leaveRoutes(
       });
 
       return reply.code(201).send({ data: created });
-    }
+    })
   );
 
-  fastify.post<{ Params: { id: string } }>(
+  fastify.post(
     '/leave-applications/:id/approve',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.LEAVE_APPROVE)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-      const id = parseInt(request.params.id, 10);
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId, userId } = ctx.tenant;
+      const id = parseInt((request.params as { id: string }).id, 10);
 
       const [app] = await ctx.db.raw
         .select()
@@ -397,20 +372,15 @@ export async function leaveRoutes(
       });
 
       return reply.code(200).send({ data: { message: 'Leave approved', id } });
-    }
+    })
   );
 
-  fastify.post<{ Params: { id: string } }>(
+  fastify.post(
     '/leave-applications/:id/reject',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.LEAVE_REJECT)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-      const id = parseInt(request.params.id, 10);
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId, userId } = ctx.tenant;
+      const id = parseInt((request.params as { id: string }).id, 10);
       const body = RejectLeaveSchema.safeParse(request.body);
       if (!body.success)
         throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
@@ -485,20 +455,15 @@ export async function leaveRoutes(
       });
 
       return reply.code(200).send({ data: { message: 'Leave rejected', id } });
-    }
+    })
   );
 
-  fastify.post<{ Params: { id: string } }>(
+  fastify.post(
     '/leave-applications/:id/cancel',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.LEAVE_APPLY)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-      const id = parseInt(request.params.id, 10);
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId, userId } = ctx.tenant;
+      const id = parseInt((request.params as { id: string }).id, 10);
 
       const [app] = await ctx.db.raw
         .select()
@@ -585,19 +550,14 @@ export async function leaveRoutes(
       });
 
       return reply.code(200).send({ data: { message: 'Leave cancelled', id } });
-    }
+    })
   );
 
   fastify.get(
     '/approvals/leaves/pending',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.LEAVE_APPROVE)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId } = ctx.tenant;
       const rows = await ctx.db.raw
         .select()
         .from(leaveApplications)
@@ -605,20 +565,15 @@ export async function leaveRoutes(
           and(eq(leaveApplications.tenantId, tenantId), eq(leaveApplications.status, 'PENDING'))
         );
       return reply.code(200).send({ data: { content: rows, totalElements: rows.length } });
-    }
+    })
   );
 
   // ── Team leave calendar (date range query) ──────────────────────────────
   fastify.get(
     '/leave-applications',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.LEAVE_VIEW)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId } = ctx.tenant;
       const query = LeaveApplicationsQuerySchema.safeParse(request.query);
       if (!query.success)
         throw new ValidationError(query.error.errors.map((e) => e.message).join('; '));
@@ -632,6 +587,6 @@ export async function leaveRoutes(
         .from(leaveApplications)
         .where(and(...conditions));
       return reply.code(200).send({ data: { content: rows, totalElements: rows.length } });
-    }
+    })
   );
 }

@@ -9,6 +9,7 @@ import {
 } from '@erp/db';
 import { PERMISSIONS } from '@erp/types';
 import type { PlatformContextFactory } from '@erp/sdk';
+import { tenantScopedHandler } from '@erp/sdk';
 import { authenticate } from '../middleware/authenticate.js';
 import { requirePermission } from '../middleware/authorize.js';
 
@@ -83,6 +84,8 @@ export function computeValuationLine(
 // the source of truth when no warehouseId is passed. When warehouseId is passed, qty comes from
 // the warehouse-level projection (real) and unit cost comes from a costing-method-aware true
 // per-warehouse source (FIFO layers / inventory_warehouse_valuation) — see computeValuationLine().
+// Phase 9 GUC-per-request rollout — migrated 2026-08-21. Single route, pure reads, no external
+// I/O.
 export async function valuationRoutes(
   fastify: FastifyInstance,
   ctxFactory: PlatformContextFactory
@@ -90,14 +93,9 @@ export async function valuationRoutes(
   fastify.get(
     '/inventory/valuation',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.REPORT_VIEW)] },
-    async (request, reply) => {
-      const ctx = ctxFactory.create({
-        tenantId: request.auth.tenantId,
-        userId: request.auth.userId,
-        correlationId: request.id,
-      });
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
       const query = ValuationQuery.parse(request.query);
-      const tenantId = request.auth.tenantId;
+      const tenantId = ctx.tenant.tenantId;
 
       const rows = await ctx.db.raw
         .select({
@@ -201,6 +199,6 @@ export async function valuationRoutes(
           totalStockValue: Math.round(totalValue * 100) / 100,
         },
       });
-    }
+    })
   );
 }

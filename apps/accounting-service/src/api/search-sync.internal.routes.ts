@@ -1,6 +1,7 @@
 /* global process */
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import type { ErpDatabase } from '@erp/db';
+import { withTenantConnection } from '@erp/sdk';
 import { accounts, journals } from '@erp/db';
 import { and, eq, gte, isNull } from 'drizzle-orm';
 import { timingSafeEqual } from 'node:crypto';
@@ -15,7 +16,9 @@ async function checkInternalKey(req: FastifyRequest, reply: FastifyReply): Promi
     keyBuffer.length === expectedBuffer.length &&
     timingSafeEqual(keyBuffer, expectedBuffer);
   if (!matches) {
-    await reply.code(401).send({ error: { code: 'UNAUTHENTICATED', message: 'Invalid internal API key' } });
+    await reply
+      .code(401)
+      .send({ error: { code: 'UNAUTHENTICATED', message: 'Invalid internal API key' } });
   }
 }
 
@@ -34,7 +37,13 @@ interface SearchSyncQuery {
 // GET /internal/search-sync/:entity — see tenant-service's copy of this file for the full
 // rationale (Phase 4 backfill/incremental-sync jobs). NOT protected by JWT — internal-only,
 // guarded by x-internal-key.
-export async function searchSyncInternalRoutes(fastify: FastifyInstance, db: ErpDatabase): Promise<void> {
+// Phase 9 GUC-per-request rollout — migrated 2026-08-21. No PlatformContextFactory (no req.auth
+// either — internal-key-guarded), tenantId comes from the query string — withTenantConnection
+// used directly, scoped per query.
+export async function searchSyncInternalRoutes(
+  fastify: FastifyInstance,
+  db: ErpDatabase
+): Promise<void> {
   fastify.get<{ Params: { entity: string }; Querystring: SearchSyncQuery }>(
     '/internal/search-sync/:entity',
     { preHandler: checkInternalKey },
@@ -44,31 +53,63 @@ export async function searchSyncInternalRoutes(fastify: FastifyInstance, db: Erp
       const page = parseInt(request.query.page ?? '0', 10);
       const size = Math.min(parseInt(request.query.size ?? '500', 10), 500);
       const offset = page * size;
-      const modifiedSince = request.query.modifiedSince ? new Date(request.query.modifiedSince) : undefined;
+      const modifiedSince = request.query.modifiedSince
+        ? new Date(request.query.modifiedSince)
+        : undefined;
 
       let content: SearchSyncDoc[] = [];
 
       if (entity === 'account') {
-        const conditions = [eq(accounts.tenantId, tenantId), isNull(accounts.deletedAt)];
-        if (modifiedSince) conditions.push(gte(accounts.updatedAt, modifiedSince));
-        const rows = await db.select().from(accounts).where(and(...conditions)).limit(size).offset(offset);
-        content = rows.map((r) => ({
-          id: String(r.id),
-          doc: { name: r.name, accountCode: r.accountCode, accountType: r.accountType, tenantId },
-        }));
+        content = await withTenantConnection(db, tenantId, async (scopedDb) => {
+          const conditions = [eq(accounts.tenantId, tenantId), isNull(accounts.deletedAt)];
+          if (modifiedSince) conditions.push(gte(accounts.updatedAt, modifiedSince));
+          const rows = await scopedDb
+            .select()
+            .from(accounts)
+            .where(and(...conditions))
+            .limit(size)
+            .offset(offset);
+          return rows.map((r) => ({
+            id: String(r.id),
+            doc: { name: r.name, accountCode: r.accountCode, accountType: r.accountType, tenantId },
+          }));
+        });
       } else if (entity === 'journal_entry') {
-        const conditions = [eq(journals.tenantId, tenantId)];
-        if (modifiedSince) conditions.push(gte(journals.createdAt, modifiedSince));
-        const rows = await db.select().from(journals).where(and(...conditions)).limit(size).offset(offset);
-        content = rows.map((r) => ({
-          id: String(r.id),
-          doc: { journalId: r.journalId, description: r.description, referenceType: r.referenceType, tenantId },
-        }));
+        content = await withTenantConnection(db, tenantId, async (scopedDb) => {
+          const conditions = [eq(journals.tenantId, tenantId)];
+          if (modifiedSince) conditions.push(gte(journals.createdAt, modifiedSince));
+          const rows = await scopedDb
+            .select()
+            .from(journals)
+            .where(and(...conditions))
+            .limit(size)
+            .offset(offset);
+          return rows.map((r) => ({
+            id: String(r.id),
+            doc: {
+              journalId: r.journalId,
+              description: r.description,
+              referenceType: r.referenceType,
+              tenantId,
+            },
+          }));
+        });
       } else {
-        return reply.code(422).send({ error: { code: 'INVALID_ENTITY', message: `accounting-service does not own entity: ${entity}` } });
+        return reply
+          .code(422)
+          .send({
+            error: {
+              code: 'INVALID_ENTITY',
+              message: `accounting-service does not own entity: ${entity}`,
+            },
+          });
       }
 
-      return reply.code(200).send({ data: { content, totalElements: content.length, hasMore: content.length === size } });
+      return reply
+        .code(200)
+        .send({
+          data: { content, totalElements: content.length, hasMore: content.length === size },
+        });
     }
   );
 }

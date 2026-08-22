@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { PlatformContextFactory } from '@erp/sdk';
+import { tenantScopedHandler } from '@erp/sdk';
 import { timingSafeEqual } from 'crypto';
 import { z } from 'zod';
 import { and, desc, eq } from 'drizzle-orm';
@@ -101,6 +102,19 @@ const CancelIrnSchema = z.object({
   remark: z.string().max(500).optional(),
 });
 
+// Phase 9 GUC-per-request rollout — migrated 2026-08-21 for GET /status and GET /list (pure DB
+// reads, tenantScopedHandler). generate/cancel/retry call EInvoiceService methods that make real
+// NIC e-Invoice API calls interleaved with DB work (caveat 4) — not a good fit for
+// tenantScopedHandler's single held-open transaction for the whole request.
+//
+// RLS-readiness follow-up (2026-08-22): rather than restructure these routes, the fix lives one
+// level down in EInvoiceService itself — every DB call there (both sides of the NIC call) now
+// goes through db.transaction() (TenantScopedDatabase's own method, not db.raw.transaction())
+// instead of a bare db.raw.select/update. db.transaction() sets the GUC itself on every call,
+// regardless of whether the ctx.db passed in here was built from a pre-scoped connection — so
+// ctx = ctxFactory.create({...}) without a dbOverride is safe to keep as-is; no route-level
+// withTenantConnection wrap needed. /retry-pending's cross-tenant scan is a deliberate,
+// documented exception — see EInvoiceService.retryPendingIrns's own comment.
 export async function einvoiceRoutes(
   fastify: FastifyInstance,
   ctxFactory: PlatformContextFactory
@@ -231,47 +245,38 @@ export async function einvoiceRoutes(
   });
 
   // GET /gst/einvoice/status/:invoiceId
-  fastify.get<{ Params: { invoiceId: string } }>(
+  fastify.get(
     '/gst/einvoice/status/:invoiceId',
     {
       preHandler: [authenticate, requirePermission(PERMISSIONS.GST_VIEW)],
     },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId } = ctx.tenant;
 
-      const invoiceId = parseInt(request.params.invoiceId, 10);
+      const invoiceId = parseInt((request.params as { invoiceId: string }).invoiceId, 10);
       if (isNaN(invoiceId)) throw new ValidationError('Invalid invoiceId');
 
       const status = await EInvoiceService.getStatus(ctx.db, tenantId, invoiceId);
       return reply.code(200).send({ data: status });
-    }
+    })
   );
 
   // GET /gst/einvoice/list — invoices with an e-Invoice/e-Way Bill record on file,
   // most recently updated first. Only covers invoices IRN generation has been attempted
   // for at least once (auto-triggered on INVOICE_CONFIRMED, or manually retried).
-  fastify.get<{ Querystring: { status?: string; limit?: string } }>(
+  fastify.get(
     '/gst/einvoice/list',
     {
       preHandler: [authenticate, requirePermission(PERMISSIONS.GST_VIEW)],
     },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-      const limit = Math.min(parseInt(request.query.limit ?? '50', 10) || 50, 200);
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId } = ctx.tenant;
+      const query = request.query as { status?: string; limit?: string };
+      const limit = Math.min(parseInt(query.limit ?? '50', 10) || 50, 200);
 
       const conditions = [eq(einvoiceData.tenantId, tenantId)];
-      if (request.query.status) {
-        conditions.push(eq(einvoiceData.irnStatus, request.query.status as never));
+      if (query.status) {
+        conditions.push(eq(einvoiceData.irnStatus, query.status as never));
       }
 
       const rows = await ctx.db.raw
@@ -294,6 +299,6 @@ export async function einvoiceRoutes(
         .limit(limit);
 
       return reply.code(200).send({ data: { content: rows, totalElements: rows.length } });
-    }
+    })
   );
 }

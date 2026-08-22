@@ -3,7 +3,7 @@ import type { TenantScopedDatabase } from '@erp/sdk';
 import { PlatformEventBus, EWB_VALUE_THRESHOLD } from '@erp/sdk';
 import { einvoiceData } from '@erp/db';
 import { createLogger } from '@erp/logger';
-import { BusinessError, NotFoundError } from '@erp/types';
+import { BusinessError } from '@erp/types';
 import { ulid } from 'ulid';
 
 const logger = createLogger({ serviceName: 'gst-service' });
@@ -71,7 +71,10 @@ export class EwayBillService {
     correlationId?: string
   ): Promise<{ ewbNumber: string; ewbDate: string; validUpto: string }> {
     if (payload.totalValue <= EWB_VALUE_THRESHOLD) {
-      throw new BusinessError('EWB_THRESHOLD_NOT_MET', `e-Way Bill not required for invoice value ≤ ₹${EWB_VALUE_THRESHOLD}`);
+      throw new BusinessError(
+        'EWB_THRESHOLD_NOT_MET',
+        `e-Way Bill not required for invoice value ≤ ₹${EWB_VALUE_THRESHOLD}`
+      );
     }
 
     const apiKey = process.env['NIC_API_KEY'];
@@ -83,17 +86,20 @@ export class EwayBillService {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
-        'gstin': payload.fromGstin,
-        'requestid': `ewb-${tenantId}-${invoiceId}-${Date.now()}`,
+        Authorization: `Bearer ${apiKey}`,
+        gstin: payload.fromGstin,
+        requestid: `ewb-${tenantId}-${invoiceId}-${Date.now()}`,
       },
       body: JSON.stringify(payload),
       signal: AbortSignal.timeout(15000),
     });
 
-    const body = await response.json() as Record<string, unknown>;
+    const body = (await response.json()) as Record<string, unknown>;
     if (!response.ok) {
-      throw new BusinessError('EWB_API_ERROR', `NIC e-Way Bill API error: ${String(body['message'] ?? response.statusText)}`);
+      throw new BusinessError(
+        'EWB_API_ERROR',
+        `NIC e-Way Bill API error: ${String(body['message'] ?? response.statusText)}`
+      );
     }
 
     const data = body['response'] as Record<string, unknown>;
@@ -101,11 +107,15 @@ export class EwayBillService {
     const ewbDate = String(data?.['ewayBillDate'] ?? '');
     const validUpto = String(data?.['validUpto'] ?? '');
 
-    // Store in einvoice_data (co-located with IRN)
-    const [existing] = await db.raw
-      .select({ id: einvoiceData.id })
-      .from(einvoiceData)
-      .where(and(eq(einvoiceData.tenantId, tenantId), eq(einvoiceData.invoiceId, invoiceId)));
+    // Store in einvoice_data (co-located with IRN). RLS-readiness follow-up (2026-08-22): was
+    // a bare db.raw.select with no GUC set — db.transaction() (not db.raw.transaction()) sets
+    // it itself, same mechanism as the already-safe write below.
+    const [existing] = await db.transaction((trx) =>
+      trx.raw
+        .select({ id: einvoiceData.id })
+        .from(einvoiceData)
+        .where(and(eq(einvoiceData.tenantId, tenantId), eq(einvoiceData.invoiceId, invoiceId)))
+    );
 
     if (existing) {
       // ES-28 [M16-b]: the state-transition write and its outbox event must commit
@@ -116,8 +126,12 @@ export class EwayBillService {
           .update(einvoiceData)
           .set({
             ewbNumber,
-            ewbDate: ewbDate ? new Date(ewbDate.replace(/(\d{2})\/(\d{2})\/(\d{4})/, '$3-$2-$1')) : new Date(),
-            ewbValidUpto: validUpto ? new Date(validUpto.replace(/(\d{2})\/(\d{2})\/(\d{4})/, '$3-$2-$1')) : new Date(),
+            ewbDate: ewbDate
+              ? new Date(ewbDate.replace(/(\d{2})\/(\d{2})\/(\d{4})/, '$3-$2-$1'))
+              : new Date(),
+            ewbValidUpto: validUpto
+              ? new Date(validUpto.replace(/(\d{2})\/(\d{2})\/(\d{4})/, '$3-$2-$1'))
+              : new Date(),
             updatedAt: new Date(),
           })
           .where(eq(einvoiceData.id, existing.id));
@@ -140,24 +154,23 @@ export class EwayBillService {
   static async getExpiringSoon(
     db: TenantScopedDatabase,
     tenantId: number
-  ): Promise<{ invoiceId: number; invoiceNumber: string; ewbNumber: string; ewbValidUpto: Date }[]> {
+  ): Promise<
+    { invoiceId: number; invoiceNumber: string; ewbNumber: string; ewbValidUpto: Date }[]
+  > {
     const tomorrow = new Date();
     tomorrow.setHours(tomorrow.getHours() + 24);
 
-    const rows = await db.raw
-      .select({
-        invoiceId: einvoiceData.invoiceId,
-        invoiceNumber: einvoiceData.invoiceNumber,
-        ewbNumber: einvoiceData.ewbNumber,
-        ewbValidUpto: einvoiceData.ewbValidUpto,
-      })
-      .from(einvoiceData)
-      .where(
-        and(
-          eq(einvoiceData.tenantId, tenantId),
-          lte(einvoiceData.ewbValidUpto, tomorrow)
-        )
-      );
+    const rows = await db.transaction((trx) =>
+      trx.raw
+        .select({
+          invoiceId: einvoiceData.invoiceId,
+          invoiceNumber: einvoiceData.invoiceNumber,
+          ewbNumber: einvoiceData.ewbNumber,
+          ewbValidUpto: einvoiceData.ewbValidUpto,
+        })
+        .from(einvoiceData)
+        .where(and(eq(einvoiceData.tenantId, tenantId), lte(einvoiceData.ewbValidUpto, tomorrow)))
+    );
 
     return rows
       .filter((r) => r.ewbNumber && r.ewbValidUpto)

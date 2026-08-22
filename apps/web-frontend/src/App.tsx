@@ -193,6 +193,7 @@ const PhysicalVerificationDetailPage = lazy(
 );
 const FabricRollsPage = lazy(() => import('./pages/inventory/FabricRollsPage.js'));
 const StockValuationPage = lazy(() => import('./pages/inventory/StockValuationPage.js'));
+const NearExpiryStockPage = lazy(() => import('./pages/inventory/NearExpiryStockPage.js'));
 
 // CRM
 const SegmentsPage = lazy(() => import('./pages/crm/SegmentsPage.js'));
@@ -244,6 +245,10 @@ const ConsignmentSettlementsPage = lazy(
 );
 const ReorderReportPage = lazy(() => import('./pages/production/ReorderReportPage.js'));
 const BarcodeLabelsPage = lazy(() => import('./pages/production/BarcodeLabelsPage.js'));
+const BOMManagementPage = lazy(() => import('./pages/production/BOMManagementPage.js'));
+const WorkCenterManagementPage = lazy(
+  () => import('./pages/production/WorkCenterManagementPage.js')
+);
 
 // Phase 11 — Reports & Analytics
 const ReportsPage = lazy(() => import('./pages/reports/ReportsPage.js'));
@@ -268,6 +273,7 @@ const TenantsPage = lazy(() => import('./pages/admin/TenantsPage.js'));
 const TenantFormPage = lazy(() => import('./pages/admin/TenantFormPage.js'));
 const DemoRequestsPage = lazy(() => import('./pages/admin/DemoRequestsPage.js'));
 const AdminTenantUsersPage = lazy(() => import('./pages/admin/AdminTenantUsersPage.js'));
+const AdminTenantBillingPage = lazy(() => import('./pages/admin/AdminTenantBillingPage.js'));
 
 // Phase 12 — Distributed Systems Admin
 const DLQPage = lazy(() => import('./pages/admin/distributed/DLQPage.js'));
@@ -1824,6 +1830,17 @@ export default function App() {
             }
           />
           <Route
+            path="inventory/near-expiry"
+            element={
+              <Page>
+                <PermissionRoute
+                  permission={PERMISSIONS.BATCH_VIEW}
+                  element={<NearExpiryStockPage />}
+                />
+              </Page>
+            }
+          />
+          <Route
             path="inventory/fabric-rolls"
             element={
               <Page>
@@ -2374,6 +2391,28 @@ export default function App() {
               </Page>
             }
           />
+          <Route
+            path="production/bom"
+            element={
+              <Page>
+                <PermissionRoute
+                  permission={PERMISSIONS.BOM_VIEW}
+                  element={<BOMManagementPage />}
+                />
+              </Page>
+            }
+          />
+          <Route
+            path="production/work-centers"
+            element={
+              <Page>
+                <PermissionRoute
+                  permission={PERMISSIONS.WORK_CENTER_VIEW}
+                  element={<WorkCenterManagementPage />}
+                />
+              </Page>
+            }
+          />
 
           {/* HR */}
           <Route
@@ -2745,6 +2784,17 @@ export default function App() {
                 <PermissionRoute
                   permission={PERMISSIONS.PLATFORM_TENANT_MANAGE}
                   element={<AdminTenantUsersPage />}
+                />
+              </Page>
+            }
+          />
+          <Route
+            path="admin/tenants/:tenantId/billing"
+            element={
+              <Page>
+                <PermissionRoute
+                  permission={PERMISSIONS.PLATFORM_TENANT_MANAGE}
+                  element={<AdminTenantBillingPage />}
                 />
               </Page>
             }

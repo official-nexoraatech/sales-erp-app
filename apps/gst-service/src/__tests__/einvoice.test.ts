@@ -165,7 +165,9 @@ describe('fetchWithRetry', () => {
   });
 
   it('7. NIC API returns 500 on every attempt → fails after 3 retries', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(mockResponse(500, { ErrorMessage: 'Internal error' }));
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(mockResponse(500, { ErrorMessage: 'Internal error' }));
     vi.stubGlobal('fetch', fetchMock);
 
     const promise = fetchWithRetry('https://nic.example/IRP/generateIRN', { method: 'POST' });
@@ -206,7 +208,7 @@ function evalCond(cond: Cond, row: Record<string, unknown>): boolean {
 
 function makeFakeDb(seed: Record<string, unknown>[] = []) {
   const rows = [...seed];
-  return {
+  const db = {
     raw: {
       select: () => ({
         from: () => ({
@@ -230,8 +232,14 @@ function makeFakeDb(seed: Record<string, unknown>[] = []) {
         }),
       }),
     },
+    // RLS-readiness follow-up (2026-08-22): EInvoiceService now calls db.transaction() (not
+    // bare db.raw.select/insert/update) so it sets the GUC itself regardless of caller context
+    // — the mock runs the callback against itself, same identity pattern used elsewhere in this
+    // rollout's test-mock fixes.
+    transaction: (fn: (trx: unknown) => Promise<unknown>) => fn(db),
     rows,
   };
+  return db;
 }
 
 describe('EInvoiceService.generateIrn', () => {
@@ -247,7 +255,9 @@ describe('EInvoiceService.generateIrn', () => {
   });
 
   it('7. NIC API returns 500 on every attempt → fails after 3 retries; irnStatus = FAILED_IRN', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(mockResponse(500, { ErrorMessage: 'Internal error' }));
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(mockResponse(500, { ErrorMessage: 'Internal error' }));
     vi.stubGlobal('fetch', fetchMock);
 
     const { EInvoiceService } = await import('../domain/EInvoiceService.js');

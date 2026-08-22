@@ -17,7 +17,11 @@ vi.mock('../middleware/authenticate.js', () => ({
   ): Promise<void> => {
     const authHeader = request.headers.authorization;
     if (!authHeader?.startsWith('Bearer ')) {
-      reply.code(401).send({ error: { code: 'UNAUTHORIZED', message: 'Missing or invalid Authorization header' } });
+      reply
+        .code(401)
+        .send({
+          error: { code: 'UNAUTHORIZED', message: 'Missing or invalid Authorization header' },
+        });
       return;
     }
     request.auth = JSON.parse(authHeader.slice(7)) as unknown;
@@ -35,7 +39,10 @@ function makeFakeDb(opts: {
   selectRows?: unknown[];
 }) {
   const updateSets: Array<Record<string, unknown>> = [];
-  return {
+  const db: Record<string, unknown> = {
+    // withTenantConnection wraps every route in a transaction that sets the GUC via
+    // `.execute()` before invoking the callback with this same object as the scoped db.
+    execute: async () => undefined,
     insert: vi.fn(() => ({
       values: vi.fn(() => ({
         returning: vi.fn().mockResolvedValue(opts.insertReturn ? [opts.insertReturn] : []),
@@ -56,6 +63,8 @@ function makeFakeDb(opts: {
     })),
     updateSets,
   };
+  db['transaction'] = (cb: (trx: unknown) => unknown) => cb(db);
+  return db;
 }
 
 function makeFakeRegistry() {
@@ -114,7 +123,11 @@ describe('GET /exports/:jobId/download', () => {
   it('returns 202 when the job is not READY yet', async () => {
     const app = Fastify({ logger: false });
     const db = makeFakeDb({ selectRows: [{ id: 1, status: 'GENERATING' }] });
-    await exportRoutes(app, db as unknown as ErpDatabase, makeFakeRegistry() as unknown as JobRegistry);
+    await exportRoutes(
+      app,
+      db as unknown as ErpDatabase,
+      makeFakeRegistry() as unknown as JobRegistry
+    );
 
     const res = await app.inject({
       method: 'GET',
@@ -129,9 +142,20 @@ describe('GET /exports/:jobId/download', () => {
   it('redirects to the real signed URL once the job is READY (no placeholder fallback)', async () => {
     const app = Fastify({ logger: false });
     const db = makeFakeDb({
-      selectRows: [{ id: 1, status: 'READY', signedUrl: 'https://minio.local/tenant/1/exports/customer.csv', signedUrlExpiresAt: null }],
+      selectRows: [
+        {
+          id: 1,
+          status: 'READY',
+          signedUrl: 'https://minio.local/tenant/1/exports/customer.csv',
+          signedUrlExpiresAt: null,
+        },
+      ],
     });
-    await exportRoutes(app, db as unknown as ErpDatabase, makeFakeRegistry() as unknown as JobRegistry);
+    await exportRoutes(
+      app,
+      db as unknown as ErpDatabase,
+      makeFakeRegistry() as unknown as JobRegistry
+    );
 
     const res = await app.inject({
       method: 'GET',

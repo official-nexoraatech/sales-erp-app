@@ -6,6 +6,18 @@ import Fastify from 'fastify';
 import { generateKeyPairSync } from 'node:crypto';
 import { SignJWT, importPKCS8, type KeyLike } from 'jose';
 import { PERMISSIONS } from '@erp/types';
+import type * as ErpSdk from '@erp/sdk';
+
+// Phase 3A (HR_PAYROLL capability) — requireCapability() is now called eagerly at
+// route-registration time, and this file's ctxFactory has no rawDb/getRedis (its purpose is
+// preflight-check correctness, not capability resolution, which is covered by
+// payroll-capability.test.ts). Mock only requireCapability to always allow — a full-replacement
+// mock breaks authenticate.ts, which imports verifyAccessToken/assertTenantActive from this
+// same module, so importOriginal is required here, not optional.
+vi.mock('@erp/sdk', async (importOriginal) => {
+  const actual = await importOriginal<typeof ErpSdk>();
+  return { ...actual, requireCapability: () => async () => {} };
+});
 
 vi.mock('@erp/db', () => ({
   payrollRuns: {},
@@ -36,8 +48,8 @@ vi.mock('@erp/utils/server', () => ({
   decryptField: (val: string, _key: string) => val.replace(/^enc:/, ''),
 }));
 
-const { payrollRoutes } = await import('../api/payroll.routes.js');
-const { employees, employeeSalaries } = await import('@erp/db');
+import { payrollRoutes } from '../api/payroll.routes.js';
+import { employees, employeeSalaries } from '@erp/db';
 
 const TEST_TTL = 900;
 let privateKey: KeyLike;
@@ -83,6 +95,12 @@ function makeCtxFactory(activeEmployees: unknown[], activeSalaryEmployeeIds: num
       events: { publish: vi.fn() },
       audit: { log: vi.fn() },
     }),
+    // requireCapability('HR_PAYROLL', ctxFactory.rawDb, ctxFactory.getRedis()) evaluates both
+    // arguments eagerly at route-registration time, before requireCapability itself (mocked
+    // above to always allow) ever runs — so these need to exist even though their contents are
+    // never touched by the mock.
+    rawDb: {},
+    getRedis: () => ({}),
   } as never;
 }
 

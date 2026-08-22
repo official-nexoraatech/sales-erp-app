@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { ErpDatabase } from '@erp/db';
+import { withTenantConnection } from '@erp/sdk';
 import { PERMISSIONS } from '@erp/types';
 import { z } from 'zod';
 import { ImportEngine, type ImportEntity } from '../domain/ImportEngine.js';
@@ -28,9 +29,14 @@ const VALID_ENTITIES: ImportEntity[] = [
   'lead',
 ];
 
+// Phase 9 GUC-per-request rollout — migrated 2026-08-21. ImportEngine holds only a bare
+// ErpDatabase (constructor(private readonly db: ErpDatabase) {}) with no other state, and every
+// method does pure Postgres work (no external I/O — confirmed by grep). Previously constructed
+// once at route-registration time and shared across every request; now built fresh per request
+// from the scoped db withTenantConnection hands back, mirroring event-service's
+// SchemaRegistry/EventStoreService pattern. The one route that can't just wrap-the-whole-handler
+// is GET /imports/:jobId/status's SSE branch — see its own comment below.
 export async function importRoutes(fastify: FastifyInstance, db: ErpDatabase): Promise<void> {
-  const engine = new ImportEngine(db);
-
   // ── POST /imports/upload ──────────────────────────────────────────────────
   fastify.post<{ Body: { entityType: string; csvData: string; fileName: string } }>(
     '/imports/upload',
@@ -51,12 +57,14 @@ export async function importRoutes(fastify: FastifyInstance, db: ErpDatabase): P
         });
       }
 
-      const jobId = await engine.createJob(
-        tenantId,
-        userId,
-        entityType as ImportEntity,
-        csvData,
-        fileName
+      const jobId = await withTenantConnection(db, tenantId, (scopedDb) =>
+        new ImportEngine(scopedDb).createJob(
+          tenantId,
+          userId,
+          entityType as ImportEntity,
+          csvData,
+          fileName
+        )
       );
       return reply.code(201).send({ data: { jobId, message: 'Upload accepted' } });
     }
@@ -80,7 +88,9 @@ export async function importRoutes(fastify: FastifyInstance, db: ErpDatabase): P
         targetField: m.targetField,
         ...(m.transform !== undefined ? { transform: m.transform } : {}),
       }));
-      await engine.mapColumns(tenantId, request.params.jobId, mappings);
+      await withTenantConnection(db, tenantId, (scopedDb) =>
+        new ImportEngine(scopedDb).mapColumns(tenantId, request.params.jobId, mappings)
+      );
       return reply.code(200).send({ data: { message: 'Columns mapped successfully' } });
     }
   );
@@ -97,12 +107,22 @@ export async function importRoutes(fastify: FastifyInstance, db: ErpDatabase): P
       }
 
       const { tenantId } = (request as unknown as AuthedRequest).auth;
-      const result = await engine.validate(tenantId, request.params.jobId);
+      const result = await withTenantConnection(db, tenantId, (scopedDb) =>
+        new ImportEngine(scopedDb).validate(tenantId, request.params.jobId)
+      );
       return reply.code(200).send({ data: result });
     }
   );
 
   // ── POST /imports/:jobId/execute ──────────────────────────────────────────
+  // Phase 9 GUC-per-request rollout — deliberately NOT migrated (caveat 3: independently-
+  // committed writes surviving later failure). ImportEngine.execute() processes rows in
+  // 100-row batches, each in its own try/catch that turns a batch failure into a `failed` count
+  // rather than throwing — batches are meant to commit independently, and a partially-completed
+  // import is expected to be undone via the explicit POST .../rollback endpoint, not an
+  // automatic transaction rollback. Wrapping the whole call in one withTenantConnection would
+  // mean an unexpected failure partway through (e.g. a dropped connection) rolls back every
+  // already-committed batch too, which is exactly the behavior change this caveat exists to avoid.
   fastify.post<{ Params: { jobId: string } }>(
     '/imports/:jobId/execute',
     { preHandler: authenticate },
@@ -114,6 +134,7 @@ export async function importRoutes(fastify: FastifyInstance, db: ErpDatabase): P
       }
 
       const { tenantId, permissions } = (request as unknown as AuthedRequest).auth;
+      const engine = new ImportEngine(db);
       const result = await engine.execute(tenantId, request.params.jobId, permissions);
       return reply.code(200).send({ data: result });
     }
@@ -131,7 +152,17 @@ export async function importRoutes(fastify: FastifyInstance, db: ErpDatabase): P
       }
 
       const { tenantId } = (request as unknown as AuthedRequest).auth;
-      const job = await engine.getStatus(tenantId, request.params.jobId);
+      // Each getStatus() call gets its own short-lived withTenantConnection wrap rather than
+      // holding one transaction open for the request's lifetime — critical for the SSE branch
+      // below, which polls every 2s for as long as the client stays connected (potentially
+      // minutes); a single held-open transaction for that whole span would be a serious
+      // long-running-transaction problem (bloat/locks), not just a style choice.
+      const getJobStatus = (): Promise<Awaited<ReturnType<ImportEngine['getStatus']>>> =>
+        withTenantConnection(db, tenantId, (scopedDb) =>
+          new ImportEngine(scopedDb).getStatus(tenantId, request.params.jobId)
+        );
+
+      const job = await getJobStatus();
 
       // Use SSE for streaming progress if requested
       const acceptHeader = request.headers['accept'] ?? '';
@@ -153,7 +184,7 @@ export async function importRoutes(fastify: FastifyInstance, db: ErpDatabase): P
 
         const interval = setInterval(async () => {
           try {
-            const current = await engine.getStatus(tenantId, request.params.jobId);
+            const current = await getJobStatus();
             send({
               status: current.status,
               importedRows: current.successRows,
@@ -190,7 +221,9 @@ export async function importRoutes(fastify: FastifyInstance, db: ErpDatabase): P
       }
 
       const { tenantId } = (request as unknown as AuthedRequest).auth;
-      await engine.rollback(tenantId, request.params.jobId);
+      await withTenantConnection(db, tenantId, (scopedDb) =>
+        new ImportEngine(scopedDb).rollback(tenantId, request.params.jobId)
+      );
       return reply.code(200).send({ data: { message: 'Import rolled back' } });
     }
   );
@@ -207,7 +240,8 @@ export async function importRoutes(fastify: FastifyInstance, db: ErpDatabase): P
           .send({ error: { code: 'NOT_FOUND', message: `Unknown entity: ${entityType}` } });
       }
 
-      const template = engine.getTemplate(entityType as ImportEntity);
+      // getTemplate() is a pure static lookup — no DB access at all, so no tenant scoping needed.
+      const template = new ImportEngine(db).getTemplate(entityType as ImportEntity);
       reply.raw.setHeader('Content-Type', 'text/csv');
       reply.raw.setHeader(
         'Content-Disposition',

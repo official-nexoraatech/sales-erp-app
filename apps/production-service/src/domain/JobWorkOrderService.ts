@@ -1,4 +1,4 @@
-import { and, eq, sql, desc, gte, getTableColumns } from 'drizzle-orm';
+import { and, eq, sql, desc, gte, inArray, getTableColumns } from 'drizzle-orm';
 import {
   jobWorkOrders,
   jobWorkOrderMaterials,
@@ -8,12 +8,22 @@ import {
   projectionStockLevel,
   items,
   suppliers,
+  workCenters,
   outboxEvents,
 } from '@erp/db';
 import type { ErpDatabase } from '@erp/db';
 import { BusinessError, NotFoundError } from '@erp/types';
 import { ValuationService } from '@erp/sdk';
 import { ulid } from 'ulid';
+import { BOMService } from './BOMService.js';
+
+export interface JobWorkOrderMaterialInput {
+  itemId: number;
+  variantId?: number | undefined;
+  requiredQty: number;
+  unitCost: number;
+  warehouseId: number;
+}
 
 export interface CreateJobWorkOrderParams {
   tenantId: number;
@@ -23,17 +33,16 @@ export interface CreateJobWorkOrderParams {
   warehouseId: number;
   outputItemId: number;
   outputVariantId?: number | undefined;
+  // Manufacturing vertical, Phase B — optional, which work center this order runs on.
+  workCenterId?: number | undefined;
   orderedQty: number;
   jobWorkRate: number;
   orderDate: Date;
   expectedDate?: Date | undefined;
-  materials: Array<{
-    itemId: number;
-    variantId?: number | undefined;
-    requiredQty: number;
-    unitCost: number;
-    warehouseId: number;
-  }>;
+  // Either pass materials explicitly, or pass bomId to auto-populate them from a BOM's explode()
+  // (scaled to orderedQty) — see BOMService. bomId takes precedence when both are provided.
+  materials?: JobWorkOrderMaterialInput[] | undefined;
+  bomId?: number | undefined;
   notes?: string | undefined;
   createdBy: number;
 }
@@ -74,10 +83,28 @@ export class JobWorkOrderService {
         .where(and(eq(items.id, params.outputItemId), eq(items.tenantId, params.tenantId)));
       if (!outputItem) throw new NotFoundError('Item', params.outputItemId);
 
-      const materialsCost = params.materials.reduce(
-        (sum, m) => sum + m.requiredQty * m.unitCost,
-        0
-      );
+      if (params.workCenterId !== undefined) {
+        const [workCenter] = await trx
+          .select({ id: workCenters.id })
+          .from(workCenters)
+          .where(
+            and(eq(workCenters.id, params.workCenterId), eq(workCenters.tenantId, params.tenantId))
+          );
+        if (!workCenter) throw new NotFoundError('WorkCenter', params.workCenterId);
+      }
+
+      const materials =
+        params.bomId !== undefined
+          ? await this.materialsFromBom(
+              trx,
+              params.tenantId,
+              params.bomId,
+              params.orderedQty,
+              params.warehouseId
+            )
+          : (params.materials ?? []);
+
+      const materialsCost = materials.reduce((sum, m) => sum + m.requiredQty * m.unitCost, 0);
 
       const [row] = await trx
         .insert(jobWorkOrders)
@@ -90,6 +117,7 @@ export class JobWorkOrderService {
           warehouseId: params.warehouseId,
           outputItemId: params.outputItemId,
           outputVariantId: params.outputVariantId,
+          workCenterId: params.workCenterId,
           orderedQty: String(params.orderedQty),
           jobWorkRate: String(params.jobWorkRate),
           jobWorkCharges: String(params.orderedQty * params.jobWorkRate),
@@ -105,9 +133,9 @@ export class JobWorkOrderService {
         throw new BusinessError('JOB_WORK_CREATE_FAILED', 'Failed to create job work order');
       const orderId = row.id;
 
-      if (params.materials.length > 0) {
+      if (materials.length > 0) {
         await trx.insert(jobWorkOrderMaterials).values(
-          params.materials.map((m) => ({
+          materials.map((m) => ({
             jobWorkOrderId: orderId,
             tenantId: params.tenantId,
             itemId: m.itemId,
@@ -731,5 +759,36 @@ export class JobWorkOrderService {
           updatedAt: new Date(),
         },
       });
+  }
+
+  // Auto-populates materials from a BOM's explode() (scaled to orderedQty) instead of requiring
+  // the caller to type every line by hand. unitCost is estimated from items.purchasePrice — the
+  // same "estimate now, real COGS at issue time via ValuationService" split already used for
+  // hand-entered materials (see the ValuationService.consumeForStockOut call above).
+  private async materialsFromBom(
+    trx: ErpDatabase,
+    tenantId: number,
+    bomId: number,
+    orderedQty: number,
+    warehouseId: number
+  ): Promise<JobWorkOrderMaterialInput[]> {
+    const bomService = new BOMService(trx);
+    const lines = await bomService.explode(bomId, tenantId, orderedQty);
+    if (lines.length === 0) return [];
+
+    const itemIds = lines.map((l) => l.componentItemId);
+    const itemRows = await trx
+      .select({ id: items.id, purchasePrice: items.purchasePrice })
+      .from(items)
+      .where(and(eq(items.tenantId, tenantId), inArray(items.id, itemIds)));
+    const priceById = new Map(itemRows.map((r) => [r.id, parseFloat(String(r.purchasePrice))]));
+
+    return lines.map((l) => ({
+      itemId: l.componentItemId,
+      variantId: l.componentVariantId,
+      requiredQty: l.requiredQty,
+      unitCost: priceById.get(l.componentItemId) ?? 0,
+      warehouseId,
+    }));
   }
 }

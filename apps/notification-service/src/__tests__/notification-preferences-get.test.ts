@@ -47,9 +47,14 @@ describe('GET /notifications/preferences', () => {
     ];
     const whereMock = vi.fn().mockResolvedValue(rows);
     const fromMock = vi.fn().mockReturnValue({ where: whereMock });
-    const db = {
+    const dbObj: Record<string, unknown> = {
+      // withTenantConnection wraps every route in a transaction that sets the GUC via
+      // `.execute()` before invoking the callback with this same object as the scoped db.
+      execute: async () => undefined,
       select: vi.fn().mockReturnValue({ from: fromMock }),
-    } as unknown as ErpDatabase;
+    };
+    dbObj['transaction'] = (cb: (trx: unknown) => unknown) => cb(dbObj);
+    const db = dbObj as unknown as ErpDatabase;
 
     const app = Fastify({ logger: false });
     await notificationRoutes(app, db, mockQueue(), {} as Redis);

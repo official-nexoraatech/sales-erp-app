@@ -28,7 +28,7 @@ export async function authenticate(request: FastifyRequest, reply: FastifyReply)
   // CRM-ROADMAP Phase 3, Feature 2 (Self-Service Customer Portal, Finding 1): a CUSTOMER-role
   // portal JWT must never reach a staff-only service. Portal routes authenticate via their own
   // requirePortalAuth preHandler instead of this one.
-  if (request.auth.roles.includes('CUSTOMER')) {
+  if (request.auth.roles.includes('CUSTOMER') || request.auth.roles.includes('PARTNER')) {
     await reply.code(401).send({
       error: { code: 'UNAUTHORIZED', message: 'Portal sessions cannot access staff endpoints' },
     });

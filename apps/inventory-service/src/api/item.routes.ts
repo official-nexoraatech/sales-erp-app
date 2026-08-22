@@ -1,6 +1,12 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import type { PlatformContextFactory } from '@erp/sdk';
-import { isUniqueConstraintViolation } from '@erp/sdk';
+import {
+  isUniqueConstraintViolation,
+  isCapabilityEnabled,
+  checkPermission,
+  tenantScopedHandler,
+} from '@erp/sdk';
+import { erpCapabilityCheckDeniedTotal } from '@erp/logger';
 import {
   items,
   itemVariants,
@@ -56,11 +62,78 @@ const ItemSchema = z.object({
   fabricWidth: z.number().min(0).optional(),
   tags: z.array(z.string()).default([]),
   customFields: z.record(z.unknown()).default({}),
+  // Phase 2B (INVENTORY_BATCH capability): opts this item into FEFO (earliest-expiry-first)
+  // stock consumption ordering instead of plain FIFO. Optional/default-false so every existing
+  // caller that omits it sees zero behavior change. Turning it on requires both the
+  // INVENTORY_BATCH capability and BATCH_CONFIGURE permission — checked in-handler below, not
+  // via a schema refinement, since that check needs tenant/auth context the schema doesn't have.
+  fefoEnabled: z.boolean().default(false),
 });
 
 const ItemUpdateSchema = ItemSchema.extend({
   version: z.number().int().min(0),
 });
+
+// Only exercised when the request is actually trying to turn fefoEnabled on — mirrors
+// requireCapability()'s exact reply shape/outcomes so a client can't tell this apart from a
+// preHandler-gated route, and increments the same erp_capability_check_denied_total metric
+// requireCapability's preHandler would have (this call site bypasses that preHandler, so
+// nothing else increments it here).
+async function assertBatchConfigureAllowed(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  ctxFactory: PlatformContextFactory
+): Promise<boolean> {
+  const auth = request.auth;
+
+  let enabled: boolean;
+  try {
+    enabled = await isCapabilityEnabled(
+      'INVENTORY_BATCH',
+      auth.tenantId,
+      ctxFactory.rawDb,
+      ctxFactory.getRedis()
+    );
+  } catch (err) {
+    request.log.error(
+      { err, tenantId: auth.tenantId, capabilityKey: 'INVENTORY_BATCH' },
+      'Capability resolution failed — denying (fail-closed), reporting as unavailable, not disabled'
+    );
+    erpCapabilityCheckDeniedTotal.inc({
+      capability_key: 'INVENTORY_BATCH',
+      outcome: 'resolution_error',
+    });
+    await reply.code(503).send({
+      error: {
+        code: 'CAPABILITY_RESOLUTION_UNAVAILABLE',
+        message: 'Unable to determine capability state. Please retry.',
+        details: { capabilityKey: 'INVENTORY_BATCH' },
+      },
+    });
+    return false;
+  }
+
+  if (!enabled) {
+    erpCapabilityCheckDeniedTotal.inc({ capability_key: 'INVENTORY_BATCH', outcome: 'disabled' });
+    await reply.code(403).send({
+      error: {
+        code: 'CAPABILITY_NOT_ENABLED',
+        message: "This tenant's plan does not include INVENTORY_BATCH.",
+        details: { capabilityKey: 'INVENTORY_BATCH' },
+      },
+    });
+    return false;
+  }
+
+  if (checkPermission(auth, PERMISSIONS.BATCH_CONFIGURE) !== 'ok') {
+    await reply.code(403).send({
+      error: { code: 'FORBIDDEN', message: `Missing permission: ${PERMISSIONS.BATCH_CONFIGURE}` },
+    });
+    return false;
+  }
+
+  return true;
+}
 
 const VariantSchema = z.object({
   sku: z.string().min(1).max(100),
@@ -73,8 +146,8 @@ const VariantSchema = z.object({
   isActive: z.boolean().default(true),
 });
 
-type AuthedRequest = { auth: { tenantId: number; userId: number } };
-
+// Phase 9 GUC-per-request rollout — migrated 2026-08-21. No external I/O — ItemCacheService
+// only touches Redis via ctx.cache, unaffected by the tenant-scoped DB connection.
 export async function itemRoutes(
   fastify: FastifyInstance,
   ctxFactory: PlatformContextFactory
@@ -83,17 +156,12 @@ export async function itemRoutes(
 
   // ── GET /items/by-barcode/:barcode — Redis-cached < 50ms ─────────────────
   // Cache key: tenant:{id}:barcode:{code}
-  fastify.get<{ Params: { barcode: string } }>(
+  fastify.get(
     '/items/by-barcode/:barcode',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.ITEM_VIEW)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-      const { barcode } = request.params;
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId } = ctx.tenant;
+      const { barcode } = request.params as { barcode: string };
 
       // Check variants first (barcode on variant level)
       const [variant] = await ctx.db.raw
@@ -119,20 +187,15 @@ export async function itemRoutes(
 
       if (!item) throw new NotFoundError('Item', barcode);
       return reply.code(200).send({ data: { item, variant: null } });
-    }
+    })
   );
 
   // ── GET /items ─────────────────────────────────────────────────────────────
   fastify.get(
     '/items',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.ITEM_VIEW)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId } = ctx.tenant;
       const query = request.query as {
         page?: string;
         size?: string;
@@ -208,21 +271,16 @@ export async function itemRoutes(
       return reply.code(200).send({
         data: { content: rows, totalElements: countRow?.count ?? 0, page, size },
       });
-    }
+    })
   );
 
   // ── GET /items/:id ─────────────────────────────────────────────────────────
-  fastify.get<{ Params: { id: string } }>(
+  fastify.get(
     '/items/:id',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.ITEM_VIEW)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-      const id = parseInt(request.params.id, 10);
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId } = ctx.tenant;
+      const id = parseInt((request.params as { id: string }).id, 10);
 
       let item = await itemCache.getItem(ctx.cache, id);
       if (!item) {
@@ -248,21 +306,16 @@ export async function itemRoutes(
         );
 
       return reply.code(200).send({ data: { ...item, variants } });
-    }
+    })
   );
 
   // ── GET /items/:id/price-history ───────────────────────────────────────────
-  fastify.get<{ Params: { id: string } }>(
+  fastify.get(
     '/items/:id/price-history',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.ITEM_VIEW)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-      const id = parseInt(request.params.id, 10);
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId } = ctx.tenant;
+      const id = parseInt((request.params as { id: string }).id, 10);
       const history = await ctx.db.raw
         .select()
         .from(itemsHistory)
@@ -274,24 +327,24 @@ export async function itemRoutes(
           )
         );
       return reply.code(200).send({ data: { content: history, totalElements: history.length } });
-    }
+    })
   );
 
   // ── POST /items ────────────────────────────────────────────────────────────
   fastify.post(
     '/items',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.ITEM_CREATE)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId, userId } = ctx.tenant;
 
       const body = ItemSchema.safeParse(request.body);
       if (!body.success)
         throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
+
+      if (body.data.fefoEnabled) {
+        const allowed = await assertBatchConfigureAllowed(request, reply, ctxFactory);
+        if (!allowed) return;
+      }
 
       let created: typeof items.$inferSelect | undefined;
       try {
@@ -343,21 +396,16 @@ export async function itemRoutes(
       });
 
       return reply.code(201).send({ data: created });
-    }
+    })
   );
 
   // ── PUT /items/:id ─────────────────────────────────────────────────────────
-  fastify.put<{ Params: { id: string } }>(
+  fastify.put(
     '/items/:id',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.ITEM_EDIT)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-      const id = parseInt(request.params.id, 10);
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId, userId } = ctx.tenant;
+      const id = parseInt((request.params as { id: string }).id, 10);
 
       const body = ItemUpdateSchema.safeParse(request.body);
       if (!body.success)
@@ -369,6 +417,17 @@ export async function itemRoutes(
         .where(and(eq(items.id, id), eq(items.tenantId, tenantId), isNull(items.deletedAt)));
 
       if (!existing) throw new NotFoundError('Item', id);
+
+      // Only gate the transition to fefoEnabled: true, not merely submitting it as true — PUT
+      // is a full-record replace, so a client editing an unrelated field on an item that's
+      // already batch-tracked resubmits fefoEnabled: true every time. Gating on the submitted
+      // value alone would make every edit to an already-batch-tracked item fail once
+      // INVENTORY_BATCH is later disabled for the tenant (D4: disabling the capability must
+      // never break/rewrite existing configuration).
+      if (body.data.fefoEnabled && !existing.fefoEnabled) {
+        const allowed = await assertBatchConfigureAllowed(request, reply, ctxFactory);
+        if (!allowed) return;
+      }
 
       // Archive previous state if price changed
       const priceChanged =
@@ -445,21 +504,16 @@ export async function itemRoutes(
       });
 
       return reply.code(200).send({ data: updated });
-    }
+    })
   );
 
   // ── DELETE /items/:id ──────────────────────────────────────────────────────
-  fastify.delete<{ Params: { id: string } }>(
+  fastify.delete(
     '/items/:id',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.ITEM_DELETE)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-      const id = parseInt(request.params.id, 10);
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId, userId } = ctx.tenant;
+      const id = parseInt((request.params as { id: string }).id, 10);
 
       const [existing] = await ctx.db.raw
         .select()
@@ -490,21 +544,16 @@ export async function itemRoutes(
       await ctx.audit.log({ action: 'DELETE', entityType: 'item', entityId: id, before: existing });
 
       return reply.code(200).send({ data: { message: 'Item deleted', id } });
-    }
+    })
   );
 
   // ── POST /items/:id/variants ───────────────────────────────────────────────
-  fastify.post<{ Params: { id: string } }>(
+  fastify.post(
     '/items/:id/variants',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.ITEM_EDIT)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-      const itemId = parseInt(request.params.id, 10);
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId, userId } = ctx.tenant;
+      const itemId = parseInt((request.params as { id: string }).id, 10);
 
       const [parentItem] = await ctx.db.raw
         .select()
@@ -539,7 +588,7 @@ export async function itemRoutes(
         .returning();
 
       return reply.code(201).send({ data: rows });
-    }
+    })
   );
 
   // ── PUT /items/:id/variants/:variantId ───────────────────────────────────
@@ -547,18 +596,14 @@ export async function itemRoutes(
   // correction, barcode fix) or deactivated once created (item variants had a fully
   // working stock/ledger backend but no way to manage the variant record itself).
   const VariantUpdateSchema = VariantSchema.extend({ version: z.number().int().min(0) });
-  fastify.put<{ Params: { id: string; variantId: string } }>(
+  fastify.put(
     '/items/:id/variants/:variantId',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.ITEM_EDIT)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-      const itemId = parseInt(request.params.id, 10);
-      const variantId = parseInt(request.params.variantId, 10);
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId } = ctx.tenant;
+      const params = request.params as { id: string; variantId: string };
+      const itemId = parseInt(params.id, 10);
+      const variantId = parseInt(params.variantId, 10);
 
       const body = VariantUpdateSchema.safeParse(request.body);
       if (!body.success)
@@ -594,21 +639,16 @@ export async function itemRoutes(
       if (result.length === 0) throw new OptimisticLockError('ItemVariant');
 
       return reply.code(200).send({ data: result[0] });
-    }
+    })
   );
 
   // ── POST /items/:id/barcode/generate ─────────────────────────────────────
-  fastify.post<{ Params: { id: string } }>(
+  fastify.post(
     '/items/:id/barcode/generate',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.ITEM_EDIT)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-      const id = parseInt(request.params.id, 10);
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId } = ctx.tenant;
+      const id = parseInt((request.params as { id: string }).id, 10);
 
       const [item] = await ctx.db.raw
         .select()
@@ -642,7 +682,7 @@ export async function itemRoutes(
         .where(and(eq(items.id, id), eq(items.tenantId, tenantId)));
 
       return reply.code(200).send({ data: { barcode: generatedBarcode, barcodeType, itemId: id } });
-    }
+    })
   );
 
   // ── Price List routes ─────────────────────────────────────────────────────
@@ -650,31 +690,21 @@ export async function itemRoutes(
   fastify.get(
     '/price-lists',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.ITEM_VIEW)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId } = ctx.tenant;
       const rows = await ctx.db.raw
         .select()
         .from(priceLists)
         .where(and(eq(priceLists.tenantId, tenantId), isNull(priceLists.deletedAt)));
       return reply.code(200).send({ data: { content: rows, totalElements: rows.length } });
-    }
+    })
   );
 
   fastify.post(
     '/price-lists',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.ITEM_EDIT)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId, userId } = ctx.tenant;
       const PriceListSchema = z.object({
         name: z.string().min(2).max(200),
         code: z.string().min(1).max(30).toUpperCase(),
@@ -706,20 +736,15 @@ export async function itemRoutes(
         })
         .returning();
       return reply.code(201).send({ data: created });
-    }
+    })
   );
 
-  fastify.put<{ Params: { id: string } }>(
+  fastify.put(
     '/price-lists/:id/items',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.ITEM_EDIT)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-      const priceListId = parseInt(request.params.id, 10);
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId, userId } = ctx.tenant;
+      const priceListId = parseInt((request.params as { id: string }).id, 10);
 
       const [priceList] = await ctx.db.raw
         .select({ id: priceLists.id })
@@ -762,6 +787,6 @@ export async function itemRoutes(
       }
 
       return reply.code(200).send({ data: { message: 'Price list items updated', priceListId } });
-    }
+    })
   );
 }

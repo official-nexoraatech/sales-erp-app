@@ -10,8 +10,24 @@ const TENANT_A = 1;
 const TENANT_B = 2;
 const AS_OF = '2026-07-01';
 
+// withTenantConnection wraps every ReportEngine.generate() call in a transaction that first
+// issues its own `SELECT set_config(...)` GUC-setting query via the same trx.execute() the real
+// report query uses — so the trx object's execute intercepts and swallows that one call (never
+// forwarding it to the tracked `executeMock` below), keeping db.execute.mock.calls exactly as it
+// was pre-migration: one entry per real report query, in the same order.
 function makeDb(rows: unknown[] = []) {
-  return { execute: vi.fn().mockResolvedValue(rows) };
+  const executeMock = vi.fn().mockResolvedValue(rows);
+  const trx = {
+    execute: (query: unknown) => {
+      const text = (query as { strings?: string[] } | undefined)?.strings?.join('') ?? '';
+      if (text.includes('set_config')) return Promise.resolve([]);
+      return executeMock(query);
+    },
+  };
+  return {
+    execute: executeMock,
+    transaction: (cb: (t: unknown) => unknown) => cb(trx),
+  };
 }
 
 describe('AR Aging — unit tests (ES-05)', () => {

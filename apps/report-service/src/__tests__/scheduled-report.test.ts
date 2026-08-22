@@ -46,11 +46,35 @@ function makeRedis() {
   };
 }
 
+// withTenantConnection wraps ReportEngine.generate()'s call in a transaction that first issues
+// its own `SELECT set_config(...)` GUC-setting query via the same trx.execute() the real report
+// query uses — this file doesn't mock drizzle-orm's `sql` (ScheduledReportJob uses the real
+// `eq()`), so the GUC query isn't a plain {strings,values} shape to pattern-match; instead,
+// intercept by CALL ORDER within one transaction() invocation — withTenantConnection always
+// issues exactly one execute() call for the GUC before calling fn(trx), so the first execute()
+// per transaction() call is always that GUC call, swallowed here rather than forwarded to the
+// tracked `execute` mock (preserving mockRejectedValueOnce()'s "the report engine throws"
+// semantics) and giving db.transaction() a working implementation at all.
 function makeDb(reportRows: unknown[]) {
   const insertedRows: Record<string, unknown>[] = [];
   const updatedRows: Record<string, unknown>[] = [];
+  const execute = vi.fn().mockResolvedValue(reportRows);
+  const transaction = (cb: (t: unknown) => unknown): unknown => {
+    let isFirstExecute = true;
+    const trx = {
+      execute: (query: unknown) => {
+        if (isFirstExecute) {
+          isFirstExecute = false;
+          return Promise.resolve([]);
+        }
+        return execute(query);
+      },
+    };
+    return cb(trx);
+  };
   return {
-    execute: vi.fn().mockResolvedValue(reportRows),
+    execute,
+    transaction,
     insert: vi.fn(() => ({
       values: vi.fn((vals: Record<string, unknown>) => {
         insertedRows.push(vals);

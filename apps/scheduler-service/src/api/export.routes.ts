@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { ErpDatabase } from '@erp/db';
+import { withTenantConnection } from '@erp/sdk';
 import { exportJobs } from '@erp/db';
 import { eq, and } from 'drizzle-orm';
 import { PERMISSIONS } from '@erp/types';
@@ -63,38 +64,48 @@ export async function exportRoutes(
 
     const signedUrlExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
 
-    const [newJob] = await db
-      .insert(exportJobs)
-      .values({
-        tenantId,
-        entityType: body.entityType,
-        format: body.format,
+    // registry.triggerManual() is a pure BullMQ/Redis enqueue (no external HTTP — confirmed via
+    // JobRegistry.ts), so it's safe to run inside the same transaction as the job-row writes.
+    const { jobId, fileName } = await withTenantConnection(db, tenantId, async (scopedDb) => {
+      const [newJob] = await scopedDb
+        .insert(exportJobs)
+        .values({
+          tenantId,
+          entityType: body.entityType,
+          format: body.format,
+          ...(body.filters !== undefined ? { filters: body.filters } : {}),
+          status: 'PENDING',
+          requestedBy: userId,
+          createdBy: userId,
+          signedUrlExpiresAt,
+        } as unknown as typeof exportJobs.$inferInsert)
+        .returning({
+          id: exportJobs.id,
+          entityType: exportJobs.entityType,
+          format: exportJobs.format,
+        });
+
+      if (!newJob) throw new Error('Export job creation failed');
+
+      await scopedDb
+        .update(exportJobs)
+        .set({ status: 'GENERATING' })
+        .where(eq(exportJobs.id, newJob.id));
+
+      await registry.triggerManual(EXPORT_GENERATE_JOB, tenantId, {
+        jobId: newJob.id,
+        entityType: newJob.entityType,
+        format: newJob.format,
         ...(body.filters !== undefined ? { filters: body.filters } : {}),
-        status: 'PENDING',
-        requestedBy: userId,
-        createdBy: userId,
-        signedUrlExpiresAt,
-      } as unknown as typeof exportJobs.$inferInsert)
-      .returning({
-        id: exportJobs.id,
-        entityType: exportJobs.entityType,
-        format: exportJobs.format,
       });
 
-    if (!newJob) throw new Error('Export job creation failed');
-
-    const jobId = newJob.id;
-    const fileName = `${newJob.entityType}-export-${Date.now()}.${newJob.format.toLowerCase()}`;
-    const downloadUrl = `/exports/${jobId}/download`;
-
-    await db.update(exportJobs).set({ status: 'GENERATING' }).where(eq(exportJobs.id, jobId));
-
-    await registry.triggerManual(EXPORT_GENERATE_JOB, tenantId, {
-      jobId,
-      entityType: newJob.entityType,
-      format: newJob.format,
-      ...(body.filters !== undefined ? { filters: body.filters } : {}),
+      return {
+        jobId: newJob.id,
+        fileName: `${newJob.entityType}-export-${Date.now()}.${newJob.format.toLowerCase()}`,
+      };
     });
+
+    const downloadUrl = `/exports/${jobId}/download`;
 
     return reply
       .code(201)
@@ -113,13 +124,15 @@ export async function exportRoutes(
       }
 
       const { tenantId } = (request as unknown as AuthedRequest).auth;
-      const [job] = await db
-        .select()
-        .from(exportJobs)
-        .where(
-          and(eq(exportJobs.id, Number(request.params.jobId)), eq(exportJobs.tenantId, tenantId))
-        )
-        .limit(1);
+      const [job] = await withTenantConnection(db, tenantId, (scopedDb) =>
+        scopedDb
+          .select()
+          .from(exportJobs)
+          .where(
+            and(eq(exportJobs.id, Number(request.params.jobId)), eq(exportJobs.tenantId, tenantId))
+          )
+          .limit(1)
+      );
 
       if (!job) throw new NotFoundError('ExportJob', request.params.jobId);
 
@@ -152,13 +165,15 @@ export async function exportRoutes(
       }
 
       const { tenantId } = (request as unknown as AuthedRequest).auth;
-      const [job] = await db
-        .select()
-        .from(exportJobs)
-        .where(
-          and(eq(exportJobs.id, Number(request.params.jobId)), eq(exportJobs.tenantId, tenantId))
-        )
-        .limit(1);
+      const [job] = await withTenantConnection(db, tenantId, (scopedDb) =>
+        scopedDb
+          .select()
+          .from(exportJobs)
+          .where(
+            and(eq(exportJobs.id, Number(request.params.jobId)), eq(exportJobs.tenantId, tenantId))
+          )
+          .limit(1)
+      );
 
       if (!job) throw new NotFoundError('ExportJob', request.params.jobId);
       return reply

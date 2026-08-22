@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { PlatformContextFactory, TenantScopedDatabase } from '@erp/sdk';
-import { PlatformEventBus } from '@erp/sdk';
+import { tenantScopedHandler, PlatformEventBus } from '@erp/sdk';
 import { accounts, financialEntries } from '@erp/db';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import { z } from 'zod';
@@ -33,8 +33,6 @@ const AccountSchema = z.object({
 const AccountUpdateSchema = AccountSchema.extend({
   version: z.number().int().min(0),
 });
-
-type AuthedRequest = { auth: { tenantId: number; userId: number } };
 
 // The account list/tree used to render `openingBalance` directly under a "Balance" header —
 // almost always ₹0.00, since only accounts touched by the Opening Balance wizard ever get a
@@ -85,6 +83,10 @@ async function getAccountBalances(
   );
 }
 
+// Phase 9 GUC-per-request rollout — migrated 2026-08-21. No external I/O — PlatformEventBus never
+// talks to Kafka directly, only writes an outbox row (a separate relay worker publishes later).
+// Post-hoc ctx.audit.log()/ctx.events.publish() calls are safe per
+// tenantConnection-nested-rollback.test.ts.
 export async function accountRoutes(
   fastify: FastifyInstance,
   ctxFactory: PlatformContextFactory
@@ -93,41 +95,29 @@ export async function accountRoutes(
   fastify.get(
     '/accounts',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.ACCOUNT_VIEW)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
+    tenantScopedHandler(ctxFactory, async (_request, reply, ctx) => {
       const rows = await ctx.db.raw
         .select()
         .from(accounts)
-        .where(and(eq(accounts.tenantId, tenantId), isNull(accounts.deletedAt)));
+        .where(and(eq(accounts.tenantId, ctx.tenant.tenantId), isNull(accounts.deletedAt)));
 
-      const balanceByAccountId = await getAccountBalances(ctx.db, tenantId);
+      const balanceByAccountId = await getAccountBalances(ctx.db, ctx.tenant.tenantId);
       const content = rows.map((r) => ({ ...r, balance: balanceByAccountId.get(r.id) ?? 0 }));
 
       return reply.code(200).send({ data: { content, totalElements: content.length } });
-    }
+    })
   );
 
   // ── GET /accounts/tree — Hierarchical tree for account picker ───────────
   fastify.get(
     '/accounts/tree',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.ACCOUNT_VIEW)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
+    tenantScopedHandler(ctxFactory, async (_request, reply, ctx) => {
       const rows = await ctx.db.raw
         .select()
         .from(accounts)
-        .where(and(eq(accounts.tenantId, tenantId), isNull(accounts.deletedAt)));
-      const balanceByAccountId = await getAccountBalances(ctx.db, tenantId);
+        .where(and(eq(accounts.tenantId, ctx.tenant.tenantId), isNull(accounts.deletedAt)));
+      const balanceByAccountId = await getAccountBalances(ctx.db, ctx.tenant.tenantId);
 
       // Build tree in-memory
       type AccountNode = (typeof rows)[number] & { balance: number; children: AccountNode[] };
@@ -147,43 +137,36 @@ export async function accountRoutes(
       });
 
       return reply.code(200).send({ data: roots });
-    }
+    })
   );
 
   // ── GET /accounts/:id ───────────────────────────────────────────────────
   fastify.get<{ Params: { id: string } }>(
     '/accounts/:id',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.ACCOUNT_VIEW)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-      const id = parseInt(request.params.id, 10);
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { id: idParam } = request.params as { id: string };
+      const id = parseInt(idParam, 10);
       const [account] = await ctx.db.raw
         .select()
         .from(accounts)
         .where(
-          and(eq(accounts.id, id), eq(accounts.tenantId, tenantId), isNull(accounts.deletedAt))
+          and(
+            eq(accounts.id, id),
+            eq(accounts.tenantId, ctx.tenant.tenantId),
+            isNull(accounts.deletedAt)
+          )
         );
       if (!account) throw new NotFoundError('Account', id);
       return reply.code(200).send({ data: account });
-    }
+    })
   );
 
   // ── POST /accounts ──────────────────────────────────────────────────────
   fastify.post(
     '/accounts',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.ACCOUNT_CREATE)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
       const body = AccountSchema.safeParse(request.body);
       if (!body.success)
         throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
@@ -195,15 +178,20 @@ export async function accountRoutes(
         const [row] = await trx.raw
           .insert(accounts)
           .values({
-            tenantId,
-            createdBy: userId,
+            tenantId: ctx.tenant.tenantId,
+            createdBy: ctx.tenant.userId,
             ...body.data,
             openingBalance: String(body.data.openingBalance),
           } as unknown as typeof accounts.$inferInsert)
           .returning();
         if (!row) throw new Error('Account insert failed unexpectedly');
 
-        const eventBus = new PlatformEventBus(trx, tenantId, userId, ctx.tenant.correlationId);
+        const eventBus = new PlatformEventBus(
+          trx,
+          ctx.tenant.tenantId,
+          ctx.tenant.userId,
+          ctx.tenant.correlationId
+        );
         await eventBus.publishInTransaction(
           'account',
           row.id,
@@ -221,21 +209,16 @@ export async function accountRoutes(
       });
 
       return reply.code(201).send({ data: created });
-    }
+    })
   );
 
   // ── PUT /accounts/:id ───────────────────────────────────────────────────
   fastify.put<{ Params: { id: string } }>(
     '/accounts/:id',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.ACCOUNT_UPDATE)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-      const id = parseInt(request.params.id, 10);
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { id: idParam } = request.params as { id: string };
+      const id = parseInt(idParam, 10);
       const body = AccountUpdateSchema.safeParse(request.body);
       if (!body.success)
         throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
@@ -243,7 +226,11 @@ export async function accountRoutes(
         .select()
         .from(accounts)
         .where(
-          and(eq(accounts.id, id), eq(accounts.tenantId, tenantId), isNull(accounts.deletedAt))
+          and(
+            eq(accounts.id, id),
+            eq(accounts.tenantId, ctx.tenant.tenantId),
+            isNull(accounts.deletedAt)
+          )
         );
       if (!existing) throw new NotFoundError('Account', id);
       if (existing.isSystem) {
@@ -265,7 +252,7 @@ export async function accountRoutes(
           .where(
             and(
               eq(accounts.id, id),
-              eq(accounts.tenantId, tenantId),
+              eq(accounts.tenantId, ctx.tenant.tenantId),
               eq(accounts.version, body.data.version)
             )
           )
@@ -276,7 +263,12 @@ export async function accountRoutes(
           throw new OptimisticLockError('Account');
         }
 
-        const eventBus = new PlatformEventBus(trx, tenantId, userId, ctx.tenant.correlationId);
+        const eventBus = new PlatformEventBus(
+          trx,
+          ctx.tenant.tenantId,
+          ctx.tenant.userId,
+          ctx.tenant.correlationId
+        );
         await eventBus.publishInTransaction(
           'account',
           row.id,
@@ -295,26 +287,25 @@ export async function accountRoutes(
       });
 
       return reply.code(200).send({ data: updated });
-    }
+    })
   );
 
   // ── DELETE /accounts/:id — Cannot delete accounts with transactions ────
   fastify.delete<{ Params: { id: string } }>(
     '/accounts/:id',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.ACCOUNT_UPDATE)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-      const id = parseInt(request.params.id, 10);
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { id: idParam } = request.params as { id: string };
+      const id = parseInt(idParam, 10);
       const [existing] = await ctx.db.raw
         .select()
         .from(accounts)
         .where(
-          and(eq(accounts.id, id), eq(accounts.tenantId, tenantId), isNull(accounts.deletedAt))
+          and(
+            eq(accounts.id, id),
+            eq(accounts.tenantId, ctx.tenant.tenantId),
+            isNull(accounts.deletedAt)
+          )
         );
       if (!existing) throw new NotFoundError('Account', id);
       if (existing.isSystem) {
@@ -330,7 +321,12 @@ export async function accountRoutes(
       const [hasEntries] = await ctx.db.raw
         .select({ id: financialEntries.id })
         .from(financialEntries)
-        .where(and(eq(financialEntries.accountId, id), eq(financialEntries.tenantId, tenantId)))
+        .where(
+          and(
+            eq(financialEntries.accountId, id),
+            eq(financialEntries.tenantId, ctx.tenant.tenantId)
+          )
+        )
         .limit(1);
       if (hasEntries) {
         throw new BusinessError(
@@ -342,8 +338,8 @@ export async function accountRoutes(
       // ES-24 [M23]: missing tenantId predicate — every other mutation in this file has it.
       await ctx.db.raw
         .update(accounts)
-        .set({ deletedAt: new Date(), deletedBy: userId, isActive: false })
-        .where(and(eq(accounts.id, id), eq(accounts.tenantId, tenantId)));
+        .set({ deletedAt: new Date(), deletedBy: ctx.tenant.userId, isActive: false })
+        .where(and(eq(accounts.id, id), eq(accounts.tenantId, ctx.tenant.tenantId)));
 
       await ctx.audit.log({
         action: 'DELETE',
@@ -354,26 +350,20 @@ export async function accountRoutes(
       await ctx.events.publish('account', id, 'ACCOUNT_DELETED', { id });
 
       return reply.code(200).send({ data: { message: 'Account deleted', id } });
-    }
+    })
   );
 
   // ── POST /accounts/seed — Seed default CoA for tenant (internal) ────────
   fastify.post(
     '/accounts/seed',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.ACCOUNT_CREATE)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
+    tenantScopedHandler(ctxFactory, async (_request, reply, ctx) => {
       const { seedDefaultAccounts } = await import('../domain/default-accounts.js');
 
       // ES-24 [C6]: the whole seed (both insert passes) + its outbox publish commit
       // atomically inside seedDefaultAccounts — previously the publish was a separate,
       // non-transactional call after all the inserts had already committed.
-      const count = await seedDefaultAccounts(ctx, tenantId, userId);
+      const count = await seedDefaultAccounts(ctx, ctx.tenant.tenantId, ctx.tenant.userId);
 
       await ctx.audit.log({
         action: 'CREATE',
@@ -384,6 +374,6 @@ export async function accountRoutes(
       return reply.code(200).send({
         data: { message: 'Chart of accounts seeded', count },
       });
-    }
+    })
   );
 }

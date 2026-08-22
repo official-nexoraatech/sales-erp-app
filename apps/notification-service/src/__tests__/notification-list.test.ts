@@ -46,6 +46,18 @@ function chainable(resolveTo: unknown): Record<string, unknown> {
   return obj;
 }
 
+// withTenantConnection wraps every route in a transaction that sets the GUC via `.execute()`
+// before invoking the callback with the same db object as the scoped db.
+function withTransactionSupport<T extends object>(db: T): T {
+  const extended = db as T & {
+    execute: () => Promise<undefined>;
+    transaction: (cb: (trx: T) => unknown) => unknown;
+  };
+  extended.execute = async () => undefined;
+  extended.transaction = (cb: (trx: T) => unknown) => cb(extended);
+  return extended;
+}
+
 describe('GET /notifications', () => {
   it('returns page/pageSize/totalElements (1-based), scoped by tenant + recipientUserId', async () => {
     const items = [
@@ -57,7 +69,7 @@ describe('GET /notifications', () => {
       .mockReturnValueOnce(chainable(items)) // content query
       .mockReturnValueOnce(chainable([{ count: 2 }])) // totalElements query
       .mockReturnValueOnce(chainable([])); // engine.getUnreadCount's own select
-    const db = { select: selectMock } as unknown as ErpDatabase;
+    const db = withTransactionSupport({ select: selectMock }) as unknown as ErpDatabase;
 
     const app = Fastify({ logger: false });
     await notificationRoutes(app, db, mockQueue(), {} as Redis);
@@ -96,9 +108,9 @@ describe('POST /notifications/read-all', () => {
   it("marks every unread IN_APP notification as read, scoped to the caller's own tenant+user", async () => {
     const whereMock = vi.fn().mockResolvedValue(undefined);
     const setMock = vi.fn().mockReturnValue({ where: whereMock });
-    const db = {
+    const db = withTransactionSupport({
       update: vi.fn().mockReturnValue({ set: setMock }),
-    } as unknown as ErpDatabase;
+    }) as unknown as ErpDatabase;
 
     const app = Fastify({ logger: false });
     await notificationRoutes(app, db, mockQueue(), {} as Redis);

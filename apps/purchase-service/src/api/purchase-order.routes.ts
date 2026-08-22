@@ -1,7 +1,7 @@
 /* global process, fetch */
 import type { FastifyInstance } from 'fastify';
 import type { PlatformContextFactory } from '@erp/sdk';
-import { getBranchScope } from '@erp/sdk';
+import { getBranchScope, tenantScopedHandler } from '@erp/sdk';
 import {
   purchaseOrders,
   purchaseOrderHistory,
@@ -76,14 +76,14 @@ const UpdatePOSchema = z.object({
 // Small lookup (not the full PO) so every mutating handler below can check scope up front
 // without duplicating the service's own tenant-scoped fetch.
 async function assertPoBranchInScope(
-  ctx: { db: { raw: ErpDatabase } },
+  db: ErpDatabase,
   id: number,
   tenantId: number,
   auth: { permissions: string[]; branchIds: number[] }
 ): Promise<void> {
   const branchScope = getBranchScope(auth);
   if (branchScope === 'all') return;
-  const [po] = await ctx.db.raw
+  const [po] = await db
     .select({ branchId: purchaseOrders.branchId })
     .from(purchaseOrders)
     .where(and(eq(purchaseOrders.id, id), eq(purchaseOrders.tenantId, tenantId)));
@@ -96,6 +96,10 @@ async function assertPoBranchInScope(
   }
 }
 
+// Phase 9 GUC-per-request rollout — migrated 2026-08-21. No external I/O in most routes —
+// PurchaseOrderService has no fetch() calls. GET /purchase-orders/:id/pdf fetches
+// report-service for PDF generation (caveat 4, same shape as accounting-service's and
+// supplier-payment.routes.ts's voucher route) — deliberately left unmigrated.
 export async function purchaseOrderRoutes(
   fastify: FastifyInstance,
   ctxFactory: PlatformContextFactory
@@ -104,13 +108,7 @@ export async function purchaseOrderRoutes(
 
   fastify.get('/purchase-orders', {
     preHandler: requirePermission(PERMISSIONS.PO_VIEW),
-    handler: async (req, reply) => {
-      const ctx = ctxFactory.create({
-        tenantId: req.auth.tenantId,
-        userId: req.auth.userId,
-        correlationId:
-          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
-      });
+    handler: tenantScopedHandler(ctxFactory, async (req, reply, ctx) => {
       const q = req.query as {
         search?: string;
         status?: string;
@@ -122,7 +120,7 @@ export async function purchaseOrderRoutes(
       const pageSize = Math.min(100, parseInt(q.pageSize ?? '20', 10));
       const offset = (page - 1) * pageSize;
 
-      const conditions = [eq(purchaseOrders.tenantId, req.auth.tenantId)];
+      const conditions = [eq(purchaseOrders.tenantId, ctx.tenant.tenantId)];
       if (q.status) conditions.push(eq(purchaseOrders.status, q.status as never));
       if (q.supplierId) conditions.push(eq(purchaseOrders.supplierId, parseInt(q.supplierId, 10)));
       if (q.search) conditions.push(ilike(purchaseOrders.poNumber, `%${q.search}%`));
@@ -155,12 +153,12 @@ export async function purchaseOrderRoutes(
       return reply.send({
         data: { content: rows, totalElements: countRow?.count ?? 0, page, pageSize },
       });
-    },
+    }),
   });
 
   fastify.post('/purchase-orders', {
     preHandler: requirePermission(PERMISSIONS.PO_CREATE),
-    handler: async (req, reply) => {
+    handler: tenantScopedHandler(ctxFactory, async (req, reply, ctx) => {
       const body = CreatePOSchema.parse(req.body);
 
       // Purchase audit 2026-07-21 gap-fix (systemic pass, part 3): a branch-restricted caller
@@ -175,15 +173,9 @@ export async function purchaseOrderRoutes(
         );
       }
 
-      const ctx = ctxFactory.create({
-        tenantId: req.auth.tenantId,
-        userId: req.auth.userId,
-        correlationId:
-          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
-      });
       const svc = new PurchaseOrderService(ctx.db.raw);
       const id = await svc.create({
-        tenantId: req.auth.tenantId,
+        tenantId: ctx.tenant.tenantId,
         branchId: body.branchId,
         warehouseId: body.warehouseId,
         supplierId: body.supplierId,
@@ -196,43 +188,31 @@ export async function purchaseOrderRoutes(
         lines: body.lines,
         notes: body.notes,
         termsAndConditions: body.termsAndConditions,
-        createdBy: req.auth.userId,
+        createdBy: ctx.tenant.userId,
         poType: body.poType,
         contractValidFrom: body.contractValidFrom ? new Date(body.contractValidFrom) : undefined,
         contractValidTill: body.contractValidTill ? new Date(body.contractValidTill) : undefined,
         requisitionId: body.requisitionId,
       });
       return reply.code(201).send({ data: { id } });
-    },
+    }),
   });
 
   fastify.get('/purchase-orders/pending-delivery', {
     preHandler: requirePermission(PERMISSIONS.PO_VIEW),
-    handler: async (req, reply) => {
-      const ctx = ctxFactory.create({
-        tenantId: req.auth.tenantId,
-        userId: req.auth.userId,
-        correlationId:
-          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
-      });
+    handler: tenantScopedHandler(ctxFactory, async (req, reply, ctx) => {
       const svc = new PurchaseOrderService(ctx.db.raw);
-      const rows = await svc.getPendingDelivery(req.auth.tenantId);
+      const rows = await svc.getPendingDelivery(ctx.tenant.tenantId);
       return reply.send({ data: rows });
-    },
+    }),
   });
 
   fastify.get('/purchase-orders/:id', {
     preHandler: requirePermission(PERMISSIONS.PO_VIEW),
-    handler: async (req, reply) => {
+    handler: tenantScopedHandler(ctxFactory, async (req, reply, ctx) => {
       const { id } = req.params as { id: string };
-      const ctx = ctxFactory.create({
-        tenantId: req.auth.tenantId,
-        userId: req.auth.userId,
-        correlationId:
-          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
-      });
       const svc = new PurchaseOrderService(ctx.db.raw);
-      const data = await svc.getWithLines(parseInt(id, 10), req.auth.tenantId);
+      const data = await svc.getWithLines(parseInt(id, 10), ctx.tenant.tenantId);
 
       const branchScope = getBranchScope(req.auth);
       if (branchScope !== 'all' && !branchScope.includes(data.branchId)) {
@@ -244,52 +224,40 @@ export async function purchaseOrderRoutes(
       }
 
       return reply.send({ data });
-    },
+    }),
   });
 
   fastify.put('/purchase-orders/:id', {
     preHandler: requirePermission(PERMISSIONS.PO_UPDATE),
-    handler: async (req, reply) => {
+    handler: tenantScopedHandler(ctxFactory, async (req, reply, ctx) => {
       const { id } = req.params as { id: string };
       const body = UpdatePOSchema.parse(req.body);
-      const ctx = ctxFactory.create({
-        tenantId: req.auth.tenantId,
-        userId: req.auth.userId,
-        correlationId:
-          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
-      });
-      await assertPoBranchInScope(ctx, parseInt(id, 10), req.auth.tenantId, req.auth);
+      await assertPoBranchInScope(ctx.db.raw, parseInt(id, 10), ctx.tenant.tenantId, req.auth);
       const svc = new PurchaseOrderService(ctx.db.raw);
-      await svc.update(parseInt(id, 10), req.auth.tenantId, req.auth.userId, {
+      await svc.update(parseInt(id, 10), ctx.tenant.tenantId, ctx.tenant.userId, {
         notes: body.notes,
         expectedDeliveryDate: body.expectedDeliveryDate
           ? new Date(body.expectedDeliveryDate)
           : undefined,
       });
       return reply.send({ success: true });
-    },
+    }),
   });
 
   fastify.post('/purchase-orders/:id/submit', {
     preHandler: requirePermission(PERMISSIONS.PO_CREATE),
-    handler: async (req, reply) => {
+    handler: tenantScopedHandler(ctxFactory, async (req, reply, ctx) => {
       const { id } = req.params as { id: string };
-      const ctx = ctxFactory.create({
-        tenantId: req.auth.tenantId,
-        userId: req.auth.userId,
-        correlationId:
-          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
-      });
-      await assertPoBranchInScope(ctx, parseInt(id, 10), req.auth.tenantId, req.auth);
+      await assertPoBranchInScope(ctx.db.raw, parseInt(id, 10), ctx.tenant.tenantId, req.auth);
       const svc = new PurchaseOrderService(ctx.db.raw);
-      await svc.submit(parseInt(id, 10), req.auth.tenantId, req.auth.userId);
+      await svc.submit(parseInt(id, 10), ctx.tenant.tenantId, ctx.tenant.userId);
       return reply.send({ success: true });
-    },
+    }),
   });
 
   fastify.post('/purchase-orders/:id/approve', {
     preHandler: requirePermission(PERMISSIONS.PO_APPROVE),
-    handler: async (req, reply) => {
+    handler: tenantScopedHandler(ctxFactory, async (req, reply, ctx) => {
       const { id } = req.params as { id: string };
       const body = ApproveSchema.parse(req.body);
 
@@ -302,18 +270,12 @@ export async function purchaseOrderRoutes(
           .send({ error: `Forbidden — missing permission: ${PERMISSIONS.CREDIT_LIMIT_OVERRIDE}` });
       }
 
-      const ctx = ctxFactory.create({
-        tenantId: req.auth.tenantId,
-        userId: req.auth.userId,
-        correlationId:
-          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
-      });
-      await assertPoBranchInScope(ctx, parseInt(id, 10), req.auth.tenantId, req.auth);
+      await assertPoBranchInScope(ctx.db.raw, parseInt(id, 10), ctx.tenant.tenantId, req.auth);
       const svc = new PurchaseOrderService(ctx.db.raw);
       await svc.approve(
         parseInt(id, 10),
-        req.auth.tenantId,
-        req.auth.userId,
+        ctx.tenant.tenantId,
+        ctx.tenant.userId,
         body.poNumber,
         body.overrideCreditLimit,
         // Unlike overrideCreditLimit, this isn't an opt-in request flag — a caller either
@@ -323,66 +285,48 @@ export async function purchaseOrderRoutes(
         req.auth.permissions.includes(PERMISSIONS.PO_APPROVE_HIGH_VALUE)
       );
       return reply.send({ success: true });
-    },
+    }),
   });
 
   fastify.post('/purchase-orders/:id/amend', {
     preHandler: requirePermission(PERMISSIONS.PO_AMEND),
-    handler: async (req, reply) => {
+    handler: tenantScopedHandler(ctxFactory, async (req, reply, ctx) => {
       const { id } = req.params as { id: string };
       const body = AmendSchema.parse(req.body);
-      const ctx = ctxFactory.create({
-        tenantId: req.auth.tenantId,
-        userId: req.auth.userId,
-        correlationId:
-          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
-      });
-      await assertPoBranchInScope(ctx, parseInt(id, 10), req.auth.tenantId, req.auth);
+      await assertPoBranchInScope(ctx.db.raw, parseInt(id, 10), ctx.tenant.tenantId, req.auth);
       const svc = new PurchaseOrderService(ctx.db.raw);
       await svc.amend(
         parseInt(id, 10),
-        req.auth.tenantId,
-        req.auth.userId,
+        ctx.tenant.tenantId,
+        ctx.tenant.userId,
         body.amendments,
         body.reason
       );
       return reply.send({ success: true });
-    },
+    }),
   });
 
   fastify.post('/purchase-orders/:id/cancel', {
     preHandler: requirePermission(PERMISSIONS.PO_CANCEL),
-    handler: async (req, reply) => {
+    handler: tenantScopedHandler(ctxFactory, async (req, reply, ctx) => {
       const { id } = req.params as { id: string };
       const body = CancelSchema.parse(req.body);
-      const ctx = ctxFactory.create({
-        tenantId: req.auth.tenantId,
-        userId: req.auth.userId,
-        correlationId:
-          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
-      });
-      await assertPoBranchInScope(ctx, parseInt(id, 10), req.auth.tenantId, req.auth);
+      await assertPoBranchInScope(ctx.db.raw, parseInt(id, 10), ctx.tenant.tenantId, req.auth);
       const svc = new PurchaseOrderService(ctx.db.raw);
-      await svc.cancel(parseInt(id, 10), req.auth.tenantId, req.auth.userId, body.reason);
+      await svc.cancel(parseInt(id, 10), ctx.tenant.tenantId, ctx.tenant.userId, body.reason);
       return reply.send({ success: true });
-    },
+    }),
   });
 
   fastify.post('/purchase-orders/:id/duplicate', {
     preHandler: requirePermission(PERMISSIONS.PO_CREATE),
-    handler: async (req, reply) => {
+    handler: tenantScopedHandler(ctxFactory, async (req, reply, ctx) => {
       const { id } = req.params as { id: string };
-      const ctx = ctxFactory.create({
-        tenantId: req.auth.tenantId,
-        userId: req.auth.userId,
-        correlationId:
-          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
-      });
-      await assertPoBranchInScope(ctx, parseInt(id, 10), req.auth.tenantId, req.auth);
+      await assertPoBranchInScope(ctx.db.raw, parseInt(id, 10), ctx.tenant.tenantId, req.auth);
       const svc = new PurchaseOrderService(ctx.db.raw);
-      const newId = await svc.duplicate(parseInt(id, 10), req.auth.tenantId, req.auth.userId);
+      const newId = await svc.duplicate(parseInt(id, 10), ctx.tenant.tenantId, ctx.tenant.userId);
       return reply.code(201).send({ data: { id: newId } });
-    },
+    }),
   });
 
   // Was a dead stub — `pdfUrl` was never written by any code path, so this always returned
@@ -472,26 +416,20 @@ export async function purchaseOrderRoutes(
 
   fastify.get('/purchase-orders/:id/activity', {
     preHandler: requirePermission(PERMISSIONS.PO_VIEW),
-    handler: async (req, reply) => {
+    handler: tenantScopedHandler(ctxFactory, async (req, reply, ctx) => {
       const { id } = req.params as { id: string };
-      const ctx = ctxFactory.create({
-        tenantId: req.auth.tenantId,
-        userId: req.auth.userId,
-        correlationId:
-          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
-      });
-      await assertPoBranchInScope(ctx, parseInt(id, 10), req.auth.tenantId, req.auth);
+      await assertPoBranchInScope(ctx.db.raw, parseInt(id, 10), ctx.tenant.tenantId, req.auth);
       const history = await ctx.db.raw
         .select()
         .from(purchaseOrderHistory)
         .where(
           and(
             eq(purchaseOrderHistory.purchaseOrderId, parseInt(id, 10)),
-            eq(purchaseOrderHistory.tenantId, req.auth.tenantId)
+            eq(purchaseOrderHistory.tenantId, ctx.tenant.tenantId)
           )
         )
         .orderBy(desc(purchaseOrderHistory.createdAt));
       return reply.send({ data: history });
-    },
+    }),
   });
 }

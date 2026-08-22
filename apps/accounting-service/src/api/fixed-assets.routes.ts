@@ -1,13 +1,12 @@
 import type { FastifyInstance } from 'fastify';
 import type { PlatformContextFactory } from '@erp/sdk';
+import { tenantScopedHandler } from '@erp/sdk';
 import { z } from 'zod';
 import { ValidationError } from '@erp/types';
 import { PERMISSIONS } from '@erp/types';
 import { authenticate } from '../middleware/authenticate.js';
 import { requirePermission } from '../middleware/authorize.js';
 import { FixedAssetService } from '../domain/FixedAssetService.js';
-
-type AuthedRequest = { auth: { tenantId: number; userId: number } };
 
 const CreateAssetSchema = z.object({
   assetCode: z.string().min(1).max(30),
@@ -41,6 +40,9 @@ const RunDepreciationSchema = z.object({
   periodYear: z.number().int().min(2000).max(2100),
 });
 
+// Phase 9 GUC-per-request rollout — migrated 2026-08-21. No external I/O; /dispose's post-hoc
+// ctx.audit.log() is safe per tenantConnection-nested-rollback.test.ts (see other accounting-
+// service route files' migration notes).
 export async function fixedAssetsRoutes(
   fastify: FastifyInstance,
   ctxFactory: PlatformContextFactory
@@ -49,14 +51,12 @@ export async function fixedAssetsRoutes(
   fastify.post(
     '/fixed-assets',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.FIXED_ASSET_CREATE)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({ tenantId, userId, correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID() });
-
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
       const body = CreateAssetSchema.safeParse(request.body);
-      if (!body.success) throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
+      if (!body.success)
+        throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
 
-      const asset = await FixedAssetService.create(ctx.db, tenantId, userId, {
+      const asset = await FixedAssetService.create(ctx.db, ctx.tenant.tenantId, ctx.tenant.userId, {
         assetCode: body.data.assetCode,
         assetName: body.data.assetName,
         assetCategory: body.data.assetCategory,
@@ -72,82 +72,81 @@ export async function fixedAssetsRoutes(
         ...(body.data.notes ? { notes: body.data.notes } : {}),
       });
       return reply.code(201).send({ data: asset });
-    }
+    })
   );
 
   // ── GET /fixed-assets ─────────────────────────────────────────────────────
   fastify.get(
     '/fixed-assets',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.FIXED_ASSET_VIEW)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({ tenantId, userId, correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID() });
-      const assets = await FixedAssetService.list(ctx.db, tenantId);
+    tenantScopedHandler(ctxFactory, async (_request, reply, ctx) => {
+      const assets = await FixedAssetService.list(ctx.db, ctx.tenant.tenantId);
       return reply.code(200).send({ data: { content: assets, totalElements: assets.length } });
-    }
+    })
   );
 
   // ── GET /fixed-assets/:id ─────────────────────────────────────────────────
   fastify.get<{ Params: { id: string } }>(
     '/fixed-assets/:id',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.FIXED_ASSET_VIEW)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({ tenantId, userId, correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID() });
-      const asset = await FixedAssetService.getById(ctx.db, tenantId, parseInt(request.params.id, 10));
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { id } = request.params as { id: string };
+      const asset = await FixedAssetService.getById(ctx.db, ctx.tenant.tenantId, parseInt(id, 10));
       return reply.code(200).send({ data: asset });
-    }
+    })
   );
 
   // ── PUT /fixed-assets/:id ─────────────────────────────────────────────────
   fastify.put<{ Params: { id: string } }>(
     '/fixed-assets/:id',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.FIXED_ASSET_UPDATE)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({ tenantId, userId, correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID() });
-      const id = parseInt(request.params.id, 10);
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { id: idParam } = request.params as { id: string };
+      const id = parseInt(idParam, 10);
 
       const body = UpdateAssetSchema.safeParse(request.body);
-      if (!body.success) throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
+      if (!body.success)
+        throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
 
-      const asset = await FixedAssetService.update(ctx.db, tenantId, id, {
+      const asset = await FixedAssetService.update(ctx.db, ctx.tenant.tenantId, id, {
         ...(body.data.assetName ? { assetName: body.data.assetName } : {}),
         ...(body.data.notes ? { notes: body.data.notes } : {}),
       });
       return reply.code(200).send({ data: asset });
-    }
+    })
   );
 
   // ── GET /fixed-assets/:id/depreciation-schedule ───────────────────────────
   fastify.get<{ Params: { id: string } }>(
     '/fixed-assets/:id/depreciation-schedule',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.FIXED_ASSET_VIEW)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({ tenantId, userId, correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID() });
-      const id = parseInt(request.params.id, 10);
-      const schedule = await FixedAssetService.getDepreciationSchedule(ctx.db, tenantId, id);
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { id } = request.params as { id: string };
+      const schedule = await FixedAssetService.getDepreciationSchedule(
+        ctx.db,
+        ctx.tenant.tenantId,
+        parseInt(id, 10)
+      );
       return reply.code(200).send({ data: { content: schedule, totalElements: schedule.length } });
-    }
+    })
   );
 
   // ── POST /fixed-assets/:id/dispose ────────────────────────────────────────
   fastify.post<{ Params: { id: string } }>(
     '/fixed-assets/:id/dispose',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.FIXED_ASSET_DISPOSE)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({ tenantId, userId, correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID() });
-      const id = parseInt(request.params.id, 10);
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { id: idParam } = request.params as { id: string };
+      const id = parseInt(idParam, 10);
 
       const body = DisposeSchema.safeParse(request.body);
-      if (!body.success) throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
+      if (!body.success)
+        throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
 
       const result = await FixedAssetService.dispose(
         ctx.db,
-        tenantId,
-        userId,
+        ctx.tenant.tenantId,
+        ctx.tenant.userId,
         id,
         body.data.disposalDate,
         body.data.disposalProceeds,
@@ -162,29 +161,27 @@ export async function fixedAssetsRoutes(
       });
 
       return reply.code(200).send({ data: result });
-    }
+    })
   );
 
   // ── POST /fixed-assets/depreciation/run ───────────────────────────────────
   fastify.post(
     '/fixed-assets/depreciation/run',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.FIXED_ASSET_UPDATE)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({ tenantId, userId, correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID() });
-
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
       const body = RunDepreciationSchema.safeParse(request.body);
-      if (!body.success) throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
+      if (!body.success)
+        throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
 
       const result = await FixedAssetService.runMonthlyDepreciationBatch(
         ctx.db,
-        tenantId,
-        userId,
+        ctx.tenant.tenantId,
+        ctx.tenant.userId,
         body.data.periodMonth,
         body.data.periodYear
       );
 
       return reply.code(200).send({ data: result });
-    }
+    })
   );
 }

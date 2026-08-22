@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { NotFoundError, ValidationError } from '@erp/types';
 import { PERMISSIONS, OptionalGSTINSchema, OptionalPANSchema } from '@erp/types';
 import type { PlatformContextFactory } from '@erp/sdk';
-import { StorageClient } from '@erp/sdk';
+import { StorageClient, tenantScopedHandler } from '@erp/sdk';
 import type { TenantServiceConfig } from '../config.js';
 import { authenticate } from '../middleware/authenticate.js';
 import { requirePermission } from '../middleware/authorize.js';
@@ -100,54 +100,57 @@ export async function organizationRoutes(
   // previously read the tenant's full bank account number via this route. Only strip
   // those fields for callers without ORGANIZATION_VIEW, rather than gating the whole
   // route, which would break branding/reference-data reads for every non-admin user.
-  fastify.get('/organization', { preHandler: [authenticate] }, async (request, reply) => {
-    const { tenantId, permissions } = request.auth;
-    const ctx = ctxFor(request);
+  fastify.get(
+    '/organization',
+    { preHandler: [authenticate] },
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId } = ctx.tenant;
+      const { permissions } = request.auth;
 
-    const [org] = await ctx.db.raw
-      .select()
-      .from(organizationSettings)
-      .where(eq(organizationSettings.tenantId, tenantId));
+      const [org] = await ctx.db.raw
+        .select()
+        .from(organizationSettings)
+        .where(eq(organizationSettings.tenantId, tenantId));
 
-    if (!org) throw new NotFoundError('Organization settings');
+      if (!org) throw new NotFoundError('Organization settings');
 
-    if (!permissions.includes(PERMISSIONS.ORGANIZATION_VIEW)) {
-      return reply.code(200).send({
-        data: {
-          id: org.id,
-          tenantId: org.tenantId,
-          orgName: org.orgName,
-          legalName: org.legalName,
-          logoObjectKey: org.logoObjectKey,
-          address: org.address,
-          timezone: org.timezone,
-          currency: org.currency,
-          fiscalYearStart: org.fiscalYearStart,
-          dateFormat: org.dateFormat,
-          country: org.country,
-          language: org.language,
-          invoiceFooter: org.invoiceFooter,
-          termsAndConditions: org.termsAndConditions,
-          themeConfig: org.themeConfig,
-          createdAt: org.createdAt,
-          updatedAt: org.updatedAt,
-          createdBy: org.createdBy,
-          updatedBy: org.updatedBy,
-          version: org.version,
-        },
-      });
-    }
+      if (!permissions.includes(PERMISSIONS.ORGANIZATION_VIEW)) {
+        return reply.code(200).send({
+          data: {
+            id: org.id,
+            tenantId: org.tenantId,
+            orgName: org.orgName,
+            legalName: org.legalName,
+            logoObjectKey: org.logoObjectKey,
+            address: org.address,
+            timezone: org.timezone,
+            currency: org.currency,
+            fiscalYearStart: org.fiscalYearStart,
+            dateFormat: org.dateFormat,
+            country: org.country,
+            language: org.language,
+            invoiceFooter: org.invoiceFooter,
+            termsAndConditions: org.termsAndConditions,
+            themeConfig: org.themeConfig,
+            createdAt: org.createdAt,
+            updatedAt: org.updatedAt,
+            createdBy: org.createdBy,
+            updatedBy: org.updatedBy,
+            version: org.version,
+          },
+        });
+      }
 
-    return reply.code(200).send({ data: org });
-  });
+      return reply.code(200).send({ data: org });
+    })
+  );
 
   // ── PUT /organization ─────────────────────────────────────────────────────
   fastify.put(
     '/organization',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.ORG_SETTINGS_EDIT)] },
-    async (request, reply) => {
-      const { tenantId, userId } = request.auth;
-      const ctx = ctxFor(request);
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId, userId } = ctx.tenant;
 
       const body = UpdateOrgSchema.safeParse(request.body);
       if (!body.success) {
@@ -230,7 +233,7 @@ export async function organizationRoutes(
       }
 
       return reply.code(200).send({ data: updated });
-    }
+    })
   );
 
   // ── POST /organization/logo/upload ────────────────────────────────────────

@@ -5,6 +5,7 @@ import { stockAdjustments } from '@erp/db';
 import type { ErpDatabase } from '@erp/db';
 import { PERMISSIONS, NotFoundError, BusinessError } from '@erp/types';
 import type { PlatformContextFactory } from '@erp/sdk';
+import { tenantScopedHandler } from '@erp/sdk';
 import { authenticate } from '../middleware/authenticate.js';
 import { requireAnyPermission } from '../middleware/authorize.js';
 import { StockAdjustmentService } from '../domain/StockAdjustmentService.js';
@@ -55,6 +56,8 @@ async function assertAdjustmentInScope(
   await assertWarehouseInScope(ctxDb, tenantId, adj.warehouseId, auth);
 }
 
+// Phase 9 GUC-per-request rollout — migrated 2026-08-21. No external I/O —
+// StockAdjustmentService has no fetch() calls.
 export async function adjustmentRoutes(
   fastify: FastifyInstance,
   ctxFactory: PlatformContextFactory
@@ -68,12 +71,7 @@ export async function adjustmentRoutes(
         requireAnyPermission([PERMISSIONS.STOCK_ADJUST, PERMISSIONS.WAREHOUSE_MANAGE]),
       ],
     },
-    async (request, reply) => {
-      const ctx = ctxFactory.create({
-        tenantId: request.auth.tenantId,
-        userId: request.auth.userId,
-        correlationId: request.id,
-      });
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
       const {
         page = 1,
         limit = 50,
@@ -87,14 +85,14 @@ export async function adjustmentRoutes(
 
       let whereClause = status
         ? and(
-            eq(stockAdjustments.tenantId, request.auth.tenantId),
+            eq(stockAdjustments.tenantId, ctx.tenant.tenantId),
             eq(stockAdjustments.status, status as (typeof stockAdjustments.$inferSelect)['status'])
           )
-        : eq(stockAdjustments.tenantId, request.auth.tenantId);
+        : eq(stockAdjustments.tenantId, ctx.tenant.tenantId);
 
       // Inventory module audit 2026-07-21: previously unfiltered — any user with STOCK_ADJUST/
       // WAREHOUSE_MANAGE saw every branch's adjustments, not just their own warehouse(s).
-      const warehouseScope = await getWarehouseScope(ctx.db.raw, request.auth.tenantId, {
+      const warehouseScope = await getWarehouseScope(ctx.db.raw, ctx.tenant.tenantId, {
         permissions: request.auth.permissions,
         branchIds: request.auth.branchIds,
       });
@@ -121,7 +119,7 @@ export async function adjustmentRoutes(
       return reply
         .code(200)
         .send({ data: { content: rows, totalElements: countRow?.count ?? 0, page, limit } });
-    }
+    })
   );
 
   // POST /stock-adjustments
@@ -133,22 +131,17 @@ export async function adjustmentRoutes(
         requireAnyPermission([PERMISSIONS.STOCK_ADJUST, PERMISSIONS.WAREHOUSE_MANAGE]),
       ],
     },
-    async (request, reply) => {
-      const ctx = ctxFactory.create({
-        tenantId: request.auth.tenantId,
-        userId: request.auth.userId,
-        correlationId: request.id,
-      });
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
       const body = CreateAdjSchema.parse(
         (request.body as { data?: unknown })?.data ?? request.body
       );
-      await assertWarehouseInScope(ctx.db.raw, request.auth.tenantId, body.warehouseId, {
+      await assertWarehouseInScope(ctx.db.raw, ctx.tenant.tenantId, body.warehouseId, {
         permissions: request.auth.permissions,
         branchIds: request.auth.branchIds,
       });
       const svc = new StockAdjustmentService(ctx.db.raw);
       const adj = await svc.create({
-        tenantId: request.auth.tenantId,
+        tenantId: ctx.tenant.tenantId,
         warehouseId: body.warehouseId,
         adjustmentType: body.adjustmentType,
         lines: body.lines.map((l) => ({
@@ -160,7 +153,7 @@ export async function adjustmentRoutes(
           ...(l.reason !== undefined ? { reason: l.reason } : {}),
         })),
         ...(body.notes !== undefined ? { notes: body.notes } : {}),
-        createdBy: request.auth.userId,
+        createdBy: ctx.tenant.userId,
       });
 
       await ctx.audit.log({
@@ -177,7 +170,7 @@ export async function adjustmentRoutes(
       );
 
       return reply.code(201).send({ data: adj });
-    }
+    })
   );
 
   // GET /stock-adjustments/:id
@@ -189,21 +182,16 @@ export async function adjustmentRoutes(
         requireAnyPermission([PERMISSIONS.STOCK_ADJUST, PERMISSIONS.WAREHOUSE_MANAGE]),
       ],
     },
-    async (request, reply) => {
-      const ctx = ctxFactory.create({
-        tenantId: request.auth.tenantId,
-        userId: request.auth.userId,
-        correlationId: request.id,
-      });
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
       const { id } = request.params as { id: string };
-      await assertAdjustmentInScope(ctx.db.raw, request.auth.tenantId, parseInt(id, 10), {
+      await assertAdjustmentInScope(ctx.db.raw, ctx.tenant.tenantId, parseInt(id, 10), {
         permissions: request.auth.permissions,
         branchIds: request.auth.branchIds,
       });
       const svc = new StockAdjustmentService(ctx.db.raw);
-      const adj = await svc.getWithLines(parseInt(id, 10), request.auth.tenantId);
+      const adj = await svc.getWithLines(parseInt(id, 10), ctx.tenant.tenantId);
       return reply.code(200).send({ data: adj });
-    }
+    })
   );
 
   // POST /stock-adjustments/:id/submit
@@ -215,21 +203,16 @@ export async function adjustmentRoutes(
         requireAnyPermission([PERMISSIONS.STOCK_ADJUST, PERMISSIONS.WAREHOUSE_MANAGE]),
       ],
     },
-    async (request, reply) => {
-      const ctx = ctxFactory.create({
-        tenantId: request.auth.tenantId,
-        userId: request.auth.userId,
-        correlationId: request.id,
-      });
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
       const { id } = request.params as { id: string };
-      await assertAdjustmentInScope(ctx.db.raw, request.auth.tenantId, parseInt(id, 10), {
+      await assertAdjustmentInScope(ctx.db.raw, ctx.tenant.tenantId, parseInt(id, 10), {
         permissions: request.auth.permissions,
         branchIds: request.auth.branchIds,
       });
       const svc = new StockAdjustmentService(ctx.db.raw);
-      const adj = await svc.submit(parseInt(id, 10), request.auth.tenantId, request.auth.userId);
+      const adj = await svc.submit(parseInt(id, 10), ctx.tenant.tenantId, ctx.tenant.userId);
       return reply.code(200).send({ data: adj });
-    }
+    })
   );
 
   // POST /stock-adjustments/:id/approve
@@ -241,14 +224,9 @@ export async function adjustmentRoutes(
         requireAnyPermission([PERMISSIONS.STOCK_ADJUST, PERMISSIONS.WAREHOUSE_MANAGE]),
       ],
     },
-    async (request, reply) => {
-      const ctx = ctxFactory.create({
-        tenantId: request.auth.tenantId,
-        userId: request.auth.userId,
-        correlationId: request.id,
-      });
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
       const { id } = request.params as { id: string };
-      await assertAdjustmentInScope(ctx.db.raw, request.auth.tenantId, parseInt(id, 10), {
+      await assertAdjustmentInScope(ctx.db.raw, ctx.tenant.tenantId, parseInt(id, 10), {
         permissions: request.auth.permissions,
         branchIds: request.auth.branchIds,
       });
@@ -260,7 +238,7 @@ export async function adjustmentRoutes(
       // but nothing ever checked it, so a single user holding only STOCK_ADJUST could create,
       // submit, and immediately approve their own high-value adjustment with no real
       // maker-checker segregation. Below-threshold (SUBMITTED) adjustments are unaffected.
-      const current = await svc.get(parseInt(id, 10), request.auth.tenantId);
+      const current = await svc.get(parseInt(id, 10), ctx.tenant.tenantId);
       if (
         current.status === 'PENDING_APPROVAL' &&
         !request.auth.permissions.includes(PERMISSIONS.STOCK_ADJUST_APPROVE)
@@ -271,7 +249,7 @@ export async function adjustmentRoutes(
         );
       }
 
-      const adj = await svc.approve(parseInt(id, 10), request.auth.tenantId, request.auth.userId);
+      const adj = await svc.approve(parseInt(id, 10), ctx.tenant.tenantId, ctx.tenant.userId);
       await ctx.events.publish(
         'stock_adjustment',
         adj.id,
@@ -279,7 +257,7 @@ export async function adjustmentRoutes(
         adj as unknown as Record<string, unknown>
       );
       return reply.code(200).send({ data: adj });
-    }
+    })
   );
 
   // POST /stock-adjustments/:id/cancel
@@ -291,25 +269,20 @@ export async function adjustmentRoutes(
         requireAnyPermission([PERMISSIONS.STOCK_ADJUST, PERMISSIONS.WAREHOUSE_MANAGE]),
       ],
     },
-    async (request, reply) => {
-      const ctx = ctxFactory.create({
-        tenantId: request.auth.tenantId,
-        userId: request.auth.userId,
-        correlationId: request.id,
-      });
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
       const { id } = request.params as { id: string };
       const { reason } = CancelSchema.parse(
         (request.body as { data?: unknown })?.data ?? request.body
       );
-      await assertAdjustmentInScope(ctx.db.raw, request.auth.tenantId, parseInt(id, 10), {
+      await assertAdjustmentInScope(ctx.db.raw, ctx.tenant.tenantId, parseInt(id, 10), {
         permissions: request.auth.permissions,
         branchIds: request.auth.branchIds,
       });
       const svc = new StockAdjustmentService(ctx.db.raw);
       const adj = await svc.cancel(
         parseInt(id, 10),
-        request.auth.tenantId,
-        request.auth.userId,
+        ctx.tenant.tenantId,
+        ctx.tenant.userId,
         reason
       );
       await ctx.events.publish(
@@ -319,6 +292,6 @@ export async function adjustmentRoutes(
         adj as unknown as Record<string, unknown>
       );
       return reply.code(200).send({ data: adj });
-    }
+    })
   );
 }

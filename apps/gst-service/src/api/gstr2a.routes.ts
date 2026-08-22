@@ -1,6 +1,7 @@
 /* global process */
 import type { FastifyInstance } from 'fastify';
 import type { PlatformContextFactory } from '@erp/sdk';
+import { tenantScopedHandler, withTenantConnection } from '@erp/sdk';
 import { z } from 'zod';
 import { timingSafeEqual } from 'node:crypto';
 import { ValidationError } from '@erp/types';
@@ -9,15 +10,20 @@ import { authenticate } from '../middleware/authenticate.js';
 import { requirePermission } from '../middleware/authorize.js';
 import { Gstr2aService, type Gstr2aRow } from '../domain/Gstr2aService.js';
 
-type AuthedRequest = { auth: { tenantId: number; userId: number } };
 const PERIOD_REGEX = /^\d{4}-\d{2}$/;
 
-function requireInternalKey(req: { headers: Record<string, string | string[] | undefined> }, reply: { code: (n: number) => { send: (b: unknown) => void } }): boolean {
+function requireInternalKey(
+  req: { headers: Record<string, string | string[] | undefined> },
+  reply: { code: (n: number) => { send: (b: unknown) => void } }
+): boolean {
   const key = req.headers['x-internal-key'];
   const expected = process.env['INTERNAL_API_KEY'];
   const keyBuffer = Buffer.from(typeof key === 'string' ? key : '');
   const expectedBuffer = Buffer.from(expected ?? '');
-  const matches = !!expected && keyBuffer.length === expectedBuffer.length && timingSafeEqual(keyBuffer, expectedBuffer);
+  const matches =
+    !!expected &&
+    keyBuffer.length === expectedBuffer.length &&
+    timingSafeEqual(keyBuffer, expectedBuffer);
   if (!matches) {
     reply.code(401).send({ error: 'Unauthorized' });
     return false;
@@ -44,72 +50,80 @@ const Gstr2aRowSchema = z.object({
   placeOfSupply: z.string().length(2).optional(),
 });
 
+// Phase 9 GUC-per-request rollout — migrated 2026-08-21. No external I/O —
+// Gstr2aService has no fetch() calls.
 export async function gstr2aRoutes(
   fastify: FastifyInstance,
   ctxFactory: PlatformContextFactory
 ): Promise<void> {
   // POST /gst/gstr2a/import
-  fastify.post('/gst/gstr2a/import', {
-    preHandler: [authenticate, requirePermission(PERMISSIONS.GSTR2A_RECONCILE)],
-  }, async (request, reply) => {
-    const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-    const ctx = ctxFactory.create({
-      tenantId, userId,
-      correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-    });
+  fastify.post(
+    '/gst/gstr2a/import',
+    {
+      preHandler: [authenticate, requirePermission(PERMISSIONS.GSTR2A_RECONCILE)],
+    },
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId } = ctx.tenant;
 
-    const BodySchema = z.object({
-      period: z.string().regex(PERIOD_REGEX, 'Period must be YYYY-MM'),
-      entries: z.array(Gstr2aRowSchema).min(1, 'At least one entry required'),
-    });
+      const BodySchema = z.object({
+        period: z.string().regex(PERIOD_REGEX, 'Period must be YYYY-MM'),
+        entries: z.array(Gstr2aRowSchema).min(1, 'At least one entry required'),
+      });
 
-    const body = BodySchema.safeParse(request.body);
-    if (!body.success) throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
+      const body = BodySchema.safeParse(request.body);
+      if (!body.success)
+        throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
 
-    const result = await Gstr2aService.importGstr2a(ctx.db, tenantId, body.data.period, body.data.entries as unknown as Gstr2aRow[]);
+      const result = await Gstr2aService.importGstr2a(
+        ctx.db,
+        tenantId,
+        body.data.period,
+        body.data.entries as unknown as Gstr2aRow[]
+      );
 
-    await ctx.audit.log({
-      action: 'GSTR2A_IMPORTED',
-      entityType: 'GSTR2A',
-      entityId: tenantId,
-      after: result as unknown as Record<string, unknown>,
-    });
+      await ctx.audit.log({
+        action: 'GSTR2A_IMPORTED',
+        entityType: 'GSTR2A',
+        entityId: tenantId,
+        after: result as unknown as Record<string, unknown>,
+      });
 
-    return reply.code(200).send({ data: result });
-  });
+      return reply.code(200).send({ data: result });
+    })
+  );
 
   // GET /gst/gstr2a/reconciliation?period=2025-06
-  fastify.get('/gst/gstr2a/reconciliation', {
-    preHandler: [authenticate, requirePermission(PERMISSIONS.GSTR2A_RECONCILE)],
-  }, async (request, reply) => {
-    const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-    const ctx = ctxFactory.create({
-      tenantId, userId,
-      correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-    });
+  fastify.get(
+    '/gst/gstr2a/reconciliation',
+    {
+      preHandler: [authenticate, requirePermission(PERMISSIONS.GSTR2A_RECONCILE)],
+    },
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId } = ctx.tenant;
 
-    const QuerySchema = z.object({
-      period: z.string().regex(PERIOD_REGEX, 'Period must be YYYY-MM'),
-    });
-    const q = QuerySchema.safeParse(request.query);
-    if (!q.success) throw new ValidationError(q.error.errors.map((e) => e.message).join('; '));
+      const QuerySchema = z.object({
+        period: z.string().regex(PERIOD_REGEX, 'Period must be YYYY-MM'),
+      });
+      const q = QuerySchema.safeParse(request.query);
+      if (!q.success) throw new ValidationError(q.error.errors.map((e) => e.message).join('; '));
 
-    const result = await Gstr2aService.getReconciliation(ctx.db, tenantId, q.data.period);
+      const result = await Gstr2aService.getReconciliation(ctx.db, tenantId, q.data.period);
 
-    return reply.code(200).send({
-      data: {
-        period: q.data.period,
-        summary: result.summary,
-        gstr2aEntries: result.gstr2aEntries,
-        booksOnlyEntries: result.booksOnlyEntries,
-        actions: {
-          BOOKS_ONLY: 'Contact supplier to file GSTR-1',
-          AMOUNT_MISMATCH: 'Raise debit note or amend GRN',
-          GSTR2A_ONLY: 'Check if GRN was missed in books',
+      return reply.code(200).send({
+        data: {
+          period: q.data.period,
+          summary: result.summary,
+          gstr2aEntries: result.gstr2aEntries,
+          booksOnlyEntries: result.booksOnlyEntries,
+          actions: {
+            BOOKS_ONLY: 'Contact supplier to file GSTR-1',
+            AMOUNT_MISMATCH: 'Raise debit note or amend GRN',
+            GSTR2A_ONLY: 'Check if GRN was missed in books',
+          },
         },
-      },
-    });
-  });
+      });
+    })
+  );
 
   // POST /gst/gstr2a/reconcile-run?tenantId=... — PG-026, scheduler-triggered.
   // Actually runs Gstr2aService.reconcile() (matching against whatever GSTR-2A data
@@ -120,18 +134,28 @@ export async function gstr2aRoutes(
     handler: async (request, reply) => {
       if (!requireInternalKey(request as never, reply as never)) return;
       const tenantId = parseInt((request.query as { tenantId?: string }).tenantId ?? '', 10);
-      if (!tenantId) return reply.code(400).send({ error: { code: 'MISSING_TENANT_ID', message: 'tenantId query param required' } });
+      if (!tenantId)
+        return reply
+          .code(400)
+          .send({ error: { code: 'MISSING_TENANT_ID', message: 'tenantId query param required' } });
 
-      const ctx = ctxFactory.create({ tenantId, userId: 0, correlationId: crypto.randomUUID() });
       const period = previousPeriod();
-      await Gstr2aService.reconcile(ctx.db, tenantId, period);
-      const result = await Gstr2aService.getReconciliation(ctx.db, tenantId, period);
+      const result = await withTenantConnection(ctxFactory.rawDb, tenantId, async (db) => {
+        const ctx = ctxFactory.create(
+          { tenantId, userId: 0, correlationId: crypto.randomUUID() },
+          db
+        );
+        await Gstr2aService.reconcile(ctx.db, tenantId, period);
+        const reconciliation = await Gstr2aService.getReconciliation(ctx.db, tenantId, period);
 
-      await ctx.audit.log({
-        action: 'GSTR2A_RECONCILED',
-        entityType: 'GSTR2A',
-        entityId: tenantId,
-        after: { period, summary: result.summary } as unknown as Record<string, unknown>,
+        await ctx.audit.log({
+          action: 'GSTR2A_RECONCILED',
+          entityType: 'GSTR2A',
+          entityId: tenantId,
+          after: { period, summary: reconciliation.summary } as unknown as Record<string, unknown>,
+        });
+
+        return reconciliation;
       });
 
       return reply.code(200).send({ data: { period, summary: result.summary } });

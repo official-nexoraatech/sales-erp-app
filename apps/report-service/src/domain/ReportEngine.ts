@@ -1,7 +1,12 @@
 ﻿import { sql } from 'drizzle-orm';
 import type { ErpDatabase, ReplicaRouter } from '@erp/db';
 import type Redis from 'ioredis';
-import { TenantScopedCache, TenantScopedDatabase, ReportsEngine } from '@erp/sdk';
+import {
+  TenantScopedCache,
+  TenantScopedDatabase,
+  ReportsEngine,
+  withTenantConnection,
+} from '@erp/sdk';
 import { decryptField } from '@erp/utils/server';
 import { requireEnv } from '@erp/config';
 
@@ -85,8 +90,18 @@ export class ReportEngine {
     private readonly replicaRouter?: ReplicaRouter
   ) {}
 
+  // Phase 9 GUC-per-request rollout — migrated 2026-08-21. New pattern (mirrors
+  // dashboard.routes.ts in this same service): replicaRouter.forRead() must resolve which
+  // physical connection to use FIRST, then that resolved connection gets wrapped in
+  // withTenantConnection — createReadReplicaClient() returns a full ErpDatabase, so
+  // `.transaction()` + `SET LOCAL`/`set_config()` work identically against the replica (a hot
+  // standby rejects DML, not read-only session operations). runQuery() now takes the scoped db
+  // as a parameter instead of resolving replicaRouter.forRead() internally.
   async generate(slug: string, tenantId: number, params: ReportParams): Promise<ReportResult> {
-    const rawRows = await this.runQuery(slug, tenantId, params);
+    const readDb = this.replicaRouter ? await this.replicaRouter.forRead() : this.db;
+    const rawRows = await withTenantConnection(readDb, tenantId, (scopedDb) =>
+      this.runQuery(slug, tenantId, params, scopedDb)
+    );
     const rows = rawRows.map((row) => {
       const out: ReportRow = {};
       for (const [k, v] of Object.entries(row)) {
@@ -105,9 +120,9 @@ export class ReportEngine {
   private async runQuery(
     slug: string,
     tenantId: number,
-    params: ReportParams
+    params: ReportParams,
+    db: DbClient
   ): Promise<ReportRow[]> {
-    const db = this.replicaRouter ? await this.replicaRouter.forRead() : this.db;
     const tid = tenantId;
     const from = params.fromDate ?? params.date ?? params.asOfDate ?? '2000-01-01';
     const to = params.toDate ?? params.date ?? params.asOfDate ?? '2099-12-31';

@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { ErpDatabase } from '@erp/db';
+import { withTenantConnection } from '@erp/sdk';
 import { notificationLog, notificationDeliveryEvents, outboxEvents } from '@erp/db';
 import { eq, like } from 'drizzle-orm';
 import { ulid } from 'ulid';
@@ -81,6 +82,13 @@ export async function applyDeliveryUpdate(
   });
 }
 
+// Phase 9 GUC-per-request rollout — migrated 2026-08-21, caveat 4f (public route, tenant
+// resolved by the route itself rather than a JWT). Each provider payload is a batch of reports/
+// events; for each one, the `notificationLog` lookup by externalMessageId is inherently
+// cross-tenant (there's no tenant to scope to until that lookup resolves), so it stays
+// unscoped — then, once logRow.tenantId is known, the actual write pair
+// (recordDeliveryEvent + applyDeliveryUpdate) runs inside its own withTenantConnection wrap, one
+// per loop iteration (same loop-shaped pattern as event-service's DLQ replay route).
 export async function webhookRoutes(
   fastify: FastifyInstance,
   db: ErpDatabase,
@@ -136,23 +144,26 @@ export async function webhookRoutes(
         statusUpper === 'DELIVERED' ? 'DELIVERED' : statusUpper === 'FAILED' ? 'FAILED' : null;
       if (!status) continue;
 
-      const isNew = await recordDeliveryEvent(
-        db,
-        logRow.tenantId,
-        logRow.id,
-        'MSG91',
-        `${report.requestId}:${statusUpper}`,
-        statusUpper
-      );
-      if (!isNew) continue;
+      const applied = await withTenantConnection(db, logRow.tenantId, async (scopedDb) => {
+        const isNew = await recordDeliveryEvent(
+          scopedDb,
+          logRow.tenantId,
+          logRow.id,
+          'MSG91',
+          `${report.requestId}:${statusUpper}`,
+          statusUpper
+        );
+        if (!isNew) return false;
 
-      await applyDeliveryUpdate(
-        db,
-        logRow,
-        status,
-        status === 'FAILED' ? 'MSG91 reported delivery failure' : undefined
-      );
-      processed++;
+        await applyDeliveryUpdate(
+          scopedDb,
+          logRow,
+          status,
+          status === 'FAILED' ? 'MSG91 reported delivery failure' : undefined
+        );
+        return true;
+      });
+      if (applied) processed++;
     }
 
     return reply.code(200).send({ data: { processed } });
@@ -182,6 +193,7 @@ export async function webhookRoutes(
     let processed = 0;
     for (const event of events) {
       if (!event.sg_message_id || !event.sg_event_id) continue;
+      const sgEventId = event.sg_event_id;
       const messageIdPrefix = event.sg_message_id.split('.')[0];
       if (!messageIdPrefix) continue;
       const [logRow] = await db
@@ -198,23 +210,26 @@ export async function webhookRoutes(
             : null;
       if (!status) continue;
 
-      const isNew = await recordDeliveryEvent(
-        db,
-        logRow.tenantId,
-        logRow.id,
-        'SENDGRID',
-        event.sg_event_id,
-        event.event ?? 'unknown'
-      );
-      if (!isNew) continue;
+      const applied = await withTenantConnection(db, logRow.tenantId, async (scopedDb) => {
+        const isNew = await recordDeliveryEvent(
+          scopedDb,
+          logRow.tenantId,
+          logRow.id,
+          'SENDGRID',
+          sgEventId,
+          event.event ?? 'unknown'
+        );
+        if (!isNew) return false;
 
-      await applyDeliveryUpdate(
-        db,
-        logRow,
-        status,
-        status === 'FAILED' ? `SendGrid reported ${event.event}` : undefined
-      );
-      processed++;
+        await applyDeliveryUpdate(
+          scopedDb,
+          logRow,
+          status,
+          status === 'FAILED' ? `SendGrid reported ${event.event}` : undefined
+        );
+        return true;
+      });
+      if (applied) processed++;
     }
 
     return reply.code(200).send({ data: { processed } });
@@ -260,23 +275,26 @@ export async function webhookRoutes(
             : null;
       if (!status) continue;
 
-      const isNew = await recordDeliveryEvent(
-        db,
-        logRow.tenantId,
-        logRow.id,
-        'META',
-        `${s.id}:${statusUpper}:${s.timestamp ?? ''}`,
-        statusUpper
-      );
-      if (!isNew) continue;
+      const applied = await withTenantConnection(db, logRow.tenantId, async (scopedDb) => {
+        const isNew = await recordDeliveryEvent(
+          scopedDb,
+          logRow.tenantId,
+          logRow.id,
+          'META',
+          `${s.id}:${statusUpper}:${s.timestamp ?? ''}`,
+          statusUpper
+        );
+        if (!isNew) return false;
 
-      await applyDeliveryUpdate(
-        db,
-        logRow,
-        status,
-        status === 'FAILED' ? 'WhatsApp reported delivery failure' : undefined
-      );
-      processed++;
+        await applyDeliveryUpdate(
+          scopedDb,
+          logRow,
+          status,
+          status === 'FAILED' ? 'WhatsApp reported delivery failure' : undefined
+        );
+        return true;
+      });
+      if (applied) processed++;
     }
 
     return reply.code(200).send({ data: { processed } });
@@ -335,18 +353,21 @@ export async function webhookRoutes(
         .where(eq(notificationLog.externalMessageId, mid));
       if (!logRow) continue;
 
-      const isNew = await recordDeliveryEvent(
-        db,
-        logRow.tenantId,
-        logRow.id,
-        'META',
-        `${mid}:DELIVERED`,
-        'DELIVERED'
-      );
-      if (!isNew) continue;
+      const applied = await withTenantConnection(db, logRow.tenantId, async (scopedDb) => {
+        const isNew = await recordDeliveryEvent(
+          scopedDb,
+          logRow.tenantId,
+          logRow.id,
+          'META',
+          `${mid}:DELIVERED`,
+          'DELIVERED'
+        );
+        if (!isNew) return false;
 
-      await applyDeliveryUpdate(db, logRow, 'DELIVERED', undefined);
-      processed++;
+        await applyDeliveryUpdate(scopedDb, logRow, 'DELIVERED', undefined);
+        return true;
+      });
+      if (applied) processed++;
     }
 
     return reply.code(200).send({ data: { processed } });

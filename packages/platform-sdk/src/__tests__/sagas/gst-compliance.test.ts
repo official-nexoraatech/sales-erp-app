@@ -16,14 +16,29 @@ vi.mock('@erp/db', () => ({
 
 vi.mock('drizzle-orm', () => ({
   eq: vi.fn((a: { columnName: string }, b: unknown) => ({ type: 'eq', col: a.columnName, val: b })),
-  and: vi.fn((...args: Array<{ type: string; col?: string; val?: unknown }>) => ({ type: 'and', args })),
+  and: vi.fn((...args: Array<{ type: string; col?: string; val?: unknown }>) => ({
+    type: 'and',
+    args,
+  })),
+  // withTenantConnection (tenantConnection.ts) uses sql`` for its SET LOCAL call — a wholesale
+  // drizzle-orm mock without this makes that call throw, not an obvious error.
+  sql: vi.fn(() => '__sql__'),
 }));
 
-import { createGstComplianceStepFactory, GST_COMPLIANCE_SAGA_TYPE, EWB_VALUE_THRESHOLD } from '../../sagas/gst-compliance.js';
+import {
+  createGstComplianceStepFactory,
+  GST_COMPLIANCE_SAGA_TYPE,
+  EWB_VALUE_THRESHOLD,
+} from '../../sagas/gst-compliance.js';
 import type { GstComplianceActionDeps } from '../../sagas/gst-compliance.js';
 import type { ErpDatabase } from '@erp/db';
 
-interface Cond { type: string; col?: string; val?: unknown; args?: Cond[] }
+interface Cond {
+  type: string;
+  col?: string;
+  val?: unknown;
+  args?: Cond[];
+}
 
 function matches(row: Record<string, unknown>, cond: Cond): boolean {
   if (cond.type === 'and') return (cond.args ?? []).every((c) => matches(row, c));
@@ -38,7 +53,11 @@ function makeFakeDb(invoiceRows: Array<Record<string, unknown>>) {
       from: (table: { __name: string }) => ({
         where: (cond: Cond) => ({
           limit: (_n: number) =>
-            Promise.resolve((table.__name === 'invoices' ? invoiceRows : einvoiceRows).filter((r) => matches(r, cond))),
+            Promise.resolve(
+              (table.__name === 'invoices' ? invoiceRows : einvoiceRows).filter((r) =>
+                matches(r, cond)
+              )
+            ),
         }),
       }),
     }),
@@ -51,15 +70,27 @@ function makeFakeDb(invoiceRows: Array<Record<string, unknown>>) {
         },
       }),
     }),
+    // RLS-readiness follow-up (2026-08-22): both DB calls in gst-compliance.ts now go through
+    // withTenantConnection, which calls pooledDb.transaction(async trx => { await
+    // trx.execute(...); return fn(trx); }) — the mock just runs the callback against itself,
+    // same identity pattern used elsewhere in this rollout's test-mock fixes.
+    execute: (_query: unknown) => Promise.resolve([]),
+    transaction: (fn: (trx: unknown) => Promise<unknown>) => fn(db),
   };
   return db as unknown as ErpDatabase;
 }
 
 function makeDeps(calls: string[]): GstComplianceActionDeps {
   return {
-    generateIrn: async () => { calls.push('generateIrn'); },
-    cancelIrn: async () => { calls.push('cancelIrn'); },
-    generateEwayBill: async () => { calls.push('generateEwayBill'); },
+    generateIrn: async () => {
+      calls.push('generateIrn');
+    },
+    cancelIrn: async () => {
+      calls.push('cancelIrn');
+    },
+    generateEwayBill: async () => {
+      calls.push('generateEwayBill');
+    },
   };
 }
 
@@ -96,10 +127,15 @@ describe('createGstComplianceStepFactory', () => {
   });
 
   it('generate_eway_bill.compensate flags the einvoice_data row for manual review instead of calling NIC', async () => {
-    const db = makeFakeDb([{ id: 4, tenantId: 1, grandTotal: String(EWB_VALUE_THRESHOLD + 1) }]) as ErpDatabase & {
+    const db = makeFakeDb([
+      { id: 4, tenantId: 1, grandTotal: String(EWB_VALUE_THRESHOLD + 1) },
+    ]) as ErpDatabase & {
       einvoiceRows: Array<Record<string, unknown>>;
     };
-    (db as unknown as { einvoiceRows: Array<Record<string, unknown>> }).einvoiceRows.push({ tenantId: 1, invoiceId: 4 });
+    (db as unknown as { einvoiceRows: Array<Record<string, unknown>> }).einvoiceRows.push({
+      tenantId: 1,
+      invoiceId: 4,
+    });
 
     const calls: string[] = [];
     const factory = createGstComplianceStepFactory(db, makeDeps(calls));
@@ -109,7 +145,8 @@ describe('createGstComplianceStepFactory', () => {
     await ewbStep.compensate!(context);
 
     expect(calls).not.toContain('generateEwayBill');
-    const row = (db as unknown as { einvoiceRows: Array<Record<string, unknown>> }).einvoiceRows[0]!;
+    const row = (db as unknown as { einvoiceRows: Array<Record<string, unknown>> })
+      .einvoiceRows[0]!;
     expect(row['ewbStatus']).toBe('EWB_GENERATION_FAILED_MANUAL_REVIEW');
   });
 

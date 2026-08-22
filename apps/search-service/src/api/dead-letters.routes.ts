@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { ErpDatabase } from '@erp/db';
+import { withTenantConnection } from '@erp/sdk';
 import { dlqItems } from '@erp/db';
 import { and, count, desc, eq, sql } from 'drizzle-orm';
 import type { ERPEventPayload } from '@erp/types';
@@ -19,6 +20,10 @@ function hasPermission(request: unknown, perm: string): boolean {
 // marker (see main.ts's eventDispatcher) so this view never shows another service's entries.
 const SEARCH_CONSUMER_FILTER = sql`${dlqItems.headers}->>'consumer' = 'search-service'`;
 
+// Phase 9 GUC-per-request rollout — migrated 2026-08-21. The list and discard routes have no
+// external I/O. The retry route calls SearchEngine (a real Elasticsearch client, network I/O)
+// with a DB read before and a DB write after — restructured per caveat 4g into two separate
+// withTenantConnection wraps, with the ES call itself running strictly between them.
 export async function deadLettersRoutes(
   fastify: FastifyInstance,
   db: ErpDatabase,
@@ -39,26 +44,30 @@ export async function deadLettersRoutes(
       const size = Math.min(parseInt(q.size ?? '50', 10), 100);
       const status = q.status ?? 'PENDING';
 
-      const whereClause = and(
-        eq(dlqItems.tenantId, tenantId),
-        eq(dlqItems.status, status as 'PENDING' | 'REPLAYED' | 'DISCARDED'),
-        SEARCH_CONSUMER_FILTER
-      );
+      const result = await withTenantConnection(db, tenantId, async (scopedDb) => {
+        const whereClause = and(
+          eq(dlqItems.tenantId, tenantId),
+          eq(dlqItems.status, status as 'PENDING' | 'REPLAYED' | 'DISCARDED'),
+          SEARCH_CONSUMER_FILTER
+        );
 
-      const [rows, totalRows] = await Promise.all([
-        db
-          .select()
-          .from(dlqItems)
-          .where(whereClause)
-          .orderBy(desc(dlqItems.createdAt), desc(dlqItems.id))
-          .limit(size)
-          .offset(page * size),
-        db.select({ total: count() }).from(dlqItems).where(whereClause),
-      ]);
+        const [rows, totalRows] = await Promise.all([
+          scopedDb
+            .select()
+            .from(dlqItems)
+            .where(whereClause)
+            .orderBy(desc(dlqItems.createdAt), desc(dlqItems.id))
+            .limit(size)
+            .offset(page * size),
+          scopedDb.select({ total: count() }).from(dlqItems).where(whereClause),
+        ]);
+
+        return { rows, total: totalRows[0]?.total ?? 0 };
+      });
 
       return reply
         .code(200)
-        .send({ data: { content: rows, totalElements: totalRows[0]?.total ?? 0, page, size } });
+        .send({ data: { content: result.rows, totalElements: result.total, page, size } });
     }
   );
 
@@ -74,31 +83,42 @@ export async function deadLettersRoutes(
       const { tenantId } = (request as unknown as AuthedRequest).auth;
       const id = parseInt(request.params.id, 10);
 
-      const [item] = await db
-        .select()
-        .from(dlqItems)
-        .where(and(eq(dlqItems.id, id), eq(dlqItems.tenantId, tenantId), SEARCH_CONSUMER_FILTER));
-      if (!item) throw new NotFoundError('Dead-letter item', id);
-      if (item.status !== 'PENDING') {
-        throw new BusinessError(
-          'ALREADY_RESOLVED',
-          `Dead-letter item ${id} is already ${item.status.toLowerCase()}`
-        );
-      }
+      const item = await withTenantConnection(db, tenantId, async (scopedDb) => {
+        const [row] = await scopedDb
+          .select()
+          .from(dlqItems)
+          .where(and(eq(dlqItems.id, id), eq(dlqItems.tenantId, tenantId), SEARCH_CONSUMER_FILTER));
+        if (!row) throw new NotFoundError('Dead-letter item', id);
+        if (row.status !== 'PENDING') {
+          throw new BusinessError(
+            'ALREADY_RESOLVED',
+            `Dead-letter item ${id} is already ${row.status.toLowerCase()}`
+          );
+        }
+        return row;
+      });
 
       try {
         await syncSearchIndex(item.payload as unknown as ERPEventPayload, engine);
-        await db
-          .update(dlqItems)
-          .set({ status: 'REPLAYED', lastRetriedAt: new Date() })
-          .where(eq(dlqItems.id, id));
+        await withTenantConnection(db, tenantId, (scopedDb) =>
+          scopedDb
+            .update(dlqItems)
+            .set({ status: 'REPLAYED', lastRetriedAt: new Date() })
+            .where(eq(dlqItems.id, id))
+        );
         return reply.code(200).send({ data: { message: 'Retry succeeded', id } });
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err);
-        await db
-          .update(dlqItems)
-          .set({ retryCount: item.retryCount + 1, lastRetriedAt: new Date(), errorMessage: errMsg })
-          .where(eq(dlqItems.id, id));
+        await withTenantConnection(db, tenantId, (scopedDb) =>
+          scopedDb
+            .update(dlqItems)
+            .set({
+              retryCount: item.retryCount + 1,
+              lastRetriedAt: new Date(),
+              errorMessage: errMsg,
+            })
+            .where(eq(dlqItems.id, id))
+        );
         return reply.code(502).send({ error: { code: 'RETRY_FAILED', message: errMsg } });
       }
     }
@@ -116,13 +136,15 @@ export async function deadLettersRoutes(
       const { tenantId } = (request as unknown as AuthedRequest).auth;
       const id = parseInt(request.params.id, 10);
 
-      const [item] = await db
-        .select()
-        .from(dlqItems)
-        .where(and(eq(dlqItems.id, id), eq(dlqItems.tenantId, tenantId), SEARCH_CONSUMER_FILTER));
-      if (!item) throw new NotFoundError('Dead-letter item', id);
+      await withTenantConnection(db, tenantId, async (scopedDb) => {
+        const [item] = await scopedDb
+          .select()
+          .from(dlqItems)
+          .where(and(eq(dlqItems.id, id), eq(dlqItems.tenantId, tenantId), SEARCH_CONSUMER_FILTER));
+        if (!item) throw new NotFoundError('Dead-letter item', id);
 
-      await db.update(dlqItems).set({ status: 'DISCARDED' }).where(eq(dlqItems.id, id));
+        await scopedDb.update(dlqItems).set({ status: 'DISCARDED' }).where(eq(dlqItems.id, id));
+      });
       return reply.code(200).send({ data: { message: 'Discarded', id } });
     }
   );

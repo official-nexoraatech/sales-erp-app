@@ -1,11 +1,6 @@
-// CP-7 (Campaign Management Platform initiative) — permission-guard tests for the three new
-// granular CRM permissions added this phase: CRM_CAMPAIGN_APPROVE, CRM_CAMPAIGN_ANALYTICS_VIEW,
-// CRM_AUTOMATION_MANAGE. Per this codebase's documented recurring bug
-// (rbac_dead_permission_constant_pattern), a permission constant can be granted in
-// role-defaults.ts but checked under a different constant at the route — these tests verify the
-// route-level guard for each new constant actually gates on that exact constant, with both a
-// positive (holds the permission) and negative (does not) case, matching the pattern in
-// quotation-sale-return-permission-guards.test.ts / payment-view-permission-guard.test.ts.
+// CP-7/CP-8 (Campaign Management Platform initiative) — permission-guard tests for the routes
+// that stayed in sales-service's crm.routes.ts after the CRM/O2C split (migration 7) moved the
+// campaign-specific describe blocks to crm-service (see that file's own header comment).
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { generateKeyPairSync } from 'node:crypto';
@@ -15,13 +10,7 @@ import { PERMISSIONS } from '@erp/types';
 vi.mock('@erp/db', () => ({
   customers: {},
   customerInteractions: {},
-  customerSegments: {},
-  campaigns: {},
-  campaignTemplates: {},
-  campaignAutomationRules: {},
-  campaignComments: {},
   businessSeasons: {},
-  notificationLog: {},
   tenantSenderIdentity: {},
   webhookSubscriptions: {},
   tenantCommunicationSettings: {},
@@ -31,10 +20,8 @@ vi.mock('drizzle-orm', () => ({
   and: vi.fn(() => '__and__'),
   eq: vi.fn(() => '__eq__'),
   gte: vi.fn(() => '__gte__'),
-  inArray: vi.fn(() => '__inArray__'),
   isNull: vi.fn(() => '__isNull__'),
   lte: vi.fn(() => '__lte__'),
-  or: vi.fn(() => '__or__'),
   sql: vi.fn(() => '__sql__'),
 }));
 
@@ -74,129 +61,9 @@ beforeAll(async () => {
   });
   privateKey = await importPKCS8(privPem, 'RS256');
   process.env['JWT_PUBLIC_KEY'] = pubPem;
+  process.env['JWT_ISSUER'] = TEST_ISSUER;
 });
 
-describe('POST /crm/campaigns/:id/approve — requirePermission(CRM_CAMPAIGN_APPROVE)', () => {
-  let app: FastifyInstance;
-  beforeAll(async () => {
-    app = Fastify({ logger: false });
-    await crmRoutes(app, mockCtxFactory);
-  });
-  afterAll(() => app.close());
-
-  it('403s a caller without CRM_CAMPAIGN_APPROVE', async () => {
-    const token = await makeToken([PERMISSIONS.CRM_CAMPAIGN_CREATE]);
-    const res = await app.inject({
-      method: 'POST',
-      url: '/crm/campaigns/1/approve',
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    expect(res.statusCode).toBe(403);
-  });
-
-  it('does not 403 a caller with CRM_CAMPAIGN_APPROVE', async () => {
-    const token = await makeToken([PERMISSIONS.CRM_CAMPAIGN_APPROVE]);
-    const res = await app.inject({
-      method: 'POST',
-      url: '/crm/campaigns/1/approve',
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    expect(res.statusCode).not.toBe(403);
-  });
-});
-
-describe('POST /crm/campaigns/:id/reject — requirePermission(CRM_CAMPAIGN_APPROVE)', () => {
-  let app: FastifyInstance;
-  beforeAll(async () => {
-    app = Fastify({ logger: false });
-    await crmRoutes(app, mockCtxFactory);
-  });
-  afterAll(() => app.close());
-
-  it('403s a caller without CRM_CAMPAIGN_APPROVE, even one who can create campaigns', async () => {
-    const token = await makeToken([PERMISSIONS.CRM_CAMPAIGN_CREATE]);
-    const res = await app.inject({
-      method: 'POST',
-      url: '/crm/campaigns/1/reject',
-      headers: { Authorization: `Bearer ${token}` },
-      payload: { reason: 'x' },
-    });
-    expect(res.statusCode).toBe(403);
-  });
-
-  it('does not 403 a caller with CRM_CAMPAIGN_APPROVE', async () => {
-    const token = await makeToken([PERMISSIONS.CRM_CAMPAIGN_APPROVE]);
-    const res = await app.inject({
-      method: 'POST',
-      url: '/crm/campaigns/1/reject',
-      headers: { Authorization: `Bearer ${token}` },
-      payload: { reason: 'x' },
-    });
-    expect(res.statusCode).not.toBe(403);
-  });
-});
-
-describe('GET /crm/campaigns/:id/stats — requirePermission(CRM_CAMPAIGN_ANALYTICS_VIEW)', () => {
-  let app: FastifyInstance;
-  beforeAll(async () => {
-    app = Fastify({ logger: false });
-    await crmRoutes(app, mockCtxFactory);
-  });
-  afterAll(() => app.close());
-
-  it('403s a caller with only the broader CRM_VIEW — analytics is a separate grant', async () => {
-    const token = await makeToken([PERMISSIONS.CRM_VIEW]);
-    const res = await app.inject({
-      method: 'GET',
-      url: '/crm/campaigns/1/stats',
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    expect(res.statusCode).toBe(403);
-  });
-
-  it('does not 403 a caller with CRM_CAMPAIGN_ANALYTICS_VIEW', async () => {
-    const token = await makeToken([PERMISSIONS.CRM_CAMPAIGN_ANALYTICS_VIEW]);
-    const res = await app.inject({
-      method: 'GET',
-      url: '/crm/campaigns/1/stats',
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    expect(res.statusCode).not.toBe(403);
-  });
-});
-
-describe('POST /crm/automation-rules — requirePermission(CRM_AUTOMATION_MANAGE)', () => {
-  let app: FastifyInstance;
-  beforeAll(async () => {
-    app = Fastify({ logger: false });
-    await crmRoutes(app, mockCtxFactory);
-  });
-  afterAll(() => app.close());
-
-  it('403s a caller with only CRM_CAMPAIGN_CREATE — automation is a separate grant now', async () => {
-    const token = await makeToken([PERMISSIONS.CRM_CAMPAIGN_CREATE]);
-    const res = await app.inject({
-      method: 'POST',
-      url: '/crm/automation-rules',
-      headers: { Authorization: `Bearer ${token}` },
-      payload: { triggerType: 'BIRTHDAY', channel: 'SMS', messageTemplate: 'Hi' },
-    });
-    expect(res.statusCode).toBe(403);
-  });
-
-  it('does not 403 a caller with CRM_AUTOMATION_MANAGE', async () => {
-    const token = await makeToken([PERMISSIONS.CRM_AUTOMATION_MANAGE]);
-    const res = await app.inject({
-      method: 'POST',
-      url: '/crm/automation-rules',
-      headers: { Authorization: `Bearer ${token}` },
-      payload: { triggerType: 'BIRTHDAY', channel: 'SMS', messageTemplate: 'Hi' },
-    });
-    expect(res.statusCode).not.toBe(403);
-  });
-});
-
-// CP-8 (Campaign Management Platform initiative): two more new granular CRM permissions.
 describe('PUT /crm/sender-identity — requirePermission(CRM_SENDER_IDENTITY_MANAGE)', () => {
   let app: FastifyInstance;
   beforeAll(async () => {

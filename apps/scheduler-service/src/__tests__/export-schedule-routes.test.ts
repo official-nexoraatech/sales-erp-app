@@ -29,7 +29,10 @@ function makeFakeDb(opts: {
   selectRows?: unknown[];
   updateReturn?: unknown[];
 }) {
-  return {
+  const db: Record<string, unknown> = {
+    // withTenantConnection wraps every route in a transaction that sets the GUC via
+    // `.execute()` before invoking the callback with this same object as the scoped db.
+    execute: async () => undefined,
     insert: vi.fn(() => ({
       values: vi.fn(() => ({
         returning: vi.fn().mockResolvedValue(opts.insertReturn ? [opts.insertReturn] : []),
@@ -49,6 +52,8 @@ function makeFakeDb(opts: {
       })),
     })),
   };
+  db['transaction'] = (cb: (trx: unknown) => unknown) => cb(db);
+  return db;
 }
 
 describe('POST /export-schedules', () => {

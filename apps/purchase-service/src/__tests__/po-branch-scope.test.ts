@@ -90,12 +90,17 @@ function makeDbRaw(script: unknown[]) {
     reject: (e: unknown) => void
   ) => next().then(resolve, reject);
   chainable['transaction'] = (fn: (t: typeof chainable) => Promise<unknown>) => fn(chainable);
+  chainable['execute'] = () => Promise.resolve();
   return chainable;
 }
 
 function makeCtxFactory(dbRaw: ReturnType<typeof makeDbRaw>): PlatformContextFactory {
   return {
-    create: () => ({ db: { raw: dbRaw } }),
+    rawDb: dbRaw,
+    create: (tenant: { tenantId: number; userId: number; correlationId: string }) => ({
+      db: { raw: dbRaw },
+      tenant,
+    }),
   } as unknown as PlatformContextFactory;
 }
 

@@ -400,6 +400,7 @@ describe('InvoiceService credit limit', () => {
 
     trx.where = vi
       .fn()
+      .mockResolvedValueOnce([{ priceListId: null }]) // select customer.priceListId (Phase B)
       .mockResolvedValueOnce([{ creditLimit: '5000', creditLimitEnabled: true }])
       .mockResolvedValueOnce([{ currentBalance: '4000.00' }])
       // RuleEngine.evaluate(): select businessRules — the seeded "Block sale above credit
@@ -431,6 +432,7 @@ describe('InvoiceService credit limit', () => {
 
     trx.where = vi
       .fn()
+      .mockResolvedValueOnce([{ priceListId: null }]) // select customer.priceListId (Phase B)
       .mockResolvedValueOnce([{ creditLimit: '5000', creditLimitEnabled: true }])
       .mockResolvedValueOnce([{ currentBalance: '4000.00' }])
       .mockImplementation(() => hybridWhere(trx, []));
@@ -467,6 +469,7 @@ describe('InvoiceService.create — customer status guard', () => {
     const { db, trx } = makeDb();
     trx.where = vi
       .fn()
+      .mockResolvedValueOnce([{ priceListId: null }]) // select customer.priceListId (Phase B)
       .mockResolvedValueOnce([{ creditLimit: '0', creditLimitEnabled: false, status: 'BLOCKED' }]);
 
     const svc = new InvoiceService(db as never);
@@ -477,6 +480,7 @@ describe('InvoiceService.create — customer status guard', () => {
     const { db, trx } = makeDb();
     trx.where = vi
       .fn()
+      .mockResolvedValueOnce([{ priceListId: null }]) // select customer.priceListId (Phase B)
       .mockResolvedValueOnce([{ creditLimit: '0', creditLimitEnabled: false, status: 'INACTIVE' }]);
 
     const svc = new InvoiceService(db as never);
@@ -487,6 +491,7 @@ describe('InvoiceService.create — customer status guard', () => {
     const { db, trx } = makeDb();
     trx.where = vi
       .fn()
+      .mockResolvedValueOnce([{ priceListId: null }]) // select customer.priceListId (Phase B)
       .mockResolvedValueOnce([{ creditLimit: '0', creditLimitEnabled: false, status: 'ACTIVE' }])
       .mockImplementation(() => hybridWhere(trx, []));
     trx.returning = vi.fn().mockResolvedValue([{ id: 99 }]);
@@ -565,6 +570,7 @@ describe('InvoiceService.create — quotation conversion status guard', () => {
 
     trx.where = vi
       .fn()
+      .mockResolvedValueOnce([{ priceListId: null }]) // select customer.priceListId (Phase B)
       .mockResolvedValueOnce([{ creditLimit: '0', creditLimitEnabled: false }])
       .mockResolvedValueOnce([{ currentBalance: '0' }])
       .mockImplementation(() => hybridWhere(trx, []));
@@ -584,6 +590,7 @@ describe('InvoiceService.create — quotation conversion status guard', () => {
 
     trx.where = vi
       .fn()
+      .mockResolvedValueOnce([{ priceListId: null }]) // select customer.priceListId (Phase B)
       .mockResolvedValueOnce([{ creditLimit: '0', creditLimitEnabled: false }])
       .mockResolvedValueOnce([{ currentBalance: '0' }])
       .mockImplementation(() => hybridWhere(trx, []));

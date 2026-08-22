@@ -1,6 +1,14 @@
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import { createDatabaseClient } from '@erp/db';
-import { tenants, roles, users, branches, organizationSettings, featureFlags } from '@erp/db';
+import {
+  tenants,
+  roles,
+  users,
+  branches,
+  organizationSettings,
+  featureFlags,
+  businessTypes,
+} from '@erp/db';
 import { eq, and } from 'drizzle-orm';
 import type { StorageClient } from '@erp/sdk';
 import { TenantProvisioner } from '../domain/TenantProvisioner.js';
@@ -67,6 +75,15 @@ describe.skipIf(!DB_URL)('Tenant provisioning integration', () => {
     // compatibility when the caller doesn't specify one.
     expect(tenant!.vertical).toBe('CLOTH_RETAIL');
 
+    // Business Profile Foundation: businessTypeId must be set at provisioning time (not
+    // left null), and must resolve to the business_types row whose code matches vertical.
+    expect(tenant!.businessTypeId).not.toBeNull();
+    const [businessType] = await db
+      .select()
+      .from(businessTypes)
+      .where(eq(businessTypes.id, tenant!.businessTypeId!));
+    expect(businessType!.code).toBe('CLOTH_RETAIL');
+
     // Roles must be seeded
     const seededRoles = await db.select().from(roles).where(eq(roles.tenantId, result.tenantId));
     expect(seededRoles.length).toBeGreaterThan(0);
@@ -110,6 +127,14 @@ describe.skipIf(!DB_URL)('Tenant provisioning integration', () => {
     try {
       const [tenant] = await db.select().from(tenants).where(eq(tenants.id, result.tenantId));
       expect(tenant!.vertical).toBe('GROCERY');
+
+      // Business Profile Foundation: same resolution proof, for the GROCERY business type.
+      expect(tenant!.businessTypeId).not.toBeNull();
+      const [businessType] = await db
+        .select()
+        .from(businessTypes)
+        .where(eq(businessTypes.id, tenant!.businessTypeId!));
+      expect(businessType!.code).toBe('GROCERY');
 
       // hr.tailoring.enabled is globally defaulted to true (see
       // apps/hr-service/src/api/internal.routes.ts) — a GROCERY tenant must get its own

@@ -15,7 +15,7 @@ import {
 import type { ErpDatabase } from '@erp/db';
 import { BusinessError, NotFoundError } from '@erp/types';
 import { ulid } from 'ulid';
-import { ValuationService } from './ValuationService.js';
+import { ValuationService } from '@erp/sdk';
 
 export interface SaleReturnLineInput {
   invoiceLineId: number;

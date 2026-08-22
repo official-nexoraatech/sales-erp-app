@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { PlatformContextFactory } from '@erp/sdk';
-import { EventStoreService } from '@erp/sdk';
+import { EventStoreService, tenantScopedHandler } from '@erp/sdk';
 import { z } from 'zod';
 import { PERMISSIONS } from '@erp/types';
 import { authenticate } from '../middleware/authenticate.js';
@@ -25,16 +25,22 @@ export async function eventStoreRoutes(
   // GET /admin/events/store — query event store
   fastify.get('/admin/events/store', {
     preHandler: requirePermission(PERMISSIONS.EVENT_STORE_VIEW),
-    handler: async (request, reply) => {
+    handler: tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
       const parsed = EventStoreQuerySchema.safeParse(request.query);
       if (!parsed.success) {
-        return reply.code(400).send({ error: { code: 'VALIDATION_ERROR', message: 'Invalid query parameters', details: parsed.error.flatten() } });
+        return reply
+          .code(400)
+          .send({
+            error: {
+              code: 'VALIDATION_ERROR',
+              message: 'Invalid query parameters',
+              details: parsed.error.flatten(),
+            },
+          });
       }
 
       const q = parsed.data;
-      const ctx = ctxFactory.create({ tenantId: request.auth.tenantId, userId: request.auth.userId, correlationId: (request.headers['x-correlation-id'] as string) ?? 'system' });
-
-      const svc = new EventStoreService(ctx.db, request.auth.tenantId);
+      const svc = new EventStoreService(ctx.db, ctx.tenant.tenantId);
       const queryParams: Parameters<typeof svc.query>[0] = {
         limit: q.limit,
         offset: q.offset,
@@ -47,7 +53,7 @@ export async function eventStoreRoutes(
       const events = await svc.query(queryParams);
 
       return reply.code(200).send({ data: events });
-    },
+    }),
   });
 
   // POST /admin/events/replay/:aggregateType/:aggregateId — rebuild aggregate state
@@ -55,18 +61,27 @@ export async function eventStoreRoutes(
     '/admin/events/replay/:aggregateType/:aggregateId',
     {
       preHandler: requirePermission(PERMISSIONS.EVENT_STORE_VIEW),
-      handler: async (request, reply) => {
-        const { aggregateType, aggregateId } = request.params;
+      handler: tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+        const { aggregateType, aggregateId } = request.params as {
+          aggregateType: string;
+          aggregateId: string;
+        };
         if (!aggregateType || !aggregateId) {
-          return reply.code(400).send({ error: { code: 'VALIDATION_ERROR', message: 'aggregateType and aggregateId are required' } });
+          return reply
+            .code(400)
+            .send({
+              error: {
+                code: 'VALIDATION_ERROR',
+                message: 'aggregateType and aggregateId are required',
+              },
+            });
         }
 
-        const ctx = ctxFactory.create({ tenantId: request.auth.tenantId, userId: request.auth.userId, correlationId: (request.headers['x-correlation-id'] as string) ?? 'system' });
-        const svc = new EventStoreService(ctx.db, request.auth.tenantId);
+        const svc = new EventStoreService(ctx.db, ctx.tenant.tenantId);
         const state = await svc.rebuild(aggregateType, aggregateId);
 
         return reply.code(200).send({ data: state });
-      },
+      }),
     }
   );
 }

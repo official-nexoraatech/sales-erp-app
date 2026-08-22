@@ -32,6 +32,7 @@ import { loadConfigWithSecrets } from '@erp/config';
 import { JobRegistry } from './JobRegistry.js';
 import { registerSystemJobs } from './jobs/system-jobs.js';
 import { registerProjectionRebuildJobs } from './jobs/projectionRebuildJobs.js';
+import { registerBillingJobs } from './jobs/billingJobs.js';
 import { registerExportGenerateJob } from './jobs/exportGenerateJob.js';
 import { registerUsageRollupJob } from './jobs/usageRollup.js';
 import { handleUsageEvent } from './jobs/usageEventConsumer.js';
@@ -74,6 +75,7 @@ async function bootstrap(): Promise<void> {
   const registry = new JobRegistry(redis, db);
   registerSystemJobs(registry, db, storage);
   registerProjectionRebuildJobs(registry, db);
+  registerBillingJobs(registry);
   registerExportGenerateJob(registry, db, storage);
   registerUsageRollupJob(registry, db);
 

@@ -31,6 +31,7 @@ vi.mock('@erp/db', () => ({
     tenantId: 'tenant_id',
     creditLimit: 'credit_limit',
     creditLimitEnabled: 'credit_limit_enabled',
+    priceListId: 'price_list_id',
   },
   items: {
     id: 'id',
@@ -39,6 +40,15 @@ vi.mock('@erp/db', () => ({
     version: 'version',
     minSalePrice: 'min_sale_price',
     trackInventory: 'track_inventory',
+    salePrice: 'sale_price',
+  },
+  priceListItems: {
+    id: 'id',
+    tenantId: 'tenant_id',
+    priceListId: 'price_list_id',
+    itemId: 'item_id',
+    minQty: 'min_qty',
+    salePrice: 'sale_price',
   },
   outboxEvents: {},
   projectionDashboardDaily: { tenantId: 'tenant_id', branchId: 'branch_id', date: 'date' },
@@ -163,6 +173,7 @@ const baseCreateParams = {
 describe('OFFLINE-02 — InvoiceService.create() idempotency-key dedup', () => {
   it('translates a unique-violation on invoices_tenant_client_operation_id into DuplicateOperationError', async () => {
     const script = [
+      [{ priceListId: null }], // select customer.priceListId (Phase B price resolution)
       [{ creditLimit: '0', creditLimitEnabled: false }], // select customer
       [{ currentBalance: '0' }], // select projectionCustomerBalance
       // price floor check skipped (overridePriceFloor: true)
@@ -181,6 +192,7 @@ describe('OFFLINE-02 — InvoiceService.create() idempotency-key dedup', () => {
 
   it('does not swallow a unique-violation on an unrelated constraint', async () => {
     const script = [
+      [{ priceListId: null }],
       [{ creditLimit: '0', creditLimitEnabled: false }],
       [{ currentBalance: '0' }],
       { __reject: uniqueViolation('some_other_constraint') },
@@ -196,6 +208,7 @@ describe('OFFLINE-02 — InvoiceService.create() idempotency-key dedup', () => {
 
   it('does not swallow a non-conflict error', async () => {
     const script = [
+      [{ priceListId: null }],
       [{ creditLimit: '0', creditLimitEnabled: false }],
       [{ currentBalance: '0' }],
       { __reject: new Error('connection lost') },
@@ -210,6 +223,7 @@ describe('OFFLINE-02 — InvoiceService.create() idempotency-key dedup', () => {
 
   it('writes clientOperationId into the invoice insert when provided', async () => {
     const script = [
+      [{ priceListId: null }],
       [{ creditLimit: '0', creditLimitEnabled: false }],
       [{ currentBalance: '0' }],
       [{ id: 1 }], // insert invoices ... returning
@@ -229,6 +243,7 @@ describe('OFFLINE-02 — InvoiceService.create() idempotency-key dedup', () => {
 
   it('two different operationIds each succeed independently (no cross-request interference)', async () => {
     const scriptA = [
+      [{ priceListId: null }],
       [{ creditLimit: '0', creditLimitEnabled: false }],
       [{ currentBalance: '0' }],
       [{ id: 10 }],
@@ -241,6 +256,7 @@ describe('OFFLINE-02 — InvoiceService.create() idempotency-key dedup', () => {
       [],
     ];
     const scriptB = [
+      [{ priceListId: null }],
       [{ creditLimit: '0', creditLimitEnabled: false }],
       [{ currentBalance: '0' }],
       [{ id: 11 }],
@@ -265,6 +281,7 @@ describe('OFFLINE-02 — InvoiceService.create() idempotency-key dedup', () => {
 
   it('still rejects a price-floor violation when no clientOperationId is supplied (backward compatible)', async () => {
     const script = [
+      [{ priceListId: null }],
       [{ creditLimit: '0', creditLimitEnabled: false }],
       [{ currentBalance: '0' }],
       [{ minSalePrice: '500.00', trackInventory: true }], // price floor check runs (no override)

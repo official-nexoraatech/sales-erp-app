@@ -1,6 +1,7 @@
 /* global process, fetch */
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import type { ErpDatabase } from '@erp/db';
+import { withTenantConnection } from '@erp/sdk';
 import { tenants } from '@erp/db';
 import { eq } from 'drizzle-orm';
 import { z } from 'zod';
@@ -49,12 +50,16 @@ async function checkInternalKey(req: FastifyRequest, reply: FastifyReply): Promi
   }
 }
 
+// Phase 9 GUC-per-request rollout — migrated 2026-08-21. NumberSeriesEngine held one ErpDatabase
+// built once at route-registration time (same ImportEngine-shaped gap seen in scheduler-service/
+// notification-service) — fixed by building a fresh instance per request from the scoped db.
+// ReportEngine.generate() already scopes its own connection internally (see ReportEngine.ts), so
+// its call sites here need no additional wrap.
 export async function reportRoutes(
   fastify: FastifyInstance,
   db: ErpDatabase,
   pdfEngine: PdfEngine
 ): Promise<void> {
-  const numberEngine = new NumberSeriesEngine(db);
   const reportEngine = new ReportEngine(db);
 
   // ── POST /internal/reports/outstanding-summary?tenantId=... — PG-026 ──────
@@ -78,10 +83,12 @@ export async function reportRoutes(
       const arTotal = ar.rows.reduce((sum, r) => sum + Number(r['totalOutstanding'] ?? 0), 0);
       const apTotal = ap.rows.reduce((sum, r) => sum + Number(r['totalOutstanding'] ?? 0), 0);
 
-      const [tenant] = await db
-        .select({ contactEmail: tenants.contactEmail })
-        .from(tenants)
-        .where(eq(tenants.id, tenantId));
+      const [tenant] = await withTenantConnection(db, tenantId, (scopedDb) =>
+        scopedDb
+          .select({ contactEmail: tenants.contactEmail })
+          .from(tenants)
+          .where(eq(tenants.id, tenantId))
+      );
       if (tenant?.contactEmail && (arTotal > 0 || apTotal > 0)) {
         const notificationUrl = process.env['NOTIFICATION_SERVICE_URL'] ?? 'http://localhost:3014';
         const apiKey = process.env['INTERNAL_API_KEY'] ?? '';
@@ -147,7 +154,14 @@ export async function reportRoutes(
 
       if (!body.formatTemplate) throw new ValidationError('formatTemplate is required');
 
-      await numberEngine.configure(tenantId, type, body.formatTemplate, body.branchId);
+      await withTenantConnection(db, tenantId, (scopedDb) =>
+        new NumberSeriesEngine(scopedDb).configure(
+          tenantId,
+          type,
+          body.formatTemplate,
+          body.branchId
+        )
+      );
       return reply.code(200).send({
         data: { message: 'Number series configured', type, formatTemplate: body.formatTemplate },
       });
@@ -162,7 +176,9 @@ export async function reportRoutes(
       const { tenantId } = (request as unknown as AuthedRequest).auth;
       const type = request.params.type.toUpperCase() as SeriesType;
 
-      const next = await numberEngine.preview(tenantId, type);
+      const next = await withTenantConnection(db, tenantId, (scopedDb) =>
+        new NumberSeriesEngine(scopedDb).preview(tenantId, type)
+      );
       return reply.code(200).send({ data: { nextNumber: next, type } });
     }
   );
@@ -177,7 +193,9 @@ export async function reportRoutes(
       const type = request.params.type.toUpperCase() as SeriesType;
       const body = request.body as { branchId?: number };
 
-      const next = await numberEngine.next(tenantId, type, body.branchId);
+      const next = await withTenantConnection(db, tenantId, (scopedDb) =>
+        new NumberSeriesEngine(scopedDb).next(tenantId, type, body.branchId)
+      );
       return reply.code(200).send({ data: { number: next } });
     }
   );

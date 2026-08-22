@@ -333,14 +333,15 @@ describe.skipIf(!DB_URL)('HealthScoringService — AI predictions integration', 
         );
       expect(firstRun?.dismissed).toBe(false);
 
-      const dismissed = await HealthScoringService.recordFeedback(
-        db,
-        TEST_TENANT,
-        'NEXT_BEST_ACTION',
-        firstRun!.id,
-        'DISMISS'
-      );
-      expect(dismissed).toBe(true);
+      // recordFeedback moved to crm-service (CRM/O2C split) — set the dismissed state directly
+      // via the same table it would have written to, so this test still exercises
+      // computeAndCachePredictions's dismiss-aware merge without a cross-service dependency.
+      const [dismissedRow] = await db
+        .update(crmNextBestActions)
+        .set({ dismissed: true, dismissedAt: new Date() })
+        .where(eq(crmNextBestActions.id, firstRun!.id))
+        .returning({ id: crmNextBestActions.id });
+      expect(dismissedRow?.id).toBe(firstRun!.id);
 
       await HealthScoringService.computeAndCachePredictions(db, TEST_TENANT);
       const [secondRun] = await db
@@ -375,13 +376,12 @@ describe.skipIf(!DB_URL)('HealthScoringService — AI predictions integration', 
         );
       expect(rec).toBeDefined();
 
-      await HealthScoringService.recordFeedback(
-        db,
-        TEST_TENANT,
-        'PRODUCT_RECOMMENDATION',
-        rec!.id,
-        'DISMISS'
-      );
+      // recordFeedback moved to crm-service (CRM/O2C split) — same direct-table-write
+      // substitution as the next-best-action test above.
+      await db
+        .update(crmProductRecommendations)
+        .set({ dismissed: true, dismissedAt: new Date() })
+        .where(eq(crmProductRecommendations.id, rec!.id));
 
       await HealthScoringService.computeAndCachePredictions(db, TEST_TENANT);
       const rows = await db
@@ -397,12 +397,20 @@ describe.skipIf(!DB_URL)('HealthScoringService — AI predictions integration', 
       expect(rows).toHaveLength(1);
       expect(rows[0]!.dismissed).toBe(true);
 
-      const { productRecommendations } = await HealthScoringService.getPredictionsForCustomer(
-        db,
-        TEST_TENANT,
-        target
-      );
-      expect(productRecommendations.find((r) => r.itemId === itemB)).toBeUndefined();
+      // getPredictionsForCustomer moved to crm-service (CRM/O2C split) — reproduce its
+      // not-dismissed filter with a direct query instead, same substitution as above.
+      const activeRows = await db
+        .select()
+        .from(crmProductRecommendations)
+        .where(
+          and(
+            eq(crmProductRecommendations.tenantId, TEST_TENANT),
+            eq(crmProductRecommendations.customerId, target),
+            eq(crmProductRecommendations.itemId, itemB),
+            eq(crmProductRecommendations.dismissed, false)
+          )
+        );
+      expect(activeRows).toHaveLength(0);
     }, 15_000);
   });
 });

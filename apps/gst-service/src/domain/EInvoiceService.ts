@@ -1,8 +1,15 @@
-import { eq, and, lte, lt, sql } from 'drizzle-orm';
-import type { TenantScopedDatabase } from '@erp/sdk';
-import { PlatformEventBus } from '@erp/sdk';
+import { eq, and, lt, sql } from 'drizzle-orm';
+import { TenantScopedDatabase, PlatformEventBus } from '@erp/sdk';
 import { type ErpDatabase } from '@erp/db';
-import { einvoiceData, invoices, invoiceLines, items, units, organizationSettings, customers } from '@erp/db';
+import {
+  einvoiceData,
+  invoices,
+  invoiceLines,
+  items,
+  units,
+  organizationSettings,
+  customers,
+} from '@erp/db';
 import { createDatabaseClient } from '@erp/db';
 import { createLogger } from '@erp/logger';
 import { BusinessError, NotFoundError } from '@erp/types';
@@ -235,64 +242,86 @@ export function buildNicPayload(input: BuildNicPayloadInput): NicEInvoicePayload
 // generate_irn step builds the identical payload the auto-IRN consumer would.
 // Returns null (with a warn log for the two "misconfigured" cases) when e-Invoice
 // doesn't apply or required data is missing — callers should skip silently.
+// RLS-readiness follow-up (2026-08-22): read-only, but callable from both the Kafka consumer
+// (already GUC-safe via PlatformEventConsumer.subscribe's own wrap) and GstComplianceSaga.ts
+// (not necessarily pre-wrapped) — all 4 SELECTs now run inside one db.transaction() so this is
+// safe regardless of caller context, same reasoning as generateIrn/cancelIrn above.
 export async function buildEinvoicePayloadInput(
   db: TenantScopedDatabase,
   tenantId: number,
   invoiceId: number,
-  overrides?: { customerGstin?: string; customerName?: string; placeOfSupply?: string; invoiceNumber?: string }
+  overrides?: {
+    customerGstin?: string;
+    customerName?: string;
+    placeOfSupply?: string;
+    invoiceNumber?: string;
+  }
 ): Promise<BuildNicPayloadInput | null> {
-  const [invoice] = await db.raw
-    .select()
-    .from(invoices)
-    .where(and(eq(invoices.tenantId, tenantId), eq(invoices.id, invoiceId)));
-  if (!invoice) return null;
+  const reads = await db.transaction(async (trx) => {
+    const [invoice] = await trx.raw
+      .select()
+      .from(invoices)
+      .where(and(eq(invoices.tenantId, tenantId), eq(invoices.id, invoiceId)));
+    if (!invoice) return null;
 
-  const lineRows = await db.raw
-    .select({
-      description: invoiceLines.description,
-      hsnCode: invoiceLines.hsnCode,
-      quantity: invoiceLines.quantity,
-      unitPrice: invoiceLines.unitPrice,
-      taxableAmount: invoiceLines.taxableAmount,
-      gstRate: invoiceLines.gstRate,
-      cgstAmount: invoiceLines.cgstAmount,
-      sgstAmount: invoiceLines.sgstAmount,
-      igstAmount: invoiceLines.igstAmount,
-      cessRate: invoiceLines.cessRate,
-      cessAmount: invoiceLines.cessAmount,
-      lineTotal: invoiceLines.lineTotal,
-      discountAmount: invoiceLines.discountAmount,
-      itemName: items.name,
-      unitAbbr: units.abbreviation,
-    })
-    .from(invoiceLines)
-    .leftJoin(items, eq(items.id, invoiceLines.itemId))
-    .leftJoin(units, eq(units.id, invoiceLines.unitId))
-    .where(and(eq(invoiceLines.tenantId, tenantId), eq(invoiceLines.invoiceId, invoiceId)));
-  if (lineRows.length === 0) return null;
+    const lineRows = await trx.raw
+      .select({
+        description: invoiceLines.description,
+        hsnCode: invoiceLines.hsnCode,
+        quantity: invoiceLines.quantity,
+        unitPrice: invoiceLines.unitPrice,
+        taxableAmount: invoiceLines.taxableAmount,
+        gstRate: invoiceLines.gstRate,
+        cgstAmount: invoiceLines.cgstAmount,
+        sgstAmount: invoiceLines.sgstAmount,
+        igstAmount: invoiceLines.igstAmount,
+        cessRate: invoiceLines.cessRate,
+        cessAmount: invoiceLines.cessAmount,
+        lineTotal: invoiceLines.lineTotal,
+        discountAmount: invoiceLines.discountAmount,
+        itemName: items.name,
+        unitAbbr: units.abbreviation,
+      })
+      .from(invoiceLines)
+      .leftJoin(items, eq(items.id, invoiceLines.itemId))
+      .leftJoin(units, eq(units.id, invoiceLines.unitId))
+      .where(and(eq(invoiceLines.tenantId, tenantId), eq(invoiceLines.invoiceId, invoiceId)));
+    if (lineRows.length === 0) return null;
 
-  const [org] = await db.raw
-    .select()
-    .from(organizationSettings)
-    .where(eq(organizationSettings.tenantId, tenantId));
-  if (!org?.gstin || !org.address) {
-    logger.warn({ invoiceId }, 'e-Invoice: seller GSTIN/address not configured; skipping auto-IRN');
-    return null;
-  }
+    const [org] = await trx.raw
+      .select()
+      .from(organizationSettings)
+      .where(eq(organizationSettings.tenantId, tenantId));
+    if (!org?.gstin || !org.address) {
+      logger.warn(
+        { invoiceId },
+        'e-Invoice: seller GSTIN/address not configured; skipping auto-IRN'
+      );
+      return null;
+    }
 
-  const [customer] = await db.raw
-    .select({
-      gstin: customers.gstin,
-      billingAddress: customers.billingAddress,
-      displayName: customers.displayName,
-      companyName: customers.companyName,
-    })
-    .from(customers)
-    .where(and(eq(customers.tenantId, tenantId), eq(customers.id, invoice.customerId)));
-  if (!customer?.billingAddress) {
-    logger.warn({ invoiceId }, 'e-Invoice: buyer billing address not on file; skipping auto-IRN');
-    return null;
-  }
+    const [customer] = await trx.raw
+      .select({
+        gstin: customers.gstin,
+        billingAddress: customers.billingAddress,
+        displayName: customers.displayName,
+        companyName: customers.companyName,
+      })
+      .from(customers)
+      .where(and(eq(customers.tenantId, tenantId), eq(customers.id, invoice.customerId)));
+    if (!customer?.billingAddress) {
+      logger.warn({ invoiceId }, 'e-Invoice: buyer billing address not on file; skipping auto-IRN');
+      return null;
+    }
+
+    return { invoice, lineRows, org, customer };
+  });
+
+  if (!reads) return null;
+  const { invoice, lineRows, org, customer } = reads;
+  // Re-narrow here — TS doesn't carry the inner transaction callback's narrowing of org/
+  // customer's optional fields through the db.transaction() generic + object-literal return.
+  if (!org.gstin || !org.address || !customer.billingAddress) return null;
 
   const customerGstin = overrides?.customerGstin ?? customer.gstin;
   if (!customerGstin) return null; // B2C — e-Invoice not applicable
@@ -310,7 +339,8 @@ export async function buildEinvoicePayloadInput(
     },
     buyer: {
       gstin: customerGstin,
-      legalName: customer.companyName || customer.displayName || overrides?.customerName || 'Customer',
+      legalName:
+        customer.companyName || customer.displayName || overrides?.customerName || 'Customer',
       placeOfSupply: overrides?.placeOfSupply ?? invoice.placeOfSupply,
       address1: customer.billingAddress.line1,
       location: customer.billingAddress.city,
@@ -354,14 +384,37 @@ export class EInvoiceService {
   ): Promise<NicIrnResponse> {
     const apiKey = process.env['NIC_API_KEY'];
     if (!apiKey) {
-      throw new BusinessError('NIC_NOT_CONFIGURED', 'NIC IRP API key not configured. Set NIC_API_KEY environment variable.');
+      throw new BusinessError(
+        'NIC_NOT_CONFIGURED',
+        'NIC IRP API key not configured. Set NIC_API_KEY environment variable.'
+      );
     }
 
-    // Check for existing IRN record
-    const [existing] = await db.raw
-      .select()
-      .from(einvoiceData)
-      .where(and(eq(einvoiceData.tenantId, tenantId), eq(einvoiceData.invoiceId, invoiceId)));
+    // RLS-readiness follow-up (2026-08-22): these two calls used to be bare db.raw.select/
+    // insert with no GUC set at all. db is a TenantScopedDatabase — db.transaction() (not
+    // db.raw.transaction()) sets the GUC itself regardless of how the underlying pooled
+    // connection was built, same mechanism already relied on for this method's post-NIC-call
+    // success-path write below. Kept as one short wrap since nothing I/O-bound sits between
+    // the existing-IRN check and the pending-record insert.
+    const existing = await db.transaction(async (trx) => {
+      const [row] = await trx.raw
+        .select()
+        .from(einvoiceData)
+        .where(and(eq(einvoiceData.tenantId, tenantId), eq(einvoiceData.invoiceId, invoiceId)));
+
+      if (!row) {
+        await trx.raw.insert(einvoiceData).values({
+          tenantId,
+          invoiceId,
+          invoiceNumber: payload.DocDtls.No,
+          irnStatus: 'PENDING_IRN' as const,
+          nicRequestPayload: payload as unknown as Record<string, unknown>,
+          createdBy: userId,
+          updatedAt: new Date(),
+        });
+      }
+      return row;
+    });
 
     if (existing?.irnStatus === 'IRN_GENERATED' && existing.irn) {
       logger.info({ invoiceId, irn: existing.irn }, 'e-Invoice: IRN already exists');
@@ -375,37 +428,22 @@ export class EInvoiceService {
       };
     }
 
-    // Create or update pending record
-    const recordData = {
-      tenantId,
-      invoiceId,
-      invoiceNumber: payload.DocDtls.No,
-      irnStatus: 'PENDING_IRN' as const,
-      nicRequestPayload: payload as unknown as Record<string, unknown>,
-      createdBy: userId,
-      updatedAt: new Date(),
-    };
-
-    if (!existing) {
-      await db.raw.insert(einvoiceData).values(recordData);
-    }
-
     try {
       const response = await fetchWithRetry(`${getNicBaseUrl()}/IRP/generateIRN`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`,
-          'user_name': process.env['NIC_USERNAME'] ?? '',
-          'password': process.env['NIC_PASSWORD'] ?? '',
-          'gstin': payload.SellerDtls.Gstin,
-          'requestid': `${tenantId}-${invoiceId}-${Date.now()}`,
+          Authorization: `Bearer ${apiKey}`,
+          user_name: process.env['NIC_USERNAME'] ?? '',
+          password: process.env['NIC_PASSWORD'] ?? '',
+          gstin: payload.SellerDtls.Gstin,
+          requestid: `${tenantId}-${invoiceId}-${Date.now()}`,
         },
         body: JSON.stringify(payload),
         signal: AbortSignal.timeout(15000),
       });
 
-      const responseBody = await response.json() as Record<string, unknown>;
+      const responseBody = (await response.json()) as Record<string, unknown>;
 
       if (!response.ok) {
         const errorCode = String(responseBody['ErrorCode'] ?? '');
@@ -419,12 +457,24 @@ export class EInvoiceService {
 
         // NIC error 2271: invalid GSTIN — flag customer
         if (errorCode === '2271') {
-          await EInvoiceService.markFailed(db, tenantId, invoiceId, `Invalid GSTIN: ${errorMessage}`, responseBody);
-          throw new BusinessError('INVALID_GSTIN', `Buyer GSTIN invalid per NIC: ${payload.BuyerDtls.Gstin}`);
+          await EInvoiceService.markFailed(
+            db,
+            tenantId,
+            invoiceId,
+            `Invalid GSTIN: ${errorMessage}`,
+            responseBody
+          );
+          throw new BusinessError(
+            'INVALID_GSTIN',
+            `Buyer GSTIN invalid per NIC: ${payload.BuyerDtls.Gstin}`
+          );
         }
 
         await EInvoiceService.markFailed(db, tenantId, invoiceId, errorMessage, responseBody);
-        throw new BusinessError('NIC_API_ERROR', `NIC IRP returned error ${errorCode}: ${errorMessage}`);
+        throw new BusinessError(
+          'NIC_API_ERROR',
+          `NIC IRP returned error ${errorCode}: ${errorMessage}`
+        );
       }
 
       const data = responseBody['data'] as Record<string, unknown>;
@@ -465,7 +515,14 @@ export class EInvoiceService {
 
       logger.info({ invoiceId, irn, ackNumber }, 'e-Invoice: IRN generated successfully');
 
-      return { AckNo: ackNumber, AckDt: ackDt, Irn: irn, SignedInvoice: signedInvoice, SignedQRCode: signedQrCode, Status: '1' };
+      return {
+        AckNo: ackNumber,
+        AckDt: ackDt,
+        Irn: irn,
+        SignedInvoice: signedInvoice,
+        SignedQRCode: signedQrCode,
+        Status: '1',
+      };
     } catch (err) {
       if (err instanceof BusinessError) throw err;
 
@@ -474,7 +531,10 @@ export class EInvoiceService {
 
       // Network timeout — mark PENDING_IRN for retry
       await EInvoiceService.markPendingForRetry(db, tenantId, invoiceId, message);
-      throw new BusinessError('IRN_PENDING', 'IRN generation queued for retry due to network timeout');
+      throw new BusinessError(
+        'IRN_PENDING',
+        'IRN generation queued for retry due to network timeout'
+      );
     }
   }
 
@@ -486,14 +546,19 @@ export class EInvoiceService {
     reason: string,
     remark?: string
   ): Promise<void> {
-    const [record] = await db.raw
-      .select()
-      .from(einvoiceData)
-      .where(and(eq(einvoiceData.tenantId, tenantId), eq(einvoiceData.invoiceId, invoiceId)));
+    const [record] = await db.transaction((trx) =>
+      trx.raw
+        .select()
+        .from(einvoiceData)
+        .where(and(eq(einvoiceData.tenantId, tenantId), eq(einvoiceData.invoiceId, invoiceId)))
+    );
 
     if (!record) throw new NotFoundError('e-Invoice record', invoiceId);
     if (record.irnStatus !== 'IRN_GENERATED' || !record.irn) {
-      throw new BusinessError('IRN_NOT_CANCELLABLE', 'IRN must be in IRN_GENERATED status to cancel');
+      throw new BusinessError(
+        'IRN_NOT_CANCELLABLE',
+        'IRN must be in IRN_GENERATED status to cancel'
+      );
     }
 
     const apiKey = process.env['NIC_API_KEY'] ?? '';
@@ -501,27 +566,32 @@ export class EInvoiceService {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
+        Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({ Irn: record.irn, CnlRsn: reason, CnlRem: remark ?? '' }),
       signal: AbortSignal.timeout(15000),
     });
 
     if (!response.ok) {
-      const body = await response.json() as Record<string, unknown>;
-      throw new BusinessError('NIC_CANCEL_ERROR', `NIC cancel failed: ${String(body['ErrorMessage'] ?? response.statusText)}`);
+      const body = (await response.json()) as Record<string, unknown>;
+      throw new BusinessError(
+        'NIC_CANCEL_ERROR',
+        `NIC cancel failed: ${String(body['ErrorMessage'] ?? response.statusText)}`
+      );
     }
 
-    await db.raw
-      .update(einvoiceData)
-      .set({
-        irnStatus: 'IRN_CANCELLED',
-        cancelledAt: new Date(),
-        cancelReason: reason,
-        cancelRemark: remark ?? null,
-        updatedAt: new Date(),
-      })
-      .where(and(eq(einvoiceData.tenantId, tenantId), eq(einvoiceData.invoiceId, invoiceId)));
+    await db.transaction((trx) =>
+      trx.raw
+        .update(einvoiceData)
+        .set({
+          irnStatus: 'IRN_CANCELLED',
+          cancelledAt: new Date(),
+          cancelReason: reason,
+          cancelRemark: remark ?? null,
+          updatedAt: new Date(),
+        })
+        .where(and(eq(einvoiceData.tenantId, tenantId), eq(einvoiceData.invoiceId, invoiceId)))
+    );
 
     logger.info({ invoiceId, irn: record.irn }, 'e-Invoice: IRN cancelled at NIC');
   }
@@ -532,10 +602,12 @@ export class EInvoiceService {
     tenantId: number,
     invoiceId: number
   ): Promise<EInvoiceStatus> {
-    const [record] = await db.raw
-      .select()
-      .from(einvoiceData)
-      .where(and(eq(einvoiceData.tenantId, tenantId), eq(einvoiceData.invoiceId, invoiceId)));
+    const [record] = await db.transaction((trx) =>
+      trx.raw
+        .select()
+        .from(einvoiceData)
+        .where(and(eq(einvoiceData.tenantId, tenantId), eq(einvoiceData.invoiceId, invoiceId)))
+    );
 
     if (!record) {
       return {
@@ -576,14 +648,19 @@ export class EInvoiceService {
     userId: number,
     invoiceId: number
   ): Promise<NicIrnResponse> {
-    const [record] = await db.raw
-      .select()
-      .from(einvoiceData)
-      .where(and(eq(einvoiceData.tenantId, tenantId), eq(einvoiceData.invoiceId, invoiceId)));
+    const [record] = await db.transaction((trx) =>
+      trx.raw
+        .select()
+        .from(einvoiceData)
+        .where(and(eq(einvoiceData.tenantId, tenantId), eq(einvoiceData.invoiceId, invoiceId)))
+    );
 
     if (!record) throw new NotFoundError('e-Invoice record', invoiceId);
     if (!record.nicRequestPayload) {
-      throw new BusinessError('NO_STORED_PAYLOAD', 'No stored NIC payload to retry — generate the IRN again from the invoice');
+      throw new BusinessError(
+        'NO_STORED_PAYLOAD',
+        'No stored NIC payload to retry — generate the IRN again from the invoice'
+      );
     }
 
     return EInvoiceService.generateIrn(
@@ -595,7 +672,11 @@ export class EInvoiceService {
     );
   }
 
-  // Retry all PENDING_IRN invoices across all tenants (called by scheduler every 15 min)
+  // Retry all PENDING_IRN invoices across all tenants (called by scheduler every 15 min).
+  // The initial `pending` scan below is genuinely cross-tenant by design (must find every
+  // tenant's retry-eligible records in one pass) — read-only, left unscoped. Each record's own
+  // retry goes through a real per-tenant TenantScopedDatabase below, which is what matters for
+  // GUC safety.
   static async retryPendingIrns(): Promise<{ retried: number; failed: number }> {
     const databaseUrl = process.env['DATABASE_URL'];
     if (!databaseUrl) {
@@ -608,10 +689,7 @@ export class EInvoiceService {
       .select()
       .from(einvoiceData)
       .where(
-        and(
-          eq(einvoiceData.irnStatus, 'PENDING_IRN'),
-          lt(einvoiceData.retryCount, MAX_RETRIES)
-        )
+        and(eq(einvoiceData.irnStatus, 'PENDING_IRN'), lt(einvoiceData.retryCount, MAX_RETRIES))
       );
 
     let retried = 0;
@@ -619,9 +697,14 @@ export class EInvoiceService {
 
     for (const record of pending) {
       if (!record.nicRequestPayload) continue;
-      // Build a minimal TenantScopedDatabase wrapper for the per-record call
+      // RLS-readiness follow-up (2026-08-22): this used to be a fake {raw, tenantId} object
+      // shape-cast to TenantScopedDatabase — it had no real .transaction() method at all, so
+      // generateIrn()'s internal db.transaction() call (its GUC-safe success-path write) would
+      // have thrown at runtime the first time this cron path actually reached it. A real
+      // instance's .transaction() sets the GUC itself on every call, regardless of how the
+      // underlying pooled connection was built.
       const tenantId = record.tenantId;
-      const tenantDb = { raw: rawDb, tenantId } as unknown as TenantScopedDatabase;
+      const tenantDb = new TenantScopedDatabase(tenantId, rawDb);
       try {
         await EInvoiceService.generateIrn(
           tenantDb,
@@ -634,11 +717,16 @@ export class EInvoiceService {
       } catch {
         failed++;
         if (record.retryCount + 1 >= MAX_RETRIES) {
-          await rawDb
-            .update(einvoiceData)
-            .set({ irnStatus: 'FAILED_IRN', updatedAt: new Date() })
-            .where(eq(einvoiceData.id, record.id));
-          logger.error({ invoiceId: record.invoiceId }, 'e-Invoice: moved to FAILED_IRN after max retries');
+          await tenantDb.transaction((trx) =>
+            trx.raw
+              .update(einvoiceData)
+              .set({ irnStatus: 'FAILED_IRN', updatedAt: new Date() })
+              .where(and(eq(einvoiceData.tenantId, tenantId), eq(einvoiceData.id, record.id)))
+          );
+          logger.error(
+            { invoiceId: record.invoiceId },
+            'e-Invoice: moved to FAILED_IRN after max retries'
+          );
         }
       }
     }
@@ -658,9 +746,10 @@ export class EInvoiceService {
       { headers: { Authorization: `Bearer ${apiKey}` }, signal: AbortSignal.timeout(10000) }
     );
 
-    if (!response.ok) throw new BusinessError('NIC_FETCH_ERROR', 'Failed to fetch existing IRN from NIC');
+    if (!response.ok)
+      throw new BusinessError('NIC_FETCH_ERROR', 'Failed to fetch existing IRN from NIC');
 
-    const body = await response.json() as Record<string, unknown>;
+    const body = (await response.json()) as Record<string, unknown>;
     const data = body['data'] as Record<string, unknown>;
     const irn = String(data?.['Irn'] ?? '');
     const ackNumber = String(data?.['AckNo'] ?? '');
@@ -668,12 +757,29 @@ export class EInvoiceService {
     const signedQrCode = String(data?.['SignedQRCode'] ?? '');
     const signedInvoice = String(data?.['SignedInvoice'] ?? '');
 
-    await db.raw
-      .update(einvoiceData)
-      .set({ irn, ackNumber, ackDate: new Date(), signedQrCode, signedInvoice, irnStatus: 'IRN_GENERATED', updatedAt: new Date() })
-      .where(and(eq(einvoiceData.tenantId, tenantId), eq(einvoiceData.invoiceId, invoiceId)));
+    await db.transaction((trx) =>
+      trx.raw
+        .update(einvoiceData)
+        .set({
+          irn,
+          ackNumber,
+          ackDate: new Date(),
+          signedQrCode,
+          signedInvoice,
+          irnStatus: 'IRN_GENERATED',
+          updatedAt: new Date(),
+        })
+        .where(and(eq(einvoiceData.tenantId, tenantId), eq(einvoiceData.invoiceId, invoiceId)))
+    );
 
-    return { AckNo: ackNumber, AckDt: ackDt, Irn: irn, SignedInvoice: signedInvoice, SignedQRCode: signedQrCode, Status: '1' };
+    return {
+      AckNo: ackNumber,
+      AckDt: ackDt,
+      Irn: irn,
+      SignedInvoice: signedInvoice,
+      SignedQRCode: signedQrCode,
+      Status: '1',
+    };
   }
 
   private static async markFailed(
@@ -683,10 +789,17 @@ export class EInvoiceService {
     reason: string,
     responseBody: Record<string, unknown>
   ): Promise<void> {
-    await db.raw
-      .update(einvoiceData)
-      .set({ irnStatus: 'FAILED_IRN', failureReason: reason, nicResponsePayload: responseBody, updatedAt: new Date() })
-      .where(and(eq(einvoiceData.tenantId, tenantId), eq(einvoiceData.invoiceId, invoiceId)));
+    await db.transaction((trx) =>
+      trx.raw
+        .update(einvoiceData)
+        .set({
+          irnStatus: 'FAILED_IRN',
+          failureReason: reason,
+          nicResponsePayload: responseBody,
+          updatedAt: new Date(),
+        })
+        .where(and(eq(einvoiceData.tenantId, tenantId), eq(einvoiceData.invoiceId, invoiceId)))
+    );
   }
 
   private static async markPendingForRetry(
@@ -695,15 +808,17 @@ export class EInvoiceService {
     invoiceId: number,
     reason: string
   ): Promise<void> {
-    await db.raw
-      .update(einvoiceData)
-      .set({
-        irnStatus: 'PENDING_IRN',
-        failureReason: reason,
-        retryCount: sql`retry_count + 1`,
-        lastRetryAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .where(and(eq(einvoiceData.tenantId, tenantId), eq(einvoiceData.invoiceId, invoiceId)));
+    await db.transaction((trx) =>
+      trx.raw
+        .update(einvoiceData)
+        .set({
+          irnStatus: 'PENDING_IRN',
+          failureReason: reason,
+          retryCount: sql`retry_count + 1`,
+          lastRetryAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(and(eq(einvoiceData.tenantId, tenantId), eq(einvoiceData.invoiceId, invoiceId)))
+    );
   }
 }

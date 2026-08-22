@@ -1,6 +1,12 @@
+/* global crypto */
 import type { FastifyInstance } from 'fastify';
 import type { PlatformContextFactory } from '@erp/sdk';
-import { getBranchScope } from '@erp/sdk';
+import {
+  tenantScopedHandler,
+  withTenantConnection,
+  getBranchScope,
+  requireCapability,
+} from '@erp/sdk';
 import {
   posSessions,
   posHeldSales,
@@ -146,8 +152,14 @@ const POSSaleSchema = z.object({
 // create()), the winning request may still be mid-flight — polls briefly for the invoice
 // to leave DRAFT (i.e. confirm() has committed) before returning its result, instead of
 // racing a partial/pre-confirm row back to the client.
+//
+// RLS-readiness follow-up (2026-08-22): takes the raw pooled db directly (not a ctx) and wraps
+// EACH poll iteration in its own withTenantConnection call rather than one held-open transaction
+// for the whole loop — same pattern as scheduler-service's SSE-poll routes. Holding a single
+// Postgres transaction open across up to 10 iterations of a 150ms sleep would be a real
+// lock/connection-hold risk for no benefit, since each iteration is independently a fresh read.
 async function waitForOperationResult(
-  ctx: ReturnType<PlatformContextFactory['create']>,
+  rawDb: ErpDatabase,
   tenantId: number,
   operationId: string
 ): Promise<{
@@ -158,17 +170,20 @@ async function waitForOperationResult(
   loyaltyRedemptionValue: string;
 } | null> {
   for (let attempt = 0; attempt < 10; attempt++) {
-    const [inv] = await ctx.db.raw
-      .select({
-        id: invoices.id,
-        invoiceNumber: invoices.invoiceNumber,
-        status: invoices.status,
-        grandTotal: invoices.grandTotal,
-        loyaltyPointsEarned: invoices.loyaltyPointsEarned,
-        loyaltyRedemptionValue: invoices.loyaltyRedemptionValue,
-      })
-      .from(invoices)
-      .where(and(eq(invoices.tenantId, tenantId), eq(invoices.clientOperationId, operationId)));
+    const inv = await withTenantConnection(rawDb, tenantId, async (scopedDb) => {
+      const [row] = await scopedDb
+        .select({
+          id: invoices.id,
+          invoiceNumber: invoices.invoiceNumber,
+          status: invoices.status,
+          grandTotal: invoices.grandTotal,
+          loyaltyPointsEarned: invoices.loyaltyPointsEarned,
+          loyaltyRedemptionValue: invoices.loyaltyRedemptionValue,
+        })
+        .from(invoices)
+        .where(and(eq(invoices.tenantId, tenantId), eq(invoices.clientOperationId, operationId)));
+      return row ?? null;
+    });
     if (inv && inv.status !== 'DRAFT' && inv.invoiceNumber) {
       return {
         invoiceId: inv.id,
@@ -183,6 +198,29 @@ async function waitForOperationResult(
   return null;
 }
 
+// Phase 9 GUC-per-request rollout — migrated 2026-08-21 (all but two routes).
+// POST /pos/sales was NOT migrated to tenantScopedHandler: its catch-all failure branch calls
+// svc.cancel() and then re-throws, on purpose — OFFLINE-07 requires that cancel's write to
+// survive even though the overall request ultimately fails, so a retry under the same
+// operationId isn't permanently blocked by an orphaned DRAFT invoice (see the handler's own
+// OFFLINE-07 comment). Under tenantScopedHandler the cancel() and the final throw would share
+// one outer transaction, so the re-throw would roll the cancel back too — the exact opposite of
+// what this code is for. This is checklist caveat 3 (an independently-committed write that must
+// survive a later failure), not caveat 4.
+//
+// RLS-readiness follow-up (2026-08-22): the `payments` audit found this route was ALSO
+// GUC-unsafe even though it uses ctx.db.raw.transaction() for its main confirm+payment+loyalty
+// block — TenantScopedDatabase.raw returns the plain pooled ErpDatabase (database.ts), and
+// .transaction() on THAT plain object never calls set_config; only TenantScopedDatabase's own
+// .transaction() (called on ctx.db, never ctx.db.raw) does. So every write phase here needed
+// its own withTenantConnection wrap, not just one. Fixed by wrapping each independently-
+// committing phase (session verify, DRAFT-invoice create, the confirm/payment/loyalty
+// transaction, each cancel() compensating write, and the post-commit cache-invalidation read) in
+// its own withTenantConnection call — preserving the exact same independent-commit boundaries
+// caveat 3 requires, since each wrap opens and closes its own real Postgres transaction.
+// POST /pos/sales/:id/send-receipt is still deliberately NOT migrated: it makes a real fetch()
+// call to notification-service after its own DB reads (caveat 4). Every other route here has no
+// external I/O and no independent-write concern.
 export async function posRoutes(
   fastify: FastifyInstance,
   ctxFactory: PlatformContextFactory
@@ -190,30 +228,30 @@ export async function posRoutes(
   fastify.addHook('preHandler', authenticate);
 
   // Open POS session
-  fastify.post('/pos/sessions/open', {
-    preHandler: requireAnyPermission([PERMISSIONS.POS_MANAGE, PERMISSIONS.POS_OPEN_SHIFT]),
-    handler: async (req, reply) => {
-      const body = OpenSessionSchema.parse(req.body);
-      if (!branchInScope(req.auth, body.branchId)) {
+  fastify.post(
+    '/pos/sessions/open',
+    {
+      preHandler: [
+        requireCapability('POS', ctxFactory.rawDb, ctxFactory.getRedis()),
+        requireAnyPermission([PERMISSIONS.POS_MANAGE, PERMISSIONS.POS_OPEN_SHIFT]),
+      ],
+    },
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const body = OpenSessionSchema.parse(request.body);
+      if (!branchInScope(request.auth, body.branchId)) {
         return sendError(reply, 403, 'BRANCH_ACCESS_DENIED', 'You are not assigned to this branch');
       }
-      const ctx = ctxFactory.create({
-        tenantId: req.auth.tenantId,
-        userId: req.auth.userId,
-        correlationId:
-          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
-      });
-      const sessionNumber = `POS-${req.auth.tenantId}-${Date.now()}`;
+      const sessionNumber = `POS-${ctx.tenant.tenantId}-${Date.now()}`;
 
       const [row] = await ctx.db.raw
         .insert(posSessions)
         .values({
-          tenantId: req.auth.tenantId,
+          tenantId: ctx.tenant.tenantId,
           branchId: body.branchId,
           warehouseId: body.warehouseId,
           sessionNumber,
           status: 'OPEN',
-          openedBy: req.auth.userId,
+          openedBy: ctx.tenant.userId,
           openingCash: String(body.openingCash),
           totalSales: '0',
           totalTransactions: 0,
@@ -221,27 +259,27 @@ export async function posRoutes(
         .returning({ id: posSessions.id });
 
       return reply.code(201).send({ data: { id: row?.id, sessionNumber } });
-    },
-  });
+    })
+  );
 
   // Close POS session
-  fastify.post('/pos/sessions/:id/close', {
-    preHandler: requireAnyPermission([PERMISSIONS.POS_MANAGE, PERMISSIONS.POS_CLOSE_SHIFT]),
-    handler: async (req, reply) => {
-      const { id } = req.params as { id: string };
-      const body = CloseSessionSchema.parse(req.body);
-      const ctx = ctxFactory.create({
-        tenantId: req.auth.tenantId,
-        userId: req.auth.userId,
-        correlationId:
-          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
-      });
+  fastify.post(
+    '/pos/sessions/:id/close',
+    {
+      preHandler: [
+        requireCapability('POS', ctxFactory.rawDb, ctxFactory.getRedis()),
+        requireAnyPermission([PERMISSIONS.POS_MANAGE, PERMISSIONS.POS_CLOSE_SHIFT]),
+      ],
+    },
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { id } = request.params as { id: string };
+      const body = CloseSessionSchema.parse(request.body);
 
       const [session] = await ctx.db.raw
         .select()
         .from(posSessions)
         .where(
-          and(eq(posSessions.id, parseInt(id, 10)), eq(posSessions.tenantId, req.auth.tenantId))
+          and(eq(posSessions.id, parseInt(id, 10)), eq(posSessions.tenantId, ctx.tenant.tenantId))
         );
       if (!session) return sendError(reply, 404, 'NOT_FOUND', 'Session not found');
 
@@ -253,72 +291,78 @@ export async function posRoutes(
         .update(posSessions)
         .set({
           status: 'CLOSED',
-          closedBy: req.auth.userId,
+          closedBy: ctx.tenant.userId,
           closingCash: String(body.closingCash),
           expectedCash: String(expectedCash),
           cashVariance: String(cashVariance),
           closedAt: new Date(),
         })
         .where(
-          and(eq(posSessions.id, parseInt(id, 10)), eq(posSessions.tenantId, req.auth.tenantId))
+          and(eq(posSessions.id, parseInt(id, 10)), eq(posSessions.tenantId, ctx.tenant.tenantId))
         );
 
       return reply.send({ data: { expectedCash, cashVariance } });
-    },
-  });
+    })
+  );
 
   // Active session for the caller — lets the frontend recover "is there an open session"
   // after a page reload, since the only other lookup is by numeric :id.
-  fastify.get('/pos/sessions/active', {
-    preHandler: requireAnyPermission([PERMISSIONS.POS_MANAGE, PERMISSIONS.POS_ACCESS]),
-    handler: async (req, reply) => {
-      const ctx = ctxFactory.create({
-        tenantId: req.auth.tenantId,
-        userId: req.auth.userId,
-        correlationId:
-          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
-      });
+  fastify.get(
+    '/pos/sessions/active',
+    {
+      preHandler: [
+        requireCapability('POS', ctxFactory.rawDb, ctxFactory.getRedis()),
+        requireAnyPermission([PERMISSIONS.POS_MANAGE, PERMISSIONS.POS_ACCESS]),
+      ],
+    },
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
       const [session] = await ctx.db.raw
         .select()
         .from(posSessions)
         .where(
           and(
-            eq(posSessions.tenantId, req.auth.tenantId),
-            eq(posSessions.openedBy, req.auth.userId),
+            eq(posSessions.tenantId, ctx.tenant.tenantId),
+            eq(posSessions.openedBy, ctx.tenant.userId),
             eq(posSessions.status, 'OPEN')
           )
         )
         .orderBy(desc(posSessions.openedAt))
         .limit(1);
       return reply.send({ data: session ?? null });
-    },
-  });
+    })
+  );
 
   // Session summary
-  fastify.get('/pos/sessions/:id/summary', {
-    preHandler: requireAnyPermission([PERMISSIONS.POS_MANAGE, PERMISSIONS.POS_ACCESS]),
-    handler: async (req, reply) => {
-      const { id } = req.params as { id: string };
-      const ctx = ctxFactory.create({
-        tenantId: req.auth.tenantId,
-        userId: req.auth.userId,
-        correlationId:
-          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
-      });
+  fastify.get(
+    '/pos/sessions/:id/summary',
+    {
+      preHandler: [
+        requireCapability('POS', ctxFactory.rawDb, ctxFactory.getRedis()),
+        requireAnyPermission([PERMISSIONS.POS_MANAGE, PERMISSIONS.POS_ACCESS]),
+      ],
+    },
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { id } = request.params as { id: string };
       const [session] = await ctx.db.raw
         .select()
         .from(posSessions)
         .where(
-          and(eq(posSessions.id, parseInt(id, 10)), eq(posSessions.tenantId, req.auth.tenantId))
+          and(eq(posSessions.id, parseInt(id, 10)), eq(posSessions.tenantId, ctx.tenant.tenantId))
         );
       if (!session) return sendError(reply, 404, 'NOT_FOUND', 'Session not found');
       return reply.send({ data: session });
-    },
-  });
+    })
+  );
 
-  // Fast-path POS sale
+  // Fast-path POS sale — NOT migrated to tenantScopedHandler (see file-level comment above:
+  // OFFLINE-07's cancel-on-failure must commit independently of the enclosing failure). Each
+  // independently-committing phase gets its own withTenantConnection wrap instead — see the
+  // 2026-08-22 RLS-readiness comment above.
   fastify.post('/pos/sales', {
-    preHandler: requireAnyPermission([PERMISSIONS.POS_MANAGE, PERMISSIONS.POS_ACCESS]),
+    preHandler: [
+      requireCapability('POS', ctxFactory.rawDb, ctxFactory.getRedis()),
+      requireAnyPermission([PERMISSIONS.POS_MANAGE, PERMISSIONS.POS_ACCESS]),
+    ],
     handler: async (req, reply) => {
       const body = POSSaleSchema.parse(req.body);
       if (!branchInScope(req.auth, body.branchId)) {
@@ -327,8 +371,12 @@ export async function posRoutes(
       if (body.loyaltyPointsRedeem > 0 && body.redeemCatalogItemId) {
         throw new ValidationError('A sale can redeem raw points or a catalog reward, not both');
       }
+      const tenantId = req.auth.tenantId;
+      // ctx is used only for ctx.cache (Redis — no GUC concern) from here on. All Postgres
+      // work below goes through withTenantConnection instead of ctx.db.raw, per the
+      // RLS-readiness fix above.
       const ctx = ctxFactory.create({
-        tenantId: req.auth.tenantId,
+        tenantId,
         userId: req.auth.userId,
         correlationId:
           (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
@@ -347,41 +395,51 @@ export async function posRoutes(
       }
 
       // Verify session is open
-      const [session] = await ctx.db.raw
-        .select()
-        .from(posSessions)
-        .where(
-          and(
-            eq(posSessions.id, body.sessionId),
-            eq(posSessions.tenantId, req.auth.tenantId),
-            eq(posSessions.status, 'OPEN')
-          )
-        );
+      const session = await withTenantConnection(ctxFactory.rawDb, tenantId, async (scopedDb) => {
+        const [row] = await scopedDb
+          .select()
+          .from(posSessions)
+          .where(
+            and(
+              eq(posSessions.id, body.sessionId),
+              eq(posSessions.tenantId, tenantId),
+              eq(posSessions.status, 'OPEN')
+            )
+          );
+        return row ?? null;
+      });
       if (!session) return sendError(reply, 400, 'NO_OPEN_SESSION', 'No open POS session found');
 
-      const svc = new InvoiceService(ctx.db.raw);
-
+      // OFFLINE-07: this DRAFT-invoice write must commit on its own, independent of the
+      // confirm+payment+loyalty phase below — its own withTenantConnection wrap, not shared.
       let invoiceId: number;
       try {
-        invoiceId = await svc.create({
-          tenantId: req.auth.tenantId,
-          branchId: body.branchId,
-          warehouseId: body.warehouseId,
-          customerId: body.customerId ?? 0,
-          placeOfSupply: body.placeOfSupply,
-          sellerStateCode: body.sellerStateCode,
-          invoiceDate: new Date(),
-          dueDate: new Date(),
-          lines: body.lines.map((l) => ({ ...l, discountAmount: 0 })),
-          createdBy: req.auth.userId,
-          clientOperationId: body.operationId,
-        } as Parameters<typeof svc.create>[0]);
+        invoiceId = await withTenantConnection(ctxFactory.rawDb, tenantId, async (scopedDb) => {
+          const svc = new InvoiceService(scopedDb);
+          return svc.create({
+            tenantId,
+            branchId: body.branchId,
+            warehouseId: body.warehouseId,
+            customerId: body.customerId ?? 0,
+            placeOfSupply: body.placeOfSupply,
+            sellerStateCode: body.sellerStateCode,
+            invoiceDate: new Date(),
+            dueDate: new Date(),
+            lines: body.lines.map((l) => ({ ...l, discountAmount: 0 })),
+            createdBy: req.auth.userId,
+            clientOperationId: body.operationId,
+          } as Parameters<typeof svc.create>[0]);
+        });
       } catch (err) {
         // OFFLINE-02: this operationId was already claimed by a prior (or concurrent)
         // request — this is a retried offline-sale sync, not a new sale. Return the
         // already-committed original result instead of creating a duplicate invoice.
         if (err instanceof DuplicateOperationError && body.operationId) {
-          const existing = await waitForOperationResult(ctx, req.auth.tenantId, body.operationId);
+          const existing = await waitForOperationResult(
+            ctxFactory.rawDb,
+            tenantId,
+            body.operationId
+          );
           if (!existing) {
             return sendError(
               reply,
@@ -390,15 +448,17 @@ export async function posRoutes(
               'This sale is still being processed — please retry shortly'
             );
           }
-          const paymentRows = await ctx.db.raw
-            .selectDistinct({ paymentId: paymentAllocations.paymentId })
-            .from(paymentAllocations)
-            .where(
-              and(
-                eq(paymentAllocations.invoiceId, existing.invoiceId),
-                eq(paymentAllocations.tenantId, req.auth.tenantId)
+          const paymentRows = await withTenantConnection(ctxFactory.rawDb, tenantId, (scopedDb) =>
+            scopedDb
+              .selectDistinct({ paymentId: paymentAllocations.paymentId })
+              .from(paymentAllocations)
+              .where(
+                and(
+                  eq(paymentAllocations.invoiceId, existing.invoiceId),
+                  eq(paymentAllocations.tenantId, tenantId)
+                )
               )
-            );
+          );
           return reply.code(200).send({
             data: {
               invoiceId: existing.invoiceId,
@@ -423,6 +483,8 @@ export async function posRoutes(
       // paymentSvc/loyaltySvc become Postgres SAVEPOINTs within this one transaction
       // (drizzle-orm's standard nested-transaction behavior), so a failure rolls back the
       // stock deduction and invoice confirmation along with the payment/loyalty writes.
+      // withTenantConnection IS this transaction (it opens pooledDb.transaction() itself and
+      // sets the GUC) — no separate .transaction() call needed inside it.
       let grandTotal = 0;
       let redemptionValue = 0;
       let loyaltyPointsEarned = 0;
@@ -430,22 +492,17 @@ export async function posRoutes(
       const paymentIds: number[] = [];
 
       try {
-        await ctx.db.raw.transaction(async (trx) => {
-          const trxDb = trx as unknown as ErpDatabase;
-          const trxInvoiceSvc = new InvoiceService(trxDb);
-          const trxPaymentSvc = new PaymentService(trxDb);
-          const trxLoyaltySvc = new LoyaltyService(trxDb);
+        await withTenantConnection(ctxFactory.rawDb, tenantId, async (scopedDb) => {
+          const trxInvoiceSvc = new InvoiceService(scopedDb);
+          const trxPaymentSvc = new PaymentService(scopedDb);
+          const trxLoyaltySvc = new LoyaltyService(scopedDb);
 
           // C-7 fix: invoiceNumber is now generated server-side inside confirm() (gap-free,
           // FY-scoped sequence) — returned directly instead of echoing a discarded
           // client-side placeholder.
-          invoiceNumber = await trxInvoiceSvc.confirm(
-            invoiceId,
-            req.auth.tenantId,
-            req.auth.userId
-          );
+          invoiceNumber = await trxInvoiceSvc.confirm(invoiceId, tenantId, req.auth.userId);
 
-          const [inv] = await trxDb
+          const [inv] = await scopedDb
             .select({ grandTotal: invoices.grandTotal })
             .from(invoices)
             .where(eq(invoices.id, invoiceId));
@@ -457,7 +514,7 @@ export async function posRoutes(
           // Phase 2, Feature 3), never both — validated above before this transaction opened.
           if (body.redeemCatalogItemId && body.customerId) {
             const reward = await trxLoyaltySvc.redeemCatalogItem(
-              req.auth.tenantId,
+              tenantId,
               body.customerId,
               body.redeemCatalogItemId,
               'POS_SALE',
@@ -470,7 +527,7 @@ export async function posRoutes(
                 : reward.rewardValue;
           } else if (body.loyaltyPointsRedeem > 0 && body.customerId) {
             redemptionValue = await trxLoyaltySvc.redeemPoints(
-              req.auth.tenantId,
+              tenantId,
               body.customerId,
               body.loyaltyPointsRedeem,
               'POS_SALE',
@@ -481,10 +538,10 @@ export async function posRoutes(
 
           if (redemptionValue > 0) {
             const loyaltyPaymentId = await trxPaymentSvc.create({
-              tenantId: req.auth.tenantId,
+              tenantId,
               branchId: body.branchId,
               customerId: body.customerId!,
-              paymentNumber: `PAY-${req.auth.tenantId}-${Date.now()}-0`,
+              paymentNumber: `PAY-${tenantId}-${Date.now()}-0`,
               paymentDate: new Date(),
               paymentMode: 'LOYALTY',
               amount: redemptionValue,
@@ -493,7 +550,7 @@ export async function posRoutes(
             });
             await trxPaymentSvc.allocate(
               loyaltyPaymentId,
-              req.auth.tenantId,
+              tenantId,
               [{ invoiceId, amount: redemptionValue }],
               req.auth.userId
             );
@@ -520,10 +577,10 @@ export async function posRoutes(
 
           for (const p of paymentLines) {
             const paymentId = await trxPaymentSvc.create({
-              tenantId: req.auth.tenantId,
+              tenantId,
               branchId: body.branchId,
               customerId: body.customerId ?? 0,
-              paymentNumber: `PAY-${req.auth.tenantId}-${Date.now()}-${paymentIds.length + 1}`,
+              paymentNumber: `PAY-${tenantId}-${Date.now()}-${paymentIds.length + 1}`,
               paymentDate: new Date(),
               paymentMode: p.mode,
               amount: p.amount,
@@ -532,7 +589,7 @@ export async function posRoutes(
             });
             await trxPaymentSvc.allocate(
               paymentId,
-              req.auth.tenantId,
+              tenantId,
               [{ invoiceId, amount: p.amount }],
               req.auth.userId
             );
@@ -543,7 +600,7 @@ export async function posRoutes(
           // is off or there's no real customer on the sale).
           if (body.customerId) {
             loyaltyPointsEarned = await trxLoyaltySvc.earnPoints(
-              req.auth.tenantId,
+              tenantId,
               body.customerId,
               grandTotal,
               'POS_SALE',
@@ -553,7 +610,7 @@ export async function posRoutes(
           }
 
           // Update session totals
-          await trxDb
+          await scopedDb
             .update(posSessions)
             .set({
               totalSales: sql`${posSessions.totalSales} + ${grandTotal}`,
@@ -565,10 +622,12 @@ export async function posRoutes(
         // Same cross-service item-cache gap GRN receipts had (fixed 2026-07-17) — a POS sale
         // confirms the invoice above, writing availableQty/valuation directly to `items`, so
         // inventory-service's Redis item-cache needs invalidating too.
-        const soldLines = await ctx.db.raw
-          .select({ itemId: invoiceLines.itemId })
-          .from(invoiceLines)
-          .where(eq(invoiceLines.invoiceId, invoiceId));
+        const soldLines = await withTenantConnection(ctxFactory.rawDb, tenantId, (scopedDb) =>
+          scopedDb
+            .select({ itemId: invoiceLines.itemId })
+            .from(invoiceLines)
+            .where(eq(invoiceLines.invoiceId, invoiceId))
+        );
         await Promise.all(
           [...new Set(soldLines.map((l) => l.itemId))].map((itemId) =>
             ctx.cache.del(`item:${itemId}`)
@@ -581,11 +640,15 @@ export async function posRoutes(
           // block any retry under the same operationId (unique constraint) while never
           // itself reaching a resolvable state. Void it now so the cashier's adjust/cancel
           // resolution (offline sync stuck-item UI) can resubmit cleanly under a new one.
-          await svc.cancel(
-            invoiceId,
-            req.auth.tenantId,
-            req.auth.userId,
-            `Stock conflict at sync: ${err.message}`
+          // Its own independent withTenantConnection wrap — must commit even though the
+          // confirm+payment+loyalty transaction above just rolled back.
+          await withTenantConnection(ctxFactory.rawDb, tenantId, (scopedDb) =>
+            new InvoiceService(scopedDb).cancel(
+              invoiceId,
+              tenantId,
+              req.auth.userId,
+              `Stock conflict at sync: ${err.message}`
+            )
           );
           return sendError(reply, 422, 'INSUFFICIENT_STOCK', err.message, {
             itemId: err.itemId,
@@ -594,17 +657,21 @@ export async function posRoutes(
           });
         }
         if (err instanceof BusinessError && err.code === 'PAYMENT_MISMATCH') {
-          await svc.cancel(invoiceId, req.auth.tenantId, req.auth.userId, err.message);
+          await withTenantConnection(ctxFactory.rawDb, tenantId, (scopedDb) =>
+            new InvoiceService(scopedDb).cancel(invoiceId, tenantId, req.auth.userId, err.message)
+          );
           return sendError(reply, 400, 'PAYMENT_MISMATCH', err.message);
         }
         // Everything above rolled back together — the invoice never actually reached
         // CONFIRMED (still DRAFT, exactly as create() left it). Void it so a retry under
         // the same operationId isn't permanently blocked, then surface the real error.
-        await svc.cancel(
-          invoiceId,
-          req.auth.tenantId,
-          req.auth.userId,
-          `POS sale processing failed: ${err instanceof Error ? err.message : String(err)}`
+        await withTenantConnection(ctxFactory.rawDb, tenantId, (scopedDb) =>
+          new InvoiceService(scopedDb).cancel(
+            invoiceId,
+            tenantId,
+            req.auth.userId,
+            `POS sale processing failed: ${err instanceof Error ? err.message : String(err)}`
+          )
         );
         throw err;
       }
@@ -623,23 +690,23 @@ export async function posRoutes(
   });
 
   // Quick items for POS (top 20 items by sales)
-  fastify.get('/pos/quick-items', {
-    preHandler: requireAnyPermission([PERMISSIONS.POS_MANAGE, PERMISSIONS.POS_ACCESS]),
-    handler: async (req, reply) => {
-      const ctx = ctxFactory.create({
-        tenantId: req.auth.tenantId,
-        userId: req.auth.userId,
-        correlationId:
-          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
-      });
+  fastify.get(
+    '/pos/quick-items',
+    {
+      preHandler: [
+        requireCapability('POS', ctxFactory.rawDb, ctxFactory.getRedis()),
+        requireAnyPermission([PERMISSIONS.POS_MANAGE, PERMISSIONS.POS_ACCESS]),
+      ],
+    },
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
       const rows = await ctx.db.raw
         .select()
         .from(items)
-        .where(and(eq(items.tenantId, req.auth.tenantId), eq(items.status, 'ACTIVE')))
+        .where(and(eq(items.tenantId, ctx.tenant.tenantId), eq(items.status, 'ACTIVE')))
         .limit(20);
       return reply.send({ data: rows });
-    },
-  });
+    })
+  );
 
   // POS search-first redesign — the omnibox's typed/fuzzy search path (Phase 1; the scanner
   // fast lane stays on production-service's /items/by-barcode, untouched) AND the Phase 3
@@ -647,21 +714,21 @@ export async function posRoutes(
   // item name/SKU/barcode/alias/supplier-code/custom-code; ranked exact-code matches first,
   // then trigram similarity on name/alias. Relies on idx_items_name_trgm (Phase 13) and the
   // alias/supplier/custom-code indexes added in migration 0074.
-  fastify.get('/pos/items/search', {
-    preHandler: requireAnyPermission([PERMISSIONS.POS_MANAGE, PERMISSIONS.POS_ACCESS]),
-    handler: async (req, reply) => {
-      const parsed = SearchItemsQuerySchema.safeParse(req.query);
+  fastify.get(
+    '/pos/items/search',
+    {
+      preHandler: [
+        requireCapability('POS', ctxFactory.rawDb, ctxFactory.getRedis()),
+        requireAnyPermission([PERMISSIONS.POS_MANAGE, PERMISSIONS.POS_ACCESS]),
+      ],
+    },
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const parsed = SearchItemsQuerySchema.safeParse(request.query);
       if (!parsed.success) {
         return sendError(reply, 400, 'INVALID_QUERY', 'Invalid search parameters');
       }
       const { q, limit, category, brand, priceListId, warehouseId, inStockOnly } = parsed.data;
       const offset = decodeSearchCursor(parsed.data.cursor);
-      const ctx = ctxFactory.create({
-        tenantId: req.auth.tenantId,
-        userId: req.auth.userId,
-        correlationId:
-          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
-      });
 
       const prefix = `${q}%`;
       const contains = `%${q}%`;
@@ -734,7 +801,7 @@ export async function posRoutes(
       }
 
       const conditions = [
-        eq(items.tenantId, req.auth.tenantId),
+        eq(items.tenantId, ctx.tenant.tenantId),
         eq(items.status, 'ACTIVE'),
         ...(q
           ? [
@@ -789,46 +856,45 @@ export async function posRoutes(
         nextCursor: hasMore ? encodeSearchCursor(offset + limit) : null,
         tookMs: Date.now() - startedAt,
       });
-    },
-  });
+    })
+  );
 
   // Phase 3 — lightweight option lists for the full-screen lookup modal's filter row.
   // Deliberately POS_ACCESS/POS_MANAGE-gated rather than reusing inventory-service's
   // /categories, /brands, /warehouses (which require CATEGORY_VIEW/BRAND_VIEW/WAREHOUSE_VIEW)
   // — the CASHIER role default doesn't grant any of those, so calling those endpoints
   // directly from POS would 403 for every ordinary cashier trying to open the filter row.
-  fastify.get('/pos/lookup-filters', {
-    preHandler: requireAnyPermission([PERMISSIONS.POS_MANAGE, PERMISSIONS.POS_ACCESS]),
-    handler: async (req, reply) => {
-      const ctx = ctxFactory.create({
-        tenantId: req.auth.tenantId,
-        userId: req.auth.userId,
-        correlationId:
-          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
-      });
-
+  fastify.get(
+    '/pos/lookup-filters',
+    {
+      preHandler: [
+        requireCapability('POS', ctxFactory.rawDb, ctxFactory.getRedis()),
+        requireAnyPermission([PERMISSIONS.POS_MANAGE, PERMISSIONS.POS_ACCESS]),
+      ],
+    },
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
       const [categoryRows, brandRows, priceListRows, warehouseRows] = await Promise.all([
         ctx.db.raw
           .select({ id: categories.id, name: categories.name })
           .from(categories)
-          .where(and(eq(categories.tenantId, req.auth.tenantId), eq(categories.isActive, true)))
+          .where(and(eq(categories.tenantId, ctx.tenant.tenantId), eq(categories.isActive, true)))
           .orderBy(categories.name),
         ctx.db.raw
           .select({ id: brands.id, name: brands.name })
           .from(brands)
-          .where(and(eq(brands.tenantId, req.auth.tenantId), eq(brands.isActive, true)))
+          .where(and(eq(brands.tenantId, ctx.tenant.tenantId), eq(brands.isActive, true)))
           .orderBy(brands.name),
         ctx.db.raw
           .select({ id: priceLists.id, name: priceLists.name })
           .from(priceLists)
-          .where(and(eq(priceLists.tenantId, req.auth.tenantId), eq(priceLists.isActive, true)))
+          .where(and(eq(priceLists.tenantId, ctx.tenant.tenantId), eq(priceLists.isActive, true)))
           .orderBy(priceLists.name),
         ctx.db.raw
           .select({ id: warehouses.id, name: warehouses.name })
           .from(warehouses)
           .where(
             and(
-              eq(warehouses.tenantId, req.auth.tenantId),
+              eq(warehouses.tenantId, ctx.tenant.tenantId),
               eq(warehouses.isActive, true),
               isNull(warehouses.deletedAt)
             )
@@ -844,20 +910,20 @@ export async function posRoutes(
           warehouses: warehouseRows,
         },
       });
-    },
-  });
+    })
+  );
 
   // Optimized customer search for POS
-  fastify.get('/pos/customer-search', {
-    preHandler: requireAnyPermission([PERMISSIONS.POS_MANAGE, PERMISSIONS.POS_ACCESS]),
-    handler: async (req, reply) => {
-      const ctx = ctxFactory.create({
-        tenantId: req.auth.tenantId,
-        userId: req.auth.userId,
-        correlationId:
-          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
-      });
-      const q = req.query as { q?: string };
+  fastify.get(
+    '/pos/customer-search',
+    {
+      preHandler: [
+        requireCapability('POS', ctxFactory.rawDb, ctxFactory.getRedis()),
+        requireAnyPermission([PERMISSIONS.POS_MANAGE, PERMISSIONS.POS_ACCESS]),
+      ],
+    },
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const q = request.query as { q?: string };
       if (!q.q || q.q.length < 2) return reply.send({ data: [] });
 
       const rows = await ctx.db.raw
@@ -865,20 +931,26 @@ export async function posRoutes(
         .from(customers)
         .where(
           and(
-            eq(customers.tenantId, req.auth.tenantId),
+            eq(customers.tenantId, ctx.tenant.tenantId),
             eq(customers.status, 'ACTIVE'),
             sql`(${customers.displayName} ILIKE ${`%${q.q}%`} OR ${customers.phone} ILIKE ${`%${q.q}%`})`
           )
         )
         .limit(10);
       return reply.send({ data: rows });
-    },
-  });
+    })
+  );
 
   // Park an in-progress cart (e.g. customer steps away mid-sale) for later resume.
-  fastify.post('/pos/held-sales', {
-    preHandler: requireAnyPermission([PERMISSIONS.POS_MANAGE, PERMISSIONS.POS_ACCESS]),
-    handler: async (req, reply) => {
+  fastify.post(
+    '/pos/held-sales',
+    {
+      preHandler: [
+        requireCapability('POS', ctxFactory.rawDb, ctxFactory.getRedis()),
+        requireAnyPermission([PERMISSIONS.POS_MANAGE, PERMISSIONS.POS_ACCESS]),
+      ],
+    },
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
       const body = z
         .object({
           sessionId: z.number().int().positive(),
@@ -886,126 +958,126 @@ export async function posRoutes(
           label: z.string().max(100).optional(),
           cart: z.array(z.record(z.unknown())).min(1),
         })
-        .parse(req.body);
-      const ctx = ctxFactory.create({
-        tenantId: req.auth.tenantId,
-        userId: req.auth.userId,
-        correlationId:
-          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
-      });
+        .parse(request.body);
 
       const [row] = await ctx.db.raw
         .insert(posHeldSales)
         .values({
-          tenantId: req.auth.tenantId,
+          tenantId: ctx.tenant.tenantId,
           sessionId: body.sessionId,
           customerId: body.customerId,
           label: body.label,
           cart: body.cart,
-          createdBy: req.auth.userId,
+          createdBy: ctx.tenant.userId,
         })
         .returning({ id: posHeldSales.id });
 
       return reply.code(201).send({ data: { id: row?.id } });
-    },
-  });
+    })
+  );
 
   // List held sales for the current session (most recent first).
-  fastify.get('/pos/held-sales', {
-    preHandler: requireAnyPermission([PERMISSIONS.POS_MANAGE, PERMISSIONS.POS_ACCESS]),
-    handler: async (req, reply) => {
-      const ctx = ctxFactory.create({
-        tenantId: req.auth.tenantId,
-        userId: req.auth.userId,
-        correlationId:
-          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
-      });
+  fastify.get(
+    '/pos/held-sales',
+    {
+      preHandler: [
+        requireCapability('POS', ctxFactory.rawDb, ctxFactory.getRedis()),
+        requireAnyPermission([PERMISSIONS.POS_MANAGE, PERMISSIONS.POS_ACCESS]),
+      ],
+    },
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
       const rows = await ctx.db.raw
         .select()
         .from(posHeldSales)
-        .where(eq(posHeldSales.tenantId, req.auth.tenantId))
+        .where(eq(posHeldSales.tenantId, ctx.tenant.tenantId))
         .orderBy(desc(posHeldSales.createdAt))
         .limit(20);
       return reply.send({ data: rows });
-    },
-  });
+    })
+  );
 
   // Resume a held sale — returns the parked cart and removes the hold (one-time use).
-  fastify.post<{ Params: { id: string } }>('/pos/held-sales/:id/resume', {
-    preHandler: requireAnyPermission([PERMISSIONS.POS_MANAGE, PERMISSIONS.POS_ACCESS]),
-    handler: async (req, reply) => {
-      const id = parseInt(req.params.id, 10);
-      const ctx = ctxFactory.create({
-        tenantId: req.auth.tenantId,
-        userId: req.auth.userId,
-        correlationId:
-          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
-      });
+  fastify.post(
+    '/pos/held-sales/:id/resume',
+    {
+      preHandler: [
+        requireCapability('POS', ctxFactory.rawDb, ctxFactory.getRedis()),
+        requireAnyPermission([PERMISSIONS.POS_MANAGE, PERMISSIONS.POS_ACCESS]),
+      ],
+    },
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { id: idParam } = request.params as { id: string };
+      const id = parseInt(idParam, 10);
 
       const [held] = await ctx.db.raw
         .select()
         .from(posHeldSales)
-        .where(and(eq(posHeldSales.id, id), eq(posHeldSales.tenantId, req.auth.tenantId)));
+        .where(and(eq(posHeldSales.id, id), eq(posHeldSales.tenantId, ctx.tenant.tenantId)));
       if (!held) return sendError(reply, 404, 'NOT_FOUND', 'Held sale not found');
 
       await ctx.db.raw
         .delete(posHeldSales)
-        .where(and(eq(posHeldSales.id, id), eq(posHeldSales.tenantId, req.auth.tenantId)));
+        .where(and(eq(posHeldSales.id, id), eq(posHeldSales.tenantId, ctx.tenant.tenantId)));
 
       return reply.send({ data: { cart: held.cart, customerId: held.customerId } });
-    },
-  });
+    })
+  );
 
   // Discard a held sale without resuming it.
-  fastify.delete<{ Params: { id: string } }>('/pos/held-sales/:id', {
-    preHandler: requireAnyPermission([PERMISSIONS.POS_MANAGE, PERMISSIONS.POS_ACCESS]),
-    handler: async (req, reply) => {
-      const id = parseInt(req.params.id, 10);
-      const ctx = ctxFactory.create({
-        tenantId: req.auth.tenantId,
-        userId: req.auth.userId,
-        correlationId:
-          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
-      });
+  fastify.delete(
+    '/pos/held-sales/:id',
+    {
+      preHandler: [
+        requireCapability('POS', ctxFactory.rawDb, ctxFactory.getRedis()),
+        requireAnyPermission([PERMISSIONS.POS_MANAGE, PERMISSIONS.POS_ACCESS]),
+      ],
+    },
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { id: idParam } = request.params as { id: string };
+      const id = parseInt(idParam, 10);
       await ctx.db.raw
         .delete(posHeldSales)
-        .where(and(eq(posHeldSales.id, id), eq(posHeldSales.tenantId, req.auth.tenantId)));
+        .where(and(eq(posHeldSales.id, id), eq(posHeldSales.tenantId, ctx.tenant.tenantId)));
       return reply.send({ data: { success: true } });
-    },
-  });
+    })
+  );
 
   // UPI VPA for the checkout QR code — organizationSettings is owned by tenant-service but
   // already read directly from other sales-service domain code (e.g. CampaignService), so
   // this follows the same established cross-service-read-of-shared-tables pattern.
-  fastify.get('/pos/upi-vpa', {
-    preHandler: requireAnyPermission([PERMISSIONS.POS_MANAGE, PERMISSIONS.POS_ACCESS]),
-    handler: async (req, reply) => {
-      const ctx = ctxFactory.create({
-        tenantId: req.auth.tenantId,
-        userId: req.auth.userId,
-        correlationId:
-          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
-      });
+  fastify.get(
+    '/pos/upi-vpa',
+    {
+      preHandler: [
+        requireCapability('POS', ctxFactory.rawDb, ctxFactory.getRedis()),
+        requireAnyPermission([PERMISSIONS.POS_MANAGE, PERMISSIONS.POS_ACCESS]),
+      ],
+    },
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
       const [org] = await ctx.db.raw
         .select({
           orgName: organizationSettings.orgName,
           bankDetails: organizationSettings.bankDetails,
         })
         .from(organizationSettings)
-        .where(eq(organizationSettings.tenantId, req.auth.tenantId));
+        .where(eq(organizationSettings.tenantId, ctx.tenant.tenantId));
       return reply.send({
         data: { upiVpa: org?.bankDetails?.upiVpa ?? null, payeeName: org?.orgName ?? 'Store' },
       });
-    },
-  });
+    })
+  );
 
   // Send the receipt for a completed POS sale via WhatsApp or Email — reuses the same
   // notification-service send-raw-internal pathway CampaignService/InvoiceNotificationService
   // already use, rather than a new integration.
+  // Deliberately NOT migrated — real fetch() call to notification-service (checklist caveat 4).
   fastify.post<{ Params: { id: string }; Body: { channel: 'WHATSAPP' | 'EMAIL' } }>(
     '/pos/sales/:id/send-receipt',
     {
-      preHandler: requireAnyPermission([PERMISSIONS.POS_MANAGE, PERMISSIONS.POS_ACCESS]),
+      preHandler: [
+        requireCapability('POS', ctxFactory.rawDb, ctxFactory.getRedis()),
+        requireAnyPermission([PERMISSIONS.POS_MANAGE, PERMISSIONS.POS_ACCESS]),
+      ],
       handler: async (req, reply) => {
         const invoiceId = parseInt(req.params.id, 10);
         const { channel } = z.object({ channel: z.enum(['WHATSAPP', 'EMAIL']) }).parse(req.body);

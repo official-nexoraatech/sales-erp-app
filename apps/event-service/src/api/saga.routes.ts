@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { PlatformContextFactory, SagaOrchestrator } from '@erp/sdk';
+import { tenantScopedHandler } from '@erp/sdk';
 import { sagaLog } from '@erp/db';
 import { and, eq, sql, desc } from 'drizzle-orm';
 import { z } from 'zod';
@@ -24,30 +25,26 @@ export async function sagaRoutes(
   // GET /admin/sagas/summary — counts by status and type
   fastify.get('/admin/sagas/summary', {
     preHandler: requirePermission(PERMISSIONS.SAGA_VIEW),
-    handler: async (request, reply) => {
-      const ctx = ctxFactory.create({
-        tenantId: request.auth.tenantId,
-        userId: request.auth.userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? 'system',
-      });
+    handler: tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
       const db = ctx.db.raw;
+      const tenantId = ctx.tenant.tenantId;
 
       const statusCounts = await db.execute(
-        sql`SELECT status, COUNT(*) as count FROM saga_log WHERE tenant_id = ${request.auth.tenantId} GROUP BY status`
+        sql`SELECT status, COUNT(*) as count FROM saga_log WHERE tenant_id = ${tenantId} GROUP BY status`
       );
 
       const typeCounts = await db.execute(
-        sql`SELECT saga_type, COUNT(*) as count FROM saga_log WHERE tenant_id = ${request.auth.tenantId} GROUP BY saga_type ORDER BY count DESC`
+        sql`SELECT saga_type, COUNT(*) as count FROM saga_log WHERE tenant_id = ${tenantId} GROUP BY saga_type ORDER BY count DESC`
       );
 
       // Stalled: IN_PROGRESS for > 30 minutes
       const stalledRows = await db.execute(
-        sql`SELECT COUNT(*) as count FROM saga_log WHERE tenant_id = ${request.auth.tenantId} AND status = 'STARTED' AND created_at < NOW() - INTERVAL '30 minutes'`
+        sql`SELECT COUNT(*) as count FROM saga_log WHERE tenant_id = ${tenantId} AND status = 'STARTED' AND created_at < NOW() - INTERVAL '30 minutes'`
       );
 
       // Completed in last 24h
       const recentRows = await db.execute(
-        sql`SELECT COUNT(*) as count, AVG(EXTRACT(EPOCH FROM (updated_at - created_at)) * 1000)::integer as avg_duration_ms FROM saga_log WHERE tenant_id = ${request.auth.tenantId} AND status = 'COMPLETED' AND updated_at > NOW() - INTERVAL '24 hours'`
+        sql`SELECT COUNT(*) as count, AVG(EXTRACT(EPOCH FROM (updated_at - created_at)) * 1000)::integer as avg_duration_ms FROM saga_log WHERE tenant_id = ${tenantId} AND status = 'COMPLETED' AND updated_at > NOW() - INTERVAL '24 hours'`
       );
 
       const byStatus: Record<string, number> = {};
@@ -74,13 +71,13 @@ export async function sagaRoutes(
           avgDurationMs: recent.avg_duration_ms ?? 0,
         },
       });
-    },
+    }),
   });
 
   // GET /admin/sagas — list sagas with optional status filter
   fastify.get('/admin/sagas', {
     preHandler: requirePermission(PERMISSIONS.SAGA_VIEW),
-    handler: async (request, reply) => {
+    handler: tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
       const parsed = SagaListSchema.safeParse(request.query);
       if (!parsed.success) {
         return reply.code(400).send({
@@ -93,14 +90,10 @@ export async function sagaRoutes(
       }
 
       const { status, sagaType, page, size } = parsed.data;
-      const ctx = ctxFactory.create({
-        tenantId: request.auth.tenantId,
-        userId: request.auth.userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? 'system',
-      });
       const db = ctx.db.raw;
+      const tenantId = ctx.tenant.tenantId;
 
-      const conditions = [eq(sagaLog.tenantId, request.auth.tenantId)];
+      const conditions = [eq(sagaLog.tenantId, tenantId)];
       if (status) conditions.push(eq(sagaLog.status, status));
       if (sagaType) conditions.push(eq(sagaLog.sagaType, sagaType));
 
@@ -113,7 +106,7 @@ export async function sagaRoutes(
         .offset((page - 1) * size);
 
       const totalRows = await db.execute(
-        sql`SELECT COUNT(*) as count FROM saga_log WHERE tenant_id = ${request.auth.tenantId} ${status ? sql`AND status = ${status}` : sql``}`
+        sql`SELECT COUNT(*) as count FROM saga_log WHERE tenant_id = ${tenantId} ${status ? sql`AND status = ${status}` : sql``}`
       );
       const total = parseInt((totalRows[0] as { count: string }).count, 10);
 
@@ -121,25 +114,20 @@ export async function sagaRoutes(
         data: rows,
         meta: { page, size, total, totalPages: Math.ceil(total / size) },
       });
-    },
+    }),
   });
 
   // GET /admin/sagas/:id — full saga step history
   fastify.get<{ Params: { id: string } }>('/admin/sagas/:id', {
     preHandler: requirePermission(PERMISSIONS.SAGA_VIEW),
-    handler: async (request, reply) => {
-      const { id } = request.params;
-      const ctx = ctxFactory.create({
-        tenantId: request.auth.tenantId,
-        userId: request.auth.userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? 'system',
-      });
+    handler: tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { id } = request.params as { id: string };
       const db = ctx.db.raw;
 
       const rows = await db
         .select()
         .from(sagaLog)
-        .where(and(eq(sagaLog.sagaId, id), eq(sagaLog.tenantId, request.auth.tenantId)))
+        .where(and(eq(sagaLog.sagaId, id), eq(sagaLog.tenantId, ctx.tenant.tenantId)))
         .limit(1);
 
       if (!rows[0]) {
@@ -147,7 +135,7 @@ export async function sagaRoutes(
       }
 
       return reply.code(200).send({ data: rows[0] });
-    },
+    }),
   });
 
   // POST /admin/sagas/:id/retry — retry from last failed step
@@ -158,6 +146,15 @@ export async function sagaRoutes(
   // process — event-service doesn't own domain logic for sagas like INVOICE_CREATION
   // (that lives in sales-service), so retrying those from here surfaces a clear
   // SAGA_TYPE_NOT_REGISTERED error instead of a silent no-op that used to look like success.
+  //
+  // Phase 9 GUC-per-request rollout — deliberately NOT migrated. registeredOrchestrator is a
+  // bootstrap-time singleton (constructed in main.ts against the raw pooled db, before any
+  // request exists) whose execute()/compensateSteps() loop runs arbitrary per-step domain logic
+  // (real external side effects, per this file's own comments — "an event was published and
+  // other services may already be reacting to it") interleaved with saga_log writes across
+  // potentially many steps. Retrofitting a GUC wrap here would mean threading a per-request
+  // scoped db down through every registered step factory — a SagaOrchestrator API change, not a
+  // route-level fix. Same shape as gst-service's internal.routes.ts.
   fastify.post<{ Params: { id: string } }>('/admin/sagas/:id/retry', {
     preHandler: requirePermission(PERMISSIONS.SAGA_MANAGE),
     handler: async (request, reply) => {

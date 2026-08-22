@@ -7,6 +7,7 @@ import {
   projectionMetadata,
 } from '@erp/db';
 import type { ErpDatabase } from '@erp/db';
+import { withTenantConnection } from '@erp/sdk';
 import { createLogger } from '@erp/logger';
 import type { JobRegistry } from '../JobRegistry.js';
 
@@ -463,7 +464,12 @@ export function registerProjectionRebuildJobs(registry: JobRegistry, db: ErpData
         }
 
         try {
-          await run(db, tenantId);
+          // RLS-readiness follow-up (2026-08-22): single-tenant per invocation (manual trigger
+          // always carries one tenantId), so a single wrap around the rebuild itself is enough.
+          // markResult() deliberately stays OUTSIDE any tenant-scoped connection — per its own
+          // comment above, projection_metadata tracks one row per projection name across the
+          // whole deployment, not per tenant; there's no tenant_id column to scope it by.
+          await withTenantConnection(db, tenantId, (scopedDb) => run(scopedDb, tenantId));
           await markResult(db, projectionName, undefined);
         } catch (err) {
           await markResult(db, projectionName, err);

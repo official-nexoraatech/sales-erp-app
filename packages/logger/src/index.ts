@@ -34,6 +34,9 @@ export {
   erpJobLastSuccessTimestamp,
   erpSearchSyncFailureTotal,
   erpSearchReindexTotal,
+  erpCapabilityCheckDeniedTotal,
+  erpTenantInvoiceGeneratedTotal,
+  erpTenantPaymentFailedTotal,
 } from './erp-metrics.js';
 
 export interface StructuredLogger {

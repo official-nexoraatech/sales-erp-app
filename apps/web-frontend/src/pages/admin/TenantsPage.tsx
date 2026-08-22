@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import toast from 'react-hot-toast';
-import { Ban, CheckCircle, XCircle, Users } from 'lucide-react';
+import { Ban, CheckCircle, XCircle, Users, CreditCard } from 'lucide-react';
 import { adminTenantApi } from '../../api/endpoints.js';
 import { useAuthStore } from '../../store/auth.store.js';
 import { useConfirm } from '../../context/ConfirmContext.js';
@@ -111,6 +111,11 @@ export default function TenantsPage() {
           label: 'Manage Users',
           icon: Users,
           onClick: (r: Tenant) => navigate(`/admin/tenants/${r.id}/users`),
+        },
+        {
+          label: 'Billing',
+          icon: CreditCard,
+          onClick: (r: Tenant) => navigate(`/admin/tenants/${r.id}/billing`),
         },
         {
           label: 'Suspend',

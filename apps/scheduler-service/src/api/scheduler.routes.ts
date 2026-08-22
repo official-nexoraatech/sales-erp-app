@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { ErpDatabase } from '@erp/db';
+import { withTenantConnection } from '@erp/sdk';
 import { jobHistory } from '@erp/db';
 import { eq, and, desc } from 'drizzle-orm';
 import { NotFoundError } from '@erp/types';
@@ -29,52 +30,58 @@ export async function schedulerRoutes(
     const { tenantId } = (request as unknown as AuthedRequest).auth;
 
     const allJobs = registry.listAll();
-    const statusPromises = allJobs.map(async ({ name, config }) => {
-      try {
-        const status = await registry.getStatus(name);
-        // Get last run from DB
-        const [lastRun] = await db
-          .select()
-          .from(jobHistory)
-          .where(and(eq(jobHistory.jobName, name), eq(jobHistory.tenantId, tenantId)))
-          .orderBy(desc(jobHistory.startedAt))
-          .limit(1);
+    const jobStatuses = await withTenantConnection(db, tenantId, (scopedDb) =>
+      Promise.all(
+        allJobs.map(async ({ name, config }) => {
+          try {
+            const status = await registry.getStatus(name);
+            // Get last run from DB
+            const [lastRun] = await scopedDb
+              .select()
+              .from(jobHistory)
+              .where(and(eq(jobHistory.jobName, name), eq(jobHistory.tenantId, tenantId)))
+              .orderBy(desc(jobHistory.startedAt))
+              .limit(1);
 
-        return {
-          name,
-          cron: config.cron,
-          description: config.description,
-          tenantScoped: config.tenantScoped,
-          isPaused: status.isPaused,
-          waiting: status.waiting,
-          active: status.active,
-          lastRun: lastRun
-            ? {
-                status: lastRun.status,
-                startedAt: lastRun.startedAt,
-                durationMs: lastRun.durationMs,
-                triggeredBy: lastRun.triggeredBy,
-              }
-            : null,
-        };
-      } catch {
-        return {
-          name,
-          cron: config.cron,
-          description: config.description,
-          isPaused: false,
-          lastRun: null,
-        };
-      }
-    });
-
-    const jobStatuses = await Promise.all(statusPromises);
+            return {
+              name,
+              cron: config.cron,
+              description: config.description,
+              tenantScoped: config.tenantScoped,
+              isPaused: status.isPaused,
+              waiting: status.waiting,
+              active: status.active,
+              lastRun: lastRun
+                ? {
+                    status: lastRun.status,
+                    startedAt: lastRun.startedAt,
+                    durationMs: lastRun.durationMs,
+                    triggeredBy: lastRun.triggeredBy,
+                  }
+                : null,
+            };
+          } catch {
+            return {
+              name,
+              cron: config.cron,
+              description: config.description,
+              isPaused: false,
+              lastRun: null,
+            };
+          }
+        })
+      )
+    );
     return reply.code(200).send({
       data: { content: jobStatuses, totalElements: jobStatuses.length },
     });
   });
 
   // ── POST /jobs/:name/trigger — Manually trigger a job ────────────────────
+  // Phase 9 GUC-per-request rollout — trigger/pause/resume below touch zero Postgres tables
+  // (JobRegistry.triggerManual/pause/resume are pure BullMQ/Redis ops — see JobRegistry.ts); the
+  // route-side comment already explains job_history itself is written by the worker, not here.
+  // Same "no-DB-access-at-all" category as gst-service's /gst/compute.
   fastify.post<{ Params: { name: string } }>(
     '/jobs/:name/trigger',
     { preHandler: authenticate },
@@ -157,12 +164,14 @@ export async function schedulerRoutes(
       const { tenantId } = (request as unknown as AuthedRequest).auth;
       const jobName = request.params.name;
 
-      const history = await db
-        .select()
-        .from(jobHistory)
-        .where(and(eq(jobHistory.jobName, jobName), eq(jobHistory.tenantId, tenantId)))
-        .orderBy(desc(jobHistory.startedAt))
-        .limit(30);
+      const history = await withTenantConnection(db, tenantId, (scopedDb) =>
+        scopedDb
+          .select()
+          .from(jobHistory)
+          .where(and(eq(jobHistory.jobName, jobName), eq(jobHistory.tenantId, tenantId)))
+          .orderBy(desc(jobHistory.startedAt))
+          .limit(30)
+      );
 
       return reply.code(200).send({ data: { content: history, jobName } });
     }

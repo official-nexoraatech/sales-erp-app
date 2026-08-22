@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { PlatformContextFactory } from '@erp/sdk';
+import { tenantScopedHandler } from '@erp/sdk';
 import { z } from 'zod';
 import { eq, and, sql } from 'drizzle-orm';
 import { journals, financialEntries, accounts } from '@erp/db';
@@ -8,8 +9,6 @@ import { PERMISSIONS } from '@erp/types';
 import { authenticate } from '../middleware/authenticate.js';
 import { requirePermission } from '../middleware/authorize.js';
 import { JournalEngine } from '../domain/JournalEngine.js';
-
-type AuthedRequest = { auth: { tenantId: number; userId: number } };
 
 const ReverseJournalSchema = z.object({
   reason: z.string().max(500).optional(),
@@ -33,6 +32,9 @@ const ManualJournalSchema = z.object({
     .min(2, 'A journal must have at least 2 lines'),
 });
 
+// Phase 9 GUC-per-request rollout — migrated 2026-08-21. No external I/O (JournalEngine.post()'s
+// outbox write is a DB row, not a synchronous network call — a separate relay worker publishes it
+// later). Post-hoc ctx.audit.log() calls are safe per tenantConnection-nested-rollback.test.ts.
 export async function journalRoutes(
   fastify: FastifyInstance,
   ctxFactory: PlatformContextFactory
@@ -41,13 +43,7 @@ export async function journalRoutes(
   fastify.get(
     '/journals',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.JOURNAL_VIEW)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
       const query = request.query as {
         page?: string;
         size?: string;
@@ -57,7 +53,7 @@ export async function journalRoutes(
       const page = Math.max(0, parseInt(query.page ?? '0', 10));
       const size = Math.min(100, Math.max(1, parseInt(query.size ?? '20', 10)));
 
-      const conditions = [eq(journals.tenantId, tenantId)];
+      const conditions = [eq(journals.tenantId, ctx.tenant.tenantId)];
       if (query.referenceType) {
         conditions.push(eq(journals.referenceType, query.referenceType));
       }
@@ -85,26 +81,20 @@ export async function journalRoutes(
           size,
         },
       });
-    }
+    })
   );
 
   // ── GET /journals/:id — Journal with all lines ────────────────────────────
   fastify.get<{ Params: { id: string } }>(
     '/journals/:id',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.JOURNAL_VIEW)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-      const journalId = request.params.id;
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { id: journalId } = request.params as { id: string };
 
       const [journal] = await ctx.db.raw
         .select()
         .from(journals)
-        .where(and(eq(journals.journalId, journalId), eq(journals.tenantId, tenantId)));
+        .where(and(eq(journals.journalId, journalId), eq(journals.tenantId, ctx.tenant.tenantId)));
       if (!journal) throw new NotFoundError('Journal', journalId);
 
       const lines = await ctx.db.raw
@@ -122,38 +112,37 @@ export async function journalRoutes(
         .from(financialEntries)
         .innerJoin(
           accounts,
-          and(eq(accounts.id, financialEntries.accountId), eq(accounts.tenantId, tenantId))
+          and(
+            eq(accounts.id, financialEntries.accountId),
+            eq(accounts.tenantId, ctx.tenant.tenantId)
+          )
         )
         .where(
-          and(eq(financialEntries.journalId, journalId), eq(financialEntries.tenantId, tenantId))
+          and(
+            eq(financialEntries.journalId, journalId),
+            eq(financialEntries.tenantId, ctx.tenant.tenantId)
+          )
         );
 
       return reply.code(200).send({ data: { ...journal, lines } });
-    }
+    })
   );
 
   // ── POST /journals — Manual journal entry ────────────────────────────────
   fastify.post(
     '/journals',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.JOURNAL_CREATE)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
       const body = ManualJournalSchema.safeParse(request.body);
       if (!body.success)
         throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
 
-      await JournalEngine.checkPeriodOpen(ctx.db, tenantId, new Date());
+      await JournalEngine.checkPeriodOpen(ctx.db, ctx.tenant.tenantId, new Date());
 
       const result = await JournalEngine.post(
         ctx.db,
-        tenantId,
-        userId,
+        ctx.tenant.tenantId,
+        ctx.tenant.userId,
         {
           description: body.data.description,
           ...(body.data.referenceType ? { referenceType: body.data.referenceType } : {}),
@@ -180,29 +169,23 @@ export async function journalRoutes(
       // numeric aggregateId) inside its own transaction — no separate publish needed here.
 
       return reply.code(201).send({ data: result });
-    }
+    })
   );
 
   // ── POST /journals/:id/reverse — Reverse a posted journal ────────────────
   fastify.post<{ Params: { id: string } }>(
     '/journals/:id/reverse',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.CANCEL_POSTED_JOURNAL)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-      const journalId = request.params.id;
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { id: journalId } = request.params as { id: string };
       const { reason } = ReverseJournalSchema.parse(request.body ?? {});
 
-      await JournalEngine.checkPeriodOpen(ctx.db, tenantId, new Date());
+      await JournalEngine.checkPeriodOpen(ctx.db, ctx.tenant.tenantId, new Date());
 
       const result = await JournalEngine.reverse(
         ctx.db,
-        tenantId,
-        userId,
+        ctx.tenant.tenantId,
+        ctx.tenant.userId,
         journalId,
         reason,
         ctx.tenant.correlationId
@@ -219,21 +202,16 @@ export async function journalRoutes(
       });
 
       return reply.code(201).send({ data: result });
-    }
+    })
   );
 
   // ── GET /accounts/:id/ledger — Account ledger with all transactions ───────
   fastify.get<{ Params: { id: string } }>(
     '/accounts/:id/ledger',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.LEDGER_VIEW)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-      const accountId = parseInt(request.params.id, 10);
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { id: idParam } = request.params as { id: string };
+      const accountId = parseInt(idParam, 10);
       const query = request.query as {
         fromDate?: string;
         toDate?: string;
@@ -244,7 +222,7 @@ export async function journalRoutes(
       const [account] = await ctx.db.raw
         .select()
         .from(accounts)
-        .where(and(eq(accounts.id, accountId), eq(accounts.tenantId, tenantId)));
+        .where(and(eq(accounts.id, accountId), eq(accounts.tenantId, ctx.tenant.tenantId)));
       if (!account) throw new NotFoundError('Account', accountId);
 
       const fromDate =
@@ -269,7 +247,7 @@ export async function journalRoutes(
             AS "runningBalance"
         FROM financial_entries fe
         JOIN journals j ON j.journal_id = fe.journal_id AND j.tenant_id = fe.tenant_id
-        WHERE fe.tenant_id = ${tenantId}
+        WHERE fe.tenant_id = ${ctx.tenant.tenantId}
           AND fe.account_id = ${accountId}
           AND fe.created_at >= ${fromDate}::DATE
           AND fe.created_at <= (${toDate}::DATE + INTERVAL '1 day')
@@ -279,7 +257,7 @@ export async function journalRoutes(
 
       const [totalRow] = (await ctx.db.raw.execute(sql`
         SELECT COUNT(*)::INTEGER AS cnt FROM financial_entries
-        WHERE tenant_id = ${tenantId}
+        WHERE tenant_id = ${ctx.tenant.tenantId}
           AND account_id = ${accountId}
           AND created_at >= ${fromDate}::DATE
           AND created_at <= (${toDate}::DATE + INTERVAL '1 day')
@@ -299,6 +277,6 @@ export async function journalRoutes(
           size,
         },
       });
-    }
+    })
   );
 }

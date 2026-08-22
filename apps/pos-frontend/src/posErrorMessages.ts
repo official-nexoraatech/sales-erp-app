@@ -31,6 +31,7 @@ const GENERIC_ERROR_MESSAGES: Record<string, string> = {
   FORBIDDEN: "You don't have permission to do this. Ask your manager or admin for access.",
   PERMISSION_DENIED: "You don't have permission to do this. Ask your manager or admin for access.",
   UNAUTHORIZED: 'Your session has expired. Please sign in again.',
+  CAPABILITY_NOT_ENABLED: "This feature isn't available on your plan. Ask your admin to enable it.",
 };
 
 // Generic counterpart to friendlySaleErrorMessage below, for screens that aren't the

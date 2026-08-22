@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { sql } from 'drizzle-orm';
 import type { ErpDatabase, ReplicaRouter } from '@erp/db';
+import { withTenantConnection } from '@erp/sdk';
 import { authenticate } from '../middleware/authenticate.js';
 import { requirePermission, requireAnyPermission } from '../middleware/authorize.js';
 
@@ -10,6 +11,15 @@ type DbClient = ErpDatabase;
 // documented 2-minute staleness tolerance (see event-service's STALE_TOLERANCE_MS), so a
 // replica lagging by up to that much is still "fresh enough" — resolve per-request via
 // replicaRouter.forRead() (falls back to the primary db when the caller passes none).
+//
+// Phase 9 GUC-per-request rollout — migrated 2026-08-21. New pattern: replicaRouter.forRead()
+// must resolve WHICH physical connection (primary or replica) to use first, then that resolved
+// connection gets wrapped in withTenantConnection for GUC scoping — createReadReplicaClient()
+// returns a full ErpDatabase (same drizzle-postgres-js wrapper as the primary), so `.transaction()`
+// + `SET LOCAL`/`set_config()` work identically against the replica: a hot standby rejects actual
+// DML at the WAL level, but BEGIN/SELECT/session-parameter operations are all read-only-safe.
+// Every query here already explicit-filters by tenant_id in its WHERE clause — this migration
+// adds RLS-ready defense-in-depth on top of that, not a fix for a missing filter.
 export async function dashboardRoutes(
   fastify: FastifyInstance,
   db: DbClient,
@@ -27,11 +37,12 @@ export async function dashboardRoutes(
       const today = new Date().toISOString().slice(0, 10);
       const monthStart = today.slice(0, 7) + '-01';
 
-      // Sales/collections come from the projection_dashboard_daily CQRS projection
-      // (kept up to date by InvoiceService/PaymentService). It has no columns for
-      // purchases, expenses, profit or invoice count — those are derived below
-      // straight from the source tables since no projection covers them.
-      const [dailyKpis] = (await readDb.execute(sql`
+      const data = await withTenantConnection(readDb, tid, async (scopedDb) => {
+        // Sales/collections come from the projection_dashboard_daily CQRS projection
+        // (kept up to date by InvoiceService/PaymentService). It has no columns for
+        // purchases, expenses, profit or invoice count — those are derived below
+        // straight from the source tables since no projection covers them.
+        const [dailyKpis] = (await scopedDb.execute(sql`
       SELECT
         COALESCE(SUM(CASE WHEN date = ${today}::date THEN sales_amount END), 0) AS today_sales,
         COALESCE(SUM(CASE WHEN date = ${today}::date THEN collected_amount END), 0) AS today_collection,
@@ -41,20 +52,20 @@ export async function dashboardRoutes(
       WHERE tenant_id = ${tid} AND date >= ${monthStart}::date
     `)) as unknown as Record<string, unknown>[];
 
-      const [todayPurchase] = (await readDb.execute(sql`
+        const [todayPurchase] = (await scopedDb.execute(sql`
       SELECT COALESCE(SUM(grand_total), 0) AS today_purchase
       FROM grns
       WHERE tenant_id = ${tid} AND grn_date::date = ${today}::date AND status = 'APPROVED'
     `)) as unknown as Record<string, unknown>[];
 
-      const [todayExpense] = (await readDb.execute(sql`
+        const [todayExpense] = (await scopedDb.execute(sql`
       SELECT COALESCE(SUM(total_amount), 0) AS today_expense
       FROM expenses
       WHERE tenant_id = ${tid} AND expense_date::date = ${today}::date AND status IN ('APPROVED', 'PAID')
     `)) as unknown as Record<string, unknown>[];
 
-      // Gross profit = invoice-line taxable amount less WACC cost of goods sold.
-      const [monthProfit] = (await readDb.execute(sql`
+        // Gross profit = invoice-line taxable amount less WACC cost of goods sold.
+        const [monthProfit] = (await scopedDb.execute(sql`
       SELECT
         COUNT(DISTINCT i.id)::int AS month_invoices,
         COALESCE(SUM(il.taxable_amount) - SUM(il.quantity * it.wacc_cost), 0) AS month_profit
@@ -64,8 +75,8 @@ export async function dashboardRoutes(
       WHERE i.tenant_id = ${tid} AND i.invoice_date >= ${monthStart}::date AND i.status NOT IN ('CANCELLED', 'DRAFT')
     `)) as unknown as Record<string, unknown>[];
 
-      // Outstanding receivables & payables from projections
-      const [balances] = (await readDb.execute(sql`
+        // Outstanding receivables & payables from projections
+        const [balances] = (await scopedDb.execute(sql`
       SELECT
         COALESCE(SUM(CASE WHEN type = 'RECEIVABLE' THEN current_balance END), 0) AS total_receivable,
         COALESCE(SUM(CASE WHEN type = 'PAYABLE' THEN current_balance END), 0) AS total_payable
@@ -78,8 +89,7 @@ export async function dashboardRoutes(
       ) t
     `)) as unknown as Record<string, unknown>[];
 
-      return reply.code(200).send({
-        data: {
+        return {
           today: {
             ...(dailyKpis ?? {}),
             today_purchase: todayPurchase?.today_purchase ?? 0,
@@ -88,8 +98,10 @@ export async function dashboardRoutes(
             month_invoices: monthProfit?.month_invoices ?? 0,
           },
           balances: balances ?? {},
-        },
+        };
       });
+
+      return reply.code(200).send({ data });
     }
   );
 
@@ -106,17 +118,25 @@ export async function dashboardRoutes(
         .toISOString()
         .slice(0, 10);
       const today = new Date().toISOString().slice(0, 10);
+      const monthStart = today.slice(0, 7) + '-01';
+      const prevMonthStart = new Date(
+        new Date(monthStart).setMonth(new Date(monthStart).getMonth() - 1)
+      )
+        .toISOString()
+        .slice(0, 10);
+      const prevMonthEnd = new Date(new Date(monthStart).setDate(0)).toISOString().slice(0, 10);
 
-      // 1. Daily sales trend (last 30 days) — sales/collections from the projection,
-      // gross profit derived from invoice lines (no profit column exists on the projection)
-      const salesTrend = (await readDb.execute(sql`
+      const data = await withTenantConnection(readDb, tid, async (scopedDb) => {
+        // 1. Daily sales trend (last 30 days) — sales/collections from the projection,
+        // gross profit derived from invoice lines (no profit column exists on the projection)
+        const salesTrend = (await scopedDb.execute(sql`
       SELECT date::date::text AS date, sales_amount AS total_sales, collected_amount AS total_collections
       FROM projection_dashboard_daily
       WHERE tenant_id = ${tid} AND date BETWEEN ${thirtyDaysAgo}::date AND ${today}::date
       ORDER BY date
     `)) as unknown as Record<string, unknown>[];
 
-      const dailyProfit = (await readDb.execute(sql`
+        const dailyProfit = (await scopedDb.execute(sql`
       SELECT
         i.invoice_date::date::text AS date,
         COALESCE(SUM(il.taxable_amount) - SUM(il.quantity * it.wacc_cost), 0) AS gross_profit
@@ -127,15 +147,14 @@ export async function dashboardRoutes(
         AND i.status NOT IN ('CANCELLED', 'DRAFT')
       GROUP BY i.invoice_date::date
     `)) as unknown as Record<string, unknown>[];
-      const profitByDate = new Map(dailyProfit.map((r) => [r.date as string, r.gross_profit]));
-      const salesTrendWithProfit = salesTrend.map((row) => ({
-        ...row,
-        gross_profit: profitByDate.get(row.date as string) ?? 0,
-      }));
+        const profitByDate = new Map(dailyProfit.map((r) => [r.date as string, r.gross_profit]));
+        const salesTrendWithProfit = salesTrend.map((row) => ({
+          ...row,
+          gross_profit: profitByDate.get(row.date as string) ?? 0,
+        }));
 
-      // 2. Sales by category (current month)
-      const monthStart = today.slice(0, 7) + '-01';
-      const salesByCategory = (await readDb.execute(sql`
+        // 2. Sales by category (current month)
+        const salesByCategory = (await scopedDb.execute(sql`
       SELECT cat.name AS category, SUM(il.line_total) AS revenue
       FROM invoice_lines il
       JOIN invoices i ON i.id = il.invoice_id AND i.tenant_id = ${tid}
@@ -149,8 +168,8 @@ export async function dashboardRoutes(
       LIMIT 8
     `)) as unknown as Record<string, unknown>[];
 
-      // 3. Payment mode breakdown (current month)
-      const paymentModes = (await readDb.execute(sql`
+        // 3. Payment mode breakdown (current month)
+        const paymentModes = (await scopedDb.execute(sql`
       SELECT payment_mode AS mode, SUM(amount) AS total
       FROM payments
       WHERE tenant_id = ${tid} AND payment_date >= ${monthStart}::date
@@ -158,8 +177,8 @@ export async function dashboardRoutes(
       ORDER BY total DESC
     `)) as unknown as Record<string, unknown>[];
 
-      // 4. Stock value by category — items table carries its own live qty/WACC cost
-      const stockByCategory = (await readDb.execute(sql`
+        // 4. Stock value by category — items table carries its own live qty/WACC cost
+        const stockByCategory = (await scopedDb.execute(sql`
       SELECT cat.name AS category, SUM(it.available_qty * it.wacc_cost) AS value
       FROM items it
       LEFT JOIN categories cat ON cat.id = it.category_id
@@ -169,15 +188,8 @@ export async function dashboardRoutes(
       LIMIT 8
     `)) as unknown as Record<string, unknown>[];
 
-      // 5. Monthly comparison (current vs prev month)
-      const prevMonthStart = new Date(
-        new Date(monthStart).setMonth(new Date(monthStart).getMonth() - 1)
-      )
-        .toISOString()
-        .slice(0, 10);
-      const prevMonthEnd = new Date(new Date(monthStart).setDate(0)).toISOString().slice(0, 10);
-
-      const [monthlySales] = (await readDb.execute(sql`
+        // 5. Monthly comparison (current vs prev month)
+        const [monthlySales] = (await scopedDb.execute(sql`
       SELECT
         SUM(CASE WHEN date >= ${monthStart}::date THEN sales_amount ELSE 0 END) AS current_sales,
         SUM(CASE WHEN date >= ${prevMonthStart}::date AND date <= ${prevMonthEnd}::date THEN sales_amount ELSE 0 END) AS prev_sales
@@ -185,7 +197,7 @@ export async function dashboardRoutes(
       WHERE tenant_id = ${tid} AND date >= ${prevMonthStart}::date
     `)) as unknown as Record<string, unknown>[];
 
-      const [monthlyProfit] = (await readDb.execute(sql`
+        const [monthlyProfit] = (await scopedDb.execute(sql`
       SELECT
         COALESCE(SUM(CASE WHEN i.invoice_date >= ${monthStart}::date THEN il.taxable_amount - il.quantity * it.wacc_cost ELSE 0 END), 0) AS current_profit,
         COALESCE(SUM(CASE WHEN i.invoice_date >= ${prevMonthStart}::date AND i.invoice_date <= ${prevMonthEnd}::date THEN il.taxable_amount - il.quantity * it.wacc_cost ELSE 0 END), 0) AS prev_profit
@@ -195,10 +207,10 @@ export async function dashboardRoutes(
       WHERE i.tenant_id = ${tid} AND i.invoice_date >= ${prevMonthStart}::date AND i.status NOT IN ('CANCELLED', 'DRAFT')
     `)) as unknown as Record<string, unknown>[];
 
-      const monthlyComparison = { ...(monthlySales ?? {}), ...(monthlyProfit ?? {}) };
+        const monthlyComparison = { ...(monthlySales ?? {}), ...(monthlyProfit ?? {}) };
 
-      // 6. Top 5 customers by sales (current month)
-      const topCustomers = (await readDb.execute(sql`
+        // 6. Top 5 customers by sales (current month)
+        const topCustomers = (await scopedDb.execute(sql`
       SELECT
         COALESCE(c.display_name, 'Walk-in') AS name,
         SUM(i.grand_total) AS revenue
@@ -212,8 +224,8 @@ export async function dashboardRoutes(
       LIMIT 5
     `)) as unknown as Record<string, unknown>[];
 
-      // 7. Receivables ageing
-      const receivablesAgeing = (await readDb.execute(sql`
+        // 7. Receivables ageing
+        const receivablesAgeing = (await scopedDb.execute(sql`
       SELECT
         CASE
           WHEN (${today}::date - i.due_date::date) <= 0 THEN 'Current'
@@ -237,8 +249,8 @@ export async function dashboardRoutes(
       END)
     `)) as unknown as Record<string, unknown>[];
 
-      // 8. Purchase trend (last 30 days) — derived from approved GRNs
-      const purchaseTrend = (await readDb.execute(sql`
+        // 8. Purchase trend (last 30 days) — derived from approved GRNs
+        const purchaseTrend = (await scopedDb.execute(sql`
       SELECT grn_date::date::text AS date, SUM(grand_total) AS total_purchases
       FROM grns
       WHERE tenant_id = ${tid} AND grn_date BETWEEN ${thirtyDaysAgo}::date AND ${today}::date
@@ -247,8 +259,7 @@ export async function dashboardRoutes(
       ORDER BY date
     `)) as unknown as Record<string, unknown>[];
 
-      return reply.code(200).send({
-        data: {
+        return {
           salesTrend: salesTrendWithProfit,
           salesByCategory,
           paymentModes,
@@ -257,8 +268,10 @@ export async function dashboardRoutes(
           topCustomers,
           receivablesAgeing,
           purchaseTrend,
-        },
+        };
       });
+
+      return reply.code(200).send({ data });
     }
   );
 
@@ -273,7 +286,8 @@ export async function dashboardRoutes(
       const tid = req.auth.tenantId;
       const today = new Date().toISOString().slice(0, 10);
 
-      const [lowStockCount] = (await readDb.execute(sql`
+      const data = await withTenantConnection(readDb, tid, async (scopedDb) => {
+        const [lowStockCount] = (await scopedDb.execute(sql`
       SELECT COUNT(*)::int AS count
       FROM items it
       WHERE it.tenant_id = ${tid}
@@ -281,7 +295,7 @@ export async function dashboardRoutes(
         AND it.reorder_level > 0
     `)) as unknown as Record<string, unknown>[];
 
-      const [overdueInvoices] = (await readDb.execute(sql`
+        const [overdueInvoices] = (await scopedDb.execute(sql`
       SELECT COUNT(*)::int AS count, COALESCE(SUM(grand_total - COALESCE(paid_amount, 0)), 0) AS total_amount
       FROM invoices
       WHERE tenant_id = ${tid}
@@ -290,47 +304,48 @@ export async function dashboardRoutes(
         AND status NOT IN ('CANCELLED', 'PAID')
     `)) as unknown as Record<string, unknown>[];
 
-      const [pendingPOs] = (await readDb.execute(sql`
+        const [pendingPOs] = (await scopedDb.execute(sql`
       SELECT COUNT(*)::int AS count
       FROM purchase_orders
       WHERE tenant_id = ${tid}
         AND status IN ('APPROVED', 'PARTIALLY_RECEIVED')
     `)) as unknown as Record<string, unknown>[];
 
-      const [pendingGRNs] = (await readDb.execute(sql`
+        const [pendingGRNs] = (await scopedDb.execute(sql`
       SELECT COUNT(*)::int AS count
       FROM grns
       WHERE tenant_id = ${tid}
         AND status = 'PENDING_APPROVAL'
     `)) as unknown as Record<string, unknown>[];
 
-      // M-13 fix: no widget tracked undispatched Delivery Challans at all, despite
-      // delivery_challans.status directly supporting it.
-      const [pendingDeliveries] = (await readDb.execute(sql`
+        // M-13 fix: no widget tracked undispatched Delivery Challans at all, despite
+        // delivery_challans.status directly supporting it.
+        const [pendingDeliveries] = (await scopedDb.execute(sql`
       SELECT COUNT(*)::int AS count
       FROM delivery_challans
       WHERE tenant_id = ${tid}
         AND status = 'DRAFT'
     `)) as unknown as Record<string, unknown>[];
 
-      // Supplier payables have no due-date tracking on grns — the projection's
-      // overdue_amount (maintained from supplier payment terms) is the real source.
-      const [pendingPayments] = (await readDb.execute(sql`
+        // Supplier payables have no due-date tracking on grns — the projection's
+        // overdue_amount (maintained from supplier payment terms) is the real source.
+        const [pendingPayments] = (await scopedDb.execute(sql`
       SELECT COUNT(*)::int AS count, COALESCE(SUM(overdue_amount), 0) AS total_amount
       FROM projection_supplier_balance
       WHERE tenant_id = ${tid} AND overdue_amount > 0
     `)) as unknown as Record<string, unknown>[];
 
-      return reply.code(200).send({
-        data: {
+        return {
           lowStock: lowStockCount ?? { count: 0 },
           overdueReceivables: overdueInvoices ?? { count: 0, total_amount: 0 },
           pendingPurchaseOrders: pendingPOs ?? { count: 0 },
           pendingGRNs: pendingGRNs ?? { count: 0 },
           pendingDeliveries: pendingDeliveries ?? { count: 0 },
           overduePayables: pendingPayments ?? { count: 0, total_amount: 0 },
-        },
+        };
       });
+
+      return reply.code(200).send({ data });
     }
   );
 
@@ -345,10 +360,11 @@ export async function dashboardRoutes(
       const tid = req.auth.tenantId;
       const today = new Date().toISOString().slice(0, 10);
 
-      // "POS transaction" = an invoice with at least one payment allocation coming
-      // from a POS session (payments has pos_session_id; payment_allocations links
-      // payments to invoices — payments has no invoice_id column of its own).
-      const [todaySummary] = (await readDb.execute(sql`
+      const data = await withTenantConnection(readDb, tid, async (scopedDb) => {
+        // "POS transaction" = an invoice with at least one payment allocation coming
+        // from a POS session (payments has pos_session_id; payment_allocations links
+        // payments to invoices — payments has no invoice_id column of its own).
+        const [todaySummary] = (await scopedDb.execute(sql`
       SELECT
         COUNT(*)::int AS total_transactions,
         COALESCE(SUM(grand_total), 0) AS total_sales,
@@ -364,7 +380,7 @@ export async function dashboardRoutes(
         )
     `)) as unknown as Record<string, unknown>[];
 
-      const hourlyData = (await readDb.execute(sql`
+        const hourlyData = (await scopedDb.execute(sql`
       SELECT
         EXTRACT(HOUR FROM created_at)::int AS hour,
         COUNT(*)::int AS count,
@@ -382,7 +398,7 @@ export async function dashboardRoutes(
       ORDER BY hour
     `)) as unknown as Record<string, unknown>[];
 
-      const lastFiveInvoices = (await readDb.execute(sql`
+        const lastFiveInvoices = (await scopedDb.execute(sql`
       SELECT
         i.invoice_number,
         i.grand_total,
@@ -402,8 +418,7 @@ export async function dashboardRoutes(
       LIMIT 5
     `)) as unknown as Record<string, unknown>[];
 
-      return reply.code(200).send({
-        data: {
+        return {
           today: todaySummary ?? {
             total_transactions: 0,
             total_sales: 0,
@@ -411,8 +426,10 @@ export async function dashboardRoutes(
           },
           hourly: hourlyData,
           lastFiveInvoices,
-        },
+        };
       });
+
+      return reply.code(200).send({ data });
     }
   );
 }

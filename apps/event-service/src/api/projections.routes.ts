@@ -1,8 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { PlatformContextFactory } from '@erp/sdk';
 import { projectionMetadata } from '@erp/db';
-import { and, eq, sql } from 'drizzle-orm';
-import { z } from 'zod';
+import { eq } from 'drizzle-orm';
 import { Queue } from 'bullmq';
 import { PERMISSIONS } from '@erp/types';
 import { authenticate } from '../middleware/authenticate.js';
@@ -21,10 +20,10 @@ const PROJECTION_QUEUE_NAMES: Record<string, string> = {
 };
 
 const STALE_TOLERANCE_MS: Record<string, number> = {
-  projection_dashboard_daily: 120_000,   // 2 minutes
-  projection_customer_balance: 5_000,    // 5 seconds
-  projection_stock_level: 5_000,         // 5 seconds
-  projection_customer_aging: 3_600_000,  // 1 hour
+  projection_dashboard_daily: 120_000, // 2 minutes
+  projection_customer_balance: 5_000, // 5 seconds
+  projection_stock_level: 5_000, // 5 seconds
+  projection_customer_aging: 3_600_000, // 1 hour
 };
 
 function computeProjectionMeta(row: typeof projectionMetadata.$inferSelect): {
@@ -44,6 +43,16 @@ function computeProjectionMeta(row: typeof projectionMetadata.$inferSelect): {
   return { lastUpdatedAt, lagMs, isStale, staleTolerance };
 }
 
+// Phase 9 GUC-per-request rollout — deliberately NOT migrated. `projectionMetadata` has a
+// nullable `tenant_id` (unique per projectionName+tenantId — schema allows either a global row
+// with tenantId=null or a per-tenant one), but every route in this file queries/updates by
+// `projectionName` alone, with no tenantId filter anywhere — this is genuinely cross-tenant
+// platform monitoring of each CQRS projection's overall health/lag, not a per-tenant view scoped
+// to the calling admin's own tenant. Wrapping these in withTenantConnection(db, tenantId, ...)
+// would apply an app.current_tenant_id GUC that these queries never intended and — once RLS is
+// enabled — would silently hide the very cross-tenant/global rows this dashboard exists to show.
+// Same category as tenant-service's `GET /admin/tenants` (its own comment already flags this as
+// cross-tenant), just for a synchronous admin route rather than a scheduler batch job.
 export async function projectionRoutes(
   fastify: FastifyInstance,
   ctxFactory: PlatformContextFactory
@@ -65,7 +74,11 @@ export async function projectionRoutes(
   fastify.get('/admin/projections', {
     preHandler: requirePermission(PERMISSIONS.PROJECTION_VIEW),
     handler: async (request, reply) => {
-      const ctx = ctxFactory.create({ tenantId: request.auth.tenantId, userId: request.auth.userId, correlationId: (request.headers['x-correlation-id'] as string) ?? 'system' });
+      const ctx = ctxFactory.create({
+        tenantId: request.auth.tenantId,
+        userId: request.auth.userId,
+        correlationId: (request.headers['x-correlation-id'] as string) ?? 'system',
+      });
       const db = ctx.db.raw;
 
       const rows = await db.select().from(projectionMetadata);
@@ -84,7 +97,11 @@ export async function projectionRoutes(
     preHandler: requirePermission(PERMISSIONS.PROJECTION_VIEW),
     handler: async (request, reply) => {
       const { name } = request.params;
-      const ctx = ctxFactory.create({ tenantId: request.auth.tenantId, userId: request.auth.userId, correlationId: (request.headers['x-correlation-id'] as string) ?? 'system' });
+      const ctx = ctxFactory.create({
+        tenantId: request.auth.tenantId,
+        userId: request.auth.userId,
+        correlationId: (request.headers['x-correlation-id'] as string) ?? 'system',
+      });
       const db = ctx.db.raw;
 
       const rows = await db
@@ -94,7 +111,9 @@ export async function projectionRoutes(
         .limit(1);
 
       if (!rows[0]) {
-        return reply.code(404).send({ error: { code: 'NOT_FOUND', message: `Projection '${name}' not found` } });
+        return reply
+          .code(404)
+          .send({ error: { code: 'NOT_FOUND', message: `Projection '${name}' not found` } });
       }
 
       return reply.code(200).send({
@@ -108,7 +127,11 @@ export async function projectionRoutes(
     preHandler: requirePermission(PERMISSIONS.PROJECTION_MANAGE),
     handler: async (request, reply) => {
       const { name } = request.params;
-      const ctx = ctxFactory.create({ tenantId: request.auth.tenantId, userId: request.auth.userId, correlationId: (request.headers['x-correlation-id'] as string) ?? 'system' });
+      const ctx = ctxFactory.create({
+        tenantId: request.auth.tenantId,
+        userId: request.auth.userId,
+        correlationId: (request.headers['x-correlation-id'] as string) ?? 'system',
+      });
       const db = ctx.db.raw;
 
       const rows = await db
@@ -118,16 +141,32 @@ export async function projectionRoutes(
         .limit(1);
 
       if (!rows[0]) {
-        return reply.code(404).send({ error: { code: 'NOT_FOUND', message: `Projection '${name}' not found` } });
+        return reply
+          .code(404)
+          .send({ error: { code: 'NOT_FOUND', message: `Projection '${name}' not found` } });
       }
 
       if (rows[0].status === 'REBUILDING') {
-        return reply.code(422).send({ error: { code: 'REBUILD_IN_PROGRESS', message: `Projection '${name}' is already being rebuilt` } });
+        return reply
+          .code(422)
+          .send({
+            error: {
+              code: 'REBUILD_IN_PROGRESS',
+              message: `Projection '${name}' is already being rebuilt`,
+            },
+          });
       }
 
       const queue = rebuildQueues[name];
       if (!queue) {
-        return reply.code(400).send({ error: { code: 'UNSUPPORTED_PROJECTION', message: `No rebuild job registered for '${name}'` } });
+        return reply
+          .code(400)
+          .send({
+            error: {
+              code: 'UNSUPPORTED_PROJECTION',
+              message: `No rebuild job registered for '${name}'`,
+            },
+          });
       }
 
       // Mark as REBUILDING
@@ -145,7 +184,11 @@ export async function projectionRoutes(
           .update(projectionMetadata)
           .set({ status: 'ERROR', errorMessage: errMsg, updatedAt: new Date() })
           .where(eq(projectionMetadata.projectionName, name));
-        return reply.code(500).send({ error: { code: 'REBUILD_ENQUEUE_FAILED', message: 'Failed to enqueue rebuild job' } });
+        return reply
+          .code(500)
+          .send({
+            error: { code: 'REBUILD_ENQUEUE_FAILED', message: 'Failed to enqueue rebuild job' },
+          });
       }
 
       return reply.code(202).send({
@@ -160,14 +203,20 @@ export async function projectionRoutes(
     handler: async (request, reply) => {
       const { name } = request.params;
       const body = request.body as { lastEventId?: string; lastEventOccurredAt?: string };
-      const ctx = ctxFactory.create({ tenantId: request.auth.tenantId, userId: request.auth.userId, correlationId: (request.headers['x-correlation-id'] as string) ?? 'system' });
+      const ctx = ctxFactory.create({
+        tenantId: request.auth.tenantId,
+        userId: request.auth.userId,
+        correlationId: (request.headers['x-correlation-id'] as string) ?? 'system',
+      });
       const db = ctx.db.raw;
 
       await db
         .update(projectionMetadata)
         .set({
           lastEventId: body.lastEventId,
-          lastEventOccurredAt: body.lastEventOccurredAt ? new Date(body.lastEventOccurredAt) : undefined,
+          lastEventOccurredAt: body.lastEventOccurredAt
+            ? new Date(body.lastEventOccurredAt)
+            : undefined,
           lastUpdatedAt: new Date(),
           status: 'UP_TO_DATE',
           updatedAt: new Date(),

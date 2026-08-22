@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { PlatformContextFactory } from '@erp/sdk';
+import { tenantScopedHandler } from '@erp/sdk';
 import { suppliers, suppliersHistory, supplierContacts } from '@erp/db';
 import { and, eq, isNull, or, ilike, sql } from 'drizzle-orm';
 import { z } from 'zod';
@@ -82,8 +83,9 @@ const SupplierContactSchema = z.object({
   notes: z.string().max(2000).optional(),
 });
 
-type AuthedRequest = { auth: { tenantId: number; userId: number } };
-
+// Phase 9 GUC-per-request rollout — migrated 2026-08-21. No external I/O anywhere in this file —
+// pure CRUD. ctx.db.transaction() calls (PUT /suppliers/:id, contact create/update) become
+// savepoints of the outer transaction once wrapped, same as everywhere else in this rollout.
 export async function supplierRoutes(
   fastify: FastifyInstance,
   ctxFactory: PlatformContextFactory
@@ -92,13 +94,7 @@ export async function supplierRoutes(
   fastify.get(
     '/suppliers',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.SUPPLIER_VIEW)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
       const query = request.query as {
         page?: string;
         size?: string;
@@ -109,7 +105,10 @@ export async function supplierRoutes(
       const page = Math.max(0, parseInt(query.page ?? '0', 10));
       const size = Math.min(100, parseInt(query.size ?? '20', 10));
 
-      let whereClause = and(eq(suppliers.tenantId, tenantId), isNull(suppliers.deletedAt));
+      let whereClause = and(
+        eq(suppliers.tenantId, ctx.tenant.tenantId),
+        isNull(suppliers.deletedAt)
+      );
       if (query.status) {
         whereClause = and(
           whereClause,
@@ -140,49 +139,47 @@ export async function supplierRoutes(
       return reply
         .code(200)
         .send({ data: { content: rows, totalElements: countRow?.count ?? 0, page, size } });
-    }
+    })
   );
 
   // ── GET /suppliers/:id ─────────────────────────────────────────────────────
-  fastify.get<{ Params: { id: string } }>(
+  fastify.get(
     '/suppliers/:id',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.SUPPLIER_VIEW)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-      const id = parseInt(request.params.id, 10);
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { id: idParam } = request.params as { id: string };
+      const id = parseInt(idParam, 10);
       const [supplier] = await ctx.db.raw
         .select()
         .from(suppliers)
         .where(
-          and(eq(suppliers.id, id), eq(suppliers.tenantId, tenantId), isNull(suppliers.deletedAt))
+          and(
+            eq(suppliers.id, id),
+            eq(suppliers.tenantId, ctx.tenant.tenantId),
+            isNull(suppliers.deletedAt)
+          )
         );
       if (!supplier) throw new NotFoundError('Supplier', id);
       return reply.code(200).send({ data: supplier });
-    }
+    })
   );
 
   // ── GET /suppliers/:id/statement ──────────────────────────────────────────
-  fastify.get<{ Params: { id: string } }>(
+  fastify.get(
     '/suppliers/:id/statement',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.SUPPLIER_VIEW)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-      const id = parseInt(request.params.id, 10);
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { id: idParam } = request.params as { id: string };
+      const id = parseInt(idParam, 10);
       const [supplier] = await ctx.db.raw
         .select()
         .from(suppliers)
         .where(
-          and(eq(suppliers.id, id), eq(suppliers.tenantId, tenantId), isNull(suppliers.deletedAt))
+          and(
+            eq(suppliers.id, id),
+            eq(suppliers.tenantId, ctx.tenant.tenantId),
+            isNull(suppliers.deletedAt)
+          )
         );
       if (!supplier) throw new NotFoundError('Supplier', id);
       return reply.code(200).send({
@@ -194,46 +191,38 @@ export async function supplierRoutes(
           closingBalance: supplier.openingBalance,
         },
       });
-    }
+    })
   );
 
   // ── GET /suppliers/:id/outstanding ────────────────────────────────────────
-  fastify.get<{ Params: { id: string } }>(
+  fastify.get(
     '/suppliers/:id/outstanding',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.SUPPLIER_VIEW)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-      const id = parseInt(request.params.id, 10);
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { id: idParam } = request.params as { id: string };
+      const id = parseInt(idParam, 10);
       const [supplier] = await ctx.db.raw
         .select()
         .from(suppliers)
         .where(
-          and(eq(suppliers.id, id), eq(suppliers.tenantId, tenantId), isNull(suppliers.deletedAt))
+          and(
+            eq(suppliers.id, id),
+            eq(suppliers.tenantId, ctx.tenant.tenantId),
+            isNull(suppliers.deletedAt)
+          )
         );
       if (!supplier) throw new NotFoundError('Supplier', id);
       return reply.code(200).send({
         data: { supplierId: id, outstandingAmount: supplier.openingBalance, bills: [] },
       });
-    }
+    })
   );
 
   // ── POST /suppliers ────────────────────────────────────────────────────────
   fastify.post(
     '/suppliers',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.SUPPLIER_CREATE)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
       const body = SupplierSchema.safeParse(request.body);
       if (!body.success)
         throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
@@ -247,8 +236,8 @@ export async function supplierRoutes(
       const [created] = await ctx.db.raw
         .insert(suppliers)
         .values({
-          tenantId,
-          createdBy: userId,
+          tenantId: ctx.tenant.tenantId,
+          createdBy: ctx.tenant.userId,
           supplierCode,
           ...body.data,
           bankAccountNo: body.data.bankAccountNo || null,
@@ -274,21 +263,16 @@ export async function supplierRoutes(
       });
 
       return reply.code(201).send({ data: created });
-    }
+    })
   );
 
   // ── PUT /suppliers/:id ────────────────────────────────────────────────────
-  fastify.put<{ Params: { id: string } }>(
+  fastify.put(
     '/suppliers/:id',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.SUPPLIER_EDIT)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-      const id = parseInt(request.params.id, 10);
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { id: idParam } = request.params as { id: string };
+      const id = parseInt(idParam, 10);
 
       const body = SupplierUpdateSchema.safeParse(request.body);
       if (!body.success)
@@ -298,7 +282,11 @@ export async function supplierRoutes(
         .select()
         .from(suppliers)
         .where(
-          and(eq(suppliers.id, id), eq(suppliers.tenantId, tenantId), isNull(suppliers.deletedAt))
+          and(
+            eq(suppliers.id, id),
+            eq(suppliers.tenantId, ctx.tenant.tenantId),
+            isNull(suppliers.deletedAt)
+          )
         );
 
       if (!existing) throw new NotFoundError('Supplier', id);
@@ -311,8 +299,8 @@ export async function supplierRoutes(
       await ctx.db.transaction(async (trx) => {
         await trx.raw.insert(suppliersHistory).values({
           supplierId: id,
-          tenantId,
-          changedBy: userId,
+          tenantId: ctx.tenant.tenantId,
+          changedBy: ctx.tenant.userId,
           changedAt: new Date(),
           previousData: existing as unknown as Record<string, unknown>,
           changeType: 'UPDATE',
@@ -333,7 +321,7 @@ export async function supplierRoutes(
           .where(
             and(
               eq(suppliers.id, id),
-              eq(suppliers.tenantId, tenantId),
+              eq(suppliers.tenantId, ctx.tenant.tenantId),
               eq(suppliers.version, body.data.version)
             )
           )
@@ -358,34 +346,33 @@ export async function supplierRoutes(
       });
 
       return reply.code(200).send({ data: updated });
-    }
+    })
   );
 
   // ── DELETE /suppliers/:id ─────────────────────────────────────────────────
-  fastify.delete<{ Params: { id: string } }>(
+  fastify.delete(
     '/suppliers/:id',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.SUPPLIER_DELETE)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-      const id = parseInt(request.params.id, 10);
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { id: idParam } = request.params as { id: string };
+      const id = parseInt(idParam, 10);
 
       const [existing] = await ctx.db.raw
         .select()
         .from(suppliers)
         .where(
-          and(eq(suppliers.id, id), eq(suppliers.tenantId, tenantId), isNull(suppliers.deletedAt))
+          and(
+            eq(suppliers.id, id),
+            eq(suppliers.tenantId, ctx.tenant.tenantId),
+            isNull(suppliers.deletedAt)
+          )
         );
 
       if (!existing) throw new NotFoundError('Supplier', id);
 
       await ctx.db.raw
         .update(suppliers)
-        .set({ deletedAt: new Date(), deletedBy: userId, status: 'INACTIVE' })
+        .set({ deletedAt: new Date(), deletedBy: ctx.tenant.userId, status: 'INACTIVE' })
         .where(eq(suppliers.id, id));
 
       await ctx.events.publish('supplier', id, 'SUPPLIER_DELETED', { id });
@@ -397,45 +384,38 @@ export async function supplierRoutes(
       });
 
       return reply.code(200).send({ data: { message: 'Supplier deleted', id } });
-    }
+    })
   );
 
   // ── Supplier Contacts (purchase-module enhancement 2026-07-21) ────────────
   // A supplier only ever had one free-text `contactPerson` field — no way to record more
   // than one real point of contact (e.g. a sales rep vs an accounts/finance contact).
-  fastify.get<{ Params: { id: string } }>(
+  fastify.get(
     '/suppliers/:id/contacts',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.SUPPLIER_VIEW)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-      const supplierId = parseInt(request.params.id, 10);
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { id: idParam } = request.params as { id: string };
+      const supplierId = parseInt(idParam, 10);
       const rows = await ctx.db.raw
         .select()
         .from(supplierContacts)
         .where(
-          and(eq(supplierContacts.supplierId, supplierId), eq(supplierContacts.tenantId, tenantId))
+          and(
+            eq(supplierContacts.supplierId, supplierId),
+            eq(supplierContacts.tenantId, ctx.tenant.tenantId)
+          )
         )
         .orderBy(sql`${supplierContacts.isPrimary} DESC, ${supplierContacts.createdAt} ASC`);
       return reply.code(200).send({ data: { content: rows, totalElements: rows.length } });
-    }
+    })
   );
 
-  fastify.post<{ Params: { id: string } }>(
+  fastify.post(
     '/suppliers/:id/contacts',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.SUPPLIER_EDIT)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-      const supplierId = parseInt(request.params.id, 10);
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { id: idParam } = request.params as { id: string };
+      const supplierId = parseInt(idParam, 10);
 
       const [supplier] = await ctx.db.raw
         .select({ id: suppliers.id })
@@ -443,7 +423,7 @@ export async function supplierRoutes(
         .where(
           and(
             eq(suppliers.id, supplierId),
-            eq(suppliers.tenantId, tenantId),
+            eq(suppliers.tenantId, ctx.tenant.tenantId),
             isNull(suppliers.deletedAt)
           )
         );
@@ -462,14 +442,14 @@ export async function supplierRoutes(
             .where(
               and(
                 eq(supplierContacts.supplierId, supplierId),
-                eq(supplierContacts.tenantId, tenantId)
+                eq(supplierContacts.tenantId, ctx.tenant.tenantId)
               )
             );
         }
         return trx.raw
           .insert(supplierContacts)
           .values({
-            tenantId,
+            tenantId: ctx.tenant.tenantId,
             supplierId,
             name: body.data.name,
             designation: body.data.designation,
@@ -477,28 +457,26 @@ export async function supplierRoutes(
             email: body.data.email || undefined,
             isPrimary: body.data.isPrimary,
             notes: body.data.notes,
-            createdBy: userId,
+            createdBy: ctx.tenant.userId,
           })
           .returning();
       });
 
       if (!created) throw new Error('Supplier contact creation failed unexpectedly');
       return reply.code(201).send({ data: created });
-    }
+    })
   );
 
-  fastify.put<{ Params: { id: string; contactId: string } }>(
+  fastify.put(
     '/suppliers/:id/contacts/:contactId',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.SUPPLIER_EDIT)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-      const supplierId = parseInt(request.params.id, 10);
-      const contactId = parseInt(request.params.contactId, 10);
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { id: idParam, contactId: contactIdParam } = request.params as {
+        id: string;
+        contactId: string;
+      };
+      const supplierId = parseInt(idParam, 10);
+      const contactId = parseInt(contactIdParam, 10);
 
       const [existing] = await ctx.db.raw
         .select()
@@ -507,7 +485,7 @@ export async function supplierRoutes(
           and(
             eq(supplierContacts.id, contactId),
             eq(supplierContacts.supplierId, supplierId),
-            eq(supplierContacts.tenantId, tenantId)
+            eq(supplierContacts.tenantId, ctx.tenant.tenantId)
           )
         );
       if (!existing) throw new NotFoundError('SupplierContact', contactId);
@@ -524,7 +502,7 @@ export async function supplierRoutes(
             .where(
               and(
                 eq(supplierContacts.supplierId, supplierId),
-                eq(supplierContacts.tenantId, tenantId)
+                eq(supplierContacts.tenantId, ctx.tenant.tenantId)
               )
             );
         }
@@ -544,21 +522,19 @@ export async function supplierRoutes(
       });
 
       return reply.code(200).send({ data: updated });
-    }
+    })
   );
 
-  fastify.delete<{ Params: { id: string; contactId: string } }>(
+  fastify.delete(
     '/suppliers/:id/contacts/:contactId',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.SUPPLIER_EDIT)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-      const supplierId = parseInt(request.params.id, 10);
-      const contactId = parseInt(request.params.contactId, 10);
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { id: idParam, contactId: contactIdParam } = request.params as {
+        id: string;
+        contactId: string;
+      };
+      const supplierId = parseInt(idParam, 10);
+      const contactId = parseInt(contactIdParam, 10);
 
       const [existing] = await ctx.db.raw
         .select()
@@ -567,14 +543,14 @@ export async function supplierRoutes(
           and(
             eq(supplierContacts.id, contactId),
             eq(supplierContacts.supplierId, supplierId),
-            eq(supplierContacts.tenantId, tenantId)
+            eq(supplierContacts.tenantId, ctx.tenant.tenantId)
           )
         );
       if (!existing) throw new NotFoundError('SupplierContact', contactId);
 
       await ctx.db.raw.delete(supplierContacts).where(eq(supplierContacts.id, contactId));
       return reply.code(200).send({ data: { message: 'Contact deleted', id: contactId } });
-    }
+    })
   );
 
   fastify.post(

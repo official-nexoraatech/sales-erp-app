@@ -23,6 +23,10 @@ export default function ItemFormPage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const hasPermission = useAuthStore((s) => s.hasPermission);
+  const enabledCapabilities = useAuthStore((s) => s.user?.enabledCapabilities);
+  const canConfigureBatch =
+    !!enabledCapabilities?.includes('INVENTORY_BATCH') &&
+    hasPermission(PERMISSIONS.BATCH_CONFIGURE);
   const isEdit = !!id;
   const [hsnSuggestions, setHsnSuggestions] = useState<{ hsnCode: string; description: string }[]>(
     []
@@ -283,6 +287,14 @@ export default function ItemFormPage() {
               checked={!!watch('hasVariants')}
               onChange={(v) => setValue('hasVariants', v)}
             />
+            {canConfigureBatch && (
+              <ERPSwitch
+                label="Batch & Expiry Tracking (FEFO)"
+                description="Consumes earliest-expiring stock first. Does not block sale or use of already-expired stock — expiry blocking isn't part of this release."
+                checked={!!watch('fefoEnabled')}
+                onChange={(v) => setValue('fefoEnabled', v)}
+              />
+            )}
           </div>
           {isFabric && (
             <Input

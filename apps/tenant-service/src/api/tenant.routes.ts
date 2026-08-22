@@ -4,7 +4,12 @@ import { tenants, auditLog } from '@erp/db';
 import { eq } from 'drizzle-orm';
 import { NotFoundError, ValidationError, BusinessError } from '@erp/types';
 import { PERMISSIONS } from '@erp/types';
-import { invalidateTenantStatusCache, StorageClient, type PlatformContextFactory } from '@erp/sdk';
+import {
+  invalidateTenantStatusCache,
+  StorageClient,
+  withTenantConnection,
+  type PlatformContextFactory,
+} from '@erp/sdk';
 import { TenantProvisioner } from '../domain/TenantProvisioner.js';
 import {
   CreateTenantSchema,
@@ -193,12 +198,21 @@ export async function tenantRoutes(
   });
 
   // ── GET /admin/tenants/:id — Get single tenant ──────────────────────────
+  // Phase 9 GUC-per-request rollout — migrated 2026-08-21. Single-tenant lookup by :id
+  // (tenantId comes from the URL param, not the platform admin's own req.auth.tenantId), no
+  // external I/O — safe via withTenantConnection directly. Every other route in this file
+  // delegates to TenantProvisioner, which is saturated with external I/O (S3, Elasticsearch,
+  // notifications) across many interleaved steps — deliberately left unmigrated (caveat 4).
+  // GET /admin/tenants is a genuine cross-tenant list (caveat 4e), also left unmigrated.
   fastify.get<{ Params: { id: string } }>(
     '/admin/tenants/:id',
     { preHandler: PLATFORM_ADMIN },
     async (request, reply) => {
       const id = parseInt(request.params.id, 10);
-      const [tenant] = await db.select().from(tenants).where(eq(tenants.id, id));
+      const tenant = await withTenantConnection(db, id, async (scopedDb) => {
+        const [row] = await scopedDb.select().from(tenants).where(eq(tenants.id, id));
+        return row;
+      });
       if (!tenant) throw new NotFoundError('Tenant', id);
       return reply.code(200).send({ data: tenant });
     }

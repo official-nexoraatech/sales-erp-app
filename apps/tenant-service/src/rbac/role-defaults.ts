@@ -28,6 +28,8 @@ export const ROLE_DEFAULTS: Record<string, Permission[]> = {
           // Logging in as a customer is sensitive enough to reserve for OWNER/SUPER_ADMIN only,
           // same reasoning as IMPERSONATE_USER above (CRM-ROADMAP Phase 3, Feature 2).
           PERMISSIONS.IMPERSONATE_PORTAL_CUSTOMER,
+          // Same reasoning, for the partner auth scope (CRM-ROADMAP Phase 4, Feature 6).
+          PERMISSIONS.IMPERSONATE_PARTNER,
         ] as Permission[]
       ).includes(p)
   ),
@@ -392,6 +394,10 @@ export const ROLE_DEFAULTS: Record<string, Permission[]> = {
     PERMISSIONS.EXPENSE_APPROVE,
     PERMISSIONS.ITEM_VIEW,
     PERMISSIONS.STOCK_VIEW,
+    // Phase 2B: needs visibility into near-expiry stock for reorder decisions — configuring
+    // which items are batch-tracked stays an INVENTORY_MANAGER-only decision (BATCH_CONFIGURE
+    // not granted here).
+    PERMISSIONS.BATCH_VIEW,
     // See SALES_MANAGER's bulk-import comment above — same omission (this role owns
     // suppliers, one of the importable entity types).
     PERMISSIONS.IMPORT_VIEW,
@@ -551,6 +557,11 @@ export const ROLE_DEFAULTS: Record<string, Permission[]> = {
     PERMISSIONS.ITEM_VIEW,
     PERMISSIONS.ITEM_CREATE,
     PERMISSIONS.ITEM_EDIT,
+    // Phase 2B: this role decides which items are batch-tracked (BATCH_CONFIGURE) and can
+    // see the near-expiry report (BATCH_VIEW) — configuring FEFO is an inventory-management
+    // decision, same tier as owning ITEM_CREATE/ITEM_EDIT above.
+    PERMISSIONS.BATCH_VIEW,
+    PERMISSIONS.BATCH_CONFIGURE,
     PERMISSIONS.CATEGORY_VIEW,
     PERMISSIONS.CATEGORY_CREATE,
     PERMISSIONS.CATEGORY_UPDATE,

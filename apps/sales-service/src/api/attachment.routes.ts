@@ -1,13 +1,47 @@
 /* global crypto */
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { and, eq } from 'drizzle-orm';
-import { campaigns } from '@erp/db';
+import { campaigns, type Campaign } from '@erp/db';
 import type { PlatformContext, PlatformContextFactory, PlatformAttachments } from '@erp/sdk';
 import { checkPermission } from '@erp/sdk';
 import { PERMISSIONS, type Permission } from '@erp/types';
 import { ValidationError, NotFoundError } from '@erp/types';
 import { authenticate } from '../middleware/authenticate.js';
-import { validateMediaForChannel } from '../domain/CampaignService.js';
+
+// CRM/O2C split — validateMediaForChannel duplicated from CampaignService.ts (now in
+// crm-service) since this route handles both INVOICE and CAMPAIGN attachments in one shared
+// endpoint; a small, pure validation helper, same duplication precedent as
+// enqueueWebhookDeliveries in migration 7.
+const MEDIA_CAPABLE_CHANNELS: ReadonlySet<Campaign['channel']> = new Set(['EMAIL', 'WHATSAPP']);
+const MEDIA_SIZE_LIMITS_BYTES: Record<'image' | 'video' | 'document', number> = {
+  image: 5 * 1024 * 1024,
+  video: 16 * 1024 * 1024,
+  document: 100 * 1024 * 1024,
+};
+
+function mediaTypeFromMime(mimeType: string): 'image' | 'video' | 'document' {
+  if (mimeType.startsWith('image/')) return 'image';
+  if (mimeType.startsWith('video/')) return 'video';
+  return 'document';
+}
+
+/** Throws ValidationError if the given media cannot be attached to a campaign on this channel. */
+function validateMediaForChannel(
+  channel: Campaign['channel'],
+  mimeType: string,
+  fileSize: number
+): void {
+  if (!MEDIA_CAPABLE_CHANNELS.has(channel)) {
+    throw new ValidationError(`${channel} campaigns cannot have media attachments`);
+  }
+  const mediaType = mediaTypeFromMime(mimeType);
+  const limit = MEDIA_SIZE_LIMITS_BYTES[mediaType];
+  if (fileSize > limit) {
+    throw new ValidationError(
+      `${mediaType} attachment is ${(fileSize / (1024 * 1024)).toFixed(1)}MB — exceeds the ${(limit / (1024 * 1024)).toFixed(0)}MB limit for ${channel} ${mediaType} messages`
+    );
+  }
+}
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 const ALLOWED_MIME_TYPES = new Set([
@@ -60,6 +94,15 @@ function assertPermission(
   return true;
 }
 
+// Phase 9 GUC-per-request rollout — deliberately NOT migrated. PlatformAttachments (ctx.files)
+// calls StorageClient.uploadFile()/deleteFile()/getSignedUrl() — network calls to the S3/MinIO
+// object store — interleaved with its own DB reads/writes (upload() calls storage.uploadFile()
+// BEFORE the documentAttachments insert; delete() calls storage.deleteFile() before the DB
+// delete). Same shape as checklist caveat 4 (external I/O mid-handler) even though the "external"
+// system here is the object store rather than another microservice — wrapping these routes would
+// hold a transaction/connection open for the storage round trip's duration. Applies to every
+// other service's attachment.routes.ts built on PlatformAttachments too (see this file's own
+// comment on mirroring purchase-service's copy).
 export async function attachmentRoutes(
   fastify: FastifyInstance,
   ctxFactory: PlatformContextFactory

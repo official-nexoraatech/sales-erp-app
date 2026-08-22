@@ -1,10 +1,19 @@
 import { eq, and } from 'drizzle-orm';
 import type { ERPEventPayload } from '@erp/types';
-import type { TenantScopedDatabase, GstComplianceContext, SagaOrchestrator, SagaStepFactory } from '@erp/sdk';
+import type {
+  TenantScopedDatabase,
+  GstComplianceContext,
+  SagaOrchestrator,
+  SagaStepFactory,
+} from '@erp/sdk';
 import { EWB_VALUE_THRESHOLD } from '@erp/sdk';
 import { einvoiceData } from '@erp/db';
 import { createLogger } from '@erp/logger';
-import { EInvoiceService, buildEinvoicePayloadInput, buildNicPayload } from '../domain/EInvoiceService.js';
+import {
+  EInvoiceService,
+  buildEinvoicePayloadInput,
+  buildNicPayload,
+} from '../domain/EInvoiceService.js';
 import { runGstComplianceSaga } from '../domain/GstComplianceSaga.js';
 
 const logger = createLogger({ serviceName: 'gst-service' });
@@ -55,7 +64,10 @@ export async function handleInvoiceConfirmedForEinvoice(
 
     // createdBy=0: system-triggered, no interactive user (mirrors the retryPendingIrns sentinel)
     await EInvoiceService.generateIrn(db, event.tenantId, 0, p.invoiceId, buildNicPayload(input));
-    logger.info({ invoiceId: p.invoiceId }, 'e-Invoice: auto IRN generation triggered from INVOICE_CONFIRMED');
+    logger.info(
+      { invoiceId: p.invoiceId },
+      'e-Invoice: auto IRN generation triggered from INVOICE_CONFIRMED'
+    );
 
     // PG-006: only invoices over the e-Way Bill threshold need the second NIC call —
     // below it, the direct generateIrn call above already fully handles compliance.
@@ -72,9 +84,15 @@ export async function handleInvoiceConfirmedForEinvoice(
           event.correlationId,
           p.invoiceId
         );
-        logger.info({ invoiceId: p.invoiceId }, 'e-Invoice: GST_COMPLIANCE_GENERATION saga started for e-Way Bill step');
+        logger.info(
+          { invoiceId: p.invoiceId },
+          'e-Invoice: GST_COMPLIANCE_GENERATION saga started for e-Way Bill step'
+        );
       } catch (sagaErr) {
-        logger.error({ err: sagaErr, invoiceId: p.invoiceId }, 'e-Invoice: GST_COMPLIANCE_GENERATION saga failed to start/complete');
+        logger.error(
+          { err: sagaErr, invoiceId: p.invoiceId },
+          'e-Invoice: GST_COMPLIANCE_GENERATION saga failed to start/complete'
+        );
       }
     }
   } catch (err) {
@@ -92,20 +110,33 @@ export async function handleInvoiceCancelledForEinvoice(
 ): Promise<void> {
   const p = event.payload as unknown as InvoiceCancelledPayload;
 
-  const [record] = await db.raw
-    .select()
-    .from(einvoiceData)
-    .where(and(eq(einvoiceData.tenantId, event.tenantId), eq(einvoiceData.invoiceId, p.invoiceId)));
+  // RLS-readiness follow-up (2026-08-22): were bare db.raw calls — db.transaction() (not
+  // db.raw.transaction()) sets the GUC itself, same reasoning as EInvoiceService's fixes.
+  // Currently only ever called from the Kafka dispatcher, where db is already GUC-scoped via
+  // PlatformEventConsumer.subscribe's own wrap — this makes it safe by construction too, not
+  // just by caller convention.
+  const [record] = await db.transaction((trx) =>
+    trx.raw
+      .select()
+      .from(einvoiceData)
+      .where(
+        and(eq(einvoiceData.tenantId, event.tenantId), eq(einvoiceData.invoiceId, p.invoiceId))
+      )
+  );
   if (!record || record.irnStatus !== 'IRN_GENERATED' || !record.irn) return;
 
   const generatedAt = record.ackDate ?? record.createdAt;
   const hoursSinceGeneration = (Date.now() - generatedAt.getTime()) / (1000 * 60 * 60);
 
   if (hoursSinceGeneration > IRN_CANCEL_WINDOW_HOURS) {
-    await db.raw
-      .update(einvoiceData)
-      .set({ irnStatus: 'CANCEL_REQUIRED_MANUALLY', updatedAt: new Date() })
-      .where(and(eq(einvoiceData.tenantId, event.tenantId), eq(einvoiceData.invoiceId, p.invoiceId)));
+    await db.transaction((trx) =>
+      trx.raw
+        .update(einvoiceData)
+        .set({ irnStatus: 'CANCEL_REQUIRED_MANUALLY', updatedAt: new Date() })
+        .where(
+          and(eq(einvoiceData.tenantId, event.tenantId), eq(einvoiceData.invoiceId, p.invoiceId))
+        )
+    );
     logger.warn(
       { invoiceId: p.invoiceId },
       'e-Invoice: 24h NIC cancellation window expired — manual cancellation required via NIC portal'
@@ -114,8 +145,17 @@ export async function handleInvoiceCancelledForEinvoice(
   }
 
   try {
-    await EInvoiceService.cancelIrn(db, event.tenantId, p.invoiceId, 'Invoice cancelled in ERP', p.reason);
-    logger.info({ invoiceId: p.invoiceId }, 'e-Invoice: auto IRN cancellation triggered from INVOICE_CANCELLED');
+    await EInvoiceService.cancelIrn(
+      db,
+      event.tenantId,
+      p.invoiceId,
+      'Invoice cancelled in ERP',
+      p.reason
+    );
+    logger.info(
+      { invoiceId: p.invoiceId },
+      'e-Invoice: auto IRN cancellation triggered from INVOICE_CANCELLED'
+    );
   } catch (err) {
     logger.error({ err, invoiceId: p.invoiceId }, 'e-Invoice: auto IRN cancellation failed');
   }

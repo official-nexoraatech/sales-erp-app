@@ -12,6 +12,10 @@ export interface AuthUser {
   branchIds: number[];
   totpEnabled?: boolean;
   preferences?: { sidebarStyle?: 'modern' | 'classic' } | null;
+  /** Tenant-plan capability keys currently enabled (@erp/types CAPABILITY_REGISTRY), from
+   * GET /users/me. UX/navigation filtering only — never a security boundary; the backend's
+   * requireCapability() is authoritative regardless of what's cached here. */
+  enabledCapabilities?: string[];
 }
 
 // The admin's own session, stashed while an impersonation token is active — lets

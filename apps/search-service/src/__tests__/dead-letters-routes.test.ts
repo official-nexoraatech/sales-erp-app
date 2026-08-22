@@ -32,7 +32,14 @@ vi.mock('@erp/types', async (importOriginal) => {
 });
 
 vi.mock('@erp/db', () => ({
-  dlqItems: { __name: 'dlqItems', id: 'id', tenantId: 'tenantId', status: 'status', createdAt: 'createdAt', headers: 'headers' },
+  dlqItems: {
+    __name: 'dlqItems',
+    id: 'id',
+    tenantId: 'tenantId',
+    status: 'status',
+    createdAt: 'createdAt',
+    headers: 'headers',
+  },
 }));
 
 vi.mock('drizzle-orm', () => ({
@@ -49,6 +56,20 @@ function authHeader(auth: { tenantId: number; permissions: string[] }): Record<s
 
 function makeEngine(): SearchEngine {
   return {} as unknown as SearchEngine;
+}
+
+// withTenantConnection wraps every route in a transaction that sets the GUC via `.execute()`
+// before invoking the callback with the same db object as the scoped db.
+function withTransactionSupport<T extends object>(
+  db: T
+): T & { execute: () => Promise<undefined>; transaction: (cb: (trx: T) => unknown) => unknown } {
+  const extended = db as T & {
+    execute: () => Promise<undefined>;
+    transaction: (cb: (trx: T) => unknown) => unknown;
+  };
+  extended.execute = async () => undefined;
+  extended.transaction = (cb: (trx: T) => unknown) => cb(extended);
+  return extended;
 }
 
 describe('GET /admin/search/dead-letters', () => {
@@ -68,12 +89,18 @@ describe('GET /admin/search/dead-letters', () => {
 
   it('with SEARCH_REINDEX lists PENDING items scoped to the caller tenant', async () => {
     const rows = [{ id: 1, topic: 'erp.customer.created', status: 'PENDING' }];
-    const db = {
+    const db = withTransactionSupport({
       select: (arg?: unknown) =>
         arg
           ? { from: () => ({ where: () => Promise.resolve([{ total: rows.length }]) }) }
-          : { from: () => ({ where: () => ({ orderBy: () => ({ limit: () => ({ offset: () => Promise.resolve(rows) }) }) }) }) },
-    };
+          : {
+              from: () => ({
+                where: () => ({
+                  orderBy: () => ({ limit: () => ({ offset: () => Promise.resolve(rows) }) }),
+                }),
+              }),
+            },
+    });
     const app = Fastify({ logger: false });
     await deadLettersRoutes(app, db as never, makeEngine());
 
@@ -90,10 +117,14 @@ describe('GET /admin/search/dead-letters', () => {
 });
 
 describe('POST /admin/search/dead-letters/:id/retry', () => {
-  beforeEach(() => { syncSearchIndexMock.mockReset(); });
+  beforeEach(() => {
+    syncSearchIndexMock.mockReset();
+  });
 
   it('retrying a nonexistent id → 404', async () => {
-    const db = { select: () => ({ from: () => ({ where: () => Promise.resolve([]) }) }) };
+    const db = withTransactionSupport({
+      select: () => ({ from: () => ({ where: () => Promise.resolve([]) }) }),
+    });
     const app = Fastify({ logger: false });
     app.setErrorHandler((error, _request, reply) => {
       const err = error as { statusCode?: number; message: string };
@@ -111,7 +142,13 @@ describe('POST /admin/search/dead-letters/:id/retry', () => {
   });
 
   it('retrying an item whose status is not PENDING → 409-style business error', async () => {
-    const db = { select: () => ({ from: () => ({ where: () => Promise.resolve([{ id: 1, status: 'REPLAYED', retryCount: 0, payload: {} }]) }) }) };
+    const db = withTransactionSupport({
+      select: () => ({
+        from: () => ({
+          where: () => Promise.resolve([{ id: 1, status: 'REPLAYED', retryCount: 0, payload: {} }]),
+        }),
+      }),
+    });
     const app = Fastify({ logger: false });
     app.setErrorHandler((error, _request, reply) => {
       const err = error as { statusCode?: number; message: string };
@@ -132,10 +169,22 @@ describe('POST /admin/search/dead-letters/:id/retry', () => {
   it('a successful retry re-syncs the index and marks the item REPLAYED', async () => {
     syncSearchIndexMock.mockResolvedValueOnce(undefined);
     const setMock = vi.fn(() => ({ where: vi.fn().mockResolvedValue(undefined) }));
-    const db = {
-      select: () => ({ from: () => ({ where: () => Promise.resolve([{ id: 1, status: 'PENDING', retryCount: 0, payload: { eventType: 'CUSTOMER_CREATED' } }]) }) }),
+    const db = withTransactionSupport({
+      select: () => ({
+        from: () => ({
+          where: () =>
+            Promise.resolve([
+              {
+                id: 1,
+                status: 'PENDING',
+                retryCount: 0,
+                payload: { eventType: 'CUSTOMER_CREATED' },
+              },
+            ]),
+        }),
+      }),
       update: () => ({ set: setMock }),
-    };
+    });
     const app = Fastify({ logger: false });
     await deadLettersRoutes(app, db as never, makeEngine());
 
@@ -153,10 +202,22 @@ describe('POST /admin/search/dead-letters/:id/retry', () => {
   it('a failed retry increments retryCount and returns 502, without marking it resolved', async () => {
     syncSearchIndexMock.mockRejectedValueOnce(new Error('ES unavailable'));
     const setMock = vi.fn(() => ({ where: vi.fn().mockResolvedValue(undefined) }));
-    const db = {
-      select: () => ({ from: () => ({ where: () => Promise.resolve([{ id: 1, status: 'PENDING', retryCount: 2, payload: { eventType: 'CUSTOMER_CREATED' } }]) }) }),
+    const db = withTransactionSupport({
+      select: () => ({
+        from: () => ({
+          where: () =>
+            Promise.resolve([
+              {
+                id: 1,
+                status: 'PENDING',
+                retryCount: 2,
+                payload: { eventType: 'CUSTOMER_CREATED' },
+              },
+            ]),
+        }),
+      }),
       update: () => ({ set: setMock }),
-    };
+    });
     const app = Fastify({ logger: false });
     await deadLettersRoutes(app, db as never, makeEngine());
 
@@ -174,10 +235,12 @@ describe('POST /admin/search/dead-letters/:id/retry', () => {
 describe('POST /admin/search/dead-letters/:id/discard', () => {
   it('marks an item DISCARDED', async () => {
     const setMock = vi.fn(() => ({ where: vi.fn().mockResolvedValue(undefined) }));
-    const db = {
-      select: () => ({ from: () => ({ where: () => Promise.resolve([{ id: 1, status: 'PENDING' }]) }) }),
+    const db = withTransactionSupport({
+      select: () => ({
+        from: () => ({ where: () => Promise.resolve([{ id: 1, status: 'PENDING' }]) }),
+      }),
       update: () => ({ set: setMock }),
-    };
+    });
     const app = Fastify({ logger: false });
     await deadLettersRoutes(app, db as never, makeEngine());
 

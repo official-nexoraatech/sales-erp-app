@@ -25,7 +25,7 @@ export async function authenticate(request: FastifyRequest, reply: FastifyReply)
     return;
   }
 
-  if (request.auth.roles.includes('CUSTOMER')) {
+  if (request.auth.roles.includes('CUSTOMER') || request.auth.roles.includes('PARTNER')) {
     await reply.code(401).send({
       error: { code: 'UNAUTHORIZED', message: 'Portal sessions cannot access staff endpoints' },
     });

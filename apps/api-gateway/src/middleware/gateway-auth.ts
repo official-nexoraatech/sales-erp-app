@@ -41,6 +41,11 @@ const EXEMPT_PATHS = new Set([
   '/api/auth/auth/portal/login',
   '/api/auth/auth/portal/refresh',
   '/api/auth/auth/portal/logout',
+  // CRM-ROADMAP Phase 4, Feature 6 (Partner/Channel Portal): same reasoning, third auth scope.
+  '/api/auth/auth/partner/set-password',
+  '/api/auth/auth/partner/login',
+  '/api/auth/auth/partner/refresh',
+  '/api/auth/auth/partner/logout',
   '/api/tenant/public/signup',
   '/api/tenant/public/faqs',
   '/api/tenant/public/demo-requests',

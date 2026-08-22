@@ -4,6 +4,7 @@ import type { ErpDatabase } from '@erp/db';
 import { BusinessError, NotFoundError } from '@erp/types';
 import { GSTCalculator } from '@erp/utils';
 import { ulid } from 'ulid';
+import { PricingResolutionService } from './PricingResolutionService.js';
 
 export interface QuotationLineInput {
   itemId: number;
@@ -11,7 +12,7 @@ export interface QuotationLineInput {
   description?: string;
   quantity: number;
   unitId?: number;
-  unitPrice: number;
+  unitPrice?: number;
   discountPct?: number;
   discountAmount?: number;
   gstRate: number;
@@ -39,9 +40,10 @@ export class QuotationService {
     return this.db.transaction(async (trx) => {
       // H-3 fix: QuotationService.create() never looked up the customer row at all, so a
       // blocked or inactive customer could still receive a new quotation.
+      let customerPriceListId: number | null = null;
       if (params.customerId > 0) {
         const [customer] = await trx
-          .select({ status: customers.status })
+          .select({ status: customers.status, priceListId: customers.priceListId })
           .from(customers)
           .where(and(eq(customers.id, params.customerId), eq(customers.tenantId, params.tenantId)));
         if (!customer) throw new NotFoundError('Customer not found');
@@ -57,9 +59,19 @@ export class QuotationService {
             `Customer ${params.customerId} is inactive and cannot receive a quotation`
           );
         }
+        customerPriceListId = customer.priceListId ?? null;
       }
 
-      const computedLines = params.lines.map((l, i) => {
+      // Distribution vertical, Phase B: resolves each line's authoritative unitPrice against
+      // the customer's price list before GST/totals are computed — see PricingResolutionService.
+      const resolvedLines = await PricingResolutionService.resolveLines(
+        trx,
+        params.tenantId,
+        customerPriceListId,
+        params.lines
+      );
+
+      const computedLines = resolvedLines.map((l, i) => {
         const gst = GSTCalculator.computeLine({
           unitPrice: l.unitPrice,
           quantity: l.quantity,
@@ -228,12 +240,16 @@ export class QuotationService {
     });
   }
 
-  async expireStale(db: ErpDatabase): Promise<number> {
+  // RLS-readiness follow-up (2026-08-22): previously had no tenant filter at all — a bulk
+  // UPDATE across every tenant's quotations in one statement. Now scoped per caller-supplied
+  // tenantId, matching how internal.routes.ts's cron sweep calls it (once per active tenant).
+  async expireStale(db: ErpDatabase, tenantId: number): Promise<number> {
     const rows = await db
       .update(quotations)
       .set({ status: 'EXPIRED', updatedAt: new Date() })
       .where(
         and(
+          eq(quotations.tenantId, tenantId),
           inArray(quotations.status, ['DRAFT', 'SENT', 'VIEWED']),
           lt(quotations.validUntil, new Date())
         )

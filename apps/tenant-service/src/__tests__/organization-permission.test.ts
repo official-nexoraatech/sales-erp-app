@@ -17,6 +17,13 @@ vi.mock('@erp/db', () => ({
 
 vi.mock('drizzle-orm', () => ({
   eq: vi.fn(() => '__eq__'),
+  // tenantScopedHandler (via withTenantConnection in @erp/sdk) uses drizzle-orm's own sql
+  // tagged template internally — a per-file vi.mock('drizzle-orm', ...) replaces the module
+  // for every importer, so it must be included here too or the SET LOCAL call throws.
+  sql: Object.assign(
+    vi.fn(() => '__sql__'),
+    { raw: vi.fn() }
+  ),
 }));
 
 // PG-012 (tenant-suspension enforcement) added an assertTenantActive() call inside
@@ -62,13 +69,17 @@ const FAKE_ORG = {
   version: 0,
 };
 
+const fakeRawDb = {
+  select: () => ({ from: () => ({ where: () => Promise.resolve([FAKE_ORG]) }) }),
+  execute: () => Promise.resolve(),
+  transaction: (fn: (trx: typeof fakeRawDb) => Promise<unknown>) => fn(fakeRawDb),
+};
+
 const mockCtxFactory = {
-  create: () => ({
-    db: {
-      raw: {
-        select: () => ({ from: () => ({ where: () => Promise.resolve([FAKE_ORG]) }) }),
-      },
-    },
+  rawDb: fakeRawDb,
+  create: (tenant: { tenantId: number; userId: number; correlationId: string }) => ({
+    db: { raw: fakeRawDb },
+    tenant,
     events: { publish: vi.fn() },
   }),
 } as never;

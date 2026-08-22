@@ -5,6 +5,7 @@ import { branches, organizationSettings } from '@erp/db';
 import { and, eq, gte, isNull } from 'drizzle-orm';
 import { timingSafeEqual } from 'node:crypto';
 import { BusinessError } from '@erp/types';
+import { withTenantConnection } from '@erp/sdk';
 
 async function checkInternalKey(req: FastifyRequest, reply: FastifyReply): Promise<void> {
   const key = req.headers['x-internal-key'];
@@ -38,6 +39,9 @@ interface SearchSyncQuery {
 // scheduler-service's search.full-reindex/search.incremental-sync jobs (Phase 4) to backfill
 // and catch-up-sync Elasticsearch. NOT protected by JWT authenticate — internal-only, guarded
 // by x-internal-key, same convention as every other internal.routes.ts in this codebase.
+//
+// Phase 9 GUC-per-request rollout — migrated 2026-08-21. No req.auth (internal-key-guarded,
+// caveat 5b) — tenantId comes from the query string, so this uses withTenantConnection directly.
 export async function searchSyncInternalRoutes(
   fastify: FastifyInstance,
   db: ErpDatabase
@@ -47,6 +51,12 @@ export async function searchSyncInternalRoutes(
     { preHandler: checkInternalKey },
     async (request, reply) => {
       const { entity } = request.params;
+      if (entity !== 'branch' && entity !== 'organization') {
+        // F18: routed through the shared error class, matching every other route in this
+        // service — the hand-rolled reply here bypassed registerErrorHandler's envelope.
+        throw new BusinessError('INVALID_ENTITY', `tenant-service does not own entity: ${entity}`);
+      }
+
       const tenantId = parseInt(request.query.tenantId, 10);
       const page = parseInt(request.query.page ?? '0', 10);
       const size = Math.min(parseInt(request.query.size ?? '500', 10), 500);
@@ -55,34 +65,34 @@ export async function searchSyncInternalRoutes(
         ? new Date(request.query.modifiedSince)
         : undefined;
 
-      let content: SearchSyncDoc[] = [];
-
-      if (entity === 'branch') {
-        const conditions = [eq(branches.tenantId, tenantId), isNull(branches.deletedAt)];
-        if (modifiedSince) conditions.push(gte(branches.updatedAt, modifiedSince));
-        const rows = await db
-          .select()
-          .from(branches)
-          .where(and(...conditions))
-          .limit(size)
-          .offset(offset);
-        content = rows.map((r) => ({
-          id: String(r.id),
-          doc: { name: r.name, code: r.code, branchId: r.id, tenantId },
-        }));
-      } else if (entity === 'organization') {
-        const rows = await db
-          .select()
-          .from(organizationSettings)
-          .where(eq(organizationSettings.tenantId, tenantId))
-          .limit(size)
-          .offset(offset);
-        content = rows.map((r) => ({ id: String(tenantId), doc: { name: r.orgName, tenantId } }));
-      } else {
-        // F18: routed through the shared error class, matching every other route in this
-        // service — the hand-rolled reply here bypassed registerErrorHandler's envelope.
-        throw new BusinessError('INVALID_ENTITY', `tenant-service does not own entity: ${entity}`);
-      }
+      const content: SearchSyncDoc[] = await withTenantConnection(
+        db,
+        tenantId,
+        async (scopedDb) => {
+          if (entity === 'branch') {
+            const conditions = [eq(branches.tenantId, tenantId), isNull(branches.deletedAt)];
+            if (modifiedSince) conditions.push(gte(branches.updatedAt, modifiedSince));
+            const rows = await scopedDb
+              .select()
+              .from(branches)
+              .where(and(...conditions))
+              .limit(size)
+              .offset(offset);
+            return rows.map((r) => ({
+              id: String(r.id),
+              doc: { name: r.name, code: r.code, branchId: r.id, tenantId },
+            }));
+          } else {
+            const rows = await scopedDb
+              .select()
+              .from(organizationSettings)
+              .where(eq(organizationSettings.tenantId, tenantId))
+              .limit(size)
+              .offset(offset);
+            return rows.map((r) => ({ id: String(tenantId), doc: { name: r.orgName, tenantId } }));
+          }
+        }
+      );
 
       return reply.code(200).send({
         data: { content, totalElements: content.length, hasMore: content.length === size },

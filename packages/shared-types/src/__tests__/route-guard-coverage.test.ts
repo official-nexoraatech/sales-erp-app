@@ -44,22 +44,37 @@ const KNOWN_EXCEPTIONS: Record<string, string[]> = {
     '/auth/portal/refresh',
     '/auth/portal/logout',
   ],
+  // CRM-ROADMAP Phase 4, Feature 6 (Partner/Channel Portal): same reasoning as
+  // portal-auth.routes.ts above, for the PARTNER auth scope's own login surface.
+  'auth-service/src/routes/partner-auth.routes.ts': [
+    '/auth/partner/set-password',
+    '/auth/partner/login',
+    '/auth/partner/refresh',
+    '/auth/partner/logout',
+  ],
   // Self-service notification inbox/preferences — every route is scoped to the caller's
   // own userId (see ES-33 completion report); `NOTIFICATION_SEND` gates sending to others.
   'notification-service/src/api/notification.routes.ts': [
     '/notifications',
     '/notifications/:id/read',
+    '/notifications/read-all',
     '/notifications/preferences',
     '/notifications/unread-count',
     '/notifications/stream',
   ],
+  // Same named-preHandler-constant pattern as integrations.routes.ts/faq.routes.ts below
+  // (`guard`, built from requirePermission(PERMISSIONS.NOTIFICATION_CONFIG) once and reused
+  // per-route) — the scanner's per-route-block slice never contains the literal
+  // `requirePermission(` text since it's declared outside every route's own block.
+  'notification-service/src/api/template.routes.ts': ['*'],
   // Public token-based unsubscribe link (clicked from an email, no login) — authorized by
   // possessing the token itself, not a JWT.
   'report-service/src/api/analytics-reports.routes.ts': ['/api/v2/unsubscribe/:token'],
   // CRM-ROADMAP Phase 2, Feature 6 — same "authorized by possessing the token" reasoning as
   // the unsubscribe link above: a campaign recipient clicking a tracked link or loading an
-  // email open-pixel isn't logged in.
-  'sales-service/src/api/link-tracking.routes.ts': ['/c/:trackingToken', '/o/:trackingToken'],
+  // email open-pixel isn't logged in. CRM/O2C split, migration 12 — this file now lives in
+  // crm-service, not sales-service.
+  'crm-service/src/api/link-tracking.routes.ts': ['/c/:trackingToken', '/o/:trackingToken'],
   // Authenticate-only by design: any authenticated tenant user in a document-create flow
   // (invoice/PO/etc.) needs the next series number — this isn't a standalone admin action
   // like the sibling /config/number-series/* routes (which now require
@@ -72,7 +87,7 @@ const KNOWN_EXCEPTIONS: Record<string, string[]> = {
   // Reference data — viewable by any authenticated tenant member (dropdowns, org display);
   // mutations on these same files already require BRANCH_MANAGE / ORG_SETTINGS_EDIT.
   'tenant-service/src/api/branch.routes.ts': ['/branches', '/branches/:id'],
-  'tenant-service/src/api/organization.routes.ts': ['/organization'],
+  'tenant-service/src/api/organization.routes.ts': ['/organization', '/organization/logo'],
   // Template download — static CSV headers, not tenant/user data (see ES-33/34 research).
   'scheduler-service/src/api/import.routes.ts': ['/imports/templates/:entityType'],
   // Inventory module audit 2026-07-21: adding requireAnyPermission( to GUARD_MARKERS (this
@@ -111,15 +126,16 @@ const KNOWN_EXCEPTIONS: Record<string, string[]> = {
   // CRM-ROADMAP Phase 1, Feature 2: the CRM equivalent of demo-request.routes.ts above —
   // public, rate-limited, honeypot-gated (see the route's own header comment and
   // 06-SECURITY-PLAN.md §2.1). Every other route in this file is authenticate + requirePermission
-  // guarded as normal.
-  'sales-service/src/api/lead.routes.ts': ['/leads/capture'],
+  // guarded as normal. CRM/O2C split, migration 12 — this file now lives in crm-service.
+  'crm-service/src/api/lead.routes.ts': ['/leads/capture'],
   // CRM-ROADMAP Phase 2, Feature 4: a referral link click and code redemption both happen
   // before the referee is a logged-in anything — same public/rate-limited/honeypot shape as
-  // lead.routes.ts's own capture route above.
-  'sales-service/src/api/referral-public.routes.ts': ['/r/:code', '/referral/redeem'],
+  // lead.routes.ts's own capture route above. CRM/O2C split, migration 12.
+  'crm-service/src/api/referral-public.routes.ts': ['/r/:code', '/referral/redeem'],
   // CRM-ROADMAP Phase 2, Feature 5: inbound provider webhooks — verified by provider signature
-  // instead of a JWT/permission guard, same shape as every public route file above.
-  'sales-service/src/api/inbound-webhooks.routes.ts': [
+  // instead of a JWT/permission guard, same shape as every public route file above. CRM/O2C
+  // split, migration 12 — this file now lives in crm-service.
+  'crm-service/src/api/inbound-webhooks.routes.ts': [
     '/webhooks/whatsapp',
     '/webhooks/instagram',
     '/webhooks/email',
@@ -131,6 +147,14 @@ const KNOWN_EXCEPTIONS: Record<string, string[]> = {
     '/webhooks/twilio/status',
     '/webhooks/twilio/recording',
   ],
+  // Identity-scoped to the caller's own earned commissions, not permission-gated for the
+  // "view mine" case — same design as tenant-service/api/approval.routes.ts above (no broader
+  // "view all commissions" permission to check here, just the caller's own userId).
+  'sales-service/src/api/commission.routes.ts': ['/commissions/mine'],
+  // Payment-gateway webhook receiver — verifies Razorpay's own HMAC signature
+  // (x-razorpay-signature header over the raw body) before trusting anything, same shape as
+  // notification-service/src/api/webhook.routes.ts above.
+  'tenant-service/src/api/billing-webhook.routes.ts': ['*'],
 };
 
 const GUARD_MARKERS = [
@@ -152,6 +176,8 @@ const GUARD_MARKERS = [
   // pattern (present in coverage, not KNOWN_EXCEPTIONS, per this feature's own roadmap DoD).
   // No trailing '(' unlike requirePermission( — this one is referenced bare (`[requirePortalAuth]`),
   // never invoked with arguments.
+  'requirePartnerAuth', // CRM-ROADMAP Phase 4, Feature 6 (Partner/Channel Portal): same pattern
+  // as requirePortalAuth above, for sales-service/src/api/partner.routes.ts's PARTNER-role routes.
   'requirePublicApiScope(', // CRM-ROADMAP Phase 4, Feature 8 (Public CRM API & BI Export):
   // sales-service/src/api/public-api.routes.ts's routes gate on a per-tenant API key (via the
   // `x-api-key` header) instead of a staff JWT — a third auth mechanism, same "genuinely new

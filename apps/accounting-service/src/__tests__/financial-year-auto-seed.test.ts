@@ -21,12 +21,20 @@ function makeCtxFactory(existingFinancialYears: unknown[]) {
         })),
       })),
     })),
+    execute: async () => [],
   };
   return {
     create: (tenant: { tenantId: number; userId: number; correlationId: string }) => ({
       tenant,
       db: { raw },
     }),
+    // withTenantConnection(ctxFactory.rawDb, tenantId, ...) needs .transaction()/.execute() on
+    // rawDb — see the "missing execute stub in mocked-db authz tests" gotcha documented in
+    // 23-guc-per-request-rollout-checklist.md.
+    rawDb: {
+      transaction: (cb: (trx: unknown) => unknown) => cb(raw),
+      execute: async () => [],
+    },
   } as never;
 }
 

@@ -29,6 +29,8 @@ export type { EventHandler } from './events.js';
 export { PlatformFeatureFlags } from './feature-flags.js';
 export type { FeatureFlagValue } from './feature-flags.js';
 
+export { requireCapability, isCapabilityEnabled } from './capability-guard.js';
+
 export { WorkflowEngine, SYSTEM_WORKFLOW_DEFINITIONS } from './workflow.js';
 export { ValuationService } from './valuation-engine.js';
 export { ReportsEngine } from './financial-reports-engine.js';
@@ -145,3 +147,6 @@ export {
   withIdempotentInsert,
   deriveTimeBucketedDedupKey,
 } from './idempotency.js';
+
+export { withTenantConnection } from './tenantConnection.js';
+export { tenantScopedHandler } from './fastify-tenant-connection.js';

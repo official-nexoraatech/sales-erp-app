@@ -57,18 +57,22 @@ const FAKE_BRANCH = {
   version: 0,
 };
 
+const fakeRawDb = {
+  select: () => ({
+    from: () => ({
+      where: () => Promise.resolve([FAKE_BRANCH]),
+      limit: () => ({ offset: () => Promise.resolve([FAKE_BRANCH]) }),
+    }),
+  }),
+  execute: () => Promise.resolve(),
+  transaction: (fn: (trx: typeof fakeRawDb) => Promise<unknown>) => fn(fakeRawDb),
+};
+
 const mockCtxFactory = {
-  create: () => ({
-    db: {
-      raw: {
-        select: () => ({
-          from: () => ({
-            where: () => Promise.resolve([FAKE_BRANCH]),
-            limit: () => ({ offset: () => Promise.resolve([FAKE_BRANCH]) }),
-          }),
-        }),
-      },
-    },
+  rawDb: fakeRawDb,
+  create: (tenant: { tenantId: number; userId: number; correlationId: string }) => ({
+    db: { raw: fakeRawDb },
+    tenant,
     events: { publish: vi.fn() },
   }),
 } as never;

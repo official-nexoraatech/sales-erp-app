@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { PlatformContextFactory } from '@erp/sdk';
-import { PlatformEventBus } from '@erp/sdk';
+import { PlatformEventBus, tenantScopedHandler, withTenantConnection } from '@erp/sdk';
 import { alterationOrders, employees } from '@erp/db';
 import { and, eq, isNull, lt, ne } from 'drizzle-orm';
 import { z } from 'zod';
@@ -8,8 +8,6 @@ import { BusinessError, NotFoundError, ValidationError } from '@erp/types';
 import { PERMISSIONS } from '@erp/types';
 import { authenticate } from '../middleware/authenticate.js';
 import { requirePermission } from '../middleware/authorize.js';
-
-type AuthedRequest = { auth: { tenantId: number; userId: number } };
 
 const ALTERATION_STATUSES = [
   'RECEIVED',
@@ -98,6 +96,12 @@ async function sendNotification(input: {
   }
 }
 
+// Phase 9 GUC-per-request rollout — migrated 2026-08-21. Most routes have no external I/O
+// (PlatformEventBus writes to the outbox, not fetch) and migrate via tenantScopedHandler.
+// /alterations/:id/assign and /alterations/:id/status both call sendNotification() — restructured
+// via withTenantConnection so the DB work is scoped but the fetch itself never runs inside an
+// open transaction (caveat 4g: /status has DB work on both sides of the fetch, so it uses two
+// separate wraps).
 export async function alterationRoutes(
   fastify: FastifyInstance,
   ctxFactory: PlatformContextFactory
@@ -105,13 +109,8 @@ export async function alterationRoutes(
   fastify.get(
     '/alterations',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.ALTERATION_VIEW)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId } = ctx.tenant;
       const query = AlterationListQuerySchema.safeParse(request.query);
       if (!query.success)
         throw new ValidationError(query.error.errors.map((e) => e.message).join('; '));
@@ -124,39 +123,29 @@ export async function alterationRoutes(
         .from(alterationOrders)
         .where(and(...conditions));
       return reply.code(200).send({ data: { content: rows, totalElements: rows.length } });
-    }
+    })
   );
 
-  fastify.get<{ Params: { id: string } }>(
+  fastify.get(
     '/alterations/:id',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.ALTERATION_VIEW)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-      const id = parseInt(request.params.id, 10);
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId } = ctx.tenant;
+      const id = parseInt((request.params as { id: string }).id, 10);
       const [order] = await ctx.db.raw
         .select()
         .from(alterationOrders)
         .where(and(eq(alterationOrders.id, id), eq(alterationOrders.tenantId, tenantId)));
       if (!order) throw new NotFoundError('AlterationOrder', id);
       return reply.code(200).send({ data: order });
-    }
+    })
   );
 
   fastify.post(
     '/alterations',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.ALTERATION_CREATE)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId, userId } = ctx.tenant;
       const body = CreateAlterationSchema.safeParse(request.body);
       if (!body.success)
         throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
@@ -209,20 +198,15 @@ export async function alterationRoutes(
       await ctx.audit.log({ action: 'CREATE', entityType: 'alteration_order', entityId: final.id });
 
       return reply.code(201).send({ data: final });
-    }
+    })
   );
 
-  fastify.put<{ Params: { id: string } }>(
+  fastify.put(
     '/alterations/:id',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.ALTERATION_UPDATE)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-      const id = parseInt(request.params.id, 10);
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId } = ctx.tenant;
+      const id = parseInt((request.params as { id: string }).id, 10);
       const body = UpdateAlterationSchema.safeParse(request.body);
       if (!body.success)
         throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
@@ -262,69 +246,77 @@ export async function alterationRoutes(
         );
       await ctx.audit.log({ action: 'UPDATE', entityType: 'alteration_order', entityId: id });
       return reply.code(200).send({ data: result[0] });
-    }
+    })
   );
 
-  fastify.post<{ Params: { id: string } }>(
+  fastify.post(
     '/alterations/:id/assign',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.ALTERATION_UPDATE)] },
     async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-      const id = parseInt(request.params.id, 10);
+      const { tenantId, userId } = request.auth;
+      const id = parseInt((request.params as { id: string }).id, 10);
       const body = AssignAlterationSchema.safeParse(request.body);
       if (!body.success)
         throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
 
-      const [existing] = await ctx.db.raw
-        .select()
-        .from(alterationOrders)
-        .where(and(eq(alterationOrders.id, id), eq(alterationOrders.tenantId, tenantId)));
-      if (!existing) throw new NotFoundError('AlterationOrder', id);
-
-      const [tailor] = await ctx.db.raw
-        .select({ id: employees.id })
-        .from(employees)
-        .where(
-          and(
-            eq(employees.id, body.data.tailorId),
-            eq(employees.tenantId, tenantId),
-            isNull(employees.deletedAt)
-          )
+      const existing = await withTenantConnection(ctxFactory.rawDb, tenantId, async (db) => {
+        const ctx = ctxFactory.create(
+          {
+            tenantId,
+            userId,
+            correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
+          },
+          db
         );
-      if (!tailor) throw new NotFoundError('Employee', body.data.tailorId);
 
-      if (
-        !ALLOWED_TRANSITIONS[existing.status]?.includes('ASSIGNED') &&
-        existing.status !== 'RECEIVED'
-      ) {
-        throw new BusinessError(
-          'INVALID_STATUS_TRANSITION',
-          `Cannot assign a ${existing.status} alteration order`
-        );
-      }
+        const [existing] = await ctx.db.raw
+          .select()
+          .from(alterationOrders)
+          .where(and(eq(alterationOrders.id, id), eq(alterationOrders.tenantId, tenantId)));
+        if (!existing) throw new NotFoundError('AlterationOrder', id);
 
-      await ctx.db.transaction(async (trx) => {
-        await trx.raw
-          .update(alterationOrders)
-          .set({ assignedToId: body.data.tailorId, status: 'ASSIGNED', updatedAt: new Date() })
-          .where(eq(alterationOrders.id, id));
-        const eventBus = new PlatformEventBus(trx, tenantId, userId, ctx.tenant.correlationId);
-        await eventBus.publishInTransaction('alteration_order', id, 'ALTERATION_ASSIGNED', {
-          alterationOrderId: id,
-          tailorId: body.data.tailorId,
-          tenantId,
+        const [tailor] = await ctx.db.raw
+          .select({ id: employees.id })
+          .from(employees)
+          .where(
+            and(
+              eq(employees.id, body.data.tailorId),
+              eq(employees.tenantId, tenantId),
+              isNull(employees.deletedAt)
+            )
+          );
+        if (!tailor) throw new NotFoundError('Employee', body.data.tailorId);
+
+        if (
+          !ALLOWED_TRANSITIONS[existing.status]?.includes('ASSIGNED') &&
+          existing.status !== 'RECEIVED'
+        ) {
+          throw new BusinessError(
+            'INVALID_STATUS_TRANSITION',
+            `Cannot assign a ${existing.status} alteration order`
+          );
+        }
+
+        await ctx.db.transaction(async (trx) => {
+          await trx.raw
+            .update(alterationOrders)
+            .set({ assignedToId: body.data.tailorId, status: 'ASSIGNED', updatedAt: new Date() })
+            .where(eq(alterationOrders.id, id));
+          const eventBus = new PlatformEventBus(trx, tenantId, userId, ctx.tenant.correlationId);
+          await eventBus.publishInTransaction('alteration_order', id, 'ALTERATION_ASSIGNED', {
+            alterationOrderId: id,
+            tailorId: body.data.tailorId,
+            tenantId,
+          });
         });
-      });
-      await ctx.audit.log({
-        action: 'UPDATE',
-        entityType: 'alteration_order',
-        entityId: id,
-        metadata: { action: 'ASSIGN', tailorId: body.data.tailorId },
+        await ctx.audit.log({
+          action: 'UPDATE',
+          entityType: 'alteration_order',
+          entityId: id,
+          metadata: { action: 'ASSIGN', tailorId: body.data.tailorId },
+        });
+
+        return existing;
       });
 
       await sendNotification({
@@ -340,59 +332,67 @@ export async function alterationRoutes(
     }
   );
 
-  fastify.post<{ Params: { id: string } }>(
+  fastify.post(
     '/alterations/:id/status',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.ALTERATION_UPDATE)] },
     async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-      const id = parseInt(request.params.id, 10);
+      const { tenantId, userId } = request.auth;
+      const id = parseInt((request.params as { id: string }).id, 10);
       const body = UpdateStatusSchema.safeParse(request.body);
       if (!body.success)
         throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
 
-      const [existing] = await ctx.db.raw
-        .select()
-        .from(alterationOrders)
-        .where(and(eq(alterationOrders.id, id), eq(alterationOrders.tenantId, tenantId)));
-      if (!existing) throw new NotFoundError('AlterationOrder', id);
+      const correlationId = (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID();
 
-      const allowed = ALLOWED_TRANSITIONS[existing.status] ?? [];
-      if (!allowed.includes(body.data.status)) {
-        throw new BusinessError(
-          'INVALID_STATUS_TRANSITION',
-          `Cannot transition from ${existing.status} to ${body.data.status}`
-        );
-      }
+      const existing = await withTenantConnection(ctxFactory.rawDb, tenantId, async (db) => {
+        const ctx = ctxFactory.create({ tenantId, userId, correlationId }, db);
 
-      const updates: Partial<typeof alterationOrders.$inferInsert> = {
-        status: body.data.status,
-        updatedAt: new Date(),
-      };
-      if (body.data.status === 'READY') updates.readyNotifiedAt = new Date();
+        const [existing] = await ctx.db.raw
+          .select()
+          .from(alterationOrders)
+          .where(and(eq(alterationOrders.id, id), eq(alterationOrders.tenantId, tenantId)));
+        if (!existing) throw new NotFoundError('AlterationOrder', id);
 
-      await ctx.db.transaction(async (trx) => {
-        await trx.raw.update(alterationOrders).set(updates).where(eq(alterationOrders.id, id));
-        const eventBus = new PlatformEventBus(trx, tenantId, userId, ctx.tenant.correlationId);
-        if (body.data.status === 'READY') {
-          await eventBus.publishInTransaction('alteration_order', id, 'ALTERATION_READY', {
-            alterationOrderId: id,
-            tenantId,
-            orderNumber: existing.orderNumber,
-            customerPhone: existing.customerPhone,
-            customerName: existing.customerName,
-          });
-        } else {
-          await eventBus.publishInTransaction('alteration_order', id, 'ALTERATION_STATUS_CHANGED', {
-            alterationOrderId: id,
-            tenantId,
-            status: body.data.status,
-          });
+        const allowed = ALLOWED_TRANSITIONS[existing.status] ?? [];
+        if (!allowed.includes(body.data.status)) {
+          throw new BusinessError(
+            'INVALID_STATUS_TRANSITION',
+            `Cannot transition from ${existing.status} to ${body.data.status}`
+          );
         }
+
+        const updates: Partial<typeof alterationOrders.$inferInsert> = {
+          status: body.data.status,
+          updatedAt: new Date(),
+        };
+        if (body.data.status === 'READY') updates.readyNotifiedAt = new Date();
+
+        await ctx.db.transaction(async (trx) => {
+          await trx.raw.update(alterationOrders).set(updates).where(eq(alterationOrders.id, id));
+          const eventBus = new PlatformEventBus(trx, tenantId, userId, ctx.tenant.correlationId);
+          if (body.data.status === 'READY') {
+            await eventBus.publishInTransaction('alteration_order', id, 'ALTERATION_READY', {
+              alterationOrderId: id,
+              tenantId,
+              orderNumber: existing.orderNumber,
+              customerPhone: existing.customerPhone,
+              customerName: existing.customerName,
+            });
+          } else {
+            await eventBus.publishInTransaction(
+              'alteration_order',
+              id,
+              'ALTERATION_STATUS_CHANGED',
+              {
+                alterationOrderId: id,
+                tenantId,
+                status: body.data.status,
+              }
+            );
+          }
+        });
+
+        return existing;
       });
 
       if (body.data.status === 'READY') {
@@ -408,11 +408,15 @@ export async function alterationRoutes(
           },
         });
       }
-      await ctx.audit.log({
-        action: 'UPDATE',
-        entityType: 'alteration_order',
-        entityId: id,
-        metadata: { action: 'STATUS_CHANGE', from: existing.status, to: body.data.status },
+
+      await withTenantConnection(ctxFactory.rawDb, tenantId, async (db) => {
+        const ctx = ctxFactory.create({ tenantId, userId, correlationId }, db);
+        await ctx.audit.log({
+          action: 'UPDATE',
+          entityType: 'alteration_order',
+          entityId: id,
+          metadata: { action: 'STATUS_CHANGE', from: existing.status, to: body.data.status },
+        });
       });
 
       return reply
@@ -421,17 +425,12 @@ export async function alterationRoutes(
     }
   );
 
-  fastify.post<{ Params: { id: string } }>(
+  fastify.post(
     '/alterations/:id/deliver',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.ALTERATION_UPDATE)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-      const id = parseInt(request.params.id, 10);
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId, userId } = ctx.tenant;
+      const id = parseInt((request.params as { id: string }).id, 10);
       const body = DeliverAlterationSchema.safeParse(request.body);
       if (!body.success)
         throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
@@ -482,20 +481,15 @@ export async function alterationRoutes(
       });
 
       return reply.code(200).send({ data: { message: 'Delivered', id } });
-    }
+    })
   );
 
-  fastify.get<{ Params: { id: string } }>(
+  fastify.get(
     '/alterations/tailor/:id',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.ALTERATION_VIEW)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-      const tailorId = parseInt(request.params.id, 10);
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId } = ctx.tenant;
+      const tailorId = parseInt((request.params as { id: string }).id, 10);
       const rows = await ctx.db.raw
         .select()
         .from(alterationOrders)
@@ -508,19 +502,14 @@ export async function alterationRoutes(
           )
         );
       return reply.code(200).send({ data: { content: rows, totalElements: rows.length } });
-    }
+    })
   );
 
   fastify.get(
     '/alterations/overdue',
     { preHandler: [authenticate, requirePermission(PERMISSIONS.ALTERATION_VIEW)] },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId } = ctx.tenant;
       const today = new Date().toISOString().slice(0, 10);
       const rows = await ctx.db.raw
         .select()
@@ -534,6 +523,6 @@ export async function alterationRoutes(
           )
         );
       return reply.code(200).send({ data: { content: rows, totalElements: rows.length } });
-    }
+    })
   );
 }

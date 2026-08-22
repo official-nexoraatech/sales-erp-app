@@ -21,6 +21,11 @@ import {
 } from '@erp/logger';
 import { loadConfigWithSecrets } from '@erp/config';
 import { jobWorkRoutes } from './api/job-work.routes.js';
+import { bomRoutes } from './api/bom.routes.js';
+import { workCenterRoutes } from './api/work-center.routes.js';
+import { productionOrderRoutes } from './api/production-order.routes.js';
+import { routingRoutes } from './api/routing.routes.js';
+import { mrpRoutes } from './api/mrp.routes.js';
 import { barcodeRoutes } from './api/barcode.routes.js';
 import { consignmentRoutes } from './api/consignment.routes.js';
 import { reorderRoutes } from './api/reorder.routes.js';
@@ -91,6 +96,17 @@ async function bootstrap(): Promise<void> {
   await fastify.register(
     async (sub) => {
       await jobWorkRoutes(sub, ctxFactory);
+      // Multi-industry platform, Phase 9 (13-security-architecture.md §2 step 1) — pilot of the
+      // GUC-per-request fix. Unlike the other route files here, bom.routes.ts wraps each handler
+      // in @erp/sdk's tenantScopedHandler instead of calling ctxFactory.create() directly — see
+      // tenantConnection.ts and 23-guc-per-request-rollout-checklist.md for the why/how and the
+      // remaining rollout. No special Fastify registration needed for this — the wrapping is
+      // internal to each handler, not a hook, so it composes fine with this shared route group.
+      await bomRoutes(sub, ctxFactory);
+      await workCenterRoutes(sub, ctxFactory);
+      await productionOrderRoutes(sub, ctxFactory);
+      await routingRoutes(sub, ctxFactory);
+      await mrpRoutes(sub, ctxFactory);
       await barcodeRoutes(sub, ctxFactory);
       await consignmentRoutes(sub, ctxFactory);
       await reorderRoutes(sub, ctxFactory);

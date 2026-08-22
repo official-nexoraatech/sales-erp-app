@@ -36,7 +36,17 @@ export const tenants = pgTable(
     vertical: varchar('vertical', { length: 20 })
       .notNull()
       .default('CLOTH_RETAIL')
-      .$type<'CLOTH_RETAIL' | 'GROCERY'>(),
+      .$type<'CLOTH_RETAIL' | 'GROCERY' | 'DISTRIBUTION' | 'MANUFACTURING'>(),
+    // Business Profile Foundation (ERP-PLANNING/implementation/phase-04-business-profile-
+    // foundation): synced twin of `vertical`, set alongside it by TenantProvisioner at
+    // tenant-creation time — see businessTypes below. No route changes an existing tenant's
+    // vertical today, so "synced" currently means "set once, correctly, at creation," not an
+    // ongoing sync; a future update path would need to write both fields together too.
+    // Nullable only for migration safety (additive column); every tenant is backfilled to a
+    // non-null value by migration 0170. `vertical` remains the authoritative field every
+    // existing call site reads (ADR-01, multi-industry-platform/18-decisions.md) — this
+    // column is additive, not a replacement.
+    businessTypeId: bigint('business_type_id', { mode: 'number' }),
     contactEmail: varchar('contact_email', { length: 255 }).notNull(),
     contactPhone: varchar('contact_phone', { length: 20 }),
     gstin: varchar('gstin', { length: 20 }),
@@ -259,6 +269,53 @@ export const ssoConfigs = pgTable(
   ]
 );
 
+// ─── Industries / Business Types (Business Profile Foundation, global — no tenant_id) ──────
+// Reference data, same governance model as planEntitlements below: ops-seeded, not
+// user-writable, no dedicated CRUD route in this phase. tenants.businessTypeId (above)
+// resolves against businessTypes.id.
+//
+// Phase 12 expansion-framework review (2026-08-20, see ERP-PLANNING/multi-industry-platform/
+// 22-phase12-expansion-framework-review.md): defaultCapabilityKeys is DELIBERATELY display-only
+// metadata, not a provisioning-time input — VERTICAL_DEFAULTS (apps/tenant-service/src/rbac/
+// vertical-defaults.ts, code) remains the sole authoritative source for what a new tenant
+// actually gets, matching the same "code template, not DB table" precedent ROLE_DEFAULTS already
+// established. This was previously (incorrectly) documented as a placeholder awaiting a future
+// DB-driven consumer that was never built and never should be — building one would duplicate,
+// not replace, VERTICAL_DEFAULTS, since a business type's real capabilities are gated by code/
+// routes that must exist first regardless. All 3 rows had silently drifted out of sync with
+// VERTICAL_DEFAULTS before this review (missing HR_PAYROLL/POS entirely) — backfilled correctly
+// by migration 0173, and apps/tenant-service/src/__tests__/business-type-capability-consistency
+// .test.ts now asserts the two never diverge again (lives in tenant-service, not this package,
+// since it needs VERTICAL_DEFAULTS — a package can't depend on an app).
+export const industries = pgTable(
+  'industries',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    code: varchar('code', { length: 50 }).notNull(),
+    name: varchar('name', { length: 100 }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [unique('industries_code_unique').on(t.code)]
+);
+
+export const businessTypes = pgTable(
+  'business_types',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    code: varchar('code', { length: 50 }).notNull(),
+    industryId: bigint('industry_id', { mode: 'number' }).notNull(),
+    name: varchar('name', { length: 100 }).notNull(),
+    defaultCapabilityKeys: jsonb('default_capability_keys').notNull().default([]).$type<string[]>(),
+    defaultRegulatoryPack: varchar('default_regulatory_pack', { length: 50 })
+      .notNull()
+      .default('INDIA_GST'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [unique('business_types_code_unique').on(t.code)]
+);
+
 // ─── Plan Entitlements (PG-027, global — no tenant_id) ─────────────────────
 // Tier template copied into a tenant's settings/feature_flags at provisioning or
 // plan-change time (see BillingService) — analogous to ROLE_DEFAULTS being a template
@@ -315,6 +372,10 @@ export const tenantInvoices = pgTable(
 
 export type Tenant = typeof tenants.$inferSelect;
 export type NewTenant = typeof tenants.$inferInsert;
+export type Industry = typeof industries.$inferSelect;
+export type NewIndustry = typeof industries.$inferInsert;
+export type BusinessType = typeof businessTypes.$inferSelect;
+export type NewBusinessType = typeof businessTypes.$inferInsert;
 export type OrganizationSettings = typeof organizationSettings.$inferSelect;
 export type Branch = typeof branches.$inferSelect;
 export type NewBranch = typeof branches.$inferInsert;

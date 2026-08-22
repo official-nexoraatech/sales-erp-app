@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { PlatformContextFactory } from '@erp/sdk';
-import { getBranchScope } from '@erp/sdk';
+import { getBranchScope, tenantScopedHandler } from '@erp/sdk';
 import { purchaseReturns, purchaseReturnLines, debitNotes, suppliers, grns, items } from '@erp/db';
 import { and, desc, eq, inArray, sql, getTableColumns } from 'drizzle-orm';
 import { z } from 'zod';
@@ -35,6 +35,9 @@ const CreateReturnSchema = z.object({
   lines: z.array(ReturnLineSchema).min(1),
 });
 
+// Phase 9 GUC-per-request rollout — migrated 2026-08-21. No external I/O — neither
+// PurchaseReturnService nor DebitNoteService has fetch() calls; ctx.cache.del() is a Redis
+// call via the platform SDK.
 export async function purchaseReturnRoutes(
   fastify: FastifyInstance,
   ctxFactory: PlatformContextFactory
@@ -43,13 +46,7 @@ export async function purchaseReturnRoutes(
 
   fastify.get('/purchase-returns', {
     preHandler: requirePermission(PERMISSIONS.PURCHASE_RETURN_VIEW),
-    handler: async (req, reply) => {
-      const ctx = ctxFactory.create({
-        tenantId: req.auth.tenantId,
-        userId: req.auth.userId,
-        correlationId:
-          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
-      });
+    handler: tenantScopedHandler(ctxFactory, async (req, reply, ctx) => {
       const q = req.query as {
         status?: string;
         supplierId?: string;
@@ -60,7 +57,7 @@ export async function purchaseReturnRoutes(
       const pageSize = Math.min(100, parseInt(q.pageSize ?? '20', 10));
       const offset = (page - 1) * pageSize;
 
-      const conditions = [eq(purchaseReturns.tenantId, req.auth.tenantId)];
+      const conditions = [eq(purchaseReturns.tenantId, ctx.tenant.tenantId)];
       if (q.status) conditions.push(eq(purchaseReturns.status, q.status as never));
       if (q.supplierId) conditions.push(eq(purchaseReturns.supplierId, parseInt(q.supplierId, 10)));
 
@@ -95,19 +92,13 @@ export async function purchaseReturnRoutes(
       return reply.send({
         data: { content: rows, totalElements: countRow?.count ?? 0, page, pageSize },
       });
-    },
+    }),
   });
 
   fastify.get('/purchase-returns/:id', {
     preHandler: requirePermission(PERMISSIONS.PURCHASE_RETURN_VIEW),
-    handler: async (req, reply) => {
+    handler: tenantScopedHandler(ctxFactory, async (req, reply, ctx) => {
       const { id } = req.params as { id: string };
-      const ctx = ctxFactory.create({
-        tenantId: req.auth.tenantId,
-        userId: req.auth.userId,
-        correlationId:
-          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
-      });
       const returnId = parseInt(id, 10);
       const [ret] = await ctx.db.raw
         .select({
@@ -119,7 +110,7 @@ export async function purchaseReturnRoutes(
         .leftJoin(suppliers, eq(purchaseReturns.supplierId, suppliers.id))
         .leftJoin(grns, eq(purchaseReturns.grnId, grns.id))
         .where(
-          and(eq(purchaseReturns.id, returnId), eq(purchaseReturns.tenantId, req.auth.tenantId))
+          and(eq(purchaseReturns.id, returnId), eq(purchaseReturns.tenantId, ctx.tenant.tenantId))
         );
       if (!ret)
         return reply
@@ -147,17 +138,17 @@ export async function purchaseReturnRoutes(
           .select()
           .from(debitNotes)
           .where(
-            and(eq(debitNotes.id, ret.debitNoteId), eq(debitNotes.tenantId, req.auth.tenantId))
+            and(eq(debitNotes.id, ret.debitNoteId), eq(debitNotes.tenantId, ctx.tenant.tenantId))
           );
       }
 
       return reply.send({ data: { ...ret, lines, debitNote } });
-    },
+    }),
   });
 
   fastify.post('/purchase-returns', {
     preHandler: requirePermission(PERMISSIONS.PURCHASE_RETURN_CREATE),
-    handler: async (req, reply) => {
+    handler: tenantScopedHandler(ctxFactory, async (req, reply, ctx) => {
       const body = CreateReturnSchema.parse(req.body);
 
       const createScope = getBranchScope(req.auth);
@@ -169,15 +160,9 @@ export async function purchaseReturnRoutes(
         );
       }
 
-      const ctx = ctxFactory.create({
-        tenantId: req.auth.tenantId,
-        userId: req.auth.userId,
-        correlationId:
-          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
-      });
       const svc = new PurchaseReturnService(ctx.db.raw);
       const id = await svc.create({
-        tenantId: req.auth.tenantId,
+        tenantId: ctx.tenant.tenantId,
         branchId: body.branchId,
         grnId: body.grnId,
         supplierId: body.supplierId,
@@ -186,7 +171,7 @@ export async function purchaseReturnRoutes(
         reason: body.reason,
         returnNotes: body.returnNotes,
         lines: body.lines,
-        createdBy: req.auth.userId,
+        createdBy: ctx.tenant.userId,
       });
       // returnNumber is generated inside svc.create() (not returned — its contract is just
       // the numeric id) so it's re-read here rather than duplicated/guessed at this layer.
@@ -197,7 +182,7 @@ export async function purchaseReturnRoutes(
       const [supplier] = await ctx.db.raw
         .select({ displayName: suppliers.displayName })
         .from(suppliers)
-        .where(and(eq(suppliers.id, body.supplierId), eq(suppliers.tenantId, req.auth.tenantId)));
+        .where(and(eq(suppliers.id, body.supplierId), eq(suppliers.tenantId, ctx.tenant.tenantId)));
       await ctx.events.publish('purchase_return', id, 'PURCHASE_RETURN_CREATED', {
         returnId: id,
         returnNumber: createdReturn?.returnNumber,
@@ -209,19 +194,13 @@ export async function purchaseReturnRoutes(
         status: 'DRAFT',
       });
       return reply.code(201).send({ data: { id } });
-    },
+    }),
   });
 
   fastify.post('/purchase-returns/:id/approve', {
     preHandler: requirePermission(PERMISSIONS.PURCHASE_RETURN_APPROVE),
-    handler: async (req, reply) => {
+    handler: tenantScopedHandler(ctxFactory, async (req, reply, ctx) => {
       const { id } = req.params as { id: string };
-      const ctx = ctxFactory.create({
-        tenantId: req.auth.tenantId,
-        userId: req.auth.userId,
-        correlationId:
-          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
-      });
       const returnId = parseInt(id, 10);
 
       const approveScope = getBranchScope(req.auth);
@@ -230,7 +209,7 @@ export async function purchaseReturnRoutes(
           .select({ branchId: purchaseReturns.branchId })
           .from(purchaseReturns)
           .where(
-            and(eq(purchaseReturns.id, returnId), eq(purchaseReturns.tenantId, req.auth.tenantId))
+            and(eq(purchaseReturns.id, returnId), eq(purchaseReturns.tenantId, ctx.tenant.tenantId))
           );
         if (retRow && !approveScope.includes(retRow.branchId)) {
           throw new ERPError(
@@ -246,7 +225,7 @@ export async function purchaseReturnRoutes(
         .from(purchaseReturnLines)
         .where(eq(purchaseReturnLines.purchaseReturnId, returnId));
       const svc = new PurchaseReturnService(ctx.db.raw);
-      const debitNoteId = await svc.approve(returnId, req.auth.tenantId, req.auth.userId);
+      const debitNoteId = await svc.approve(returnId, ctx.tenant.tenantId, ctx.tenant.userId);
 
       // Same cross-service item-cache gap GRN receipts had (fixed 2026-07-17) — a purchase
       // return also writes availableQty/valuation directly to `items`, so inventory-service's
@@ -257,18 +236,12 @@ export async function purchaseReturnRoutes(
       );
 
       return reply.send({ success: true, data: { debitNoteId } });
-    },
+    }),
   });
 
   fastify.get('/debit-notes', {
     preHandler: requirePermission(PERMISSIONS.PURCHASE_RETURN_VIEW),
-    handler: async (req, reply) => {
-      const ctx = ctxFactory.create({
-        tenantId: req.auth.tenantId,
-        userId: req.auth.userId,
-        correlationId:
-          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
-      });
+    handler: tenantScopedHandler(ctxFactory, async (req, reply, ctx) => {
       const q = req.query as {
         supplierId?: string;
         status?: string;
@@ -279,7 +252,7 @@ export async function purchaseReturnRoutes(
       const pageSize = Math.min(100, parseInt(q.pageSize ?? '20', 10));
       const offset = (page - 1) * pageSize;
 
-      const conditions = [eq(debitNotes.tenantId, req.auth.tenantId)];
+      const conditions = [eq(debitNotes.tenantId, ctx.tenant.tenantId)];
       if (q.supplierId) conditions.push(eq(debitNotes.supplierId, parseInt(q.supplierId, 10)));
       if (q.status) conditions.push(eq(debitNotes.status, q.status as never));
 
@@ -312,19 +285,13 @@ export async function purchaseReturnRoutes(
       return reply.send({
         data: { content: rows, totalElements: countRow?.count ?? 0, page, pageSize },
       });
-    },
+    }),
   });
 
   fastify.get('/debit-notes/:id', {
     preHandler: requirePermission(PERMISSIONS.PURCHASE_RETURN_VIEW),
-    handler: async (req, reply) => {
+    handler: tenantScopedHandler(ctxFactory, async (req, reply, ctx) => {
       const { id } = req.params as { id: string };
-      const ctx = ctxFactory.create({
-        tenantId: req.auth.tenantId,
-        userId: req.auth.userId,
-        correlationId:
-          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
-      });
       const [row] = await ctx.db.raw
         .select({
           ...getTableColumns(debitNotes),
@@ -335,7 +302,7 @@ export async function purchaseReturnRoutes(
         .leftJoin(suppliers, eq(debitNotes.supplierId, suppliers.id))
         .leftJoin(purchaseReturns, eq(debitNotes.purchaseReturnId, purchaseReturns.id))
         .where(
-          and(eq(debitNotes.id, parseInt(id, 10)), eq(debitNotes.tenantId, req.auth.tenantId))
+          and(eq(debitNotes.id, parseInt(id, 10)), eq(debitNotes.tenantId, ctx.tenant.tenantId))
         );
       if (!row)
         return reply
@@ -357,7 +324,7 @@ export async function purchaseReturnRoutes(
 
       const { _returnBranchId, ...data } = row;
       return reply.send({ data });
-    },
+    }),
   });
 
   // Marks part or all of a debit note's value as matched against a supplier bill/payment
@@ -366,15 +333,9 @@ export async function purchaseReturnRoutes(
   // that's the same authority level that generates the debit note in the first place.
   fastify.post('/debit-notes/:id/apply', {
     preHandler: requirePermission(PERMISSIONS.PURCHASE_RETURN_APPROVE),
-    handler: async (req, reply) => {
+    handler: tenantScopedHandler(ctxFactory, async (req, reply, ctx) => {
       const { id } = req.params as { id: string };
       const body = ApplyDebitNoteSchema.parse(req.body);
-      const ctx = ctxFactory.create({
-        tenantId: req.auth.tenantId,
-        userId: req.auth.userId,
-        correlationId:
-          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
-      });
       const applyScope = getBranchScope(req.auth);
       if (applyScope !== 'all') {
         const [dnRow] = await ctx.db.raw
@@ -382,7 +343,7 @@ export async function purchaseReturnRoutes(
           .from(debitNotes)
           .leftJoin(purchaseReturns, eq(debitNotes.purchaseReturnId, purchaseReturns.id))
           .where(
-            and(eq(debitNotes.id, parseInt(id, 10)), eq(debitNotes.tenantId, req.auth.tenantId))
+            and(eq(debitNotes.id, parseInt(id, 10)), eq(debitNotes.tenantId, ctx.tenant.tenantId))
           );
         if (
           dnRow?.branchId !== null &&
@@ -400,11 +361,11 @@ export async function purchaseReturnRoutes(
       const svc = new DebitNoteService(ctx.db.raw);
       await svc.apply({
         id: parseInt(id, 10),
-        tenantId: req.auth.tenantId,
+        tenantId: ctx.tenant.tenantId,
         amount: body.amount,
         notes: body.notes,
       });
       return reply.send({ success: true });
-    },
+    }),
   });
 }

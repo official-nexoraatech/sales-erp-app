@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { ErpDatabase } from '@erp/db';
+import { withTenantConnection } from '@erp/sdk';
 import { exportSchedules, exportRunHistory } from '@erp/db';
 import { eq, and, desc } from 'drizzle-orm';
 import { PERMISSIONS } from '@erp/types';
@@ -55,11 +56,13 @@ export async function exportScheduleRoutes(
         .send({ error: { code: 'PERMISSION_DENIED', message: 'Missing permission: EXPORT_VIEW' } });
     }
     const { tenantId } = (request as unknown as AuthedRequest).auth;
-    const rows = await db
-      .select()
-      .from(exportSchedules)
-      .where(eq(exportSchedules.tenantId, tenantId))
-      .orderBy(desc(exportSchedules.createdAt));
+    const rows = await withTenantConnection(db, tenantId, (scopedDb) =>
+      scopedDb
+        .select()
+        .from(exportSchedules)
+        .where(eq(exportSchedules.tenantId, tenantId))
+        .orderBy(desc(exportSchedules.createdAt))
+    );
     return reply.code(200).send({ data: { content: rows, totalElements: rows.length } });
   });
 
@@ -74,18 +77,20 @@ export async function exportScheduleRoutes(
     if (!body.success)
       throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
 
-    const [created] = await db
-      .insert(exportSchedules)
-      .values({
-        tenantId,
-        entityType: body.data.entityType,
-        format: body.data.format,
-        filters: body.data.filters ?? {},
-        cronExpression: body.data.cronExpression,
-        recipients: body.data.recipients,
-        createdBy: userId,
-      })
-      .returning();
+    const [created] = await withTenantConnection(db, tenantId, (scopedDb) =>
+      scopedDb
+        .insert(exportSchedules)
+        .values({
+          tenantId,
+          entityType: body.data.entityType,
+          format: body.data.format,
+          filters: body.data.filters ?? {},
+          cronExpression: body.data.cronExpression,
+          recipients: body.data.recipients,
+          createdBy: userId,
+        })
+        .returning()
+    );
     return reply.code(201).send({ data: created });
   });
 
@@ -104,18 +109,20 @@ export async function exportScheduleRoutes(
       if (!body.success)
         throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
 
-      const [updated] = await db
-        .update(exportSchedules)
-        .set({
-          ...(body.data.cronExpression !== undefined
-            ? { cronExpression: body.data.cronExpression }
-            : {}),
-          ...(body.data.recipients !== undefined ? { recipients: body.data.recipients } : {}),
-          ...(body.data.active !== undefined ? { active: body.data.active ? 1 : 0 } : {}),
-          updatedAt: new Date(),
-        })
-        .where(and(eq(exportSchedules.id, id), eq(exportSchedules.tenantId, tenantId)))
-        .returning();
+      const [updated] = await withTenantConnection(db, tenantId, (scopedDb) =>
+        scopedDb
+          .update(exportSchedules)
+          .set({
+            ...(body.data.cronExpression !== undefined
+              ? { cronExpression: body.data.cronExpression }
+              : {}),
+            ...(body.data.recipients !== undefined ? { recipients: body.data.recipients } : {}),
+            ...(body.data.active !== undefined ? { active: body.data.active ? 1 : 0 } : {}),
+            updatedAt: new Date(),
+          })
+          .where(and(eq(exportSchedules.id, id), eq(exportSchedules.tenantId, tenantId)))
+          .returning()
+      );
       if (!updated) throw new NotFoundError('ExportSchedule', id);
       return reply.code(200).send({ data: updated });
     }
@@ -132,11 +139,13 @@ export async function exportScheduleRoutes(
       }
       const { tenantId } = (request as unknown as AuthedRequest).auth;
       const id = parseInt(request.params.id, 10);
-      const [updated] = await db
-        .update(exportSchedules)
-        .set({ active: 0, updatedAt: new Date() })
-        .where(and(eq(exportSchedules.id, id), eq(exportSchedules.tenantId, tenantId)))
-        .returning({ id: exportSchedules.id });
+      const [updated] = await withTenantConnection(db, tenantId, (scopedDb) =>
+        scopedDb
+          .update(exportSchedules)
+          .set({ active: 0, updatedAt: new Date() })
+          .where(and(eq(exportSchedules.id, id), eq(exportSchedules.tenantId, tenantId)))
+          .returning({ id: exportSchedules.id })
+      );
       if (!updated) throw new NotFoundError('ExportSchedule', id);
       return reply.code(200).send({ data: { message: 'Export schedule deactivated' } });
     }
@@ -153,12 +162,14 @@ export async function exportScheduleRoutes(
       }
       const { tenantId } = (request as unknown as AuthedRequest).auth;
       const id = parseInt(request.params.id, 10);
-      const rows = await db
-        .select()
-        .from(exportRunHistory)
-        .where(and(eq(exportRunHistory.scheduleId, id), eq(exportRunHistory.tenantId, tenantId)))
-        .orderBy(desc(exportRunHistory.createdAt))
-        .limit(50);
+      const rows = await withTenantConnection(db, tenantId, (scopedDb) =>
+        scopedDb
+          .select()
+          .from(exportRunHistory)
+          .where(and(eq(exportRunHistory.scheduleId, id), eq(exportRunHistory.tenantId, tenantId)))
+          .orderBy(desc(exportRunHistory.createdAt))
+          .limit(50)
+      );
       return reply.code(200).send({ data: { content: rows, totalElements: rows.length } });
     }
   );

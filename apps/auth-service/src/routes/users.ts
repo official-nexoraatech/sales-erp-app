@@ -13,9 +13,9 @@ import { and, eq, ne, inArray, isNull } from 'drizzle-orm';
 import { z } from 'zod';
 import * as argon2 from 'argon2';
 import { BusinessError, NotFoundError, PermissionError, ValidationError } from '@erp/types';
-import { PERMISSIONS } from '@erp/types';
+import { PERMISSIONS, CAPABILITY_REGISTRY } from '@erp/types';
 import type { PlatformContextFactory } from '@erp/sdk';
-import { assertUnderUserLimit, acquireTenantLimitLock } from '@erp/sdk';
+import { assertUnderUserLimit, acquireTenantLimitLock, isCapabilityEnabled } from '@erp/sdk';
 import { authenticate } from '../middleware/authenticate.js';
 import { requirePermission } from '../middleware/authorize.js';
 import { inetParam } from '../db-helpers.js';
@@ -565,8 +565,37 @@ export async function userRoutes(
       .from(userBranches)
       .where(eq(userBranches.userId, userId));
     const safeUser = sanitizeUser(user);
+    // Capability Foundation (Phase 1): UX/navigation-filtering data only, not a security
+    // boundary — backend requireCapability() remains authoritative regardless of what's
+    // returned here. On a resolution failure for a given key, fail closed by treating that
+    // capability as absent rather than failing the whole /me response (Decision 4/5).
+    const enabledCapabilities: string[] = [];
+    for (const capabilityKey of Object.keys(CAPABILITY_REGISTRY)) {
+      try {
+        if (
+          await isCapabilityEnabled(
+            capabilityKey,
+            tenantId,
+            ctxFactory.rawDb,
+            ctxFactory.getRedis()
+          )
+        ) {
+          enabledCapabilities.push(capabilityKey);
+        }
+      } catch (err) {
+        request.log.error(
+          { err, tenantId, capabilityKey },
+          'Capability resolution failed while building /users/me — treating as disabled (fail-closed)'
+        );
+      }
+    }
     return reply.code(200).send({
-      data: { ...safeUser, roleIds: userRoleRows.map((r) => r.roleId), branches: branchRows },
+      data: {
+        ...safeUser,
+        roleIds: userRoleRows.map((r) => r.roleId),
+        branches: branchRows,
+        enabledCapabilities,
+      },
     });
   });
 

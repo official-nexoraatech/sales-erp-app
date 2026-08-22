@@ -49,10 +49,81 @@ describe('getFirstAccessiblePath', () => {
 
 describe('filterNavGroups', () => {
   it('drops parent groups entirely once every child is filtered out', () => {
-    const filtered = filterNavGroups(NAV_GROUPS, has(PERMISSIONS.DASHBOARD_VIEW));
+    const filtered = filterNavGroups(NAV_GROUPS, has(PERMISSIONS.DASHBOARD_VIEW), new Set());
     expect(filtered.every((g) => g.items.length > 0)).toBe(true);
     expect(filtered.some((g) => g.groupLabel === 'ANALYTICS')).toBe(true);
     expect(filtered.some((g) => g.groupLabel === 'PURCHASE')).toBe(false);
+  });
+
+  it('leaves every untagged item unaffected regardless of enabledCapabilities contents, for a user without any capability-gated permission', () => {
+    // Every real, currently-shipped item except Near-Expiry Stock (INVENTORY_BATCH) and
+    // Payroll (HR_PAYROLL, Phase 3A) is untagged. A user who also lacks BATCH_VIEW/
+    // PAYROLL_VIEW never sees either item either way, so an empty set and a populated,
+    // unrelated set must still filter identically for them (08-frontend-navigation.md §8).
+    const withEmpty = filterNavGroups(NAV_GROUPS, has(PERMISSIONS.DASHBOARD_VIEW), new Set());
+    const withUnrelated = filterNavGroups(
+      NAV_GROUPS,
+      has(PERMISSIONS.DASHBOARD_VIEW),
+      new Set(['SOME_UNRELATED_CAPABILITY'])
+    );
+    expect(withUnrelated).toEqual(withEmpty);
+  });
+
+  it('Phase 2B: shows Near-Expiry Stock only when INVENTORY_BATCH is enabled AND the user holds BATCH_VIEW', () => {
+    const hasBatchView = has(PERMISSIONS.BATCH_VIEW);
+    const findItem = (groups: NavGroup[]) =>
+      groups
+        .find((g) => g.groupLabel === 'INVENTORY')
+        ?.items.find((i) => i.label === 'Inventory')
+        ?.children?.find((c) => c.path === '/inventory/near-expiry');
+
+    // Permission alone, capability off — still hidden.
+    expect(findItem(filterNavGroups(NAV_GROUPS, hasBatchView, new Set()))).toBeUndefined();
+    // Capability on, no permission — still hidden.
+    expect(
+      findItem(filterNavGroups(NAV_GROUPS, has(), new Set(['INVENTORY_BATCH'])))
+    ).toBeUndefined();
+    // Both present — visible.
+    expect(
+      findItem(filterNavGroups(NAV_GROUPS, hasBatchView, new Set(['INVENTORY_BATCH'])))
+    ).toBeDefined();
+  });
+
+  it('Phase 3A: shows Payroll only when HR_PAYROLL is enabled AND the user holds PAYROLL_VIEW', () => {
+    const hasPayrollView = has(PERMISSIONS.PAYROLL_VIEW);
+    const findItem = (groups: NavGroup[]) =>
+      groups
+        .find((g) => g.groupLabel === 'HR & PAYROLL')
+        ?.items.find((i) => i.label === 'HR')
+        ?.children?.find((c) => c.path === '/hr/payroll');
+
+    // Permission alone, capability off — still hidden.
+    expect(findItem(filterNavGroups(NAV_GROUPS, hasPayrollView, new Set()))).toBeUndefined();
+    // Capability on, no permission — still hidden.
+    expect(findItem(filterNavGroups(NAV_GROUPS, has(), new Set(['HR_PAYROLL'])))).toBeUndefined();
+    // Both present — visible.
+    expect(
+      findItem(filterNavGroups(NAV_GROUPS, hasPayrollView, new Set(['HR_PAYROLL'])))
+    ).toBeDefined();
+  });
+
+  it('drops an item whose capabilityKey is not in enabledCapabilities, keeps it once present', () => {
+    const DummyIcon = (() => null) as unknown as NavItem['icon'];
+    const groups: NavGroup[] = [
+      {
+        groupLabel: 'TEST',
+        items: [
+          {
+            label: 'Gated Item',
+            path: '/test/gated',
+            icon: DummyIcon,
+            capabilityKey: 'HR_PAYROLL',
+          },
+        ],
+      },
+    ];
+    expect(filterNavGroups(groups, has(), new Set())).toEqual([]);
+    expect(filterNavGroups(groups, has(), new Set(['HR_PAYROLL']))).toEqual(groups);
   });
 });
 

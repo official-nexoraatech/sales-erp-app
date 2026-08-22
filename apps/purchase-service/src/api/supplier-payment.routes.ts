@@ -1,7 +1,7 @@
 /* global process, fetch */
 import type { FastifyInstance } from 'fastify';
 import type { PlatformContextFactory } from '@erp/sdk';
-import { getBranchScope } from '@erp/sdk';
+import { getBranchScope, tenantScopedHandler } from '@erp/sdk';
 import {
   supplierPayments,
   supplierPaymentAllocations,
@@ -46,14 +46,14 @@ const BounceSchema = z.object({
 // purchase-order.routes.ts's assertPoBranchInScope, for the mutating actions (allocate/bounce/
 // voucher) that don't already have the payment row in hand.
 async function assertSupplierPaymentBranchInScope(
-  ctx: { db: { raw: ErpDatabase } },
+  db: ErpDatabase,
   id: number,
   tenantId: number,
   auth: { permissions: string[]; branchIds: number[] }
 ): Promise<void> {
   const branchScope = getBranchScope(auth);
   if (branchScope === 'all') return;
-  const [payment] = await ctx.db.raw
+  const [payment] = await db
     .select({ branchId: supplierPayments.branchId })
     .from(supplierPayments)
     .where(and(eq(supplierPayments.id, id), eq(supplierPayments.tenantId, tenantId)));
@@ -66,6 +66,10 @@ async function assertSupplierPaymentBranchInScope(
   }
 }
 
+// Phase 9 GUC-per-request rollout — migrated 2026-08-21. No external I/O in most routes —
+// SupplierPaymentService has no fetch() calls. GET /supplier-payments/:id/voucher fetches
+// report-service for PDF generation (caveat 4, same shape as purchase-order.routes.ts's PDF
+// route and accounting-service's) — deliberately left unmigrated.
 export async function supplierPaymentRoutes(
   fastify: FastifyInstance,
   ctxFactory: PlatformContextFactory
@@ -74,13 +78,7 @@ export async function supplierPaymentRoutes(
 
   fastify.get('/supplier-payments', {
     preHandler: requirePermission(PERMISSIONS.PAYMENT_OUT_VIEW),
-    handler: async (req, reply) => {
-      const ctx = ctxFactory.create({
-        tenantId: req.auth.tenantId,
-        userId: req.auth.userId,
-        correlationId:
-          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
-      });
+    handler: tenantScopedHandler(ctxFactory, async (req, reply, ctx) => {
       const q = req.query as {
         supplierId?: string;
         status?: string;
@@ -91,7 +89,7 @@ export async function supplierPaymentRoutes(
       const pageSize = Math.min(100, parseInt(q.pageSize ?? '20', 10));
       const offset = (page - 1) * pageSize;
 
-      const conditions = [eq(supplierPayments.tenantId, req.auth.tenantId)];
+      const conditions = [eq(supplierPayments.tenantId, ctx.tenant.tenantId)];
       if (q.supplierId)
         conditions.push(eq(supplierPayments.supplierId, parseInt(q.supplierId, 10)));
       if (q.status) conditions.push(eq(supplierPayments.status, q.status as never));
@@ -124,26 +122,23 @@ export async function supplierPaymentRoutes(
       return reply.send({
         data: { content: rows, totalElements: countRow?.count ?? 0, page, pageSize },
       });
-    },
+    }),
   });
 
   fastify.get('/supplier-payments/:id', {
     preHandler: requirePermission(PERMISSIONS.PAYMENT_OUT_VIEW),
-    handler: async (req, reply) => {
+    handler: tenantScopedHandler(ctxFactory, async (req, reply, ctx) => {
       const { id } = req.params as { id: string };
-      const ctx = ctxFactory.create({
-        tenantId: req.auth.tenantId,
-        userId: req.auth.userId,
-        correlationId:
-          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
-      });
       const paymentId = parseInt(id, 10);
       const [payment] = await ctx.db.raw
         .select({ ...getTableColumns(supplierPayments), supplierName: suppliers.displayName })
         .from(supplierPayments)
         .leftJoin(suppliers, eq(supplierPayments.supplierId, suppliers.id))
         .where(
-          and(eq(supplierPayments.id, paymentId), eq(supplierPayments.tenantId, req.auth.tenantId))
+          and(
+            eq(supplierPayments.id, paymentId),
+            eq(supplierPayments.tenantId, ctx.tenant.tenantId)
+          )
         );
       if (!payment)
         return reply
@@ -166,7 +161,7 @@ export async function supplierPaymentRoutes(
         .where(eq(supplierPaymentAllocations.paymentId, paymentId));
 
       return reply.send({ data: { ...payment, allocations } });
-    },
+    }),
   });
 
   // Payment voucher PDF — generated on-demand via report-service's PdfEngine, same pattern
@@ -248,7 +243,7 @@ export async function supplierPaymentRoutes(
 
   fastify.post('/supplier-payments', {
     preHandler: requirePermission(PERMISSIONS.PAYMENT_OUT_CREATE),
-    handler: async (req, reply) => {
+    handler: tenantScopedHandler(ctxFactory, async (req, reply, ctx) => {
       const body = CreateSupplierPaymentSchema.parse(req.body);
 
       const createScope = getBranchScope(req.auth);
@@ -260,15 +255,9 @@ export async function supplierPaymentRoutes(
         );
       }
 
-      const ctx = ctxFactory.create({
-        tenantId: req.auth.tenantId,
-        userId: req.auth.userId,
-        correlationId:
-          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
-      });
       const svc = new SupplierPaymentService(ctx.db.raw);
       const id = await svc.create({
-        tenantId: req.auth.tenantId,
+        tenantId: ctx.tenant.tenantId,
         branchId: body.branchId,
         supplierId: body.supplierId,
         paymentDate: new Date(body.paymentDate),
@@ -281,77 +270,68 @@ export async function supplierPaymentRoutes(
         pdcClearingDate: body.pdcClearingDate ? new Date(body.pdcClearingDate) : undefined,
         transactionReference: body.transactionReference,
         notes: body.notes,
-        createdBy: req.auth.userId,
+        createdBy: ctx.tenant.userId,
       });
       return reply.code(201).send({ data: { id } });
-    },
+    }),
   });
 
   fastify.post('/supplier-payments/:id/allocate', {
     preHandler: requirePermission(PERMISSIONS.PAYMENT_OUT_CREATE),
-    handler: async (req, reply) => {
+    handler: tenantScopedHandler(ctxFactory, async (req, reply, ctx) => {
       const { id } = req.params as { id: string };
       const body = AllocateSchema.parse(req.body);
-      const ctx = ctxFactory.create({
-        tenantId: req.auth.tenantId,
-        userId: req.auth.userId,
-        correlationId:
-          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
-      });
-      await assertSupplierPaymentBranchInScope(ctx, parseInt(id, 10), req.auth.tenantId, req.auth);
+      await assertSupplierPaymentBranchInScope(
+        ctx.db.raw,
+        parseInt(id, 10),
+        ctx.tenant.tenantId,
+        req.auth
+      );
       const svc = new SupplierPaymentService(ctx.db.raw);
-      await svc.allocate(parseInt(id, 10), req.auth.tenantId, body.allocations, req.auth.userId);
+      await svc.allocate(
+        parseInt(id, 10),
+        ctx.tenant.tenantId,
+        body.allocations,
+        ctx.tenant.userId
+      );
       return reply.send({ success: true });
-    },
+    }),
   });
 
   fastify.post('/supplier-payments/:id/bounce', {
     preHandler: requirePermission(PERMISSIONS.PAYMENT_OUT_CREATE),
-    handler: async (req, reply) => {
+    handler: tenantScopedHandler(ctxFactory, async (req, reply, ctx) => {
       const { id } = req.params as { id: string };
       const body = BounceSchema.parse(req.body);
-      const ctx = ctxFactory.create({
-        tenantId: req.auth.tenantId,
-        userId: req.auth.userId,
-        correlationId:
-          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
-      });
-      await assertSupplierPaymentBranchInScope(ctx, parseInt(id, 10), req.auth.tenantId, req.auth);
+      await assertSupplierPaymentBranchInScope(
+        ctx.db.raw,
+        parseInt(id, 10),
+        ctx.tenant.tenantId,
+        req.auth
+      );
       const svc = new SupplierPaymentService(ctx.db.raw);
-      await svc.bounceCheque(parseInt(id, 10), req.auth.tenantId, body.reason);
+      await svc.bounceCheque(parseInt(id, 10), ctx.tenant.tenantId, body.reason);
       return reply.send({ success: true });
-    },
+    }),
   });
 
   fastify.get('/suppliers/:id/outstanding', {
     preHandler: requirePermission(PERMISSIONS.SUPPLIER_STATEMENT_VIEW),
-    handler: async (req, reply) => {
+    handler: tenantScopedHandler(ctxFactory, async (req, reply, ctx) => {
       const { id } = req.params as { id: string };
-      const ctx = ctxFactory.create({
-        tenantId: req.auth.tenantId,
-        userId: req.auth.userId,
-        correlationId:
-          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
-      });
       const svc = new SupplierPaymentService(ctx.db.raw);
-      const data = await svc.getOutstanding(parseInt(id, 10), req.auth.tenantId);
+      const data = await svc.getOutstanding(parseInt(id, 10), ctx.tenant.tenantId);
       return reply.send({ data });
-    },
+    }),
   });
 
   fastify.get('/suppliers/:id/statement', {
     preHandler: requirePermission(PERMISSIONS.SUPPLIER_STATEMENT_VIEW),
-    handler: async (req, reply) => {
+    handler: tenantScopedHandler(ctxFactory, async (req, reply, ctx) => {
       const { id } = req.params as { id: string };
-      const ctx = ctxFactory.create({
-        tenantId: req.auth.tenantId,
-        userId: req.auth.userId,
-        correlationId:
-          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
-      });
       const svc = new SupplierPaymentService(ctx.db.raw);
-      const data = await svc.getStatement(parseInt(id, 10), req.auth.tenantId);
+      const data = await svc.getStatement(parseInt(id, 10), ctx.tenant.tenantId);
       return reply.send({ data });
-    },
+    }),
   });
 }

@@ -9,12 +9,27 @@ import { ReportEngine } from '../domain/ReportEngine.js';
 const TENANT_A = 1;
 const TENANT_B = 2;
 
+// withTenantConnection wraps every ReportEngine.generate() call in a transaction that first
+// issues its own `SELECT set_config(...)` GUC-setting query via the same trx.execute() the real
+// report query uses — so the trx object's execute intercepts and swallows that one call (never
+// forwarding it to the tracked `execute` mock below), preserving the exact
+// mockResolvedValueOnce() call-order semantics this file depends on for multi-query reports.
 function makeDb(rowsPerCall: unknown[][]) {
   const execute = vi.fn();
   for (const rows of rowsPerCall) {
     execute.mockResolvedValueOnce(rows);
   }
-  return { execute };
+  const trx = {
+    execute: (query: unknown) => {
+      const text = (query as { strings?: string[] } | undefined)?.strings?.join('') ?? '';
+      if (text.includes('set_config')) return Promise.resolve([]);
+      return execute(query);
+    },
+  };
+  return {
+    execute,
+    transaction: (cb: (t: unknown) => unknown) => cb(trx),
+  };
 }
 
 describe('ES-17 — Financial statement correctness', () => {

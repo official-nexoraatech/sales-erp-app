@@ -3,7 +3,12 @@ import type { ErpDatabase } from '@erp/db';
 import { searchAnalytics } from '@erp/db';
 import { and, eq, isNotNull } from 'drizzle-orm';
 import { PERMISSIONS, type Permission } from '@erp/types';
-import { getBranchScope, PlatformAuditLogger, TenantScopedDatabase } from '@erp/sdk';
+import {
+  getBranchScope,
+  PlatformAuditLogger,
+  TenantScopedDatabase,
+  withTenantConnection,
+} from '@erp/sdk';
 import { z } from 'zod';
 import type { SearchEngine, SearchEntity } from '../domain/SearchEngine.js';
 import { ALL_SEARCH_ENTITIES, BRANCH_SCOPED_ENTITIES } from '../domain/SearchEngine.js';
@@ -22,6 +27,10 @@ function hasPermission(request: unknown, perm: string): boolean {
 // previously didn't, despite DELETE /admin/search/indices wiping every index for a tenant and
 // the reindex/bulk-index routes doing tenant-wide bulk writes. Best-effort: a logging failure
 // must never block the actual admin action, matching this file's existing analytics pattern.
+//
+// Phase 9 GUC-per-request rollout — migrated 2026-08-21. This write always runs strictly after
+// the route's own ES call has already completed (never concurrently), so wrapping just this
+// write in its own withTenantConnection is sufficient — no need to touch the callers.
 async function logAdminAction(
   db: ErpDatabase | undefined,
   tenantId: number,
@@ -31,8 +40,13 @@ async function logAdminAction(
 ): Promise<void> {
   if (!db) return;
   try {
-    const audit = new PlatformAuditLogger(new TenantScopedDatabase(tenantId, db), userId ?? 0);
-    await audit.log({ action, entityType: 'search_index', metadata });
+    await withTenantConnection(db, tenantId, async (scopedDb) => {
+      const audit = new PlatformAuditLogger(
+        new TenantScopedDatabase(tenantId, scopedDb),
+        userId ?? 0
+      );
+      await audit.log({ action, entityType: 'search_index', metadata });
+    });
   } catch {
     // best-effort — see comment above
   }
@@ -222,17 +236,19 @@ export async function searchRoutes(
       let boostedIds: string[] | undefined;
       if (db) {
         try {
-          const clicked = await db
-            .selectDistinct({ id: searchAnalytics.clickedResultId })
-            .from(searchAnalytics)
-            .where(
-              and(
-                eq(searchAnalytics.tenantId, tenantId),
-                eq(searchAnalytics.query, params.q),
-                isNotNull(searchAnalytics.clickedResultId)
+          const clicked = await withTenantConnection(db, tenantId, (scopedDb) =>
+            scopedDb
+              .selectDistinct({ id: searchAnalytics.clickedResultId })
+              .from(searchAnalytics)
+              .where(
+                and(
+                  eq(searchAnalytics.tenantId, tenantId),
+                  eq(searchAnalytics.query, params.q),
+                  isNotNull(searchAnalytics.clickedResultId)
+                )
               )
-            )
-            .limit(20);
+              .limit(20)
+          );
           const ids = clicked.map((c) => c.id).filter((id): id is string => id !== null);
           if (ids.length > 0) boostedIds = ids;
         } catch {
@@ -270,9 +286,8 @@ export async function searchRoutes(
       // Fire-and-forget analytics logging (Phase 8) — never let a logging failure affect the
       // actual search response, and don't make the caller wait on it either.
       if (db) {
-        void db
-          .insert(searchAnalytics)
-          .values({
+        void withTenantConnection(db, tenantId, (scopedDb) =>
+          scopedDb.insert(searchAnalytics).values({
             tenantId,
             userId: auth.userId ?? 0,
             query: params.q,
@@ -280,7 +295,7 @@ export async function searchRoutes(
             resultCount: result.total,
             latencyMs: result.took,
           })
-          .catch(() => {});
+        ).catch(() => {});
       }
 
       return reply.code(200).send({

@@ -17,8 +17,10 @@ export function POSProductCard({
         <span className="text-lg font-bold text-primary">
           ₹{parseFloat(item.salePrice ?? '0').toFixed(2)}
         </span>
-        {item.mrp != null && item.mrp > parseFloat(item.salePrice ?? '0') && (
-          <span className="text-xs text-secondary line-through">₹{item.mrp.toFixed(2)}</span>
+        {item.mrp != null && Number(item.mrp) > parseFloat(item.salePrice ?? '0') && (
+          <span className="text-xs text-secondary line-through">
+            ₹{Number(item.mrp).toFixed(2)}
+          </span>
         )}
       </div>
     </button>

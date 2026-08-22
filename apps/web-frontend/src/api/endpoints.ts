@@ -24,6 +24,7 @@ export const authApi = {
       lastName: string;
       branches: Array<{ id: number; branchId: number; isPrimary: boolean }>;
       preferences?: { sidebarStyle?: 'modern' | 'classic' } | null;
+      enabledCapabilities: string[];
     }>('auth', '/users/me'),
   updateMe: (data: Record<string, unknown>) => apiClient.put('auth', '/users/me', data),
   changePassword: (data: { currentPassword: string; newPassword: string }) =>
@@ -247,6 +248,36 @@ export const adminTenantApi = {
       reason,
       confirmation: 'CLOSE_TENANT',
     }),
+  // PG-027 Session 3
+  getBilling: (id: number) =>
+    apiClient.get<{
+      plan: string;
+      entitlements: {
+        maxUsers: number | null;
+        currentUsers: number;
+        maxBranches: number | null;
+        currentBranches: number;
+      };
+      nextBillingDate: string | null;
+      dunningStartedAt: string | null;
+    }>('tenant', `/admin/tenants/${id}/billing`),
+  updatePlan: (id: number, plan: 'STARTER' | 'GROWTH' | 'ENTERPRISE') =>
+    apiClient.patch<{ message: string; tenantId: number; plan: string }>(
+      'tenant',
+      `/admin/tenants/${id}/plan`,
+      { plan }
+    ),
+  listInvoices: (id: number, page = 0, pageSize = 20) =>
+    apiClient.get<{ content: unknown[]; totalElements: number }>(
+      'tenant',
+      `/admin/tenants/${id}/invoices?page=${page}&pageSize=${pageSize}`
+    ),
+  retryInvoicePayment: (id: number, invoiceId: number) =>
+    apiClient.post<{ status: 'PAID' | 'FAILED'; gatewayRef?: string }>(
+      'tenant',
+      `/admin/tenants/${id}/invoices/${invoiceId}/retry-payment`,
+      {}
+    ),
 };
 
 // ── Platform Admin: Users (cross-tenant, PLATFORM_TENANT_MANAGE only) ──────────
@@ -419,18 +450,18 @@ export const crmAccountApi = {
     if (params?.size !== undefined) qs.set('size', String(params.size));
     if (params?.search) qs.set('search', params.search);
     return apiClient.get<{ content: unknown[]; totalElements: number; page: number; size: number }>(
-      'sales',
+      'crm',
       `/accounts?${qs}`
     );
   },
-  getById: (id: number) => apiClient.get('sales', `/accounts/${id}`),
-  create: (data: Record<string, unknown>) => apiClient.post('sales', '/accounts', data),
+  getById: (id: number) => apiClient.get('crm', `/accounts/${id}`),
+  create: (data: Record<string, unknown>) => apiClient.post('crm', '/accounts', data),
   update: (id: number, data: Record<string, unknown>) =>
-    apiClient.put('sales', `/accounts/${id}`, data),
+    apiClient.put('crm', `/accounts/${id}`, data),
   merge: (data: { sourceId: number; targetId: number }) =>
-    apiClient.post('sales', '/accounts/merge', data),
+    apiClient.post('crm', '/accounts/merge', data),
   getOrCreateForCustomer: (customerId: number) =>
-    apiClient.post('sales', `/accounts/for-customer/${customerId}`, {}),
+    apiClient.post('crm', `/accounts/for-customer/${customerId}`, {}),
   dedupeCheck: (params: {
     name?: string | undefined;
     gstin?: string | undefined;
@@ -442,15 +473,15 @@ export const crmAccountApi = {
     if (params.gstin) qs.set('gstin', params.gstin);
     if (params.phone) qs.set('phone', params.phone);
     if (params.email) qs.set('email', params.email);
-    return apiClient.get<{ content: unknown[] }>('sales', `/accounts/dedupe-check?${qs}`);
+    return apiClient.get<{ content: unknown[] }>('crm', `/accounts/dedupe-check?${qs}`);
   },
-  listContacts: (accountId: number) => apiClient.get('sales', `/accounts/${accountId}/contacts`),
+  listContacts: (accountId: number) => apiClient.get('crm', `/accounts/${accountId}/contacts`),
   addContact: (accountId: number, data: Record<string, unknown>) =>
-    apiClient.post('sales', `/accounts/${accountId}/contacts`, data),
+    apiClient.post('crm', `/accounts/${accountId}/contacts`, data),
   updateContact: (accountId: number, contactId: number, data: Record<string, unknown>) =>
-    apiClient.put('sales', `/accounts/${accountId}/contacts/${contactId}`, data),
+    apiClient.put('crm', `/accounts/${accountId}/contacts/${contactId}`, data),
   deleteContact: (accountId: number, contactId: number) =>
-    apiClient.delete('sales', `/accounts/${accountId}/contacts/${contactId}`),
+    apiClient.delete('crm', `/accounts/${accountId}/contacts/${contactId}`),
 };
 
 // ── CRM Leads (CRM-ROADMAP Phase 1, Feature 2 — Lead Management & Capture) ────────────
@@ -458,27 +489,25 @@ export const leadApi = {
   // Public, unauthenticated — apiClient still attaches an Authorization header if one exists
   // in the store, but the gateway/route both allow this path through without one (see
   // apps/api-gateway/src/middleware/gateway-auth.ts's EXEMPT_PATHS and lead.routes.ts).
-  capture: (data: Record<string, unknown>) => apiClient.post('sales', '/leads/capture', data),
+  capture: (data: Record<string, unknown>) => apiClient.post('crm', '/leads/capture', data),
   list: (params?: { stage?: string; mine?: boolean }) => {
     const qs = new URLSearchParams();
     if (params?.stage) qs.set('stage', params.stage);
     if (params?.mine) qs.set('mine', 'true');
-    return apiClient.get<{ content: unknown[]; totalElements: number }>('sales', `/leads?${qs}`);
+    return apiClient.get<{ content: unknown[]; totalElements: number }>('crm', `/leads?${qs}`);
   },
-  getById: (id: number) => apiClient.get('sales', `/leads/${id}`),
-  create: (data: Record<string, unknown>) => apiClient.post('sales', '/leads', data),
-  update: (id: number, data: Record<string, unknown>) =>
-    apiClient.put('sales', `/leads/${id}`, data),
-  assign: (id: number, userId?: number) =>
-    apiClient.post('sales', `/leads/${id}/assign`, { userId }),
+  getById: (id: number) => apiClient.get('crm', `/leads/${id}`),
+  create: (data: Record<string, unknown>) => apiClient.post('crm', '/leads', data),
+  update: (id: number, data: Record<string, unknown>) => apiClient.put('crm', `/leads/${id}`, data),
+  assign: (id: number, userId?: number) => apiClient.post('crm', `/leads/${id}/assign`, { userId }),
   convert: (id: number, branchId: number) =>
-    apiClient.post('sales', `/leads/${id}/convert`, { branchId }),
-  listActivities: (id: number) => apiClient.get('sales', `/leads/${id}/activities`),
+    apiClient.post('crm', `/leads/${id}/convert`, { branchId }),
+  listActivities: (id: number) => apiClient.get('crm', `/leads/${id}/activities`),
   addActivity: (id: number, data: { activityType: string; description: string }) =>
-    apiClient.post('sales', `/leads/${id}/activities`, data),
-  listAssignmentRules: () => apiClient.get('sales', '/lead-assignment-rules'),
+    apiClient.post('crm', `/leads/${id}/activities`, data),
+  listAssignmentRules: () => apiClient.get('crm', '/lead-assignment-rules'),
   createAssignmentRule: (data: Record<string, unknown>) =>
-    apiClient.post('sales', '/lead-assignment-rules', data),
+    apiClient.post('crm', '/lead-assignment-rules', data),
 };
 
 // ── CRM Tickets (CRM-ROADMAP Phase 1, Feature 4 — Support & Ticketing) ────────────────
@@ -492,30 +521,29 @@ export const ticketApi = {
     if (params?.status) qs.set('status', params.status);
     if (params?.mine) qs.set('mine', 'true');
     if (params?.customerId) qs.set('customerId', String(params.customerId));
-    return apiClient.get<{ content: unknown[]; totalElements: number }>('sales', `/tickets?${qs}`);
+    return apiClient.get<{ content: unknown[]; totalElements: number }>('crm', `/tickets?${qs}`);
   },
-  getById: (id: number) => apiClient.get('sales', `/tickets/${id}`),
-  create: (data: Record<string, unknown>) => apiClient.post('sales', '/tickets', data),
+  getById: (id: number) => apiClient.get('crm', `/tickets/${id}`),
+  create: (data: Record<string, unknown>) => apiClient.post('crm', '/tickets', data),
   update: (id: number, data: Record<string, unknown>) =>
-    apiClient.put('sales', `/tickets/${id}`, data),
+    apiClient.put('crm', `/tickets/${id}`, data),
   assign: (id: number, userId: number) =>
-    apiClient.post('sales', `/tickets/${id}/assign`, { userId }),
-  reopen: (id: number) => apiClient.post('sales', `/tickets/${id}/reopen`, {}),
-  listMessages: (id: number) => apiClient.get('sales', `/tickets/${id}/messages`),
+    apiClient.post('crm', `/tickets/${id}/assign`, { userId }),
+  reopen: (id: number) => apiClient.post('crm', `/tickets/${id}/reopen`, {}),
+  listMessages: (id: number) => apiClient.get('crm', `/tickets/${id}/messages`),
   addMessage: (id: number, data: { visibility: 'INTERNAL' | 'CUSTOMER_VISIBLE'; body: string }) =>
-    apiClient.post('sales', `/tickets/${id}/messages`, data),
+    apiClient.post('crm', `/tickets/${id}/messages`, data),
   recordCsat: (id: number, data: { rating: number; comment?: string }) =>
-    apiClient.post('sales', `/tickets/${id}/csat`, data),
+    apiClient.post('crm', `/tickets/${id}/csat`, data),
 };
 
 // ── CRM DLT Templates (CRM-ROADMAP Phase 1, Feature 6 — DLT/TRAI SMS Compliance) ──────
 export const dltTemplateApi = {
-  list: () =>
-    apiClient.get<{ content: unknown[]; totalElements: number }>('sales', '/dlt-templates'),
-  create: (data: Record<string, unknown>) => apiClient.post('sales', '/dlt-templates', data),
+  list: () => apiClient.get<{ content: unknown[]; totalElements: number }>('crm', '/dlt-templates'),
+  create: (data: Record<string, unknown>) => apiClient.post('crm', '/dlt-templates', data),
   update: (id: number, data: Record<string, unknown>) =>
-    apiClient.put('sales', `/dlt-templates/${id}`, data),
-  delete: (id: number) => apiClient.delete('sales', `/dlt-templates/${id}`),
+    apiClient.put('crm', `/dlt-templates/${id}`, data),
+  delete: (id: number) => apiClient.delete('crm', `/dlt-templates/${id}`),
 };
 
 // CRM-ROADMAP Phase 2, Feature 1 — Sales Pipeline & Opportunity Management.
@@ -527,22 +555,22 @@ export const opportunityApi = {
     if (params?.customerId) qs.set('customerId', String(params.customerId));
     const suffix = qs.toString() ? `?${qs.toString()}` : '';
     return apiClient.get<{ content: unknown[]; totalElements: number }>(
-      'sales',
+      'crm',
       `/opportunities${suffix}`
     );
   },
-  get: (id: number) => apiClient.get<Record<string, unknown>>('sales', `/opportunities/${id}`),
+  get: (id: number) => apiClient.get<Record<string, unknown>>('crm', `/opportunities/${id}`),
   create: (data: Record<string, unknown>) =>
-    apiClient.post<Record<string, unknown>>('sales', '/opportunities', data),
+    apiClient.post<Record<string, unknown>>('crm', '/opportunities', data),
   update: (id: number, data: Record<string, unknown>) =>
-    apiClient.put('sales', `/opportunities/${id}`, data),
-  delete: (id: number) => apiClient.delete('sales', `/opportunities/${id}`),
+    apiClient.put('crm', `/opportunities/${id}`, data),
+  delete: (id: number) => apiClient.delete('crm', `/opportunities/${id}`),
   addLineItem: (id: number, data: Record<string, unknown>) =>
-    apiClient.post('sales', `/opportunities/${id}/line-items`, data),
+    apiClient.post('crm', `/opportunities/${id}/line-items`, data),
   removeLineItem: (id: number, lineItemId: number) =>
-    apiClient.delete('sales', `/opportunities/${id}/line-items/${lineItemId}`),
+    apiClient.delete('crm', `/opportunities/${id}/line-items/${lineItemId}`),
   changeStage: (id: number, data: { toStageCode: string; version: number }) =>
-    apiClient.post('sales', `/opportunities/${id}/stage`, data),
+    apiClient.post('crm', `/opportunities/${id}/stage`, data),
   markWon: (
     id: number,
     data: {
@@ -552,14 +580,14 @@ export const opportunityApi = {
       sellerStateCode: string;
       validUntil: string;
     }
-  ) => apiClient.post('sales', `/opportunities/${id}/won`, data),
+  ) => apiClient.post('crm', `/opportunities/${id}/won`, data),
   markLost: (id: number, data: { version: number; lostReason: string }) =>
-    apiClient.post('sales', `/opportunities/${id}/lost`, data),
+    apiClient.post('crm', `/opportunities/${id}/lost`, data),
   // CRM-ROADMAP Phase 3, Feature 6: these 3 fields are omitted (not present at all) for a
   // caller lacking OPPORTUNITY_VALUE_VIEW — hence all-optional here, not required numbers.
   forecast: () =>
     apiClient.get<{ pipelineValue?: number; weightedValue?: number; commitValue?: number }>(
-      'sales',
+      'crm',
       '/opportunities/forecast'
     ),
   pipelineStages: (dealType?: string) =>
@@ -573,7 +601,7 @@ export const opportunityApi = {
         isLost: boolean;
       }>
     >(
-      'sales',
+      'crm',
       dealType ? `/pipeline-stages?dealType=${encodeURIComponent(dealType)}` : '/pipeline-stages'
     ),
 };
@@ -585,7 +613,7 @@ export const crmDashboardApi = {
     if (params?.from) qs.set('from', params.from);
     if (params?.to) qs.set('to', params.to);
     const suffix = qs.toString() ? `?${qs.toString()}` : '';
-    return apiClient.get<unknown>('sales', `/crm/dashboard${suffix}`);
+    return apiClient.get<unknown>('crm', `/crm/dashboard${suffix}`);
   },
 };
 
@@ -856,6 +884,27 @@ export const stockApi = {
     if (params?.page) qs.set('page', String(params.page));
     if (params?.limit) qs.set('limit', String(params.limit));
     return apiClient.get('inventory', `/inventory/ledger/${itemId}?${qs}`);
+  },
+  // Phase 2B (INVENTORY_BATCH capability) — requires BATCH_VIEW + the capability enabled;
+  // a 403 CAPABILITY_NOT_ENABLED/FORBIDDEN or 503 CAPABILITY_RESOLUTION_UNAVAILABLE is expected
+  // for tenants/users without access, same as any other gated route.
+  nearExpiry: (params?: {
+    warehouseId?: number | undefined;
+    thresholdDays?: number;
+    page?: number;
+    limit?: number;
+  }) => {
+    const qs = new URLSearchParams();
+    if (params?.warehouseId) qs.set('warehouseId', String(params.warehouseId));
+    if (params?.thresholdDays) qs.set('thresholdDays', String(params.thresholdDays));
+    if (params?.page) qs.set('page', String(params.page));
+    if (params?.limit) qs.set('limit', String(params.limit));
+    return apiClient.get<{
+      content: unknown[];
+      totalElements: number;
+      page: number;
+      limit: number;
+    }>('inventory', `/inventory/near-expiry-stock?${qs}`);
   },
 };
 
@@ -1133,37 +1182,40 @@ export const dayEndApi = {
 };
 
 export const loyaltyApi = {
-  balance: (customerId: number) => apiClient.get('sales', `/customers/${customerId}/loyalty`),
+  // CRM/O2C split — balance/tiers/catalog moved to crm-service; redeem/redeemCatalogItem stay
+  // on sales-service (transactionally tied to a POS sale, see domain/LoyaltyService.ts's header
+  // comment in that service).
+  balance: (customerId: number) => apiClient.get('crm', `/customers/${customerId}/loyalty`),
   redeem: (data: Record<string, unknown>) => apiClient.post('sales', '/pos/loyalty/redeem', data),
   redeemCatalogItem: (data: Record<string, unknown>) =>
     apiClient.post('sales', '/pos/loyalty/redeem-catalog', data),
 
   // CRM-ROADMAP Phase 2, Feature 3 — tier + redemption-catalog configuration
-  listTiers: () => apiClient.get('sales', '/loyalty/tiers'),
-  createTier: (data: Record<string, unknown>) => apiClient.post('sales', '/loyalty/tiers', data),
+  listTiers: () => apiClient.get('crm', '/loyalty/tiers'),
+  createTier: (data: Record<string, unknown>) => apiClient.post('crm', '/loyalty/tiers', data),
   updateTier: (id: number, data: Record<string, unknown>) =>
-    apiClient.put('sales', `/loyalty/tiers/${id}`, data),
-  listCatalog: () => apiClient.get('sales', '/loyalty/redemption-catalog'),
+    apiClient.put('crm', `/loyalty/tiers/${id}`, data),
+  listCatalog: () => apiClient.get('crm', '/loyalty/redemption-catalog'),
   createCatalogItem: (data: Record<string, unknown>) =>
-    apiClient.post('sales', '/loyalty/redemption-catalog', data),
+    apiClient.post('crm', '/loyalty/redemption-catalog', data),
   updateCatalogItem: (id: number, data: Record<string, unknown>) =>
-    apiClient.put('sales', `/loyalty/redemption-catalog/${id}`, data),
+    apiClient.put('crm', `/loyalty/redemption-catalog/${id}`, data),
 };
 
 // CRM-ROADMAP Phase 2, Feature 4 — Referral Program Engine
 export const referralApi = {
-  getOrCreateCode: (customerId: number) => apiClient.get('sales', `/referral-codes/${customerId}`),
-  getFunnel: () => apiClient.get('sales', '/referral/funnel'),
+  getOrCreateCode: (customerId: number) => apiClient.get('crm', `/referral-codes/${customerId}`),
+  getFunnel: () => apiClient.get('crm', '/referral/funnel'),
   listRewards: (status?: 'PENDING' | 'FLAGGED' | 'PAID' | 'REJECTED') => {
     const qs = new URLSearchParams();
     if (status) qs.set('status', status);
-    return apiClient.get('sales', `/referral/rewards?${qs}`);
+    return apiClient.get('crm', `/referral/rewards?${qs}`);
   },
-  approveReward: (id: number) => apiClient.post('sales', `/referral/rewards/${id}/approve`, {}),
+  approveReward: (id: number) => apiClient.post('crm', `/referral/rewards/${id}/approve`, {}),
   rejectReward: (id: number, reason: string) =>
-    apiClient.post('sales', `/referral/rewards/${id}/reject`, { reason }),
+    apiClient.post('crm', `/referral/rewards/${id}/reject`, { reason }),
   // Public, unauthenticated — same shape as leadApi.capture above.
-  redeem: (data: Record<string, unknown>) => apiClient.post('sales', '/referral/redeem', data),
+  redeem: (data: Record<string, unknown>) => apiClient.post('crm', '/referral/redeem', data),
 };
 
 // CRM-ROADMAP Phase 2, Feature 5 — Omnichannel Communication Hub
@@ -1172,17 +1224,17 @@ export const conversationApi = {
     const qs = new URLSearchParams();
     if (params?.status) qs.set('status', params.status);
     if (params?.mine) qs.set('mine', 'true');
-    return apiClient.get('sales', `/conversations?${qs}`);
+    return apiClient.get('crm', `/conversations?${qs}`);
   },
-  getById: (id: number) => apiClient.get('sales', `/conversations/${id}`),
+  getById: (id: number) => apiClient.get('crm', `/conversations/${id}`),
   reply: (id: number, body: string) =>
-    apiClient.post('sales', `/conversations/${id}/messages`, { body }),
+    apiClient.post('crm', `/conversations/${id}/messages`, { body }),
   assign: (id: number, userId: number) =>
-    apiClient.post('sales', `/conversations/${id}/assign`, { userId }),
-  close: (id: number) => apiClient.post('sales', `/conversations/${id}/close`, {}),
-  listCannedResponses: () => apiClient.get('sales', '/canned-responses'),
+    apiClient.post('crm', `/conversations/${id}/assign`, { userId }),
+  close: (id: number) => apiClient.post('crm', `/conversations/${id}/close`, {}),
+  listCannedResponses: () => apiClient.get('crm', '/canned-responses'),
   createCannedResponse: (data: Record<string, unknown>) =>
-    apiClient.post('sales', '/canned-responses', data),
+    apiClient.post('crm', '/canned-responses', data),
 };
 
 // ── Phase 5 — Purchase ────────────────────────────────────────────────────────
@@ -1888,6 +1940,22 @@ export const productionApi = {
   },
   createReorderPOs: (data: Record<string, unknown>) =>
     apiClient.post('production', '/api/v2/inventory/reorder/create-pos', data),
+
+  // Manufacturing vertical, Phase A — Bill of Materials
+  listBomsForItem: (itemId: number) =>
+    apiClient.get('production', `/api/v2/boms/for-item/${itemId}`),
+  getBom: (id: number) => apiClient.get('production', `/api/v2/boms/${id}`),
+  createBom: (data: Record<string, unknown>) => apiClient.post('production', '/api/v2/boms', data),
+  explodeBom: (id: number, qty: number) =>
+    apiClient.get('production', `/api/v2/boms/${id}/explode?qty=${qty}`),
+
+  // Manufacturing vertical, Phase B — Work Centers
+  listWorkCenters: () => apiClient.get('production', '/api/v2/work-centers'),
+  getWorkCenter: (id: number) => apiClient.get('production', `/api/v2/work-centers/${id}`),
+  createWorkCenter: (data: Record<string, unknown>) =>
+    apiClient.post('production', '/api/v2/work-centers', data),
+  updateWorkCenter: (id: number, data: Record<string, unknown>) =>
+    apiClient.put('production', `/api/v2/work-centers/${id}`, data),
 };
 
 // ── Phase 9 — CRM ─────────────────────────────────────────────────────────────
@@ -1900,44 +1968,43 @@ export const crmApi = {
   followUps: () => apiClient.get('sales', '/crm/follow-ups'),
 
   // Health
-  healthSegments: () => apiClient.get('sales', '/crm/segments/health'),
+  healthSegments: () => apiClient.get('crm', '/crm/segments/health'),
 
   // Segments
-  listSegments: () => apiClient.get('sales', '/crm/segments'),
-  createSegment: (data: Record<string, unknown>) => apiClient.post('sales', '/crm/segments', data),
+  listSegments: () => apiClient.get('crm', '/crm/segments'),
+  createSegment: (data: Record<string, unknown>) => apiClient.post('crm', '/crm/segments', data),
   previewSegment: (data: Record<string, unknown>) =>
-    apiClient.post('sales', '/crm/segments/preview', data),
+    apiClient.post('crm', '/crm/segments/preview', data),
   segmentCustomers: (idOrCode: string | number, params?: { page?: number; size?: number }) => {
     const qs = new URLSearchParams();
     if (params?.page !== undefined) qs.set('page', String(params.page));
     if (params?.size !== undefined) qs.set('size', String(params.size));
-    return apiClient.get('sales', `/crm/segments/${idOrCode}/customers?${qs}`);
+    return apiClient.get('crm', `/crm/segments/${idOrCode}/customers?${qs}`);
   },
 
   // Campaigns
   listCampaigns: (params?: { status?: string }) => {
     const qs = new URLSearchParams();
     if (params?.status) qs.set('status', params.status);
-    return apiClient.get('sales', `/crm/campaigns?${qs}`);
+    return apiClient.get('crm', `/crm/campaigns?${qs}`);
   },
-  getCampaign: (id: number) => apiClient.get('sales', `/crm/campaigns/${id}`),
-  createCampaign: (data: Record<string, unknown>) =>
-    apiClient.post('sales', '/crm/campaigns', data),
+  getCampaign: (id: number) => apiClient.get('crm', `/crm/campaigns/${id}`),
+  createCampaign: (data: Record<string, unknown>) => apiClient.post('crm', '/crm/campaigns', data),
   // CP-4: edit a DRAFT/SCHEDULED campaign — data must include `version` for the optimistic lock.
   updateCampaign: (id: number, data: Record<string, unknown>) =>
-    apiClient.put('sales', `/crm/campaigns/${id}`, data),
-  campaignHistory: (id: number) => apiClient.get('sales', `/crm/campaigns/${id}/history`),
+    apiClient.put('crm', `/crm/campaigns/${id}`, data),
+  campaignHistory: (id: number) => apiClient.get('crm', `/crm/campaigns/${id}/history`),
   previewCampaign: (data: Record<string, unknown>) =>
-    apiClient.post('sales', '/crm/campaigns/preview', data),
-  sendCampaign: (id: number) => apiClient.post('sales', `/crm/campaigns/${id}/send`, {}),
+    apiClient.post('crm', '/crm/campaigns/preview', data),
+  sendCampaign: (id: number) => apiClient.post('crm', `/crm/campaigns/${id}/send`, {}),
   scheduleCampaign: (id: number, data: { scheduledAt: string }) =>
-    apiClient.post('sales', `/crm/campaigns/${id}/schedule`, data),
-  cancelCampaign: (id: number) => apiClient.post('sales', `/crm/campaigns/${id}/cancel`, {}),
-  campaignStats: (id: number) => apiClient.get('sales', `/crm/campaigns/${id}/stats`),
-  campaignRecipients: (id: number) => apiClient.get('sales', `/crm/campaigns/${id}/recipients`),
-  birthdayStats: () => apiClient.get('sales', '/crm/campaigns/birthday-stats'),
+    apiClient.post('crm', `/crm/campaigns/${id}/schedule`, data),
+  cancelCampaign: (id: number) => apiClient.post('crm', `/crm/campaigns/${id}/cancel`, {}),
+  campaignStats: (id: number) => apiClient.get('crm', `/crm/campaigns/${id}/stats`),
+  campaignRecipients: (id: number) => apiClient.get('crm', `/crm/campaigns/${id}/recipients`),
+  birthdayStats: () => apiClient.get('crm', '/crm/campaigns/birthday-stats'),
   // CRM-ROADMAP Phase 3, Feature 3 — cross-campaign ROI report
-  campaignRoiReport: () => apiClient.get('sales', '/crm/campaigns/roi-report'),
+  campaignRoiReport: () => apiClient.get('crm', '/crm/campaigns/roi-report'),
 
   // CRM-ROADMAP Phase 3, Feature 5 — per-language variants for one campaign. Replaces the whole
   // set per call, not a per-language granular API.
@@ -1945,23 +2012,23 @@ export const crmApi = {
     apiClient.get<{
       content: Array<{ language: string; messageTemplate: string }>;
       totalElements: number;
-    }>('sales', `/crm/campaigns/${id}/translations`),
+    }>('crm', `/crm/campaigns/${id}/translations`),
   updateCampaignTranslations: (
     id: number,
     translations: Array<{ language: string; messageTemplate: string }>
-  ) => apiClient.put('sales', `/crm/campaigns/${id}/translations`, { translations }),
+  ) => apiClient.put('crm', `/crm/campaigns/${id}/translations`, { translations }),
 
   // CP-7: approval workflow
   submitCampaignForApproval: (id: number) =>
-    apiClient.post('sales', `/crm/campaigns/${id}/submit-for-approval`, {}),
-  approveCampaign: (id: number) => apiClient.post('sales', `/crm/campaigns/${id}/approve`, {}),
+    apiClient.post('crm', `/crm/campaigns/${id}/submit-for-approval`, {}),
+  approveCampaign: (id: number) => apiClient.post('crm', `/crm/campaigns/${id}/approve`, {}),
   rejectCampaign: (id: number, reason: string) =>
-    apiClient.post('sales', `/crm/campaigns/${id}/reject`, { reason }),
+    apiClient.post('crm', `/crm/campaigns/${id}/reject`, { reason }),
 
   // CP-7: internal campaign comments (never sent to recipients)
-  listCampaignComments: (id: number) => apiClient.get('sales', `/crm/campaigns/${id}/comments`),
+  listCampaignComments: (id: number) => apiClient.get('crm', `/crm/campaigns/${id}/comments`),
   createCampaignComment: (id: number, body: string) =>
-    apiClient.post('sales', `/crm/campaigns/${id}/comments`, { body }),
+    apiClient.post('crm', `/crm/campaigns/${id}/comments`, { body }),
 
   // CP-5/CP-7 follow-up: tenant-wide approval-required + frequency-cap settings
   getCommunicationSettings: () => apiClient.get('sales', '/crm/communication-settings'),
@@ -1988,10 +2055,10 @@ export const crmApi = {
   listCampaignTemplates: (params?: { channel?: string }) => {
     const qs = new URLSearchParams();
     if (params?.channel) qs.set('channel', params.channel);
-    return apiClient.get('sales', `/crm/campaign-templates?${qs}`);
+    return apiClient.get('crm', `/crm/campaign-templates?${qs}`);
   },
   createCampaignTemplate: (data: Record<string, unknown>) =>
-    apiClient.post('sales', '/crm/campaign-templates', data),
+    apiClient.post('crm', '/crm/campaign-templates', data),
 
   // CP-4/CP-2: campaign media attachment (reuses the generic /attachments endpoint)
   listCampaignMedia: (campaignId: number) =>
@@ -2022,27 +2089,27 @@ export const crmApi = {
   },
 
   // CRM-ROADMAP Phase 2, Feature 2 — Visual Customer Journey Builder
-  listJourneys: () => apiClient.get('sales', '/journeys'),
-  getJourney: (id: number) => apiClient.get('sales', `/journeys/${id}`),
-  createJourney: (data: Record<string, unknown>) => apiClient.post('sales', '/journeys', data),
-  publishJourney: (id: number) => apiClient.post('sales', `/journeys/${id}/publish`, {}),
-  deleteJourney: (id: number) => apiClient.delete('sales', `/journeys/${id}`),
-  journeyAffectedCount: (id: number) => apiClient.get('sales', `/journeys/${id}/affected-count`),
-  listJourneyEnrollments: (id: number) => apiClient.get('sales', `/journeys/${id}/enrollments`),
+  listJourneys: () => apiClient.get('crm', '/journeys'),
+  getJourney: (id: number) => apiClient.get('crm', `/journeys/${id}`),
+  createJourney: (data: Record<string, unknown>) => apiClient.post('crm', '/journeys', data),
+  publishJourney: (id: number) => apiClient.post('crm', `/journeys/${id}/publish`, {}),
+  deleteJourney: (id: number) => apiClient.delete('crm', `/journeys/${id}`),
+  journeyAffectedCount: (id: number) => apiClient.get('crm', `/journeys/${id}/affected-count`),
+  listJourneyEnrollments: (id: number) => apiClient.get('crm', `/journeys/${id}/enrollments`),
   enrollJourneyCustomer: (id: number, customerId: number) =>
-    apiClient.post('sales', `/journeys/${id}/enrollments`, { customerId }),
+    apiClient.post('crm', `/journeys/${id}/enrollments`, { customerId }),
 
-  // CRM-ROADMAP Phase 4, Feature 4 — Territory Management
-  listTerritories: () => apiClient.get('sales', '/territories'),
+  // CRM-ROADMAP Phase 4, Feature 4 — Territory Management (routes moved to crm-service)
+  listTerritories: () => apiClient.get('crm', '/territories'),
   createTerritory: (data: { name: string; description?: string }) =>
-    apiClient.post('sales', '/territories', data),
+    apiClient.post('crm', '/territories', data),
   updateTerritory: (id: number, data: Record<string, unknown>) =>
-    apiClient.put('sales', `/territories/${id}`, data),
+    apiClient.put('crm', `/territories/${id}`, data),
   setTerritoryBranches: (id: number, branchIds: number[]) =>
-    apiClient.put('sales', `/territories/${id}/branches`, { branchIds }),
+    apiClient.put('crm', `/territories/${id}/branches`, { branchIds }),
   setTerritoryUsers: (id: number, userIds: number[]) =>
-    apiClient.put('sales', `/territories/${id}/users`, { userIds }),
-  territoryCoverage: (id: number) => apiClient.get('sales', `/territories/${id}/coverage`),
+    apiClient.put('crm', `/territories/${id}/users`, { userIds }),
+  territoryCoverage: (id: number) => apiClient.get('crm', `/territories/${id}/coverage`),
 
   // CRM-ROADMAP Phase 4, Feature 5 — Sales Forecasting & Quota Management
   listQuotas: (params?: { periodYear?: number; periodMonth?: number }) => {
@@ -2050,78 +2117,82 @@ export const crmApi = {
     if (params?.periodYear !== undefined) qs.set('periodYear', String(params.periodYear));
     if (params?.periodMonth !== undefined) qs.set('periodMonth', String(params.periodMonth));
     const query = qs.toString();
-    return apiClient.get('sales', `/quotas${query ? `?${query}` : ''}`);
+    return apiClient.get('crm', `/quotas${query ? `?${query}` : ''}`);
   },
-  createQuota: (data: Record<string, unknown>) => apiClient.post('sales', '/quotas', data),
+  createQuota: (data: Record<string, unknown>) => apiClient.post('crm', '/quotas', data),
   updateQuota: (id: number, data: { quotaAmount: number; version: number }) =>
-    apiClient.put('sales', `/quotas/${id}`, data),
+    apiClient.put('crm', `/quotas/${id}`, data),
   quotaAttainment: (params?: { periodYear?: number; periodMonth?: number }) => {
     const qs = new URLSearchParams();
     if (params?.periodYear !== undefined) qs.set('periodYear', String(params.periodYear));
     if (params?.periodMonth !== undefined) qs.set('periodMonth', String(params.periodMonth));
     const query = qs.toString();
-    return apiClient.get('sales', `/quotas/attainment${query ? `?${query}` : ''}`);
+    return apiClient.get('crm', `/quotas/attainment${query ? `?${query}` : ''}`);
   },
 
   // CRM-ROADMAP Phase 4, Feature 3 — Festival Intelligence AI
   listFestivalSuggestions: (status?: string) =>
-    apiClient.get('sales', `/crm/festival-suggestions${status ? `?status=${status}` : ''}`),
+    apiClient.get('crm', `/crm/festival-suggestions${status ? `?status=${status}` : ''}`),
   approveFestivalSuggestion: (id: number, data: Record<string, unknown>) =>
-    apiClient.post('sales', `/crm/festival-suggestions/${id}/approve`, data),
+    apiClient.post('crm', `/crm/festival-suggestions/${id}/approve`, data),
   rejectFestivalSuggestion: (id: number) =>
-    apiClient.post('sales', `/crm/festival-suggestions/${id}/reject`, {}),
+    apiClient.post('crm', `/crm/festival-suggestions/${id}/reject`, {}),
 };
 
 // CRM-ROADMAP Phase 4, Feature 1 — Field Sales / Distributor CRM
 export const fieldVisitApi = {
-  listRoutes: () => apiClient.get('sales', '/visit-routes'),
+  listRoutes: () => apiClient.get('crm', '/visit-routes'),
   createRoute: (data: {
     name: string;
     assignedTo: number;
     territoryId?: number;
     scheduledDate: string;
-  }) => apiClient.post('sales', '/visit-routes', data),
+  }) => apiClient.post('crm', '/visit-routes', data),
   updateRoute: (id: number, data: { version: number; status?: string }) =>
-    apiClient.put('sales', `/visit-routes/${id}`, data),
+    apiClient.put('crm', `/visit-routes/${id}`, data),
   setRouteStops: (id: number, stops: Array<{ customerId: number; sequenceNumber: number }>) =>
-    apiClient.put('sales', `/visit-routes/${id}/stops`, { stops }),
-  routeProgress: (id: number) => apiClient.get('sales', `/visit-routes/${id}/progress`),
+    apiClient.put('crm', `/visit-routes/${id}/stops`, { stops }),
+  routeProgress: (id: number) => apiClient.get('crm', `/visit-routes/${id}/progress`),
   listVisits: (params?: { repUserId?: number; dateFrom?: string; dateTo?: string }) => {
     const qs = new URLSearchParams();
     if (params?.repUserId !== undefined) qs.set('repUserId', String(params.repUserId));
     if (params?.dateFrom) qs.set('dateFrom', params.dateFrom);
     if (params?.dateTo) qs.set('dateTo', params.dateTo);
     const query = qs.toString();
-    return apiClient.get('sales', `/field-visits${query ? `?${query}` : ''}`);
+    return apiClient.get('crm', `/field-visits${query ? `?${query}` : ''}`);
   },
   checkOut: (id: number, data: { checkOutLat?: number; checkOutLng?: number }) =>
-    apiClient.put('sales', `/field-visits/${id}/checkout`, data),
+    apiClient.put('crm', `/field-visits/${id}/checkout`, data),
 };
 
 // CRM-ROADMAP Phase 4, Feature 2 — WhatsApp Commerce
 export const whatsappCommerceApi = {
+  // Deliberately stays on sales-service — /crm/whatsapp-orders (crm.routes.ts) is an
+  // order-source indicator on the existing Quotations list (QUOTATION_VIEW-gated), not a CRM
+  // management page; it reads crm_whatsapp_catalog_orders directly, matching the established
+  // shared-table-read precedent in the other direction (O2C reading a CRM-owned table).
   listOrders: () => apiClient.get('sales', '/crm/whatsapp-orders'),
 };
 
 // CRM-ROADMAP Phase 4, Feature 7 — CTI / Call Center Integration
 export const callApi = {
   initiate: (data: { customerId?: number; toNumber: string }) =>
-    apiClient.post('sales', '/calls/initiate', data),
+    apiClient.post('crm', '/calls/initiate', data),
   list: (params?: { customerId?: number }) => {
     const qs = new URLSearchParams();
     if (params?.customerId !== undefined) qs.set('customerId', String(params.customerId));
     const query = qs.toString();
-    return apiClient.get('sales', `/calls${query ? `?${query}` : ''}`);
+    return apiClient.get('crm', `/calls${query ? `?${query}` : ''}`);
   },
-  addNotes: (id: number, notes: string) => apiClient.put('sales', `/calls/${id}/notes`, { notes }),
+  addNotes: (id: number, notes: string) => apiClient.put('crm', `/calls/${id}/notes`, { notes }),
 };
 
 // CRM-ROADMAP Phase 4, Feature 8 — Public CRM API & BI/Data-Warehouse Export
 export const apiKeyApi = {
-  list: () => apiClient.get('sales', '/api-keys'),
+  list: () => apiClient.get('crm', '/api-keys'),
   create: (data: { name: string; scopes: string[]; expiresAt?: string }) =>
-    apiClient.post('sales', '/api-keys', data),
-  revoke: (id: number) => apiClient.delete('sales', `/api-keys/${id}`),
+    apiClient.post('crm', '/api-keys', data),
+  revoke: (id: number) => apiClient.delete('crm', `/api-keys/${id}`),
 };
 
 // ── Global Search (search-service) ────────────────────────────────────────────

@@ -30,6 +30,7 @@ vi.mock('@erp/db', () => ({
     tenantId: 'tenant_id',
     creditLimit: 'credit_limit',
     creditLimitEnabled: 'credit_limit_enabled',
+    priceListId: 'price_list_id',
   },
   items: {
     id: 'id',
@@ -38,6 +39,15 @@ vi.mock('@erp/db', () => ({
     version: 'version',
     minSalePrice: 'min_sale_price',
     trackInventory: 'track_inventory',
+    salePrice: 'sale_price',
+  },
+  priceListItems: {
+    id: 'id',
+    tenantId: 'tenant_id',
+    priceListId: 'price_list_id',
+    itemId: 'item_id',
+    minQty: 'min_qty',
+    salePrice: 'sale_price',
   },
   outboxEvents: {},
   projectionDashboardDaily: { tenantId: 'tenant_id', branchId: 'branch_id', date: 'date' },
@@ -165,6 +175,7 @@ const baseCreateParams = {
 describe('InvoiceService.create — credit limit via RuleEngine', () => {
   it('blocks when over limit and the seeded system rule is active', async () => {
     const script = [
+      [{ priceListId: null }], // select customer.priceListId (Phase B price resolution)
       [{ creditLimit: '5000', creditLimitEnabled: true }], // select customer
       [{ currentBalance: '4000.00' }], // select projectionCustomerBalance
       [seededBlockRule], // RuleEngine.evaluate(): select businessRules — active match
@@ -177,6 +188,7 @@ describe('InvoiceService.create — credit limit via RuleEngine', () => {
 
   it('does NOT block when over limit but the tenant has deactivated the system rule', async () => {
     const script = [
+      [{ priceListId: null }], // select customer.priceListId (Phase B price resolution)
       [{ creditLimit: '5000', creditLimitEnabled: true }], // select customer
       [{ currentBalance: '4000.00' }], // select projectionCustomerBalance
       [], // RuleEngine.evaluate(): select businessRules WHERE isActive=true — none (deactivated)
@@ -198,6 +210,7 @@ describe('InvoiceService.create — credit limit via RuleEngine', () => {
 
   it('does not evaluate any rule when the customer has credit-limit checking disabled (unchanged behavior)', async () => {
     const script = [
+      [{ priceListId: null }], // select customer.priceListId (Phase B price resolution)
       [{ creditLimit: '5000', creditLimitEnabled: false }], // select customer — disabled
       [{ currentBalance: '9999999.00' }], // select projectionCustomerBalance — would be way over if checked
       // no businessRules select — the `if (customer.creditLimitEnabled && ...)` guard short-circuits

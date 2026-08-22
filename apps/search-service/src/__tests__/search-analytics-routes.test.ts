@@ -20,13 +20,28 @@ vi.mock('../middleware/authenticate.js', () => ({
 
 vi.mock('@erp/types', async (importOriginal) => {
   const actual = await importOriginal<typeof ErpTypes>();
-  return { ...actual, PERMISSIONS: { ...actual.PERMISSIONS, SEARCH_GLOBAL: 'SEARCH_GLOBAL', SEARCH_REINDEX: 'SEARCH_REINDEX' } };
+  return {
+    ...actual,
+    PERMISSIONS: {
+      ...actual.PERMISSIONS,
+      SEARCH_GLOBAL: 'SEARCH_GLOBAL',
+      SEARCH_REINDEX: 'SEARCH_REINDEX',
+    },
+  };
 });
 
 vi.mock('@erp/db', () => ({
   searchAnalytics: {
-    __name: 'searchAnalytics', id: 'id', tenantId: 'tenantId', userId: 'userId', query: 'query',
-    clickedResultId: 'clickedResultId', clickedEntity: 'clickedEntity', createdAt: 'createdAt', resultCount: 'resultCount', latencyMs: 'latencyMs',
+    __name: 'searchAnalytics',
+    id: 'id',
+    tenantId: 'tenantId',
+    userId: 'userId',
+    query: 'query',
+    clickedResultId: 'clickedResultId',
+    clickedEntity: 'clickedEntity',
+    createdAt: 'createdAt',
+    resultCount: 'resultCount',
+    latencyMs: 'latencyMs',
   },
 }));
 
@@ -36,11 +51,32 @@ vi.mock('drizzle-orm', () => ({
   desc: vi.fn(() => '__desc__'),
   gte: vi.fn(() => '__gte__'),
   isNull: vi.fn(() => '__isNull__'),
-  sql: Object.assign(vi.fn(() => '__sql__'), { raw: vi.fn() }),
+  sql: Object.assign(
+    vi.fn(() => '__sql__'),
+    { raw: vi.fn() }
+  ),
 }));
 
-function authHeader(auth: { tenantId: number; userId?: number; permissions: string[] }): Record<string, string> {
+function authHeader(auth: {
+  tenantId: number;
+  userId?: number;
+  permissions: string[];
+}): Record<string, string> {
   return { authorization: `Bearer ${JSON.stringify(auth)}` };
+}
+
+// withTenantConnection wraps every route in a transaction that sets the GUC via `.execute()`
+// before invoking the callback with the same db object as the scoped db.
+function withTransactionSupport<T extends object>(
+  db: T
+): T & { execute: () => Promise<undefined>; transaction: (cb: (trx: T) => unknown) => unknown } {
+  const extended = db as T & {
+    execute: () => Promise<undefined>;
+    transaction: (cb: (trx: T) => unknown) => unknown;
+  };
+  extended.execute = async () => undefined;
+  extended.transaction = (cb: (trx: T) => unknown) => cb(extended);
+  return extended;
 }
 
 describe('POST /search/analytics/click', () => {
@@ -62,10 +98,14 @@ describe('POST /search/analytics/click', () => {
 
   it('with a matching recent search event, updates it and reports recorded:true', async () => {
     const setMock = vi.fn(() => ({ where: vi.fn().mockResolvedValue(undefined) }));
-    const db = {
-      select: () => ({ from: () => ({ where: () => ({ orderBy: () => ({ limit: () => Promise.resolve([{ id: 42 }]) }) }) }) }),
+    const db = withTransactionSupport({
+      select: () => ({
+        from: () => ({
+          where: () => ({ orderBy: () => ({ limit: () => Promise.resolve([{ id: 42 }]) }) }),
+        }),
+      }),
       update: () => ({ set: setMock }),
-    };
+    });
     const app = Fastify({ logger: false });
     await searchAnalyticsRoutes(app, db as never);
 
@@ -84,10 +124,12 @@ describe('POST /search/analytics/click', () => {
 
   it('with no matching recent search event, reports recorded:false and never updates', async () => {
     const updateMock = vi.fn();
-    const db = {
-      select: () => ({ from: () => ({ where: () => ({ orderBy: () => ({ limit: () => Promise.resolve([]) }) }) }) }),
+    const db = withTransactionSupport({
+      select: () => ({
+        from: () => ({ where: () => ({ orderBy: () => ({ limit: () => Promise.resolve([]) }) }) }),
+      }),
       update: updateMock,
-    };
+    });
     const app = Fastify({ logger: false });
     await searchAnalyticsRoutes(app, db as never);
 
@@ -125,16 +167,22 @@ describe('GET /admin/search/analytics/summary', () => {
     const popularRows = [{ query: 'ramesh', count: 4 }];
     const noResultRows = [{ query: 'zzz', count: 2 }];
     let selectCallIndex = 0;
-    const db = {
+    const db = withTransactionSupport({
       select: () => {
         selectCallIndex += 1;
         if (selectCallIndex === 1) {
           return { from: () => ({ where: () => Promise.resolve([totalsRow]) }) };
         }
         const rows = selectCallIndex === 2 ? popularRows : noResultRows;
-        return { from: () => ({ where: () => ({ groupBy: () => ({ orderBy: () => ({ limit: () => Promise.resolve(rows) }) }) }) }) };
+        return {
+          from: () => ({
+            where: () => ({
+              groupBy: () => ({ orderBy: () => ({ limit: () => Promise.resolve(rows) }) }),
+            }),
+          }),
+        };
       },
-    };
+    });
     const app = Fastify({ logger: false });
     await searchAnalyticsRoutes(app, db as never);
 
@@ -145,7 +193,9 @@ describe('GET /admin/search/analytics/summary', () => {
     });
 
     expect(res.statusCode).toBe(200);
-    const body = JSON.parse(res.body) as { data: typeof totalsRow & { popularQueries: unknown; noResultQueries: unknown } };
+    const body = JSON.parse(res.body) as {
+      data: typeof totalsRow & { popularQueries: unknown; noResultQueries: unknown };
+    };
     expect(body.data.totalSearches).toBe(10);
     expect(body.data.popularQueries).toEqual(popularRows);
     expect(body.data.noResultQueries).toEqual(noResultRows);

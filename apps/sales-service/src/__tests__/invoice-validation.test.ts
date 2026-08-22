@@ -30,6 +30,7 @@ vi.mock('@erp/db', () => ({
     tenantId: 'tenant_id',
     creditLimit: 'credit_limit',
     creditLimitEnabled: 'credit_limit_enabled',
+    priceListId: 'price_list_id',
   },
   items: {
     id: 'id',
@@ -38,6 +39,15 @@ vi.mock('@erp/db', () => ({
     version: 'version',
     minSalePrice: 'min_sale_price',
     trackInventory: 'track_inventory',
+    salePrice: 'sale_price',
+  },
+  priceListItems: {
+    id: 'id',
+    tenantId: 'tenant_id',
+    priceListId: 'price_list_id',
+    itemId: 'item_id',
+    minQty: 'min_qty',
+    salePrice: 'sale_price',
   },
   outboxEvents: {},
   projectionDashboardDaily: { tenantId: 'tenant_id', branchId: 'branch_id', date: 'date' },
@@ -187,6 +197,7 @@ describe('ES-14 — API-boundary shape validation (Zod)', () => {
 describe('ES-14 — InvoiceService.create price floor', () => {
   it('rejects a line priced below the item minSalePrice without an override', async () => {
     const script = [
+      [{ priceListId: null }], // select customer.priceListId (Phase B price resolution)
       [{ creditLimit: '0', creditLimitEnabled: false }], // select customer
       [{ currentBalance: '0' }], // select projectionCustomerBalance
       [{ minSalePrice: '150.00', trackInventory: true }], // select item (price floor check)
@@ -199,6 +210,7 @@ describe('ES-14 — InvoiceService.create price floor', () => {
 
   it('allows a line priced below minSalePrice when overridePriceFloor=true', async () => {
     const script = [
+      [{ priceListId: null }], // select customer.priceListId (Phase B price resolution)
       [{ creditLimit: '0', creditLimitEnabled: false }], // select customer
       [{ currentBalance: '0' }], // select projectionCustomerBalance
       // price floor check skipped entirely when overridePriceFloor=true

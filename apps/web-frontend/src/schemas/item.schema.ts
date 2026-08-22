@@ -40,6 +40,7 @@ export const itemFormSchema = z.object({
   isFabricItem: z.boolean().optional(),
   fabricWidth: optionalNonNegative(),
   description: z.string().max(5000, 'Must be 5000 characters or fewer').optional(),
+  fefoEnabled: z.boolean().optional(),
 });
 
 export type ItemFormData = z.infer<typeof itemFormSchema>;

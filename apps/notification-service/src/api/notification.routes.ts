@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type Redis from 'ioredis';
 import type { ErpDatabase } from '@erp/db';
+import { withTenantConnection } from '@erp/sdk';
 import {
   notificationLog,
   notificationPreferences,
@@ -105,14 +106,20 @@ const PreferencesSchema = z.object({
 
 type AuthedRequest = { auth: { tenantId: number; userId?: number } };
 
+// Phase 9 GUC-per-request rollout — migrated 2026-08-21. NotificationEngine held a single
+// ErpDatabase reference constructed ONCE at route-registration time (same shape as
+// scheduler-service's ImportEngine) — now built fresh per request from the scoped db. Every
+// actual channel send (SMS/email/WhatsApp) goes through DeliveryQueue.enqueue(), confirmed to be
+// a plain BullMQ/Redis `.add()` call with no direct external HTTP I/O (the real provider calls
+// happen in DeliveryQueue's worker-side `process()`, a separate execution context out of scope
+// for this rollout, same as every other service's background workers) — so it's safe to run
+// inside the same transaction as the DB writes around it, no caveat-4/4g restructuring needed.
 export async function notificationRoutes(
   fastify: FastifyInstance,
   db: ErpDatabase,
   deliveryQueue: DeliveryEnqueuer,
   redis: Redis
 ): Promise<void> {
-  const engine = new NotificationEngine(db, deliveryQueue);
-
   // ── POST /notifications/send — Send a notification ──────────────────────
   fastify.post(
     '/notifications/send',
@@ -125,15 +132,17 @@ export async function notificationRoutes(
 
       const { recipientUserId, recipientPhone, recipientEmail, channels, idempotencyKey, ...rest } =
         body.data;
-      const results = await engine.send({
-        tenantId,
-        ...rest,
-        ...(recipientUserId !== undefined ? { recipientUserId } : {}),
-        ...(recipientPhone !== undefined ? { recipientPhone } : {}),
-        ...(recipientEmail !== undefined ? { recipientEmail } : {}),
-        ...(channels !== undefined ? { channels } : {}),
-        ...(idempotencyKey !== undefined ? { idempotencyKey } : {}),
-      });
+      const results = await withTenantConnection(db, tenantId, (scopedDb) =>
+        new NotificationEngine(scopedDb, deliveryQueue).send({
+          tenantId,
+          ...rest,
+          ...(recipientUserId !== undefined ? { recipientUserId } : {}),
+          ...(recipientPhone !== undefined ? { recipientPhone } : {}),
+          ...(recipientEmail !== undefined ? { recipientEmail } : {}),
+          ...(channels !== undefined ? { channels } : {}),
+          ...(idempotencyKey !== undefined ? { idempotencyKey } : {}),
+        })
+      );
       return reply.code(200).send({ data: { results } });
     }
   );
@@ -147,14 +156,16 @@ export async function notificationRoutes(
 
     const { recipientUserId, recipientPhone, recipientEmail, channels, idempotencyKey, ...rest } =
       body.data;
-    const results = await engine.send({
-      ...rest,
-      ...(recipientUserId !== undefined ? { recipientUserId } : {}),
-      ...(recipientPhone !== undefined ? { recipientPhone } : {}),
-      ...(recipientEmail !== undefined ? { recipientEmail } : {}),
-      ...(channels !== undefined ? { channels } : {}),
-      ...(idempotencyKey !== undefined ? { idempotencyKey } : {}),
-    });
+    const results = await withTenantConnection(db, body.data.tenantId, (scopedDb) =>
+      new NotificationEngine(scopedDb, deliveryQueue).send({
+        ...rest,
+        ...(recipientUserId !== undefined ? { recipientUserId } : {}),
+        ...(recipientPhone !== undefined ? { recipientPhone } : {}),
+        ...(recipientEmail !== undefined ? { recipientEmail } : {}),
+        ...(channels !== undefined ? { channels } : {}),
+        ...(idempotencyKey !== undefined ? { idempotencyKey } : {}),
+      })
+    );
     return reply.code(200).send({ data: { results } });
   });
 
@@ -178,25 +189,8 @@ export async function notificationRoutes(
       // @fastify/rate-limit plugin's tenantOrIpKeyGenerator can't key it by tenant (request.auth
       // is never populated here), so without this check every tenant's campaign sends would share
       // one IP-keyed budget. This is a genuinely per-tenant, per-tenant-configurable check instead.
-      const [settings] = await db
-        .select({ limit: tenantCommunicationSettings.notificationRateLimitPerMinute })
-        .from(tenantCommunicationSettings)
-        .where(eq(tenantCommunicationSettings.tenantId, body.data.tenantId));
-      const limit = settings?.limit ?? DEFAULT_NOTIFICATION_RATE_LIMIT_PER_MINUTE;
-      const rateLimitResult = await checkTenantNotificationRateLimit(
-        redis,
-        body.data.tenantId,
-        limit
-      );
-      if (!rateLimitResult.allowed) {
-        return reply.code(429).send({
-          error: {
-            code: 'TENANT_RATE_LIMIT_EXCEEDED',
-            message: `Notification rate limit exceeded for this tenant (${limit}/minute). Configure a higher limit in Campaign Settings if this tenant needs more throughput.`,
-          },
-        });
-      }
-
+      // The settings lookup runs inside the same wrap as sendRaw() below; checkTenantNotification
+      // RateLimit is a Redis-only call, safe to interleave (fast, no external HTTP).
       const {
         recipientPhone,
         recipientEmail,
@@ -208,18 +202,45 @@ export async function notificationRoutes(
         senderOverride,
         ...rest
       } = body.data;
-      const result = await engine.sendRaw({
-        ...rest,
-        ...(recipientPhone !== undefined ? { recipientPhone } : {}),
-        ...(recipientEmail !== undefined ? { recipientEmail } : {}),
-        ...(recipientUserId !== undefined ? { recipientUserId } : {}),
-        ...(subject !== undefined ? { subject } : {}),
-        ...(idempotencyKey !== undefined ? { idempotencyKey } : {}),
-        ...(mediaUrl !== undefined ? { mediaUrl } : {}),
-        ...(mediaType !== undefined ? { mediaType } : {}),
-        ...(senderOverride !== undefined ? { senderOverride } : {}),
+
+      const result = await withTenantConnection(db, body.data.tenantId, async (scopedDb) => {
+        const [settings] = await scopedDb
+          .select({ limit: tenantCommunicationSettings.notificationRateLimitPerMinute })
+          .from(tenantCommunicationSettings)
+          .where(eq(tenantCommunicationSettings.tenantId, body.data.tenantId));
+        const limit = settings?.limit ?? DEFAULT_NOTIFICATION_RATE_LIMIT_PER_MINUTE;
+        const rateLimitResult = await checkTenantNotificationRateLimit(
+          redis,
+          body.data.tenantId,
+          limit
+        );
+        if (!rateLimitResult.allowed) {
+          return { rateLimited: true as const, limit };
+        }
+
+        const sendResult = await new NotificationEngine(scopedDb, deliveryQueue).sendRaw({
+          ...rest,
+          ...(recipientPhone !== undefined ? { recipientPhone } : {}),
+          ...(recipientEmail !== undefined ? { recipientEmail } : {}),
+          ...(recipientUserId !== undefined ? { recipientUserId } : {}),
+          ...(subject !== undefined ? { subject } : {}),
+          ...(idempotencyKey !== undefined ? { idempotencyKey } : {}),
+          ...(mediaUrl !== undefined ? { mediaUrl } : {}),
+          ...(mediaType !== undefined ? { mediaType } : {}),
+          ...(senderOverride !== undefined ? { senderOverride } : {}),
+        });
+        return { rateLimited: false as const, result: sendResult };
       });
-      return reply.code(200).send({ data: result });
+
+      if (result.rateLimited) {
+        return reply.code(429).send({
+          error: {
+            code: 'TENANT_RATE_LIMIT_EXCEEDED',
+            message: `Notification rate limit exceeded for this tenant (${result.limit}/minute). Configure a higher limit in Campaign Settings if this tenant needs more throughput.`,
+          },
+        });
+      }
+      return reply.code(200).send({ data: result.result });
     }
   );
 
@@ -252,20 +273,23 @@ export async function notificationRoutes(
       },
     ];
 
-    let count = 0;
-    for (const t of templates) {
-      const [inserted] = await db
-        .insert(notificationTemplates)
-        .values({
-          tenantId: body.data.tenantId,
-          createdBy: body.data.createdBy,
-          isSystem: true,
-          ...t,
-        })
-        .onConflictDoNothing()
-        .returning();
-      if (inserted) count++;
-    }
+    const count = await withTenantConnection(db, body.data.tenantId, async (scopedDb) => {
+      let n = 0;
+      for (const t of templates) {
+        const [inserted] = await scopedDb
+          .insert(notificationTemplates)
+          .values({
+            tenantId: body.data.tenantId,
+            createdBy: body.data.createdBy,
+            isSystem: true,
+            ...t,
+          })
+          .onConflictDoNothing()
+          .returning();
+        if (inserted) n++;
+      }
+      return n;
+    });
 
     return reply.code(200).send({ data: { message: 'CRM templates seeded', count } });
   });
@@ -299,15 +323,18 @@ export async function notificationRoutes(
       },
     ];
 
-    let count = 0;
-    for (const t of templates) {
-      const [inserted] = await db
-        .insert(notificationTemplates)
-        .values({ tenantId: body.data.tenantId, createdBy: body.data.createdBy, ...t })
-        .onConflictDoNothing()
-        .returning();
-      if (inserted) count++;
-    }
+    const count = await withTenantConnection(db, body.data.tenantId, async (scopedDb) => {
+      let n = 0;
+      for (const t of templates) {
+        const [inserted] = await scopedDb
+          .insert(notificationTemplates)
+          .values({ tenantId: body.data.tenantId, createdBy: body.data.createdBy, ...t })
+          .onConflictDoNothing()
+          .returning();
+        if (inserted) n++;
+      }
+      return n;
+    });
 
     return reply.code(200).send({ data: { message: 'HR templates seeded', count } });
   });
@@ -336,15 +363,18 @@ export async function notificationRoutes(
       },
     ];
 
-    let count = 0;
-    for (const t of templates) {
-      const [inserted] = await db
-        .insert(notificationTemplates)
-        .values({ tenantId: body.data.tenantId, createdBy: body.data.createdBy, ...t })
-        .onConflictDoNothing()
-        .returning();
-      if (inserted) count++;
-    }
+    const count = await withTenantConnection(db, body.data.tenantId, async (scopedDb) => {
+      let n = 0;
+      for (const t of templates) {
+        const [inserted] = await scopedDb
+          .insert(notificationTemplates)
+          .values({ tenantId: body.data.tenantId, createdBy: body.data.createdBy, ...t })
+          .onConflictDoNothing()
+          .returning();
+        if (inserted) n++;
+      }
+      return n;
+    });
 
     return reply.code(200).send({ data: { message: 'Auth templates seeded', count } });
   });
@@ -376,15 +406,18 @@ export async function notificationRoutes(
       },
     ];
 
-    let count = 0;
-    for (const t of templates) {
-      const [inserted] = await db
-        .insert(notificationTemplates)
-        .values({ tenantId: body.data.tenantId, createdBy: body.data.createdBy, ...t })
-        .onConflictDoNothing()
-        .returning();
-      if (inserted) count++;
-    }
+    const count = await withTenantConnection(db, body.data.tenantId, async (scopedDb) => {
+      let n = 0;
+      for (const t of templates) {
+        const [inserted] = await scopedDb
+          .insert(notificationTemplates)
+          .values({ tenantId: body.data.tenantId, createdBy: body.data.createdBy, ...t })
+          .onConflictDoNothing()
+          .returning();
+        if (inserted) n++;
+      }
+      return n;
+    });
 
     return reply
       .code(200)
@@ -422,21 +455,31 @@ export async function notificationRoutes(
       ...(query.unreadOnly === 'true' ? [isNull(notificationLog.readAt)] : [])
     );
 
-    const items = await db
-      .select()
-      .from(notificationLog)
-      .where(whereClause)
-      .orderBy(desc(notificationLog.createdAt), desc(notificationLog.id))
-      .limit(pageSize)
-      .offset((page - 1) * pageSize);
+    const { items, totalElements, unreadCount } = await withTenantConnection(
+      db,
+      tenantId,
+      async (scopedDb) => {
+        const rows = await scopedDb
+          .select()
+          .from(notificationLog)
+          .where(whereClause)
+          .orderBy(desc(notificationLog.createdAt), desc(notificationLog.id))
+          .limit(pageSize)
+          .offset((page - 1) * pageSize);
 
-    const [totalRow] = await db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(notificationLog)
-      .where(whereClause);
-    const totalElements = totalRow?.count ?? 0;
+        const [totalRow] = await scopedDb
+          .select({ count: sql<number>`count(*)::int` })
+          .from(notificationLog)
+          .where(whereClause);
 
-    const unreadCount = await engine.getUnreadCount(tenantId, userId);
+        const unread = await new NotificationEngine(scopedDb, deliveryQueue).getUnreadCount(
+          tenantId,
+          userId
+        );
+
+        return { items: rows, totalElements: totalRow?.count ?? 0, unreadCount: unread };
+      }
+    );
 
     return reply.code(200).send({
       data: { content: items, unreadCount, page, pageSize, totalElements },
@@ -447,17 +490,19 @@ export async function notificationRoutes(
   fastify.post('/notifications/read-all', { preHandler: authenticate }, async (request, reply) => {
     const { tenantId, userId = 0 } = (request as unknown as AuthedRequest).auth;
 
-    await db
-      .update(notificationLog)
-      .set({ readAt: new Date(), updatedAt: new Date() })
-      .where(
-        and(
-          eq(notificationLog.tenantId, tenantId),
-          eq(notificationLog.recipientUserId, userId),
-          eq(notificationLog.channel, 'IN_APP'),
-          isNull(notificationLog.readAt)
+    await withTenantConnection(db, tenantId, (scopedDb) =>
+      scopedDb
+        .update(notificationLog)
+        .set({ readAt: new Date(), updatedAt: new Date() })
+        .where(
+          and(
+            eq(notificationLog.tenantId, tenantId),
+            eq(notificationLog.recipientUserId, userId),
+            eq(notificationLog.channel, 'IN_APP'),
+            isNull(notificationLog.readAt)
+          )
         )
-      );
+    );
 
     return reply.code(200).send({ data: { message: 'All notifications marked as read' } });
   });
@@ -474,16 +519,18 @@ export async function notificationRoutes(
       // authenticated user in the tenant could mark ANY other user's notification as read by
       // guessing/enumerating ids (IDOR). GET /notifications and /unread-count both already scope
       // by recipientUserId; this route needs the same scoping.
-      await db
-        .update(notificationLog)
-        .set({ readAt: new Date(), updatedAt: new Date() })
-        .where(
-          and(
-            eq(notificationLog.id, id),
-            eq(notificationLog.tenantId, tenantId),
-            eq(notificationLog.recipientUserId, userId)
+      await withTenantConnection(db, tenantId, (scopedDb) =>
+        scopedDb
+          .update(notificationLog)
+          .set({ readAt: new Date(), updatedAt: new Date() })
+          .where(
+            and(
+              eq(notificationLog.id, id),
+              eq(notificationLog.tenantId, tenantId),
+              eq(notificationLog.recipientUserId, userId)
+            )
           )
-        );
+      );
 
       return reply.code(200).send({ data: { message: 'Marked as read' } });
     }
@@ -501,7 +548,9 @@ export async function notificationRoutes(
       const { tenantId } = (request as unknown as AuthedRequest).auth;
       const id = parseInt(request.params.id, 10);
 
-      const result = await engine.retrySingle(tenantId, id);
+      const result = await withTenantConnection(db, tenantId, (scopedDb) =>
+        new NotificationEngine(scopedDb, deliveryQueue).retrySingle(tenantId, id)
+      );
       if (!result) {
         return reply.code(404).send({
           error: {
@@ -524,7 +573,9 @@ export async function notificationRoutes(
         .send({ error: { code: 'MISSING_TENANT_ID', message: 'tenantId query param required' } });
     }
 
-    const result = await engine.retryFailed(tenantId);
+    const result = await withTenantConnection(db, tenantId, (scopedDb) =>
+      new NotificationEngine(scopedDb, deliveryQueue).retryFailed(tenantId)
+    );
     return reply.code(200).send({ data: result });
   });
 
@@ -536,22 +587,24 @@ export async function notificationRoutes(
     { preHandler: authenticate },
     async (request, reply) => {
       const { tenantId, userId = 0 } = (request as unknown as AuthedRequest).auth;
-      const rows = await db
-        .select({
-          eventType: notificationPreferences.eventType,
-          smsEnabled: notificationPreferences.smsEnabled,
-          emailEnabled: notificationPreferences.emailEnabled,
-          whatsappEnabled: notificationPreferences.whatsappEnabled,
-          inAppEnabled: notificationPreferences.inAppEnabled,
-          quietHoursEnabled: notificationPreferences.quietHoursEnabled,
-        })
-        .from(notificationPreferences)
-        .where(
-          and(
-            eq(notificationPreferences.tenantId, tenantId),
-            eq(notificationPreferences.userId, userId)
+      const rows = await withTenantConnection(db, tenantId, (scopedDb) =>
+        scopedDb
+          .select({
+            eventType: notificationPreferences.eventType,
+            smsEnabled: notificationPreferences.smsEnabled,
+            emailEnabled: notificationPreferences.emailEnabled,
+            whatsappEnabled: notificationPreferences.whatsappEnabled,
+            inAppEnabled: notificationPreferences.inAppEnabled,
+            quietHoursEnabled: notificationPreferences.quietHoursEnabled,
+          })
+          .from(notificationPreferences)
+          .where(
+            and(
+              eq(notificationPreferences.tenantId, tenantId),
+              eq(notificationPreferences.userId, userId)
+            )
           )
-        );
+      );
 
       return reply.code(200).send({ data: { content: rows } });
     }
@@ -567,34 +620,36 @@ export async function notificationRoutes(
       if (!body.success)
         throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
 
-      await db
-        .insert(notificationPreferences)
-        .values({
-          tenantId,
-          userId,
-          eventType: body.data.eventType,
-          smsEnabled: body.data.smsEnabled ?? true,
-          emailEnabled: body.data.emailEnabled ?? true,
-          whatsappEnabled: body.data.whatsappEnabled ?? false,
-          inAppEnabled: body.data.inAppEnabled ?? true,
-          quietHoursEnabled: body.data.quietHoursEnabled ?? true,
-          createdBy: userId,
-        })
-        .onConflictDoUpdate({
-          target: [
-            notificationPreferences.userId,
-            notificationPreferences.eventType,
-            notificationPreferences.tenantId,
-          ],
-          set: {
+      await withTenantConnection(db, tenantId, (scopedDb) =>
+        scopedDb
+          .insert(notificationPreferences)
+          .values({
+            tenantId,
+            userId,
+            eventType: body.data.eventType,
             smsEnabled: body.data.smsEnabled ?? true,
             emailEnabled: body.data.emailEnabled ?? true,
             whatsappEnabled: body.data.whatsappEnabled ?? false,
             inAppEnabled: body.data.inAppEnabled ?? true,
             quietHoursEnabled: body.data.quietHoursEnabled ?? true,
-            updatedAt: new Date(),
-          },
-        });
+            createdBy: userId,
+          })
+          .onConflictDoUpdate({
+            target: [
+              notificationPreferences.userId,
+              notificationPreferences.eventType,
+              notificationPreferences.tenantId,
+            ],
+            set: {
+              smsEnabled: body.data.smsEnabled ?? true,
+              emailEnabled: body.data.emailEnabled ?? true,
+              whatsappEnabled: body.data.whatsappEnabled ?? false,
+              inAppEnabled: body.data.inAppEnabled ?? true,
+              quietHoursEnabled: body.data.quietHoursEnabled ?? true,
+              updatedAt: new Date(),
+            },
+          })
+      );
 
       return reply.code(200).send({ data: { message: 'Preferences saved' } });
     }
@@ -606,7 +661,9 @@ export async function notificationRoutes(
     { preHandler: authenticate },
     async (request, reply) => {
       const { tenantId, userId = 0 } = (request as unknown as AuthedRequest).auth;
-      const count = await engine.getUnreadCount(tenantId, userId);
+      const count = await withTenantConnection(db, tenantId, (scopedDb) =>
+        new NotificationEngine(scopedDb, deliveryQueue).getUnreadCount(tenantId, userId)
+      );
       return reply.code(200).send({ data: { count } });
     }
   );
@@ -638,43 +695,55 @@ export async function notificationRoutes(
       // Send initial heartbeat
       reply.raw.write('data: {"type":"connected"}\n\n');
 
+      // This connection stays open for as long as the client keeps it (minutes, potentially) —
+      // each DB touch below (the initial seed AND every 5-second poll) gets its own short-lived
+      // withTenantConnection wrap rather than one transaction held open for the whole SSE
+      // lifetime, same pattern as scheduler-service's import-status SSE route.
+
       // Seed lastSeenId from the newest row that already exists at connect time, so the first
       // tick below doesn't replay the recipient's entire notification history as "new".
-      const [newest] = await db
-        .select({ id: notificationLog.id })
-        .from(notificationLog)
-        .where(
-          and(
-            eq(notificationLog.tenantId, tenantId),
-            eq(notificationLog.recipientUserId, userId),
-            eq(notificationLog.channel, 'IN_APP')
+      const newest = await withTenantConnection(db, tenantId, (scopedDb) =>
+        scopedDb
+          .select({ id: notificationLog.id })
+          .from(notificationLog)
+          .where(
+            and(
+              eq(notificationLog.tenantId, tenantId),
+              eq(notificationLog.recipientUserId, userId),
+              eq(notificationLog.channel, 'IN_APP')
+            )
           )
-        )
-        .orderBy(desc(notificationLog.id))
-        .limit(1);
-      let lastSeenId = newest?.id ?? 0;
+          .orderBy(desc(notificationLog.id))
+          .limit(1)
+      );
+      let lastSeenId = newest[0]?.id ?? 0;
 
       // Poll every 5 seconds for new notifications. Still a DB poll, not a pub/sub push — kept
       // deliberately simple (no new infrastructure) but now also surfaces the new rows'
       // content, not just the unread count, so the panel/list can live-update too.
       const interval = setInterval(async () => {
         try {
-          const count = await engine.getUnreadCount(tenantId, userId);
-          reply.raw.write(`data: ${JSON.stringify({ type: 'unread_count', count })}\n\n`);
-
-          const newItems = await db
-            .select()
-            .from(notificationLog)
-            .where(
-              and(
-                eq(notificationLog.tenantId, tenantId),
-                eq(notificationLog.recipientUserId, userId),
-                eq(notificationLog.channel, 'IN_APP'),
-                sql`${notificationLog.id} > ${lastSeenId}`
+          const { count, newItems } = await withTenantConnection(db, tenantId, async (scopedDb) => {
+            const unread = await new NotificationEngine(scopedDb, deliveryQueue).getUnreadCount(
+              tenantId,
+              userId
+            );
+            const rows = await scopedDb
+              .select()
+              .from(notificationLog)
+              .where(
+                and(
+                  eq(notificationLog.tenantId, tenantId),
+                  eq(notificationLog.recipientUserId, userId),
+                  eq(notificationLog.channel, 'IN_APP'),
+                  sql`${notificationLog.id} > ${lastSeenId}`
+                )
               )
-            )
-            .orderBy(desc(notificationLog.id))
-            .limit(20);
+              .orderBy(desc(notificationLog.id))
+              .limit(20);
+            return { count: unread, newItems: rows };
+          });
+          reply.raw.write(`data: ${JSON.stringify({ type: 'unread_count', count })}\n\n`);
 
           if (newItems.length > 0) {
             lastSeenId = Math.max(lastSeenId, ...newItems.map((n) => n.id));

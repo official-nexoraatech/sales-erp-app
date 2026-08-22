@@ -25,6 +25,12 @@ vi.mock('@erp/db', () => ({
 
 vi.mock('drizzle-orm', () => ({
   eq: vi.fn((col: unknown, val: unknown) => ({ type: 'eq', col, val })),
+  // withTenantConnection (platform-sdk's tenantConnection.ts) uses sql`` for its SET LOCAL
+  // call — a wholesale drizzle-orm mock without this makes that call throw.
+  sql: Object.assign(
+    vi.fn((strings: unknown) => ({ strings })),
+    { raw: vi.fn() }
+  ),
 }));
 
 import { registerExportGenerateJob, EXPORT_GENERATE_JOB } from '../jobs/exportGenerateJob.js';
@@ -37,24 +43,37 @@ function buildFakeRegistry() {
   return {
     handlers,
     configs,
-    register: vi.fn((name: string, config: { manualOnly?: boolean; tenantScoped: boolean }, handler: JobHandler) => {
-      handlers.set(name, handler);
-      configs.set(name, config);
-    }),
+    register: vi.fn(
+      (
+        name: string,
+        config: { manualOnly?: boolean; tenantScoped: boolean },
+        handler: JobHandler
+      ) => {
+        handlers.set(name, handler);
+        configs.set(name, config);
+      }
+    ),
   };
 }
 
 function buildFakeDb() {
   const updateSets: Array<Record<string, unknown>> = [];
-  return {
+  const db = {
     update: vi.fn(() => ({
       set: vi.fn((patch: Record<string, unknown>) => {
         updateSets.push(patch);
         return { where: vi.fn(() => Promise.resolve()) };
       }),
     })),
+    // RLS-readiness follow-up (2026-08-22): every DB call in the job now goes through
+    // withTenantConnection, which calls pooledDb.transaction(async trx => { await
+    // trx.execute(...); return fn(trx); }) — the mock runs the callback against itself and
+    // no-ops the SET LOCAL call.
+    execute: vi.fn(() => Promise.resolve([])),
+    transaction: vi.fn((fn: (trx: unknown) => Promise<unknown>) => fn(db)),
     updateSets,
   };
+  return db;
 }
 
 function buildFakeStorage(objectKey = 'tenant/1/exports/foo.csv', signedUrl = 'https://minio/foo') {
@@ -110,7 +129,13 @@ describe('registerExportGenerateJob', () => {
 
     expect(toCSVMock).toHaveBeenCalled();
     expect(toExcelMock).not.toHaveBeenCalled();
-    expect(storage.uploadFile).toHaveBeenCalledWith(1, 'exports', 'customer-export.csv', expect.any(Buffer), 'text/csv');
+    expect(storage.uploadFile).toHaveBeenCalledWith(
+      1,
+      'exports',
+      'customer-export.csv',
+      expect.any(Buffer),
+      'text/csv'
+    );
     expect(storage.getSignedUrl).toHaveBeenCalledWith('tenant/1/exports/customer.csv', 86400);
     expect(db.updateSets).toContainEqual(
       expect.objectContaining({
@@ -129,7 +154,9 @@ describe('registerExportGenerateJob', () => {
     queryMock.mockResolvedValue({ columns: [], rows: [], totalRows: 0 });
     toExcelMock.mockReturnValue(Buffer.from('xlsx-bytes'));
     getFileNameMock.mockReturnValue('item-export.xlsx');
-    getContentTypeMock.mockReturnValue('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    getContentTypeMock.mockReturnValue(
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    );
 
     registerExportGenerateJob(registry as never, db as never, storage as never);
     const handler = registry.handlers.get(EXPORT_GENERATE_JOB)!;
@@ -147,7 +174,11 @@ describe('registerExportGenerateJob', () => {
     registerExportGenerateJob(registry as never, db as never, buildFakeStorage() as never);
     const handler = registry.handlers.get(EXPORT_GENERATE_JOB)!;
 
-    await expect(handler({ data: { jobId: 7, entityType: 'customer', format: 'CSV' } }, 1)).rejects.toThrow('db down');
-    expect(db.updateSets).toContainEqual(expect.objectContaining({ status: 'FAILED', errorMessage: 'db down' }));
+    await expect(
+      handler({ data: { jobId: 7, entityType: 'customer', format: 'CSV' } }, 1)
+    ).rejects.toThrow('db down');
+    expect(db.updateSets).toContainEqual(
+      expect.objectContaining({ status: 'FAILED', errorMessage: 'db down' })
+    );
   });
 });

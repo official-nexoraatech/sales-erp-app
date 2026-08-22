@@ -95,7 +95,7 @@ function firstHighlight(hit: SearchHit): string | undefined {
 export default function ERPCommandPalette({ open, onClose, initialQuery = '' }: Props) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { hasPermission } = useAuthStore();
+  const { hasPermission, user } = useAuthStore();
   const { toggleTheme } = useTheme();
   const [query, setQuery] = useState('');
   const [highlightedIndex, setHighlightedIndex] = useState(0);
@@ -125,7 +125,11 @@ export default function ERPCommandPalette({ open, onClose, initialQuery = '' }: 
 
   const commandRegistry = useMemo(() => {
     const commands: { key: string; label: string; icon: FlatRow['icon']; onRun: () => void }[] = [];
-    const navGroups = filterNavGroups(NAV_GROUPS, hasPermission);
+    const navGroups = filterNavGroups(
+      NAV_GROUPS,
+      hasPermission,
+      new Set(user?.enabledCapabilities ?? [])
+    );
     for (const group of navGroups) {
       for (const item of group.items) {
         if (item.children) {
@@ -162,7 +166,7 @@ export default function ERPCommandPalette({ open, onClose, initialQuery = '' }: 
       onRun: toggleTheme,
     });
     return commands;
-  }, [hasPermission, navigate, toggleTheme]);
+  }, [hasPermission, user?.enabledCapabilities, navigate, toggleTheme]);
 
   const actionRows: FlatRow[] = useMemo(() => {
     const filtered = actionQuery

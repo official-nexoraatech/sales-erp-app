@@ -1,27 +1,24 @@
 import type { FastifyInstance } from 'fastify';
 import type { PlatformContextFactory } from '@erp/sdk';
+import { tenantScopedHandler } from '@erp/sdk';
 import { invoices, quotations, payments } from '@erp/db';
 import { and, count, eq, gt, gte, lt, notInArray, sql } from 'drizzle-orm';
 import { PERMISSIONS } from '@erp/types';
 import { authenticate } from '../middleware/authenticate.js';
 import { requirePermission } from '../middleware/authorize.js';
 
+// Phase 9 GUC-per-request rollout — migrated 2026-08-21. No external I/O, pure reads.
 export async function dashboardRoutes(
   fastify: FastifyInstance,
   ctxFactory: PlatformContextFactory
 ): Promise<void> {
   fastify.addHook('preHandler', authenticate);
 
-  fastify.get('/dashboard/sales-summary', {
-    preHandler: requirePermission(PERMISSIONS.INVOICE_VIEW),
-    handler: async (req, reply) => {
-      const ctx = ctxFactory.create({
-        tenantId: req.auth.tenantId,
-        userId: req.auth.userId,
-        correlationId:
-          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
-      });
-      const tenantId = req.auth.tenantId;
+  fastify.get(
+    '/dashboard/sales-summary',
+    { preHandler: requirePermission(PERMISSIONS.INVOICE_VIEW) },
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const tenantId = ctx.tenant.tenantId;
       const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
       const todayStart = new Date();
       todayStart.setHours(0, 0, 0, 0);
@@ -67,6 +64,6 @@ export async function dashboardRoutes(
           collectedToday: parseFloat(collectedToday?.total ?? '0'),
         },
       });
-    },
-  });
+    })
+  );
 }

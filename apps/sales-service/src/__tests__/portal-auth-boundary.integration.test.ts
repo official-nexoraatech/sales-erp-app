@@ -1,10 +1,11 @@
-// CRM-ROADMAP Phase 3, Feature 2 (Self-Service Customer Portal) — the single highest-value test
-// in this feature per the approved plan: proves customer A can never reach customer B's data
-// through any /portal/* route, on a real database with two real seeded customers. A parameterized
-// route table (not one-off tests per route) plus a meta-assertion checking the table's length
-// against the route count scraped from portal.routes.ts, so a new :id-scoped route added without
-// a matching boundary-test entry fails CI — same self-defending-scanner idea
-// route-guard-coverage.test.ts already uses.
+// CRM-ROADMAP Phase 3, Feature 2 (Self-Service Customer Portal) — proves customer A can never
+// reach customer B's data through any /portal/* route in sales-service's own portal.routes.ts
+// (the O2C half — orders/preferences/loyalty-bridge; the Ticket/Referral half moved to
+// crm-service, CRM/O2C split migration 12, with its own equivalent boundary test there), on a
+// real database with two real seeded customers. A parameterized route table (not one-off tests
+// per route) plus a meta-assertion checking the table's length against the route count scraped
+// from portal.routes.ts, so a new :id-scoped route added without a matching boundary-test entry
+// fails CI — same self-defending-scanner idea route-guard-coverage.test.ts already uses.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
@@ -13,7 +14,7 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import { generateKeyPairSync } from 'node:crypto';
 import { SignJWT, importPKCS8, type KeyLike } from 'jose';
 import { createDatabaseClient } from '@erp/db';
-import { branches, customers, invoices, crmTickets, crmTicketMessages } from '@erp/db';
+import { branches, customers, invoices } from '@erp/db';
 import { eq } from 'drizzle-orm';
 import { portalRoutes } from '../api/portal.routes.js';
 
@@ -21,7 +22,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const DB_URL = process.env['DATABASE_URL'];
 const TEST_ISSUER = process.env['JWT_ISSUER'] ?? 'erp-auth-service';
 
-describe.skipIf(!DB_URL)('portal routes — cross-customer boundary', () => {
+describe.skipIf(!DB_URL)('portal routes (sales-service) — cross-customer boundary', () => {
   let db: ReturnType<typeof createDatabaseClient>;
   let app: FastifyInstance;
   let privateKey: KeyLike;
@@ -31,8 +32,6 @@ describe.skipIf(!DB_URL)('portal routes — cross-customer boundary', () => {
   let customerB: number;
   let orderA: number;
   let orderB: number;
-  let ticketA: number;
-  let ticketB: number;
 
   async function tokenFor(customerId: number): Promise<string> {
     const nowSec = Math.floor(Date.now() / 1000);
@@ -134,39 +133,6 @@ describe.skipIf(!DB_URL)('portal routes — cross-customer boundary', () => {
       .returning();
     orderB = invB!.id;
 
-    const [tktA] = await db
-      .insert(crmTickets)
-      .values({
-        tenantId: TEST_TENANT,
-        ticketNumber: 'TKT-A',
-        customerId: customerA,
-        subject: 'A subject',
-        createdByPortalAccountId: 1,
-      })
-      .returning();
-    ticketA = tktA!.id;
-
-    const [tktB] = await db
-      .insert(crmTickets)
-      .values({
-        tenantId: TEST_TENANT,
-        ticketNumber: 'TKT-B',
-        customerId: customerB,
-        subject: 'B subject',
-        createdByPortalAccountId: 2,
-      })
-      .returning();
-    ticketB = tktB!.id;
-
-    await db.insert(crmTicketMessages).values({
-      tenantId: TEST_TENANT,
-      ticketId: ticketB,
-      authorId: null,
-      authorName: 'Customer B',
-      visibility: 'CUSTOMER_VISIBLE',
-      body: "B's own message",
-    });
-
     app = Fastify({ logger: false });
     await portalRoutes(app, db);
     await app.ready();
@@ -174,8 +140,6 @@ describe.skipIf(!DB_URL)('portal routes — cross-customer boundary', () => {
 
   afterAll(async () => {
     await app.close();
-    await db.delete(crmTicketMessages).where(eq(crmTicketMessages.tenantId, TEST_TENANT));
-    await db.delete(crmTickets).where(eq(crmTickets.tenantId, TEST_TENANT));
     await db.delete(invoices).where(eq(invoices.tenantId, TEST_TENANT));
     await db.delete(customers).where(eq(customers.tenantId, TEST_TENANT));
     await db.delete(branches).where(eq(branches.tenantId, TEST_TENANT));
@@ -185,16 +149,7 @@ describe.skipIf(!DB_URL)('portal routes — cross-customer boundary', () => {
   // Called with customer A's token — every one must 404, proving A cannot reach B's data by
   // guessing/incrementing an id. A 403 would itself leak that the row exists for someone else.
   function routeTable(): Array<{ method: 'GET' | 'POST'; url: () => string; body?: unknown }> {
-    return [
-      { method: 'GET', url: () => `/portal/orders/${orderB}` },
-      { method: 'GET', url: () => `/portal/tickets/${ticketB}` },
-      { method: 'GET', url: () => `/portal/tickets/${ticketB}/messages` },
-      {
-        method: 'POST',
-        url: () => `/portal/tickets/${ticketB}/messages`,
-        body: { body: "trying to reply on someone else's ticket" },
-      },
-    ];
+    return [{ method: 'GET', url: () => `/portal/orders/${orderB}` }];
   }
 
   // Self-defending: scrape portal.routes.ts for every :id-scoped route so a newly added one
@@ -211,27 +166,15 @@ describe.skipIf(!DB_URL)('portal routes — cross-customer boundary', () => {
     expect(found.length).toBe(routeTable().length);
   });
 
-  for (const { method, url, body } of [
-    { method: 'GET' as const, url: '/portal/orders/:id' },
-    { method: 'GET' as const, url: '/portal/tickets/:id' },
-    { method: 'GET' as const, url: '/portal/tickets/:id/messages' },
-    { method: 'POST' as const, url: '/portal/tickets/:id/messages', body: true },
-  ]) {
-    it(`${method} ${url} 404s when customer A requests customer B's id`, async () => {
-      const table = routeTable();
-      const entry = table.find(
-        (e) => e.method === method && (body ? e.body !== undefined : e.body === undefined)
-      )!;
-      const token = await tokenFor(customerA);
-      const res = await app.inject({
-        method: entry.method,
-        url: entry.url(),
-        headers: { Authorization: `Bearer ${token}` },
-        ...(entry.body !== undefined ? { payload: entry.body } : {}),
-      });
-      expect(res.statusCode).toBe(404);
+  it("GET /portal/orders/:id 404s when customer A requests customer B's id", async () => {
+    const token = await tokenFor(customerA);
+    const res = await app.inject({
+      method: 'GET',
+      url: `/portal/orders/${orderB}`,
+      headers: { Authorization: `Bearer ${token}` },
     });
-  }
+    expect(res.statusCode).toBe(404);
+  });
 
   it("GET /portal/orders never includes customer B's order in customer A's list", async () => {
     const token = await tokenFor(customerA);
@@ -244,19 +187,6 @@ describe.skipIf(!DB_URL)('portal routes — cross-customer boundary', () => {
     const ids = (res.json().data.content as Array<{ id: number }>).map((r) => r.id);
     expect(ids).toContain(orderA);
     expect(ids).not.toContain(orderB);
-  });
-
-  it("GET /portal/tickets never includes customer B's ticket in customer A's list", async () => {
-    const token = await tokenFor(customerA);
-    const res = await app.inject({
-      method: 'GET',
-      url: '/portal/tickets',
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    expect(res.statusCode).toBe(200);
-    const ids = (res.json().data.content as Array<{ id: number }>).map((r) => r.id);
-    expect(ids).toContain(ticketA);
-    expect(ids).not.toContain(ticketB);
   });
 
   it('a staff-shaped token (no CUSTOMER role) is rejected by every /portal/* route', async () => {

@@ -45,11 +45,16 @@ function authHeader(auth: { tenantId: number; permissions: string[] }): Record<s
 }
 
 function emptyDb(): ErpDatabase {
-  return {
+  const db: Record<string, unknown> = {
+    // withTenantConnection wraps every route in a transaction that sets the GUC via
+    // `.execute()` before invoking the callback with this same object as the scoped db.
+    execute: async () => undefined,
     select: vi
       .fn()
       .mockReturnValue({ from: vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue([]) }) }),
-  } as unknown as ErpDatabase;
+  };
+  db['transaction'] = (cb: (trx: unknown) => unknown) => cb(db);
+  return db as unknown as ErpDatabase;
 }
 
 describe('POST /notifications/:id/retry', () => {

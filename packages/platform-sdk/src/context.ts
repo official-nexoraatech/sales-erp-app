@@ -153,10 +153,14 @@ export class PlatformContextFactory {
     return this.drizzleDb;
   }
 
-  create(tenant: TenantContext): PlatformContext {
+  // `dbOverride` lets a caller supply a GUC-scoped, per-request-reserved connection instead of
+  // the shared pool-level one — see tenantConnection.ts / fastify-tenant-connection.ts (Phase 9,
+  // 13-security-architecture.md §2 step 1). Omitted, this is unchanged from before: every existing
+  // call site keeps working exactly as-is.
+  create(tenant: TenantContext, dbOverride?: ErpDatabase): PlatformContext {
     return new PlatformContextImpl(
       tenant,
-      this.drizzleDb,
+      dbOverride ?? this.drizzleDb,
       this.locks,
       this.redis,
       this.storageClient,

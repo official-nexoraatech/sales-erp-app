@@ -807,6 +807,72 @@ export const crmPortalPasswordTokens = pgTable(
   ]
 );
 
+// ─── Partner Portal Accounts (CRM-ROADMAP Phase 4, Feature 6 — Partner/Channel Portal) ───
+// A "partner" is an existing customers row typed WHOLESALE/B2B — no dedicated distributor
+// entity (see DISTRIBUTION-ROADMAP's own domain-model docs, which explicitly rejected one).
+// Structurally identical to the Customer Portal trio above (crmPortalAccounts et al.),
+// deliberately kept as separate parallel tables rather than reused ones: partner and customer
+// portal sessions must never be confused or replayed against the wrong table/role. Staff-
+// provisioned (POST /customers/:id/partner-account), not self-registered — see
+// partner-auth.routes.ts. One account per customer per tenant.
+export const crmPartnerAccounts = pgTable(
+  'crm_partner_accounts',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    tenantId: integer('tenant_id').notNull(),
+    customerId: integer('customer_id').notNull(),
+    email: varchar('email', { length: 320 }).notNull(),
+    passwordHash: varchar('password_hash', { length: 200 }).notNull(),
+    isActive: boolean('is_active').notNull().default(true),
+    mustResetPassword: boolean('must_reset_password').notNull().default(true),
+    lastLoginAt: timestamp('last_login_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    unique('crm_partner_accounts_customer_unique').on(t.tenantId, t.customerId),
+    index('idx_crm_partner_accounts_email').on(t.tenantId, t.email),
+  ]
+);
+
+// Mirrors crmPortalRefreshTokens exactly, scoped to partnerAccountId and issued under a
+// distinct `partner_refresh_token` cookie name (partner-auth.routes.ts).
+export const crmPartnerRefreshTokens = pgTable(
+  'crm_partner_refresh_tokens',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    partnerAccountId: integer('partner_account_id').notNull(),
+    tenantId: integer('tenant_id').notNull(),
+    tokenHash: varchar('token_hash', { length: 64 }).notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    unique('crm_partner_refresh_tokens_hash').on(t.tokenHash),
+    index('idx_crm_partner_refresh_tokens_account').on(t.partnerAccountId, t.tenantId),
+  ]
+);
+
+// Mirrors crmPortalPasswordTokens exactly; serves both the initial staff-sent invite
+// (set-password) and any future self-service reset request.
+export const crmPartnerPasswordTokens = pgTable(
+  'crm_partner_password_tokens',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    partnerAccountId: integer('partner_account_id').notNull(),
+    tenantId: integer('tenant_id').notNull(),
+    tokenHash: varchar('token_hash', { length: 64 }).notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    usedAt: timestamp('used_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    unique('crm_partner_password_tokens_hash').on(t.tokenHash),
+    index('idx_crm_partner_password_tokens_account').on(t.partnerAccountId, t.tenantId),
+  ]
+);
+
 // ─── Campaign Automation Rules (CP-5) ───────────────────────────────────────
 // Trigger-based automation — each enabled rule is evaluated by a scheduler-service cron job,
 // which creates a real campaign row per firing (same CampaignService.send() path as a manual
@@ -1132,7 +1198,10 @@ export const crmWhatsappCatalogOrders = pgTable(
     customerId: integer('customer_id'),
     waOrderMessageId: varchar('wa_order_message_id', { length: 100 }).notNull(),
     catalogId: varchar('catalog_id', { length: 100 }),
-    status: varchar('status', { length: 20 }).notNull().$type<'CREATED' | 'REJECTED'>(),
+    // PENDING: crm-service validated the order and published a WHATSAPP_ORDER_RECEIVED outbox
+    // event (CRM/O2C split), but sales-service's WhatsAppOrderConsumer hasn't yet created the
+    // Quotation. Never returned to the webhook caller — that path is fire-and-forget.
+    status: varchar('status', { length: 20 }).notNull().$type<'PENDING' | 'CREATED' | 'REJECTED'>(),
     rejectionReason: text('rejection_reason'),
     quotationId: integer('quotation_id'),
     rawPayload: jsonb('raw_payload').notNull().default({}),

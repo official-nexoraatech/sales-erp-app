@@ -18,6 +18,14 @@ vi.mock('drizzle-orm', () => ({
   eq: vi.fn((a: unknown, b: unknown) => ({ __eq__: [a, b] })),
   and: vi.fn((...args: unknown[]) => ({ __and__: args })),
   desc: vi.fn((a: unknown) => ({ __desc__: a })),
+  // withTenantConnection (imported by usage.routes.ts via @erp/sdk) uses drizzle-orm's own
+  // sql tagged template internally — a per-file vi.mock('drizzle-orm', ...) replaces the
+  // module for every importer, not just this test's own direct imports, so it must be
+  // included here too or withTenantConnection's SET LOCAL call throws.
+  sql: Object.assign(
+    vi.fn(() => '__sql__'),
+    { raw: vi.fn() }
+  ),
 }));
 
 vi.mock('@erp/types', async (importOriginal) => {
@@ -80,7 +88,7 @@ interface FakeState {
 }
 
 function makeFakeDb(state: FakeState): Record<string, unknown> {
-  return {
+  const db: Record<string, unknown> = {
     select: (cols?: unknown) => ({
       from: (table: { __name: string }) => {
         if (table.__name === 'tenants') {
@@ -92,7 +100,10 @@ function makeFakeDb(state: FakeState): Record<string, unknown> {
         return chain([]);
       },
     }),
+    execute: () => Promise.resolve(),
   };
+  db['transaction'] = (fn: (trx: typeof db) => Promise<unknown>) => fn(db);
+  return db;
 }
 
 async function buildApp(db: Record<string, unknown>): Promise<FastifyInstance> {

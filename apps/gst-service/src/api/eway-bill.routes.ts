@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { PlatformContextFactory } from '@erp/sdk';
+import { tenantScopedHandler, withTenantConnection } from '@erp/sdk';
 import { z } from 'zod';
 import { timingSafeEqual } from 'node:crypto';
 import { tenants } from '@erp/db';
@@ -83,6 +84,13 @@ const GenerateEwbSchema = z.object({
   }),
 });
 
+// Phase 9 GUC-per-request rollout — migrated 2026-08-21 for the two pure-DB-read routes.
+// POST /gst/eway-bill/generate not migrated to tenantScopedHandler — EwayBillService.generate()
+// makes a real NIC e-Way Bill API call interleaved with DB work (caveat 4). RLS-readiness
+// follow-up (2026-08-22): fixed one level down in EwayBillService instead (every DB call there
+// now goes through db.transaction(), which sets the GUC itself regardless of how ctx.db's
+// underlying connection was built — see EInvoiceService's identical fix for the full reasoning),
+// so ctx = ctxFactory.create({...}) without a dbOverride here is safe as-is.
 export async function ewayBillRoutes(
   fastify: FastifyInstance,
   ctxFactory: PlatformContextFactory
@@ -133,17 +141,11 @@ export async function ewayBillRoutes(
     {
       preHandler: [authenticate, requirePermission(PERMISSIONS.GST_VIEW)],
     },
-    async (request, reply) => {
-      const { tenantId, userId } = (request as unknown as AuthedRequest).auth;
-      const ctx = ctxFactory.create({
-        tenantId,
-        userId,
-        correlationId: (request.headers['x-correlation-id'] as string) ?? crypto.randomUUID(),
-      });
-
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { tenantId } = ctx.tenant;
       const expiring = await EwayBillService.getExpiringSoon(ctx.db, tenantId);
       return reply.code(200).send({ data: { content: expiring, totalElements: expiring.length } });
-    }
+    })
   );
 
   // POST /gst/eway-bill/expiry-alert — scheduler-triggered (x-internal-key), notification-service
@@ -163,16 +165,30 @@ export async function ewayBillRoutes(
           .send({ error: { code: 'MISSING_TENANT_ID', message: 'tenantId query param required' } });
       }
 
-      const ctx = ctxFactory.create({ tenantId, userId: 0, correlationId: crypto.randomUUID() });
-      const expiring = await EwayBillService.getExpiringSoon(ctx.db, tenantId);
+      const { expiring, contactEmail } = await withTenantConnection(
+        ctxFactory.rawDb,
+        tenantId,
+        async (db) => {
+          const ctx = ctxFactory.create(
+            { tenantId, userId: 0, correlationId: crypto.randomUUID() },
+            db
+          );
+          const expiring = await EwayBillService.getExpiringSoon(ctx.db, tenantId);
+          let contactEmail: string | null = null;
+          if (expiring.length > 0) {
+            const [tenant] = await ctx.db.raw
+              .select({ contactEmail: tenants.contactEmail })
+              .from(tenants)
+              .where(eq(tenants.id, tenantId));
+            contactEmail = tenant?.contactEmail ?? null;
+          }
+          return { expiring, contactEmail };
+        }
+      );
 
       let sent = false;
       if (expiring.length > 0) {
-        const [tenant] = await ctx.db.raw
-          .select({ contactEmail: tenants.contactEmail })
-          .from(tenants)
-          .where(eq(tenants.id, tenantId));
-        if (tenant?.contactEmail) {
+        if (contactEmail) {
           const notificationUrl =
             process.env['NOTIFICATION_SERVICE_URL'] ?? 'http://localhost:3014';
           const apiKey = process.env['INTERNAL_API_KEY'] ?? '';
@@ -184,7 +200,7 @@ export async function ewayBillRoutes(
                 tenantId,
                 eventType: 'EWAY_BILL_EXPIRY_ALERT',
                 channel: 'EMAIL',
-                recipientEmail: tenant.contactEmail,
+                recipientEmail: contactEmail,
                 subject: `${expiring.length} e-Way Bill(s) expiring within 24 hours`,
                 body: `The following e-Way Bill(s) expire within 24 hours: ${expiring
                   .map((e) => `${e.ewbNumber} (invoice ${e.invoiceNumber})`)

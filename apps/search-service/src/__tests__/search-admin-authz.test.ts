@@ -61,6 +61,20 @@ function authHeader(auth: { tenantId: number; permissions: string[] }): Record<s
   };
 }
 
+// withTenantConnection wraps logAdminAction's write in a transaction that sets the GUC via
+// `.execute()` before invoking the callback with the same db object as the scoped db.
+function withTransactionSupport<T extends object>(
+  db: T
+): T & { execute: () => Promise<undefined>; transaction: (cb: (trx: T) => unknown) => unknown } {
+  const extended = db as T & {
+    execute: () => Promise<undefined>;
+    transaction: (cb: (trx: T) => unknown) => unknown;
+  };
+  extended.execute = async () => undefined;
+  extended.transaction = (cb: (trx: T) => unknown) => cb(extended);
+  return extended;
+}
+
 describe('ES-21 — search-service admin route tenant-trust fix (H1)', () => {
   it('POST /admin/search/indices without SEARCH_REINDEX → 403', async () => {
     const engine = makeEngine();
@@ -139,7 +153,7 @@ describe('ES-21 — search-service admin route tenant-trust fix (H1)', () => {
   it('DELETE /admin/search/indices writes an audit-log entry when a db is supplied', async () => {
     const engine = makeEngine();
     const insertValues = vi.fn().mockResolvedValue(undefined);
-    const db = { insert: vi.fn(() => ({ values: insertValues })) };
+    const db = withTransactionSupport({ insert: vi.fn(() => ({ values: insertValues })) });
     const app = Fastify({ logger: false });
     await searchRoutes(app, engine, db as never);
 

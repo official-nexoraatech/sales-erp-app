@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { PlatformContextFactory } from '@erp/sdk';
-import { getBranchScope } from '@erp/sdk';
+import { getBranchScope, tenantScopedHandler } from '@erp/sdk';
 import { grns, grnHistory, suppliers, purchaseOrders } from '@erp/db';
 import { and, desc, eq, ilike, inArray, sql, getTableColumns } from 'drizzle-orm';
 import { z } from 'zod';
@@ -56,6 +56,9 @@ const RejectGRNSchema = z.object({
   reason: z.string().min(1).max(500),
 });
 
+// Phase 9 GUC-per-request rollout — migrated 2026-08-21. No external I/O — GRNService has no
+// fetch() calls; ctx.cache.del() is a Redis call via the platform SDK, unaffected by the
+// tenant-scoped DB connection.
 export async function grnRoutes(
   fastify: FastifyInstance,
   ctxFactory: PlatformContextFactory
@@ -64,13 +67,7 @@ export async function grnRoutes(
 
   fastify.get('/grns', {
     preHandler: requirePermission(PERMISSIONS.GRN_VIEW),
-    handler: async (req, reply) => {
-      const ctx = ctxFactory.create({
-        tenantId: req.auth.tenantId,
-        userId: req.auth.userId,
-        correlationId:
-          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
-      });
+    handler: tenantScopedHandler(ctxFactory, async (req, reply, ctx) => {
       const q = req.query as {
         status?: string;
         supplierId?: string;
@@ -83,7 +80,7 @@ export async function grnRoutes(
       const pageSize = Math.min(100, parseInt(q.pageSize ?? '20', 10));
       const offset = (page - 1) * pageSize;
 
-      const conditions = [eq(grns.tenantId, req.auth.tenantId)];
+      const conditions = [eq(grns.tenantId, ctx.tenant.tenantId)];
       if (q.status) conditions.push(eq(grns.status, q.status as never));
       if (q.supplierId) conditions.push(eq(grns.supplierId, parseInt(q.supplierId, 10)));
       if (q.poId) conditions.push(eq(grns.purchaseOrderId, parseInt(q.poId, 10)));
@@ -121,12 +118,12 @@ export async function grnRoutes(
       return reply.send({
         data: { content: rows, totalElements: countRow?.count ?? 0, page, pageSize },
       });
-    },
+    }),
   });
 
   fastify.post('/grns', {
     preHandler: requirePermission(PERMISSIONS.GRN_CREATE),
-    handler: async (req, reply) => {
+    handler: tenantScopedHandler(ctxFactory, async (req, reply, ctx) => {
       const body = CreateGRNSchema.parse(req.body);
 
       // Purchase audit 2026-07-21 gap-fix (systemic pass, part 3): see purchase-order.routes.ts.
@@ -139,17 +136,11 @@ export async function grnRoutes(
         );
       }
 
-      const ctx = ctxFactory.create({
-        tenantId: req.auth.tenantId,
-        userId: req.auth.userId,
-        correlationId:
-          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
-      });
       const svc = new GRNService(ctx.db.raw);
       let id: number;
       try {
         id = await svc.create({
-          tenantId: req.auth.tenantId,
+          tenantId: ctx.tenant.tenantId,
           branchId: body.branchId,
           warehouseId: body.warehouseId,
           purchaseOrderId: body.purchaseOrderId,
@@ -164,7 +155,7 @@ export async function grnRoutes(
             expiryDate: l.expiryDate ? new Date(l.expiryDate) : undefined,
           })),
           notes: body.notes,
-          createdBy: req.auth.userId,
+          createdBy: ctx.tenant.userId,
           clientOperationId: body.operationId,
         });
       } catch (err) {
@@ -176,7 +167,7 @@ export async function grnRoutes(
             .from(grns)
             .where(
               and(
-                eq(grns.tenantId, req.auth.tenantId),
+                eq(grns.tenantId, ctx.tenant.tenantId),
                 eq(grns.clientOperationId, body.operationId)
               )
             );
@@ -199,7 +190,7 @@ export async function grnRoutes(
       const [supplier] = await ctx.db.raw
         .select({ displayName: suppliers.displayName })
         .from(suppliers)
-        .where(and(eq(suppliers.id, body.supplierId), eq(suppliers.tenantId, req.auth.tenantId)));
+        .where(and(eq(suppliers.id, body.supplierId), eq(suppliers.tenantId, ctx.tenant.tenantId)));
       await ctx.events.publish('grn', id, 'GRN_CREATED', {
         grnId: id,
         supplierId: body.supplierId,
@@ -210,21 +201,15 @@ export async function grnRoutes(
         status: 'DRAFT',
       });
       return reply.code(201).send({ data: { id } });
-    },
+    }),
   });
 
   fastify.get('/grns/:id', {
     preHandler: requirePermission(PERMISSIONS.GRN_VIEW),
-    handler: async (req, reply) => {
+    handler: tenantScopedHandler(ctxFactory, async (req, reply, ctx) => {
       const { id } = req.params as { id: string };
-      const ctx = ctxFactory.create({
-        tenantId: req.auth.tenantId,
-        userId: req.auth.userId,
-        correlationId:
-          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
-      });
       const svc = new GRNService(ctx.db.raw);
-      const data = await svc.getWithLines(parseInt(id, 10), req.auth.tenantId);
+      const data = await svc.getWithLines(parseInt(id, 10), ctx.tenant.tenantId);
 
       const branchScope = getBranchScope(req.auth);
       if (branchScope !== 'all' && !branchScope.includes(data.branchId)) {
@@ -232,23 +217,17 @@ export async function grnRoutes(
       }
 
       return reply.send({ data });
-    },
+    }),
   });
 
   fastify.post('/grns/:id/approve', {
     preHandler: requirePermission(PERMISSIONS.GRN_APPROVE),
-    handler: async (req, reply) => {
+    handler: tenantScopedHandler(ctxFactory, async (req, reply, ctx) => {
       const { id } = req.params as { id: string };
       const body = ApproveGRNSchema.parse(req.body);
-      const ctx = ctxFactory.create({
-        tenantId: req.auth.tenantId,
-        userId: req.auth.userId,
-        correlationId:
-          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
-      });
       const svc = new GRNService(ctx.db.raw);
       const grnId = parseInt(id, 10);
-      const { branchId, lines } = await svc.getWithLines(grnId, req.auth.tenantId);
+      const { branchId, lines } = await svc.getWithLines(grnId, ctx.tenant.tenantId);
 
       // Purchase audit 2026-07-21 gap-fix (systemic pass, part 2): GRN approval is where
       // stock/AP/GST all actually post — the highest-value mutating action to close this on,
@@ -258,7 +237,7 @@ export async function grnRoutes(
         throw new ERPError('GRN_OUT_OF_SCOPE', 'GRN is outside your assigned branch(es)', 403);
       }
 
-      await svc.approve(grnId, req.auth.tenantId, req.auth.userId, body.grnNumber);
+      await svc.approve(grnId, ctx.tenant.tenantId, ctx.tenant.userId, body.grnNumber);
 
       // GRNService.approve() writes availableQty/WACC/valuation directly to the shared
       // `items` table (purchase-service has no business calling into inventory-service's own
@@ -272,56 +251,44 @@ export async function grnRoutes(
       );
 
       return reply.send({ success: true });
-    },
+    }),
   });
 
   fastify.post('/grns/:id/reject', {
     preHandler: requirePermission(PERMISSIONS.GRN_APPROVE),
-    handler: async (req, reply) => {
+    handler: tenantScopedHandler(ctxFactory, async (req, reply, ctx) => {
       const { id } = req.params as { id: string };
       const body = RejectGRNSchema.parse(req.body);
-      const ctx = ctxFactory.create({
-        tenantId: req.auth.tenantId,
-        userId: req.auth.userId,
-        correlationId:
-          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
-      });
       const grnId = parseInt(id, 10);
       const branchScope = getBranchScope(req.auth);
       if (branchScope !== 'all') {
         const [grnRow] = await ctx.db.raw
           .select({ branchId: grns.branchId })
           .from(grns)
-          .where(and(eq(grns.id, grnId), eq(grns.tenantId, req.auth.tenantId)));
+          .where(and(eq(grns.id, grnId), eq(grns.tenantId, ctx.tenant.tenantId)));
         if (grnRow && !branchScope.includes(grnRow.branchId)) {
           throw new ERPError('GRN_OUT_OF_SCOPE', 'GRN is outside your assigned branch(es)', 403);
         }
       }
 
       const svc = new GRNService(ctx.db.raw);
-      await svc.reject(grnId, req.auth.tenantId, req.auth.userId, body.reason);
+      await svc.reject(grnId, ctx.tenant.tenantId, ctx.tenant.userId, body.reason);
       return reply.send({ success: true });
-    },
+    }),
   });
 
   fastify.get('/grns/:id/activity', {
     preHandler: requirePermission(PERMISSIONS.GRN_VIEW),
-    handler: async (req, reply) => {
+    handler: tenantScopedHandler(ctxFactory, async (req, reply, ctx) => {
       const { id } = req.params as { id: string };
-      const ctx = ctxFactory.create({
-        tenantId: req.auth.tenantId,
-        userId: req.auth.userId,
-        correlationId:
-          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
-      });
       const history = await ctx.db.raw
         .select()
         .from(grnHistory)
         .where(
-          and(eq(grnHistory.grnId, parseInt(id, 10)), eq(grnHistory.tenantId, req.auth.tenantId))
+          and(eq(grnHistory.grnId, parseInt(id, 10)), eq(grnHistory.tenantId, ctx.tenant.tenantId))
         )
         .orderBy(desc(grnHistory.createdAt));
       return reply.send({ data: history });
-    },
+    }),
   });
 }

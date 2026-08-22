@@ -92,7 +92,7 @@ function buildFakeDb(overrides: Partial<Record<string, unknown>> = {}) {
   // Allow `await db.select(...).from(...).where(...)` without an explicit .limit() call too.
   Object.assign(chain, { [Symbol.for('nodejs.util.inspect.custom')]: undefined });
 
-  return {
+  const db = {
     selectResults,
     executeResults,
     select: vi.fn(() => ({
@@ -100,12 +100,24 @@ function buildFakeDb(overrides: Partial<Record<string, unknown>> = {}) {
         where: vi.fn(() => Promise.resolve(selectResults[selectIndex++] ?? [])),
       })),
     })),
-    execute: vi.fn(() => Promise.resolve(executeResults[executeIndex++] ?? [])),
+    // RLS-readiness follow-up (2026-08-22): withTenantConnection's own SET LOCAL call also
+    // goes through this same execute() — swallow that one specifically (by SQL-text match, sql
+    // is mocked above to return {strings, values}) rather than letting it consume a slot meant
+    // for a real job query, which would silently shift every subsequent result off by one.
+    execute: vi.fn((query?: { strings?: string[] }) => {
+      if (query?.strings?.some((s) => s.includes('set_config'))) return Promise.resolve([]);
+      return Promise.resolve(executeResults[executeIndex++] ?? []);
+    }),
     insert: vi.fn(() => ({ values: vi.fn(() => Promise.resolve()) })),
     update: vi.fn(() => ({ set: vi.fn(() => ({ where: vi.fn(() => Promise.resolve()) })) })),
     delete: vi.fn(() => ({ where: vi.fn(() => Promise.resolve()) })),
+    // Several jobs now go through withTenantConnection, which calls pooledDb.transaction(async
+    // trx => { await trx.execute(...); return fn(trx); }) — the mock runs the callback against
+    // itself, same identity pattern used elsewhere in this rollout's test-mock fixes.
+    transaction: vi.fn((fn: (trx: unknown) => Promise<unknown>) => fn(db)),
     ...overrides,
   };
+  return db;
 }
 
 function buildFakeStorage() {
@@ -557,14 +569,17 @@ describe('registerSystemJobs', () => {
     expect(db.execute).toHaveBeenCalledTimes(3);
   });
 
-  it('platform.partition-maintenance issues a CREATE TABLE ... PARTITION OF for next year', async () => {
+  it('platform.partition-maintenance issues a CREATE TABLE ... PARTITION OF for next year, then enables+forces RLS on the new partition', async () => {
     const registry = buildFakeRegistry();
     const db = buildFakeDb();
-    db.executeResults.push([]);
+    db.executeResults.push([], [], []);
     registerSystemJobs(registry as never, db as never, buildFakeStorage() as never);
 
     await registry.handlers.get('platform.partition-maintenance')!({}, undefined);
-    expect(db.execute).toHaveBeenCalledTimes(1);
+    // RLS-readiness follow-up (2026-08-22): a fresh partition doesn't inherit the parent's
+    // ENABLE/FORCE ROW LEVEL SECURITY flags — CREATE TABLE ... PARTITION OF, then
+    // ALTER TABLE ... ENABLE ROW LEVEL SECURITY, then ALTER TABLE ... FORCE ROW LEVEL SECURITY.
+    expect(db.execute).toHaveBeenCalledTimes(3);
   });
 
   it('workflow.approval-reminder sends a real IN_APP notification per pending approval and increments reminderCount', async () => {

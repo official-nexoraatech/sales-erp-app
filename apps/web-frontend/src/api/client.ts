@@ -24,6 +24,7 @@ const BASE_URLS: Record<string, string> = {
   scheduler: `${GATEWAY_URL}/api/scheduler`,
   automation: `${GATEWAY_URL}/api/automation`,
   copilot: `${GATEWAY_URL}/api/copilot`,
+  crm: `${GATEWAY_URL}/api/crm`,
 };
 
 export function notificationServiceUrl(): string {

@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { PlatformContextFactory } from '@erp/sdk';
-import { getBranchScope } from '@erp/sdk';
+import { getBranchScope, tenantScopedHandler } from '@erp/sdk';
 import { purchaseOrders, grns, projectionSupplierBalance, suppliers } from '@erp/db';
 import { and, eq, gte, inArray, sql } from 'drizzle-orm';
 import { PERMISSIONS } from '@erp/types';
@@ -10,6 +10,7 @@ import { requirePermission } from '../middleware/authorize.js';
 // Purchase audit 2026-07-21 gap-fix: no purpose-built purchase KPI dashboard existed anywhere
 // (only the pull-style PurchaseAnalytics report page) — this is a single lightweight
 // aggregation endpoint for a live "at a glance" dashboard, not a new reporting subsystem.
+// Phase 9 GUC-per-request rollout — migrated 2026-08-21. No external I/O.
 export async function dashboardRoutes(
   fastify: FastifyInstance,
   ctxFactory: PlatformContextFactory
@@ -18,14 +19,8 @@ export async function dashboardRoutes(
 
   fastify.get('/purchase-orders-dashboard-summary', {
     preHandler: requirePermission(PERMISSIONS.PO_VIEW),
-    handler: async (req, reply) => {
-      const ctx = ctxFactory.create({
-        tenantId: req.auth.tenantId,
-        userId: req.auth.userId,
-        correlationId:
-          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
-      });
-      const tenantId = req.auth.tenantId;
+    handler: tenantScopedHandler(ctxFactory, async (req, reply, ctx) => {
+      const tenantId = ctx.tenant.tenantId;
       const branchScope = getBranchScope(req.auth);
       const branchCondition =
         branchScope === 'all' ? undefined : inArray(purchaseOrders.branchId, branchScope);
@@ -107,6 +102,6 @@ export async function dashboardRoutes(
           topSuppliers,
         },
       });
-    },
+    }),
   });
 }

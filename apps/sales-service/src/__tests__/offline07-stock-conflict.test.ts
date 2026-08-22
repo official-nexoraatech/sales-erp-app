@@ -12,6 +12,17 @@ import { generateKeyPairSync } from 'node:crypto';
 import { SignJWT, importPKCS8, type KeyLike } from 'jose';
 import { PERMISSIONS } from '@erp/types';
 import type * as InvoiceServiceModule from '../domain/InvoiceService.js';
+import type * as ErpSdk from '@erp/sdk';
+
+// Phase 3B (POS capability) — requireCapability() is now called eagerly at route-registration
+// time, and this file's ctxFactory has no rawDb/getRedis (its purpose is stock-conflict
+// error-handling correctness, not capability resolution, which is covered by
+// pos-capability.test.ts). Mock only requireCapability to always allow — keep the rest of
+// @erp/sdk real, since pos.routes.ts also uses getBranchScope() from it.
+vi.mock('@erp/sdk', async (importOriginal) => {
+  const actual = await importOriginal<typeof ErpSdk>();
+  return { ...actual, requireCapability: () => async () => {} };
+});
 
 vi.mock('@erp/db', () => ({
   posSessions: {
@@ -149,6 +160,8 @@ function makeCtxFactory(script: unknown[]) {
       events: { publish: vi.fn() },
       audit: { log: vi.fn() },
     }),
+    rawDb: {},
+    getRedis: () => ({}),
   } as never;
 }
 

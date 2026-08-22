@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import type { ErpDatabase } from '@erp/db';
 import { z } from 'zod';
 import { ValidationError } from '@erp/types';
-import { WorkflowEngine } from '@erp/sdk';
+import { WorkflowEngine, withTenantConnection } from '@erp/sdk';
 import { authenticate } from '../middleware/authenticate.js';
 
 const ApproveSchema = z.object({
@@ -15,16 +15,18 @@ const RejectSchema = z.object({
   comment: z.string().min(5).max(1000),
 });
 
+// Phase 9 GUC-per-request rollout — migrated 2026-08-21. No PlatformContextFactory in this
+// service (plain db passed in), so each route uses withTenantConnection directly.
+// WorkflowEngine.notifyUser() is always called as `void this.notifyUser(...)` at every call
+// site (fire-and-forget, caveat 4c) — safe to migrate despite the fetch() inside it.
 export async function approvalRoutes(fastify: FastifyInstance, db: ErpDatabase): Promise<void> {
-  function getEngine(tenantId: number, userId: number, correlationId: string): WorkflowEngine {
-    return new WorkflowEngine(db, tenantId, userId, correlationId);
-  }
-
   // ── GET /approvals/pending — Pending approvals for current user ──────────
   fastify.get('/approvals/pending', { preHandler: [authenticate] }, async (request, reply) => {
     const { tenantId, userId } = request.auth;
-    const engine = getEngine(tenantId, userId, 'n/a');
-    const items = await engine.getPendingForApprover(userId);
+    const items = await withTenantConnection(db, tenantId, async (scopedDb) => {
+      const engine = new WorkflowEngine(scopedDb, tenantId, userId, 'n/a');
+      return engine.getPendingForApprover(userId);
+    });
     return reply.code(200).send({ data: { content: items, totalElements: items.length } });
   });
 
@@ -35,8 +37,10 @@ export async function approvalRoutes(fastify: FastifyInstance, db: ErpDatabase):
     async (request, reply) => {
       const { tenantId, userId } = request.auth;
       const instanceId = parseInt(request.params.id, 10);
-      const engine = getEngine(tenantId, userId, 'n/a');
-      const status = await engine.getStatus(instanceId);
+      const status = await withTenantConnection(db, tenantId, async (scopedDb) => {
+        const engine = new WorkflowEngine(scopedDb, tenantId, userId, 'n/a');
+        return engine.getStatus(instanceId);
+      });
       return reply.code(200).send({ data: status });
     }
   );
@@ -53,12 +57,14 @@ export async function approvalRoutes(fastify: FastifyInstance, db: ErpDatabase):
       if (!body.success)
         throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
 
-      const engine = getEngine(tenantId, userId, 'n/a');
-      await engine.approve({
-        instanceId,
-        nodeId: body.data.nodeId,
-        userId,
-        ...(body.data.comment !== undefined ? { comment: body.data.comment } : {}),
+      await withTenantConnection(db, tenantId, async (scopedDb) => {
+        const engine = new WorkflowEngine(scopedDb, tenantId, userId, 'n/a');
+        await engine.approve({
+          instanceId,
+          nodeId: body.data.nodeId,
+          userId,
+          ...(body.data.comment !== undefined ? { comment: body.data.comment } : {}),
+        });
       });
       return reply.code(200).send({ data: { message: 'Approved', instanceId } });
     }
@@ -76,12 +82,14 @@ export async function approvalRoutes(fastify: FastifyInstance, db: ErpDatabase):
       if (!body.success)
         throw new ValidationError(body.error.errors.map((e) => e.message).join('; '));
 
-      const engine = getEngine(tenantId, userId, 'n/a');
-      await engine.reject({
-        instanceId,
-        nodeId: body.data.nodeId,
-        userId,
-        comment: body.data.comment,
+      await withTenantConnection(db, tenantId, async (scopedDb) => {
+        const engine = new WorkflowEngine(scopedDb, tenantId, userId, 'n/a');
+        await engine.reject({
+          instanceId,
+          nodeId: body.data.nodeId,
+          userId,
+          comment: body.data.comment,
+        });
       });
       return reply.code(200).send({ data: { message: 'Rejected', instanceId } });
     }

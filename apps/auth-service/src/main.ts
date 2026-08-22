@@ -40,6 +40,8 @@ import { mfaVerifyRoute, mfaManagementRoutes } from './routes/mfa.routes.js';
 import { impersonateRoutes } from './routes/impersonate.routes.js';
 import { portalAuthRoutes } from './routes/portal-auth.routes.js';
 import { portalImpersonateRoutes } from './routes/portal-impersonate.routes.js';
+import { partnerAuthRoutes } from './routes/partner-auth.routes.js';
+import { partnerImpersonateRoutes } from './routes/partner-impersonate.routes.js';
 import { adminUsersRoutes } from './routes/admin-users.routes.js';
 import { sessionsRoutes } from './routes/sessions.routes.js';
 import { securityAuditLogRoutes } from './routes/security-audit-log.routes.js';
@@ -173,6 +175,8 @@ async function bootstrap(): Promise<void> {
     // CRM-ROADMAP Phase 3, Feature 2 (Self-Service Customer Portal): public, same as the
     // staff auth routes above — these ARE the portal's own login/refresh/logout surface.
     await portalAuthRoutes(sub, db, config, redis);
+    // CRM-ROADMAP Phase 4, Feature 6 (Partner/Channel Portal): same reasoning, third auth scope.
+    await partnerAuthRoutes(sub, db, config, redis);
     // Internal-only, guarded by x-internal-key rather than JWT — must stay outside the
     // `authenticate` scope below (scheduler-service has no user JWT to present).
     await searchSyncInternalRoutes(sub, db);
@@ -187,6 +191,7 @@ async function bootstrap(): Promise<void> {
       await mfaManagementRoutes(scope, db, config);
       await impersonateRoutes(scope, db);
       await portalImpersonateRoutes(scope, db);
+      await partnerImpersonateRoutes(scope, db);
       await adminUsersRoutes(scope, db);
       await sessionsRoutes(scope, db);
       await securityAuditLogRoutes(scope, db);

@@ -1,6 +1,7 @@
 /* global crypto, process, fetch, Buffer */
 import type { FastifyInstance } from 'fastify';
 import type { PlatformContextFactory } from '@erp/sdk';
+import { tenantScopedHandler, withTenantConnection } from '@erp/sdk';
 import {
   invoices,
   invoiceHistory,
@@ -29,7 +30,7 @@ const InvoiceLineSchema = z
     description: z.string().max(500).optional(),
     quantity: z.number().positive(),
     unitId: z.number().int().positive().optional(),
-    unitPrice: z.number().nonnegative(),
+    unitPrice: z.number().nonnegative().optional(),
     discountPct: z.number().min(0).max(100).default(0),
     discountAmount: z.number().min(0).default(0),
     gstRate: z.number().min(0).max(100),
@@ -73,22 +74,32 @@ const CancelSchema = z.object({
   reason: z.string().min(1).max(500),
 });
 
+// Phase 9 GUC-per-request rollout — migrated 2026-08-21 (all but one route), plus a
+// RLS-readiness follow-up 2026-08-22. POST /invoices/:id/confirm was originally left
+// unmigrated for the same fetch()-interleaved-with-reads reason as GET /invoices/:id/pdf below,
+// but an RLS-readiness audit found it (and InvoiceNotificationService.notifyInvoiceConfirmed())
+// were real, everyday production call sites that would start throwing "tenant context not set"
+// the moment RLS goes live on `invoices` — fixed per caveat 4g: the route's own DB work runs in
+// one withTenantConnection wrap, and notifyInvoiceConfirmed() now manages its own separate wrap
+// for its own reads (see that file), with the real fetch() calls running after both have
+// already committed. GET /invoices/:id/pdf is still deliberately NOT migrated (fetch() to
+// report-service). Every other route here has no external I/O; InvoiceService.create()/
+// confirm()/cancel() already wrap their own writes in db.transaction(); post-hoc
+// ctx.audit.log()/ctx.events.publish() calls and ctx.cache.del() are safe per
+// tenantConnection-nested-rollback.test.ts (nested transactions become savepoints of the outer
+// one; cache.del() is a single fast Redis round trip, not the class of slow external I/O
+// caveat 4 is about).
 export async function invoiceRoutes(
   fastify: FastifyInstance,
   ctxFactory: PlatformContextFactory
 ): Promise<void> {
   fastify.addHook('preHandler', authenticate);
 
-  fastify.get('/invoices', {
-    preHandler: requirePermission(PERMISSIONS.INVOICE_VIEW),
-    handler: async (req, reply) => {
-      const ctx = ctxFactory.create({
-        tenantId: req.auth.tenantId,
-        userId: req.auth.userId,
-        correlationId:
-          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
-      });
-      const q = req.query as {
+  fastify.get(
+    '/invoices',
+    { preHandler: requirePermission(PERMISSIONS.INVOICE_VIEW) },
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const q = request.query as {
         search?: string;
         status?: string;
         customerId?: string;
@@ -99,14 +110,14 @@ export async function invoiceRoutes(
       const pageSize = Math.min(100, parseInt(q.pageSize ?? '20', 10));
       const offset = (page - 1) * pageSize;
 
-      const conditions = [eq(invoices.tenantId, req.auth.tenantId)];
+      const conditions = [eq(invoices.tenantId, ctx.tenant.tenantId)];
       if (q.status) conditions.push(eq(invoices.status, q.status as never));
       if (q.customerId) conditions.push(eq(invoices.customerId, parseInt(q.customerId, 10)));
       if (q.search) conditions.push(ilike(invoices.invoiceNumber, `%${q.search}%`));
 
       // ES-31 — restrict to the caller's assigned branches unless they hold
       // BRANCH_SCOPE_BYPASS or have no branch assignments (see getBranchScope docstring).
-      const branchScope = getBranchScope(req.auth);
+      const branchScope = getBranchScope(request.auth);
       if (branchScope !== 'all') conditions.push(inArray(invoices.branchId, branchScope));
 
       const rows = await ctx.db.raw
@@ -129,17 +140,18 @@ export async function invoiceRoutes(
       return reply.send({
         data: { content: rows, totalElements: countRow?.count ?? 0, page, pageSize },
       });
-    },
-  });
+    })
+  );
 
-  fastify.post('/invoices', {
-    preHandler: requirePermission(PERMISSIONS.INVOICE_CREATE),
-    handler: async (req, reply) => {
-      const body = CreateInvoiceSchema.parse(req.body);
+  fastify.post(
+    '/invoices',
+    { preHandler: requirePermission(PERMISSIONS.INVOICE_CREATE) },
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const body = CreateInvoiceSchema.parse(request.body);
 
       if (
         body.overrideCreditLimit &&
-        !req.auth.permissions.includes(PERMISSIONS.CREDIT_LIMIT_OVERRIDE)
+        !request.auth.permissions.includes(PERMISSIONS.CREDIT_LIMIT_OVERRIDE)
       ) {
         return sendError(
           reply,
@@ -150,7 +162,7 @@ export async function invoiceRoutes(
       }
       if (
         body.overridePriceFloor &&
-        !req.auth.permissions.includes(PERMISSIONS.PRICE_FLOOR_OVERRIDE)
+        !request.auth.permissions.includes(PERMISSIONS.PRICE_FLOOR_OVERRIDE)
       ) {
         return sendError(
           reply,
@@ -162,7 +174,7 @@ export async function invoiceRoutes(
       // H-5 fix: this ceiling was previously enforced only in POS (pos.routes.ts) — a plain
       // INVOICE_CREATE holder could apply a 100% line discount on a back-office invoice with
       // no manager approval at all, the identical action POS blocks above 10%.
-      if (!req.auth.permissions.includes(PERMISSIONS.DISCOUNT_OVERRIDE)) {
+      if (!request.auth.permissions.includes(PERMISSIONS.DISCOUNT_OVERRIDE)) {
         const overLimitLine = body.lines.find((l) => l.discountPct > MAX_CASHIER_DISCOUNT_PCT);
         if (overLimitLine) {
           return sendError(
@@ -174,18 +186,12 @@ export async function invoiceRoutes(
         }
       }
 
-      const ctx = ctxFactory.create({
-        tenantId: req.auth.tenantId,
-        userId: req.auth.userId,
-        correlationId:
-          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
-      });
       const svc = new InvoiceService(ctx.db.raw);
 
       let id: number;
       try {
         id = await svc.create({
-          tenantId: req.auth.tenantId,
+          tenantId: ctx.tenant.tenantId,
           branchId: body.branchId,
           warehouseId: body.warehouseId,
           customerId: body.customerId,
@@ -200,7 +206,7 @@ export async function invoiceRoutes(
           notes: body.notes,
           deliveryDate: body.deliveryDate ? new Date(body.deliveryDate) : undefined,
           deliveryAddress: body.deliveryAddress,
-          createdBy: req.auth.userId,
+          createdBy: ctx.tenant.userId,
           overrideCreditLimit: body.overrideCreditLimit,
           overridePriceFloor: body.overridePriceFloor,
           clientOperationId: body.operationId,
@@ -214,7 +220,7 @@ export async function invoiceRoutes(
             .from(invoices)
             .where(
               and(
-                eq(invoices.tenantId, req.auth.tenantId),
+                eq(invoices.tenantId, ctx.tenant.tenantId),
                 eq(invoices.clientOperationId, body.operationId)
               )
             );
@@ -236,8 +242,8 @@ export async function invoiceRoutes(
         entityType: 'invoice',
         entityId: id,
         after: { customerId: body.customerId, lines: body.lines.length },
-        actorEmail: req.auth.email,
-        ipAddress: req.ip,
+        actorEmail: request.auth.email,
+        ipAddress: request.ip,
       });
 
       // PG-028: durable usage-metering event, alongside the existing erp_invoice_create_total
@@ -249,86 +255,97 @@ export async function invoiceRoutes(
       });
 
       return reply.code(201).send({ data: { id } });
-    },
-  });
+    })
+  );
 
-  fastify.get('/invoices/:id', {
-    preHandler: requirePermission(PERMISSIONS.INVOICE_VIEW),
-    handler: async (req, reply) => {
-      const { id } = req.params as { id: string };
-      const ctx = ctxFactory.create({
-        tenantId: req.auth.tenantId,
-        userId: req.auth.userId,
-        correlationId:
-          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
-      });
+  fastify.get(
+    '/invoices/:id',
+    { preHandler: requirePermission(PERMISSIONS.INVOICE_VIEW) },
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { id } = request.params as { id: string };
       const svc = new InvoiceService(ctx.db.raw);
-      const data = await svc.getWithLines(parseInt(id, 10), req.auth.tenantId);
+      const data = await svc.getWithLines(parseInt(id, 10), ctx.tenant.tenantId);
       return reply.send({ data });
-    },
-  });
+    })
+  );
 
+  // RLS-readiness follow-up (2026-08-22): previously deliberately unmigrated because
+  // InvoiceNotificationService.notifyInvoiceConfirmed() makes real fetch() calls to
+  // notification-service, interleaved after its own DB reads (checklist caveat 4). Now split
+  // per caveat 4g: all the DB work below runs inside one withTenantConnection wrap (ctx built
+  // inside it, same pattern as event-service/gst-service's internal routes), and
+  // notifyInvoiceConfirmed — which now manages its own separate wrap for its own reads,
+  // strictly outside this one — runs after this wrap has already committed.
   fastify.post('/invoices/:id/confirm', {
     preHandler: requirePermission(PERMISSIONS.INVOICE_CREATE),
     handler: async (req, reply) => {
       const { id } = req.params as { id: string };
-      const ctx = ctxFactory.create({
-        tenantId: req.auth.tenantId,
-        userId: req.auth.userId,
-        correlationId:
-          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
-      });
-      const svc = new InvoiceService(ctx.db.raw);
-      // C-7 fix: invoiceNumber is now generated server-side (gap-free, FY-scoped sequence) —
-      // no longer accepted from the client at all.
-      const invoiceNumber = await svc.confirm(parseInt(id, 10), req.auth.tenantId, req.auth.userId);
+      const invoiceId = parseInt(id, 10);
+      const correlationId =
+        (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID();
 
-      // Same cross-service item-cache gap GRN receipts had (fixed 2026-07-17) — confirming an
-      // invoice writes availableQty/valuation directly to `items`, so inventory-service's
-      // Redis item-cache needs the same invalidation or it serves pre-sale stock for up to the
-      // full 5-minute TTL.
-      const confirmedLines = await ctx.db.raw
-        .select({ itemId: invoiceLines.itemId })
-        .from(invoiceLines)
-        .where(eq(invoiceLines.invoiceId, parseInt(id, 10)));
-      await Promise.all(
-        [...new Set(confirmedLines.map((l) => l.itemId))].map((itemId) =>
-          ctx.cache.del(`item:${itemId}`)
-        )
+      const invoiceNumber = await withTenantConnection(
+        ctxFactory.rawDb,
+        req.auth.tenantId,
+        async (scopedDb) => {
+          const ctx = ctxFactory.create(
+            { tenantId: req.auth.tenantId, userId: req.auth.userId, correlationId },
+            scopedDb
+          );
+          const svc = new InvoiceService(ctx.db.raw);
+          // C-7 fix: invoiceNumber is now generated server-side (gap-free, FY-scoped
+          // sequence) — no longer accepted from the client at all.
+          const number = await svc.confirm(invoiceId, req.auth.tenantId, req.auth.userId);
+
+          // Same cross-service item-cache gap GRN receipts had (fixed 2026-07-17) — confirming
+          // an invoice writes availableQty/valuation directly to `items`, so inventory-
+          // service's Redis item-cache needs the same invalidation or it serves pre-sale stock
+          // for up to the full 5-minute TTL.
+          const confirmedLines = await ctx.db.raw
+            .select({ itemId: invoiceLines.itemId })
+            .from(invoiceLines)
+            .where(eq(invoiceLines.invoiceId, invoiceId));
+          await Promise.all(
+            [...new Set(confirmedLines.map((l) => l.itemId))].map((itemId) =>
+              ctx.cache.del(`item:${itemId}`)
+            )
+          );
+
+          await ctx.audit.log({
+            action: 'STATUS_CHANGE',
+            entityType: 'invoice',
+            entityId: invoiceId,
+            before: { status: 'DRAFT' },
+            after: { status: 'CONFIRMED', invoiceNumber: number },
+            changedFields: ['status', 'invoiceNumber'],
+            actorEmail: req.auth.email,
+            ipAddress: req.ip,
+          });
+          return number;
+        }
       );
 
-      await ctx.audit.log({
-        action: 'STATUS_CHANGE',
-        entityType: 'invoice',
-        entityId: parseInt(id, 10),
-        before: { status: 'DRAFT' },
-        after: { status: 'CONFIRMED', invoiceNumber },
-        changedFields: ['status', 'invoiceNumber'],
-        actorEmail: req.auth.email,
-        ipAddress: req.ip,
-      });
-      await InvoiceNotificationService.notifyInvoiceConfirmed(ctx, parseInt(id, 10));
+      await InvoiceNotificationService.notifyInvoiceConfirmed(
+        ctxFactory.rawDb,
+        req.auth.tenantId,
+        invoiceId
+      );
       return reply.send({ success: true, data: { invoiceNumber } });
     },
   });
 
-  fastify.post('/invoices/:id/cancel', {
-    preHandler: requirePermission(PERMISSIONS.INVOICE_CANCEL),
-    handler: async (req, reply) => {
-      const { id } = req.params as { id: string };
-      const body = CancelSchema.parse(req.body);
-      const ctx = ctxFactory.create({
-        tenantId: req.auth.tenantId,
-        userId: req.auth.userId,
-        correlationId:
-          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
-      });
+  fastify.post(
+    '/invoices/:id/cancel',
+    { preHandler: requirePermission(PERMISSIONS.INVOICE_CANCEL) },
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { id } = request.params as { id: string };
+      const body = CancelSchema.parse(request.body);
       const svc = new InvoiceService(ctx.db.raw);
       const cancelledLines = await ctx.db.raw
         .select({ itemId: invoiceLines.itemId })
         .from(invoiceLines)
         .where(eq(invoiceLines.invoiceId, parseInt(id, 10)));
-      await svc.cancel(parseInt(id, 10), req.auth.tenantId, req.auth.userId, body.reason);
+      await svc.cancel(parseInt(id, 10), ctx.tenant.tenantId, ctx.tenant.userId, body.reason);
       await Promise.all(
         [...new Set(cancelledLines.map((l) => l.itemId))].map((itemId) =>
           ctx.cache.del(`item:${itemId}`)
@@ -340,13 +357,16 @@ export async function invoiceRoutes(
         entityId: parseInt(id, 10),
         after: { status: 'CANCELLED', reason: body.reason },
         changedFields: ['status'],
-        actorEmail: req.auth.email,
-        ipAddress: req.ip,
+        actorEmail: request.auth.email,
+        ipAddress: request.ip,
       });
       return reply.send({ success: true });
-    },
-  });
+    })
+  );
 
+  // Deliberately NOT migrated — fetch() to report-service's puppeteer-backed PDF engine,
+  // interleaved after several DB reads (checklist caveat 4, same shape as accounting-service's
+  // GET /reports/profit-loss/pdf).
   fastify.get('/invoices/:id/pdf', {
     preHandler: requirePermission(PERMISSIONS.INVOICE_VIEW),
     handler: async (req, reply) => {
@@ -468,49 +488,39 @@ export async function invoiceRoutes(
     },
   });
 
-  fastify.post('/invoices/:id/duplicate', {
-    preHandler: requirePermission(PERMISSIONS.INVOICE_CREATE),
-    handler: async (req, reply) => {
-      const { id } = req.params as { id: string };
-      const ctx = ctxFactory.create({
-        tenantId: req.auth.tenantId,
-        userId: req.auth.userId,
-        correlationId:
-          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
-      });
+  fastify.post(
+    '/invoices/:id/duplicate',
+    { preHandler: requirePermission(PERMISSIONS.INVOICE_CREATE) },
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { id } = request.params as { id: string };
       const svc = new InvoiceService(ctx.db.raw);
-      const invoiceNumber = `INV-${req.auth.tenantId}-${Date.now()}`;
+      const invoiceNumber = `INV-${ctx.tenant.tenantId}-${Date.now()}`;
       const newId = await svc.duplicate(
         parseInt(id, 10),
-        req.auth.tenantId,
-        req.auth.userId,
+        ctx.tenant.tenantId,
+        ctx.tenant.userId,
         invoiceNumber
       );
       return reply.code(201).send({ data: { id: newId } });
-    },
-  });
+    })
+  );
 
-  fastify.get('/invoices/:id/activity', {
-    preHandler: requirePermission(PERMISSIONS.INVOICE_VIEW),
-    handler: async (req, reply) => {
-      const { id } = req.params as { id: string };
-      const ctx = ctxFactory.create({
-        tenantId: req.auth.tenantId,
-        userId: req.auth.userId,
-        correlationId:
-          (req.headers['x-correlation-id'] as string | undefined) ?? crypto.randomUUID(),
-      });
+  fastify.get(
+    '/invoices/:id/activity',
+    { preHandler: requirePermission(PERMISSIONS.INVOICE_VIEW) },
+    tenantScopedHandler(ctxFactory, async (request, reply, ctx) => {
+      const { id } = request.params as { id: string };
       const history = await ctx.db.raw
         .select()
         .from(invoiceHistory)
         .where(
           and(
             eq(invoiceHistory.invoiceId, parseInt(id, 10)),
-            eq(invoiceHistory.tenantId, req.auth.tenantId)
+            eq(invoiceHistory.tenantId, ctx.tenant.tenantId)
           )
         )
         .orderBy(desc(invoiceHistory.createdAt));
       return reply.send({ data: history });
-    },
-  });
+    })
+  );
 }
